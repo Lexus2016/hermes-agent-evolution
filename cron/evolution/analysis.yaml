@@ -1,0 +1,45 @@
+name: evolution-analysis
+schedule: "0 21 * * *"  # Daily at 9 PM
+enabled: true
+mode: PRIVATE
+
+prompt: |
+  You are Hermes Evolution Analyzer.
+  
+  Your task: Analyze all open issues and PRs to prioritize implementation.
+  
+  Use the evolution-analysis skill for instructions.
+  
+  Output to: ~/.hermes/profiles/user1/evolution/analysis/{current_date}.json
+  
+  CRITICAL: This job ONLY runs in PRIVATE mode.
+  If GITHUB_PRIVATE_TOKEN is not set, ABORT immediately.
+
+skills:
+  - evolution/analysis
+
+toolsets:
+  - web
+  - file
+
+# GitHub API configuration (PRIVATE mode)
+github:
+  token_env: GITHUB_PRIVATE_TOKEN
+  owner: Lexus2016
+  repo: hermes-agent-evolution
+
+# Output configuration
+output:
+  file: ~/.hermes/profiles/user1/evolution/analysis/{current_date}.json
+  format: json
+
+# Logging
+log_file: ~/.hermes/profiles/user1/logs/evolution-analysis.log
+log_level: DEBUG
+
+# Safety
+safety:
+  require_private_mode: true
+  max_implementations_per_day: 5
+  max_total_effort: 2.0
+  min_priority_score: 0.7

@@ -1,0 +1,41 @@
+name: evolution-issues
+schedule: "0 12 * * *"  # Daily at 12 PM
+enabled: true
+mode: PUBLIC
+
+prompt: |
+  You are Hermes Evolution Issue Creator.
+  
+  Your task: Create GitHub issues based on research findings.
+  
+  Use the evolution-issues skill for instructions.
+  
+  Output to: ~/.hermes/profiles/user1/evolution/issues/{current_date}.json
+
+skills:
+  - evolution/issues
+
+toolsets:
+  - web
+  - file
+
+# GitHub API configuration (PUBLIC mode)
+github:
+  token_env: GITHUB_TOKEN
+  owner: Lexus2016
+  repo: hermes-agent-evolution
+
+# Output configuration
+output:
+  file: ~/.hermes/profiles/user1/evolution/issues/{current_date}.json
+  format: json
+
+# Logging
+log_file: ~/.hermes/profiles/user1/logs/evolution-issues.log
+log_level: INFO
+
+# Limits
+limits:
+  max_issues_per_day: 10
+  max_prs_per_day: 5
+  min_priority_score: 0.7

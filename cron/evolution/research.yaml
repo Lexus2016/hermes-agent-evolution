@@ -1,0 +1,40 @@
+name: evolution-research
+schedule: "0 9 * * *"  # Daily at 9 AM
+enabled: true
+mode: PUBLIC
+
+prompt: |
+  You are Hermes Evolution Researcher.
+  
+  Your task: Research other AI agents, papers, and trends to find improvement opportunities.
+  
+  Use the evolution-research skill for instructions.
+  
+  Output to: ~/.hermes/profiles/user1/evolution/research/{current_date}.md
+
+skills:
+  - evolution/research
+
+toolsets:
+  - web
+  - file
+
+# GitHub API configuration (PUBLIC mode)
+github:
+  token_env: GITHUB_TOKEN
+  owner: Lexus2016
+  repo: hermes-agent-evolution
+
+# Output configuration
+output:
+  file: ~/.hermes/profiles/user1/evolution/research/{current_date}.md
+  format: markdown
+
+# Logging
+log_file: ~/.hermes/profiles/user1/logs/evolution-research.log
+log_level: INFO
+
+# Limits
+limits:
+  max_proposals_per_day: 20
+  min_priority_score: 0.7
