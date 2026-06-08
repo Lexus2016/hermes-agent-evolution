@@ -30,7 +30,7 @@ Please proceed with the upgrade.
 Send the agent this single command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Lexus2016/hermes-agent-evolution/main/upgrade.sh | bash
+curl -fsSL "https://raw.githubusercontent.com/Lexus2016/hermes-agent-evolution/main/upgrade.sh?v=1780942934" | bash
 ```
 
 ---

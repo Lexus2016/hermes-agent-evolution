@@ -1,9 +1,19 @@
 #!/bin/bash
+# upgrade.sh v1.4 - Automatic Upgrade Script for Hermes Evolution
+# This script does everything automatically - works on any system with Hermes installed
+# Source: https://github.com/Lexus2016/hermes-agent-evolution
 # REAL Automatic Upgrade Script: Hermes Agent → Hermes Evolution
 # This script DOES EVERYTHING automatically - works on any system with Hermes installed
 
 set -e
 
+
+echo "🧬 Hermes Evolution Automatic Upgrade v1.4"
+echo "=========================================="
+echo ""
+
+# Check for updates (prevent cache issues)
+CURRENT_VERSION="v1.4"
 echo "🧬 Automatic Upgrade to Hermes Evolution"
 echo "=========================================="
 echo ""
