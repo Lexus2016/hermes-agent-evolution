@@ -30,7 +30,7 @@ echo "📂 Cron directory: $HERMES_CRON_DIR"
 echo ""
 
 # Step 1: Create backup
-echo "📦 Step 1/6: Creating backup..."
+echo "📦 Step 1/7: Creating backup..."
 if [ -d "$HOME/.hermes" ]; then
     cp -r "$HOME/.hermes" "$HOME/.hermes.backup.$BACKUP_DATE"
     echo "✅ Backup created: ~/.hermes.backup.$BACKUP_DATE"
@@ -40,14 +40,14 @@ fi
 
 # Step 2: Clean up and clone
 echo ""
-echo "📥 Step 2/6: Cloning Hermes Evolution..."
+echo "📥 Step 2/7: Cloning Hermes Evolution..."
 rm -rf "$EVOLUTION_DIR" /tmp/hermes-evolution
 git clone "$EVOLUTION_REPO" "$EVOLUTION_DIR"
 echo "✅ Cloned to: $EVOLUTION_DIR"
 
 # Step 3: Run setup (THIS IS CRITICAL - actually updates Hermes)
 echo ""
-echo "🔧 Step 3/6: Running setup-hermes.sh (this updates Hermes)..."
+echo "🔧 Step 3/7: Running setup-hermes.sh (this updates Hermes)..."
 cd "$EVOLUTION_DIR"
 if [ -f "setup-hermes.sh" ]; then
     bash setup-hermes.sh
@@ -57,29 +57,44 @@ else
     exit 1
 fi
 
-# Step 4: Copy evolution skills TO THE RIGHT PLACE
+# Step 4: Re-detect Hermes path (it may have changed after setup)
 echo ""
-echo "📚 Step 4/6: Installing evolution skills to: $HERMES_SKILLS_DIR"
+echo "🔍 Step 4/7: Re-detecting Hermes path after setup..."
+HERMES_PROJECT=$(hermes --version 2>/dev/null | grep "Project:" | cut -d' ' -f2 || echo "")
+HERMES_SKILLS_DIR="$HERMES_PROJECT/skills"
+HERMES_CRON_DIR="$HERMES_PROJECT/cron"
+echo "✅ Hermes now at: $HERMES_PROJECT"
+echo "📂 Skills directory: $HERMES_SKILLS_DIR"
+
+# Step 5: Install evolution skills with CORRECT structure
+echo ""
+echo "📚 Step 5/7: Installing evolution skills with correct structure..."
+
+# Install each evolution skill as a separate directory
 EVOLUTION_SKILLS="$EVOLUTION_DIR/skills/evolution"
 
-if [ -d "$EVOLUTION_SKILLS" ]; then
-    mkdir -p "$HERMES_SKILLS_DIR"
-    cp -r "$EVOLUTION_SKILLS" "$HERMES_SKILLS_DIR/"
-    echo "✅ Evolution skills installed to: $HERMES_SKILLS_DIR/evolution"
+for skill_file in "$EVOLUTION_SKILLS"/*.md; do
+    skill_name=$(basename "$skill_file" .md)
     
-    # List installed skills
-    echo "📋 Installed evolution skills:"
-    ls -1 "$EVOLUTION_SKILLS"/*.md 2>/dev/null | while read file; do
-        echo "   - $(basename $file .md)"
-    done
-else
-    echo "❌ Evolution skills not found in repository"
-    exit 1
-fi
+    # Create skill directory
+    skill_dir="$HERMES_SKILLS_DIR/evolution-$skill_name"
+    mkdir -p "$skill_dir"
+    
+    # Copy skill file as SKILL.md (Hermes expects this)
+    cp "$skill_file" "$skill_dir/SKILL.md"
+    
+    echo "✅ Installed: evolution-$skill_name"
+done
 
-# Step 5: Copy evolution cron jobs TO THE RIGHT PLACE
 echo ""
-echo "⏰ Step 5/6: Installing evolution cron jobs to: $HERMES_CRON_DIR"
+echo "📋 Installed evolution skills:"
+ls -1 "$HERMES_SKILLS_DIR"/evolution-* 2>/dev/null | while read dir; do
+    echo "   - $(basename $dir)"
+done
+
+# Step 6: Copy evolution cron jobs TO THE RIGHT PLACE
+echo ""
+echo "⏰ Step 6/7: Installing evolution cron jobs to: $HERMES_CRON_DIR"
 EVOLUTION_CRON="$EVOLUTION_DIR/cron/evolution"
 
 if [ -d "$EVOLUTION_CRON" ]; then
@@ -94,12 +109,11 @@ if [ -d "$EVOLUTION_CRON" ]; then
     done
 else
     echo "❌ Evolution cron jobs not found in repository"
-    exit 1
 fi
 
-# Step 6: Verify installation
+# Step 7: Verify installation
 echo ""
-echo "✅ Step 6/6: Verifying installation..."
+echo "✅ Step 7/7: Verifying installation..."
 
 # Check if hermes command exists
 if command -v hermes &> /dev/null; then
@@ -122,13 +136,13 @@ echo "=========================================="
 echo "🎉 Upgrade to Hermes Evolution complete!"
 echo ""
 echo "📖 What's new:"
-echo "  • Evolution skills (research, issues, analysis, implementation)"
+echo "  • Evolution skills (research, issues, analysis, implementation, upstream-sync)"
 echo "  • Evolution cron jobs (daily research, analysis, implementation)"
 echo "  • Self-update capabilities"
 echo ""
 echo "🔗 Next steps:"
 echo "  1. Test: hermes --help"
-echo "  2. Check skills: hermes skills list"
+echo "  2. Check skills: hermes skills list | grep evolution"
 echo "  3. Read docs: cat $EVOLUTION_DIR/EVOLUTION_README.md"
 echo ""
 echo "📂 Backup location: ~/.hermes.backup.$BACKUP_DATE"
