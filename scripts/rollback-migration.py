@@ -90,7 +90,7 @@ def main():
         # Try to read from last backup file
         last_backup_file = Path(os.path.expanduser("~/.hermes.last_backup"))
         if last_backup_file.exists():
-            backup_path = last_backup_file.read_text().strip()
+            backup_path = last_backup_file.read_text(encoding="utf-8").strip()
         else:
             print("❌ No backup path provided")
             print("Usage: python rollback_migration.py <backup_path>")

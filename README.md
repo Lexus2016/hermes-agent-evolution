@@ -220,7 +220,7 @@ See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md).
 ### Requirements
 
 - **Python**: 3.11 or higher
-- **OS**: macOS, Linux, or Windows with WSL
+- **OS**: macOS, Linux, or Windows (native PowerShell installer `scripts/install.ps1`, or WSL)
 - **Git**: For cloning and updates
 - **GitHub Account**: For tokens (optional for basic use)
 
@@ -236,6 +236,11 @@ cd hermes-agent-evolution
 ```bash
 ./setup-hermes.sh
 ```
+
+> **Windows (native, no WSL):** run the PowerShell installer instead:
+> ```powershell
+> powershell -ExecutionPolicy Bypass -File scripts/install.ps1
+> ```
 
 3. **Configure evolution tokens (optional):**
 ```bash
