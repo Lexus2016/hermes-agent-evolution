@@ -8,8 +8,8 @@
 # gate itself. Everything else can flow through CI-gated automerge.
 
 # Self-update + install machinery
-/scripts/auto_update.sh            @Lexus2016
 /scripts/install_auto_update.sh    @Lexus2016
+/scripts/setup_evolution_bot.sh    @Lexus2016
 /scripts/register_evolution_cron.py @Lexus2016
 /upgrade.sh                        @Lexus2016
 /setup-hermes.sh                   @Lexus2016

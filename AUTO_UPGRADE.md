@@ -1,264 +1,171 @@
-# 🧬 Hermes Evolution — Upgrade & Install Instructions
+# 🧬 Hermes Evolution — Install & Update Guide
 
-**Upgrade an existing Hermes Agent install to Hermes Evolution without data loss.**
+**Run the original Hermes Agent as our self-evolving fork, and keep it updated —
+using the OFFICIAL `hermes update`, not custom scripts.**
 
 ---
 
-## 🎯 What This Does
+## 🎯 What this does
 
-Upgrades your existing Hermes Agent installation to **Hermes Evolution** — a
-self-improving fork with autonomous research, proposal generation, and
-self-update capabilities.
+Hermes Evolution is a fork of [Hermes Agent](https://github.com/nousresearch/hermes-agent).
+The right way to install and update it is the **official Hermes tooling**
+(`scripts/install.sh` + `hermes update`), with the install's git `origin`
+pointed at this fork. Then `hermes update` pulls evolution automatically, on
+every platform, with built-in backup and rollback.
 
-**Zero data loss:** profiles, skills, cron jobs, memories, and configuration
-are preserved (a timestamped backup is taken automatically).
+> **Why not a custom upgrade script?** Earlier versions of `upgrade.sh` /
+> `auto_update.sh` reinvented the updater: they cloned a *second* copy to
+> `~/hermes-agent-evolution` (separate from the real install at
+> `/usr/local/lib/hermes-agent`) and made a conflicting `~/.local/bin/hermes`
+> symlink — which broke the `hermes` command on a real install. Those scripts
+> are now deprecated. **`hermes update` is the supported mechanism.**
 
 ---
 
 ## 📋 Prerequisites
 
-- ✅ Python 3.11+
-- ✅ Git installed
-- ✅ Active internet connection
-- ✅ Existing Hermes Agent installation (`hermes` on PATH)
+- Python 3.11+, Git, `gh` (for the bot/PR flow), internet access.
+- The `hermes` command on PATH (install it below if absent).
 
 ---
 
-## 🚀 Recommended: One-Command Upgrade
+## 🔑 How updates flow (so the behavior is predictable)
+
+`hermes update` applies from **`origin/<branch>`** (default `main`) of the
+**real install dir**, and:
+
+- If `origin` = **this fork** → it pulls our evolution. ✅
+- It is fork-aware: because our fork has its own commits, the built-in
+  "sync from upstream" step **skips** to preserve our changes
+  (it never overwrites evolution with the original).
+- It takes a pre-update snapshot and **rolls back automatically** if the update
+  fails.
+
+So the whole job is: **point `origin` at the fork, then run `hermes update`.**
+
+---
+
+## 🅰️ Switch an EXISTING Hermes install onto the fork
+
+If the original Hermes Agent is already installed:
 
 ```bash
-# Clone fresh (git always gets the latest main — see the cache note below)
-rm -rf ~/hermes-agent-evolution /tmp/hermes-evolution
-git clone https://github.com/Lexus2016/hermes-agent-evolution.git ~/hermes-agent-evolution
+# 1. Find the real install dir from the hermes binary (works on any layout):
+HERMES_BIN="$(readlink -f "$(command -v hermes)")"
+INSTALL_DIR="$(dirname "$(dirname "$(dirname "$HERMES_BIN")")")"
+echo "Install dir: $INSTALL_DIR"     # e.g. /usr/local/lib/hermes-agent
 
-# Run the upgrade (backup → setup → seed skills → register cron → restart gateway)
-bash ~/hermes-agent-evolution/upgrade.sh
+# 2. Point origin at THIS fork; keep upstream at NousResearch (for sync/compare):
+git -C "$INSTALL_DIR" remote set-url origin https://github.com/Lexus2016/hermes-agent-evolution.git
+git -C "$INSTALL_DIR" remote add  upstream https://github.com/nousresearch/hermes-agent.git 2>/dev/null || true
+git -C "$INSTALL_DIR" remote -v    # verify origin = fork, upstream = original
 
-# Verify
-hermes skills list | grep -i evolution
-hermes cron list   | grep -i evolution
+# 3. Update onto the fork (cross-platform, with snapshot/rollback):
+hermes update --check     # preview
+hermes update --yes       # apply
+
+# 4. Register evolution cron jobs into the native scheduler (jobs.json):
+"$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/scripts/register_evolution_cron.py"
+
+# 5. Schedule the daily self-update (see below):
+bash "$INSTALL_DIR/scripts/install_auto_update.sh"
+
+# 6. Verify:
+hermes doctor
+hermes cron list | grep -i evolution
 ```
 
-> **⚠️ Do not pipe the script from a CDN** (`curl … raw.githubusercontent.com`
-> or `jsdelivr`). Those cache the script aggressively (jsDelivr `@main` up to
-> 7 days), so `curl | bash` can run a STALE `upgrade.sh`. `git clone` always
-> pulls the current `main`.
+> **First update note:** if the existing install was on a much newer original
+> `main` than the fork's base, the first `hermes update` may `reset --hard` to
+> the fork (a *replacement*, not a merge). Your data in `~/.hermes` is never
+> touched. To avoid shipping a stale base, keep the fork synced with upstream
+> (see "Keeping the fork current").
 
-### What `upgrade.sh` does (7 steps)
+---
 
-1. **Backup** the live Hermes data dir (`$HERMES_HOME` or `~/.hermes`).
-2. **Clone** the fork to `~/hermes-agent-evolution`.
-3. **Run `setup-hermes.sh`** — installs new code AND seeds bundled skills
-   (including `evolution/*`) into the real skills dir via `tools/skills_sync.py`.
-4. **Verify** evolution skills landed in the dir Hermes actually scans.
-5. **Register evolution cron jobs** into Hermes' native `jobs.json` registry
-   (via `scripts/register_evolution_cron.py`, idempotent by job name).
-6. **Restart the gateway** so the running process reloads new code + skills.
-   Opt out with `--no-restart` or `HERMES_SKIP_GATEWAY_RESTART=1`.
-7. **Verify** skills and cron jobs are visible to Hermes.
+## 🅱️ Fresh install, then switch to the fork
+
+The official installer clones the **original** repo, so install first, then do
+section 🅰️ steps 2–6:
 
 ```bash
-# Skip the gateway restart (e.g. to drain active sessions yourself first)
-bash ~/hermes-agent-evolution/upgrade.sh --no-restart
-# ...then apply when ready:
-hermes gateway restart
+# Official install (root → /usr/local/lib/hermes-agent, non-root → ~/.hermes/hermes-agent):
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+# then run section 🅰️ (point origin at the fork, hermes update, register cron, schedule).
 ```
 
 ---
 
-## 🧩 Why a restart is required
+## 🔁 Daily self-update (scheduled)
 
-A running gateway loads code and caches the skill list **in memory at start**.
-Updating files on disk changes nothing until the process restarts:
+Self-evolution = run `hermes update` on a schedule. It's the official updater,
+so it's safe and cross-platform.
 
-- **Skills only** (hot): inside the gateway run `/reload-skills` (rescans the
-  skills dir, no process restart).
-- **New code / new version**: a full `hermes gateway restart` is required —
-  reload does not reload Python modules.
+**Linux / macOS (cron):**
+```bash
+bash "$INSTALL_DIR/scripts/install_auto_update.sh"      # daily ~04:17
+# custom time:
+AUTO_UPDATE_SCHEDULE="30 5 * * *" bash "$INSTALL_DIR/scripts/install_auto_update.sh"
+# remove:
+bash "$INSTALL_DIR/scripts/install_auto_update.sh" --remove
+```
+This installs one cron line: `hermes update --yes` (non-interactive, keeps the
+pre-update backup).
 
-`hermes gateway restart` is restart-aware: from a shell it does a graceful
-drain-restart; from within the gateway (self-update) it requests an async
-SIGUSR1 self-restart, so it never kills itself mid-script.
+**Windows (Task Scheduler):**
+```powershell
+# Run hermes update daily at 04:17 (native, no WSL needed):
+schtasks /Create /SC DAILY /ST 04:17 /TN "HermesEvolutionUpdate" /TR "hermes update --yes" /F
+# remove:
+schtasks /Delete /TN "HermesEvolutionUpdate" /F
+```
 
 ---
 
-## ⏰ Cron jobs (important)
+## ⏰ Evolution cron jobs
 
-Hermes schedules jobs ONLY from its native registry `~/.hermes/cron/jobs.json`
-(see `cron/jobs.py`). The evolution jobs ship as rich custom YAML under
-`cron/evolution/*.yaml` — **copying those files does not schedule anything.**
-`upgrade.sh` registers them for you; to (re-)run it standalone:
+Evolution's scheduled tasks (research/issues/analysis/implementation/upstream-sync)
+live as YAML in `cron/evolution/*.yaml`, but Hermes schedules from its native
+registry `~/.hermes/cron/jobs.json`. Register them (idempotent):
 
 ```bash
-# Preview without writing:
-~/hermes-agent-evolution/venv/bin/python \
-    ~/hermes-agent-evolution/scripts/register_evolution_cron.py --dry-run
-
-# Register (idempotent — safe to re-run):
-~/hermes-agent-evolution/venv/bin/python \
-    ~/hermes-agent-evolution/scripts/register_evolution_cron.py
-
+"$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/scripts/register_evolution_cron.py"
 hermes cron list | grep -i evolution
 ```
 
 ---
 
-## 🔁 Automatic Self-Update (ON by default)
+## 🔄 Keeping the fork current (upstream → fork)
 
-Self-evolution is the whole point of this fork, so `upgrade.sh` enables daily
-self-update **automatically — no flag required**. Each day, if `main` has new
-commits, the agent pulls them, re-runs setup, health-checks, and restarts the
-gateway — **rolling back automatically if anything breaks**. This is what makes
-the agent self-evolving rather than "plain Hermes on our repo".
-
-> **Why system cron, not Hermes cron:** the Hermes cron ticker runs as a thread
-> INSIDE the gateway process (`gateway/run.py::_start_cron_ticker`). A
-> self-update job scheduled there would kill itself when it restarts the
-> gateway, mid-update. So the updater runs from **system cron** as an
-> independent process.
-
-### It's already on — opting out
-
-`bash upgrade.sh` installs the self-update cron for you. If you specifically do
-NOT want unattended evolution:
-
-```bash
-bash ~/hermes-agent-evolution/upgrade.sh --no-auto-update
-# or: HERMES_NO_AUTO_UPDATE=1 bash ~/hermes-agent-evolution/upgrade.sh
-```
-
-To (re)install standalone or change the schedule later (default daily ~04:17):
-
-```bash
-AUTO_UPDATE_SCHEDULE="30 5 * * *" \
-  bash ~/hermes-agent-evolution/scripts/install_auto_update.sh
-```
-
-### What each run does
-
-1. `git fetch` — if `main` is unchanged, exit immediately (no-op).
-2. Fast-forward-only pull (never merges or rewrites local work).
-3. Back up the data dir (keeps the last 3 auto-update backups).
-4. Re-run `setup-hermes.sh` + register evolution cron jobs.
-5. Health-check: `hermes --version` and `hermes cron list`.
-6. On success → restart the gateway. **On ANY failure → roll back code + data.**
-
-### Manage it
-
-```bash
-# Run it now (ignores the "no changes" check):
-~/hermes-agent-evolution/scripts/auto_update.sh --force
-
-# Watch the log:
-tail -f ~/.hermes/logs/auto-update.log
-
-# Disable:
-~/hermes-agent-evolution/scripts/install_auto_update.sh --remove
-```
-
-> **⚠️ Safety:** unattended self-update means a bad commit on `main` reaches your
-> agent without a human in the loop. The backup + health-check + rollback
-> mitigate "bricking", but for production prefer gating merges to `main` behind
-> review/CI before enabling this.
+The fork can fall behind the original. `hermes update` will NOT auto-merge
+upstream into a fork that has its own commits (by design — it preserves
+evolution). To pull upstream improvements, do it deliberately on the fork via a
+PR (so CI + the safety gate run), not on the server. This is the
+`evolution-upstream-sync` job's purpose.
 
 ---
 
-## 🔐 Configure Evolution (GitHub access)
+## ↩️ Rollback
 
-Evolution's research/issue/PR jobs need GitHub access. **Use a dedicated
-fine-grained Personal Access Token, not your personal/classic token:**
-
-- **Repository access:** only `Lexus2016/hermes-agent-evolution`
-- **Permissions:** Contents (RW), Pull requests (RW), Issues (RW) — nothing else
-
-```bash
-# PUBLIC mode (research + proposals): read/PR/issues scope is enough
-export GITHUB_TOKEN="<fine-grained-pat>"
-
-# PRIVATE mode (owner only: implementation + self-update)
-export GITHUB_PRIVATE_TOKEN="<fine-grained-pat>"
-```
-
-> **Security:** Do NOT hard-code tokens into `~/.bashrc` in plaintext or into
-> any git remote URL. Prefer a secrets manager / env file with `chmod 600`,
-> or the Hermes secrets vault. A leaked broad-scope token gives an attacker
-> (or a prompt-injected agent) the keys to your repositories.
+`hermes update` snapshots before applying and rolls back automatically on
+failure. For a manual rollback it prints the exact `git reset --hard <pre-sha>`
+command; data in `~/.hermes` is independent of code and is not changed by code
+updates.
 
 ---
 
-## ✅ Verification
+## 🛡️ Safety gate
 
-```bash
-hermes profile list                 # profiles preserved
-ls "$(hermes --version 2>/dev/null | grep Project: | cut -d' ' -f2)" >/dev/null 2>&1 || true
-hermes skills list | grep -i evolution
-hermes cron list   | grep -i evolution
-
-# Explicitly load an evolution skill (canonical names use a hyphen):
-hermes --skill evolution-research "What's new in AI agents?"
-```
+Autonomous self-modification is gated (see EVOLUTION_README "Гейт безпечної
+самоеволюції"): the agent opens PRs only (never merges to `main`), CI must pass,
+`.github/CODEOWNERS` protects critical paths, and `main` requires branch
+protection. Configure a separate **bot account** for the agent so the owner can
+review its PRs (`scripts/setup_evolution_bot.sh`).
 
 ---
 
-## 🔄 Rollback
+## 📖 More
 
-`upgrade.sh` prints the exact rollback command with your backup path. Generic form:
-
-```bash
-ls -d "${HERMES_HOME:-$HOME/.hermes}".backup.* 2>/dev/null   # find backups
-# Restore (replace TIMESTAMP):
-HOME_DIR="${HERMES_HOME:-$HOME/.hermes}"
-rm -rf "$HOME_DIR" && mv "$HOME_DIR.backup.TIMESTAMP" "$HOME_DIR"
-hermes gateway restart
-```
-
-A scripted migration/verify/rollback path also exists under `scripts/`
-(`migrate-from-hermes.sh`, `verify-migration.py`, `rollback-migration.py`)
-for advanced, step-by-step control.
-
----
-
-## 📚 What's New
-
-### Evolution Skills (canonical names)
-- **evolution-research** — research other AI agents and papers
-- **evolution-issues** — create GitHub issues with proposals
-- **evolution-analysis** — analyze and prioritize improvements
-- **evolution-implementation** — implement and self-update
-- **evolution-upstream-sync** — sync with upstream Hermes Agent
-
-### Automated Cron Jobs (registered in the native scheduler)
-- Research — daily 09:00
-- Issue creation — daily 12:00
-- Analysis — daily 21:00 (PRIVATE mode)
-- Implementation — daily 22:00 (PRIVATE mode)
-- Upstream sync — weekly (PRIVATE mode)
-
----
-
-## 🎯 How Evolution Works
-
-### PUBLIC Mode (all installations)
-- ✅ Research other agents and papers
-- ✅ Create GitHub issues with improvement proposals
-- ❌ Cannot modify code or self-update
-
-### PRIVATE Mode (repository owner only)
-- ✅ Everything in PUBLIC mode, plus:
-- ✅ Analyze and prioritize proposals
-- ✅ Implement selected improvements
-- ✅ Create versions and self-update (with tests + rollback safeguards)
-- ✅ Sync with upstream Hermes Agent
-
----
-
-## 📖 More Information
-
-- **Repository**: https://github.com/Lexus2016/hermes-agent-evolution
-- **Evolution docs**: `EVOLUTION_README.md`
-- **Upstream**: https://github.com/nousresearch/hermes-agent
-
----
-
-**Welcome to Hermes Evolution!** 🧬🚀 Your data is backed up, and you can roll
-back at any time.
+- `EVOLUTION_README.md` — evolution architecture, modes, safety gate.
+- `MIGRATION_GUIDE.md` — data-preserving migration details.
+- Upstream: https://github.com/nousresearch/hermes-agent
