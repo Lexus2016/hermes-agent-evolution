@@ -1,6 +1,6 @@
 #!/bin/bash
 # REAL Automatic Upgrade Script: Hermes Agent → Hermes Evolution
-# This script DOES EVERYTHING automatically - no manual steps required
+# This script DOES EVERYTHING automatically - works on any system with Hermes installed
 
 set -e
 
@@ -12,6 +12,22 @@ echo ""
 EVOLUTION_REPO="https://github.com/Lexus2016/hermes-agent-evolution.git"
 EVOLUTION_DIR="$HOME/hermes-agent-evolution"
 BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
+
+# Detect where Hermes is installed
+echo "🔍 Detecting Hermes installation..."
+HERMES_PROJECT=$(hermes --version 2>/dev/null | grep "Project:" | cut -d' ' -f2 || echo "")
+if [ -z "$HERMES_PROJECT" ]; then
+    echo "❌ Cannot detect Hermes installation"
+    exit 1
+fi
+echo "✅ Hermes installed at: $HERMES_PROJECT"
+
+HERMES_SKILLS_DIR="$HERMES_PROJECT/skills"
+HERMES_CRON_DIR="$HERMES_PROJECT/cron"
+
+echo "📂 Skills directory: $HERMES_SKILLS_DIR"
+echo "📂 Cron directory: $HERMES_CRON_DIR"
+echo ""
 
 # Step 1: Create backup
 echo "📦 Step 1/6: Creating backup..."
@@ -41,16 +57,15 @@ else
     exit 1
 fi
 
-# Step 4: Copy evolution skills
+# Step 4: Copy evolution skills TO THE RIGHT PLACE
 echo ""
-echo "📚 Step 4/6: Installing evolution skills..."
+echo "📚 Step 4/6: Installing evolution skills to: $HERMES_SKILLS_DIR"
 EVOLUTION_SKILLS="$EVOLUTION_DIR/skills/evolution"
-HERMES_SKILLS="$HOME/.hermes/skills"
 
 if [ -d "$EVOLUTION_SKILLS" ]; then
-    mkdir -p "$HERMES_SKILLS"
-    cp -r "$EVOLUTION_SKILLS" "$HERMES_SKILLS/"
-    echo "✅ Evolution skills installed"
+    mkdir -p "$HERMES_SKILLS_DIR"
+    cp -r "$EVOLUTION_SKILLS" "$HERMES_SKILLS_DIR/"
+    echo "✅ Evolution skills installed to: $HERMES_SKILLS_DIR/evolution"
     
     # List installed skills
     echo "📋 Installed evolution skills:"
@@ -59,18 +74,18 @@ if [ -d "$EVOLUTION_SKILLS" ]; then
     done
 else
     echo "❌ Evolution skills not found in repository"
+    exit 1
 fi
 
-# Step 5: Copy evolution cron jobs
+# Step 5: Copy evolution cron jobs TO THE RIGHT PLACE
 echo ""
-echo "⏰ Step 5/6: Installing evolution cron jobs..."
+echo "⏰ Step 5/6: Installing evolution cron jobs to: $HERMES_CRON_DIR"
 EVOLUTION_CRON="$EVOLUTION_DIR/cron/evolution"
-HERMES_CRON="$HOME/.hermes/cron"
 
 if [ -d "$EVOLUTION_CRON" ]; then
-    mkdir -p "$HERMES_CRON"
-    cp -r "$EVOLUTION_CRON" "$HERMES_CRON/"
-    echo "✅ Evolution cron jobs installed"
+    mkdir -p "$HERMES_CRON_DIR"
+    cp -r "$EVOLUTION_CRON" "$HERMES_CRON_DIR/"
+    echo "✅ Evolution cron jobs installed to: $HERMES_CRON_DIR/evolution"
     
     # List installed cron jobs
     echo "📋 Installed evolution cron jobs:"
@@ -79,6 +94,7 @@ if [ -d "$EVOLUTION_CRON" ]; then
     done
 else
     echo "❌ Evolution cron jobs not found in repository"
+    exit 1
 fi
 
 # Step 6: Verify installation
@@ -93,7 +109,8 @@ if command -v hermes &> /dev/null; then
     if hermes skills list 2>/dev/null | grep -q "evolution"; then
         echo "✅ Evolution skills installed and available"
     else
-        echo "⚠️  Evolution skills installed but not yet visible (may need to reload shell)"
+        echo "⚠️  Evolution skills installed but not yet visible"
+        echo "📋 Try running: hermes skills list"
     fi
 else
     echo "❌ Hermes command not found - something went wrong"
@@ -111,7 +128,7 @@ echo "  • Self-update capabilities"
 echo ""
 echo "🔗 Next steps:"
 echo "  1. Test: hermes --help"
-echo "  2. Check skills: hermes skills list | grep evolution"
+echo "  2. Check skills: hermes skills list"
 echo "  3. Read docs: cat $EVOLUTION_DIR/EVOLUTION_README.md"
 echo ""
 echo "📂 Backup location: ~/.hermes.backup.$BACKUP_DATE"
