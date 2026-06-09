@@ -9,57 +9,57 @@ mode: PRIVATE
 
 # Evolution Analysis Skill
 
-**Режим роботи:** PRIVATE (тільки для власника репозиторію)
+**Operating mode:** PRIVATE (repository owner only)
 
-## Завдання
+## Task
 
-Аналізувати всі створені issues та PR, визначати пріоритет для реалізації.
+Analyze all created issues and PRs, and determine priority for implementation.
 
-## Процес
+## Process
 
-1. **Отримання** всіх відкритих issues через `gh` CLI (terminal tool).
-   `gh` уже авторизований через `GITHUB_PRIVATE_TOKEN` з оточення:
+1. **Retrieve** all open issues via the `gh` CLI (terminal tool).
+   `gh` is already authorized through `GITHUB_PRIVATE_TOKEN` from the environment:
 
 ```bash
 gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
   --limit 50 --json number,title,body,labels,createdAt
 ```
 
-2. **Оцінювання** кожного issue за критеріями:
+2. **Evaluate** each issue against the criteria:
 
-### Impact (Вплив)
-- Critical: 1.0 (безпека, критичні баги)
-- High: 0.8 (нові функції)
-- Medium: 0.5 (покращення UX)
-- Low: 0.2 (мінімальні зміни)
+### Impact
+- Critical: 1.0 (security, critical bugs)
+- High: 0.8 (new features)
+- Medium: 0.5 (UX improvements)
+- Low: 0.2 (minimal changes)
 
-### Effort (Зусилля)
-- Trivial: 0.1 (< 1 година)
-- Easy: 0.3 (< 4 години)
-- Medium: 0.5 (< 2 дні)
-- Hard: 0.8 (< 1 тиждень)
-- Very Hard: 1.0 (> 1 тиждень)
+### Effort
+- Trivial: 0.1 (< 1 hour)
+- Easy: 0.3 (< 4 hours)
+- Medium: 0.5 (< 2 days)
+- Hard: 0.8 (< 1 week)
+- Very Hard: 1.0 (> 1 week)
 
-### Додаткові фактори
+### Additional factors
 - Community interest: 👍 / 10 (max 1.0)
 - Age: days / 30 (max 1.0)
-- Compatibility: 1.0 (добре) / 0.5 (треба рефакторинг) / 0.1 (ламає)
-- Safety: 0.0 (ризиковано) / 0.5 (треба тести) / 1.0 (безпечно)
+- Compatibility: 1.0 (good) / 0.5 (needs refactoring) / 0.1 (breaks)
+- Safety: 0.0 (risky) / 0.5 (needs tests) / 1.0 (safe)
 
-3. **Обчислення Priority Score**
+3. **Compute Priority Score**
 
 ```python
 base_priority = (impact * 2) / effort
 final_priority = base_priority + community*0.1 + age*0.05 + compatibility*0.2 + safety*0.3
 ```
 
-4. **Вибір** top 5 для реалізації:
+4. **Select** the top 5 for implementation:
    - Min priority: 0.7
    - Max total effort: 2.0
 
-## Вихідний формат
+## Output format
 
-Збережи в `~/.hermes/profiles/user1/evolution/analysis/YYYY-MM-DD.json`:
+Save to `~/.hermes/profiles/user1/evolution/analysis/YYYY-MM-DD.json`:
 
 ```json
 {
@@ -77,6 +77,6 @@ final_priority = base_priority + community*0.1 + age*0.05 + compatibility*0.2 + 
 }
 ```
 
-## Безпека
+## Security
 
-Якщо GITHUB_PRIVATE_TOKEN не встановлений — **АБОРТ**. Цей skill працює тільки в PRIVATE mode.
+If GITHUB_PRIVATE_TOKEN is not set — **ABORT**. This skill only works in PRIVATE mode.
