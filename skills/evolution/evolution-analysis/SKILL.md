@@ -27,7 +27,31 @@ gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
   --limit 50 --json number,title,body,labels,createdAt
 ```
 
-2. **Evaluate** each issue against the criteria:
+2. **Viability triage — REJECT before you rank.** Implementing the wrong thing
+   costs far more than skipping it. For EACH open issue, first decide whether it
+   should exist at all. REJECT it (do not rank, do not implement) if ANY holds:
+   - **Already implemented** — the capability already exists. You MUST check the
+     codebase before assuming it's new, e.g.:
+     ```bash
+     grep -rni "<key term from the issue>" --include=*.py . | head
+     ```
+   - **Out of scope / not needed** — it doesn't serve a real user task or the
+     project's purpose; speculative "nice to have" with no concrete need.
+   - **Harmful** — it would add risk, heavy dependencies, scope creep, a
+     security/compatibility regression, or conflict with existing architecture,
+     outweighing its value.
+   - **Duplicate** — another open issue already covers it.
+
+   CLOSE every rejected issue with a clear reason + label, so the backlog stays
+   honest and the same idea isn't re-proposed next cycle:
+   ```bash
+   gh issue close <N> --repo Lexus2016/hermes-agent-evolution \
+     --comment "Rejected by evolution-analysis: <already-exists|out-of-scope|harmful|duplicate> — <one-line reason>."
+   gh issue edit <N> --repo Lexus2016/hermes-agent-evolution --add-label wontfix 2>/dev/null || true
+   ```
+   Only issues that SURVIVE triage proceed to scoring. Be conservative.
+
+3. **Evaluate** each SURVIVING issue against the criteria:
 
 ### Impact
 - Critical: 1.0 (security, critical bugs)
@@ -48,14 +72,14 @@ gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
 - Compatibility: 1.0 (good) / 0.5 (needs refactoring) / 0.1 (breaks)
 - Safety: 0.0 (risky) / 0.5 (needs tests) / 1.0 (safe)
 
-3. **Compute Priority Score**
+4. **Compute Priority Score**
 
 ```python
 base_priority = (impact * 2) / effort
 final_priority = base_priority + community*0.1 + age*0.05 + compatibility*0.2 + safety*0.3
 ```
 
-4. **Select** the top 5 for implementation:
+5. **Select** the top 5 for implementation:
    - Min priority: 0.7
    - Max total effort: 2.0
 
@@ -66,6 +90,14 @@ Save to `~/.hermes/profiles/user1/evolution/analysis/YYYY-MM-DD.json`:
 ```json
 {
   "date": "2026-06-08",
+  "rejected": [
+    {
+      "issue_number": 120,
+      "reason_code": "already-exists",
+      "reason": "Hierarchical cache already implemented in tools/cache.py",
+      "closed": true
+    }
+  ],
   "selected_for_implementation": [
     {
       "issue_number": 123,
