@@ -118,16 +118,21 @@ hermes cron list | grep -i evolution
 
 ---
 
-## 🅱️ Fresh install, then switch to the fork
+## 🅱️ Fresh install (no Hermes yet) — installs the fork directly
 
-The official installer clones the **original** repo, so install first, then do
-section 🅰️ steps 2–6:
+You do NOT need the original first. The one-command `upgrade.sh` detects there's
+no Hermes and installs **our fork** directly (our `scripts/install.sh` defaults
+its repo to this fork — root → `/usr/local/lib/hermes-agent`, non-root →
+`~/.hermes/hermes-agent`), then finishes evolution setup:
 
 ```bash
-# Official install (root → /usr/local/lib/hermes-agent, non-root → ~/.hermes/hermes-agent):
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
-# then run section 🅰️ (point origin at the fork, hermes update, register cron, schedule).
+curl -fsSL https://raw.githubusercontent.com/Lexus2016/hermes-agent-evolution/main/upgrade.sh | bash
 ```
+
+Prefer to run the installer by itself? It already clones the fork (code +
+evolution skills); afterwards `hermes` is ready and you can run `upgrade.sh`
+again to register cron + schedule. To install a different repo instead, set
+`HERMES_REPO_HTTPS=<url>`.
 
 ---
 
