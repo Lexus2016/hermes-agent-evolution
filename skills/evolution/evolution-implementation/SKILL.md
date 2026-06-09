@@ -19,6 +19,21 @@ Implement selected issues, create versions, and self-update.
 
 1. **Load** the latest analysis from `~/.hermes/profiles/user1/evolution/analysis/`
 
+1a. **`needs-work` issues — YOUR call: rework or consciously drop.** If a selected
+    issue is labelled `needs-work`, a previous PR failed code review and was sent
+    back. FIRST read the rework brief in the issue comments
+    (`gh issue view <N> --repo Lexus2016/hermes-agent-evolution --comments`). Then
+    make a deliberate decision — you have TWO valid options, pick one:
+    - **REWORK** — if the idea is still worth it and the brief is doable: fix it
+      exactly as the brief says (esp. wire the code into a REAL call site — that
+      was usually the failure), then proceed to implement + open a fresh PR.
+    - **DROP** — if, looking closer, it's genuinely too complex for its value,
+      out of scope, or would harm the project: close the issue with an HONEST
+      reason. This is a legitimate decision, not a failure — *"reconsidered: not
+      worth the complexity because X"* is a fine outcome.
+    Do NOT silently skip a `needs-work` issue and leave it hanging — either
+    rework it or close it with a reason. The choice is yours; own it.
+
 2. **Final viability re-check (last line of defense).** analysis already triaged,
    but you are about to write real code into the project — confirm once more,
    per issue, BEFORE branching:

@@ -80,8 +80,24 @@ gh pr list --repo "$REPO" --state open --limit 50 \
       the diff against the issue's intent. Does the mechanism actually produce
       the requested effect, or just *look* like it? (e.g. an "LLM must emit X"
       requirement implemented with a random generator does NOT — the LLM never
-      acts.) If the approach cannot deliver the issue's goal → do NOT merge;
-      comment why and send it back.
+      acts.) If the approach cannot deliver the issue's goal → do NOT merge.
+
+    **When a PR FAILS review — send the IDEA back for REWORK; do NOT discard it.**
+    analysis already judged the idea worth doing, so the implementation was weak,
+    not the idea. Do all of:
+    1. Close the failed PR (its branch is a dead end) with a brief comment.
+    2. Post a SPECIFIC, actionable rework brief as a comment ON THE ISSUE — name
+       exactly what was wrong and what "done" looks like, e.g.:
+       *"Blocked: dead code — `agent/entropy_eval` has no call sites. To fix:
+       call `format_report(...)` from the CLI session-summary path
+       (run_agent.py end-of-session) so it actually runs. Re-open a PR once it's
+       invoked."* Be concrete: the integration point + the definition of done.
+    3. Label the issue `needs-work` (`gh label create needs-work --color d93f0b
+       --description "Blocked by code-review; needs rework" 2>/dev/null || true`;
+       then `gh issue edit <issue> --add-label needs-work`).
+    Keep the ISSUE OPEN. The next implementation run will see `needs-work`, read
+    the brief, and either fix it properly OR consciously decide to drop it — that
+    decision belongs to implementation, not to a silent skip here.
 
     Only PRs that pass BOTH the deterministic dead-code check and the judgement
     check proceed to merge.

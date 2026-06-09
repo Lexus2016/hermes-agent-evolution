@@ -27,9 +27,19 @@ gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
   --limit 50 --json number,title,body,labels,createdAt
 ```
 
-2. **Viability triage — REJECT before you rank.** Implementing the wrong thing
-   costs far more than skipping it. For EACH open issue, first decide whether it
-   should exist at all. REJECT it (do not rank, do not implement) if ANY holds:
+2. **Rework first — `needs-work` issues are PRIORITY, not rejects.** An issue
+   labelled `needs-work` was ALREADY judged worth doing and attempted; a PR
+   failed code review and was sent back with a rework brief (in the issue
+   comments). Do NOT reject it as "already exists / already tried" — that throws
+   away a wanted idea. Instead SELECT it for implementation (give it priority, it
+   has momentum) so implementation can read the brief and finish it properly (or
+   consciously drop it). Only skip a `needs-work` issue if it is now genuinely
+   harmful or obsolete — and then close it with a reason, don't just ignore it.
+
+3. **Viability triage — REJECT before you rank.** Implementing the wrong thing
+   costs far more than skipping it. For EACH remaining open issue (NOT already
+   handled as `needs-work` above), first decide whether it should exist at all.
+   REJECT it (do not rank, do not implement) if ANY holds:
    - **Already implemented** — the capability already exists. You MUST check the
      codebase before assuming it's new, e.g.:
      ```bash
@@ -51,7 +61,7 @@ gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
    ```
    Only issues that SURVIVE triage proceed to scoring. Be conservative.
 
-3. **Evaluate** each SURVIVING issue against the criteria:
+4. **Evaluate** each SURVIVING issue against the criteria:
 
 ### Impact
 - Critical: 1.0 (security, critical bugs)
@@ -72,14 +82,15 @@ gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
 - Compatibility: 1.0 (good) / 0.5 (needs refactoring) / 0.1 (breaks)
 - Safety: 0.0 (risky) / 0.5 (needs tests) / 1.0 (safe)
 
-4. **Compute Priority Score**
+5. **Compute Priority Score**
 
 ```python
 base_priority = (impact * 2) / effort
 final_priority = base_priority + community*0.1 + age*0.05 + compatibility*0.2 + safety*0.3
 ```
 
-5. **Select** the top 5 for implementation:
+6. **Select** the top 5 for implementation (include any `needs-work` issues from
+   step 2):
    - Min priority: 0.7
    - Max total effort: 2.0
 
