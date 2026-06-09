@@ -1,402 +1,124 @@
 # Hermes Evolution 🧬
 
-> **Self-evolving AI Agent** — Research • Propose • Implement • Update
+> A self-improving version of **Hermes Agent** — it researches improvements,
+> proposes them, and updates itself daily. You keep using Hermes as usual; it
+> gets better on its own.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![Evolution](https://img.shields.io/badge/evolution-active-green.svg)](https://github.com/Lexus2016/hermes-agent-evolution)
+[![Based on Hermes Agent](https://img.shields.io/badge/based%20on-Hermes%20Agent-blue.svg)](https://github.com/nousresearch/hermes-agent)
 
 ---
 
-## 🎯 What is Hermes Evolution?
+## ⭐ Already running Hermes? Upgrade in one command
 
-**Hermes Evolution** is a self-improving AI agent based on [Hermes Agent](https://github.com/nousresearch/hermes-agent) by Nous Research, enhanced with autonomous evolution capabilities.
-
-### Key Innovation: Collaborative Evolution
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│              COLLABORATIVE EVOLUTION ARCHITECTURE             │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  PUBLIC Mode — Everyone contributes:                         │
-│  ┌──────────────────┐         ┌──────────────────┐         │
-│  │ DAILY RESEARCH   │────────▶│  CREATE ISSUES   │         │
-│  │  (24h cron)      │         │  (proposals)     │         │
-│  └──────────────────┘         └──────────────────┘         │
-│           │                                                   │
-│           ▼                                                   │
-│    [All installations propose improvements]                 │
-│           │                                                   │
-│  PRIVATE Mode — Only owner implements:                      │
-│           ▼                                                   │
-│  ┌──────────────────┐         ┌──────────────────┐         │
-│  │ ANALYZE & PRIORITIZE│────────▶│  IMPLEMENT      │         │
-│  │  (24h cron)      │         │  (auto-update)   │         │
-│  └──────────────────┘         └──────────────────┘         │
-│                                         │                    │
-│                                         ▼                    │
-│                                  ┌─────────────┐            │
-│                                  │ SELF-UPDATE │            │
-│                                  └─────────────┘            │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**How it works:**
-1. All installations research and propose improvements
-2. Only the owner's agent analyzes, implements, and self-updates
-3. Regular sync with upstream Hermes Agent keeps features current
-
----
-
-## ✨ Features
-
-### 🧠 Base Capabilities (from Hermes Agent)
-- Multi-tool AI agent with LLM integration
-- Skills system for task specialization
-- Cron jobs for automation
-- Memory and context management
-- Multi-provider support (OpenAI, Anthropic, etc.)
-
-### 🧬 Evolution Capabilities (NEW)
-- **Autonomous Research**: Scans other agents, papers, trends daily
-- **Proposal Generation**: Creates GitHub issues with improvement ideas
-- **Analysis & Prioritization**: Scores proposals by impact/effort
-- **Implementation**: Automatically implements selected improvements
-- **Self-Update**: Creates versions and updates itself
-- **Upstream Sync**: Syncs with original Hermes Agent weekly
-
----
-
-## 🚀 Quick Start
-
-### Option 1: Fresh Installation
-
-```bash
-# Clone Hermes Evolution
-git clone https://github.com/Lexus2016/hermes-agent-evolution.git
-cd hermes-agent-evolution
-
-# Run setup
-./setup-hermes.sh
-
-# Configure evolution (see EVOLUTION_README.md)
-export GITHUB_TOKEN=*** For PUBLIC mode (all users)
-export GITHUB_PRIVATE_TOKEN=*** # Only for repository owner
-```
-
-### Option 2: Upgrade an EXISTING Hermes Agent → Evolution (one command)
-
-Already running the original Hermes Agent? **One command** switches it onto this
-self-evolving fork and keeps it auto-updating — data preserved, idempotent
-(safe to re-run):
+If you installed Hermes Agent and went through its setup wizard, switch to
+Hermes Evolution by pasting **one line** into your terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Lexus2016/hermes-agent-evolution/main/upgrade.sh | bash
 ```
 
-What it does automatically: backs up your data dir, points the install's git
-`origin` at this fork (keeps `upstream` = original), runs the official
-`hermes update`, refreshes evolution skills + registers cron jobs, schedules the
-daily self-update, fixes the command symlink, and verifies. Re-running is
-harmless — no duplicate backups, no needless gateway restart.
+That's it. The script does everything for you, safely:
+- backs up your data (nothing is lost),
+- switches your Hermes to this version,
+- turns on the evolution features,
+- sets up **daily auto-updates** so it keeps improving on its own.
 
-Opt out of the daily auto-update: `bash upgrade.sh --no-auto-update` (from a clone).
+You can re-run it any time — it won't break anything. Your existing chats,
+memory, and settings stay exactly as they were.
 
-**See [AUTO_UPGRADE.md](AUTO_UPGRADE.md)** for details, manual steps, and Windows.
-
----
-
-## 📚 Documentation
-
-| Document | Description |
-|----------|-------------|
-| **EVOLUTION_README.md** | Evolution capabilities and architecture |
-| **MIGRATION_GUIDE.md** | Migrate from Hermes Agent without data loss |
-| **CONTRIBUTING_EVOLUTION.md** | Contribution guidelines |
-| **CODE_OF_CONDUCT.md** | Community guidelines |
-| **SECURITY_EVOLUTION.md** | Security policy and best practices |
-| **AGENTS.md** | Original Hermes Agent documentation |
+> Don't want unattended daily updates? Add `--no-star` and/or `--no-auto-update`
+> when you run it (from a clone): `bash upgrade.sh --no-auto-update`.
 
 ---
 
-## 🔄 Evolution in Action
+## 🔑 One thing to set up: a GitHub token
 
-### Daily Evolution Cycle
+For the agent to research and open improvement **issues** on GitHub, it needs a
+GitHub token. Here's how to get one (takes ~2 minutes, no coding):
 
-| Time | Task | Mode | Description |
-|------|------|-------|-------------|
-| 08:00 (Sun) | Upstream Sync | PRIVATE | Sync with Hermes Agent |
-| 09:00 | Research | PUBLIC | Scan agents & papers |
-| 12:00 | Create Issues | PUBLIC | Generate proposals |
-| 21:00 | Analysis | PRIVATE | Prioritize changes |
-| 22:00 | Implementation | PRIVATE | Implement & update |
+1. Open **[github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new)**
+   (log in if asked). This is the **Fine-grained token** page.
+2. **Token name:** type `hermes-evolution`.
+3. **Expiration:** pick 90 days (or longer).
+4. **Repository access:** choose **“Only select repositories”** → pick
+   **`hermes-agent-evolution`**.
+5. **Permissions → Repository permissions**, set these three to **Read and write**:
+   - **Contents**
+   - **Issues**
+   - **Pull requests**
+6. Click **Generate token** at the bottom, then **copy** the token
+   (it starts with `github_pat_…`). Copy it now — GitHub shows it only once.
+7. Give it to your agent — paste this one line (replace the placeholder):
 
-### Example Workflow
+   ```bash
+   echo 'GITHUB_TOKEN=PASTE_YOUR_TOKEN_HERE' >> ~/.hermes/.env
+   ```
+
+Done. From now on your Hermes can research and open improvement issues on GitHub.
+
+*That's all most people need. If you own the fork and want the agent to also
+implement changes and update the project itself, that uses a separate owner
+token — see [EVOLUTION_README.md](EVOLUTION_README.md).*
+
+> Keep the token private — treat it like a password. Never share it or paste it
+> into a chat. If it ever leaks, delete it on GitHub and make a new one.
+
+---
+
+## 🧬 What you get
+
+- **Daily research** — scans other AI agents, papers, and trends for ideas.
+- **Proposals** — opens GitHub issues with concrete improvement suggestions.
+- **Self-update** — pulls the latest improvements automatically every day.
+- **Stays current** — periodically brings in useful changes from the original
+  Hermes Agent.
+
+Everything you already love about Hermes Agent still works exactly the same.
+
+---
+
+## 🆕 Don't have Hermes yet?
+
+Install the original Hermes Agent first, then run the one-command upgrade above:
 
 ```bash
-# 1. Research runs automatically (9 AM)
-# Result: ~/.hermes/profiles/user1/evolution/research/2026-06-08.md
-
-# 2. Issues created automatically (12 PM)
-# Result: https://github.com/Lexus2016/hermes-agent-evolution/issues
-
-# 3. Analysis runs automatically (9 PM, owner only)
-# Result: ~/.hermes/profiles/user1/evolution/analysis/2026-06-08.json
-
-# 4. Implementation runs automatically (10 PM, owner only)
-# Result: New git tag, agent self-updates
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+# then the upgrade line from the top of this README
 ```
 
----
-
-## 🔐 Modes of Operation
-
-### PUBLIC Mode (Default)
-**For: All installations**
-
-✅ **Can:**
-- Research other agents and papers
-- Create GitHub issues and PRs
-- Use all Hermes Agent features
-
-❌ **Cannot:**
-- Modify code directly
-- Merge pull requests
-- Self-update
-
-**Setup:**
-```bash
-export GITHUB_TOKEN="*** For PRIVATE Mode (Repository Owner Only)
-**For: Lexus2016's installation only**
-
-✅ **Everything in PUBLIC mode, plus:**
-- Analyze and prioritize proposals
-- Implement selected improvements
-- Merge pull requests
-- Create versions and self-update
-- Sync with upstream Hermes Agent
-
-**Setup:**
-```bash
-export GITHUB_PRIVATE_TOKEN="*** Evolution Skills
-
-- **[evolution-research](skills/evolution/evolution-research/SKILL.md)** — Research agents & papers
-- **[evolution-issues](skills/evolution/evolution-issues/SKILL.md)** — Create GitHub issues/PR
-- **[evolution-analysis](skills/evolution/evolution-analysis/SKILL.md)** — Prioritize improvements
-- **[evolution-implementation](skills/evolution/evolution-implementation/SKILL.md)** — Implement & update
-- **[evolution-upstream-sync](skills/evolution/evolution-upstream-sync/SKILL.md)** — Sync with upstream
+Windows works natively too — see **[AUTO_UPGRADE.md](AUTO_UPGRADE.md)**.
 
 ---
 
-## 🔄 Updating Hermes Evolution
+## 🛡️ Is it safe?
 
-### Automatic Updates (PRIVATE mode only)
+Yes. The agent can **propose** changes but cannot silently rewrite itself:
+every change goes through a pull request with automated tests, and important
+parts require your approval before they're merged. Updates are backed up and
+roll back automatically if anything looks wrong.
 
-If you're the repository owner, Hermes Evolution updates itself automatically.
-
-### Manual Updates (All users)
-
-```bash
-cd ~/hermes-agent-evolution  # or your installation path
-git pull origin main
-./setup-hermes.sh  # Re-run to ensure dependencies
-```
-
-### Update from Hermes Agent (Upstream)
-
-If you were using original Hermes Agent:
-
-```bash
-./scripts/migrate-from-hermes.sh ~/.hermes.backup.*
-```
-
-See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md).
+Details: **[EVOLUTION_README.md](EVOLUTION_README.md)** ·
+**[SECURITY_EVOLUTION.md](SECURITY_EVOLUTION.md)**
 
 ---
 
-## 🛠️ Installation
+## 📖 Learn more
 
-### Requirements
-
-- **Python**: 3.11 or higher
-- **OS**: macOS, Linux, or Windows (native PowerShell installer `scripts/install.ps1`, or WSL)
-- **Git**: For cloning and updates
-- **GitHub Account**: For tokens (optional for basic use)
-
-### Step-by-Step
-
-1. **Clone the repository:**
-```bash
-git clone https://github.com/Lexus2016/hermes-agent-evolution.git
-cd hermes-agent-evolution
-```
-
-2. **Run the setup script:**
-```bash
-./setup-hermes.sh
-```
-
-> **Windows (native, no WSL):** run the PowerShell installer instead:
-> ```powershell
-> powershell -ExecutionPolicy Bypass -File scripts/install.ps1
-> ```
-
-3. **Configure evolution tokens (optional):**
-```bash
-# For PUBLIC mode (research + proposals)
-export GITHUB_TOKEN="*** For PRIVATE mode (implement + self-update, owner only)
-export GITHUB_PRIVATE_TOKEN="*** the evolution cron jobs:**
-```bash
-# Register ALL evolution cron jobs from cron/evolution/*.yaml (idempotent):
-~/hermes-agent-evolution/venv/bin/python \
-  ~/hermes-agent-evolution/scripts/register_evolution_cron.py
-```
-
-See [EVOLUTION_README.md](EVOLUTION_README.md) for complete setup.
+| Document | What's inside |
+|----------|---------------|
+| **[AUTO_UPGRADE.md](AUTO_UPGRADE.md)** | Install/upgrade in detail, Windows, manual steps |
+| **[EVOLUTION_README.md](EVOLUTION_README.md)** | How evolution works, modes, the safety gate |
+| **[SECURITY_EVOLUTION.md](SECURITY_EVOLUTION.md)** | Security policy |
+| **[AGENTS.md](AGENTS.md)** | Original Hermes Agent documentation |
 
 ---
 
-## 📖 Usage
+## 📄 License & credits
 
-### Basic Usage (Same as Hermes Agent)
+Apache License 2.0. Built on **[Hermes Agent](https://github.com/nousresearch/hermes-agent)**
+by [Nous Research](https://nousresearch.com/) — huge thanks to them and the
+Hermes community.
 
-```bash
-# Start interactive agent
-hermes
-
-# Ask a question
-hermes "What's the weather like?"
-
-# Use a specific skill
-hermes --skill github-pr-workflow
-```
-
-### Evolution Usage
-
-```bash
-# Run research manually
-hermes --skill evolution-research
-
-# Check evolution mode
-python evolution/detect_mode.py
-
-# View research reports
-cat ~/.hermes/profiles/user1/evolution/research/*.md
-```
-
----
-
-## 🆚 Hermes Evolution vs Hermes Agent
-
-| Feature | Hermes Agent | Hermes Evolution |
-|---------|--------------|------------------|
-| Base Agent Capabilities | ✅ | ✅ (inherited) |
-| Skills System | ✅ | ✅ (inherited) |
-| Cron Jobs | ✅ | ✅ (inherited) |
-| **Autonomous Research** | ❌ | ✅ **NEW** |
-| **Proposal Generation** | ❌ | ✅ **NEW** |
-| **Analysis & Prioritization** | ❌ | ✅ **NEW** |
-| **Self-Implementation** | ❌ | ✅ **NEW** |
-| **Self-Update** | ❌ | ✅ **NEW** |
-| **Upstream Sync** | ❌ | ✅ **NEW** |
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! See [CONTRIBUTING_EVOLUTION.md](CONTRIBUTING_EVOLUTION.md).
-
-Quick start:
-1. Fork the repository
-2. Create a branch: `git checkout -b feature/my-feature`
-3. Make your changes
-4. Run tests: `pytest tests/`
-5. Submit a pull request
-
----
-
-## 🐛 Troubleshooting
-
-### Migration Issues
-
-If you encounter problems during migration:
-
-```bash
-# Check backup
-ls -la ~/.hermes.backup.*
-
-# Verify data integrity
-python scripts/verify-migration.py ~/.hermes.backup.*
-
-# Re-run migration if needed
-./scripts/migrate-from-hermes.sh ~/.hermes.backup.* --force
-```
-
-### Evolution Not Working
-
-```bash
-# Check mode
-python evolution/detect_mode.py
-
-# Verify tokens
-echo $GITHUB_TOKEN
-echo $GITHUB_PRIVATE_TOKEN
-
-# Check logs
-tail -f ~/.hermes/profiles/user1/logs/evolution-*.log
-```
-
-### More Help
-
-- **Documentation**: See [docs/](docs/)
-- **Issues**: [Create an issue](https://github.com/Lexus2016/hermes-agent-evolution/issues)
-- **Discussions**: [Join Discussions](https://github.com/Lexus2016/hermes-agent-evolution/discussions)
-
----
-
-## 📄 License
-
-Apache License 2.0 — Inherits from [Hermes Agent](https://github.com/nousresearch/hermes-agent) by Nous Research.
-
-See [LICENSE](LICENSE) for details.
-
----
-
-## 🙏 Acknowledgments
-
-- **[Nous Research](https://nousresearch.com/)** — Original Hermes Agent
-- **Hermes Agent Contributors** — Core agent functionality
-- **Open Source Community** — Tools and libraries
-
----
-
-## 📢 Status
-
-🧬 **Evolution Status**: Active Development
-
-✅ **Implemented**:
-- Evolution skills (5 skills)
-- Cron jobs (5 jobs)
-- Mode detection
-- Documentation
-
-🚧 **In Progress**:
-- Automated testing
-- Enhanced upstream sync
-- Web UI for monitoring
-
-📋 **Planned**:
-- Multi-agent collaboration
-- Predictive evolution
-- Enhanced rollback mechanism
-
----
-
-**Ready to evolve?** [Get started now!](#-quick-start) 🚀
-
----
-
-**Website**: [hermes-agent.nousresearch.com](https://hermes-agent.nousresearch.com)
-**Repository**: [github.com/Lexus2016/hermes-agent-evolution](https://github.com/Lexus2016/hermes-agent-evolution)
-**Upstream**: [github.com/nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent)
+- **Repository:** [github.com/Lexus2016/hermes-agent-evolution](https://github.com/Lexus2016/hermes-agent-evolution)
+- **Upstream:** [github.com/nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent)
