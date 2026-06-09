@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 from agent.prompt_builder import (
     DEFAULT_AGENT_IDENTITY,
     ATTENTION_RESET_GUIDANCE,
+    DELIBERATE_WORK_GUIDANCE,
     GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
     HERMES_AGENT_HELP_GUIDANCE,
     KANBAN_GUIDANCE,
@@ -116,6 +117,11 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # itself to break tunnel vision. Always on — cheap, static text, helps every
     # model avoid repeating failed approaches.
     stable_parts.append(ATTENTION_RESET_GUIDANCE)
+
+    # Deliberate work + self-review on the USER'S tasks: judge necessity before
+    # acting, audit and rate your own work after. Always on — static text, scoped
+    # to non-trivial work, so it raises quality without slowing simple replies.
+    stable_parts.append(DELIBERATE_WORK_GUIDANCE)
 
     # Tool-aware behavioral guidance: only inject when the tools are loaded
     tool_guidance = []
