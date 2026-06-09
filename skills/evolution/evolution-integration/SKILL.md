@@ -57,6 +57,35 @@ gh pr list --repo "$REPO" --state open --limit 50 \
    - **Closes a real, open issue** that analysis selected (sanity check the PR
      body's `Closes #NN`).
 
+2a. **CODE REVIEW — green CI is NOT enough.** CI ran the tests; it did NOT check
+    that the code is actually wired into the system or that it solves the issue.
+    A real case: PR #49 was green but shipped a 350-line module nothing imported
+    (dead code) plus a category error (used Python RNG where the LLM itself had
+    to act). For EACH candidate PR, before merging, REVIEW:
+
+    - **Not dead code (DETERMINISTIC check).** For every NEW top-level symbol /
+      module the PR adds, confirm it is actually imported or called from
+      somewhere OTHER than its own file and its tests. Check out the PR and grep:
+      ```bash
+      gh pr checkout <N> --repo "$REPO" 2>/dev/null || gh pr diff <N> --repo "$REPO"
+      # for a new module tools/foo.py with class Foo / def bar:
+      grep -rn "import foo\|from .*foo import\|Foo(\|bar(" . --include=*.py \
+        | grep -viE "tools/foo.py|/test|_test|tests/"
+      ```
+      If the new code is referenced ONLY by its own module + tests (zero real
+      call sites) → it's DEAD CODE. Do NOT merge. Comment on the PR and either
+      reopen the issue or label it `needs-work`.
+
+    - **No category error / actually solves the issue (JUDGEMENT check).** Read
+      the diff against the issue's intent. Does the mechanism actually produce
+      the requested effect, or just *look* like it? (e.g. an "LLM must emit X"
+      requirement implemented with a random generator does NOT — the LLM never
+      acts.) If the approach cannot deliver the issue's goal → do NOT merge;
+      comment why and send it back.
+
+    Only PRs that pass BOTH the deterministic dead-code check and the judgement
+    check proceed to merge.
+
 3. **Daily limit — MAX 3 merges per run.** Quality over throughput. Merging a
    flood of agent code unreviewed is exactly the risk we are guarding against.
 
