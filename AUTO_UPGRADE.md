@@ -152,13 +152,19 @@ bash "$INSTALL_DIR/scripts/install_auto_update.sh" --remove
 This installs one cron line: `hermes update --yes` (non-interactive, keeps the
 pre-update backup).
 
-**Windows (Task Scheduler):**
+**Windows (Task Scheduler):** use the bundled PowerShell installer — it registers
+the daily task for you (the equivalent of the cron line above), idempotently:
 ```powershell
-# Run hermes update daily at 04:17 (native, no WSL needed):
-schtasks /Create /SC DAILY /ST 04:17 /TN "HermesEvolutionUpdate" /TR "hermes update --yes" /F
-# remove:
-schtasks /Delete /TN "HermesEvolutionUpdate" /F
+# Install daily `hermes update --yes` (default 04:17):
+powershell -ExecutionPolicy Bypass -File scripts\install_auto_update.ps1
+# Custom time:
+powershell -ExecutionPolicy Bypass -File scripts\install_auto_update.ps1 -Time 05:30
+# Remove:
+powershell -ExecutionPolicy Bypass -File scripts\install_auto_update.ps1 -Remove
 ```
+It resolves the `hermes` path, logs to `%USERPROFILE%\.hermes\logs\auto-update.log`,
+and overwrites any existing task on re-run. (Manual equivalent, if you prefer:
+`schtasks /Create /SC DAILY /ST 04:17 /TN "HermesEvolutionUpdate" /TR "hermes update --yes" /F`.)
 
 ---
 
