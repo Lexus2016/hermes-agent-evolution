@@ -75,6 +75,36 @@ class TestEntropyEngine:
         # There are at least 2 unique tools used
         assert len(report.action_counts) >= 5
 
+    def test_tool_result_messages_do_not_pollute_tool_entropy(self):
+        """role=='tool' messages must NOT be counted as a pseudo-tool.
+
+        Regression: they used to map to ``tool:result``, inflating
+        tool_entropy (one real tool reported entropy 1.0 instead of 0.0).
+        """
+        messages = [
+            {"role": "user", "content": "do"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"function": {"name": "terminal"}}],
+            },
+            {"role": "tool", "content": "out1"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"function": {"name": "terminal"}}],
+            },
+            {"role": "tool", "content": "out2"},
+            {"role": "assistant", "content": "done"},
+        ]
+        engine = EntropyEngine()
+        report = engine.analyze("s5", messages)
+        # Only ONE real tool used -> tool entropy must be exactly 0.0
+        assert report.tool_entropy == 0.0
+        assert "tool:result" not in report.action_counts
+        # 2 synthetic markers (after tool_calls) + 2 real role=="tool" messages
+        assert report.action_counts.get("builtin:tool_result") == 4
+
     def test_information_gain_with_baseline(self):
         from collections import Counter
 

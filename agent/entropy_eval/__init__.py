@@ -20,7 +20,7 @@ Reference
 
 import math
 import statistics
-from collections import Counter, defaultdict
+from collections import Counter
 from typing import Any, Dict, List, Optional, Sequence
 
 
@@ -31,8 +31,11 @@ def _safe_entropy(counter: Counter, total: int) -> float:
     """
     if total <= 0:
         return 0.0
-    return -sum(
-        (count / total) * math.log2(count / total) for count in counter.values()
+    # max(0.0, ...) guards float artifacts like -0.0 for degenerate
+    # single-symbol distributions (entropy is never negative by definition).
+    return max(
+        0.0,
+        -sum((count / total) * math.log2(count / total) for count in counter.values()),
     )
 
 
@@ -99,14 +102,16 @@ class EntropyEngine:
         """Build a flat action list from messages.
 
         Each action is represented as ``tool:<name>`` or ``role:<role>`` if there
-        is no tool call.  For assistant messages with multiple tool_calls we
-        emit them in order followed by a synthetic ``tool:collective_result``
-        marker so the loop structure is preserved.
+        is no tool call.  For assistant messages with tool_calls we emit them in
+        order followed by a synthetic ``builtin:tool_result`` marker so the loop
+        structure is preserved.  Tool-result messages (``role == "tool"``) map to
+        the same ``builtin:tool_result`` marker — deliberately NOT ``tool:...``,
+        so pseudo-entries never pollute *tool_entropy* (which counts only real
+        tool names).
         """
         actions: List[str] = []
         for msg in messages:
             role = msg.get("role", "unknown")
-            content = msg.get("content") or ""
             _tool_calls = msg.get("tool_calls") or []
             if role in ("user", "system"):
                 actions.append(f"role:{role}")
@@ -115,6 +120,9 @@ class EntropyEngine:
                 if _tool_calls:
                     actions.append("role:assistant(tool)")
                     for tc in _tool_calls:
+                        if not isinstance(tc, dict):
+                            actions.append("tool:unknown")
+                            continue
                         name = (
                             tc.get("function", {}).get("name")
                             or tc.get("name")
@@ -126,7 +134,10 @@ class EntropyEngine:
                     actions.append("role:assistant(text)")
                 continue
             if role == "tool":
-                actions.append(f"tool:result")
+                # Real tool-result message: same synthetic marker as above so
+                # the trajectory keeps its shape WITHOUT inventing a fake tool
+                # name (would corrupt tool_entropy).
+                actions.append("builtin:tool_result")
                 continue
             actions.append(f"role:{role}")
         return actions
@@ -168,12 +179,14 @@ class EntropyEngine:
         # 5. information_gain  (KL divergence vs optional baseline)
         if self.baseline_actions and total_actions > 0:
             baseline_total = sum(self.baseline_actions.values())
+            # Add-one (Laplace) smoothing over the UNION vocabulary so q is a
+            # proper distribution and q(count=0) < q(count=1) (monotone).
+            vocab = set(self.baseline_actions) | set(action_counter)
+            q_denom = baseline_total + len(vocab)
             kl = 0.0
             for act, count in action_counter.items():
                 p = count / total_actions
-                q = max(self.baseline_actions.get(act, 0), 1) / (
-                    baseline_total + len(action_counter)
-                )
+                q = (self.baseline_actions.get(act, 0) + 1) / q_denom
                 if p > 0:
                     kl += p * math.log2(p / q)
             information_gain = kl
@@ -221,8 +234,10 @@ class MultiSessionAggregator:
 
 def format_report_terminal(report: SessionEntropyReport) -> str:
     """Return a compact, terminal-ready summary string."""
+    sid = report.session_id
+    sid_display = f"{sid[:24]}..." if len(sid) > 24 else sid
     lines = [
-        f"  🔬 Entropy Metrics (session {report.session_id[:24]}...)",
+        f"  🔬 Entropy Metrics (session {sid_display})",
         f"  {'─' * 40}",
         f"  Action entropy:      {report.action_entropy:8.3f}",
         f"  Trajectory entropy:  {report.trajectory_entropy:8.3f}",

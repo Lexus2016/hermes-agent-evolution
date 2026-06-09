@@ -128,6 +128,26 @@ A concrete fix/capability that would unblock it.
 - Priority Score: <impact*2/effort>
 ```
 
+## Cross-cycle memory (optional — only if Turbo-Quant Memory is available)
+
+If the `mcp__tqmemory__*` tools are present (the optional Turbo-Quant Memory MCP
+is installed and registered — see `setup-hermes.sh`), use them so introspection
+*remembers across runs* instead of re-deriving everything daily. If those tools
+are NOT available, skip this section entirely — the `gh`-based flow above is
+fully sufficient. **Never make the cycle depend on tqmemory.**
+
+- **Before dedup**, query memory for patterns already seen or decided — this
+  catches things a closed issue's title would not surface (e.g. "we dropped this
+  last month because X"):
+  `mcp__tqmemory__semantic_search(query="<the problem pattern>", scope="project")`.
+  If a prior `decision`/`lesson` says it was already fixed or deliberately
+  dropped, treat it like an existing issue and SKIP. This **complements**, does
+  not replace, the `gh issue list` dedup above.
+- **After the run**, record what you found and decided so the next cycle builds
+  on it instead of repeating it:
+  `mcp__tqmemory__remember_note(title="<pattern>", content="<abstracted finding + decision>", kind="pattern", scope="project")`.
+  Same privacy rule — abstracted only, never raw session text, paths, or PII.
+
 ## Limits
 
 - Maximum 5 introspection issues per day (keep signal high).

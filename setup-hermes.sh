@@ -518,6 +518,35 @@ if [ "${HERMES_NO_STAR:-0}" != "1" ]; then
     fi
 fi
 
+# --- Optional: Turbo-Quant Memory MCP for evolution introspection -----------
+# Local-first MCP memory server (github.com/Lexus2016/turbo_quant_memory). When
+# present, evolution skills get typed cross-cycle memory (decisions/lessons,
+# semantic dedup, knowledge graph) instead of re-deriving everything each run.
+# Best-effort + opt-out (HERMES_NO_TQMEMORY=1); NEVER fails the install — a
+# missing memory server just means evolution runs as it did before.
+if [ "${HERMES_NO_TQMEMORY:-0}" != "1" ] && command -v uv >/dev/null 2>&1; then
+    if command -v turbo-memory-mcp >/dev/null 2>&1; then
+        uv tool upgrade turbo-memory-mcp >/dev/null 2>&1 || true
+    else
+        echo "🧠 Installing Turbo-Quant Memory MCP (one-time, may take a minute)…"
+        uv tool install "git+https://github.com/Lexus2016/turbo_quant_memory" >/dev/null 2>&1 || true
+    fi
+    hash -r 2>/dev/null || true   # pick up a freshly-installed shim in ~/.local/bin
+    if command -v turbo-memory-mcp >/dev/null 2>&1; then
+        # Register with Hermes only if absent — avoids the interactive overwrite
+        # prompt (which would hang a non-interactive install).
+        if ! "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.main mcp list 2>/dev/null | grep -qi "tqmemory"; then
+            "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.main mcp add tqmemory \
+                --command turbo-memory-mcp --args serve >/dev/null 2>&1 || true
+        fi
+        echo "🧠 Turbo-Quant Memory ready for evolution introspection (opt out: HERMES_NO_TQMEMORY=1)."
+    else
+        echo "ℹ️  Turbo-Quant Memory not installed (optional) — evolution runs without it."
+    fi
+elif [ "${HERMES_NO_TQMEMORY:-0}" != "1" ]; then
+    echo "ℹ️  'uv' not found — skipping optional Turbo-Quant Memory. Evolution runs without it."
+fi
+
 # Ask if they want to run setup wizard now
 read -p "Would you like to run the setup wizard now? [Y/n] " -n 1 -r
 echo
