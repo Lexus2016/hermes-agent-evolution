@@ -18,8 +18,24 @@ Create GitHub issues and pull requests based on research.
 
 1. **Load** the latest research report from `~/.hermes/profiles/user1/evolution/research/`
 2. **Select** proposals with Priority Score >= 0.7
-3. **Create issues** via the `gh` CLI (terminal tool). `gh` is already authorized
-   through `GITHUB_TOKEN` from the environment — a separate `gh auth login` is not needed.
+2a. **Self-critique BEFORE you file (do not propose noise).** A high priority
+    score is not enough. For EACH candidate, honestly ask — and DROP it (don't
+    open an issue) unless you can answer yes:
+    - **Would I actually want this in THIS project?** Not "it's trending" or "I
+      saw it somewhere" — does it serve a real need for *this* agent and its users?
+    - **Does it not already exist?** Check the codebase before proposing:
+      ```bash
+      grep -rni "<key term from the proposal>" --include=*.py . | head
+      ```
+      If it's already there → drop it.
+    - **Is it concrete, not vague hype?** A clear problem + plausible solution,
+      not a buzzword.
+    - **Would it help more than it costs?** No needless deps, scope creep, or
+      risk that outweighs the benefit.
+    Filing fewer, genuinely-useful issues is the goal. Noise wastes the whole
+    downstream pipeline (analysis → implementation) and pollutes the backlog.
+3. **Create issues** (only for proposals that survived 2a) via the `gh` CLI
+   (terminal tool). `gh` is already authorized via persistent `gh auth login`.
 
    **FIRST, ONCE, make sure all the required labels exist** —
    otherwise `gh issue create --label …` will fail on the missing label (this is exactly
