@@ -19,7 +19,25 @@ Implement selected issues, create versions, and self-update.
 
 1. **Load** the latest analysis from `~/.hermes/profiles/user1/evolution/analysis/`
 
-2. **Implement** each selected issue:
+2. **Final viability re-check (last line of defense).** analysis already triaged,
+   but you are about to write real code into the project — confirm once more,
+   per issue, BEFORE branching:
+   - **Does it already exist?** Search the codebase for the capability:
+     ```bash
+     grep -rni "<key term>" --include=*.py . | head
+     ```
+     If it already exists → SKIP, comment on the issue, and close it.
+   - **Is it still worth it?** If, now that you look at the actual code, the
+     change is out of scope, harmful, much bigger than estimated, or not really
+     needed → SKIP and close the issue with a clear reason. Do NOT force a weak
+     change just because it was selected. Shipping the wrong code is worse than
+     shipping nothing.
+   ```bash
+   gh issue close <N> --repo Lexus2016/hermes-agent-evolution \
+     --comment "Skipped at implementation: <already-exists|out-of-scope|harmful|too-large> — <reason>."
+   ```
+
+3. **Implement** each issue that passes the re-check:
 
 ### Create a branch
 ```bash

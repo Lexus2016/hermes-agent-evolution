@@ -82,7 +82,16 @@ gh label create ux           --repo "$REPO" --color fbca04 --description "Intera
 # 'bug' and 'enhancement' are standard GitHub labels, present by default.
 ```
 
-Then, for EACH selected pattern (`>= 0.7`):
+**Deduplicate first (MANDATORY — many installations file in parallel).** Other
+installs hit the same problems, so the same issue WILL be proposed elsewhere.
+Before creating, list existing issues and SKIP anything already covered (open OR
+closed/rejected) — compare by meaning, not exact string:
+```bash
+gh issue list --repo Lexus2016/hermes-agent-evolution --state all --limit 300 \
+  --json number,title,state --jq '.[] | "\(.number)\t\(.state)\t\(.title)"'
+```
+
+Then, for EACH selected pattern (`>= 0.7`) that is NOT already filed:
 
 ```bash
 gh issue create \

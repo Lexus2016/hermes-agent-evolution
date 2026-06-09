@@ -35,8 +35,14 @@ Keywords: "agent", "autonomous", "LLM tool use", "multi-agent"
 ## Research process
 
 1. **Scan sources** using `web_search`
-2. **Filter** by relevance and novelty
-3. **Classify** findings:
+2. **Filter critically — not every trend is a proposal.** A finding being new or
+   popular is NOT a reason to propose it. Keep a finding ONLY if it would
+   genuinely help THIS project's real users. Drop it if it's hype with no
+   concrete need, generic to any project (not specific to this agent), or likely
+   already covered by Hermes. Prefer a few high-conviction findings over a long
+   list. Quality over quantity — every weak finding becomes noise the whole
+   downstream pipeline (issues → analysis → implementation) must process.
+3. **Classify** the surviving findings:
    - `[FEATURE]` — new functionality
    - `[IMPROVEMENT]` — improvement of something existing
    - `[REPLACEMENT]` — alternative to something existing
