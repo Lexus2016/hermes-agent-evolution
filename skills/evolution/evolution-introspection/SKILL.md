@@ -68,12 +68,13 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
 
 ## Creating issues
 
-Use the `gh` CLI (terminal tool), exactly like `evolution-issues`. This runs in
-the PUBLIC proposer role — force the public token explicitly:
+Use the `gh` CLI (terminal tool), exactly like `evolution-issues`. `gh` is
+authorized via persistent `gh auth login` (~/.config/gh) — do NOT set GH_TOKEN
+from $GITHUB_TOKEN (Hermes strips it from the agent terminal, so it would be
+empty and break gh):
 
 ```bash
 REPO=Lexus2016/hermes-agent-evolution
-export GH_TOKEN="$GITHUB_TOKEN"
 # ensure labels exist (idempotent — a fresh fork has none of these):
 gh label create capability   --repo "$REPO" --color 5319e7 --description "Missing ability users needed"        2>/dev/null || true
 gh label create introspection --repo "$REPO" --color 0e8a16 --description "Found by session introspection"      2>/dev/null || true

@@ -108,9 +108,9 @@ git revert -m 1 <merge-commit>
 upstream changes go **through a separate branch + PR + CI** — NOT a direct merge:
 
 ```bash
-# 0. PRIVATE owner role — force the private token and route git auth through gh
-#    so neither gh nor git picks the wrong token when both are in the env:
-export GH_TOKEN="$GITHUB_PRIVATE_TOKEN"
+# 0. `gh` is authorized via persistent `gh auth login` (~/.config/gh) from
+#    setup-hermes.sh. Do NOT export GH_TOKEN (Hermes strips it from the agent
+#    terminal). Just route git auth through gh:
 gh auth setup-git
 
 # 1. Separate branch from the current main:

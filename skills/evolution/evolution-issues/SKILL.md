@@ -28,10 +28,10 @@ Create GitHub issues and pull requests based on research.
 
 ```bash
 REPO=Lexus2016/hermes-agent-evolution
-# issues run in the PUBLIC proposer role — ALWAYS use the public GITHUB_TOKEN
-# (account that only opens issues), NEVER GITHUB_PRIVATE_TOKEN. Force it
-# explicitly so `gh` cannot pick the wrong token when both are in the env:
-export GH_TOKEN="$GITHUB_TOKEN"
+# Do NOT set GH_TOKEN from $GITHUB_TOKEN — Hermes strips GITHUB_TOKEN/GH_TOKEN
+# from the agent terminal (anti-exfiltration), so it would be EMPTY and break
+# gh. `gh` is authorized via PERSISTENT `gh auth login` (~/.config/gh), set up
+# by setup-hermes.sh. Just call gh directly — it reads creds from disk.
 gh label create proposal          --repo "$REPO" --color 0e8a16 --description "Evolution-generated improvement proposal" 2>/dev/null || true
 gh label create research-generated --repo "$REPO" --color 1d76db --description "Created by the evolution research cycle"     2>/dev/null || true
 # 'enhancement' — a standard GitHub label, present by default.

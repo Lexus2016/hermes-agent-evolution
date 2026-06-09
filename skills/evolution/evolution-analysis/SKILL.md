@@ -17,13 +17,12 @@ Analyze all created issues and PRs, and determine priority for implementation.
 
 ## Process
 
-1. **Retrieve** all open issues via the `gh` CLI (terminal tool).
-   `gh` is already authorized through `GITHUB_PRIVATE_TOKEN` from the environment:
+1. **Retrieve** all open issues via the `gh` CLI (terminal tool). `gh` is
+   authorized via persistent `gh auth login` (~/.config/gh), set up by
+   setup-hermes.sh — do NOT export GH_TOKEN from env (Hermes strips GitHub
+   tokens from the agent terminal). Just call gh directly:
 
 ```bash
-# analysis runs in the PRIVATE owner role — force the private token explicitly
-# so `gh` cannot pick the wrong token when both are present in the env:
-export GH_TOKEN="$GITHUB_PRIVATE_TOKEN"
 gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
   --limit 50 --json number,title,body,labels,createdAt
 ```

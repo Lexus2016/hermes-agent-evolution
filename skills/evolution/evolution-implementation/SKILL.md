@@ -33,13 +33,12 @@ git checkout -b evolution/issue-123-feature-name
 - Add tests
 - Add documentation
 
-### Authorize git + gh (PRIVATE owner role)
+### Authorize git (gh is already logged in)
 ```bash
-# implementation runs in the PRIVATE owner role — force the private token and
-# make git use it for push, so neither gh nor git can pick the wrong token
-# when both are present in the env:
-export GH_TOKEN="$GITHUB_PRIVATE_TOKEN"
-gh auth setup-git    # routes git https push/pull auth through gh's token
+# `gh` is authorized via persistent `gh auth login` (~/.config/gh), set up by
+# setup-hermes.sh. Do NOT export GH_TOKEN from env — Hermes strips GitHub tokens
+# from the agent terminal, so it would be empty. Just route git auth through gh:
+gh auth setup-git    # makes git https push/pull use gh's stored credentials
 ```
 
 ### Commit
