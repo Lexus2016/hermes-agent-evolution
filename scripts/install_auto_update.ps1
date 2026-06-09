@@ -53,7 +53,16 @@ $log = Join-Path $logDir "auto-update.log"
 
 # Build the action. Wrap in cmd /c so we can redirect stdout/stderr to the log.
 # Inner quoting: the whole /TR value is one string; quote the exe and log paths.
-$action = "cmd /c `"`"$hermes`" update --yes >> `"$log`" 2>&1`""
+$inner = "`"$hermes`" update --yes >> `"$log`" 2>&1"
+# Also keep the optional Turbo-Quant Memory MCP current when uv is installed.
+# Absolute path; '&' runs it independently of the update result (best-effort, so
+# a memory-upgrade hiccup never blocks the self-update that already ran).
+$uvCmd = Get-Command uv -ErrorAction SilentlyContinue
+if ($uvCmd) {
+    $uv = $uvCmd.Source
+    $inner = "$inner & `"$uv`" tool upgrade turbo-memory-mcp >> `"$log`" 2>&1"
+}
+$action = "cmd /c `"$inner`""
 
 schtasks /Create /SC DAILY /ST $Time /TN $TaskName /TR $action /F | Out-Null
 if ($LASTEXITCODE -ne 0) {

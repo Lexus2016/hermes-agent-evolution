@@ -53,7 +53,16 @@ mkdir -p "$(dirname "$LOG")"
 
 # `hermes update --yes` = non-interactive (auto-answers stash/migration prompts),
 # pulls origin/main (the fork), keeps the built-in pre-update backup + rollback.
-ENTRY="$SCHEDULE $HERMES_BIN update --yes >> $LOG 2>&1  # $MARKER"
+ENTRY="$SCHEDULE $HERMES_BIN update --yes >> $LOG 2>&1"
+# Also keep the optional Turbo-Quant Memory MCP current when uv is present. Use
+# uv's ABSOLUTE path (cron's PATH usually omits ~/.local/bin) and a trailing
+# `; true` so a memory-upgrade hiccup never fails the job or the hermes update
+# that already ran. Skipped entirely if uv isn't installed.
+UV_BIN="$(command -v uv || true)"
+if [ -n "$UV_BIN" ]; then
+    ENTRY="$ENTRY; $UV_BIN tool upgrade turbo-memory-mcp >> $LOG 2>&1; true"
+fi
+ENTRY="$ENTRY  # $MARKER"
 
 # Idempotent install (if-form, no set -e/pipefail traps on empty crontab).
 KEPT="$(crontab -l 2>/dev/null | grep -v "$MARKER" || true)"

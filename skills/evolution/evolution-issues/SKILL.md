@@ -52,6 +52,13 @@ Create GitHub issues and pull requests based on research.
     Only genuinely NEW proposals proceed. Rule at scale: the FIRST install files an
     idea once; every other install must recognize it already exists and stay silent.
 
+    **Optional cross-run memory:** if the `mcp__tqmemory__*` tools are available
+    (optional Turbo-Quant Memory MCP), also
+    `mcp__tqmemory__semantic_search(query="<proposal>", scope="project")` before
+    filing — a past `decision`/`lesson` can record that an idea was already tried
+    or deliberately dropped even when no issue exists for it. Skip silently if the
+    tools are absent; never depend on them.
+
 3. **Create issues** (only for proposals that survived BOTH 2a and 2b) via the
    `gh` CLI (terminal tool). `gh` is already authorized via persistent `gh auth login`.
 
