@@ -82,6 +82,14 @@ _DEFAULT_FILE_TIMEOUT_SECONDS = 600.0  # 10 minutes
 # CI jobs by estimated total time, so no one job gets all the slow files.
 _DURATIONS_FILE = "test_durations.json"
 
+# Exit-4 ("file or directory not found") recovery. The planner enumerates each
+# file via --collect-only before slicing, so a file that reaches a worker WAS
+# collectable; an exit-4 at per-file exec time is therefore a transient stat
+# failure under load, not a genuinely-missing file. Retry a few times with a
+# short backoff to let the filesystem settle before surfacing a hard failure.
+_EXIT4_MAX_RETRIES = 3
+_EXIT4_BACKOFF_BASE = 0.5  # seconds; cumulative ~0.5+1.0+1.5 across retries
+
 
 def _count_tests(
     files: List[Path], repo_root: Path, pytest_passthrough: List[str]
@@ -335,49 +343,76 @@ def _run_one_file(
         # dead processes are a no-op.
         _kill_tree(proc, pgid=pgid)
 
-    if rc == 4 and Path(file).exists():
+    if rc == 4:
         # pytest exit 4 = "file or directory not found" at exec time, yet the
-        # file is present on disk now. On loaded shared CI runners we have seen
-        # the planner enumerate a file (its tests counted via --collect-only)
-        # but the per-file subprocess fail to stat it moments later — a
+        # planner already enumerated this file (its tests were counted via
+        # --collect-only), so it WAS present and collectable. On loaded shared CI
+        # runners the per-file subprocess can fail to stat it moments later — a
         # transient the deterministic LPT slicer otherwise reproduces on every
-        # rerun (same file set → same shard). Retry the file ONCE before
-        # surfacing it as a hard failure. We do NOT widen the exit-5 rule:
-        # exit 4 on a file that genuinely does not exist must still fail.
-        retry_proc = subprocess.Popen(
-            cmd,
-            cwd=repo_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            start_new_session=True,
-        )
-        retry_pgid: int | None = None
-        if sys.platform != "win32":
-            try:
-                retry_pgid = os.getpgid(retry_proc.pid)
-            except (ProcessLookupError, PermissionError):
-                retry_pgid = None
-        try:
-            retry_output, _ = retry_proc.communicate(timeout=file_timeout)
-            retry_rc = retry_proc.returncode
-        except subprocess.TimeoutExpired:
-            _kill_tree(retry_proc, pgid=retry_pgid)
-            try:
-                retry_output, _ = retry_proc.communicate(timeout=10)
-            except subprocess.TimeoutExpired:
-                retry_output = "(file timeout exceeded on retry; output unavailable)"
-            retry_rc = 124
-            retry_output = (
-                f"(per-file timeout on exit-4 retry: {file_timeout:.0f}s exceeded; "
-                f"process tree SIGKILL'd)\n{retry_output}"
+        # rerun (same file set → same shard, so a plain re-run never clears it).
+        # Because the planner proved the file exists, retry with backoff and do
+        # NOT gate on Path.exists(): the whole point is that stat is momentarily
+        # flaky, so an exists() check here can itself read False and wrongly skip
+        # the retry. Genuinely-missing files don't reach this branch — the
+        # planner would not have enumerated them.
+        for _attempt in range(_EXIT4_MAX_RETRIES):
+            time.sleep(_EXIT4_BACKOFF_BASE * (_attempt + 1))  # let the FS settle
+            retry_proc = subprocess.Popen(
+                cmd,
+                cwd=repo_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                start_new_session=True,
             )
-        except BaseException:
-            _kill_tree(retry_proc, pgid=retry_pgid)
-            raise
+            retry_pgid: int | None = None
+            if sys.platform != "win32":
+                try:
+                    retry_pgid = os.getpgid(retry_proc.pid)
+                except (ProcessLookupError, PermissionError):
+                    retry_pgid = None
+            try:
+                retry_output, _ = retry_proc.communicate(timeout=file_timeout)
+                retry_rc = retry_proc.returncode
+            except subprocess.TimeoutExpired:
+                _kill_tree(retry_proc, pgid=retry_pgid)
+                try:
+                    retry_output, _ = retry_proc.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    retry_output = "(file timeout exceeded on retry; output unavailable)"
+                retry_rc = 124
+                retry_output = (
+                    f"(per-file timeout on exit-4 retry: {file_timeout:.0f}s exceeded; "
+                    f"process tree SIGKILL'd)\n{retry_output}"
+                )
+            except BaseException:
+                _kill_tree(retry_proc, pgid=retry_pgid)
+                raise
+            else:
+                _kill_tree(retry_proc, pgid=retry_pgid)
+            rc, output = retry_rc, retry_output
+            if rc != 4:
+                break  # recovered, or produced a real (different) result
         else:
-            _kill_tree(retry_proc, pgid=retry_pgid)
-        rc, output = retry_rc, retry_output
+            # Still exit-4 after every retry. Capture diagnostics so the next
+            # occurrence is conclusively diagnosable instead of a bare "not
+            # found", then let it fall through as a hard failure.
+            try:
+                _p = Path(file)
+                _parent = _p.parent
+                _siblings = (
+                    sorted(x.name for x in _parent.glob("test_*.py"))[:5]
+                    if _parent.exists()
+                    else "N/A"
+                )
+                output = (output or "") + (
+                    f"\n--- exit-4 persisted after {_EXIT4_MAX_RETRIES} retries ---\n"
+                    f"path={_p} exists={_p.exists()} is_file={_p.is_file()} "
+                    f"parent_exists={_parent.exists()}\n"
+                    f"sibling test_*.py sample={_siblings}\n"
+                )
+            except Exception as _diag_exc:  # diagnostics must never mask the failure
+                output = (output or "") + f"\n--- exit-4 diagnostics failed: {_diag_exc} ---\n"
 
     if rc == 5:
         # No tests collected — every test in the file was filtered out.
