@@ -1690,10 +1690,59 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
             pass
         return result
 
+    # Check cache first for read-style tools
+    cache_hit = False
+    cached_result = None
+    
+    try:
+        from tools.tool_cache import get_global_cache
+        cache = get_global_cache()
+        
+        # Try to get from cache
+        cached_result = cache.get(function_name, function_args, effective_task_id)
+        if cached_result is not None:
+            cache_hit = True
+            # Emit post-tool hook for cache hit (with 0 duration)
+            try:
+                from model_tools import _emit_post_tool_call_hook
+                _emit_post_tool_call_hook(
+                    function_name=function_name,
+                    function_args=function_args,
+                    result=cached_result,
+                    task_id=effective_task_id or "",
+                    session_id=getattr(agent, "session_id", "") or "",
+                    tool_call_id=tool_call_id or "",
+                    turn_id=getattr(agent, "_current_turn_id", "") or "",
+                    api_request_id=getattr(agent, "_current_api_request_id", "") or "",
+                    duration_ms=0,
+                    status="cached",
+                    middleware_trace=list(_tool_middleware_trace),
+                )
+            except Exception:
+                pass
+            
+            return cached_result
+    except Exception:
+        # Cache failure should not block tool execution
+        pass
+    
     tool_start_time = time.monotonic()
 
     def _finish_agent_tool(result: Any, observed_args: Optional[dict] = None) -> Any:
         hook_args = observed_args if isinstance(observed_args, dict) else function_args
+        
+        # Cache the result if applicable
+        try:
+            from tools.tool_cache import get_global_cache
+            cache = get_global_cache()
+            
+            if not cache_hit:
+                cache.set(function_name, function_args, result, effective_task_id)
+                # Run invalidation for side effects
+                cache.invalidate(function_name, function_args, effective_task_id)
+        except Exception:
+            pass
+        
         try:
             from model_tools import _emit_post_tool_call_hook
             _emit_post_tool_call_hook(
