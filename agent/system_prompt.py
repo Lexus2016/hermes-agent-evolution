@@ -246,6 +246,14 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
             _probe_line = get_environment_probe_line()
             if _probe_line:
                 stable_parts.append(_probe_line)
+            # Extra PEP 668 install hint when the host is externally-managed
+            try:
+                from tools.python_install import get_install_hint
+                _install_hint = get_install_hint()
+                if _install_hint:
+                    stable_parts.append(_install_hint)
+            except Exception:
+                pass
         except Exception:
             # Probe failure must never block prompt build.
             pass

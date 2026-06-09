@@ -2065,6 +2065,19 @@ def terminal_tool(
                     "status": "blocked"
                 }, ensure_ascii=False)
 
+        # ── PEP 668 transparent rewrite for pip install ──
+        # When the host Python is externally-managed, naive `pip install`
+        # fails immediately. We transparently rewrite to `uv pip install`
+        # or a transient venv so the model doesn't have to remember
+        # platform-specific workarounds.
+        try:
+            from tools.python_install import rewrite_pip_command as _rewrite_pip
+            _rewritten = _rewrite_pip(command)
+            if _rewritten is not None:
+                command = _rewritten
+        except Exception:
+            pass
+
         # Prepare command for execution
         pty_disabled_reason = None
         effective_pty = pty
