@@ -34,8 +34,26 @@ Create GitHub issues and pull requests based on research.
       risk that outweighs the benefit.
     Filing fewer, genuinely-useful issues is the goal. Noise wastes the whole
     downstream pipeline (analysis → implementation) and pollutes the backlog.
-3. **Create issues** (only for proposals that survived 2a) via the `gh` CLI
-   (terminal tool). `gh` is already authorized via persistent `gh auth login`.
+2b. **Deduplicate against EXISTING issues — MANDATORY (many installations file in
+    parallel).** Hundreds or thousands of installs research the same trends, so
+    the SAME proposal WILL be filed by others. At scale this is the #1 source of
+    noise. Before creating ANY issue, fetch what already exists and SKIP anything
+    already covered — OPEN or already CLOSED/rejected:
+    ```bash
+    gh issue list --repo Lexus2016/hermes-agent-evolution --state all --limit 300 \
+      --json number,title,state,labels \
+      --jq '.[] | "\(.number)\t\(.state)\t\(.title)"'
+    ```
+    Compare each surviving proposal by MEANING (not exact string) to that list:
+    - an equivalent issue is **OPEN** → do NOT create a duplicate. Optionally signal
+      demand instead: `gh issue comment <N> --repo "$REPO" --body "+1 from evolution research"`.
+    - an equivalent issue is **CLOSED** as `wontfix`/rejected → do NOT re-file it
+      (the project already decided against it).
+    Only genuinely NEW proposals proceed. Rule at scale: the FIRST install files an
+    idea once; every other install must recognize it already exists and stay silent.
+
+3. **Create issues** (only for proposals that survived BOTH 2a and 2b) via the
+   `gh` CLI (terminal tool). `gh` is already authorized via persistent `gh auth login`.
 
    **FIRST, ONCE, make sure all the required labels exist** —
    otherwise `gh issue create --label …` will fail on the missing label (this is exactly
