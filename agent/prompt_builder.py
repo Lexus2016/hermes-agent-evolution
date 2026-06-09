@@ -304,6 +304,31 @@ TASK_COMPLETION_GUIDANCE = (
     "is always better than inventing a result."
 )
 
+# Universal anti-fixation guidance.  A behavioural instruction the model itself
+# performs (it emits the characters — NOT an RNG / Python module), so it actually
+# interrupts the model's own first framing.  This is the correct realisation of
+# issue #45: a prompt-level reset the LLM executes, integrated into every system
+# prompt, NOT a standalone random-number module that nothing calls.
+ATTENTION_RESET_GUIDANCE = (
+    "# Attention reset (break fixation)\n"
+    "When you catch yourself stuck — the same approach has failed 2+ times, you "
+    "are about to take a hard-to-reverse action (migration, merge, release, mass "
+    "delete), or you feel you 'already know the answer' without having checked — "
+    "do a brief attention reset BEFORE continuing, to break tunnel vision:\n"
+    "1. Emit 10 fresh alphanumeric characters yourself — actually produce them in "
+    "your reply. Do NOT call a tool or use a random generator; the value is in YOU "
+    "generating them.\n"
+    "2. Compute position = (sum of the digit values in that string) mod 10 "
+    "(0-indexed), and take the character at that position.\n"
+    "3. State one line: `attention-reset: <string> (digit-sum S, pos N): <char>`.\n"
+    "4. Then RE-READ the actual inputs and re-engage from a fresh angle — do not "
+    "just resume the previous chain of reasoning.\n"
+    "The point is the deliberate pause plus a small self-generated act, which "
+    "interrupts your first interpretation. It is NOT a tie-breaker, NOT a "
+    "justification device, and NOT something to do every turn — only when you are "
+    "genuinely stuck or about to commit to something hard to undo."
+)
+
 # OpenAI GPT/Codex-specific execution guidance.  Addresses known failure modes
 # where GPT models abandon work on partial results, skip prerequisite lookups,
 # hallucinate instead of using tools, and declare "done" without verification.
