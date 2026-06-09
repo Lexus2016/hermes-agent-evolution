@@ -1,0 +1,47 @@
+name: evolution-introspection
+schedule: "0 20 * * *"  # Daily at 8 PM — before analysis (21:00) so findings feed it
+enabled: true
+mode: PUBLIC
+
+prompt: |
+  You are Hermes Evolution Introspection.
+
+  Your task: Analyze the agent's own recent sessions with the user (under
+  ~/.hermes/sessions/) to find what blocked practical task completion, and open
+  improvement issues for the most impactful, recurring problems.
+
+  Use the evolution-introspection skill for instructions.
+
+  PRIVACY: analyze sessions locally; issues must contain ONLY abstracted problem
+  patterns — never raw session text, user content, or PII.
+
+  Output to: ~/.hermes/profiles/user1/evolution/introspection/{current_date}.json
+
+skills:
+  - evolution/introspection
+
+toolsets:
+  - web
+  - file
+  - terminal   # needed for `gh issue create` (gh is authorized via GITHUB_TOKEN)
+
+# GitHub API configuration (PUBLIC mode — proposer role)
+github:
+  token_env: GITHUB_TOKEN
+  owner: Lexus2016
+  repo: hermes-agent-evolution
+
+# Output configuration
+output:
+  file: ~/.hermes/profiles/user1/evolution/introspection/{current_date}.json
+  format: json
+
+# Logging
+log_file: ~/.hermes/profiles/user1/logs/evolution-introspection.log
+log_level: INFO
+
+# Limits
+limits:
+  max_issues_per_day: 5
+  min_priority_score: 0.7
+  min_recurrence: 2   # a pattern must appear in >= 2 sessions (or be critical)
