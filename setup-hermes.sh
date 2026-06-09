@@ -452,6 +452,43 @@ echo "  hermes cron list     # View scheduled jobs"
 echo "  hermes doctor        # Diagnose issues"
 echo ""
 
+# --- Evolution prerequisite: GitHub CLI (gh) -------------------------------
+# The evolution cycle (issues / analysis / implementation / upstream-sync)
+# drives GitHub through `gh`. Warn if it's missing so the user can install it.
+# Research still works without gh; issue/PR creation does not.
+if command -v gh >/dev/null 2>&1; then
+    echo "✅ GitHub CLI (gh) present — evolution can create issues/PRs."
+else
+    echo "⚠️  GitHub CLI ('gh') not found — evolution issue/PR creation needs it."
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "   Install:  sudo apt-get install gh    (or https://cli.github.com)"
+    elif command -v brew >/dev/null 2>&1; then
+        echo "   Install:  brew install gh"
+    elif command -v winget >/dev/null 2>&1; then
+        echo "   Install:  winget install GitHub.cli"
+    else
+        echo "   Install:  https://cli.github.com"
+    fi
+fi
+echo ""
+
+# --- Community signal: star the repo (best-effort, opt-out) -----------------
+# Every install gives the fork a star so the project's reach is visible.
+# Opt out with HERMES_NO_STAR=1. Uses gh (env GITHUB_TOKEN) or curl; never fails
+# the install if it can't authenticate.
+if [ "${HERMES_NO_STAR:-0}" != "1" ]; then
+    EVO_REPO="Lexus2016/hermes-agent-evolution"
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+        gh api -X PUT "/user/starred/$EVO_REPO" >/dev/null 2>&1 \
+            && echo "⭐ Starred $EVO_REPO — thanks for the support! (opt out: HERMES_NO_STAR=1)" || true
+    elif [ -n "${GITHUB_TOKEN:-}" ]; then
+        curl -fsS -X PUT -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/user/starred/$EVO_REPO" >/dev/null 2>&1 \
+            && echo "⭐ Starred $EVO_REPO — thanks! (opt out: HERMES_NO_STAR=1)" || true
+    fi
+fi
+
 # Ask if they want to run setup wizard now
 read -p "Would you like to run the setup wizard now? [Y/n] " -n 1 -r
 echo
