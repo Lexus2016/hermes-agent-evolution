@@ -532,12 +532,17 @@ if [ "${HERMES_NO_TQMEMORY:-0}" != "1" ] && command -v uv >/dev/null 2>&1; then
         uv tool install "git+https://github.com/Lexus2016/turbo_quant_memory" >/dev/null 2>&1 || true
     fi
     hash -r 2>/dev/null || true   # pick up a freshly-installed shim in ~/.local/bin
-    if command -v turbo-memory-mcp >/dev/null 2>&1; then
-        # Register with Hermes only if absent — avoids the interactive overwrite
-        # prompt (which would hang a non-interactive install).
+    TQM_PATH="$(command -v turbo-memory-mcp 2>/dev/null || true)"
+    if [ -n "$TQM_PATH" ]; then
+        # Register with Hermes only if absent (skips the interactive overwrite
+        # prompt). Register with the ABSOLUTE shim path: the gateway/cron process
+        # PATH does NOT include ~/.local/bin, so a bare 'turbo-memory-mcp' command
+        # fails at runtime ("No such file or directory") even though the server
+        # shows "enabled". 'yes |' answers the non-interactive "enable all tools"
+        # prompt so the add actually completes.
         if ! "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.main mcp list 2>/dev/null | grep -qi "tqmemory"; then
-            "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.main mcp add tqmemory \
-                --command turbo-memory-mcp --args serve >/dev/null 2>&1 || true
+            yes | "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.main mcp add tqmemory \
+                --command "$TQM_PATH" --args serve >/dev/null 2>&1 || true
         fi
         echo "🧠 Turbo-Quant Memory ready for evolution introspection (opt out: HERMES_NO_TQMEMORY=1)."
     else
