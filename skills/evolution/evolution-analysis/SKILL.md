@@ -17,10 +17,12 @@ mode: PRIVATE
 
 ## Процес
 
-1. **Отримання** всіх відкритих issues через GitHub API:
+1. **Отримання** всіх відкритих issues через `gh` CLI (terminal tool).
+   `gh` уже авторизований через `GITHUB_PRIVATE_TOKEN` з оточення:
 
 ```bash
-GET https://api.github.com/repos/Lexus2016/hermes-agent-evolution/issues?state=open
+gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
+  --limit 50 --json number,title,body,labels,createdAt
 ```
 
 2. **Оцінювання** кожного issue за критеріями:

@@ -21,6 +21,7 @@ skills:
 toolsets:
   - web
   - file
+  - terminal   # needed for `gh issue list` (gh is authorized via GITHUB_PRIVATE_TOKEN)
 
 # GitHub API configuration (PRIVATE mode)
 github:

@@ -18,6 +18,7 @@ skills:
 toolsets:
   - web
   - file
+  - terminal   # needed for `gh issue create` (gh is authorized via GITHUB_TOKEN)
 
 # GitHub API configuration (PUBLIC mode)
 github:
