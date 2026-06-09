@@ -511,6 +511,7 @@ class TestDeliverResultWrapping:
         mock_cfg.platforms = {Platform.TELEGRAM: pconfig}
 
         with patch("gateway.config.load_gateway_config", return_value=mock_cfg), \
+             patch("cron.scheduler.load_config", return_value={"cron": {"wrap_response": True}}), \
              patch("tools.send_message_tool._send_to_platform", new=AsyncMock(return_value={"success": True})) as send_mock:
             job = {
                 "id": "test-job",
@@ -538,6 +539,7 @@ class TestDeliverResultWrapping:
         mock_cfg.platforms = {Platform.TELEGRAM: pconfig}
 
         with patch("gateway.config.load_gateway_config", return_value=mock_cfg), \
+             patch("cron.scheduler.load_config", return_value={"cron": {"wrap_response": True}}), \
              patch("tools.send_message_tool._send_to_platform", new=AsyncMock(return_value={"success": True})) as send_mock:
             job = {
                 "id": "abc-123",

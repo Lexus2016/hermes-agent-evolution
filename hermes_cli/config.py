@@ -1991,9 +1991,11 @@ DEFAULT_CONFIG = {
     },
 
     "cron": {
-        # Wrap delivered cron responses with a header (task name) and footer
-        # ("The agent cannot see this message").  Set to false for clean output.
-        "wrap_response": True,
+        # Wrap delivered cron responses with a header (task name + job_id) and
+        # footer ("To stop or manage this job…").  Hermes Evolution default is
+        # False — clean output for the end user (the wrapper reads as clutter in
+        # chat).  Set true to re-enable the header/footer.
+        "wrap_response": False,
         # Maximum number of due jobs to run in parallel per tick.
         # null/0 = unbounded (limited only by thread count).
         # 1 = serial (pre-v0.9 behaviour).
