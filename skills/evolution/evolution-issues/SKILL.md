@@ -18,12 +18,20 @@ category: evolution
 
 1. **Завантаження** останнього звіту дослідження з `~/.hermes/profiles/user1/evolution/research/`
 2. **Вибір** пропозицій з Priority Score >= 0.7
-3. **Створення issues** через GitHub API:
+3. **Створення issues** через `gh` CLI (terminal tool). `gh` уже авторизований
+   через `GITHUB_TOKEN` з оточення — окремий `gh auth login` не потрібен.
+   Для КОЖНОЇ відібраної пропозиції виконай:
 
 ```bash
-# Використовуй web tool для GitHub API:
-POST https://api.github.com/repos/Lexus2016/hermes-agent-evolution/issues
+gh issue create \
+  --repo Lexus2016/hermes-agent-evolution \
+  --title "[FEATURE] <короткий заголовок>" \
+  --label "enhancement,proposal,research-generated" \
+  --body "<тіло issue за форматом нижче>"
 ```
+
+> НЕ використовуй web tool для створення issue — він не робить
+> авторизований POST. Створення issue — лише через `gh` (terminal).
 
 ### Формат issue
 
