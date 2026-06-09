@@ -20,18 +20,36 @@ category: evolution
 2. **Вибір** пропозицій з Priority Score >= 0.7
 3. **Створення issues** через `gh` CLI (terminal tool). `gh` уже авторизований
    через `GITHUB_TOKEN` з оточення — окремий `gh auth login` не потрібен.
-   Для КОЖНОЇ відібраної пропозиції виконай:
+
+   **СПОЧАТКУ ОДИН раз переконайся, що всі потрібні labels існують** —
+   інакше `gh issue create --label …` впаде на відсутньому label (саме через
+   це раніше issue не створювались, хоч джоба й завершувалась `ok`). Створення
+   label ідемпотентне: якщо він уже є, помилку просто ігноруємо (`|| true`):
+
+```bash
+REPO=Lexus2016/hermes-agent-evolution
+gh label create proposal          --repo "$REPO" --color 0e8a16 --description "Evolution-generated improvement proposal" 2>/dev/null || true
+gh label create research-generated --repo "$REPO" --color 1d76db --description "Created by the evolution research cycle"     2>/dev/null || true
+# 'enhancement' — стандартний GitHub label, є за замовчуванням.
+```
+
+   Потім для КОЖНОЇ відібраної пропозиції виконай:
 
 ```bash
 gh issue create \
-  --repo Lexus2016/hermes-agent-evolution \
+  --repo "$REPO" \
   --title "[FEATURE] <короткий заголовок>" \
   --label "enhancement,proposal,research-generated" \
   --body "<тіло issue за форматом нижче>"
 ```
 
+   Після створення **переконайся, що issue справді з'явився** (інакше не
+   рахуй його у звіт): `gh issue list --repo "$REPO" --state open --limit 5`.
+
 > НЕ використовуй web tool для створення issue — він не робить
 > авторизований POST. Створення issue — лише через `gh` (terminal).
+> Якщо `gh issue create` повертає помилку — НЕ позначай крок успішним:
+> зафіксуй помилку у звіті, щоб наступний цикл міг її врахувати.
 
 ### Формат issue
 
