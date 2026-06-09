@@ -74,10 +74,22 @@ open pull requests, push branches, and cut releases. You own the repo, so use a
    - **Issues**
    - **Pull requests**
 5. Click **Generate token** → **copy** it (starts with `github_pat_…`; shown once).
-6. Give it to your agent:
+6. Give it to your agent. The owner runs the **full** cycle, which uses **two
+   roles**, so set **both** env vars (this is the part people miss):
    ```bash
-   echo 'GITHUB_PRIVATE_TOKEN=PASTE_YOUR_TOKEN_HERE' >> ~/.hermes/.env
+   # PRIVATE role — analysis, implementation, push, PRs, releases (owner):
+   echo 'GITHUB_PRIVATE_TOKEN=PASTE_OWNER_TOKEN_HERE' >> ~/.hermes/.env
+   # PUBLIC role — research + opening issues reads GITHUB_TOKEN.
+   # Simplest: reuse the SAME owner token here too.
+   echo 'GITHUB_TOKEN=PASTE_OWNER_TOKEN_HERE' >> ~/.hermes/.env
    ```
+   > **Why both?** The agent forces the right token per role: issues/research use
+   > `GITHUB_TOKEN`, while analysis/implementation use `GITHUB_PRIVATE_TOKEN`. If
+   > only one is set, half the cycle silently does nothing. Reusing the same owner
+   > token in both is fine. For a clean *"proposals come from a separate account"*
+   > split, put a **second** account's classic `public_repo` token in
+   > `GITHUB_TOKEN` instead (see the *Regular user* section above) — but never swap
+   > the two: `GITHUB_TOKEN` must be the proposer, `GITHUB_PRIVATE_TOKEN` the owner.
 
 > Keep tokens private — treat them like passwords. Never share them or paste them
 > into a chat. If one leaks, delete it on GitHub and create a new one.
