@@ -102,19 +102,31 @@ git checkout -b sync/upstream-YYYY-MM-DD
 git revert -m 1 <merge-commit>
 ```
 
-## Стратегія merge
+## Стратегія merge — ЛИШЕ через PR (safety-гейт)
 
-### Для compatible змін:
+⛔ НЕ мерджити upstream напряму в `main`. Як і `evolution-implementation`,
+upstream-зміни йдуть **через окрему гілку + PR + CI** — НЕ прямий merge:
+
 ```bash
-git cherry-pick <commit-hash>
+# 1. Окрема гілка від актуального main:
+git checkout main && git pull && git checkout -b sync/upstream-YYYY-MM-DD
+
+# 2. Перенести лише ПОТРІБНІ коміти:
+git cherry-pick <commit-hash>          # для сумісних змін
+# або для конфліктних:
+git merge upstream/main --no-commit    # вирішити конфлікти, потім: git commit
+
+# 3. Створити PR (НЕ зливати в main вручну):
+git push origin sync/upstream-YYYY-MM-DD
+gh pr create --base main --head sync/upstream-YYYY-MM-DD \
+  --title "[UPSTREAM] Sync: <summary>" \
+  --body "Cherry-picked relevant upstream changes. See upstream sync report."
 ```
 
-### для conflicted змін:
-```bash
-git merge upstream/main --no-commit
-# Resolve conflicts manually
-git commit
-```
+Злиття в `main` — лише після зелених CI (`tests.yml`/`lint.yml`) і за branch
+protection. Зміни в критичних шляхах (`.github/CODEOWNERS`) потребують рев'ю
+власника. Це той самий гейт, що захищає всю самоеволюцію — upstream-код теж
+недовірений, доки не пройшов CI + рев'ю.
 
 ## Вихідний формат
 
