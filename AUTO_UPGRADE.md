@@ -170,9 +170,10 @@ and overwrites any existing task on re-run. (Manual equivalent, if you prefer:
 
 ## ⏰ Evolution cron jobs
 
-Evolution's scheduled tasks (research/issues/analysis/implementation/upstream-sync)
-live as YAML in `cron/evolution/*.yaml`, but Hermes schedules from its native
-registry `~/.hermes/cron/jobs.json`. Register them (idempotent):
+Evolution's scheduled tasks (research / introspection / issues / analysis /
+implementation / upstream-sync) live as YAML in `cron/evolution/*.yaml`, but
+Hermes schedules from its native registry `~/.hermes/cron/jobs.json`. Register
+them (idempotent):
 
 ```bash
 "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/scripts/register_evolution_cron.py"

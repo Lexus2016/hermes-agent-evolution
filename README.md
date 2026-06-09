@@ -99,6 +99,8 @@ open pull requests, push branches, and cut releases. You own the repo, so use a
 ## 🧬 What you get
 
 - **Daily research** — scans other AI agents, papers, and trends for ideas.
+- **Introspection** — reviews its own past sessions with you to find what
+  blocked real tasks, and proposes fixes for *those* (not just shiny features).
 - **Proposals** — opens GitHub issues with concrete improvement suggestions.
 - **Self-update** — pulls the latest improvements automatically every day.
 - **Stays current** — periodically brings in useful changes from the original
