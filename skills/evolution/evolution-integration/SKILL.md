@@ -92,9 +92,15 @@ gh pr list --repo "$REPO" --state open --limit 50 \
        call `format_report(...)` from the CLI session-summary path
        (run_agent.py end-of-session) so it actually runs. Re-open a PR once it's
        invoked."* Be concrete: the integration point + the definition of done.
-    3. Label the issue `needs-work` (`gh label create needs-work --color d93f0b
-       --description "Blocked by code-review; needs rework" 2>/dev/null || true`;
-       then `gh issue edit <issue> --add-label needs-work`).
+    3. Flip the issue from `accepted` to the transient `needs-work` status — the
+       PR is dead, so it is no longer "sent to a PR"; it is back in the queue for
+       rework:
+       ```bash
+       gh label create needs-work --color d93f0b \
+         --description "Blocked by code-review; needs rework" 2>/dev/null || true
+       gh issue edit <issue> --repo "$REPO" \
+         --add-label needs-work --remove-label accepted 2>/dev/null || true
+       ```
     Keep the ISSUE OPEN. The next implementation run will see `needs-work`, read
     the brief, and either fix it properly OR consciously decide to drop it — that
     decision belongs to implementation, not to a silent skip here.

@@ -47,8 +47,8 @@ Create GitHub issues and pull requests based on research.
     Compare each surviving proposal by MEANING (not exact string) to that list:
     - an equivalent issue is **OPEN** → do NOT create a duplicate. Optionally signal
       demand instead: `gh issue comment <N> --repo "$REPO" --body "+1 from evolution research"`.
-    - an equivalent issue is **CLOSED** as `wontfix`/rejected → do NOT re-file it
-      (the project already decided against it).
+    - an equivalent issue is **CLOSED** with the `rejected` label (or legacy
+      `wontfix`) → do NOT re-file it (the project already decided against it).
     Only genuinely NEW proposals proceed. Rule at scale: the FIRST install files an
     idea once; every other install must recognize it already exists and stay silent.
 

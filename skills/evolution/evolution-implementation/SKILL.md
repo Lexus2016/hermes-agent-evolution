@@ -29,10 +29,20 @@ Implement selected issues, create versions, and self-update.
       was usually the failure), then proceed to implement + open a fresh PR.
     - **DROP** — if, looking closer, it's genuinely too complex for its value,
       out of scope, or would harm the project: close the issue with an HONEST
-      reason. This is a legitimate decision, not a failure — *"reconsidered: not
-      worth the complexity because X"* is a fine outcome.
+      reason and flip it to the terminal `rejected` status. This is a legitimate
+      decision, not a failure — *"reconsidered: not worth the complexity because
+      X"* is a fine outcome.
+      ```bash
+      gh label create rejected --color b60205 \
+        --description "Not accepted by evolution — see closing comment" 2>/dev/null || true
+      gh issue edit <N> --repo Lexus2016/hermes-agent-evolution \
+        --add-label rejected --remove-label needs-work 2>/dev/null || true
+      gh issue close <N> --repo Lexus2016/hermes-agent-evolution \
+        --comment "Dropped after rework review: <honest reason>."
+      ```
     Do NOT silently skip a `needs-work` issue and leave it hanging — either
-    rework it or close it with a reason. The choice is yours; own it.
+    rework it or close it with a reason + the `rejected` label. The choice is
+    yours; own it.
 
 2. **Final viability re-check (last line of defense).** analysis already triaged,
    but you are about to write real code into the project — confirm once more,
@@ -48,6 +58,9 @@ Implement selected issues, create versions, and self-update.
      change just because it was selected. Shipping the wrong code is worse than
      shipping nothing.
    ```bash
+   gh label create rejected --color b60205 \
+     --description "Not accepted by evolution — see closing comment" 2>/dev/null || true
+   gh issue edit <N> --repo Lexus2016/hermes-agent-evolution --add-label rejected 2>/dev/null || true
    gh issue close <N> --repo Lexus2016/hermes-agent-evolution \
      --comment "Skipped at implementation: <already-exists|out-of-scope|harmful|too-large> — <reason>."
    ```
@@ -78,9 +91,16 @@ python -m pytest tests/ -x -q
 ```
 - If anything is red → FIX it and re-run. Iterate until lint + tests are green.
 - If after a few honest attempts you cannot get it green (the change is harder
-  or more fragile than estimated) → do NOT open a red PR. SKIP and close the
-  issue with a clear reason (`gh issue close <N> --comment "..."`). A red PR is
-  worse than no PR: it wastes the integration step and never merges.
+  or more fragile than estimated) → do NOT open a red PR. SKIP, label it
+  `rejected`, and close the issue with a clear reason. A red PR is worse than no
+  PR: it wastes the integration step and never merges.
+  ```bash
+  gh label create rejected --color b60205 \
+    --description "Not accepted by evolution — see closing comment" 2>/dev/null || true
+  gh issue edit <N> --repo Lexus2016/hermes-agent-evolution --add-label rejected 2>/dev/null || true
+  gh issue close <N> --repo Lexus2016/hermes-agent-evolution \
+    --comment "Skipped at implementation: could not get CI green — <what failed>."
+  ```
 - Only when local checks are green do you continue to commit + push + PR.
 
 ### Authorize git (gh is already logged in)
@@ -114,6 +134,16 @@ git push origin evolution/issue-123-feature-name
 gh pr create --base main --head evolution/issue-123-feature-name \
   --title "feat: <feature name> (Closes #123)" \
   --body "Automated evolution PR for issue #123."
+```
+
+Once the PR is open, flip the issue to the terminal `accepted` status so the
+owner sees — straight from the issue list — that this idea actually went to a
+PR. If it was a `needs-work` rework, drop that transient label now:
+```bash
+gh label create accepted --color 0e8a16 \
+  --description "Accepted by evolution — sent to a PR" 2>/dev/null || true
+gh issue edit <issue#> --repo Lexus2016/hermes-agent-evolution \
+  --add-label accepted --remove-label needs-work 2>/dev/null || true
 ```
 
 Merging happens ONLY after green CI tests

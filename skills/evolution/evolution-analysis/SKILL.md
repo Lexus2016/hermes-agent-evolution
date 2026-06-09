@@ -34,7 +34,8 @@ gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
    away a wanted idea. Instead SELECT it for implementation (give it priority, it
    has momentum) so implementation can read the brief and finish it properly (or
    consciously drop it). Only skip a `needs-work` issue if it is now genuinely
-   harmful or obsolete — and then close it with a reason, don't just ignore it.
+   harmful or obsolete — and then close it with a reason AND the `rejected` label
+   (see step 3), don't just ignore it.
 
 3. **Viability triage — REJECT before you rank.** Implementing the wrong thing
    costs far more than skipping it. For EACH remaining open issue (NOT already
@@ -52,12 +53,16 @@ gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
      outweighing its value.
    - **Duplicate** — another open issue already covers it.
 
-   CLOSE every rejected issue with a clear reason + label, so the backlog stays
-   honest and the same idea isn't re-proposed next cycle:
+   CLOSE every rejected issue with a clear reason + the canonical `rejected`
+   status label, so the backlog shows at a glance what was turned down (the
+   *why* is in the closing comment) and the same idea isn't re-proposed:
    ```bash
+   # Ensure the status label exists (idempotent), then close + label:
+   gh label create rejected --color b60205 \
+     --description "Not accepted by evolution — see closing comment" 2>/dev/null || true
    gh issue close <N> --repo Lexus2016/hermes-agent-evolution \
      --comment "Rejected by evolution-analysis: <already-exists|out-of-scope|harmful|duplicate> — <one-line reason>."
-   gh issue edit <N> --repo Lexus2016/hermes-agent-evolution --add-label wontfix 2>/dev/null || true
+   gh issue edit <N> --repo Lexus2016/hermes-agent-evolution --add-label rejected 2>/dev/null || true
    ```
    Only issues that SURVIVE triage proceed to scoring. Be conservative.
 
@@ -93,6 +98,24 @@ final_priority = base_priority + community*0.1 + age*0.05 + compatibility*0.2 + 
    step 2):
    - Min priority: 0.7
    - Max total effort: 2.0
+
+## Status labels — accept/reject visible in the issue list
+
+The evolution pipeline tags every issue with ONE canonical status label so the
+owner can see, straight from the GitHub issue list, what happened to each idea
+(the *reason* is always in a closing comment — click in to read it):
+
+| Label | Color | Meaning | Set by |
+|-------|-------|---------|--------|
+| `accepted` | green `0e8a16` | Sent to a PR / implemented | evolution-implementation (when the PR is opened) |
+| `rejected` | red `b60205` | Turned down — see closing comment | analysis triage, or implementation final re-check / conscious drop |
+| `needs-work` | orange `d93f0b` | A PR was bounced back; rework in progress | evolution-integration (code-review gate) |
+
+`accepted` and `rejected` are terminal. `needs-work` is transient: it becomes
+`accepted` once a reworked PR is opened, or `rejected` if implementation drops
+it. **This skill only ever sets `rejected`** (on triage rejects). Do NOT mark an
+issue `accepted` here — selection is a recommendation; `accepted` means the code
+actually went to a PR, which only implementation can confirm.
 
 ## Output format
 
