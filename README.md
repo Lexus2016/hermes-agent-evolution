@@ -85,25 +85,25 @@ export GITHUB_TOKEN=*** For PUBLIC mode (all users)
 export GITHUB_PRIVATE_TOKEN=*** # Only for repository owner
 ```
 
-### Option 2: Migrate from Hermes Agent
+### Option 2: Upgrade an EXISTING Hermes Agent → Evolution (one command)
 
-Already using Hermes Agent? **Migrate without data loss:**
+Already running the original Hermes Agent? **One command** switches it onto this
+self-evolving fork and keeps it auto-updating — data preserved, idempotent
+(safe to re-run):
 
 ```bash
-# Backup your installation
-cp -r ~/.hermes ~/.hermes.backup.$(date +%Y%m%d)
-
-# Clone Hermes Evolution
-git clone https://github.com/Lexus2016/hermes-agent-evolution.git
-cd hermes-agent-evolution
-
-# Run migration script
-./scripts/migrate-from-hermes.sh ~/.hermes.backup.*
-
-# Continue using your data, skills, and configuration
+curl -fsSL https://raw.githubusercontent.com/Lexus2016/hermes-agent-evolution/main/upgrade.sh | bash
 ```
 
-**See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for detailed migration instructions.**
+What it does automatically: backs up your data dir, points the install's git
+`origin` at this fork (keeps `upstream` = original), runs the official
+`hermes update`, refreshes evolution skills + registers cron jobs, schedules the
+daily self-update, fixes the command symlink, and verifies. Re-running is
+harmless — no duplicate backups, no needless gateway restart.
+
+Opt out of the daily auto-update: `bash upgrade.sh --no-auto-update` (from a clone).
+
+**See [AUTO_UPGRADE.md](AUTO_UPGRADE.md)** for details, manual steps, and Windows.
 
 ---
 

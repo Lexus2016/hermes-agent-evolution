@@ -45,7 +45,28 @@ So the whole job is: **point `origin` at the fork, then run `hermes update`.**
 
 ---
 
-## 🅰️ Switch an EXISTING Hermes install onto the fork
+## ⭐ Recommended: one command
+
+On a machine that already has Hermes Agent installed:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lexus2016/hermes-agent-evolution/main/upgrade.sh | bash
+```
+(or, after `git clone`, just `bash upgrade.sh`)
+
+`upgrade.sh` does everything below automatically and **idempotently** (safe to
+re-run): detects the install dir, backs up data, points `origin` at the fork,
+runs `hermes update`, **refreshes evolution skills** (incl. healing legacy
+`local`/flat-`.md` copies and the manifest re-seed quirk), registers cron jobs,
+schedules the daily self-update, fixes the `~/.local/bin/hermes` symlink,
+restarts the gateway, and verifies. Opt out of scheduling with
+`bash upgrade.sh --no-auto-update`.
+
+The manual steps below are the same thing broken out, if you prefer control.
+
+---
+
+## 🅰️ Switch an EXISTING Hermes install onto the fork (manual)
 
 If the original Hermes Agent is already installed:
 
@@ -80,6 +101,20 @@ hermes cron list | grep -i evolution
 > the fork (a *replacement*, not a merge). Your data in `~/.hermes` is never
 > touched. To avoid shipping a stale base, keep the fork synced with upstream
 > (see "Keeping the fork current").
+>
+> **Legacy installs (heal stale skills):** if you previously experimented with
+> old evolution scripts, some evolution skills may appear as `local` (stale,
+> not refreshed by `skills_sync`) instead of `builtin`, or leave untracked flat
+> `*.md` files under `skills/evolution/` (causing an autostash on every update).
+> The one-command `upgrade.sh` heals this automatically. To do it manually:
+> ```bash
+> H="${HERMES_HOME:-$HOME/.hermes}"
+> rm -f "$INSTALL_DIR"/skills/evolution/*.md                      # legacy flat files
+> [ -f "$H/skills/.bundled_manifest" ] && grep -v '^evolution-' "$H/skills/.bundled_manifest" > "$H/skills/.bundled_manifest.tmp" && mv "$H/skills/.bundled_manifest.tmp" "$H/skills/.bundled_manifest"
+> rm -rf "$H/skills/evolution"
+> "$INSTALL_DIR/venv/bin/python" -c "import sys;sys.path.insert(0,'$INSTALL_DIR');from tools.skills_sync import sync_skills;sync_skills()"
+> hermes skills list | grep -i evolution   # all 5 should now be 'builtin'
+> ```
 
 ---
 
