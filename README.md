@@ -9,10 +9,12 @@
 
 ---
 
-## ⭐ Already running Hermes? Upgrade in one command
+## ⭐ Install or upgrade — one command
 
-If you installed Hermes Agent and went through its setup wizard, switch to
-Hermes Evolution by pasting **one line** into your terminal:
+Whether you're **starting from scratch** or **already running Hermes**, paste
+**one line** into your terminal. If Hermes isn't installed yet, it installs our
+version fresh; if it is, it switches your existing Hermes onto Evolution
+(your chats, memory, and settings are kept):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Lexus2016/hermes-agent-evolution/main/upgrade.sh | bash
@@ -78,14 +80,12 @@ Everything you already love about Hermes Agent still works exactly the same.
 
 ---
 
-## 🆕 Don't have Hermes yet?
+## 🆕 Starting from scratch?
 
-Install the original Hermes Agent first, then run the one-command upgrade above:
-
-```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
-# then the upgrade line from the top of this README
-```
+No need to install the original Hermes first — the one command above installs
+**our fork directly** (you do NOT end up on the original and then migrate).
+It pulls Hermes Evolution, sets it up, and turns on the evolution features in
+one go.
 
 Windows works natively too — see **[AUTO_UPGRADE.md](AUTO_UPGRADE.md)**.
 

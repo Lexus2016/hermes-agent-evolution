@@ -31,11 +31,19 @@ done
 echo "🧬 Hermes Evolution — upgrade existing Hermes onto the fork"
 echo "=========================================================="
 
-# 1. Locate the existing install from the hermes binary --------------------
+# 1. Locate the existing install — or do a FRESH install of the fork ---------
+# No Hermes yet? Don't make the user install the original first — install OUR
+# fork directly (install.sh defaults to this repo), then finish evolution setup.
 if ! command -v hermes >/dev/null 2>&1; then
-    echo "❌ 'hermes' not found on PATH. Install Hermes Agent first:"
-    echo "   curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
-    exit 1
+    echo "ℹ️  No Hermes found — installing Hermes Evolution fresh (from this fork)..."
+    curl -fsSL https://raw.githubusercontent.com/Lexus2016/hermes-agent-evolution/main/scripts/install.sh | bash
+    hash -r 2>/dev/null || true
+    if ! command -v hermes >/dev/null 2>&1; then
+        echo "❌ Fresh install finished but 'hermes' isn't on PATH yet."
+        echo "   Open a NEW terminal (so PATH refreshes) and re-run this command."
+        exit 1
+    fi
+    echo "✅ Fresh install complete — continuing with evolution setup."
 fi
 HERMES_BIN="$(readlink -f "$(command -v hermes)" 2>/dev/null || command -v hermes)"
 INSTALL_DIR="$(dirname "$(dirname "$(dirname "$HERMES_BIN")")")"
