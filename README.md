@@ -34,37 +34,53 @@ memory, and settings stay exactly as they were.
 
 ---
 
-## 🔑 One thing to set up: a GitHub token
+## 🔑 Set up a GitHub token
 
-For the agent to research and open improvement **issues** on GitHub, it needs a
-GitHub token. Here's how to get one (takes ~2 minutes, no coding):
+The agent needs a GitHub token to work with GitHub. There are **two cases** —
+pick the one that's you. (~2 minutes, no coding.)
 
-1. Open **[github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new)**
-   (log in if asked). This is the **Fine-grained token** page.
-2. **Token name:** type `hermes-evolution`.
-3. **Expiration:** pick 90 days (or longer).
-4. **Repository access:** choose **“Only select repositories”** → pick
-   **`hermes-agent-evolution`**.
-5. **Permissions → Repository permissions**, set these three to **Read and write**:
-   - **Contents**
-   - **Issues**
-   - **Pull requests**
-6. Click **Generate token** at the bottom, then **copy** the token
-   (it starts with `github_pat_…`). Copy it now — GitHub shows it only once.
-7. Give it to your agent — paste this one line (replace the placeholder):
+### 👤 Regular user — let the agent open improvement *issues*
 
+The agent opens issues on the **shared Hermes Evolution repo**. That repo isn't
+yours, so a fine-grained token can't target it — use a **classic** token with
+the `public_repo` scope:
+
+1. Open **[github.com/settings/tokens/new](https://github.com/settings/tokens/new)**
+   — this is *Personal access token (classic)*.
+2. **Note:** `hermes-evolution`. **Expiration:** 90 days (or longer).
+3. Tick **`public_repo`** (under **repo** → “Access public repositories”). That's
+   the only box you need — it lets the agent open issues/PRs on public repos.
+4. Click **Generate token** → **copy** it (starts with `ghp_…`; shown once).
+5. Give it to your agent:
    ```bash
    echo 'GITHUB_TOKEN=PASTE_YOUR_TOKEN_HERE' >> ~/.hermes/.env
    ```
 
-Done. From now on your Hermes can research and open improvement issues on GitHub.
+Done — your Hermes can now research and open improvement issues.
 
-*That's all most people need. If you own the fork and want the agent to also
-implement changes and update the project itself, that uses a separate owner
-token — see [EVOLUTION_README.md](EVOLUTION_README.md).*
+### 🛠️ Repo owner — full self-evolution (issues, PRs, commits, pushes, releases)
 
-> Keep the token private — treat it like a password. Never share it or paste it
-> into a chat. If it ever leaks, delete it on GitHub and make a new one.
+If you **own** `hermes-agent-evolution`, the agent can also implement changes,
+open pull requests, push branches, and cut releases. You own the repo, so use a
+**fine-grained** token scoped to it:
+
+1. Open **[github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new)**
+   — this is the *Fine-grained token* page.
+2. **Token name:** `hermes-evolution-owner`. **Expiration:** 90 days (or longer).
+3. **Repository access:** *Only select repositories* → pick
+   **`hermes-agent-evolution`** (you can select it because it's yours).
+4. **Permissions → Repository permissions** — set to **Read and write**:
+   - **Contents** — commits, pushes, tags **and releases**
+   - **Issues**
+   - **Pull requests**
+5. Click **Generate token** → **copy** it (starts with `github_pat_…`; shown once).
+6. Give it to your agent:
+   ```bash
+   echo 'GITHUB_PRIVATE_TOKEN=PASTE_YOUR_TOKEN_HERE' >> ~/.hermes/.env
+   ```
+
+> Keep tokens private — treat them like passwords. Never share them or paste them
+> into a chat. If one leaks, delete it on GitHub and create a new one.
 
 ---
 
@@ -87,7 +103,8 @@ No need to install the original Hermes first — the one command above installs
 It pulls Hermes Evolution, sets it up, and turns on the evolution features in
 one go.
 
-Windows works natively too — see **[AUTO_UPGRADE.md](AUTO_UPGRADE.md)**.
+Windows works natively too — a PowerShell installer (`scripts/install.ps1`) is
+included; see **[AUTO_UPGRADE.md](AUTO_UPGRADE.md)**.
 
 ---
 
