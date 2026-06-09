@@ -21,6 +21,9 @@ Analyze all created issues and PRs, and determine priority for implementation.
    `gh` is already authorized through `GITHUB_PRIVATE_TOKEN` from the environment:
 
 ```bash
+# analysis runs in the PRIVATE owner role — force the private token explicitly
+# so `gh` cannot pick the wrong token when both are present in the env:
+export GH_TOKEN="$GITHUB_PRIVATE_TOKEN"
 gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
   --limit 50 --json number,title,body,labels,createdAt
 ```

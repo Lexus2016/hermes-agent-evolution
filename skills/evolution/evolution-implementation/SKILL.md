@@ -33,6 +33,15 @@ git checkout -b evolution/issue-123-feature-name
 - Add tests
 - Add documentation
 
+### Authorize git + gh (PRIVATE owner role)
+```bash
+# implementation runs in the PRIVATE owner role — force the private token and
+# make git use it for push, so neither gh nor git can pick the wrong token
+# when both are present in the env:
+export GH_TOKEN="$GITHUB_PRIVATE_TOKEN"
+gh auth setup-git    # routes git https push/pull auth through gh's token
+```
+
 ### Commit
 ```bash
 git add .
