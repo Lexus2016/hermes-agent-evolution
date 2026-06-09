@@ -9,48 +9,48 @@ mode: PRIVATE
 
 # Evolution Upstream Sync Skill
 
-**Режим роботи:** PRIVATE (тільки для власника репозиторію)
+**Operating mode:** PRIVATE (repository owner only)
 
-## Завдання
+## Task
 
-Синхронізуватися з оригінальним Hermes Agent (upstream) та визначити які зміни треба інтегрувати.
+Synchronize with the original Hermes Agent (upstream) and determine which changes should be integrated.
 
-## Процес
+## Process
 
-1. **Отримати зміни з upstream:**
+1. **Fetch changes from upstream:**
 
 ```bash
 git fetch upstream
 git log main..upstream/main --oneline
 ```
 
-2. **Аналізувати зміни:**
+2. **Analyze the changes:**
 
-Категорії змін:
-- **Bug fixes** — критичні виправлення, треба інтегрувати
-- **Security fixes** — виправлення безпеки, обов'язково
-- **Performance improvements** — покращення продуктивності
-- **New features** — нові функції оригінального Hermes
-- **Refactoring** — рефакторинг, може конфліктувати з нашими змінами
-- **Documentation** — оновлення документації
-- **Tests** — оновлення тестів
+Change categories:
+- **Bug fixes** — critical fixes, should be integrated
+- **Security fixes** — security fixes, mandatory
+- **Performance improvements** — performance improvements
+- **New features** — new features of the original Hermes
+- **Refactoring** — refactoring, may conflict with our changes
+- **Documentation** — documentation updates
+- **Tests** — test updates
 
-3. **Оцінити кожну зміну:**
+3. **Evaluate each change:**
 
-### Вплив на еволюційні зміни
-- **Conflicts** — конфліктує з нашими модифікаціями → треба manual merge
-- **Compatible** — сумісно → можна автоматично мерджити
-- **Enhances** — покращує наші зміни → пріоритет
+### Impact on evolution changes
+- **Conflicts** — conflicts with our modifications → needs manual merge
+- **Compatible** — compatible → can be merged automatically
+- **Enhances** — improves our changes → priority
 
-### Пріоритет інтеграції
+### Integration priority
 1. **Critical**: Security, bug fixes (must have)
 2. **High**: Performance, critical features (should have)
 3. **Medium**: New features (nice to have)
 4. **Low**: Documentation, tests (optional)
 
-4. **Створити пропозиції:**
+4. **Create proposals:**
 
-Для кожної релевантної зміни створити issue:
+For each relevant change, create an issue:
 
 ```markdown
 # [UPSTREAM] Integrate upstream fix: description
@@ -80,57 +80,57 @@ What changed in upstream...
 4. Update docs
 ```
 
-## Частота синхронізації
+## Sync frequency
 
-Рекомендується:
-- **Weekly** — повний синк та аналіз
-- **After critical updates** — якщо в upstream critical fixes
+Recommended:
+- **Weekly** — full sync and analysis
+- **After critical updates** — if there are critical fixes in upstream
 
-## Безпека
+## Security
 
-1. **Завжди роби в окремій гілці:**
+1. **Always work in a separate branch:**
 ```bash
 git checkout -b sync/upstream-YYYY-MM-DD
 ```
 
-2. **Тестуй після merge:**
-- Переконайся що evolution features працюють
-- Запусти тести
+2. **Test after merge:**
+- Make sure evolution features work
+- Run the tests
 
-3. **Rollback якщо щось зламалося:**
+3. **Rollback if something broke:**
 ```bash
 git revert -m 1 <merge-commit>
 ```
 
-## Стратегія merge — ЛИШЕ через PR (safety-гейт)
+## Merge strategy — ONLY via PR (safety gate)
 
-⛔ НЕ мерджити upstream напряму в `main`. Як і `evolution-implementation`,
-upstream-зміни йдуть **через окрему гілку + PR + CI** — НЕ прямий merge:
+⛔ Do NOT merge upstream directly into `main`. Like `evolution-implementation`,
+upstream changes go **through a separate branch + PR + CI** — NOT a direct merge:
 
 ```bash
-# 1. Окрема гілка від актуального main:
+# 1. Separate branch from the current main:
 git checkout main && git pull && git checkout -b sync/upstream-YYYY-MM-DD
 
-# 2. Перенести лише ПОТРІБНІ коміти:
-git cherry-pick <commit-hash>          # для сумісних змін
-# або для конфліктних:
-git merge upstream/main --no-commit    # вирішити конфлікти, потім: git commit
+# 2. Bring over only the NEEDED commits:
+git cherry-pick <commit-hash>          # for compatible changes
+# or for conflicting ones:
+git merge upstream/main --no-commit    # resolve conflicts, then: git commit
 
-# 3. Створити PR (НЕ зливати в main вручну):
+# 3. Create a PR (do NOT merge into main manually):
 git push origin sync/upstream-YYYY-MM-DD
 gh pr create --base main --head sync/upstream-YYYY-MM-DD \
   --title "[UPSTREAM] Sync: <summary>" \
   --body "Cherry-picked relevant upstream changes. See upstream sync report."
 ```
 
-Злиття в `main` — лише після зелених CI (`tests.yml`/`lint.yml`) і за branch
-protection. Зміни в критичних шляхах (`.github/CODEOWNERS`) потребують рев'ю
-власника. Це той самий гейт, що захищає всю самоеволюцію — upstream-код теж
-недовірений, доки не пройшов CI + рев'ю.
+Merging into `main` happens only after green CI (`tests.yml`/`lint.yml`) and with branch
+protection. Changes in critical paths (`.github/CODEOWNERS`) require owner
+review. This is the same gate that protects the entire self-evolution — upstream code is also
+untrusted until it has passed CI + review.
 
-## Вихідний формат
+## Output format
 
-Збережи звіт в `~/.hermes/profiles/user1/evolution/upstream/YYYY-MM-DD.md`:
+Save the report to `~/.hermes/profiles/user1/evolution/upstream/YYYY-MM-DD.md`:
 
 ```markdown
 # Upstream Sync Report - YYYY-MM-DD
@@ -159,8 +159,8 @@ protection. Зміни в критичних шляхах (`.github/CODEOWNERS`)
 ...
 ```
 
-## Ліміти
+## Limits
 
-- Не більше 10 upstream commits за один раз
-- Critical changes — пріоритет
-- Breaking changes — завжди manual review
+- No more than 10 upstream commits at a time
+- Critical changes — priority
+- Breaking changes — always manual review
