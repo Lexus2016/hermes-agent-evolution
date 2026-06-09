@@ -528,6 +528,7 @@ if [ "${HERMES_NO_TQMEMORY:-0}" != "1" ] && command -v uv >/dev/null 2>&1; then
     if command -v turbo-memory-mcp >/dev/null 2>&1; then
         uv tool upgrade turbo-memory-mcp >/dev/null 2>&1 || true
     else
+        echo "🧠 Installing Turbo-Quant Memory MCP (one-time, may take a minute)…"
         uv tool install "git+https://github.com/Lexus2016/turbo_quant_memory" >/dev/null 2>&1 || true
     fi
     hash -r 2>/dev/null || true   # pick up a freshly-installed shim in ~/.local/bin
