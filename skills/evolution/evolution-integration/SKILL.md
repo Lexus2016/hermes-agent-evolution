@@ -102,6 +102,23 @@ gh pr list --repo "$REPO" --state open --limit 50 \
     Only PRs that pass BOTH the deterministic dead-code check and the judgement
     check proceed to merge.
 
+2c. **Self-audit your verdict before you act (do NOT rubber-stamp).** A glance at
+    a green CI is not a review. Before you merge / send-back / drop, audit your
+    OWN review with this loop:
+    0. Pause and re-focus. If you feel you are rushing or "already know" the
+       verdict, do an attention-reset first (emit 10 chars, derive the position,
+       re-read the diff fresh).
+    1. Re-check every gate step by step, honestly: Did you ACTUALLY run the
+       dead-code grep against the real diff (not assume)? Is the call site real
+       and reachable (not a test, not the module itself)? Does the change truly
+       deliver the issue's goal, or just look like it? Then rate your review 1–10.
+    2. If the score is < 10, you missed something — find it, correct your verdict,
+       and start this self-audit again from step 0.
+    3. Repeat until you complete the checks with ZERO corrections and are
+       genuinely confident. Only then act.
+    Treat it as if it were your own project shipping to `main`: a wrong merge or a
+    wrongly-dropped good idea both cost more than a careful second look.
+
 3. **Daily limit — MAX 3 merges per run.** Quality over throughput. Merging a
    flood of agent code unreviewed is exactly the risk we are guarding against.
 
