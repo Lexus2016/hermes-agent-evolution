@@ -11154,6 +11154,16 @@ def main():
         "--limit", type=int, default=500, help="Max sessions to load (default: 500)"
     )
 
+    sessions_entropy = sessions_subparsers.add_parser(
+        "entropy",
+        help="Compute entropy-based behavioral evaluation for a session",
+    )
+    sessions_entropy.add_argument(
+        "session_id",
+        nargs="?",
+        help="Session ID to analyze (default: most recent session)",
+    )
+
     def _confirm_prompt(prompt: str) -> bool:
         """Prompt for y/N confirmation, safe against non-TTY environments."""
         try:
@@ -11348,6 +11358,30 @@ def main():
             if db_path.exists():
                 size_mb = os.path.getsize(db_path) / (1024 * 1024)
                 print(f"Database size: {size_mb:.1f} MB")
+
+        elif action == "entropy":
+            sid = args.session_id
+            if not sid:
+                sessions = db.list_sessions_rich(limit=1)
+                if not sessions:
+                    print("No sessions found.")
+                    db.close()
+                    return
+                sid = sessions[0]["id"]
+            resolved = db.resolve_session_id(sid)
+            if not resolved:
+                print(f"Session '{sid}' not found.")
+                db.close()
+                return
+            data = db.export_session(resolved)
+            if not data:
+                print(f"Session '{resolved}' not found.")
+                db.close()
+                return
+            from agent.entropy_eval import EntropyEngine, format_report_terminal
+            engine = EntropyEngine()
+            report = engine.analyze(resolved, data.get("messages", []))
+            print(format_report_terminal(report))
 
         else:
             sessions_parser.print_help()
