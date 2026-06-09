@@ -60,7 +60,8 @@ Implement selected issues, create versions, and self-update.
    ```bash
    gh label create rejected --color b60205 \
      --description "Not accepted by evolution — see closing comment" 2>/dev/null || true
-   gh issue edit <N> --repo Lexus2016/hermes-agent-evolution --add-label rejected 2>/dev/null || true
+   gh issue edit <N> --repo Lexus2016/hermes-agent-evolution \
+     --add-label rejected --remove-label needs-work 2>/dev/null || true
    gh issue close <N> --repo Lexus2016/hermes-agent-evolution \
      --comment "Skipped at implementation: <already-exists|out-of-scope|harmful|too-large> — <reason>."
    ```
@@ -97,7 +98,8 @@ python -m pytest tests/ -x -q
   ```bash
   gh label create rejected --color b60205 \
     --description "Not accepted by evolution — see closing comment" 2>/dev/null || true
-  gh issue edit <N> --repo Lexus2016/hermes-agent-evolution --add-label rejected 2>/dev/null || true
+  gh issue edit <N> --repo Lexus2016/hermes-agent-evolution \
+    --add-label rejected --remove-label needs-work 2>/dev/null || true
   gh issue close <N> --repo Lexus2016/hermes-agent-evolution \
     --comment "Skipped at implementation: could not get CI green — <what failed>."
   ```

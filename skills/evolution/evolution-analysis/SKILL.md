@@ -62,7 +62,8 @@ gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
      --description "Not accepted by evolution — see closing comment" 2>/dev/null || true
    gh issue close <N> --repo Lexus2016/hermes-agent-evolution \
      --comment "Rejected by evolution-analysis: <already-exists|out-of-scope|harmful|duplicate> — <one-line reason>."
-   gh issue edit <N> --repo Lexus2016/hermes-agent-evolution --add-label rejected 2>/dev/null || true
+   gh issue edit <N> --repo Lexus2016/hermes-agent-evolution \
+     --add-label rejected --remove-label needs-work 2>/dev/null || true
    ```
    Only issues that SURVIVE triage proceed to scoring. Be conservative.
 

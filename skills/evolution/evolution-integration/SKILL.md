@@ -73,8 +73,8 @@ gh pr list --repo "$REPO" --state open --limit 50 \
         | grep -viE "tools/foo.py|/test|_test|tests/"
       ```
       If the new code is referenced ONLY by its own module + tests (zero real
-      call sites) → it's DEAD CODE. Do NOT merge. Comment on the PR and either
-      reopen the issue or label it `needs-work`.
+      call sites) → it's DEAD CODE. Do NOT merge — follow the send-back
+      procedure below (close PR, rework brief, flip to `needs-work`).
 
     - **No category error / actually solves the issue (JUDGEMENT check).** Read
       the diff against the issue's intent. Does the mechanism actually produce
@@ -108,7 +108,7 @@ gh pr list --repo "$REPO" --state open --limit 50 \
     Only PRs that pass BOTH the deterministic dead-code check and the judgement
     check proceed to merge.
 
-2c. **Self-audit your verdict before you act (do NOT rubber-stamp).** A glance at
+2b. **Self-audit your verdict before you act (do NOT rubber-stamp).** A glance at
     a green CI is not a review. Before you merge / send-back / drop, audit your
     OWN review with this loop:
     0. Pause and re-focus. If you feel you are rushing or "already know" the
