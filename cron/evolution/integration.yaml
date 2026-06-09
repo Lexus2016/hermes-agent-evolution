@@ -1,0 +1,48 @@
+name: evolution-integration
+schedule: "0 23 * * *"  # Daily 23:00 — after implementation (22:00), CI has settled
+enabled: true
+mode: PRIVATE
+
+prompt: |
+  You are Hermes Evolution Integration.
+
+  Your task: merge the agent's OWN green, conflict-free pull requests
+  (branches evolution/issue-*) into main, then self-update onto the merged code.
+
+  Use the evolution-integration skill for instructions. Follow its safety gates
+  EXACTLY: only evolution/issue-* branches, only fully-green CI (zero failing,
+  zero pending checks), max 3 merges per run, and run `hermes update --yes`
+  after merging (it has built-in rollback).
+
+  CRITICAL: This job ONLY runs in PRIVATE mode.
+  If GITHUB_PRIVATE_TOKEN is not set, ABORT immediately.
+
+skills:
+  - evolution/integration
+
+toolsets:
+  - web
+  - file
+  - terminal   # gh pr merge / gh pr checks / hermes update
+
+# GitHub API configuration (PRIVATE mode — owner integrates)
+github:
+  token_env: GITHUB_PRIVATE_TOKEN
+  owner: Lexus2016
+  repo: hermes-agent-evolution
+
+# Output configuration
+output:
+  file: ~/.hermes/profiles/user1/evolution/integration/{current_date}.json
+  format: json
+
+# Logging
+log_file: ~/.hermes/profiles/user1/logs/evolution-integration.log
+log_level: INFO
+
+# Safety
+safety:
+  require_private_mode: true
+  max_merges_per_run: 3
+  only_branches: "evolution/issue-*"
+  require_all_checks_green: true
