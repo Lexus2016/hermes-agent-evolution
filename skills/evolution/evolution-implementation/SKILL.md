@@ -51,6 +51,23 @@ git checkout -b evolution/issue-123-feature-name
 - Add tests
 - Add documentation
 
+### Validate LOCALLY — the PR must be green BEFORE you open it
+Do NOT commit+push blind and let CI find problems — that produces red PRs that
+just clutter the backlog and can never be merged. Run the SAME checks CI runs,
+fix everything, and only proceed when they all pass locally:
+```bash
+# Lint + format (CI runs `ruff` as a blocking check):
+ruff check . && ruff format --check .
+# Test suite (run at least the tests touching your change; full suite if quick):
+python -m pytest tests/ -x -q
+```
+- If anything is red → FIX it and re-run. Iterate until lint + tests are green.
+- If after a few honest attempts you cannot get it green (the change is harder
+  or more fragile than estimated) → do NOT open a red PR. SKIP and close the
+  issue with a clear reason (`gh issue close <N> --comment "..."`). A red PR is
+  worse than no PR: it wastes the integration step and never merges.
+- Only when local checks are green do you continue to commit + push + PR.
+
 ### Authorize git (gh is already logged in)
 ```bash
 # `gh` is authorized via persistent `gh auth login` (~/.config/gh), set up by
