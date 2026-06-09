@@ -49,6 +49,34 @@ def _normalize_skills(raw) -> list[str] | None:
     return out or None
 
 
+def _install_access_gate(repo_root: Path) -> str | None:
+    """Copy the GitHub access wake-gate into HERMES_HOME/scripts so cron runs it
+    as a pre-check before each evolution job. Returns the script name to attach
+    to every job, or None on failure (jobs are still created, just ungated).
+
+    The gate prints ``{"wakeAgent": false}`` when GitHub is unreachable, which
+    makes the scheduler SKIP the LLM agent entirely — no tokens / web-search
+    spent when the cycle has no outlet to post issues/PRs.
+    """
+    import os
+    import shutil
+
+    src = repo_root / "scripts" / "evolution_access_gate.sh"
+    if not src.is_file():
+        return None
+    home = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
+    dest_dir = home / "scripts"
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / src.name
+        shutil.copyfile(src, dest)
+        dest.chmod(0o755)
+        return src.name
+    except Exception as exc:  # pragma: no cover - environment dependent
+        print(f"[evolution-cron] warning: could not install access gate: {exc}", file=sys.stderr)
+        return None
+
+
 def main(argv: list[str]) -> int:
     dry_run = "--dry-run" in argv
     positional = [a for a in argv[1:] if not a.startswith("--")]
@@ -66,6 +94,10 @@ def main(argv: list[str]) -> int:
     except Exception as exc:  # pragma: no cover - environment dependent
         print(f"[evolution-cron] cannot import cron.jobs: {exc}", file=sys.stderr)
         return 1
+
+    # Install the GitHub-access wake-gate and attach it to every evolution job,
+    # so the expensive LLM agent only runs when GitHub is actually reachable.
+    gate_script = None if dry_run else _install_access_gate(repo_root)
 
     existing_names = {str(j.get("name", "")).strip() for j in load_jobs()}
     created: list[tuple[str, str]] = []
@@ -101,7 +133,7 @@ def main(argv: list[str]) -> int:
             continue
 
         try:
-            job = create_job(
+            create_kwargs = dict(
                 prompt=str(prompt),
                 schedule=schedule,
                 name=name,
@@ -109,6 +141,11 @@ def main(argv: list[str]) -> int:
                 enabled_toolsets=list(toolsets) if toolsets else None,
                 deliver="local",
             )
+            if gate_script:
+                # Pre-check script: skips the agent (no LLM/web spend) when
+                # GitHub is unreachable. Keeps the LLM agent (skills) for the run.
+                create_kwargs["script"] = gate_script
+            job = create_job(**create_kwargs)
             created.append((name, job["id"]))
             existing_names.add(name)
             if spec.get("enabled") is False:
