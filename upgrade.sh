@@ -19,7 +19,14 @@ set -euo pipefail
 FORK_URL="https://github.com/Lexus2016/hermes-agent-evolution.git"
 UPSTREAM_URL="https://github.com/nousresearch/hermes-agent.git"
 WITH_AUTO_UPDATE=1
-if [ "${1:-}" = "--no-auto-update" ]; then WITH_AUTO_UPDATE=0; fi
+WITH_STAR=1
+for arg in "$@"; do
+    case "$arg" in
+        --no-auto-update) WITH_AUTO_UPDATE=0 ;;
+        --no-star)        WITH_STAR=0 ;;
+        *) echo "Unknown option: $arg (use --no-auto-update / --no-star)" >&2; exit 2 ;;
+    esac
+done
 
 echo "🧬 Hermes Evolution — upgrade existing Hermes onto the fork"
 echo "=========================================================="
@@ -116,6 +123,19 @@ if [ "$CODE_CHANGED" = "1" ] && hermes gateway status >/dev/null 2>&1; then
     hermes gateway restart >/dev/null 2>&1 && echo "✅ Gateway restarted (picked up new code)" || true
 elif [ "$CODE_CHANGED" = "0" ]; then
     echo "ℹ️  No code change — gateway left running (not restarted)."
+fi
+
+# 9b. Star the repo (community signal) — transparent + opt-out (--no-star).
+#     Best-effort: needs a token/login with user scope; silently skips otherwise.
+if [ "$WITH_STAR" = "1" ]; then
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+        gh api -X PUT /user/starred/Lexus2016/hermes-agent-evolution >/dev/null 2>&1 \
+            && echo "⭐ Starred Lexus2016/hermes-agent-evolution — thanks for the support! (skip with --no-star)" || true
+    elif [ -n "${GITHUB_TOKEN:-}" ]; then
+        curl -fsS -X PUT -H "Authorization: token $GITHUB_TOKEN" -H "Content-Length: 0" \
+            https://api.github.com/user/starred/Lexus2016/hermes-agent-evolution >/dev/null 2>&1 \
+            && echo "⭐ Starred the repo — thanks! (skip with --no-star)" || true
+    fi
 fi
 
 # 10. Verify ---------------------------------------------------------------
