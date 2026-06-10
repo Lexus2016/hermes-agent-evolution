@@ -48,6 +48,12 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
      signalling the agent misread intent.
    - **Performance** — long waits, timeouts, repeated identical work.
 
+   **Context discipline: delegate bulky reads.** The `delegation` toolset is
+   enabled for this job. Session transcripts or large diffs expected to exceed
+   ~2k tokens should be delegated via `delegate_task` to a subagent that returns
+   a compact summary; the subagent's context dies after returning so the main
+   session stays lean.
+
 3. **Aggregate, don't anecdote.** Group signals into recurring patterns. A one-off
    glitch is noise; a problem that recurs across multiple sessions is signal.
    Count frequency — it drives Impact.

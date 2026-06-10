@@ -35,7 +35,12 @@ Keywords: "agent", "autonomous", "LLM tool use", "multi-agent"
 ## Research process
 
 1. **Scan sources** using `web_search`
-2. **Filter critically — not every trend is a proposal.** A finding being new or
+2. **Offload bulky reads to subagents.** The `delegation` toolset is enabled for
+   this job. Any web dump, large diff, or long log expected to exceed ~2k tokens
+   should be delegated via `delegate_task` to a throwaway subagent that returns a
+   compact summary. The subagent's context dies after returning — the main session
+   stays lean.
+3. **Filter critically — not every trend is a proposal.** A finding being new or
    popular is NOT a reason to propose it. Keep a finding ONLY if it would
    genuinely help THIS project's real users. Drop it if it's hype with no
    concrete need, generic to any project (not specific to this agent), or likely
