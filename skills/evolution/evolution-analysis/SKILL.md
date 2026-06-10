@@ -17,15 +17,34 @@ Analyze all created issues and PRs, and determine priority for implementation.
 
 ## Process
 
-1. **Retrieve** all open issues via the `gh` CLI (terminal tool). `gh` is
+1. **Retrieve** all open issues — THIN first (context economy). `gh` is
    authorized via persistent `gh auth login` (~/.config/gh), set up by
    setup-hermes.sh — do NOT export GH_TOKEN from env (Hermes strips GitHub
-   tokens from the agent terminal). Just call gh directly:
+   tokens from the agent terminal).
 
+   **Rule: query thin, hydrate survivors.** Do NOT pull issue bodies for the
+   whole backlog — most get rejected at triage and their bodies are pure
+   context waste (~10-20k tokens/run measured). Two phases:
 ```bash
+# Phase A — THIN list (no bodies): triage + ranking work from this alone
 gh issue list --repo Lexus2016/hermes-agent-evolution --state open \
-  --limit 50 --json number,title,body,labels,createdAt
+  --limit 50 --json number,title,labels,createdAt
 ```
+   Run triage (steps 2-3) and scoring (steps 4-5) on titles+labels. Only THEN
+   hydrate the survivors — the few issues you actually selected (and any
+   `needs-work` ones whose rework brief you must read):
+```bash
+# Phase B — hydrate ONLY survivors (selected + needs-work), one by one
+gh issue view <N> --repo Lexus2016/hermes-agent-evolution --json body,comments
+```
+   Apply the same thin-first rule to ANY bulk query in this skill.
+
+1a. **Input freshness — verify before consuming (gate against stale state).**
+   If you read any prior-stage artifact (a previous analysis JSON, an
+   implementation report), check its `date` field matches the CURRENT cycle.
+   A stale file means the upstream stage failed or was gated — record
+   `"stale_input": true` in your report and work from live GitHub data only;
+   never silently act on yesterday's selection.
 
 2. **Rework first — `needs-work` issues are PRIORITY, not rejects.** An issue
    labelled `needs-work` was ALREADY judged worth doing and attempted; a PR

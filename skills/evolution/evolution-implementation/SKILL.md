@@ -19,6 +19,13 @@ Implement selected issues, create versions, and self-update.
 
 1. **Load** the latest analysis from `~/.hermes/profiles/user1/evolution/analysis/`
 
+1b. **Freshness gate — NEVER consume a stale selection.** Check the loaded
+    JSON's `date` field: it must be from the CURRENT cycle (today, or the most
+    recent scheduled analysis slot). If it is older, the analysis stage failed
+    or was gated — do NOT implement yesterday's picks. Instead write a report
+    with `"skipped": "stale analysis input (<date>) — upstream stage failed"`
+    and STOP. Acting on outdated decisions is worse than skipping a cycle.
+
 1a. **`needs-work` issues — YOUR call: rework or consciously drop.** If a selected
     issue is labelled `needs-work`, a previous PR failed code review and was sent
     back. FIRST read the rework brief in the issue comments
