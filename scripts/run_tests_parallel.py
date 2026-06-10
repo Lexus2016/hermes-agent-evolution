@@ -395,6 +395,38 @@ def _run_one_file(
             timeout_note=f"per-file timeout on exit-4 retry {attempt}",
         )
 
+    if rc == 4 and not _file_present(file):
+        # Tripwire (#85): the file existed at plan time (its tests were
+        # counted by the bulk --collect-only) but is genuinely gone now.
+        # The known cause was a test spawning the real `hermes update`,
+        # whose orphaned process ran `git checkout main` on the workspace
+        # and deleted every file new relative to main. Dump the tree state
+        # into the failure block so any recurrence is diagnosable from the
+        # CI log alone.
+        diag_cmds = [
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            ["git", "rev-parse", "HEAD"],
+            ["git", "status", "--porcelain"],
+            ["git", "reflog", "-5"],
+        ]
+        diag_lines = [
+            "",
+            "[tripwire] file vanished from disk after plan time — "
+            "workspace tree state:",
+        ]
+        for diag_cmd in diag_cmds:
+            try:
+                diag_out = subprocess.run(
+                    diag_cmd, cwd=repo_root, capture_output=True,
+                    text=True, timeout=10,
+                ).stdout.strip()
+            except Exception as exc:  # noqa: BLE001 — diagnostics only
+                diag_out = f"<failed: {exc}>"
+            shown = diag_out.splitlines()[:10] or ["<empty>"]
+            diag_lines.append(f"  $ {' '.join(diag_cmd)}")
+            diag_lines.extend(f"    {line}" for line in shown)
+        output += "\n".join(diag_lines) + "\n"
+
     if rc == 5:
         # No tests collected — every test in the file was filtered out.
         # Treat as a pass; surface info in a slightly distinct status
