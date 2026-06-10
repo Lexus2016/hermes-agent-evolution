@@ -82,14 +82,6 @@ _DEFAULT_FILE_TIMEOUT_SECONDS = 600.0  # 10 minutes
 # CI jobs by estimated total time, so no one job gets all the slow files.
 _DURATIONS_FILE = "test_durations.json"
 
-# Exit-4 ("file or directory not found") recovery. The planner enumerates each
-# file via --collect-only before slicing, so a file that reaches a worker WAS
-# collectable; an exit-4 at per-file exec time is therefore a transient stat
-# failure under load, not a genuinely-missing file. Retry a few times with a
-# short backoff to let the filesystem settle before surfacing a hard failure.
-_EXIT4_MAX_RETRIES = 3
-_EXIT4_BACKOFF_BASE = 0.5  # seconds; cumulative ~0.5+1.0+1.5 across retries
-
 
 def _count_tests(
     files: List[Path], repo_root: Path, pytest_passthrough: List[str]
@@ -254,6 +246,98 @@ def _kill_tree(proc: "subprocess.Popen", pgid: int | None = None) -> None:
         pass
 
 
+def _spawn_pytest_once(
+    cmd: List[str],
+    repo_root: Path,
+    file_timeout: float,
+    *,
+    timeout_note: str = "per-file timeout",
+) -> Tuple[int, str]:
+    """Run one ``pytest`` subprocess to completion and return ``(rc, output)``.
+
+    Spawns the child in its own process group / session so a hung file and
+    its grandchildren (uvicorn servers, async runtimes, etc.) can be SIGKILL'd
+    as a tree on timeout rather than orphaning onto PID 1. Shared by the
+    primary per-file run and the exit-4 retry loop so the lifecycle/cleanup
+    logic lives in exactly one place.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        # POSIX: place the child at the head of its own process group so
+        # _kill_tree can SIGKILL the group atomically.
+        # Windows: this maps to CREATE_NEW_PROCESS_GROUP in CPython 3.12+;
+        # _kill_tree handles the Windows path via taskkill /F /T.
+        start_new_session=True,
+    )
+
+    # Capture the pgid NOW, before the leader can exit and be reaped. Once
+    # the leader is reaped, os.getpgid(proc.pid) raises ProcessLookupError
+    # even though grandchildren in that group are still alive — defeating
+    # the whole cleanup. None on Windows where the pgid concept doesn't apply.
+    pgid: int | None = None
+    if sys.platform != "win32":
+        try:
+            pgid = os.getpgid(proc.pid)
+        except (ProcessLookupError, PermissionError):
+            pgid = None
+
+    try:
+        output, _ = proc.communicate(timeout=file_timeout)
+        rc = proc.returncode
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc, pgid=pgid)
+        try:
+            output, _ = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            output = "(file timeout exceeded; output unavailable)"
+        rc = 124  # de facto convention for "killed by timeout".
+        output = (
+            f"({timeout_note}: {file_timeout:.0f}s exceeded; "
+            f"process tree SIGKILL'd)\n{output}"
+        )
+    except BaseException:
+        # KeyboardInterrupt / runner crash — make sure no zombie
+        # grandchildren outlive us.
+        _kill_tree(proc, pgid=pgid)
+        raise
+    else:
+        # Happy path: pytest exited on its own. Kill the group anyway in
+        # case it left grandchildren behind; already-dead is a no-op.
+        _kill_tree(proc, pgid=pgid)
+
+    return rc, output
+
+
+# How many times to re-run a file that exits 4 ("file or directory not found")
+# while the file demonstrably exists on disk. On loaded shared CI runners the
+# planner can enumerate a file (tests counted via --collect-only) but the
+# per-file subprocess fail to stat it moments later — and a SINGLE immediate
+# retry can land in the same brief high-load window and fail again. We retry a
+# few times with a short backoff so transient I/O pressure has time to settle.
+_EXIT4_RETRY_ATTEMPTS = 3
+_EXIT4_RETRY_BACKOFF_SECONDS = 0.5
+
+
+def _file_present(file: Path, *, attempts: int = 3, delay: float = 0.2) -> bool:
+    """Return True if ``file`` exists, re-checking a few times.
+
+    ``Path.exists()`` itself issues a ``stat`` that can transiently fail under
+    the same load that makes pytest report "file or directory not found", so a
+    single negative check is not authoritative. Only conclude the file is
+    genuinely missing if it's absent across several spaced checks.
+    """
+    for i in range(attempts):
+        if file.exists():
+            return True
+        if i < attempts - 1:
+            time.sleep(delay)
+    return False
+
+
 def _run_one_file(
     file: Path,
     pytest_args: List[str],
@@ -288,131 +372,28 @@ def _run_one_file(
     """
     cmd = [sys.executable, "-m", "pytest", str(file), *pytest_args]
     subproc_start = time.monotonic()
-    proc = subprocess.Popen(
-        cmd,
-        cwd=repo_root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        # POSIX: place the child at the head of its own process group so
-        # _kill_tree can SIGKILL the group atomically.
-        # Windows: this maps to CREATE_NEW_PROCESS_GROUP in CPython 3.12+;
-        # _kill_tree handles the Windows path via taskkill /F /T.
-        start_new_session=True,
-    )
+    rc, output = _spawn_pytest_once(cmd, repo_root, file_timeout)
 
-    # Capture the pgid NOW, before the leader can exit and be reaped.
-    # Once the leader is reaped, os.getpgid(proc.pid) raises
-    # ProcessLookupError even though grandchildren in that group are
-    # still alive — defeating the whole cleanup. None on Windows where
-    # the pgid concept doesn't apply (taskkill walks ppid chain instead).
-    pgid: int | None = None
-    if sys.platform != "win32":
-        try:
-            pgid = os.getpgid(proc.pid)
-        except (ProcessLookupError, PermissionError):
-            # Astonishingly fast child? Already dead. _kill_tree's
-            # fallback will handle this case as a no-op.
-            pgid = None
-
-    try:
-        output, _ = proc.communicate(timeout=file_timeout)
-        rc = proc.returncode
-    except subprocess.TimeoutExpired:
-        _kill_tree(proc, pgid=pgid)
-        # Drain whatever the child wrote before we killed it so we have
-        # something to surface in the failure dump.
-        try:
-            output, _ = proc.communicate(timeout=10)
-        except subprocess.TimeoutExpired:
-            output = "(file timeout exceeded; output unavailable)"
-        rc = 124  # de facto convention for "killed by timeout".
-        output = (
-            f"(per-file timeout: {file_timeout:.0f}s exceeded; "
-            f"process tree SIGKILL'd)\n{output}"
+    # pytest exit 4 = "file or directory not found" at exec time. On loaded
+    # shared CI runners we have seen the planner enumerate a file (its tests
+    # counted via --collect-only) but the per-file subprocess fail to stat it
+    # moments later — a transient the deterministic LPT slicer otherwise
+    # reproduces on every rerun (same file set → same shard). Re-run the file a
+    # few times with a short backoff so the I/O pressure has time to settle,
+    # but ONLY while the file demonstrably exists on disk. A single immediate
+    # retry (the old behaviour) could land in the same brief high-load window
+    # and fail again; a single Path.exists() check could itself be a flaky stat
+    # under that load, so we re-check existence across spaced attempts.
+    # We do NOT widen the exit-5 rule: exit 4 on a file that genuinely does not
+    # exist must still fail.
+    attempt = 0
+    while rc == 4 and attempt < _EXIT4_RETRY_ATTEMPTS and _file_present(file):
+        attempt += 1
+        time.sleep(_EXIT4_RETRY_BACKOFF_SECONDS * attempt)
+        rc, output = _spawn_pytest_once(
+            cmd, repo_root, file_timeout,
+            timeout_note=f"per-file timeout on exit-4 retry {attempt}",
         )
-    except BaseException:
-        # KeyboardInterrupt / runner crash — make sure no zombie
-        # grandchildren outlive us.
-        _kill_tree(proc, pgid=pgid)
-        raise
-    else:
-        # Happy path: pytest exited on its own. The child process already
-        # cleaned up its grandchildren if it's well-behaved, but
-        # well-behaved is not universal — kill the group anyway. Already-
-        # dead processes are a no-op.
-        _kill_tree(proc, pgid=pgid)
-
-    if rc == 4:
-        # pytest exit 4 = "file or directory not found" at exec time, yet the
-        # planner already enumerated this file (its tests were counted via
-        # --collect-only), so it WAS present and collectable. On loaded shared CI
-        # runners the per-file subprocess can fail to stat it moments later — a
-        # transient the deterministic LPT slicer otherwise reproduces on every
-        # rerun (same file set → same shard, so a plain re-run never clears it).
-        # Because the planner proved the file exists, retry with backoff and do
-        # NOT gate on Path.exists(): the whole point is that stat is momentarily
-        # flaky, so an exists() check here can itself read False and wrongly skip
-        # the retry. Genuinely-missing files don't reach this branch — the
-        # planner would not have enumerated them.
-        for _attempt in range(_EXIT4_MAX_RETRIES):
-            time.sleep(_EXIT4_BACKOFF_BASE * (_attempt + 1))  # let the FS settle
-            retry_proc = subprocess.Popen(
-                cmd,
-                cwd=repo_root,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                start_new_session=True,
-            )
-            retry_pgid: int | None = None
-            if sys.platform != "win32":
-                try:
-                    retry_pgid = os.getpgid(retry_proc.pid)
-                except (ProcessLookupError, PermissionError):
-                    retry_pgid = None
-            try:
-                retry_output, _ = retry_proc.communicate(timeout=file_timeout)
-                retry_rc = retry_proc.returncode
-            except subprocess.TimeoutExpired:
-                _kill_tree(retry_proc, pgid=retry_pgid)
-                try:
-                    retry_output, _ = retry_proc.communicate(timeout=10)
-                except subprocess.TimeoutExpired:
-                    retry_output = "(file timeout exceeded on retry; output unavailable)"
-                retry_rc = 124
-                retry_output = (
-                    f"(per-file timeout on exit-4 retry: {file_timeout:.0f}s exceeded; "
-                    f"process tree SIGKILL'd)\n{retry_output}"
-                )
-            except BaseException:
-                _kill_tree(retry_proc, pgid=retry_pgid)
-                raise
-            else:
-                _kill_tree(retry_proc, pgid=retry_pgid)
-            rc, output = retry_rc, retry_output
-            if rc != 4:
-                break  # recovered, or produced a real (different) result
-        else:
-            # Still exit-4 after every retry. Capture diagnostics so the next
-            # occurrence is conclusively diagnosable instead of a bare "not
-            # found", then let it fall through as a hard failure.
-            try:
-                _p = Path(file)
-                _parent = _p.parent
-                _siblings = (
-                    sorted(x.name for x in _parent.glob("test_*.py"))[:5]
-                    if _parent.exists()
-                    else "N/A"
-                )
-                output = (output or "") + (
-                    f"\n--- exit-4 persisted after {_EXIT4_MAX_RETRIES} retries ---\n"
-                    f"path={_p} exists={_p.exists()} is_file={_p.is_file()} "
-                    f"parent_exists={_parent.exists()}\n"
-                    f"sibling test_*.py sample={_siblings}\n"
-                )
-            except Exception as _diag_exc:  # diagnostics must never mask the failure
-                output = (output or "") + f"\n--- exit-4 diagnostics failed: {_diag_exc} ---\n"
 
     if rc == 5:
         # No tests collected — every test in the file was filtered out.

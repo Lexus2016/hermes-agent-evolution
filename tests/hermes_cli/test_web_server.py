@@ -4,6 +4,7 @@ import os
 import json
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -1068,6 +1069,41 @@ class TestWebServerEndpoints:
         assert "MATTERMOST_ALLOW_ALL_USERS" in managed
         assert "GATEWAY_PROXY_URL" not in managed
         assert "GATEWAY_PROXY_URL" in _MESSAGING_KEYS_PAGE_KEYS
+
+    def test_model_set_requires_confirmation_for_expensive_model(self, monkeypatch):
+        monkeypatch.setattr(
+            "hermes_cli.model_cost_guard.expensive_model_warning",
+            lambda *_args, **_kwargs: SimpleNamespace(message="EXPENSIVE MODEL WARNING"),
+        )
+
+        resp = self.client.post(
+            "/api/model/set",
+            json={
+                "scope": "main",
+                "provider": "nous",
+                "model": "openai/gpt-5.5-pro",
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert data["confirm_required"] is True
+        assert data["confirm_message"] == "EXPENSIVE MODEL WARNING"
+
+        confirmed = self.client.post(
+            "/api/model/set",
+            json={
+                "scope": "main",
+                "provider": "nous",
+                "model": "openai/gpt-5.5-pro",
+                "confirm_expensive_model": True,
+            },
+        )
+
+        assert confirmed.status_code == 200
+        assert confirmed.json()["ok"] is True
+
 
     def test_reveal_env_var(self, tmp_path):
         """POST /api/env/reveal should return the real unredacted value."""
@@ -4145,6 +4181,39 @@ class TestPtyWebSocket:
 
         assert env["HERMES_TUI_INLINE"] == "1"
         assert env["HERMES_TUI_DISABLE_MOUSE"] == "1"
+
+    def test_resolve_chat_argv_applies_terminal_backend_config(
+        self, monkeypatch, _isolate_hermes_home
+    ):
+        import hermes_cli.main as main_mod
+
+        config_path = Path(os.environ["HERMES_HOME"]) / "config.yaml"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "terminal:",
+                    "  backend: docker",
+                    "  docker_image: example/hermes-tools:latest",
+                    "  docker_extra_args:",
+                    "    - --network=host",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("TERMINAL_ENV", raising=False)
+        monkeypatch.delenv("TERMINAL_DOCKER_IMAGE", raising=False)
+        monkeypatch.delenv("TERMINAL_DOCKER_EXTRA_ARGS", raising=False)
+        monkeypatch.setattr(
+            main_mod,
+            "_make_tui_argv",
+            lambda project_root, tui_dev=False: (["node", "dist/entry.js"], "/tmp/ui-tui"),
+        )
+
+        _argv, _cwd, env = self.ws_module._resolve_chat_argv()
+
+        assert env["TERMINAL_ENV"] == "docker"
+        assert env["TERMINAL_DOCKER_IMAGE"] == "example/hermes-tools:latest"
+        assert env["TERMINAL_DOCKER_EXTRA_ARGS"] == '["--network=host"]'
 
     def test_rejects_when_embedded_chat_disabled(self, monkeypatch):
         monkeypatch.setattr(self.ws_module, "_DASHBOARD_EMBEDDED_CHAT_ENABLED", False)

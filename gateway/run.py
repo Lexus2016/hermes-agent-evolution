@@ -688,7 +688,18 @@ def _last_transcript_timestamp(history: Optional[List[Dict[str, Any]]]) -> Any:
 # ordinary outputs. Only tools that intentionally create deliverable media
 # artifacts should be eligible for automatic append when the model omits them
 # from the final gateway reply.
-_AUTO_APPEND_MEDIA_TOOL_NAMES = {"text_to_speech", "text_to_speech_tool"}
+_AUTO_APPEND_MEDIA_TOOL_NAMES = {
+    "text_to_speech",
+    "text_to_speech_tool",
+    "image_generate",
+}
+
+# Tools in this set return their deliverable artifact as a JSON payload with a
+# local-file path field rather than a literal ``MEDIA:`` tag (e.g. image_generate
+# returns ``{"success": true, "image": "/abs/path.png"}``). The auto-append path
+# extracts the path from these fields so delivery is deterministic and does not
+# depend on the model restating the path in its final reply.
+_JSON_MEDIA_TOOL_PATH_FIELDS = ("host_image", "image", "agent_visible_image")
 
 
 # Extension-anchored MEDIA: matcher for tool results. Mirrors the dispatch-site
@@ -755,10 +766,28 @@ def _collect_auto_append_media_tags(
         if tool_name_by_call_id.get(call_id) not in _AUTO_APPEND_MEDIA_TOOL_NAMES:
             continue
         content = str(msg.get("content") or "")
+        tool_name = tool_name_by_call_id.get(call_id)
+        # JSON-payload tools (image_generate) return a local-file path in a
+        # known field rather than a MEDIA: tag. Extract it so delivery is
+        # deterministic even when the model omits the path from its reply.
+        if tool_name == "image_generate" and "MEDIA:" not in content:
+            try:
+                payload = json.loads(content)
+            except Exception:
+                payload = None
+            if isinstance(payload, dict) and payload.get("success"):
+                for field in _JSON_MEDIA_TOOL_PATH_FIELDS:
+                    path = payload.get(field)
+                    if (isinstance(path, str)
+                            and _TOOL_MEDIA_RE.fullmatch(f"MEDIA:{path}")
+                            and path not in history_media_paths):
+                        media_tags.append(f"MEDIA:{path}")
+                        break
+            continue
         if "MEDIA:" not in content:
             continue
         for match in _TOOL_MEDIA_RE.finditer(content):
-            path = match.group(1).strip().rstrip('\",}')
+            path = match.group(1).strip().rstrip('",}')
             if path and path not in history_media_paths:
                 media_tags.append(f"MEDIA:{path}")
         if "[[audio_as_voice]]" in content:
@@ -1924,6 +1953,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         self._exit_code: Optional[int] = None
         self._draining = False
         self._restart_requested = False
+        # Set by shutdown_signal_handler when a SIGTERM/SIGINT arrived
+        # WITHOUT a planned-stop / takeover marker — i.e. an unexpected
+        # external signal (container/s6 SIGTERM on `docker restart` or
+        # image upgrade, OOM-killer, bare `kill`). Distinct from an
+        # operator-requested stop, which writes a marker first. Used by
+        # _stop_impl to decide whether to persist gateway_state=stopped
+        # (see issue #42675): an unexpected signal must NOT persist
+        # "stopped", or container_boot refuses to auto-start the gateway
+        # on the next boot.
+        self._signal_initiated_shutdown = False
         self._restart_task_started = False
         self._restart_detached = False
         self._restart_via_service = False
@@ -1934,6 +1973,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # Key: session_key, Value: AIAgent instance
         self._running_agents: Dict[str, Any] = {}
         self._running_agents_ts: Dict[str, float] = {}  # start timestamp per session
+        self._active_session_leases: Dict[str, Any] = {}
         self._pending_messages: Dict[str, str] = {}  # Queued messages during interrupt
         # Last successfully-resolved (non-empty) model, keyed by session. Used
         # as a fallback when a fresh config read transiently returns an empty
@@ -3389,6 +3429,59 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             for session_key, agent in self._running_agents.items()
             if agent is not _AGENT_PENDING_SENTINEL
         }
+
+    def _get_max_concurrent_sessions(self) -> Optional[int]:
+        """Return the configured active chat session cap, if enabled."""
+        try:
+            from hermes_cli.active_sessions import resolve_max_concurrent_sessions
+
+            return resolve_max_concurrent_sessions(getattr(self, "config", None))
+        except Exception:
+            return None
+
+    def _active_session_limit_message(self, session_key: str) -> Optional[str]:
+        """Return a user-facing rejection when starting a new session exceeds the cap."""
+        max_sessions = self._get_max_concurrent_sessions()
+        if max_sessions is None:
+            return None
+        if session_key in getattr(self, "_running_agents", {}):
+            return None
+        active_count = len(getattr(self, "_running_agents", {}))
+        if active_count < max_sessions:
+            return None
+        return (
+            f"Hermes is at the active session limit ({active_count}/{max_sessions}). "
+            "Try again when another session finishes."
+        )
+
+    def _claim_active_session_slot(
+        self,
+        session_key: str,
+        source: SessionSource,
+    ) -> tuple[Any, Optional[str]]:
+        """Claim a cross-process active-session slot for a new gateway turn."""
+        if session_key in getattr(self, "_running_agents", {}):
+            return None, None
+        local_limit_message = self._active_session_limit_message(session_key)
+        if local_limit_message is not None:
+            return None, local_limit_message
+        try:
+            from hermes_cli.active_sessions import try_acquire_active_session
+
+            platform = source.platform.value if source and source.platform else "gateway"
+            return try_acquire_active_session(
+                session_id=session_key,
+                surface=f"gateway:{platform}",
+                config=getattr(self, "config", None),
+                metadata={
+                    "platform": platform,
+                    "chat_id": getattr(source, "chat_id", "") or "",
+                    "user_id": getattr(source, "user_id", "") or "",
+                },
+            )
+        except Exception as exc:
+            logger.warning("Failed to claim active session slot: %s", exc)
+            return None, None
 
     @staticmethod
     def _agent_has_active_subagents(running_agent: Any) -> bool:
@@ -5751,8 +5844,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             self._background_tasks.clear()
 
             self.adapters.clear()
+            for _session_key in list(self._running_agents):
+                self._release_running_agent_state(_session_key)
             self._running_agents.clear()
             self._running_agents_ts.clear()
+            if hasattr(self, "_active_session_leases"):
+                self._active_session_leases.clear()
             self._pending_messages.clear()
             self._pending_approvals.clear()
             if hasattr(self, '_busy_ack_ts'):
@@ -5865,7 +5962,36 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 self._exit_reason = self._exit_reason or "Gateway restart requested"
 
             self._draining = False
-            self._update_runtime_status("stopped", self._exit_reason)
+            # Persist the terminal gateway_state. The default is "stopped",
+            # but when this teardown was triggered by an UNEXPECTED external
+            # signal (container/s6 SIGTERM on `docker restart` or image
+            # upgrade, OOM-killer, bare `kill`) we instead persist "running"
+            # to preserve the operator's run-intent across the restart.
+            #
+            # On Docker (s6-overlay), container_boot.py reads gateway_state
+            # on the next boot and only auto-starts gateways whose last
+            # state was "running" (_AUTOSTART_STATES). Persisting "stopped"
+            # — or leaving the mid-shutdown "draining" marker in place — for
+            # a routine `docker compose up --force-recreate` permanently
+            # suppresses auto-start, so the messaging channels silently stay
+            # dark until the operator manually restarts (issue #42675).
+            #
+            # An operator-initiated stop (`hermes gateway stop`,
+            # systemd/launchd ExecStop, the s6 stop path, Ctrl+C) writes a
+            # planned-stop marker BEFORE signalling, so it is classified as
+            # a planned stop (not signal-initiated) and correctly persists
+            # "stopped" — respecting the explicit intent. A restart also
+            # persists "stopped" here; the restarting process brings the
+            # gateway back up itself.
+            if getattr(self, "_signal_initiated_shutdown", False) and not self._restart_requested:
+                logger.info(
+                    "Gateway stopped by an unexpected signal — persisting "
+                    "gateway_state=running so container_boot auto-starts on "
+                    "the next boot (issue #42675)"
+                )
+                self._update_runtime_status("running", self._exit_reason)
+            else:
+                self._update_runtime_status("stopped", self._exit_reason)
             logger.info("Gateway stopped (total teardown %.2fs)", _phase_elapsed())
 
         self._stop_task = asyncio.create_task(_stop_impl())
@@ -6930,6 +7056,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if canonical == "reasoning":
             return await self._handle_reasoning_command(event)
 
+        if canonical == "memory":
+            return await self._handle_memory_command(event)
+
         if canonical == "fast":
             return await self._handle_fast_command(event)
 
@@ -7237,6 +7366,20 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # message arriving during any of those yields would pass the
         # "already running" guard and spin up a duplicate agent for the
         # same session — corrupting the transcript.
+        _active_session_lease, _limit_message = self._claim_active_session_slot(
+            _quick_key,
+            source,
+        )
+        if _limit_message is not None:
+            logger.info(
+                "Rejecting new active session %s: max_concurrent_sessions reached",
+                _quick_key,
+            )
+            return _limit_message
+        if _active_session_lease is not None:
+            if not hasattr(self, "_active_session_leases"):
+                self._active_session_leases = {}
+            self._active_session_leases[_quick_key] = _active_session_lease
         self._running_agents[_quick_key] = _AGENT_PENDING_SENTINEL
         self._running_agents_ts[_quick_key] = time.time()
         _run_generation = self._begin_session_run_generation(_quick_key)
@@ -9224,6 +9367,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             adapter._voice_input_callback = self._handle_voice_channel_input
         if hasattr(adapter, "_on_voice_disconnect"):
             adapter._on_voice_disconnect = self._handle_voice_timeout_cleanup
+        # Let the adapter's inactivity timer see the live voice-reply mode so it
+        # doesn't disconnect a deliberately text-only (/voice off) session.
+        if hasattr(adapter, "_voice_mode_getter"):
+            adapter._voice_mode_getter = lambda chat_id: self._voice_mode.get(
+                self._voice_key(Platform.DISCORD, str(chat_id)), "off"
+            )
 
         try:
             success = await adapter.join_voice_channel(voice_channel)
@@ -11395,7 +11544,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # when we successfully transcribed the audio — it's redundant.
             _placeholder = "(The user sent a message with no text content)"
             if user_text and user_text.strip() == _placeholder:
-                return prefix
+                return prefix, successful_transcripts
             if user_text:
                 return f"{prefix}\n\n{user_text}", successful_transcripts
             return prefix, successful_transcripts
@@ -11976,6 +12125,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             session_key, run_generation
         ):
             return False
+        lease = getattr(self, "_active_session_leases", {}).pop(session_key, None)
+        if lease is not None:
+            try:
+                lease.release()
+            except Exception:
+                logger.debug("Failed to release active session slot", exc_info=True)
         self._running_agents.pop(session_key, None)
         self._running_agents_ts.pop(session_key, None)
         if hasattr(self, "_busy_ack_ts"):
@@ -12894,13 +13049,21 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             from agent.display import get_tool_emoji
             emoji = get_tool_emoji(tool_name, default="⚙️")
 
-            # Markdown-capable platforms render a terminal command as a native
-            # ```bash fenced block (full command, no quotes, no label, no
-            # truncation) instead of the noisy `terminal: "cmd…"` line.  Gated
-            # on the adapter's ``supports_code_blocks`` capability so every
-            # markdown-rendering platform (and plugin adapters that opt in) gets
-            # it, while plain-text platforms keep the compact line.
-            _bash_block = None
+            # Markdown-capable platforms render a terminal command as a fenced
+            # code block instead of the compact `terminal: "cmd…"` preview.
+            # Gated on the adapter's ``supports_code_blocks`` capability so
+            # plain-text platforms keep the short line.  No language tag is
+            # emitted — Slack mrkdwn renders the tag as a literal first code
+            # line ("bash"), and a bare fence renders correctly everywhere
+            # that supports blocks.
+            #
+            # Verbose mode shows the FULL command.  Non-verbose ("all"/"new")
+            # modes still wrap in a fence but truncate to a single line capped
+            # at ``tool_preview_length`` (default 40) so a long or multi-line
+            # command doesn't render as a huge block — matching the budget the
+            # non-terminal preview path already applies (#42634).
+            _code_block_full = None
+            _code_block_short = None
             try:
                 _progress_adapter = self.adapters.get(source.platform)
             except Exception:
@@ -12912,13 +13075,27 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 and isinstance(args.get("command"), str)
                 and args["command"].strip()
             ):
-                _bash_block = f"```bash\n{args['command'].rstrip()}\n```"
-            
+                from agent.display import get_tool_preview_max_len
+                _cmd_full = args["command"].rstrip()
+                _code_block_full = f"{emoji} {tool_name}\n```\n{_cmd_full}\n```"
+                # Single-line, capped preview for non-verbose modes.
+                _pl = get_tool_preview_max_len()
+                _cap = _pl if _pl > 0 else 40
+                _lines = _cmd_full.splitlines()
+                _cmd_short = _lines[0] if _lines else _cmd_full
+                _multiline = len(_lines) > 1
+                if len(_cmd_short) > _cap:
+                    _cmd_short = _cmd_short[:_cap - 3] + "..."
+                elif _multiline:
+                    _cmd_short = _cmd_short + " ..."
+                _code_block_short = f"{emoji} {tool_name}\n```\n{_cmd_short}\n```"
+
             # Verbose mode: show detailed arguments, respects tool_preview_length
             if progress_mode == "verbose":
-                if _bash_block is not None:
-                    msg = _bash_block
-                elif args:
+                if _code_block_full is not None:
+                    progress_queue.put(_code_block_full)
+                    return
+                if args:
                     from agent.display import get_tool_preview_max_len
                     _pl = get_tool_preview_max_len()
                     args_str = json.dumps(args, ensure_ascii=False, default=str)
@@ -12938,8 +13115,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             # "all" / "new" modes: short preview, respects tool_preview_length
             # config (defaults to 40 chars when unset to keep gateway messages
             # compact — unlike CLI spinners, these persist as permanent messages).
-            if _bash_block is not None:
-                msg = _bash_block
+            # Terminal commands on markdown platforms get a single-line capped
+            # fenced block (built above) instead of the truncated preview.
+            if _code_block_short is not None:
+                msg = _code_block_short
             elif preview:
                 from agent.display import get_tool_preview_max_len
                 _pl = get_tool_preview_max_len()
@@ -13052,6 +13231,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     "message_id": message_id,
                     "content": content,
                 }
+                if getattr(adapter, "REQUIRES_EDIT_FINALIZE", False):
+                    kwargs["finalize"] = True
                 if _edit_accepts_metadata:
                     kwargs["metadata"] = _progress_metadata
                 return await adapter.edit_message(**kwargs)
@@ -15578,6 +15759,13 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
             )
         else:
             _signal_initiated_shutdown = True
+            # Mirror onto the runner so _stop_impl can suppress the
+            # gateway_state=stopped persist for unexpected signals
+            # (container/s6 SIGTERM on restart, OOM, bare kill) — see
+            # issue #42675. Operator-initiated stops set a planned-stop
+            # marker first, land in the `planned_stop` branch above, and
+            # leave this flag False so they DO persist "stopped".
+            runner._signal_initiated_shutdown = True
             logger.info(
                 "Received %s — initiating shutdown",
                 _shutdown_ctx["signal"] if _shutdown_ctx else "SIGTERM/SIGINT",

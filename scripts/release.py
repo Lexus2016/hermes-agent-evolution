@@ -47,6 +47,11 @@ ACP_REGISTRY_MANIFEST = REPO_ROOT / "acp_registry" / "agent.json"
 AUTHOR_MAP = {
     "lexus@cdzv.com": "Lexus2016",
     "evolution@hermes.ai": "Lexus2016",  # autonomous evolution agent commits
+    "ondrej.drapalik@gmail.com": "OndrejDrapalik",
+    "tomasz.panek@gmail.com": "tomekpanek",
+    "philipadsouza@gmail.com": "PhilipAD",
+    "zhuhaoyu0909@icloud.com": "underthestars-zhy",
+    "raysun12142006@gmail.com": "yanxue06",
     "alberto.regalado@ymail.com": "ARegalado1",
     "alchemistchaos@protonmail.com": "AlchemistChaos",  # co-author only
     "gilad@smiti.ai": "giladbau",
@@ -58,12 +63,14 @@ AUTHOR_MAP = {
     "thomas.paquette@gmail.com": "RyTsYdUp",
     "techxacm@gmail.com": "ProgramCaiCai",
     "266365592+bmoore210@users.noreply.github.com": "bmoore210",
+    "157839748+psionic73@users.noreply.github.com": "psionic73",
     "manishbyatroy@gmail.com": "manishbyatroy",
     "chilltulpa@gmail.com": "TheGardenGallery",
     "al@randomsnowflake.me": "randomsnowflake",
     "zakame@zakame.net": "zakame",
     "152110621+jiangkoumo@users.noreply.github.com": "jiangkoumo",
     "834740219@qq.com": "ViewWay",
+    "matt@vestigial.dev": "m4dni5",
     "harjoth.khara@gmail.com": "harjothkhara",
     "129007007+HeLLGURD@users.noreply.github.com": "HeLLGURD",
     "290859878+synapsesx@users.noreply.github.com": "synapsesx",
@@ -102,6 +109,7 @@ AUTHOR_MAP = {
     "metalclaudbot@gmail.com": "HashClawAI",
     "tonybear55665566@gmail.com": "TonyPepeBear",
     "kaspersniels@gmail.com": "nielskaspers",
+    "daxxpasquini@gmail.com": "bpasquini",
     "kurobaryo@gmail.com": "kurobaryo",
     "scubamount@users.noreply.github.com": "scubamount",
     "251514042+youngstar-eth@users.noreply.github.com": "youngstar-eth",
@@ -126,6 +134,7 @@ AUTHOR_MAP = {
     "wangpuv@hotmail.com": "wangpuv",
     "202622897+ticketclosed-wontfix@users.noreply.github.com": "ticketclosed-wontfix",
     "wuxuebin1993@gmail.com": "victorGPT",
+    "xiaoxingitee@gmail.com": "xiaoxinova",
     "wei.chen.coder@gmail.com": "wenchengxucool",
     "frowte3k@gmail.com": "Frowtek",
     "211828103+julio-cloudvisor@users.noreply.github.com": "julio-cloudvisor",
@@ -973,6 +982,7 @@ AUTHOR_MAP = {
     "draixagent@gmail.com": "draix",
     "martin.alca@gmail.com": "draix",
     "junminliu@gmail.com": "JimLiu",
+    "juraj@bednar.io": "jooray",
     "jarvischer@gmail.com": "maxchernin",
     "levantam.98.2324@gmail.com": "LVT382009",
     "zhurongcheng@rcrai.com": "heykb",
@@ -1033,6 +1043,7 @@ AUTHOR_MAP = {
     "zhang9w0v5@qq.com": "zhang9w0v5",
     "fuleinist@outlook.com": "fuleinist",
     "43494187+Llugaes@users.noreply.github.com": "Llugaes",
+    "xiangji.chen@centurygame.com": "Llugaes",
     "fengtianyu88@users.noreply.github.com": "fengtianyu88",
     "l.moncany@gmail.com": "lmoncany",
     "fatinghenji@users.noreply.github.com": "fatinghenji",
@@ -1243,6 +1254,7 @@ AUTHOR_MAP = {
     "charliekerfoot@gmail.com": "CharlieKerfoot",  # PR #18951
     # Debug share upload-time redaction (May 2026)
     "dhuysamen@gmail.com": "GodsBoy",  # PR #19318
+    "github@nadyahermes.anonaddy.com": "ruangraung",  # PR #42308
     "mrcoferland@gmail.com": "mrcoferland",  # PR #19023
     "chenlinfeng@ruije.com.cn": "noOne-list",  # PR #19050
     "briansu@Mac-mini.attlocal.net": "likejudy",  # PR #19052
@@ -1471,6 +1483,7 @@ AUTHOR_MAP = {
     # v0.15.0 additions
     "glen@workmanfirearms.com": "sgtworkman",
     "jorge.fuenmayort@gmail.com": "jfuenmayor",
+    "josh.dow@prepad.io": "joshuadow",  # PR #43004 salvage (desktop WS session rebind)
     "mordred@inaugust.com": "emonty",
     "rodrigoeq@hotmail.com": "rodrigoeqnit",
     "soliva.johnpaul@icloud.com": "jonpol01",
@@ -1496,6 +1509,7 @@ AUTHOR_MAP = {
     "singhsanidhya741@gmail.com": "sanidhyasin",  # PR #40403 salvage (model.default_headers for custom OpenAI-compatible providers, #40033)
     "josephjohnson.joel@gmail.com": "JoelJJohnson",  # PR #39913 salvage (Windows ConPTY dashboard chat bridge)
     "andreas@schwarz-ketsch.de": "Nea74",  # PR #40022 co-author credit (same Windows ConPTY bridge design)
+    "chanhokyim@gmail.com": "joel611",  # PR #33958 salvage (DISCORD_ALLOWED_ROLES role_authorized gateway flag)
 }
 
 
