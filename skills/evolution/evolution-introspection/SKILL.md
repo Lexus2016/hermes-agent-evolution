@@ -93,12 +93,29 @@ gh issue list --repo Lexus2016/hermes-agent-evolution --state all --limit 300 \
 
 Then, for EACH selected pattern (`>= 0.7`) that is NOT already filed:
 
+**PII redaction gate — pipe every issue body through the mechanical scrubber
+before `gh issue create`:**
+
+```bash
+BODY="<abstracted body markdown>"
+# scripts/redact_pii.py returns 0=clean 1=blocked (writes redacted text to stdout)
+CLEANED=$(printf '%s' "$BODY" | python3 /path/to/scripts/redact_pii.py)
+if [ $? -ne 0 ]; then
+  echo "BLOCKED by PII gate — issue body contained sensitive data"
+  # Log the block to the cycle report and skip this issue
+  continue
+fi
+BODY="$CLEANED"
+```
+
+Then create:
+
 ```bash
 gh issue create \
   --repo "$REPO" \
   --title "[CAPABILITY] <short, abstracted problem>" \
   --label "enhancement,introspection,capability" \
-  --body "<abstracted body in the format below>"
+  --body "$BODY"
 ```
 
 After creation, verify it appeared:

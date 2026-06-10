@@ -80,12 +80,27 @@ gh label create research-generated --repo "$REPO" --color 1d76db --description "
 
    Then, for EACH selected proposal, run:
 
+**PII redaction gate — pipe every issue body through the mechanical scrubber
+before `gh issue create`:**
+
+```bash
+BODY="<issue body markdown>"
+CLEANED=$(printf '%s' "$BODY" | python3 scripts/redact_pii.py)
+if [ $? -ne 0 ]; then
+  echo "BLOCKED by PII gate — issue body contained sensitive data"
+  continue
+fi
+BODY="$CLEANED"
+```
+
+Then create:
+
 ```bash
 gh issue create \
   --repo "$REPO" \
   --title "[FEATURE] <short title>" \
   --label "enhancement,proposal,research-generated" \
-  --body "<issue body in the format below>"
+  --body "$BODY"
 ```
 
    After creation, **verify that the issue actually appeared** (otherwise do not
