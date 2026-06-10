@@ -26,6 +26,7 @@ Usage
 
 Exit codes: 0 ok, 1 setup error, 2 one or more jobs failed to register.
 """
+
 from __future__ import annotations
 
 import sys
@@ -46,6 +47,20 @@ def _normalize_skills(raw) -> list[str] | None:
     if isinstance(raw, str):
         raw = [raw]
     out = [str(s).strip().replace("/", "-") for s in raw if str(s).strip()]
+    return out or None
+
+
+def _normalize_toolsets(raw) -> list[str] | None:
+    """Expand short toolset names to canonical forms and append `delegation` for bulky jobs."""
+    if not raw:
+        return None
+    if isinstance(raw, str):
+        raw = [raw]
+    out = [str(s).strip() for s in raw if str(s).strip()]
+    # Bulk-heavy evolution stages (research/introspection) benefit from subagent
+    # delegation so large reads do not inflate the main job context.
+    if "delegation" not in out:
+        out.append("delegation")
     return out or None
 
 
@@ -73,7 +88,10 @@ def _install_access_gate(repo_root: Path) -> str | None:
         dest.chmod(0o755)
         return src.name
     except Exception as exc:  # pragma: no cover - environment dependent
-        print(f"[evolution-cron] warning: could not install access gate: {exc}", file=sys.stderr)
+        print(
+            f"[evolution-cron] warning: could not install access gate: {exc}",
+            file=sys.stderr,
+        )
         return None
 
 
@@ -123,9 +141,7 @@ def main(argv: list[str]) -> int:
             continue
 
         skills = _normalize_skills(spec.get("skills"))
-        toolsets = spec.get("toolsets") or None
-        if isinstance(toolsets, str):
-            toolsets = [toolsets]
+        toolsets = _normalize_toolsets(spec.get("toolsets"))
 
         if dry_run:
             created.append((name, "DRY-RUN"))
@@ -138,7 +154,7 @@ def main(argv: list[str]) -> int:
                 schedule=schedule,
                 name=name,
                 skills=skills,
-                enabled_toolsets=list(toolsets) if toolsets else None,
+                enabled_toolsets=toolsets,
                 deliver="local",
             )
             if gate_script:
