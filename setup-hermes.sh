@@ -541,8 +541,15 @@ if [ "${HERMES_NO_TQMEMORY:-0}" != "1" ] && command -v uv >/dev/null 2>&1; then
         # shows "enabled". 'yes |' answers the non-interactive "enable all tools"
         # prompt so the add actually completes.
         if ! "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.main mcp list 2>/dev/null | grep -qi "tqmemory"; then
+            # TQMEMORY_MIGRATE_ON_STARTUP=1: when auto-update bumps the tqmemory
+            # binary to a version with a pending schema migration, the next
+            # daemon start applies it (taking a rolling snapshot first) instead
+            # of silently serving a stale schema or dead-locking on 'migrate
+            # --apply'. Without this, 'uv tool upgrade' updates the code but
+            # leaves the storage un-migrated.
             yes | "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.main mcp add tqmemory \
-                --command "$TQM_PATH" --args serve >/dev/null 2>&1 || true
+                --command "$TQM_PATH" --args serve \
+                --env TQMEMORY_MIGRATE_ON_STARTUP=1 >/dev/null 2>&1 || true
         fi
         echo "🧠 Turbo-Quant Memory ready for evolution introspection (opt out: HERMES_NO_TQMEMORY=1)."
     else
