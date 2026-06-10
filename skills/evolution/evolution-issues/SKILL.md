@@ -84,8 +84,22 @@ gh label create research-generated --repo "$REPO" --color 1d76db --description "
 before `gh issue create`:**
 
 ```bash
+# Locate the scrubber once (FAIL-CLOSED: if it cannot be found, do NOT
+# publish anything — a privacy gate that silently skips is no gate).
+RPII=""
+for c in "${HERMES_INSTALL_DIR:-}/scripts/redact_pii.py" \
+         /usr/local/lib/hermes-agent/scripts/redact_pii.py \
+         "$(git rev-parse --show-toplevel 2>/dev/null)/scripts/redact_pii.py" \
+         scripts/redact_pii.py; do
+  if [ -f "$c" ]; then RPII="$c"; break; fi
+done
+if [ -z "$RPII" ]; then
+  echo "HARD STOP: redact_pii.py not found — refusing to publish unredacted text"
+  exit 1
+fi
+
 BODY="<issue body markdown>"
-CLEANED=$(printf '%s' "$BODY" | python3 scripts/redact_pii.py)
+CLEANED=$(printf '%s' "$BODY" | python3 "$RPII")
 if [ $? -ne 0 ]; then
   echo "BLOCKED by PII gate — issue body contained sensitive data"
   continue
