@@ -111,10 +111,24 @@ class TestJobsHealth:
         assert "26h" in alerts[0] or "stale" in alerts[0]
 
     def test_never_ran_alerts(self, tmp_path):
-        p = self._jobs_file(tmp_path, [self._job(last_run_at=None, last_status=None)])
+        old_created = (NOW - timedelta(days=5)).isoformat()
+        p = self._jobs_file(
+            tmp_path,
+            [self._job(last_run_at=None, last_status=None, created_at=old_created)],
+        )
         alerts = check_jobs(p, NOW)
         assert len(alerts) == 1
         assert "never" in alerts[0]
+
+    def test_freshly_registered_never_ran_is_quiet(self, tmp_path):
+        # Re-registration wipes run history; a job younger than its cadence
+        # window must not alert (its first slot simply hasn't come yet).
+        fresh_created = (NOW - timedelta(hours=5)).isoformat()
+        p = self._jobs_file(
+            tmp_path,
+            [self._job(last_run_at=None, last_status=None, created_at=fresh_created)],
+        )
+        assert check_jobs(p, NOW) == []
 
     def test_non_evolution_jobs_ignored(self, tmp_path):
         p = self._jobs_file(
