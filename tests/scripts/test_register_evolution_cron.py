@@ -132,3 +132,36 @@ class TestNoAgentJobs:
 
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
         assert rc == 2  # registration failure reported
+
+    def test_existing_no_agent_job_still_refreshes_script(self, tmp_path, monkeypatch):
+        """`hermes update` refreshes the repo, but the scheduler executes the
+        copy in HERMES_HOME/scripts — re-running the registrar must refresh
+        that copy even when the job itself is already registered."""
+        mod = _import_module()
+        src_dir = tmp_path / "cron-src"
+        src_dir.mkdir()
+        self._write_watchdog_yaml(src_dir)
+        home = tmp_path / "hermes-home"
+        (home / "scripts").mkdir(parents=True)
+        # Stale installed copy from a previous registration.
+        stale = home / "scripts" / "evolution_watchdog.py"
+        stale.write_text("# stale old version\n")
+        monkeypatch.setenv("HERMES_HOME", str(home))
+
+        import cron.jobs as jobs_mod
+
+        # Job already registered — create_job must NOT be called.
+        monkeypatch.setattr(
+            jobs_mod, "load_jobs", lambda: [{"name": "evolution-watchdog"}]
+        )
+        monkeypatch.setattr(
+            jobs_mod,
+            "create_job",
+            lambda **kw: (_ for _ in ()).throw(AssertionError("must not create")),
+        )
+
+        rc = mod.main(["register_evolution_cron.py", str(src_dir)])
+
+        assert rc == 0
+        refreshed = stale.read_text()
+        assert "stale old version" not in refreshed  # real script copied over

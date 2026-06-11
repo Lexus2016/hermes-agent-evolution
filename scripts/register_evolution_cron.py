@@ -138,6 +138,16 @@ def main(argv: list[str]) -> int:
             continue
 
         name = str(spec.get("name") or yaml_file.stem).strip()
+
+        # Refresh installed no_agent scripts on EVERY run — including for
+        # already-registered jobs — mirroring the access gate above:
+        # `hermes update` refreshes the repo checkout, but the scheduler
+        # executes the copy in HERMES_HOME/scripts; without this refresh the
+        # installed script stays frozen at whatever version existed when the
+        # job was first registered.
+        if spec.get("no_agent") and str(spec.get("script") or "").strip() and not dry_run:
+            _install_script(repo_root, str(spec["script"]).strip())
+
         if name in existing_names:
             skipped.append(name)
             continue
