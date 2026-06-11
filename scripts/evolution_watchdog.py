@@ -128,6 +128,11 @@ def check_jobs(jobs_file: Path, now: datetime) -> List[str]:
         stale_hours = WEEKLY_STALE_HOURS if name in WEEKLY_JOBS else DAILY_STALE_HOURS
         last_run = _parse_iso(job.get("last_run_at"))
         if last_run is None:
+            created = _parse_iso(job.get("created_at"))
+            if created is not None and now - created <= timedelta(hours=stale_hours):
+                # Freshly (re)registered job — its first slot hasn't come yet.
+                # Re-registration wipes run history; alerting here is noise.
+                continue
             alerts.append(f"job '{name}': has never recorded a run")
         elif now - last_run > timedelta(hours=stale_hours):
             alerts.append(
