@@ -64,19 +64,15 @@ def _normalize_toolsets(raw) -> list[str] | None:
     return out or None
 
 
-def _install_access_gate(repo_root: Path) -> str | None:
-    """Copy the GitHub access wake-gate into HERMES_HOME/scripts so cron runs it
-    as a pre-check before each evolution job. Returns the script name to attach
-    to every job, or None on failure (jobs are still created, just ungated).
-
-    The gate prints ``{"wakeAgent": false}`` when GitHub is unreachable, which
-    makes the scheduler SKIP the LLM agent entirely — no tokens / web-search
-    spent when the cycle has no outlet to post issues/PRs.
+def _install_script(repo_root: Path, filename: str) -> str | None:
+    """Copy a repo script into HERMES_HOME/scripts (the only place the cron
+    scheduler is allowed to execute scripts from). Returns the script name on
+    success, None on failure.
     """
     import os
     import shutil
 
-    src = repo_root / "scripts" / "evolution_access_gate.sh"
+    src = repo_root / "scripts" / filename
     if not src.is_file():
         return None
     home = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
@@ -89,10 +85,22 @@ def _install_access_gate(repo_root: Path) -> str | None:
         return src.name
     except Exception as exc:  # pragma: no cover - environment dependent
         print(
-            f"[evolution-cron] warning: could not install access gate: {exc}",
+            f"[evolution-cron] warning: could not install script {filename}: {exc}",
             file=sys.stderr,
         )
         return None
+
+
+def _install_access_gate(repo_root: Path) -> str | None:
+    """Copy the GitHub access wake-gate into HERMES_HOME/scripts so cron runs it
+    as a pre-check before each evolution job. Returns the script name to attach
+    to every job, or None on failure (jobs are still created, just ungated).
+
+    The gate prints ``{"wakeAgent": false}`` when GitHub is unreachable, which
+    makes the scheduler SKIP the LLM agent entirely — no tokens / web-search
+    spent when the cycle has no outlet to post issues/PRs.
+    """
+    return _install_script(repo_root, "evolution_access_gate.sh")
 
 
 def main(argv: list[str]) -> int:
@@ -136,12 +144,17 @@ def main(argv: list[str]) -> int:
 
         schedule = str(spec.get("schedule") or "").strip()
         prompt = spec.get("prompt") or ""
-        if not schedule or not str(prompt).strip():
+        no_agent = bool(spec.get("no_agent"))
+        if not schedule or (not str(prompt).strip() and not no_agent):
             failed.append((name, "missing required 'schedule' or 'prompt'"))
+            continue
+        if no_agent and not str(spec.get("script") or "").strip():
+            failed.append((name, "no_agent job requires a 'script'"))
             continue
 
         skills = _normalize_skills(spec.get("skills"))
         toolsets = _normalize_toolsets(spec.get("toolsets"))
+        deliver = str(spec.get("deliver") or "local").strip()
 
         if dry_run:
             created.append((name, "DRY-RUN"))
@@ -149,13 +162,34 @@ def main(argv: list[str]) -> int:
             continue
 
         try:
+            if no_agent:
+                # Deterministic script job — no LLM agent at all. The script
+                # itself IS the job; its stdout is delivered (empty = silent).
+                script_name = str(spec["script"]).strip()
+                installed = _install_script(repo_root, script_name)
+                if not installed:
+                    failed.append((name, f"could not install script {script_name}"))
+                    continue
+                create_kwargs = dict(
+                    prompt=str(prompt) or name,
+                    schedule=schedule,
+                    name=name,
+                    deliver=deliver,
+                    no_agent=True,
+                    script=installed,
+                )
+                job = create_job(**create_kwargs)
+                created.append((name, job["id"]))
+                existing_names.add(name)
+                continue
+
             create_kwargs = dict(
                 prompt=str(prompt),
                 schedule=schedule,
                 name=name,
                 skills=skills,
                 enabled_toolsets=toolsets,
-                deliver="local",
+                deliver=deliver,
             )
             if gate_script:
                 # Pre-check script: skips the agent (no LLM/web spend) when

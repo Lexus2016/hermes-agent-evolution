@@ -1,0 +1,22 @@
+name: evolution-watchdog
+# 07:47 daily — by then EVERY stage of yesterday's chain (research 09:00 …
+# integration 23:00) is past its slot + grace, so one morning run audits the
+# complete previous cycle. Deliberately off the :00/:30 marks.
+schedule: "47 7 * * *"
+enabled: true
+mode: PUBLIC
+
+# Deterministic health check — NO LLM agent. The script is the job.
+# Empty stdout = healthy = silent run (nothing delivered); any anomaly text
+# is delivered to the owner's configured home channels.
+no_agent: true
+script: evolution_watchdog.py
+
+# "all" = every platform with a configured *_HOME_CHANNEL env var.
+# Installations without home channels simply keep the report on disk.
+deliver: all
+
+prompt: |
+  Deterministic evolution pipeline health check (no LLM). Verifies stage
+  reports for the last cycle, cron job health, and GitHub access.
+  See scripts/evolution_watchdog.py (issue 83).
