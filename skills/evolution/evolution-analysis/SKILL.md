@@ -41,10 +41,18 @@ gh issue view <N> --repo Lexus2016/hermes-agent-evolution --json body,comments
 
 1a. **Input freshness — verify before consuming (gate against stale state).**
    If you read any prior-stage artifact (a previous analysis JSON, an
-   implementation report), check its `date` field matches the CURRENT cycle.
-   A stale file means the upstream stage failed or was gated — record
-   `"stale_input": true` in your report and work from live GitHub data only;
-   never silently act on yesterday's selection.
+   implementation report, a research/introspection report), check its `date`
+   field against that stage's MOST RECENT SCHEDULED SLOT — not against the
+   calendar day. An artifact is FRESH if it was produced at or after the
+   last slot that stage was supposed to run. Example: introspection runs
+   daily at 20:00; when you run at 10:30 today, yesterday's 20:05 report IS
+   fresh (today's 20:00 slot hasn't happened yet). Flag `"stale_input": true`
+   ONLY when an upstream artifact MISSED its latest scheduled slot — that
+   means the stage failed or was gated. In that case work from live GitHub
+   data; never silently act on a genuinely outdated selection.
+   NOTE: `stale_input` hard-stops the downstream implementation stage —
+   a false positive here silently kills the whole day's cycle, so judge
+   by SLOTS, not by dates.
 
 2. **Rework first — `needs-work` issues are PRIORITY, not rejects.** An issue
    labelled `needs-work` was ALREADY judged worth doing and attempted; a PR
@@ -65,6 +73,14 @@ gh issue view <N> --repo Lexus2016/hermes-agent-evolution --json body,comments
      ```bash
      grep -rni "<key term from the issue>" --include=*.py . | head
      ```
+     **Evidence rule (hard requirement).** An `already-exists` rejection is
+     valid ONLY with executable evidence: the `reason` MUST contain the exact
+     file path you verified AND you MUST have confirmed it in THIS session
+     with a real command (`ls <path>` / `grep` whose output you saw). If your
+     grep/ls returned nothing, the capability does NOT exist — do not reject.
+     Never cite a file from memory or plausibility: a fabricated path here
+     destructively closes a wanted issue (it happened: #83 was closed citing
+     a `scripts/evolution_watchdog.sh` that never existed; see #101).
    - **Out of scope / not needed** — it doesn't serve a real user task or the
      project's purpose; speculative "nice to have" with no concrete need.
    - **Harmful** — it would add risk, heavy dependencies, scope creep, a
