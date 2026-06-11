@@ -149,7 +149,13 @@ _LEGACY_HOME_TARGET_ENV_VARS = {
     "QQBOT_HOME_CHANNEL": "QQ_HOME_CHANNEL",
 }
 
-from cron.jobs import get_due_jobs, mark_job_run, save_job_output, advance_next_run
+from cron.jobs import (
+    get_due_jobs,
+    mark_job_run,
+    mark_job_started,
+    save_job_output,
+    advance_next_run,
+)
 
 # Sentinel: when a cron agent has nothing new to report, it can start its
 # response with this marker to suppress delivery.  Output is still saved
@@ -2132,6 +2138,10 @@ def tick(verbose: bool = True, adapters=None, loop=None, sync: bool = True) -> i
         def _process_job(job: dict) -> bool:
             """Run one due job end-to-end: execute, save, deliver, mark."""
             try:
+                # Durable in-flight marker (issue 105): if the gateway dies
+                # while this job runs, recover_interrupted_jobs() makes the
+                # loss visible (and re-fires recent ones) on next startup.
+                mark_job_started(job["id"])
                 success, output, final_response, error = run_job(job)
 
                 output_file = save_job_output(job["id"], output)

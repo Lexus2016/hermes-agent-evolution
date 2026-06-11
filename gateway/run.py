@@ -15434,6 +15434,18 @@ def _start_cron_ticker(stop_event: threading.Event, adapters=None, loop=None, in
     from gateway.platforms.base import cleanup_image_cache, cleanup_document_cache
     from hermes_cli.debug import _sweep_expired_pastes
 
+    # Recover jobs that were in-flight when the previous gateway process died
+    # (issue 105). Must run ONCE, before the first tick: nothing is running
+    # in THIS process yet, so every persisted 'running' marker is stale.
+    try:
+        from cron.jobs import recover_interrupted_jobs
+
+        _recovered = recover_interrupted_jobs()
+        for _desc in _recovered:
+            logger.warning("cron: recovered interrupted job: %s", _desc)
+    except Exception:
+        logger.exception("cron: interrupted-job recovery failed (non-fatal)")
+
     IMAGE_CACHE_EVERY = 60   # ticks — once per hour at default 60s interval
     CHANNEL_DIR_EVERY = 5    # ticks — every 5 minutes
     PASTE_SWEEP_EVERY = 60   # ticks — once per hour
