@@ -8,9 +8,12 @@ on:
       - 'docs/**'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
+    # NO paths-ignore here (issue #108): branch protection REQUIRES the
+    # `test (1..6)` statuses, and a workflow filtered out by paths-ignore
+    # reports nothing at all — markdown-only PRs then sit BLOCKED forever.
+    # Instead the `changes` job below detects docs-only diffs and the test
+    # jobs SKIP themselves: a skipped check run satisfies required status
+    # checks, a missing one does not.
 
 permissions:
   contents: read
@@ -21,7 +24,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Detect docs/markdown-only PRs so the heavy jobs can skip themselves
+  # while still REPORTING a (skipped) check run — required status checks
+  # are satisfied by skipped runs but permanently blocked by absent ones
+  # (issue #108). This job must be infallible: any uncertainty falls back
+  # to docs_only=false (i.e. run the tests — fail-safe direction).
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.filter.outputs.docs_only }}
+    steps:
+      - name: Classify changed files via API
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          DOCS_ONLY=false
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            FILES=$(gh api \
+              "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+              --paginate --jq '.[].filename' 2>/dev/null)
+            if [ -n "$FILES" ]; then
+              DOCS_ONLY=true
+              while IFS= read -r f; do
+                case "$f" in
+                  *.md|docs/*) ;;
+                  *) DOCS_ONLY=false; break ;;
+                esac
+              done <<< "$FILES"
+            fi
+          fi
+          echo "docs_only=$DOCS_ONLY" >> "$GITHUB_OUTPUT"
+          echo "docs_only=$DOCS_ONLY"
+          exit 0
+
   test:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -155,6 +196,8 @@ jobs:
           key: test-durations
 
   e2e:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
