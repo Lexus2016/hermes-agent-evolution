@@ -62,7 +62,12 @@ jobs:
 
   test:
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    # NOTE: no job-level `if` here. A skipped matrix job reports a single
+    # check run named 'test' (the matrix is never expanded), so the required
+    # 'test (1..6)' contexts would still be missing and the PR stays BLOCKED.
+    # Instead the job always runs (matrix expands, all six check runs exist)
+    # and every STEP below skips on docs-only PRs — each run completes
+    # successfully in seconds.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -71,9 +76,11 @@ jobs:
         slice: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Checkout code
+        if: needs.changes.outputs.docs_only != 'true'
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
 
       - name: Restore duration cache
+        if: needs.changes.outputs.docs_only != 'true'
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
           path: test_durations.json
@@ -81,6 +88,7 @@ jobs:
           key: test-durations
 
       - name: Install ripgrep (prebuilt binary)
+        if: needs.changes.outputs.docs_only != 'true'
         run: |
           set -euo pipefail
           RG_VERSION=15.1.0
@@ -95,6 +103,7 @@ jobs:
           rg --version
 
       - name: Install uv
+        if: needs.changes.outputs.docs_only != 'true'
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
         with:
           # Persist uv's download/wheel cache (~/.cache/uv) across runs.
@@ -108,9 +117,11 @@ jobs:
             uv.lock
 
       - name: Set up Python 3.11
+        if: needs.changes.outputs.docs_only != 'true'
         run: uv python install 3.11
 
       - name: Install dependencies
+        if: needs.changes.outputs.docs_only != 'true'
         # `uv sync --locked` installs the exact pinned set from uv.lock (and
         # fails if the lock is out of sync with pyproject.toml), giving a
         # reproducible env. It also creates .venv itself, so no separate
@@ -118,11 +129,13 @@ jobs:
         run: uv sync --locked --python 3.11 --extra all --extra dev
 
       - name: Minimize uv cache
+        if: needs.changes.outputs.docs_only != 'true'
         # Optimized for CI: prunes pre-built wheels that are cheap to
         # re-download, keeping the persisted cache small and fast to restore.
         run: uv cache prune --ci
 
       - name: Run tests (slice ${{ matrix.slice }}/6)
+        if: needs.changes.outputs.docs_only != 'true'
         # Per-file isolation via scripts/run_tests_parallel.py: discovers
         # every test_*.py file under tests/ (excluding integration/ + e2e/),
         # then runs `python -m pytest <file>` in a freshly-spawned subprocess
@@ -156,6 +169,7 @@ jobs:
           NOUS_API_KEY: ""
 
       - name: Upload per-slice durations
+        if: needs.changes.outputs.docs_only != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: test-durations-slice-${{ matrix.slice }}
