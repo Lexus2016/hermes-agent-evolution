@@ -62,3 +62,73 @@ class TestNormalizeSkills:
             "evolution-research",
             "evolution-analysis",
         ]
+
+
+class TestNoAgentJobs:
+    """no_agent yaml jobs (e.g. the watchdog) register as script-only cron
+    jobs: the script is installed into HERMES_HOME/scripts, no LLM agent and
+    no access-gate pre-check are attached."""
+
+    def _write_watchdog_yaml(self, src_dir):
+        (src_dir / "watchdog.yaml").write_text(
+            "name: evolution-watchdog\n"
+            'schedule: "47 7 * * *"\n'
+            "enabled: true\n"
+            "no_agent: true\n"
+            "script: evolution_watchdog.py\n"
+            "deliver: all\n"
+            'prompt: "health check"\n'
+        )
+
+    def test_no_agent_job_registered_with_script(self, tmp_path, monkeypatch):
+        mod = _import_module()
+        src_dir = tmp_path / "cron-src"
+        src_dir.mkdir()
+        self._write_watchdog_yaml(src_dir)
+        home = tmp_path / "hermes-home"
+        home.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(home))
+
+        captured = {}
+
+        def fake_create_job(**kwargs):
+            captured.update(kwargs)
+            return {"id": "wd123", "name": kwargs["name"]}
+
+        import cron.jobs as jobs_mod
+
+        monkeypatch.setattr(jobs_mod, "create_job", fake_create_job)
+        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+
+        rc = mod.main(["register_evolution_cron.py", str(src_dir)])
+
+        assert rc == 0
+        assert captured["no_agent"] is True
+        assert captured["script"] == "evolution_watchdog.py"
+        assert captured["deliver"] == "all"
+        # The real watchdog script must have been installed into HERMES_HOME.
+        assert (home / "scripts" / "evolution_watchdog.py").is_file()
+        # No gate / skills / toolsets attached to a script-only job.
+        assert "skills" not in captured
+        assert "enabled_toolsets" not in captured
+
+    def test_no_agent_without_script_fails(self, tmp_path, monkeypatch):
+        mod = _import_module()
+        src_dir = tmp_path / "cron-src"
+        src_dir.mkdir()
+        (src_dir / "bad.yaml").write_text(
+            "name: evolution-bad\n"
+            'schedule: "0 9 * * *"\n'
+            "no_agent: true\n"
+            'prompt: "x"\n'
+        )
+        home = tmp_path / "hermes-home"
+        home.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(home))
+
+        import cron.jobs as jobs_mod
+
+        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+
+        rc = mod.main(["register_evolution_cron.py", str(src_dir)])
+        assert rc == 2  # registration failure reported
