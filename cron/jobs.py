@@ -1009,6 +1009,84 @@ def advance_next_run(job_id: str) -> bool:
         return False
 
 
+def mark_job_started(job_id: str) -> None:
+    """Record that a job's execution has begun (interrupted-run forensics).
+
+    Leaves a durable ``state="running"`` + ``run_started_at`` marker in
+    jobs.json. ``mark_job_run()`` clears it on completion (it sets state to
+    scheduled/completed/error). If the gateway dies mid-run — a routine
+    planned restart is enough — the marker survives on disk, and
+    ``recover_interrupted_jobs()`` turns it into a visible ``interrupted``
+    record on the next startup instead of the run silently vanishing
+    (issue 105: the 2026-06-10 nightly cycle was lost exactly this way).
+    """
+    with _jobs_file_lock:
+        jobs = load_jobs()
+        for job in jobs:
+            if job["id"] == job_id:
+                job["state"] = "running"
+                job["run_started_at"] = _hermes_now().isoformat()
+                save_jobs(jobs)
+                return
+        logger.warning("mark_job_started: job_id %s not found", job_id)
+
+
+def recover_interrupted_jobs(max_refire_age_hours: float = 6.0) -> List[str]:
+    """Turn stale ``running`` markers into visible interrupted records.
+
+    Call ONCE at gateway startup, BEFORE the first scheduler tick: this
+    process has not started any job yet, so every job still marked
+    ``running`` was killed mid-run by the previous process's death.
+
+    For each such job: record ``last_status="interrupted"`` with an
+    explanatory ``last_error``, restore ``state="scheduled"``, and — when
+    the interruption is recent (within ``max_refire_age_hours``) — re-fire
+    once by pulling ``next_run_at`` to now. The bounded re-fire window
+    preserves the at-most-once / anti-crash-loop semantics of
+    ``advance_next_run()``: an old marker just waits for its normal slot.
+
+    Returns human-readable descriptions of recovered jobs (for logging).
+
+    Do NOT call this from CLI ``cron tick`` paths — a tick alongside a live
+    gateway would misread that gateway's in-flight jobs as interrupted.
+    """
+    recovered: List[str] = []
+    with _jobs_file_lock:
+        jobs = load_jobs()
+        now = _hermes_now()
+        changed = False
+        for job in jobs:
+            if job.get("state") != "running":
+                continue
+            started_raw = job.get("run_started_at")
+            started = None
+            try:
+                started = datetime.fromisoformat(str(started_raw))
+            except (TypeError, ValueError):
+                pass
+
+            job["state"] = "scheduled"
+            job["last_status"] = "interrupted"
+            job["last_error"] = (
+                "interrupted: the gateway restarted while this job was running "
+                f"(started {started_raw or 'unknown'})"
+            )
+            refired = False
+            if started is not None and (now - started) <= timedelta(
+                hours=max_refire_age_hours
+            ):
+                job["next_run_at"] = now.isoformat()
+                refired = True
+            changed = True
+            recovered.append(
+                f"{job.get('name', job['id'])}"
+                + (" (re-fired)" if refired else " (waits for its normal slot)")
+            )
+        if changed:
+            save_jobs(jobs)
+    return recovered
+
+
 def get_due_jobs() -> List[Dict[str, Any]]:
     """Get all jobs that are due to run now.
 
