@@ -193,7 +193,18 @@ def main() -> int:
         )
     )
     jobs_file = hermes_home / "cron" / "jobs.json"
-    now = datetime.now()
+    # Stage reports are dated in Hermes' CONFIGURED timezone (hermes_time.now),
+    # which may differ from the server's local zone — around midnight a naive
+    # datetime.now() would then look for the wrong report date. The scheduler
+    # runs this script from HERMES_HOME/scripts (outside the repo's sys.path),
+    # so hermes_time may not be importable — fall back to server-local wall
+    # time, which is identical whenever no explicit timezone is configured.
+    try:
+        from hermes_time import now as _hermes_now
+
+        now = _hermes_now().replace(tzinfo=None)
+    except ImportError:
+        now = datetime.now()
 
     alerts: List[str] = []
     alerts += check_stage_reports(evolution_dir, now)
