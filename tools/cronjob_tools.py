@@ -110,8 +110,11 @@ _CRON_INVISIBLE_CHARS = {
 
 # U+200D Zero-Width Joiner is also a legitimate, required part of many
 # Unicode emoji sequences (for example 👨‍👩‍👧, 🏳️‍🌈, ❤️‍🩹, 🧑‍💻).
-# We should still block ZWJ when it is hiding between plain text characters,
-# but not when it is clearly part of an emoji grapheme cluster.
+# It is also used in some multilingual scripts (e.g. Arabic, Devanagari,
+# Cyrillic formatting) to control ligature/joining behavior.
+# We should still block ZWJ when it is hiding between plain text characters
+# (Latin, digits, punctuation), but not when it is clearly part of an emoji
+# grapheme cluster or between letters from a script that legitimately uses ZWJ.
 _EMOJI_NEIGHBOUR_CP_RANGES = (
     (0x1F000, 0x1FFFF),
     (0x2600, 0x27BF),
@@ -124,6 +127,126 @@ _VARIATION_SELECTOR_CP = 0xFE0F
 
 def _is_emoji_cp(cp: int) -> bool:
     return any(lo <= cp <= hi for lo, hi in _EMOJI_NEIGHBOUR_CP_RANGES)
+
+
+def _is_script_using_zwj(cp: int) -> bool:
+    """Return True for codepoints from scripts that legitimately use ZWJ."""
+    # Arabic (U+0600–U+06FF, U+0750–U+077F, U+08A0–U+08FF, U+FB50–U+FDFF, U+FE70–U+FEFF)
+    if 0x0600 <= cp <= 0x06FF:
+        return True
+    if 0x0750 <= cp <= 0x077F:
+        return True
+    if 0x08A0 <= cp <= 0x08FF:
+        return True
+    if 0xFB50 <= cp <= 0xFDFF:
+        return True
+    if 0xFE70 <= cp <= 0xFEFF:
+        return True
+    # Devanagari (U+0900–U+097F)
+    if 0x0900 <= cp <= 0x097F:
+        return True
+    # Bengali (U+0980–U+09FF)
+    if 0x0980 <= cp <= 0x09FF:
+        return True
+    # Gurmukhi (U+0A00–U+0A7F)
+    if 0x0A00 <= cp <= 0x0A7F:
+        return True
+    # Gujarati (U+0A80–U+0AFF)
+    if 0x0A80 <= cp <= 0x0AFF:
+        return True
+    # Oriya (U+0B00–U+0B7F)
+    if 0x0B00 <= cp <= 0x0B7F:
+        return True
+    # Tamil (U+0B80–U+0BFF)
+    if 0x0B80 <= cp <= 0x0BFF:
+        return True
+    # Telugu (U+0C00–U+0C7F)
+    if 0x0C00 <= cp <= 0x0C7F:
+        return True
+    # Kannada (U+0C80–U+0CFF)
+    if 0x0C80 <= cp <= 0x0CFF:
+        return True
+    # Malayalam (U+0D00–U+0D7F)
+    if 0x0D00 <= cp <= 0x0D7F:
+        return True
+    # Sinhala (U+0D80–U+0DFF)
+    if 0x0D80 <= cp <= 0x0DFF:
+        return True
+    # Hebrew (U+0590–U+05FF)
+    if 0x0590 <= cp <= 0x05FF:
+        return True
+    # Syriac (U+0700–U+074F)
+    if 0x0700 <= cp <= 0x074F:
+        return True
+    # Thaana (U+0780–U+07BF)
+    if 0x0780 <= cp <= 0x07BF:
+        return True
+    # Myanmar (U+1000–U+109F)
+    if 0x1000 <= cp <= 0x109F:
+        return True
+    # Khmer (U+1780–U+17FF)
+    if 0x1780 <= cp <= 0x17FF:
+        return True
+    # Tibetan (U+0F00–U+0FFF)
+    if 0x0F00 <= cp <= 0x0FFF:
+        return True
+    # Georgian (U+10A0–U+10FF, U+2D00–U+2D2F)
+    if 0x10A0 <= cp <= 0x10FF:
+        return True
+    if 0x2D00 <= cp <= 0x2D2F:
+        return True
+    # Ethiopic (U+1200–U+137F)
+    if 0x1200 <= cp <= 0x137F:
+        return True
+    # Cherokee (U+13A0–U+13FF)
+    if 0x13A0 <= cp <= 0x13FF:
+        return True
+    # Canadian Aboriginal (U+1400–U+167F)
+    if 0x1400 <= cp <= 0x167F:
+        return True
+    # Mongolian (U+1800–U+18AF)
+    if 0x1800 <= cp <= 0x18AF:
+        return True
+    # Limbu (U+1900–U+194F)
+    if 0x1900 <= cp <= 0x194F:
+        return True
+    # Tai Le (U+1950–U+197F)
+    if 0x1950 <= cp <= 0x197F:
+        return True
+    # New Tai Lue (U+1980–U+19DF)
+    if 0x1980 <= cp <= 0x19DF:
+        return True
+    # Buginese (U+1A00–U+1A1F)
+    if 0x1A00 <= cp <= 0x1A1F:
+        return True
+    # Tai Tham (U+1A20–U+1AAF)
+    if 0x1A20 <= cp <= 0x1AAF:
+        return True
+    # Balinese (U+1B00–U+1B7F)
+    if 0x1B00 <= cp <= 0x1B7F:
+        return True
+    # Sundanese (U+1B80–U+1BBF)
+    if 0x1B80 <= cp <= 0x1BBF:
+        return True
+    # Batak (U+1BC0–U+1BFF)
+    if 0x1BC0 <= cp <= 0x1BFF:
+        return True
+    # Lepcha (U+1C00–U+1C4F)
+    if 0x1C00 <= cp <= 0x1C4F:
+        return True
+    # Ol Chiki (U+1C50–U+1C7F)
+    if 0x1C50 <= cp <= 0x1C7F:
+        return True
+    # Cyrillic (U+0400–U+04FF, U+0500–U+052F, U+2DE0–U+2DFF, U+A640–U+A69F)
+    if 0x0400 <= cp <= 0x04FF:
+        return True
+    if 0x0500 <= cp <= 0x052F:
+        return True
+    if 0x2DE0 <= cp <= 0x2DFF:
+        return True
+    if 0xA640 <= cp <= 0xA69F:
+        return True
+    return False
 
 
 def _zwj_has_emoji_neighbour(text: str, idx: int) -> bool:
@@ -141,12 +264,26 @@ def _zwj_has_emoji_neighbour(text: str, idx: int) -> bool:
     )
 
 
+def _zwj_has_script_neighbour(text: str, idx: int) -> bool:
+    """Return True when the ZWJ at text[idx] sits between letters from
+    scripts that legitimately use ZWJ for joining/ligature control."""
+    left = idx - 1
+    while left >= 0 and ord(text[left]) == _VARIATION_SELECTOR_CP:
+        left -= 1
+    right = idx + 1
+    while right < len(text) and ord(text[right]) == _VARIATION_SELECTOR_CP:
+        right += 1
+    if left < 0 or right >= len(text):
+        return False
+    return _is_script_using_zwj(ord(text[left])) and _is_script_using_zwj(ord(text[right]))
+
+
 def _strip_legitimate_emoji_zwj(prompt: str) -> str:
     if '\u200d' not in prompt:
         return prompt
     cleaned: list[str] = []
     for idx, ch in enumerate(prompt):
-        if ch == '\u200d' and _zwj_has_emoji_neighbour(prompt, idx):
+        if ch == '\u200d' and (_zwj_has_emoji_neighbour(prompt, idx) or _zwj_has_script_neighbour(prompt, idx)):
             continue
         cleaned.append(ch)
     return ''.join(cleaned)
@@ -183,7 +320,8 @@ def _check_invisible_unicode(prompt: str) -> str:
 
 def _strip_invisible_unicode(prompt: str) -> tuple[str, list[str]]:
     """Strip invisible-unicode characters from *prompt*, preserving the ZWJ
-    that lives inside legitimate emoji sequences.
+    that lives inside legitimate emoji sequences OR between letters from
+    scripts that legitimately use ZWJ (Arabic, Devanagari, Cyrillic, etc.).
 
     Returns ``(cleaned_prompt, removed_codepoints)`` where ``removed_codepoints``
     is the sorted list of ``U+XXXX`` labels that were stripped (empty when the
@@ -194,15 +332,12 @@ def _strip_invisible_unicode(prompt: str) -> tuple[str, list[str]]:
     """
     if not prompt:
         return prompt, []
-    # Keep emoji-ZWJ: temporarily remove the legitimate joiners, scan/strip the
-    # rest, then the legitimate joiners survive because we operate on the
-    # original string and only drop chars that are NOT part of an emoji cluster.
     removed: set[str] = set()
     cleaned: list[str] = []
     for idx, ch in enumerate(prompt):
         if ch in _CRON_INVISIBLE_CHARS:
-            if ch == '\u200d' and _zwj_has_emoji_neighbour(prompt, idx):
-                cleaned.append(ch)  # legitimate emoji joiner — keep
+            if ch == '\u200d' and (_zwj_has_emoji_neighbour(prompt, idx) or _zwj_has_script_neighbour(prompt, idx)):
+                cleaned.append(ch)  # legitimate ZWJ — keep
                 continue
             removed.add(f"U+{ord(ch):04X}")
             continue
