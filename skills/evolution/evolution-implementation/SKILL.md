@@ -60,18 +60,49 @@ Implement selected issues, create versions, and self-update.
      ```
      If it already exists → SKIP, comment on the issue, and close it.
    - **Is it still worth it?** If, now that you look at the actual code, the
-     change is out of scope, harmful, much bigger than estimated, or not really
-     needed → SKIP and close the issue with a clear reason. Do NOT force a weak
-     change just because it was selected. Shipping the wrong code is worse than
-     shipping nothing.
+     change is out of scope, harmful, or not really needed → SKIP and close the
+     issue with a clear reason. Do NOT force a weak change just because it was
+     selected. Shipping the wrong code is worse than shipping nothing.
    ```bash
    gh label create rejected --color b60205 \
      --description "Not accepted by evolution — see closing comment" 2>/dev/null || true
    gh issue edit <N> --repo Lexus2016/hermes-agent-evolution \
      --add-label rejected --remove-label needs-work 2>/dev/null || true
    gh issue close <N> --repo Lexus2016/hermes-agent-evolution \
-     --comment "Skipped at implementation: <already-exists|out-of-scope|harmful|too-large> — <reason>."
+     --comment "Skipped at implementation: <already-exists|out-of-scope|harmful> — <reason>."
    ```
+
+2a. **Closure policy — close ONLY what the project decided AGAINST.**
+   `closed + rejected` is a TERMINAL verdict: the dedup machinery will treat
+   the idea as "turned down" forever and silently drop every future
+   re-proposal of it. Therefore:
+   - **Too large for this cycle** is NOT a rejection. The idea is still
+     wanted — it just doesn't fit one cycle's budget. Keep the issue OPEN,
+     comment what you found (real scope, blast radius), add the
+     `needs-split` label, and where possible propose a concrete decomposition
+     in the comment so a future cycle (or a human) can split it:
+     ```bash
+     gh label create needs-split --color d4c5f9 \
+       --description "Wanted, but exceeds one cycle — needs decomposition" 2>/dev/null || true
+     gh issue edit <N> --repo Lexus2016/hermes-agent-evolution --add-label needs-split 2>/dev/null || true
+     gh issue comment <N> --repo Lexus2016/hermes-agent-evolution \
+       --body "Deferred at implementation: larger than estimated — <what you measured>. Proposed split: <steps>."
+     ```
+   - **Blocked by infrastructure** (missing credential scope, absent service,
+     environment limits) is NOT a rejection either. Keep the issue OPEN, add
+     the `blocked` label, and state exactly what is needed and from whom:
+     ```bash
+     gh label create blocked --color e11d21 \
+       --description "Needs human/infrastructure action — see comment" 2>/dev/null || true
+     gh issue edit <N> --repo Lexus2016/hermes-agent-evolution --add-label blocked 2>/dev/null || true
+     gh issue comment <N> --repo Lexus2016/hermes-agent-evolution \
+       --body "Blocked: <exact missing prerequisite, e.g. token lacks workflow scope>. A human must <action>."
+     ```
+   - **Evidence rule for `already-exists`** (same as evolution-analysis): the
+     closing comment MUST contain the exact file path / code location you
+     verified in THIS session with a real `ls`/`grep` whose output you saw.
+     If your search returned nothing, the capability does NOT exist — do not
+     close. (A fabricated path once destructively closed a wanted issue: #83.)
 
 3. **Implement** each issue that passes the re-check:
 
