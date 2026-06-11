@@ -640,7 +640,16 @@ def _build_child_system_prompt(
         "Important workspace rule: Never assume a repository lives at /workspace/... or any other container-style path unless the task/context explicitly gives that path. "
         "If no exact local path is provided, discover it first before issuing git/workdir-specific commands.\n\n"
         "Be thorough but concise -- your response is returned to the "
-        "parent agent as a summary."
+        "parent agent as a summary.\n\n"
+        "ARTIFACT CONTRACT (non-negotiable): you must actually PERFORM the "
+        "task with your tools — read the files, run the commands, do the "
+        "computation. Answering from prior knowledge without tool use is a "
+        "failed delegation, even if your answer sounds plausible. Your final "
+        "summary MUST quote the concrete artifacts the task asked for "
+        "verbatim: exact file paths, extracted snippets, counts, command "
+        "output. A generic narrative without the requested data is useless "
+        "to the parent — it will have to redo the work, which defeats the "
+        "purpose of delegating to you."
     )
     if role == "orchestrator":
         child_note = (
@@ -1770,6 +1779,22 @@ def _run_single_child(
         }
         if status == "failed":
             entry["error"] = result.get("error", "Subagent did not produce a response.")
+
+        # Shallow-delegation detector (issue 102): a child that made ZERO
+        # tool calls answered from its own head. For the dominant delegation
+        # use case (read/filter/compute on real data) that narrative is a
+        # non-result — flag it loudly IN the summary so the parent model
+        # cannot miss it, plus a structured field for programmatic callers.
+        if status == "completed" and not tool_trace:
+            entry["shallow_result"] = True
+            entry["summary"] = (
+                "⚠️ SHALLOW DELEGATION: this subagent made NO tool calls — "
+                "the text below is narrative from model memory, not "
+                "extracted data. If you asked for file contents, search "
+                "results, or computed values, treat this as a failure and "
+                "either re-delegate with explicit tool instructions or do "
+                "the work inline.\n\n" + summary
+            )
 
         # Cross-agent file-state reminder.  If this subagent wrote any
         # files the parent had already read, surface it so the parent

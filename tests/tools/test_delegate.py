@@ -2797,3 +2797,64 @@ class TestFallbackModelInheritance(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestArtifactContract(unittest.TestCase):
+    """Issue 102: the child prompt must demand real tool work + artifacts."""
+
+    def test_contract_present_in_child_prompt(self):
+        prompt = _build_child_system_prompt("Read foo.py and quote its first line")
+        self.assertIn("ARTIFACT CONTRACT", prompt)
+        self.assertIn("verbatim", prompt)
+
+
+class TestShallowDelegationDetector(unittest.TestCase):
+    """Issue 102: a 'completed' child that made ZERO tool calls answered from
+    model memory — for read/filter/compute delegations that is a non-result.
+    The parent must see an unmissable flag instead of a plausible narrative."""
+
+    def _run_child(self, messages):
+        parent = _make_mock_parent()
+        with patch("run_agent.AIAgent") as MockAgent:
+            mock_child = MagicMock()
+            mock_child.model = "m"
+            mock_child.session_prompt_tokens = 10
+            mock_child.session_completion_tokens = 5
+            mock_child.run_conversation.return_value = {
+                "final_response": "Here is a plausible-sounding answer.",
+                "completed": True,
+                "interrupted": False,
+                "api_calls": 1,
+                "messages": messages,
+            }
+            MockAgent.return_value = mock_child
+            return json.loads(
+                delegate_task(
+                    goal="read file X and quote line 1", parent_agent=parent
+                )
+            )
+
+    def test_zero_tool_calls_flagged_shallow(self):
+        entry = self._run_child(messages=[])["results"][0]
+        self.assertTrue(entry.get("shallow_result"))
+        self.assertIn("SHALLOW DELEGATION", entry["summary"])
+        # The original narrative is preserved below the flag.
+        self.assertIn("plausible-sounding answer", entry["summary"])
+        self.assertEqual(entry["status"], "completed")
+
+    def test_tool_using_child_not_flagged(self):
+        messages = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "t1",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "t1", "content": "line 1: hello"},
+        ]
+        entry = self._run_child(messages=messages)["results"][0]
+        self.assertNotIn("shallow_result", entry)
+        self.assertNotIn("SHALLOW DELEGATION", entry["summary"])
