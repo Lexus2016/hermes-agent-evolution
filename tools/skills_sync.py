@@ -469,7 +469,7 @@ def sync_skills(quiet: bool = False) -> dict:
             print("  (skipped — profile opted out of bundled skills via .no-bundled-skills)")
         return {
             "copied": [], "updated": [], "skipped": 0,
-            "user_modified": [], "cleaned": [], "total_bundled": 0,
+            "user_modified": [], "relocated": [], "cleaned": [], "total_bundled": 0,
             "optional_provenance_backfilled": [], "skipped_opt_out": True,
         }
 
@@ -477,7 +477,8 @@ def sync_skills(quiet: bool = False) -> dict:
     if not bundled_dir.exists():
         return {
             "copied": [], "updated": [], "skipped": 0,
-            "user_modified": [], "cleaned": [], "suppressed": [], "total_bundled": 0,
+            "user_modified": [], "relocated": [], "cleaned": [], "suppressed": [],
+            "total_bundled": 0,
             "optional_provenance_backfilled": [],
         }
 
@@ -490,6 +491,7 @@ def sync_skills(quiet: bool = False) -> dict:
     copied = []
     updated = []
     user_modified = []
+    relocated: List[str] = []
     suppressed_skipped: List[str] = []
     skipped = 0
 
@@ -593,8 +595,65 @@ def sync_skills(quiet: bool = False) -> dict:
                 skipped += 1  # bundled unchanged, user unchanged
 
         else:
-            # ── In manifest but not on disk — user deleted it ──
-            skipped += 1
+            # ── In manifest but not at the current dest ──
+            # Two very different situations look identical here: the user
+            # deleted their copy, OR the bundled skill was MOVED to a new
+            # category path (the dest changed while the manifest key — the
+            # skill name — stayed the same). Treating a moved skill as
+            # user-deleted strands the old copy forever and never seeds the
+            # new location: the loader then reports a name collision once a
+            # fresh copy appears by any other route, and cron jobs bound to
+            # the bare skill name silently skip (e.g. the
+            # ai-safe-audit → security/ recategorization).
+            stale_copies = _find_skill_dirs_by_name(skill_name, exclude=dest)
+            if not stale_copies:
+                # Genuinely user-deleted — respected, not re-added.
+                skipped += 1
+                continue
+
+            origin_hash = manifest.get(skill_name, "")
+            kept_modified = []
+            for old_copy in stale_copies:
+                if origin_hash and _dir_hash(old_copy) == origin_hash:
+                    try:
+                        _rmtree_writable(old_copy)
+                    except (OSError, IOError):
+                        logger.debug(
+                            "Could not remove stale copy %s", old_copy,
+                            exc_info=True,
+                        )
+                        kept_modified.append(old_copy)
+                else:
+                    kept_modified.append(old_copy)
+
+            if kept_modified:
+                # A customized (or unremovable) copy remains at the old
+                # path. Do NOT seed the new location — that would create
+                # exactly the name collision this branch prevents.
+                user_modified.append(skill_name)
+                if not quiet:
+                    kept_str = ", ".join(
+                        str(p.relative_to(SKILLS_DIR)) for p in kept_modified
+                    )
+                    print(
+                        f"  ! {skill_name}: bundled moved to "
+                        f"{dest.relative_to(SKILLS_DIR)}, but your modified "
+                        f"copy at {kept_str} was kept — not relocating"
+                    )
+            else:
+                try:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree(skill_src, dest)
+                    manifest[skill_name] = bundled_hash
+                    relocated.append(skill_name)
+                    if not quiet:
+                        print(
+                            f"  → {skill_name} (relocated to "
+                            f"{dest.relative_to(SKILLS_DIR)})"
+                        )
+                except (OSError, IOError) as e:
+                    if not quiet:
+                        print(f"  ! Failed to relocate {skill_name}: {e}")
 
     # Clean stale manifest entries (skills removed from bundled dir)
     cleaned = sorted(set(manifest.keys()) - bundled_names)
@@ -620,11 +679,39 @@ def sync_skills(quiet: bool = False) -> dict:
         "updated": updated,
         "skipped": skipped,
         "user_modified": user_modified,
+        "relocated": relocated,
         "cleaned": cleaned,
         "suppressed": suppressed_skipped,
         "total_bundled": len(bundled_skills),
         "optional_provenance_backfilled": optional_provenance_backfilled,
     }
+
+
+def _find_skill_dirs_by_name(skill_name: str, exclude: Path) -> List[Path]:
+    """Find every directory in SKILLS_DIR holding a skill with this name.
+
+    Used to detect copies stranded at OLD locations after a bundled skill
+    is recategorized (moved to a different category subdirectory). The
+    ``exclude`` path (the current canonical dest) is skipped, as are
+    transient ``.bak`` backups created by the update flow.
+    """
+    matches: List[Path] = []
+    try:
+        exclude_resolved = exclude.resolve()
+    except OSError:
+        exclude_resolved = exclude
+    for skill_md in SKILLS_DIR.rglob("SKILL.md"):
+        skill_dir = skill_md.parent
+        if skill_dir.suffix == ".bak":
+            continue
+        try:
+            if skill_dir.resolve() == exclude_resolved:
+                continue
+        except OSError:
+            continue
+        if _read_skill_name(skill_md, skill_dir.name) == skill_name:
+            matches.append(skill_dir)
+    return matches
 
 
 def _rmtree_writable(path: Path) -> None:
@@ -890,6 +977,8 @@ if __name__ == "__main__":
         if len(names) > MAX_SHOW:
             shown += f", +{len(names) - MAX_SHOW} more"
         parts.append(f"{len(names)} user-modified (kept): {shown}")
+    if result.get("relocated"):
+        parts.append(f"{len(result['relocated'])} relocated: {', '.join(result['relocated'])}")
     if result["cleaned"]:
         parts.append(f"{len(result['cleaned'])} cleaned from manifest")
     if result.get("optional_provenance_backfilled"):
