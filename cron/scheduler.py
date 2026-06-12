@@ -1573,8 +1573,18 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
     if prompt is None:
         logger.info("Job '%s': script produced no output, skipping AI call.", job_name)
         return True, "", SILENT_MARKER, None
+
     origin = _resolve_origin(job)
     _cron_session_id = f"cron_{job_id}_{_hermes_now().strftime('%Y%m%d_%H%M%S')}"
+
+    # Ensure the session row exists before the agent starts so that
+    # end_session() in the finally block always has a row to update.
+    if _session_db:
+        try:
+            _origin_platform = (origin or {}).get("platform", "cron")
+            _session_db.ensure_session(_cron_session_id, _origin_platform)
+        except (Exception, KeyboardInterrupt) as _exc:
+            logger.debug("Job '%s': failed to ensure session row: %s", job_id, _exc)
 
     logger.info("Running job '%s' (ID: %s)", job_name, job_id)
     logger.info("Prompt: %s", prompt[:100])

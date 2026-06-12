@@ -1,5 +1,6 @@
 """Regression tests for sudo detection and sudo password handling."""
 
+import json
 import tools.terminal_tool as terminal_tool
 
 
@@ -211,3 +212,43 @@ def test_get_env_config_still_rejects_bad_docker_json_for_docker_backend(monkeyp
         assert "TERMINAL_DOCKER_VOLUMES" in str(exc)
     else:
         raise AssertionError("Docker backend must validate TERMINAL_DOCKER_VOLUMES")
+
+
+def test_nano_without_pty_rejected(monkeypatch):
+    """Interactive editors without PTY should be rejected immediately."""
+    monkeypatch.setenv("TERMINAL_ENV", "local")
+    result = terminal_tool.terminal_tool("nano config.txt")
+    data = json.loads(result)
+    assert data["exit_code"] == -1
+    assert "pty=true" in data["error"]
+
+
+def test_vim_without_pty_rejected(monkeypatch):
+    """vim without PTY should be rejected."""
+    monkeypatch.setenv("TERMINAL_ENV", "local")
+    result = terminal_tool.terminal_tool("vim config.txt")
+    data = json.loads(result)
+    assert data["exit_code"] == -1
+
+
+def test_editor_with_pty_allowed():
+    """Interactive editors with PTY should be allowed (regex doesn't fire when pty=True)."""
+    from tools.terminal_tool import _INTERACTIVE_EDITOR_RE
+    assert _INTERACTIVE_EDITOR_RE.search("nano config.txt")
+    assert _INTERACTIVE_EDITOR_RE.search("vim config.txt")
+
+
+def test_non_editor_command_unchanged():
+    """Non-editor commands should not be affected by the editor guard."""
+    from tools.terminal_tool import _INTERACTIVE_EDITOR_RE, _strip_quotes
+    assert not _INTERACTIVE_EDITOR_RE.search(_strip_quotes("ls -la"))
+    assert not _INTERACTIVE_EDITOR_RE.search(_strip_quotes("cat file.txt"))
+    assert not _INTERACTIVE_EDITOR_RE.search(_strip_quotes("git commit -m 'nano fix'"))
+
+
+def test_editor_in_quotes_not_flagged():
+    """Editor names inside quoted strings should not trigger the guard."""
+    from tools.terminal_tool import _INTERACTIVE_EDITOR_RE, _strip_quotes
+    cmd = 'git commit -m "use nano for editing"'
+    stripped = _strip_quotes(cmd)
+    assert not _INTERACTIVE_EDITOR_RE.search(stripped)

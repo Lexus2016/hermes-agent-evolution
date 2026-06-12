@@ -1686,6 +1686,10 @@ _SHELL_LEVEL_BACKGROUND_RE = re.compile(
 _INLINE_BACKGROUND_AMP_RE = re.compile(r"\s&\s")
 _TRAILING_BACKGROUND_AMP_RE = re.compile(r"\s&\s*(?:#.*)?$")
 
+_INTERACTIVE_EDITOR_RE = re.compile(
+    r"\b(?:nano|vi|vim|emacs|micro|joe|jed|kate|gedit|subl|code)\b", re.IGNORECASE
+)
+
 
 def _strip_quotes(command: str) -> str:
     """Remove single- and double-quoted content so regex checks don't match inside strings.
@@ -1932,6 +1936,19 @@ def terminal_tool(
                     "error": guidance,
                     "status": "error",
                 }, ensure_ascii=False)
+
+        # Guardrail: interactive editors without PTY will hang.
+        if not background and not pty and _INTERACTIVE_EDITOR_RE.search(_strip_quotes(command)):
+            return json.dumps({
+                "output": "",
+                "exit_code": -1,
+                "error": (
+                    "Interactive editors (nano, vim, emacs, etc.) require pty=true "
+                    "or must be run in background mode. For file edits, prefer "
+                    "patch() or write_file() instead of terminal()."
+                ),
+                "status": "error",
+            }, ensure_ascii=False)
 
         # Start cleanup thread
         _start_cleanup_thread()
