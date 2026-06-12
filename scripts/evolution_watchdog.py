@@ -35,13 +35,15 @@ from pathlib import Path
 from typing import Callable, Dict, List, Tuple
 
 # stage name -> (daily slot hour, report file extension)
-# Slots mirror cron/evolution/*.yaml schedules.
+# Slots and extensions mirror cron/evolution/*.yaml (schedule + output.file).
+# Drift is locked down by TestStagesMirrorCronSpecs in
+# tests/scripts/test_evolution_watchdog.py.
 STAGES: Dict[str, Tuple[int, str]] = {
     "research": (9, "md"),
     "introspection": (20, "json"),
     "analysis": (21, "json"),
     "implementation": (22, "md"),
-    "integration": (23, "md"),
+    "integration": (23, "json"),
 }
 
 GRACE_HOURS = 2

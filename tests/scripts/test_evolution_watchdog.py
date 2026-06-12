@@ -1,6 +1,7 @@
 """Tests for scripts/evolution_watchdog.py — deterministic pipeline health check."""
 
 import json
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -192,3 +193,34 @@ class TestGhCheck:
 
         alerts = check_gh(runner=fake_run)
         assert len(alerts) >= 1
+
+
+class TestStagesMirrorCronSpecs:
+    """STAGES duplicates cron/evolution/*.yaml; lock the two together.
+
+    Regression for the 2026-06-12 false alarm: integration writes
+    {date}.json (integration.yaml output.file) but STAGES said "md",
+    so the watchdog reported a healthy run as a dead job.
+    """
+
+    CRON_DIR = Path(__file__).resolve().parents[2] / "cron" / "evolution"
+
+    def test_extension_matches_output_file(self):
+        for stage, (_slot, ext) in STAGES.items():
+            spec = (self.CRON_DIR / f"{stage}.yaml").read_text()
+            m = re.search(r"^\s*file:.*\{current_date\}\.(\w+)\s*$", spec, re.M)
+            assert m, f"{stage}.yaml has no output.file with {{current_date}}"
+            assert m.group(1) == ext, (
+                f"watchdog STAGES says '{stage}' reports are .{ext}, "
+                f"but {stage}.yaml writes .{m.group(1)}"
+            )
+
+    def test_slot_hour_matches_schedule(self):
+        for stage, (slot, _ext) in STAGES.items():
+            spec = (self.CRON_DIR / f"{stage}.yaml").read_text()
+            m = re.search(r'^schedule:\s*"(\d+)\s+(\d+)\s', spec, re.M)
+            assert m, f"{stage}.yaml has no parsable daily schedule"
+            assert int(m.group(2)) == slot, (
+                f"watchdog STAGES says '{stage}' runs at {slot:02d}:00, "
+                f"but {stage}.yaml schedules hour {m.group(2)}"
+            )
