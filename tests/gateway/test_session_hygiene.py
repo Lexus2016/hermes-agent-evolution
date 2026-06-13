@@ -302,6 +302,8 @@ class TestTokenEstimation:
 async def test_session_hygiene_messages_stay_in_originating_topic(monkeypatch, tmp_path):
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     class FakeCompressAgent:
@@ -404,6 +406,8 @@ async def test_session_hygiene_warns_user_when_compression_aborts(monkeypatch, t
     topic/thread) saying the conversation is unchanged and how to retry."""
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     class FakeCompressAgentWithSummaryFailure:
@@ -523,6 +527,8 @@ async def test_session_hygiene_informs_user_when_aux_model_fails_but_recovers(mo
     hides a misconfig only they can resolve."""
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     class FakeCompressAgentWithAuxRecovery:
@@ -651,6 +657,8 @@ async def test_session_hygiene_honors_configurable_hard_message_limit(
     """
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     class FakeCompressAgent:
@@ -765,6 +773,8 @@ async def test_session_hygiene_default_hard_message_limit_does_not_fire_at_12_me
     passes without changes, the override test's finding is meaningful."""
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     class FakeCompressAgent:

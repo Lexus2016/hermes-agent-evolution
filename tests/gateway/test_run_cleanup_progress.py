@@ -160,6 +160,8 @@ def _install_fakes(monkeypatch, agent_cls, *, cleanup_on: bool):
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *a, **k: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")

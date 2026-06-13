@@ -135,6 +135,8 @@ async def _run_once(monkeypatch, tmp_path, agent_cls, session_id):
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")

@@ -252,6 +252,8 @@ async def test_run_agent_progress_stays_in_originating_topic(monkeypatch, tmp_pa
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")
@@ -299,6 +301,8 @@ async def test_run_agent_progress_edits_keep_originating_topic_metadata(monkeypa
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")
@@ -338,6 +342,8 @@ async def test_run_agent_progress_does_not_use_event_message_id_for_telegram_dm(
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")
@@ -388,6 +394,8 @@ async def test_run_agent_progress_uses_event_message_id_for_slack_dm(monkeypatch
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")
@@ -430,6 +438,8 @@ async def test_run_agent_feishu_progress_replies_inside_existing_thread(monkeypa
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")
@@ -486,6 +496,8 @@ def _run_long_preview_helper(monkeypatch, tmp_path, preview_length=0):
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")
@@ -696,6 +708,8 @@ async def _run_with_agent(
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")
@@ -1136,6 +1150,8 @@ async def test_run_agent_drops_tool_progress_after_generation_invalidation(monke
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")
@@ -1198,6 +1214,8 @@ async def test_run_agent_drops_interim_commentary_after_generation_invalidation(
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")
@@ -1354,6 +1372,8 @@ async def test_terminal_progress_renders_fenced_code_block(monkeypatch, tmp_path
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")
@@ -1407,6 +1427,8 @@ async def test_terminal_progress_verbose_shows_full_command(monkeypatch, tmp_pat
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")
@@ -1455,6 +1477,8 @@ async def test_terminal_progress_no_bash_block_in_verbose_mode(monkeypatch, tmp_
 
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     fake_run_agent = types.ModuleType("run_agent")
