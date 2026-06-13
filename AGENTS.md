@@ -4,6 +4,20 @@ Instructions for AI coding assistants and developers working on the hermes-agent
 
 **Never give up on the right solution.**
 
+## Fork & PR Targeting (read before opening any PR)
+
+This repository is the fork **`Lexus2016/hermes-agent-evolution`**. `NousResearch/hermes-agent` is the read-only `upstream`. **All branches, pull requests, and merges stay on the `Lexus2016` fork — never open a PR against `NousResearch`.**
+
+- The default `gh` repo for a clone must be pinned to the fork:
+  `gh repo set-default Lexus2016/hermes-agent-evolution` (persisted as
+  `remote.origin.gh-resolved` in `.git/config`). Re-run it in every fresh clone —
+  without it, `gh` resolves the default repo to the `NousResearch` upstream.
+- `gh pr create` defaults a fork's base to the upstream parent, so do **not**
+  rely on the interactive default. Target the fork explicitly:
+  `gh pr create --repo Lexus2016/hermes-agent-evolution --base main`, or create
+  it unambiguously via `gh api repos/Lexus2016/hermes-agent-evolution/pulls`
+  (`-f head=<branch> -f base=main`).
+
 ## What Hermes Is
 
 Hermes is a personal AI agent that runs the same agent core across a CLI, a
