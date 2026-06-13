@@ -117,10 +117,18 @@ git checkout -b sync/upstream-YYYY-MM-DD
 git revert -m 1 <merge-commit>
 ```
 
-## Merge strategy — ONLY via PR (safety gate)
+## Merge strategy — bounded, cherry-pick, ONLY via PR (safety gate)
+
+⛔ **HARD RULE — NEVER wholesale-merge.** Do NOT run `git merge upstream/main`
+(it pulls the ENTIRE backlog — hundreds of commits / 600+ files — into one
+unreviewable PR; it happened once and could not even be pushed). No matter how
+far behind we are, a single run integrates **at most `max_commits_per_run` (25)**
+commits, the OLDEST first (closest to our baseline), via cherry-pick. The rest
+wait for the next run — the Mon/Wed/Fri cadence drains the backlog over a few
+weeks. Falling behind is fine; an enormous merge is not.
 
 ⛔ Do NOT merge upstream directly into `main`. Like `evolution-implementation`,
-upstream changes go **through a separate branch + PR + CI** — NOT a direct merge:
+upstream changes go **through a separate branch + PR + CI** — NEVER a direct merge:
 
 ```bash
 # 0. `gh` is authorized via persistent `gh auth login` (~/.config/gh) from
@@ -131,22 +139,34 @@ gh auth setup-git
 # 1. Separate branch from the current main:
 git checkout main && git pull && git checkout -b sync/upstream-YYYY-MM-DD
 
-# 2. Bring over only the NEEDED commits:
-git cherry-pick <commit-hash>          # for compatible changes
-# or for conflicting ones:
-git merge upstream/main --no-commit    # resolve conflicts, then: git commit
+# 2. Pick the OLDEST <=25 relevant commits — cherry-pick ONLY, never a bare
+#    `git merge upstream/main`. Oldest-first keeps history linear and conflicts small:
+git log --reverse --oneline main..upstream/main | head -25   # candidates, oldest first
+git cherry-pick <hash>                 # one commit (or a contiguous range) at a time
+# On conflict: resolve THAT commit (keep our evolution changes), `git add`,
+# `git cherry-pick --continue`. If a commit is too entangled to resolve cleanly,
+# `git cherry-pick --skip` and note it in the report for a future run — do NOT
+# fall back to a full merge to "get everything".
+
+# 2a. WORKFLOW FILES: pushing a branch that edits `.github/workflows/**` needs the
+#     `workflow` token scope. If a picked commit touches workflows and the push is
+#     rejected for missing scope, drop those files from this sync
+#     (`git checkout HEAD~ -- .github/workflows && git commit --amend`) and flag
+#     them for an owner-gated follow-up — do not fail the whole sync.
 
 # 3. Create a PR (do NOT merge into main manually):
 git push origin sync/upstream-YYYY-MM-DD
 gh pr create --base main --head sync/upstream-YYYY-MM-DD \
-  --title "[UPSTREAM] Sync: <summary>" \
-  --body "Cherry-picked relevant upstream changes. See upstream sync report."
+  --title "[UPSTREAM] Sync: <N> commits (<from>..<to>)" \
+  --body "Cherry-picked <=25 oldest relevant upstream changes. See upstream sync report."
 ```
 
 Merging into `main` happens only after green CI (`tests.yml`/`lint.yml`) and with branch
 protection. Changes in critical paths (`.github/CODEOWNERS`) require owner
 review. This is the same gate that protects the entire self-evolution — upstream code is also
-untrusted until it has passed CI + review.
+untrusted until it has passed CI + review. A `sync/*` branch is NOT
+`evolution/issue-*`, so evolution-integration never auto-merges it — upstream
+PRs always wait for the owner.
 
 ## Inherit upstream version numbering (do this IN the sync PR)
 
