@@ -6482,7 +6482,9 @@ class TestDeadRetryCode:
 
     def test_no_unreachable_max_retries_after_backoff(self):
         import inspect
-        from agent.conversation_loop import run_conversation as _rc
+        # Loop body lives in _run_conversation_impl since run_conversation
+        # became a thin telemetry wrapper (#167).
+        from agent.conversation_loop import _run_conversation_impl as _rc
         source = inspect.getsource(_rc)
         occurrences = source.count("if retry_count >= max_retries:")
         assert occurrences == 2, (
@@ -6521,7 +6523,9 @@ class TestMemoryContextSanitization:
         a literal <memory-context> tag we don't silently delete their text.
         The streaming scrubber + plugin-side scrub cover real leak paths."""
         import inspect
-        from agent.conversation_loop import run_conversation as _rc
+        # Loop body lives in _run_conversation_impl since run_conversation
+        # became a thin telemetry wrapper (#167).
+        from agent.conversation_loop import _run_conversation_impl as _rc
         src = inspect.getsource(_rc)
         assert "sanitize_context(user_message)" not in src
         assert "sanitize_context(persist_user_message)" not in src
