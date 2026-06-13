@@ -5,6 +5,7 @@ import errno
 import json
 import logging
 import os
+import tempfile
 import threading
 from pathlib import Path
 
@@ -323,6 +324,20 @@ def _check_sensitive_path(filepath: str, task_id: str = "default") -> str | None
         f"Refusing to write to sensitive system path: {filepath}\n"
         "Use the terminal tool with sudo if you need to modify system files."
     )
+    # The OS temp dir is user scratch space, never a sensitive system path.
+    # On macOS it lives under /var/folders -> realpath /private/var/folders,
+    # which would otherwise be rejected by the /private/var/ prefix below.
+    # Exempt it FIRST so temp writes (incl. the test suite's tmp dirs) work.
+    try:
+        _tmp = os.path.realpath(tempfile.gettempdir())
+    except Exception:
+        _tmp = ""
+    _temp_roots = tuple(
+        p for p in (_tmp + os.sep if _tmp else "", "/var/folders/", "/private/var/folders/") if p
+    )
+    for safe in _temp_roots:
+        if resolved.startswith(safe) or normalized.startswith(safe):
+            return None
     for prefix in _SENSITIVE_PATH_PREFIXES:
         if resolved.startswith(prefix) or normalized.startswith(prefix):
             return _err
