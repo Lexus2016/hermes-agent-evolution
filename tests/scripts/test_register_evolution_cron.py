@@ -249,3 +249,30 @@ class TestReconcileExistingJob:
 
         assert rc == 0
         assert calls == {}  # no update_job call — nothing changed
+
+
+class TestFindVenvPython:
+    """The registrar self-locates the install venv interpreter so it runs with
+    the full Hermes deps regardless of which python launched it (no human/agent
+    has to pick `venv/bin/python` by hand)."""
+
+    def test_finds_venv_python(self, tmp_path):
+        mod = _import_module()
+        venv_py = tmp_path / "venv" / "bin" / "python"
+        venv_py.parent.mkdir(parents=True)
+        venv_py.write_text("#!/bin/sh\n")
+        venv_py.chmod(0o755)
+
+        assert mod._find_venv_python(tmp_path) == str(venv_py)
+
+    def test_returns_none_when_absent(self, tmp_path):
+        mod = _import_module()
+        assert mod._find_venv_python(tmp_path) is None
+
+    def test_non_executable_is_ignored(self, tmp_path):
+        mod = _import_module()
+        venv_py = tmp_path / "venv" / "bin" / "python"
+        venv_py.parent.mkdir(parents=True)
+        venv_py.write_text("#!/bin/sh\n")
+        venv_py.chmod(0o644)  # not executable
+        assert mod._find_venv_python(tmp_path) is None

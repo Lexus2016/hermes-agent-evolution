@@ -38,8 +38,6 @@ from typing import List, Optional
 # the module) fail with ModuleNotFoundError for hermes_time et al.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dotenv import dotenv_values
-
 from hermes_constants import get_hermes_home
 from hermes_cli._subprocess_compat import windows_hide_flags
 from hermes_cli.config import load_config, _expand_env_vars
@@ -1045,8 +1043,13 @@ def _run_job_script(script_path: str) -> tuple[bool, str]:
 
     # Load secrets from HERMES_HOME/.env so no_agent cron scripts can access
     # API keys (OpenRouter, OpenAI, etc.) without hard-coding them.
-    # See issue #124.
+    # See issue #124. Import dotenv lazily (like load_dotenv below) so that
+    # merely importing cron.scheduler / cron.jobs does NOT require python-dotenv
+    # — lightweight importers (e.g. scripts/register_evolution_cron.py run under
+    # a bare interpreter) must not break just because this runtime helper uses it.
     try:
+        from dotenv import dotenv_values
+
         _env_path = _get_hermes_home() / ".env"
         if _env_path.exists():
             _env_data = dotenv_values(_env_path)
