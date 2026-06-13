@@ -268,7 +268,8 @@ def find_docker() -> Optional[str]:
     """Locate the docker (or podman) CLI binary.
 
     Resolution order:
-    1. ``HERMES_DOCKER_BINARY`` env var — explicit override (e.g. ``/usr/bin/podman``)
+    1. Explicit override — config.yaml ``docker.binary`` (preferred), or the
+       legacy ``HERMES_DOCKER_BINARY`` env var (back-compat; e.g. ``/usr/bin/podman``)
     2. ``docker`` on PATH via ``shutil.which``
     3. ``podman`` on PATH via ``shutil.which``
     4. Well-known macOS Docker Desktop install locations
@@ -279,11 +280,19 @@ def find_docker() -> Optional[str]:
     if _docker_executable is not None:
         return _docker_executable
 
-    # 1. Explicit override via env var (e.g. for Podman on immutable distros)
-    override = os.getenv("HERMES_DOCKER_BINARY")
+    # 1. Explicit override: config.yaml `docker.binary` (AGENTS.md #164 — config,
+    #    not new HERMES_* env vars), falling back to the legacy env var.
+    override = None
+    try:
+        from hermes_cli.config import load_config_readonly as _load_ro
+
+        override = (_load_ro().get("docker", {}) or {}).get("binary")
+    except Exception:
+        override = None
+    override = override or os.getenv("HERMES_DOCKER_BINARY")
     if override and os.path.isfile(override) and os.access(override, os.X_OK):
         _docker_executable = override
-        logger.info("Using HERMES_DOCKER_BINARY override: %s", override)
+        logger.info("Using docker binary override: %s", override)
         return override
 
     # 2. docker on PATH

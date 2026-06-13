@@ -4014,24 +4014,39 @@ class BasePlatformAdapter(ABC):
         """
         Return a random delay in seconds for human-like response pacing.
 
-        Reads from env vars:
-          HERMES_HUMAN_DELAY_MODE: "off" (default) | "natural" | "custom"
-          HERMES_HUMAN_DELAY_MIN_MS: minimum delay in ms (default 800, custom mode)
-          HERMES_HUMAN_DELAY_MAX_MS: maximum delay in ms (default 2500, custom mode)
+        Behavioral config lives in config.yaml under ``gateway.human_delay``:
+          mode:   "off" (default) | "natural" | "custom"
+          min_ms: minimum delay in ms (default 800, custom mode)
+          max_ms: maximum delay in ms (default 2500, custom mode)
+        The legacy ``HERMES_HUMAN_DELAY_*`` env vars are still honored as a
+        fallback for back-compat (AGENTS.md: behavioral config belongs in
+        config.yaml, not new HERMES_* env vars — issue #164).
         """
-        mode = os.getenv("HERMES_HUMAN_DELAY_MODE", "off").lower()
+        hd: dict = {}
+        try:
+            # readonly = cached, no per-message disk read / deepcopy.
+            from hermes_cli.config import load_config_readonly as _load_ro
+
+            hd = (_load_ro().get("gateway", {}) or {}).get("human_delay", {}) or {}
+        except Exception:
+            hd = {}
+
+        def _setting(key: str, env: str, default):
+            v = hd.get(key)
+            return v if v is not None else os.getenv(env, default)
+
+        mode = str(_setting("mode", "HERMES_HUMAN_DELAY_MODE", "off")).lower()
         if mode == "off":
             return 0.0
         if mode == "natural":
-            min_ms, max_ms = 800, 2500
-            return random.uniform(min_ms / 1000.0, max_ms / 1000.0)
-        # custom mode — tolerate malformed env vars instead of crashing.
+            return random.uniform(800 / 1000.0, 2500 / 1000.0)
+        # custom mode — tolerate malformed values instead of crashing.
         try:
-            min_ms = int(os.getenv("HERMES_HUMAN_DELAY_MIN_MS", "800"))
+            min_ms = int(_setting("min_ms", "HERMES_HUMAN_DELAY_MIN_MS", 800))
         except (TypeError, ValueError):
             min_ms = 800
         try:
-            max_ms = int(os.getenv("HERMES_HUMAN_DELAY_MAX_MS", "2500"))
+            max_ms = int(_setting("max_ms", "HERMES_HUMAN_DELAY_MAX_MS", 2500))
         except (TypeError, ValueError):
             max_ms = 2500
         return random.uniform(min_ms / 1000.0, max_ms / 1000.0)

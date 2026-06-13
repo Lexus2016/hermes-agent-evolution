@@ -1262,6 +1262,23 @@ class TestGetHumanDelay:
             delay = BasePlatformAdapter._get_human_delay()
             assert 0.8 <= delay <= 2.5
 
+    def test_config_yaml_overrides_env(self):
+        # config.yaml gateway.human_delay wins over the legacy env var (#164).
+        cfg = {"gateway": {"human_delay": {"mode": "custom", "min_ms": 100, "max_ms": 200}}}
+        with patch.dict(os.environ, {"HERMES_HUMAN_DELAY_MODE": "off"}), patch(
+            "hermes_cli.config.load_config_readonly", return_value=cfg
+        ):
+            delay = BasePlatformAdapter._get_human_delay()
+            assert 0.1 <= delay <= 0.2
+
+    def test_env_used_when_config_absent(self):
+        # back-compat: no config section -> the HERMES_HUMAN_DELAY_* env still works.
+        with patch.dict(os.environ, {"HERMES_HUMAN_DELAY_MODE": "natural"}), patch(
+            "hermes_cli.config.load_config_readonly", return_value={}
+        ):
+            delay = BasePlatformAdapter._get_human_delay()
+            assert 0.8 <= delay <= 2.5
+
 
 # ---------------------------------------------------------------------------
 # utf16_len / _prefix_within_utf16_limit / truncate_message with len_fn
