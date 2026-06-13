@@ -61,7 +61,7 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     # MiniMax
     ("minimax/minimax-m3",                     ""),
     # Z-AI
-    ("z-ai/glm-5.2[1m]",                       ""),
+    ("z-ai/glm-5.2",                       ""),
     ("z-ai/glm-5.1",                           ""),
     # Xiaomi
     ("xiaomi/mimo-v2.5-pro",                   ""),
@@ -184,7 +184,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         # MiniMax
         "minimax/minimax-m3",
         # Z-AI
-        "z-ai/glm-5.2[1m]",
+        "z-ai/glm-5.2",
         "z-ai/glm-5.1",
         # Xiaomi
         "xiaomi/mimo-v2.5-pro",
@@ -260,7 +260,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "gemini-3.5-flash",
     ],
     "zai": [
-        "glm-5.2[1m]",
+        "glm-5.2",
         "glm-5.1",
         "glm-5",
         "glm-5v-turbo",
@@ -282,7 +282,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "moonshotai/kimi-k2.7-code",
         "moonshotai/kimi-k2.6",
         "minimaxai/minimax-m2.5",
-        "z-ai/glm-5.2[1m]",
+        "z-ai/glm-5.2",
         "z-ai/glm5",
         "openai/gpt-oss-120b",
     ],
@@ -369,7 +369,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "trinity-mini",
     ],
     "gmi": [
-        "zai-org/GLM-5.2[1m]",
+        "zai-org/GLM-5.2",
         "zai-org/GLM-5.1-FP8",
         "deepseek-ai/DeepSeek-V3.2",
         "moonshotai/Kimi-K2.5",
@@ -418,7 +418,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "kimi-k2.7-code",
         "kimi-k2.6",
         "kimi-k2.5",
-        "glm-5.2[1m]",
+        "glm-5.2",
         "glm-5.1",
         "glm-5",
         "mimo-v2.5-pro",
@@ -476,7 +476,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "deepseek-ai/DeepSeek-V3.2",
         "MiniMaxAI/MiniMax-M2.5",
         "zai-org/GLM-5",
-        "zai-org/GLM-5.2[1m]",
+        "zai-org/GLM-5.2",
         "XiaomiMiMo/MiMo-V2-Flash",
         "moonshotai/Kimi-K2-Thinking",
         "moonshotai/Kimi-K2.6",
