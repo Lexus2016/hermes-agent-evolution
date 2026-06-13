@@ -180,6 +180,18 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     # call site uses prompt=False so it can never raise a blocking input()
     # prompt mid-session (#40490).
     "tool.vision": ("Pillow==12.2.0",),
+
+    # ─── Telemetry ─────────────────────────────────────────────────────────
+    # Opt-in OpenTelemetry export (#167). Resolved at first use only when
+    # telemetry.otel.enabled in config.yaml; the call site (hermes_telemetry
+    # ._ensure_init) uses prompt=False and degrades to a silent no-op if the
+    # install is unavailable. Keep these pins in lockstep with the `otel`
+    # extra in pyproject.toml.
+    "telemetry.otel": (
+        "opentelemetry-api==1.39.1",
+        "opentelemetry-sdk==1.39.1",
+        "opentelemetry-exporter-otlp-proto-http==1.39.1",
+    ),
 }
 
 

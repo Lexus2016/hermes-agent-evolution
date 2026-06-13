@@ -38,6 +38,7 @@ from typing import List, Optional
 # the module) fail with ModuleNotFoundError for hermes_time et al.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import hermes_telemetry
 from hermes_constants import get_hermes_home
 from hermes_cli._subprocess_compat import windows_hide_flags
 from hermes_cli.config import load_config, _expand_env_vars
@@ -1409,7 +1410,22 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     """Execute a single cron job, applying any per-job profile override."""
     job_id = job["id"]
     with _job_profile_context(job_id, job.get("profile")):
-        return _run_job_impl(job)
+        # Opt-in OpenTelemetry span (#167): no-op + zero overhead unless
+        # telemetry.otel.enabled. The job blocks on the agent future, so this
+        # spans the whole job — exactly the unattended-job timing/failure
+        # visibility the issue asked for.
+        with hermes_telemetry.span(
+            "cron.job",
+            job=job_id,
+            job_name=str(job.get("name") or job_id),
+            no_agent=bool(job.get("no_agent")),
+        ):
+            result = _run_job_impl(job)
+            hermes_telemetry.set_attributes(
+                success=bool(result[0]),
+                error=(result[3] or None),
+            )
+            return result
 
 
 def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:

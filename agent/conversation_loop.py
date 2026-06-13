@@ -377,6 +377,44 @@ def run_conversation(
     stream_callback: Optional[callable] = None,
     persist_user_message: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """Thin wrapper that traces one agent run (#167), then delegates.
+
+    The opt-in OpenTelemetry span is a zero-overhead no-op unless
+    telemetry.otel.enabled — the real work lives in ``_run_conversation_impl``
+    (kept verbatim, same as the run_job/_run_job_impl idiom)."""
+    import hermes_telemetry
+
+    with hermes_telemetry.span(
+        "agent.run",
+        task_id=task_id,
+        provider=getattr(agent, "provider", None),
+    ):
+        result = _run_conversation_impl(
+            agent,
+            user_message,
+            system_message=system_message,
+            conversation_history=conversation_history,
+            task_id=task_id,
+            stream_callback=stream_callback,
+            persist_user_message=persist_user_message,
+        )
+        if isinstance(result, dict):
+            hermes_telemetry.set_attributes(
+                failed=bool(result.get("failed")),
+                interrupted=bool(result.get("interrupted")),
+            )
+        return result
+
+
+def _run_conversation_impl(
+    agent,
+    user_message: str,
+    system_message: str = None,
+    conversation_history: List[Dict[str, Any]] = None,
+    task_id: str = None,
+    stream_callback: Optional[callable] = None,
+    persist_user_message: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Run a complete conversation with tool calling until completion.
 

@@ -1775,3 +1775,38 @@ terminal:
 ```
 
 `MESSAGING_CWD` and direct `TERMINAL_CWD` entries in `~/.hermes/.env` are legacy compatibility fallbacks. New configurations should use `terminal.cwd`.
+
+## Telemetry (OpenTelemetry tracing)
+
+Hermes can emit [OpenTelemetry](https://opentelemetry.io/) spans for high-value
+boundaries — each cron job and each agent run — so unattended automations are
+debuggable after the fact. This is **opt-in and disabled by default**: it is
+*your* observability data going to *your* sink (a local console, or an OTLP
+collector you point it at), never usage attribution phoned home to anyone.
+
+```yaml
+# In ~/.hermes/config.yaml:
+telemetry:
+  otel:
+    enabled: true            # opt-in; default false (no spans, zero overhead)
+    exporter: console         # "console" (local-first, default) or "otlp"
+    endpoint: http://localhost:4318/v1/traces   # otlp only; or OTEL_EXPORTER_OTLP_ENDPOINT
+```
+
+Behavior:
+
+- **Default off, zero overhead.** When `enabled` is unset/false every span call
+  is a single boolean check — `opentelemetry` is never even imported.
+- **Lazy install.** On first enabled use Hermes installs the OTel packages
+  (the `otel` extra) automatically; if that install isn't possible the feature
+  degrades to a silent no-op rather than erroring. To install ahead of time:
+  `pip install "hermes-agent[otel]"`.
+- **Never breaks the agent.** A failing exporter or misconfigured endpoint can
+  never raise into the agent loop — telemetry errors degrade to no-op.
+
+Spans emitted:
+
+| Span | When | Key attributes |
+|------|------|----------------|
+| `cron.job` | one per scheduled job | `hermes.job`, `hermes.job_name`, `hermes.no_agent`, `hermes.success`, `hermes.error` |
+| `agent.run` | one per agent conversation | `hermes.task_id`, `hermes.provider`, `hermes.failed`, `hermes.interrupted` |
