@@ -442,6 +442,22 @@ def repair_message_sequence(agent, messages: List[Dict]) -> int:
         # value, session DB flush) see the repaired sequence.
         messages[:] = merged
 
+        # Shrinking `messages` in place invalidates the SQLite flush
+        # boundaries, which are computed from the *pre-repair* sizes:
+        #   * ``len(conversation_history)`` (loaded-history floor), and
+        #   * ``_last_flushed_db_idx`` (this agent's flush cursor).
+        # Each repair drops exactly one message from the already-loaded
+        # prefix, so pull both markers back by ``repairs``. Without this
+        # the flush computes ``flush_from`` past the end of the shrunk
+        # list and silently drops the turn's new assistant/tool messages
+        # (see tests/test_flush_repair_shrink_regression.py).
+        agent._history_repaired_count = (
+            getattr(agent, "_history_repaired_count", 0) + repairs
+        )
+        cursor = getattr(agent, "_last_flushed_db_idx", 0)
+        if isinstance(cursor, int) and cursor > 0:
+            agent._last_flushed_db_idx = max(0, cursor - repairs)
+
     return repairs
 
 

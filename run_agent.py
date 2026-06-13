@@ -1560,6 +1560,15 @@ class AIAgent:
             if not self._session_db_created:
                 self._ensure_db_session()
             start_idx = len(conversation_history) if conversation_history else 0
+            # Role-alternation repair (repair_message_sequence) can shrink the
+            # live `messages` list in place after load, while
+            # `conversation_history` keeps its pre-repair length. Pull the
+            # loaded-history floor back by the number of messages repair
+            # removed this turn, otherwise `flush_from` overshoots the shrunk
+            # list and this turn's assistant/tool messages are never written
+            # (silent transcript loss that snowballs into consecutive-user
+            # corruption — see tests/test_flush_repair_shrink_regression.py).
+            start_idx = max(0, start_idx - getattr(self, "_history_repaired_count", 0))
             flush_from = max(start_idx, self._last_flushed_db_idx)
             for msg in messages[flush_from:]:
                 role = msg.get("role", "unknown")

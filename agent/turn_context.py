@@ -177,6 +177,12 @@ def build_turn_context(
     # Initialize conversation (copy to avoid mutating the caller's list).
     messages = list(conversation_history) if conversation_history else []
 
+    # Reset the per-turn repair counter that keeps the SQLite flush boundary
+    # aligned when repair_message_sequence shrinks `messages` in place. Must
+    # be zeroed each turn so it never accumulates across turns (which would
+    # drag the flush floor toward 0 and re-write already-persisted rows).
+    agent._history_repaired_count = 0
+
     # Hydrate todo store from conversation history.
     if conversation_history and not agent._todo_store.has_items():
         agent._hydrate_todo_store(conversation_history)
