@@ -31,8 +31,20 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
 
 ## Process
 
-1. **Load recent sessions** (e.g. the last 7 days). For each session reconstruct
-   the turn sequence: user request → agent actions (tool calls) → outcome.
+1. **Pre-extract signals deterministically — do NOT load raw transcripts into
+   context** (#89). Raw session JSONL is unbounded (megabytes) and full of the
+   user's private text. Run the no-LLM extractor first; it scans the last 7 days
+   of `~/.hermes/sessions/*.jsonl` and emits a compact, anonymized digest (counts
+   per signal/tool, generic shapes — never raw content):
+   ```bash
+   python scripts/introspection_extract.py --days=7
+   ```
+   Work from THAT digest (a few KB) — it gives tool_failures per tool, timeouts,
+   refusals/access-denials, and repeated-tool-runs per session. Only if the
+   digest is genuinely insufficient for a specific pattern should you read a
+   single targeted session (and even then, summarize locally; never paste raw
+   text). This both bounds context (unbounded → ~2-5k tokens) and keeps private
+   text out of the model entirely (complements the PII gate #82).
 
 2. **Detect problem signals** (non-exhaustive):
    - **Tool failures** — a tool returned an error / non-zero / exception,
