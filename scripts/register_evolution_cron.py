@@ -29,8 +29,23 @@ Exit codes: 0 ok, 1 setup error, 2 one or more jobs failed to register.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+
+def _find_venv_python(repo_root: Path) -> str | None:
+    """Locate the install's venv interpreter (has the full Hermes deps)."""
+    for rel in (
+        "venv/bin/python",
+        ".venv/bin/python",
+        "venv/bin/python3",
+        ".venv/bin/python3",
+    ):
+        cand = repo_root / rel
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return str(cand)
+    return None
 
 
 def _load_yaml(path: Path) -> dict:
@@ -117,6 +132,24 @@ def main(argv: list[str]) -> int:
     sys.path.insert(0, str(repo_root))
     try:
         from cron.jobs import create_job, load_jobs, parse_schedule, update_job
+    except ModuleNotFoundError as exc:  # pragma: no cover - environment dependent
+        # A Hermes dependency (e.g. python-dotenv) isn't importable under the
+        # current interpreter. Re-exec under the install's venv python — which
+        # has the full dependency set — so this script "just works" no matter
+        # which interpreter launched it. Nobody (human OR agent) should ever
+        # have to pick `venv/bin/python` by hand. Guard against re-exec loops.
+        if os.environ.get("_HERMES_REG_REEXEC") != "1":
+            venv_py = _find_venv_python(repo_root)
+            if venv_py and Path(venv_py).resolve() != Path(sys.executable).resolve():
+                os.environ["_HERMES_REG_REEXEC"] = "1"
+                print(
+                    f"[evolution-cron] re-executing under venv python ({venv_py}) "
+                    f"— current interpreter lacks: {exc}",
+                    file=sys.stderr,
+                )
+                os.execv(venv_py, [venv_py, str(Path(__file__).resolve()), *argv[1:]])
+        print(f"[evolution-cron] cannot import cron.jobs: {exc}", file=sys.stderr)
+        return 1
     except Exception as exc:  # pragma: no cover - environment dependent
         print(f"[evolution-cron] cannot import cron.jobs: {exc}", file=sys.stderr)
         return 1
