@@ -61,6 +61,7 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     # MiniMax
     ("minimax/minimax-m3",                     ""),
     # Z-AI
+    ("z-ai/glm-5.2[1m]",                       ""),
     ("z-ai/glm-5.1",                           ""),
     # Xiaomi
     ("xiaomi/mimo-v2.5-pro",                   ""),
@@ -183,6 +184,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         # MiniMax
         "minimax/minimax-m3",
         # Z-AI
+        "z-ai/glm-5.2[1m]",
         "z-ai/glm-5.1",
         # Xiaomi
         "xiaomi/mimo-v2.5-pro",
@@ -258,6 +260,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "gemini-3.5-flash",
     ],
     "zai": [
+        "glm-5.2[1m]",
         "glm-5.1",
         "glm-5",
         "glm-5v-turbo",
@@ -276,12 +279,15 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         # (map to OpenRouter defaults — users get familiar picks on NIM)
         "qwen/qwen3.5-397b-a17b",
         "deepseek-ai/deepseek-v3.2",
+        "moonshotai/kimi-k2.7-code",
         "moonshotai/kimi-k2.6",
         "minimaxai/minimax-m2.5",
+        "z-ai/glm-5.2[1m]",
         "z-ai/glm5",
         "openai/gpt-oss-120b",
     ],
     "kimi-coding": [
+        "kimi-k2.7-code",
         "kimi-k2.6",
         "kimi-k2.5",
         "kimi-for-coding",
@@ -291,6 +297,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "kimi-k2-0905-preview",
     ],
     "kimi-coding-cn": [
+        "kimi-k2.7-code",
         "kimi-k2.6",
         "kimi-k2.5",
         "kimi-k2-thinking",
@@ -302,6 +309,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "step-3.5-flash-2603",
     ],
     "moonshot": [
+        "kimi-k2.7-code",
         "kimi-k2.6",
         "kimi-k2.5",
         "kimi-k2-thinking",
@@ -361,6 +369,7 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "trinity-mini",
     ],
     "gmi": [
+        "zai-org/GLM-5.2[1m]",
         "zai-org/GLM-5.1-FP8",
         "deepseek-ai/DeepSeek-V3.2",
         "moonshotai/Kimi-K2.5",
@@ -406,8 +415,10 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "big-pickle",
     ],
     "opencode-go": [
+        "kimi-k2.7-code",
         "kimi-k2.6",
         "kimi-k2.5",
+        "glm-5.2[1m]",
         "glm-5.1",
         "glm-5",
         "mimo-v2.5-pro",
@@ -465,9 +476,11 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "deepseek-ai/DeepSeek-V3.2",
         "MiniMaxAI/MiniMax-M2.5",
         "zai-org/GLM-5",
+        "zai-org/GLM-5.2[1m]",
         "XiaomiMiMo/MiMo-V2-Flash",
         "moonshotai/Kimi-K2-Thinking",
         "moonshotai/Kimi-K2.6",
+        "moonshotai/Kimi-K2.7-Code",
     ],
     # AWS Bedrock — static fallback list used when dynamic discovery is
     # unavailable (no boto3, no credentials, or API error).  The agent

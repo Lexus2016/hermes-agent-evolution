@@ -210,6 +210,7 @@ DEFAULT_CONTEXT_LENGTHS = {
     "minimax-m3": 1000000,
     "minimax": 204800,
     # GLM
+    "glm-5.2[1m]": 1000000,
     "glm": 202752,
     # xAI Grok — xAI /v1/models does not return context_length metadata,
     # so these hardcoded fallbacks prevent Hermes from probing-down to
@@ -245,6 +246,8 @@ DEFAULT_CONTEXT_LENGTHS = {
     "deepseek-ai/DeepSeek-V3.2": 65536,
     "moonshotai/Kimi-K2.5": 262144,
     "moonshotai/Kimi-K2.6": 262144,
+    "moonshotai/Kimi-K2.7-Code": 262144,
+    "moonshotai/Kimi-K2.7-code": 262144,
     "moonshotai/Kimi-K2-Thinking": 262144,
     "MiniMaxAI/MiniMax-M2.5": 204800,
     "XiaomiMiMo/MiMo-V2-Flash": 262144,
@@ -254,6 +257,7 @@ DEFAULT_CONTEXT_LENGTHS = {
     "mimo-v2-omni": 262144,
     "mimo-v2-flash": 262144,
     "zai-org/GLM-5": 202752,
+    "zai-org/GLM-5.2[1m]": 1000000,
 }
 
 # xAI Grok models that ACCEPT the `reasoning.effort` parameter on
