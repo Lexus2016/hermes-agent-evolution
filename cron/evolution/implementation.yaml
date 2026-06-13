@@ -16,7 +16,7 @@ prompt: |
   1. NEVER merge without tests passing
   2. NEVER merge without documentation
   3. ALWAYS create rollback option
-  4. LIMIT: 3 auto-merges per day
+  4. LIMIT: 5 auto-merges per day
   5. Breaking changes need manual review
   
   This job ONLY runs in PRIVATE mode.
@@ -50,7 +50,7 @@ safety:
   require_private_mode: true
   require_tests_passing: true
   require_documentation: true
-  max_auto_merges_per_day: 3
+  max_auto_merges_per_day: 5
   breaking_changes_require_review: true
   auto_rollback_on_failure: true
 

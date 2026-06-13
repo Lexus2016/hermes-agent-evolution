@@ -48,12 +48,40 @@ gh pr list --repo "$REPO" --state open --limit 50 \
      ```bash
      gh pr checks <N> --repo "$REPO"
      ```
-     If any check fails or is still pending → SKIP this PR this cycle.
    - **Mergeable** (no conflicts). If `mergeStateStatus` is `BEHIND`, update the
-     branch, then RE-VERIFY it's still green before merging:
+     branch first (this also kicks fresh CI):
      ```bash
      gh pr update-branch <N> --repo "$REPO"
      ```
+
+   **Do NOT skip on the first non-green snapshot — resolve it in-cycle (the whole
+   point of autonomous PR handling).** Apply this resolution ladder per PR:
+
+   - **PENDING checks** (incl. CI just kicked by `update-branch`): WAIT for them
+     to settle in THIS run, don't defer to tomorrow:
+     ```bash
+     gh pr checks <N> --repo "$REPO" --watch --interval 30   # ~40 min cap
+     ```
+     If still unsettled at the cap → SKIP this PR (next cycle picks it up).
+   - **FAILING checks, zero pending** → distinguish flake from real bug by
+     RE-RUNNING the failed jobs ONCE, then re-watching:
+     ```bash
+     RUN=$(gh pr checks <N> --repo "$REPO" --json link,state \
+       -q '[.[]|select(.state=="FAILURE"or.state=="failure")][0].link' \
+       | grep -oE '[0-9]+' | head -1)
+     gh run rerun "$RUN" --repo "$REPO" --failed
+     gh pr checks <N> --repo "$REPO" --watch --interval 30   # ~40 min cap
+     ```
+     - Re-run **GREEN** → it was a flake → proceed to code review (2a).
+     - Re-run **still FAILS** → treat as a REAL bug → do NOT merge; follow the
+       send-back-for-rework procedure in 2a (close PR, rework brief on issue,
+       flip to `needs-work`).
+   - **Hard limits so a run can't hang:** at most **1 re-run per PR** per cycle,
+     and at most **2 PRs** held in the WAIT/re-run path per run (the rest skip to
+     next cycle). Never re-run more than once — a test that needs two re-runs to
+     pass is itself broken (a real flake to fix at the source, issue #99), not
+     something to merge around.
+
    - **Closes a real, open issue** that analysis selected (sanity check the PR
      body's `Closes #NN`).
 
@@ -125,8 +153,10 @@ gh pr list --repo "$REPO" --state open --limit 50 \
     Treat it as if it were your own project shipping to `main`: a wrong merge or a
     wrongly-dropped good idea both cost more than a careful second look.
 
-3. **Daily limit — MAX 3 merges per run.** Quality over throughput. Merging a
-   flood of agent code unreviewed is exactly the risk we are guarding against.
+3. **Daily limit — MAX 5 merges per run.** Quality over throughput: each PR still
+   passes the full code review (2a) and self-audit (2b) before merging. The limit
+   bounds how much agent code lands on `main` per cycle; the per-PR review is what
+   guards quality, not a low ceiling.
 
 4. **Merge** (squash). `--admin` is required because branch protection mandates
    review; the owner token authorizes it:
@@ -144,7 +174,10 @@ hermes update --yes
 
 ## What to NEVER merge
 
-- Any PR with a failing OR pending check.
+- Any PR whose checks are not GREEN at merge time. (You MAY re-run failed jobs
+  once and wait for pending CI in-cycle per the gate ladder above — but the
+  state at the moment you call `gh pr merge` must be fully green. A PR that is
+  red after its one allowed re-run goes to rework, never to merge.)
 - Any non-`evolution/issue-*` branch (dependabot, human PRs, etc.).
 - Anything with merge conflicts you can't resolve via a clean branch update.
 - More than the daily limit.

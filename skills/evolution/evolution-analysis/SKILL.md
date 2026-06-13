@@ -127,13 +127,33 @@ gh issue view <N> --repo Lexus2016/hermes-agent-evolution --json body,comments
 
 ```python
 base_priority = (impact * 2) / effort
-final_priority = base_priority + community*0.1 + age*0.05 + compatibility*0.2 + safety*0.3
+final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + safety*0.3
 ```
 
-6. **Select** the top 5 for implementation (include any `needs-work` issues from
+   `age = min(days_since_created / 30, 1.0)`. The age weight is **0.15** (was
+   0.05) so a genuinely-valid issue that keeps losing the nightly contest still
+   climbs over time instead of rotting forever.
+
+6. **Select** the top 8 for implementation (include any `needs-work` issues from
    step 2):
    - Min priority: 0.7
-   - Max total effort: 2.0
+   - Max total effort: 3.0
+
+6a. **Anti-starvation slot — guarantee no valid issue rots for days.** Scoring
+    alone lets a sound-but-modest issue lose every single night. To prevent that,
+    RESERVE one selection slot for age:
+    - From the thin list, find the OLDEST **eligible** open issue — eligible =
+      not `rejected`, not currently in-flight `accepted` (an open PR already
+      exists for it), age **> 3 days**.
+    - If that issue was NOT already picked by score in step 6, **select it anyway**
+      — bypass the `min_priority 0.7` floor for THIS one slot (it still counts
+      toward `max_total_effort`; if it alone blows the effort budget, pick the
+      oldest eligible issue that fits).
+    - `needs-work` issues are already prioritized (step 2) and don't need this
+      slot. This slot is for issues the scorer keeps passing over.
+    - Tag the chosen issue's output entry `"selected_reason": "anti-starvation"`;
+      all score-selected entries get `"selected_reason": "score"`. This makes
+      starvation rescues visible in the report and in funnel metrics.
 
 ## Status labels — accept/reject visible in the issue list
 
@@ -175,7 +195,17 @@ Save to `~/.hermes/profiles/user1/evolution/analysis/YYYY-MM-DD.json`:
       "priority_score": 3.3,
       "impact_score": 0.8,
       "effort_score": 0.5,
-      "estimated_hours": 24
+      "estimated_hours": 24,
+      "selected_reason": "score"
+    },
+    {
+      "issue_number": 84,
+      "title": "[IMPROVEMENT] Per-cycle funnel metrics",
+      "priority_score": 0.62,
+      "impact_score": 0.5,
+      "effort_score": 0.3,
+      "estimated_hours": 4,
+      "selected_reason": "anti-starvation"
     }
   ]
 }

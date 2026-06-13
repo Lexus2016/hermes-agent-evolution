@@ -237,6 +237,6 @@ git tag -a v0.2.1 -m "Rollback"
 
 ## Limits
 
-- Maximum 5 implementations per day
-- Maximum 3 auto-merges per day
+- Maximum 8 implementations per day
+- Maximum 5 auto-merges per day
 - Breaking changes always require manual review

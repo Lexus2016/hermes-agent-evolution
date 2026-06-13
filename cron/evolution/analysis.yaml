@@ -41,6 +41,6 @@ log_level: DEBUG
 # Safety
 safety:
   require_private_mode: true
-  max_implementations_per_day: 5
-  max_total_effort: 2.0
+  max_implementations_per_day: 8
+  max_total_effort: 3.0
   min_priority_score: 0.7
