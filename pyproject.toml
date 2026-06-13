@@ -326,6 +326,8 @@ testpaths = ["tests"]
 markers = [
     "integration: marks tests requiring external services (API keys, Modal, etc.)",
     "real_concurrent_gate: opt out of the autouse stub that disables _detect_concurrent_hermes_instances",
+    "xdist_group: pin a set of tests to the same pytest-xdist worker (shared app state)",
+    "ssh: marks tests that require a reachable SSH endpoint",
 ]
 # pytest-timeout: per-test 30s hard cap with cross-platform thread method.
 # This is the fallback inside each per-file pytest subprocess (see

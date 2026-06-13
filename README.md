@@ -4,7 +4,7 @@
 > proposes them, and updates itself daily. You keep using Hermes as usual; it
 > gets better on its own.
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Based on Hermes Agent](https://img.shields.io/badge/based%20on-Hermes%20Agent-blue.svg)](https://github.com/nousresearch/hermes-agent)
 
 ---
@@ -147,7 +147,7 @@ Details: **[EVOLUTION_README.md](EVOLUTION_README.md)** ·
 
 ## 📄 License & credits
 
-Apache License 2.0. Built on **[Hermes Agent](https://github.com/nousresearch/hermes-agent)**
+MIT License (see `LICENSE`). Built on **[Hermes Agent](https://github.com/nousresearch/hermes-agent)**
 by [Nous Research](https://nousresearch.com/) — huge thanks to them and the
 Hermes community.
 

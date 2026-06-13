@@ -2,33 +2,33 @@
 
 > Self-evolving AI Agent based on [Hermes Agent](https://github.com/nousresearch/hermes-agent) by Nous Research
 
-**Це форк Hermes Agent з вбудованим функціоналом саморозвитку.**
+**This is a fork of Hermes Agent with built-in self-improvement.**
 
-## 🎯 Концепція
+## 🎯 Concept
 
-Hermes Evolution — це AI агент, який:
-- Досліджує інших AI агентів та академічні статті
-- Створює proposals для покращення
-- Аналізує та пріоритезує зміни
-- Реалізує покращення та самооновлюється
+Hermes Evolution is an AI agent that:
+- Researches other AI agents and academic papers
+- Creates proposals for improvements
+- Analyzes and prioritizes changes
+- Implements improvements and self-updates
 
-## 🔄 Як це працює
+## 🔄 How it works
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    HERMES EVOLUTION AGENT                    │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  PUBLIC Mode (всі інсталяції):                              │
+│  PUBLIC Mode (all installations):                           │
 │  ┌──────────────────┐         ┌──────────────────┐         │
 │  │ DAILY RESEARCH   │────────▶│  ISSUE/PR CREATE │         │
 │  │  (24h cron)      │         │  (read-only)     │         │
 │  └──────────────────┘         └──────────────────┘         │
 │           │                                                   │
 │           ▼                                                   │
-│    [Пропозиції змін]                                         │
+│    [Change proposals]                                        │
 │           │                                                   │
-│  PRIVATE Mode (тільки власник):                              │
+│  PRIVATE Mode (owner only):                                  │
 │           ▼                                                   │
 │  ┌──────────────────┐         ┌──────────────────┐         │
 │  │ ISSUE ANALYSIS   │────────▶│  IMPLEMENTATION  │         │
@@ -43,146 +43,138 @@ Hermes Evolution — це AI агент, який:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 📅 Щоденний цикл
+## 📅 Daily cycle
 
-| Час | Задача | Режим |
-|-----|-------|-------|
-| 08:00 (неділя) | Sync з upstream Hermes Agent | PRIVATE |
-| 09:00 | Research інших агентів та статей | PUBLIC |
-| 12:00 | Створення issues/PR з пропозиціями | PUBLIC |
-| 21:00 | Аналіз та пріоритезація issues | PRIVATE |
-| 22:00 | Реалізація покращень | PRIVATE |
+Schedules below mirror `cron/evolution/*.yaml` (the source of truth).
 
-## 🆚 Відмінності від оригінального Hermes Agent
+| Time | Stage | Mode |
+|------|-------|------|
+| 07:47 daily | Watchdog — deterministic pipeline health check (no LLM) | PUBLIC |
+| 08:00 Mon/Wed/Fri | Sync with upstream Hermes Agent | PRIVATE |
+| 09:00 daily | Research other agents and papers | PUBLIC |
+| 12:00 daily | Create issues/PRs from proposals | PUBLIC |
+| 20:00 daily | Introspection — self-observed weaknesses | PRIVATE |
+| 21:00 daily | Analyze and prioritize issues | PRIVATE |
+| 22:00 daily | Implement improvements (open PRs) | PRIVATE |
+| 23:00 daily | Integration — merge green PRs + self-update | PRIVATE |
 
-| Функціонал | Hermes Agent | Hermes Evolution |
+## 🆚 Differences from the original Hermes Agent
+
+| Capability | Hermes Agent | Hermes Evolution |
 |------------|--------------|------------------|
-| Базові можливості агента | ✅ | ✅ |
+| Core agent capabilities | ✅ | ✅ |
 | Skills & Tools | ✅ | ✅ |
 | Cron Jobs | ✅ | ✅ |
-| **Еволюційні skills** | ❌ | ✅ |
-| **Автоматичний research** | ❌ | ✅ |
-| **Автоматичне створення issues** | ❌ | ✅ |
-| **Аналіз пріоритетів** | ❌ | ✅ |
-| **Самооновлення** | ❌ | ✅ |
-| **Sync з upstream** | ❌ | ✅ |
+| **Evolution skills** | ❌ | ✅ |
+| **Automated research** | ❌ | ✅ |
+| **Automated issue creation** | ❌ | ✅ |
+| **Priority analysis** | ❌ | ✅ |
+| **Self-update** | ❌ | ✅ |
+| **Upstream sync** | ❌ | ✅ |
 
-## 🚀 Встановлення
+## 🚀 Installation
 
-### 1. Клонування
+### 1. Clone
 
 ```bash
 git clone https://github.com/Lexus2016/hermes-agent-evolution.git
 cd hermes-agent-evolution
 ```
 
-### 2. Налаштування
+### 2. Configure
 
 ```bash
-# Запустіть детектор режиму
+# Detect the operating mode
 python evolution/detect_mode.py
 
-# Для PUBLIC mode (всі користувачі)
+# PUBLIC mode (all users)
 export GITHUB_TOKEN="your..."
 
-# Для PRIVATE mode (власник репозиторію)
+# PRIVATE mode (repository owner)
 export GITHUB_PRIVATE_TOKEN="your..."
 ```
 
-### 3. Налаштування cron jobs
+### 3. Register the evolution cron jobs
+
+The evolution stages ship as YAML under `cron/evolution/*.yaml`. Register them
+into the native Hermes scheduler with the canonical registrar (it self-locates
+the install's venv interpreter, so any python works):
 
 ```bash
-# Research (PUBLIC mode)
-hermes cron create --name evolution-research \
-  --schedule "0 9 * * *" \
-  --prompt "$(cat cron/evolution/research.yaml)" \
-  --skills evolution-research
-
-# Issues (PUBLIC mode)
-hermes cron create --name evolution-issues \
-  --schedule "0 12 * * *" \
-  --prompt "$(cat cron/evolution/issues.yaml)" \
-  --skills evolution-issues
-
-# Analysis (PRIVATE mode only)
-hermes cron create --name evolution-analysis \
-  --schedule "0 21 * * *" \
-  --prompt "$(cat cron/evolution/analysis.yaml)" \
-  --skills evolution-analysis
-
-# Implementation (PRIVATE mode only)
-hermes cron create --name evolution-implement \
-  --schedule "0 22 * * *" \
-  --prompt "$(cat cron/evolution/implementation.yaml)" \
-  --skills evolution-implementation
-
-# Upstream Sync (PRIVATE mode only)
-hermes cron create --name evolution-upstream \
-  --schedule "0 8 * * 0" \
-  --prompt "$(cat cron/evolution/upstream-sync.yaml)" \
-  --skills evolution-upstream-sync
+python scripts/register_evolution_cron.py
 ```
+
+Re-running it is idempotent: new stages are added and changed schedules/prompts
+are reconciled in place. On a normal install this runs automatically as part of
+`hermes update` (see `upgrade.sh`).
 
 ## 📚 Evolution Skills
 
 ### evolution/research
-Досліджує інших агентів, статті, тренди для генерації ідей.
+Researches other agents, papers, and trends to generate ideas.
 
 ### evolution/issues
-Створює GitHub issues та PR з пропозиціями.
+Creates GitHub issues and PRs with proposals.
 
 ### evolution/analysis
-Аналізує issues та пріоритезує для реалізації (PRIVATE only).
+Analyzes issues and prioritizes them for implementation (PRIVATE only).
 
 ### evolution/implementation
-Реалізує обрані зміни та самооновлюється (PRIVATE only).
+Implements selected changes and self-updates (PRIVATE only).
 
 ### evolution/upstream-sync
-Синхронізується з upstream Hermes Agent (PRIVATE only).
+Synchronizes with the upstream Hermes Agent (PRIVATE only).
 
-## 🔐 Режими роботи
+## 🔐 Operating modes
 
 ### PUBLIC Mode
-- ✅ Дослідження
-- ✅ Створення issues/PR
-- ❌ Мердж PR
-- ❌ Модифікація коду
+- ✅ Research
+- ✅ Issue/PR creation
+- ❌ PR merge
+- ❌ Code modification
 
 ### PRIVATE Mode
-- ✅ Все що в PUBLIC mode
-- ✅ Мердж PR
-- ✅ Модифікація коду
-- ✅ Самооновлення
+- ✅ Everything in PUBLIC mode
+- ✅ PR merge
+- ✅ Code modification
+- ✅ Self-update
 
-## 🔄 Sync з Upstream
+## 🔄 Upstream sync
 
-Hermes Evolution регулярно синхронізується з оригінальним Hermes Agent:
+Hermes Evolution regularly synchronizes with the original Hermes Agent:
 
-1. Отримує зміни з upstream
-2. Аналізує кожну зміну
-3. Визначає пріоритет інтеграції
-4. Створює proposals для конфліктуючих змін
-5. Інтегрує сумісні зміни
+1. Fetches upstream changes (analyzed at the merged-PR level, with the raw
+   commit log as a fallback)
+2. Evaluates each change
+3. Determines integration priority
+4. Opens proposals for conflicting changes
+5. Integrates compatible changes — bounded per run, through a separate branch +
+   PR + CI (never a wholesale direct merge)
 
-## 🛡️ Гейт безпечної самоеволюції
+The upstream release tag we have synced through is recorded in
+`.evolution/upstream-sync-state.json` and mirrored into `__release_date__`
+(`hermes_cli/__init__.py`) so our version corresponds to upstream's.
 
-Агент пише код автономно. Без гейту зламаний або ін'єктований код потрапив би
-в `main`, і авто-апдейт розніс би його на всі інсталяції за 24 год. Тому
-злиття контролює **інфраструктура, а не самооцінка LLM**:
+## 🛡️ Safe self-evolution gate
 
-1. **PR-only.** `evolution-implementation` лише створює PR (`gh pr create`) і
-   НЕ робить `git merge` / `git checkout main`. Прямий merge заборонено.
-2. **CI-гейт.** На кожен PR у `main` запускаються `.github/workflows/tests.yml`
-   і `lint.yml`. Червоні тести = merge заблоковано.
-3. **Захист критичних шляхів.** `.github/CODEOWNERS` вимагає рев'ю власника для
-   PR, що чіпають self-update, планувальник, CI чи evolution-skills.
-4. **Авто-апдейт тягне лише CI-захищений `main`** — офіційний `hermes update`
-   (origin = наш форк) оновлюється на код, який уже пройшов перевірку.
+The agent writes code autonomously. Without a gate, broken or injected code
+would reach `main` and auto-update would propagate it to every installation
+within 24h. So merges are controlled by **infrastructure, not the LLM's own
+judgement**:
 
-### Увімкнути branch protection (ОБОВ'ЯЗКОВО)
+1. **PR-only.** `evolution-implementation` only opens PRs (`gh pr create`) and
+   never runs `git merge` / `git checkout main`. Direct merge is forbidden.
+2. **CI gate.** Every PR into `main` runs `.github/workflows/tests.yml` and
+   `lint.yml`. Red tests = merge blocked.
+3. **Critical-path protection.** `.github/CODEOWNERS` requires owner review for
+   PRs touching self-update, the scheduler, CI, or evolution skills.
+4. **Auto-update pulls only CI-protected `main`** — the official `hermes update`
+   (origin = our fork) updates onto code that has already passed the gate.
 
-Без захисту гілки PR-only — лише інструкція, яку LLM може обійти. Enforcement
-вмикає власник репозиторію:
+### Enable branch protection (REQUIRED)
+
+Without branch protection, "PR-only" is just an instruction the LLM could
+bypass. The repository owner enables enforcement:
 
 ```bash
 gh api -X PUT repos/Lexus2016/hermes-agent-evolution/branches/main/protection \
@@ -199,72 +191,73 @@ gh api -X PUT repos/Lexus2016/hermes-agent-evolution/branches/main/protection \
 JSON
 ```
 
-- `contexts: ["Tests"]` — назва перевірки з `tests.yml` (`name: Tests`); додай
-  інші (наприклад lint) за фактичними назвами в Actions.
-- `require_code_owner_reviews` + `count: 0` — звичайні PR зливаються на зеленому
-  CI без рев'ю (автономність), а PR на критичні шляхи з `CODEOWNERS` усе одно
-  потребують підтвердження власника.
-- Для повного «людина в циклі» постав `required_approving_review_count: 1`.
+- `contexts: ["Tests"]` — the check name from `tests.yml` (`name: Tests`); add
+  others (e.g. lint) by their actual names in Actions.
+- `require_code_owner_reviews` + `count: 0` — ordinary PRs merge on green CI
+  without review (autonomy), while PRs touching `CODEOWNERS` critical paths
+  still require owner approval.
+- For a full "human in the loop", set `required_approving_review_count: 1`.
 
-> ⚠️ Без цього кроку гейт неповний: skill каже «лише PR», але ніщо технічно не
-> заважає агенту змерджити напряму.
+> ⚠️ Without this step the gate is incomplete: the skill says "PR only", but
+> nothing technically stops the agent from merging directly.
 
-## 🤖 Bot-акаунт для агента (для критичних PR)
+## 🤖 Bot account for the agent (for critical PRs)
 
-Захист гілки забороняє автору апрувити власний PR. Якщо агент пушить під
-акаунтом власника, власник не зможе рев'ювати агентські PR на критичні шляхи
-(`CODEOWNERS`) — вони зависнуть назавжди. Тому агент має діяти під ОКРЕМИМ
-bot-акаунтом.
+Branch protection forbids a PR author from approving their own PR. If the agent
+pushes under the owner's account, the owner cannot review the agent's PRs to
+critical paths (`CODEOWNERS`) — they would hang forever. So the agent should act
+under a SEPARATE bot account.
 
-### Налаштування (один раз)
+### Setup (once)
 
-1. **Створи окремий GitHub-акаунт** для бота (напр. `hermes-evo-bot`). Це робить
-   людина — агент не створює акаунти.
-2. **Додай бота як collaborator** з правом write на репозиторій
-   (`Settings → Collaborators`).
-3. **Створи fine-grained PAT** від імені бота, з доступом ЛИШЕ до цього репо:
-   - Repository access: тільки `hermes-agent-evolution`
-   - Permissions: Contents (RW), Pull requests (RW), Issues (RW) — і нічого більше.
-4. **Налаштуй сервер діяти як бот** (токен через env, не аргумент):
+1. **Create a separate GitHub account** for the bot (e.g. `hermes-evo-bot`). A
+   human does this — the agent does not create accounts.
+2. **Add the bot as a collaborator** with write access (`Settings → Collaborators`).
+3. **Create a fine-grained PAT** as the bot, scoped to ONLY this repo:
+   - Repository access: only `hermes-agent-evolution`
+   - Permissions: Contents (RW), Pull requests (RW), Issues (RW), Workflows (RW) — and nothing else.
+4. **Configure the server to act as the bot** (token via env, not an argument):
    ```bash
    export GITHUB_EVOLUTION_TOKEN=<bot-pat>
    bash scripts/setup_evolution_bot.sh
    ```
-   Скрипт залогінить `gh` як бота, підключить його як git credential і виставить
-   git identity. Токен ніде не друкується.
+   The script logs `gh` in as the bot, wires it as a git credential, and sets
+   the git identity. The token is never printed.
 
-### Як це працює далі
+### How it works from there
 
-- Агент створює PR під `hermes-evo-bot` → ти (власник + code owner) рев'юєш
-  критичні PR і зливаєш; звичайні PR зливаються на зеленому CI без рев'ю.
-- Токен бота обмежений одним репо → навіть при компрометації агента (через
-  ін'єкцію) зловмисник не дістане інших твоїх репозиторіїв.
+- The agent opens PRs as `hermes-evo-bot` → you (owner + code owner) review
+  critical PRs and merge them; ordinary PRs merge on green CI without review.
+- The bot token is scoped to one repo → even if the agent is compromised (via
+  injection), an attacker cannot reach your other repositories.
 
-> Зберігай bot-PAT у secrets-сховищі / env з `chmod 600`, НЕ в коді чи git URL.
+> Store the bot PAT in a secrets vault / env with `chmod 600`, NOT in code or a
+> git URL.
 
-## 📖 Документація
+## 📖 Documentation
 
-- [AGENTS.md](AGENTS.md) — документація Hermes Agent (оригінальна)
-- [CONTRIBUTING.md](CONTRIBUTING.md) — як контрибьютити
-- [evolution/README.md](evolution/README.md) — документація еволюції (в розробці)
+- [AGENTS.md](AGENTS.md) — Hermes Agent documentation (original)
+- [SECURITY_EVOLUTION.md](SECURITY_EVOLUTION.md) — self-evolution threat model & gate
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute
 
-## 🤝 Контрибьюшн
+## 🤝 Contributing
 
-Контриб'юшн вітається! Перш ніж PR:
+Contributions are welcome! Before opening a PR:
 
-1. Перевірте [CONTRIBUTING.md](CONTRIBUTING.md)
-2. Запустіть тести: `pytest tests/`
-3. Оновіть документацію
+1. Check [CONTRIBUTING.md](CONTRIBUTING.md)
+2. Run the tests: `python scripts/run_tests_parallel.py` (the canonical parallel
+   runner; `pytest tests/` directly does not isolate cross-file state)
+3. Update the documentation
 
-## 📄 Ліцензія
+## 📄 License
 
-Apache 2.0 (наслідується від [nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent))
+MIT (see `LICENSE`; built on [nousresearch/hermes-agent](https://github.com/nousresearch/hermes-agent)).
 
-## 🙏 Вдячність
+## 🙏 Acknowledgements
 
-- [Nous Research](https://nousresearch.com/) — оригінальний Hermes Agent
-- Всім контриб'юторам Hermes Agent
+- [Nous Research](https://nousresearch.com/) — the original Hermes Agent
+- All Hermes Agent contributors
 
 ---
 
-**Це експеримент в self-improving AI systems.** ⚗️
+**This is an experiment in self-improving AI systems.** ⚗️
