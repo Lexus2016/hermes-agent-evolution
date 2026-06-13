@@ -3875,27 +3875,35 @@ def validate_requested_model(
                 "recognized": True,
                 "message": None,
             }
-        else:
-            # API responded but model is not listed.  Accept anyway —
-            # the user may have access to models not shown in the public
-            # listing (e.g. Z.AI Pro/Max plans can use glm-5 on coding
-            # endpoints even though it's not in /models).  Warn but allow.
 
-            # Auto-correct if the top match is very similar (e.g. typo)
-            auto = get_close_matches(requested_for_lookup, api_models, n=1, cutoff=0.9)
-            if auto:
-                return {
-                    "accepted": True,
-                    "persist": True,
-                    "recognized": True,
-                    "corrected_model": auto[0],
-                    "message": f"Auto-corrected `{requested}` → `{auto[0]}`",
-                }
+        # Check if the model is in our static curated listing for this provider
+        curated_models = _PROVIDER_MODELS.get(normalized, [])
+        if requested_for_lookup in set(curated_models):
+            return {
+                "accepted": True,
+                "persist": True,
+                "recognized": True,
+                "message": (
+                    f"Note: `{requested}` was not found in this provider's live model listing, "
+                    f"but is recognized by Hermes."
+                ),
+            }
 
-            suggestions = get_close_matches(requested, api_models, n=3, cutoff=0.5)
-            suggestion_text = ""
-            if suggestions:
-                suggestion_text = "\n  Similar models: " + ", ".join(f"`{s}`" for s in suggestions)
+        # Auto-correct if the top match is very similar (e.g. typo)
+        auto = get_close_matches(requested_for_lookup, api_models, n=1, cutoff=0.9)
+        if auto:
+            return {
+                "accepted": True,
+                "persist": True,
+                "recognized": True,
+                "corrected_model": auto[0],
+                "message": f"Auto-corrected `{requested}` → `{auto[0]}`",
+            }
+
+        suggestions = get_close_matches(requested, api_models, n=3, cutoff=0.5)
+        suggestion_text = ""
+        if suggestions:
+            suggestion_text = "\n  Similar models: " + ", ".join(f"`{s}`" for s in suggestions)
 
         return {
             "accepted": False,

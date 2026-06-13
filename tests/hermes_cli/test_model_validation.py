@@ -800,3 +800,15 @@ class TestProbeApiModelsUserAgent:
         assert ua and ua.startswith("hermes-cli/")
         # No Authorization was set, but UA must still be present.
         assert req.get_header("Authorization") is None
+
+
+class TestValidateCuratedFallback:
+    def test_curated_model_not_in_live_api_is_accepted(self):
+        # "glm-5.2[1m]" is in _PROVIDER_MODELS for "zai" but we mock the live API to return other models
+        live_models = ["glm-5.1", "glm-5", "glm-4.7"]
+        result = _validate("glm-5.2[1m]", provider="zai", api_models=live_models)
+        assert result["accepted"] is True
+        assert result["persist"] is True
+        assert result["recognized"] is True
+        assert "not found in this provider's live model listing" in result["message"]
+        assert "recognized by Hermes" in result["message"]
