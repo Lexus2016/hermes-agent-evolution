@@ -210,7 +210,7 @@ DEFAULT_CONTEXT_LENGTHS = {
     "minimax-m3": 1000000,
     "minimax": 204800,
     # GLM
-    "glm-5.2[1m]": 1000000,
+    "glm-5.2": 1000000,
     "glm": 202752,
     # xAI Grok — xAI /v1/models does not return context_length metadata,
     # so these hardcoded fallbacks prevent Hermes from probing-down to
@@ -257,7 +257,7 @@ DEFAULT_CONTEXT_LENGTHS = {
     "mimo-v2-omni": 262144,
     "mimo-v2-flash": 262144,
     "zai-org/GLM-5": 202752,
-    "zai-org/GLM-5.2[1m]": 1000000,
+    "zai-org/GLM-5.2": 1000000,
 }
 
 # xAI Grok models that ACCEPT the `reasoning.effort` parameter on
