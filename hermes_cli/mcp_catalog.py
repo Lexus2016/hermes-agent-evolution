@@ -361,6 +361,13 @@ def _run_bootstrap(cwd: Path, commands: List[str]) -> None:
 
     Each command runs through the shell (so `&&` etc. work). The output is
     streamed to the user's terminal for visibility.
+
+    Security (reviewed for #165): shell=True is intentional — bootstrap steps
+    are the MCP's own install recipe (git clone + dep install, analogous to a
+    package manager's post-install scripts) and require shell features. They run
+    ONLY on an explicit user-initiated MCP install from a catalog entry the user
+    chose; each command is echoed before it runs. The trust boundary is the
+    catalog source — do NOT wire agent/LLM-generated command strings into here.
     """
     for cmd in commands:
         print(color(f"  $ {cmd}", Colors.DIM))

@@ -810,6 +810,9 @@ def _run_cua_driver_installer(label: str = "Installing", verbose: bool = True) -
         _print_info(f"    {label} cua-driver...")
     driver_cmd = _cua_driver_cmd()
     try:
+        # shell=True is safe here: install_cmd is a FIXED literal (hard-coded
+        # upstream install URL, no user/agent-interpolated input), run only on
+        # an explicit user-initiated `hermes tools` install. Reviewed for #165.
         result = subprocess.run(install_cmd, shell=True, timeout=300)
         if result.returncode == 0 and shutil.which(driver_cmd):
             if verbose:
