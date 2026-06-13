@@ -17,26 +17,45 @@ Synchronize with the original Hermes Agent (upstream) and determine which change
 
 ## Process
 
-0. **Read where we last synced through** (the baseline). This is recorded in
-   `.evolution/upstream-sync-state.json` at the repo root (created/updated in the
-   version-stamp step below). Use its `synced_through_date` to scope the PR query:
-```bash
-SYNCED_DATE=$(jq -r '.synced_through_date // "2026-01-01"' \
-  .evolution/upstream-sync-state.json 2>/dev/null || echo "2026-01-01")
-```
-
-1. **Fetch upstream and analyze at the PULL-REQUEST level (preferred), with the
-   commit log as a fallback.** A merged upstream PR carries a title, description
-   and labels — far richer grounds to judge relevance than an opaque commit:
+0. **Read the cursor** — the upstream commit through which we've ACCOUNTED for
+   every commit so far. It lives in `.evolution/upstream-sync-state.json`
+   (`synced_through_commit`). This is a LOGICAL cursor, NOT git ancestry: we
+   cherry-pick (which makes new SHAs), so `git rev-list`/merge-base never reflect
+   applied work — the cursor in the file is the source of truth.
 ```bash
 git fetch upstream --tags
-# PRIMARY: upstream merged PRs since our baseline (richest context):
-gh pr list --repo nousresearch/hermes-agent --state merged --limit 50 \
-  --search "merged:>=$SYNCED_DATE" \
-  --json number,title,mergedAt,labels,url,mergeCommit
-# FALLBACK: raw commits not in our main (catches direct-push / PR-less commits):
-git log main..upstream/main --oneline
+CURSOR=$(jq -r '.synced_through_commit // empty' .evolution/upstream-sync-state.json 2>/dev/null)
+# Fallback only if the file is missing: the honest contiguous point.
+[ -n "$CURSOR" ] || CURSOR=$(git merge-base main upstream/main)
+echo "cursor: $CURSOR  | remaining: $(git rev-list --count $CURSOR..upstream/main)"
 ```
+
+   ⚠️ **NEVER scope by date** (e.g. `gh pr list --search merged:>=<date>`). A date
+   window silently drops upstream commits you merely didn't cherry-pick this run —
+   the exact bug that left the marker at a run-date with most of the window
+   unprocessed. The cursor advances ONLY past commits you actually account for.
+
+1. **Take the next bounded batch AFTER the cursor, oldest-first, and ACCOUNT FOR
+   EVERY commit in it** (apply OR defer — never ignore):
+```bash
+# The driver is the commit list (catches everything, incl. PR-less commits).
+git log --reverse --format='%H %s' "$CURSOR"..upstream/main | head -25
+```
+   For richer relevance judgement, look up the PR a commit belongs to (title /
+   labels / description):
+```bash
+gh pr list --repo nousresearch/hermes-agent --state merged --search "<sha>" \
+  --json number,title,labels,url
+```
+   For EACH commit in the batch, decide and record one of:
+   - **already-applied** — its change is already in our main (a previous
+     cherry-pick). Detect via an empty/redundant cherry-pick and skip:
+     `git cherry-pick -x <sha>` → if it reports "nothing to commit"/empty, run
+     `git cherry-pick --skip`. Counts as accounted.
+   - **apply** — relevant + conflict-free → `git cherry-pick -x <sha>`.
+   - **defer** — conflicting, irrelevant, or `.github/workflows/**` without scope
+     → do NOT apply; append `{sha, summary, reason}` to `deferred[]` in the state
+     file. Counts as accounted (recorded, not lost; owner can revisit).
 
 2. **Analyze the changes:**
 
@@ -168,45 +187,46 @@ untrusted until it has passed CI + review. A `sync/*` branch is NOT
 `evolution/issue-*`, so evolution-integration never auto-merges it — upstream
 PRs always wait for the owner.
 
-## Inherit upstream version numbering (do this IN the sync PR)
+## Advance the cursor + inherit version (do this IN the sync PR)
 
-Upstream releases are tagged by calendar date (`vYYYY.M.D`, e.g. `v2026.6.5`),
-roughly weekly; their `pyproject.toml` version is static. So the meaningful
-"version" to inherit is **the newest upstream release tag your synced commits
-reach**. Stamp it as PART of the sync PR (same branch, so CI covers it):
+After accounting for the batch, advance the cursor and stamp the version. This
+is the step that makes the sync CONVERGE — the cursor moves forward by exactly
+the batch you processed, every run, so the backlog drains deterministically.
 
 ```bash
-# Newest upstream release tag that is actually an ancestor of THIS sync branch
-# (i.e. reached by the commits you just cherry-picked/merged) — NOT upstream's
-# tip, which may be tags ahead of the ≤25 commits you took this run:
-git fetch upstream --tags
+# LAST commit of the batch you just processed (the 25th, or fewer at the end).
+# This is the new cursor — you accounted for everything up to and including it.
+LAST=$(git log --reverse --format='%H' "$CURSOR"..upstream/main | head -25 | tail -1)
+
+# Newest upstream release tag that is an ancestor of the NEW cursor (NOT of
+# upstream's tip). Tags advance only when the cursor actually crosses one:
 TAG=$(for t in $(git tag -l 'v20*' | sort -Vr); do \
-        git merge-base --is-ancestor "$t" HEAD 2>/dev/null && { echo "$t"; break; }; \
+        git merge-base --is-ancestor "$t" "$LAST" 2>/dev/null && { echo "$t"; break; }; \
       done)
-COMMIT=$(git rev-parse HEAD)
 DATE=$(echo "$TAG" | sed 's/^v//')                          # e.g. 2026.6.5
-# If TAG is unchanged from the current marker, the synced commits are post-release
-# (untagged) work — keep the existing tag/date, just bump synced_through_commit.
 ```
 
-1. Update `hermes_cli/__init__.py` → set `__release_date__ = "<DATE>"` (the banner
-   already renders `Hermes Agent v<__version__> (<__release_date__>)`, so the
-   correspondence becomes visible immediately). Leave `__version__` (our own
-   semver) as-is.
-2. Write the baseline marker `.evolution/upstream-sync-state.json`:
+1. **Rewrite `.evolution/upstream-sync-state.json`** with the advanced cursor,
+   the tag/date for that cursor, and append any commits you deferred this run:
 ```json
 {
-  "synced_through_tag": "v2026.6.5",
-  "synced_through_commit": "<full sha>",
-  "synced_through_date": "2026-06-05",
+  "synced_through_commit": "<LAST>",
+  "synced_through_tag": "<TAG>",
+  "synced_through_date": "<DATE as YYYY-MM-DD>",
   "our_version": "0.16.0",
-  "synced_at": "<run date>"
+  "synced_at": "<run date>",
+  "deferred": [ {"sha": "...", "summary": "...", "reason": "conflict|irrelevant|workflow-scope"} ]
 }
 ```
-   `synced_through_date` (ISO `YYYY-MM-DD`, derived from the tag) is what step 0
-   reads next run to scope the PR query — so each run only looks at NEW upstream
-   work. Commit both files on the `sync/upstream-*` branch so they ride the same
-   PR + CI as the code.
+2. **Only if `TAG` changed** from the previous marker, update `hermes_cli/__init__.py`
+   `__release_date__ = "<DATE>"` (the banner renders `Hermes Agent v<__version__>
+   (<__release_date__>)`). If the batch was post-release untagged work, `TAG` is
+   unchanged — leave `__release_date__` as-is, just advance the cursor.
+
+Commit the state file (and `__init__.py` if changed) on the `sync/upstream-*`
+branch so they ride the same PR + CI as the cherry-picked code. The cursor only
+moves forward when this PR's commits are real — so a failed/empty run leaves the
+cursor untouched and the next run retries the same batch.
 
 ## Output format
 

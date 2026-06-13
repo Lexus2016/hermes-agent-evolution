@@ -1,8 +1,9 @@
 {
+  "synced_through_commit": "298bb93d397faffc64aa5cfd58cbd707561d292a",
   "synced_through_tag": "v2026.6.5",
-  "synced_through_commit": "45f9099e516192f6d16023f1f2944c13e94112be",
-  "synced_through_date": "2026-06-13",
+  "synced_through_date": "2026-06-05",
   "our_version": "0.16.0",
   "synced_at": "2026-06-13",
-  "_note": "Newest upstream release tag that is an ancestor of our main. Updated by the evolution-upstream-sync skill on each sync. synced_through_date scopes the next upstream-PR query; __release_date__ in hermes_cli/__init__.py mirrors synced_through_tag for the banner."
+  "deferred": [],
+  "_note": "synced_through_commit is the LOGICAL cursor: the upstream commit through which evolution-upstream-sync has ACCOUNTED for every commit (applied OR deferred). Each run processes the next <=25 commits AFTER it (oldest-first) and advances it — so nothing in the window is ever silently skipped. Seeded to the merge-base of our main and upstream/main (the honest contiguous synced point). synced_through_tag/date = newest upstream release tag that is an ancestor of the cursor (mirrored into __release_date__ for the banner); they advance ONLY when the cursor crosses a new tag. deferred[] records commits evaluated but not applied (conflict/irrelevant) with reasons, for owner review."
 }
