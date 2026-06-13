@@ -1138,7 +1138,13 @@ def _transcribe_local(file_path: str, model_name: str) -> Dict[str, Any]:
             transcribe_kwargs["language"] = _forced_lang
 
         try:
-            segments, info = _local_model.transcribe(file_path, **transcribe_kwargs)
+            if not _local_model:
+                return {"success": False, "transcript": "", "error": "Local STT model failed to load"}
+            transcribe_result = _local_model.transcribe(file_path, **transcribe_kwargs)
+            try:
+                segments, info = transcribe_result
+            except (TypeError, ValueError):
+                return {"success": False, "transcript": "", "error": "Local STT model returned an invalid result"}
             transcript = " ".join(segment.text.strip() for segment in segments)
         except Exception as exc:
             # CUDA runtime libs sometimes only fail at dlopen-on-first-use,
@@ -1158,7 +1164,13 @@ def _transcribe_local(file_path: str, model_name: str) -> Dict[str, Any]:
             from faster_whisper import WhisperModel
             _local_model = WhisperModel(model_name, device="cpu", compute_type="int8")
             _local_model_name = model_name
-            segments, info = _local_model.transcribe(file_path, **transcribe_kwargs)
+            if not _local_model:
+                return {"success": False, "transcript": "", "error": "Local STT model failed to load on CPU fallback"}
+            transcribe_result = _local_model.transcribe(file_path, **transcribe_kwargs)
+            try:
+                segments, info = transcribe_result
+            except (TypeError, ValueError):
+                return {"success": False, "transcript": "", "error": "Local STT model returned an invalid result on CPU fallback"}
             transcript = " ".join(segment.text.strip() for segment in segments)
 
         logger.info(
@@ -1655,6 +1667,21 @@ def transcribe_audio(file_path: str, model: Optional[str] = None) -> Dict[str, A
 
     provider = _get_provider(stt_config)
 
+    # If _get_provider returned "none" (e.g. explicitly-configured cloud
+    # provider is missing credentials), try a last-resort local fallback so
+    # voice messages aren't silently dropped when local STT is actually
+    # available.  Only use already-installed local tools — do not trigger a
+    # mid-session lazy install here. (#122)
+    if provider == "none":
+        if _HAS_FASTER_WHISPER:
+            logger.info(
+                "STT provider unavailable, falling back to local faster-whisper"
+            )
+            provider = "local"
+        elif _has_local_command():
+            logger.info("STT provider unavailable, falling back to local STT command")
+            provider = "local_command"
+
     if provider == "local":
         local_cfg = stt_config.get("local", {})
         model_name = _normalize_local_model(
@@ -1668,6 +1695,20 @@ def transcribe_audio(file_path: str, model: Optional[str] = None) -> Dict[str, A
             model or local_cfg.get("model", DEFAULT_LOCAL_MODEL)
         )
         return _transcribe_local_command(file_path, model_name)
+
+    if provider == "none":
+        return {
+            "success": False,
+            "transcript": "",
+            "error": (
+                "No STT provider available. Install faster-whisper for free local "
+                f"transcription, configure {LOCAL_STT_COMMAND_ENV} or install a local whisper CLI, "
+                "set GROQ_API_KEY for free Groq Whisper, set MISTRAL_API_KEY for Mistral "
+                "Voxtral Transcribe, configure xAI OAuth or set XAI_API_KEY for xAI Grok STT, "
+                "set ELEVENLABS_API_KEY for ElevenLabs Scribe, or set VOICE_TOOLS_OPENAI_KEY "
+                "or OPENAI_API_KEY for the OpenAI Whisper API."
+            ),
+        }
 
     if provider == "groq":
         model_name = model or DEFAULT_GROQ_STT_MODEL
