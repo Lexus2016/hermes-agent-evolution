@@ -485,6 +485,27 @@ def run_conversation(
                 agent._safe_print(f"\n⚠️  Iteration budget exhausted ({agent.iteration_budget.used}/{agent.iteration_budget.max_total} iterations used)")
             break
 
+        # Loop guard: if the model is stuck repeating one tool (or repeatedly
+        # failing the same tool), inject a ONE-TIME advisory nudge to break the
+        # spiral and re-check the goal (#173/#174/#175/#176/#143). Advisory only:
+        # it appends a user message, never blocks a tool call. Nudges once per
+        # stuck run (tracked by the trailing tool name) to avoid spamming.
+        try:
+            from agent import loop_guard as _loop_guard
+
+            _lg_sig = _loop_guard.current_run_signature(messages)
+            _lg_tool = _lg_sig[0] if _lg_sig else None
+            if _lg_tool != getattr(agent, "_loop_guard_nudged_tool", None):
+                agent._loop_guard_nudged_tool = None  # run changed/ended — re-arm
+                _lg_nudge = _loop_guard.maybe_nudge(messages) if _lg_tool else None
+                if _lg_nudge:
+                    messages.append({"role": "user", "content": _lg_nudge})
+                    agent._loop_guard_nudged_tool = _lg_tool
+                    if not agent.quiet_mode:
+                        agent._safe_print("\n🌀 loop-guard: nudging a strategy change")
+        except Exception as _lg_err:  # never let the guard break the loop
+            logger.debug("loop_guard error (iteration %s): %s", api_call_count, _lg_err)
+
         # Fire step_callback for gateway hooks (agent:step event)
         if agent.step_callback is not None:
             try:
