@@ -37,8 +37,23 @@ Create GitHub issues and pull requests based on research.
 2b. **Deduplicate against EXISTING issues — MANDATORY (many installations file in
     parallel).** Hundreds or thousands of installs research the same trends, so
     the SAME proposal WILL be filed by others. At scale this is the #1 source of
-    noise. Before creating ANY issue, fetch what already exists and SKIP anything
-    already covered — OPEN or already CLOSED/rejected:
+    noise. Before creating ANY issue, SKIP anything already covered.
+
+    **Fast-path — local dedup cache (O(1), avoids re-pulling history every run).**
+    This install keeps a cache of every idea it has already filed/considered at
+    `~/.hermes/profiles/user1/evolution/dedup-cache.json`. Check each proposal
+    against it FIRST; a hit means we already handled this idea — skip it with no
+    gh query, no in-context comparison:
+    ```bash
+    python scripts/evolution_dedup.py check "<proposal title>"   # exit 1 = already seen → SKIP
+    ```
+    The cache is a pure NEGATIVE fast-path: a MISS (exit 0) only means "not seen
+    locally yet" — fall through to the gh query below, which still catches ideas
+    filed by OTHER installs. (Issue #91 — dedup cost stops growing with repo age.)
+
+    **Fallback — only for cache-misses:** fetch what already exists and compare
+    by meaning. Bounded by the cache (historical-rejected ideas are cached, so
+    this can stay small):
     ```bash
     gh issue list --repo Lexus2016/hermes-agent-evolution --state all --limit 300 \
       --json number,title,state,labels \
@@ -119,6 +134,16 @@ gh issue create \
 
    After creation, **verify that the issue actually appeared** (otherwise do not
    count it in the report): `gh issue list --repo "$REPO" --state open --limit 5`.
+
+   **Then record the outcome in the dedup cache** (so this idea short-circuits on
+   every future run — issue #91). Record BOTH filed issues AND proposals you
+   skipped as duplicates, so neither is ever re-evaluated from scratch:
+   ```bash
+   # filed:
+   python scripts/evolution_dedup.py record "<title>" filed <issue#> "$(date +%F)"
+   # skipped as an existing dup:
+   python scripts/evolution_dedup.py record "<title>" considered "" "$(date +%F)"
+   ```
 
 > Do NOT use the web tool to create an issue — it does not make an
 > authorized POST. Issue creation is only via `gh` (terminal).
