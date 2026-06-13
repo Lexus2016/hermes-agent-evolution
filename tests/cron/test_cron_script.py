@@ -172,6 +172,23 @@ class TestRunJobScript:
         parsed = json.loads(output)
         assert parsed["new_prs"][0]["number"] == 42
 
+    def test_script_reads_env_from_hermes_dotenv(self, cron_env):
+        """no_agent scripts should inherit API keys from HERMES_HOME/.env."""
+        from cron.scheduler import _run_job_script
+
+        env_file = cron_env / ".env"
+        env_file.write_text("OPENROUTER_API_KEY=sk-test-123\n")
+
+        script = cron_env / "scripts" / "read_env.py"
+        script.write_text(textwrap.dedent("""\
+            import os
+            print(os.getenv("OPENROUTER_API_KEY", "MISSING"))
+        """))
+
+        success, output = _run_job_script("read_env.py")
+        assert success is True
+        assert output == "sk-test-123"
+
 
 class TestBuildJobPromptWithScript:
     """Test that script output is injected into the prompt."""
