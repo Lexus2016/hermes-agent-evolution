@@ -334,6 +334,17 @@ def make_tool_result_message(name: str, content: Any, tool_call_id: str) -> dict
     list structure stays valid for vision-capable adapters.
     """
     wrapped = _maybe_wrap_untrusted(name, content)
+    # Normalize failures into an actionable diagnostic hint (#130/#175): if the
+    # result looks like an error, append a one-line failure-class + recovery hint
+    # so the model adapts instead of retrying blindly. Trusted annotation, added
+    # AFTER any untrusted-content wrapper. Classify on the original content.
+    if isinstance(wrapped, str):
+        try:
+            from agent.tool_diagnostics import diagnostic_suffix
+
+            wrapped = wrapped + diagnostic_suffix(content)
+        except Exception:
+            pass
     return {
         "role": "tool",
         "name": name,
