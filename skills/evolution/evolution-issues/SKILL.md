@@ -124,10 +124,22 @@ BODY="$CLEANED"
 
 Then create:
 
+   **Idempotency guard — search GitHub by EXACT title before creating.** The
+   local cache check above does NOT protect against a `gh issue create` that
+   silently succeeds but whose response times out, so you "retry" and file a true
+   duplicate (this happened — #193/#194, identical body, 13s apart, one proposal).
+   So immediately before creating, confirm no OPEN issue already has this exact
+   title; if one does, SKIP the create and just record it:
 ```bash
-gh issue create \
+TITLE="[FEATURE] <short title>"   # right prefix per category: [FEATURE]/[FIX]/[IMPROVEMENT]/...
+existing=$(gh issue list --repo "$REPO" --state open --search "in:title $TITLE" \
+  --json number,title --jq ".[] | select(.title==\"$TITLE\") | .number" | head -1)
+```
+   Create ONLY when `$existing` is empty:
+```bash
+[ -z "$existing" ] && gh issue create \
   --repo "$REPO" \
-  --title "[FEATURE] <short title>" \
+  --title "$TITLE" \
   --label "enhancement,proposal,research-generated" \
   --body "$BODY"
 ```
