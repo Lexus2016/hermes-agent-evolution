@@ -34,3 +34,15 @@ def test_clean_text_unchanged():
 def test_empty_and_none_safe():
     assert strip("") == ""
     assert strip(None) is None
+
+
+def test_inline_mention_preserved_not_corrupted():
+    # A report may legitimately quote/discuss the tag — only LEADING/own-line
+    # reasoning is stripped, never an inline mid-sentence mention (regression:
+    # the first cut silently deleted '<think>hidden</think>' from real content).
+    rep = "# Report\nThe model emits <think>hidden</think> blocks we must strip."
+    assert strip(rep) == rep
+
+
+def test_own_line_block_stripped_but_surrounding_kept():
+    assert strip("intro\n<think>mid</think>\nmore") == "intro\nmore"

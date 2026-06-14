@@ -1417,19 +1417,26 @@ def strip_reasoning_for_delivery(text: str) -> str:
 
     Cron output must be the RESULT only — never the model's reasoning. The
     delivery hint asks the agent for clean output, but instructions are not a
-    guarantee, so we also strip any `<think>`/`<thinking>`/`<reasoning>` blocks
-    mechanically here, at the delivery boundary. This is CRON-ONLY (interactive
-    sessions may legitimately surface reasoning); inline untagged narration is
-    handled by the delivery-hint instruction, not here."""
+    guarantee, so we also strip `<think>`/`<thinking>`/`<reasoning>` blocks
+    mechanically here, at the delivery boundary (CRON-ONLY — interactive sessions
+    may legitimately surface reasoning).
+
+    Only LEADING / own-line blocks are stripped — Hermes prepends native
+    reasoning as ``<think>\\n...\\n</think>\\n`` (see agent_runtime_helpers), so a
+    reasoning block always starts a line. An INLINE ``<think>...</think>``
+    mid-sentence is left intact, because a report may legitimately quote/discuss
+    the tag (e.g. an agent-research report about reasoning models) and silently
+    deleting that content would be worse than the leak. Inline untagged narration
+    is handled by the delivery-hint instruction, not here."""
     if not text:
         return text
     import re
 
     return re.sub(
-        r"<(think|thinking|reasoning|reasoning_scratchpad)\b[^>]*>.*?</\1>",
+        r"^[ \t]*<(think|thinking|reasoning|reasoning_scratchpad)\b[^>]*>.*?</\1>[ \t]*\n?",
         "",
         text,
-        flags=re.IGNORECASE | re.DOTALL,
+        flags=re.IGNORECASE | re.DOTALL | re.MULTILINE,
     ).strip()
 
 
