@@ -22,6 +22,7 @@ Usage::
 import json
 import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -44,10 +45,10 @@ _PROFILE_DIRS = [
     "plans",
     "workspace",
     "cron",
-    # Per-profile HOME for subprocesses: isolates system tool configs (git,
-    # ssh, gh, npm …) so credentials don't bleed between profiles.  In Docker
-    # this also ensures tool configs land inside the persistent volume.
-    # See hermes_constants.get_subprocess_home() and issue #4426.
+    # Back-compat/Docker HOME for tool subprocesses. Host subprocesses keep
+    # the user's real HOME by default so normal CLI credentials remain visible;
+    # containers still use this directory for persistent HOME state.
+    # See hermes_constants.get_subprocess_home().
     "home",
 ]
 
@@ -421,7 +422,8 @@ def create_wrapper_script(name: str, target: Optional[str] = None) -> Optional[P
     else:
         wrapper_path = wrapper_dir / canon
         try:
-            wrapper_path.write_text(f'#!/bin/sh\nexec hermes -p {profile} "$@"\n')
+            hermes_exe = shutil.which("hermes") or "hermes"
+            wrapper_path.write_text(f'#!/bin/sh\nexec {shlex.quote(hermes_exe)} -p {profile} "$@"\n')
             wrapper_path.chmod(wrapper_path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
             return wrapper_path
         except OSError as e:
@@ -784,9 +786,9 @@ def create_profile(
     Path
         The newly created profile directory.
     """
-    if no_skills and (clone_config or clone_all):
+    if no_skills and (clone_from is not None or clone_config or clone_all):
         raise ValueError(
-            "--no-skills is mutually exclusive with --clone / --clone-all "
+            "--no-skills is mutually exclusive with --clone / --clone-from / --clone-all "
             "(cloning explicitly copies skills from the source profile)."
         )
     canon = normalize_profile_name(name)
@@ -866,6 +868,25 @@ def create_profile(
                     dst.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(src, dst)
 
+    # Seed an empty .env so the profile has its own credentials file from
+    # day one. Without it, profile-scoped env writes (dashboard Channels /
+    # Keys pages, `hermes -p <name> auth add`) had no file until first
+    # write, and the profile silently inherited API keys from the shell
+    # environment — users reasonably read that as "the new profile reads
+    # the root .env". Skipped when --clone/--clone-all already copied one.
+    env_path = profile_dir / ".env"
+    if not env_path.exists():
+        try:
+            env_path.write_text(
+                "# Per-profile secrets for this Hermes profile.\n"
+                "# API keys and tokens set here override the shell environment.\n"
+                "# Behavioral settings belong in config.yaml, not here.\n",
+                encoding="utf-8",
+            )
+            os.chmod(str(env_path), 0o600)
+        except OSError:
+            pass  # best-effort — save_env_value creates the file on demand
+
     # Seed a default SOUL.md so the user has a file to customize immediately.
     # Skipped when the profile already has one (from --clone / --clone-all).
     soul_path = profile_dir / "SOUL.md"
@@ -875,18 +896,6 @@ def create_profile(
             soul_path.write_text(DEFAULT_SOUL_MD, encoding="utf-8")
         except Exception:
             pass  # best-effort — don't fail profile creation over this
-
-    # Seed a per-profile .env (PR #44792 parity) so a FRESH profile carries the
-    # install's credentials instead of silently showing everything as
-    # unconfigured once Channels/Keys endpoints became profile-scoped. Only for
-    # non-clone creates: clone/clone-config deliberately copy ONLY the files the
-    # source actually has (a missing source .env stays missing), so we must not
-    # fabricate one on those paths.
-    if source_dir is None:
-        try:
-            _seed_profile_env(profile_dir)
-        except OSError:
-            pass  # best-effort — profile creation must not fail over .env seeding
 
     # Write the opt-out marker so seed_profile_skills() and `hermes update`'s
     # all-profile sync loop both skip this profile for bundled-skill seeding.
@@ -970,35 +979,6 @@ def seed_profile_skills(profile_dir: Path, quiet: bool = False) -> Optional[dict
         return None
 
 
-_PROFILE_ENV_PLACEHOLDER = (
-    "# Per-profile secrets for this Hermes profile.\n"
-    "# API keys and tokens set here override the shell environment.\n"
-    "# Behavioral settings belong in config.yaml, not here.\n"
-)
-
-
-def _seed_profile_env(profile_dir: Path) -> bool:
-    """Give a profile its own ``.env`` if it lacks one.
-
-    Copies the DEFAULT install's ``.env`` when present, otherwise writes the
-    placeholder header; tightens perms to 0600. No-op (returns ``False``) when
-    the profile already has a ``.env``; returns ``True`` when one was created.
-
-    Shared by ``create_profile`` (new profiles, PR #44792 parity) and
-    ``backfill_profile_envs`` (pre-#44792 profiles) so both seed identically.
-    """
-    env_path = profile_dir / ".env"
-    if env_path.exists():
-        return False
-    default_env = _get_default_hermes_home() / ".env"
-    if default_env.is_file():
-        shutil.copy2(default_env, env_path)
-    else:
-        env_path.write_text(_PROFILE_ENV_PLACEHOLDER, encoding="utf-8")
-    os.chmod(str(env_path), 0o600)
-    return True
-
-
 def backfill_profile_envs(quiet: bool = False) -> List[str]:
     """Give every named profile that predates per-profile ``.env`` files one.
 
@@ -1022,14 +1002,28 @@ def backfill_profile_envs(quiet: bool = False) -> List[str]:
     if not profiles_root.is_dir():
         return backfilled
 
+    default_env = _get_default_hermes_home() / ".env"
+
     for entry in sorted(profiles_root.iterdir()):
         if not entry.is_dir() or not _PROFILE_ID_RE.match(entry.name):
             continue
         if entry.name == "default":
             continue
+        env_path = entry / ".env"
+        if env_path.exists():
+            continue
         try:
-            if _seed_profile_env(entry):
-                backfilled.append(entry.name)
+            if default_env.is_file():
+                shutil.copy2(default_env, env_path)
+            else:
+                env_path.write_text(
+                    "# Per-profile secrets for this Hermes profile.\n"
+                    "# API keys and tokens set here override the shell environment.\n"
+                    "# Behavioral settings belong in config.yaml, not here.\n",
+                    encoding="utf-8",
+                )
+            os.chmod(str(env_path), 0o600)
+            backfilled.append(entry.name)
         except OSError as e:
             if not quiet:
                 print(f"⚠ Could not seed .env for profile '{entry.name}': {e}")
@@ -1198,10 +1192,16 @@ def _maybe_register_gateway_service(profile_name: str) -> None:
     can re-register manually later via the gateway start command,
     which goes through the same dispatch path.
 
-    Port selection is governed by the profile's ``config.yaml``
-    (``[gateway] port = …``) — there is no Python-side allocator
-    (PR #30136 review item I5 retired the SHA-256-derived range
-    [9200, 9800) because it was dead code through the entire stack).
+    Port selection: each supervised profile gateway loads its own
+    ``HERMES_HOME`` and binds the port resolved by ``gateway/config.py``
+    from that profile's environment — ``API_SERVER_PORT`` (or
+    ``platforms.api_server.extra.port`` in the profile's
+    ``config.yaml``), defaulting to 8642. There is no ``[gateway] port``
+    key and no Python-side allocator (PR #30136 review item I5 retired
+    the SHA-256-derived range [9200, 9800) as dead code), so two
+    profiles that both leave the port at its default will both try to
+    bind 8642 — give each profile a distinct ``API_SERVER_PORT`` in its
+    ``.env``.
 
     Host short-circuit: check ``detect_service_manager()`` first and
     return immediately if it isn't ``"s6"``. This keeps host
