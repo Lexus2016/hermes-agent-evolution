@@ -221,11 +221,15 @@ def _probe_single_server(
     Returns list of ``(tool_name, description)`` tuples.
     Raises on connection failure.
     """
+    issues = validate_mcp_server_entry(name, config)
+    if issues:
+        raise ValueError("; ".join(issues))
+
     from tools.mcp_tool import (
         _ensure_mcp_loop,
         _run_on_mcp_loop,
         _connect_server,
-        _stop_mcp_loop,
+        _stop_mcp_loop_if_idle,
     )
 
     config = _resolve_mcp_server_config(config)
@@ -253,7 +257,7 @@ def _probe_single_server(
     except BaseException as exc:
         raise _unwrap_exception_group(exc) from None
     finally:
-        _stop_mcp_loop()
+        _stop_mcp_loop_if_idle()
 
     return tools_found
 
@@ -301,6 +305,8 @@ def cmd_mcp_add(args):
     # hermes_cli/main.py for why the dest is renamed.
     command = getattr(args, "mcp_command", None)
     cmd_args = getattr(args, "args", None) or []
+    if cmd_args and cmd_args[0] == "--":
+        cmd_args = cmd_args[1:]
     auth_type = getattr(args, "auth", None)
     preset_name = getattr(args, "preset", None)
     raw_env = getattr(args, "env", None)
@@ -350,6 +356,12 @@ def cmd_mcp_add(args):
         if explicit_env:
             server_config["env"] = explicit_env
 
+    issues = validate_mcp_server_entry(name, server_config)
+    if issues:
+        for issue in issues:
+            _warning(issue)
+        _warning(f"Server '{name}' was NOT saved due to suspicious configuration.")
+        return
 
     # ── Authentication ────────────────────────────────────────────────
 
