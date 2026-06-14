@@ -17,45 +17,67 @@ Synchronize with the original Hermes Agent (upstream) and determine which change
 
 ## Process
 
-0. **Read the cursor** — the upstream commit through which we've ACCOUNTED for
-   every commit so far. It lives in `.evolution/upstream-sync-state.json`
-   (`synced_through_commit`). This is a LOGICAL cursor, NOT git ancestry: we
-   cherry-pick (which makes new SHAs), so `git rev-list`/merge-base never reflect
-   applied work — the cursor in the file is the source of truth.
+0. **Baseline + accounting model.** State lives in
+   `.evolution/upstream-sync-state.json`. `synced_through_date` is the evaluation
+   horizon: every upstream PR merged on/before it has been ACCOUNTED for — ported,
+   deferred-with-reason (`deferred[]`), or skipped as permanently-irrelevant
+   (bulk count by scope). We do NOT chase a contiguous commit cursor or parity
+   (upstream is a firehose that diverges heavily from us — parity is impossible
+   and undesirable); we track which RELEVANT PRs are handled.
 ```bash
 git fetch upstream --tags
-CURSOR=$(jq -r '.synced_through_commit // empty' .evolution/upstream-sync-state.json 2>/dev/null)
-# Fallback only if the file is missing: the honest contiguous point.
-[ -n "$CURSOR" ] || CURSOR=$(git merge-base main upstream/main)
-echo "cursor: $CURSOR  | remaining: $(git rev-list --count $CURSOR..upstream/main)"
+SINCE=$(jq -r '.synced_through_date // empty' .evolution/upstream-sync-state.json 2>/dev/null)
+[ -n "$SINCE" ] || SINCE=2026-06-05
+echo "evaluating upstream PRs merged >= $SINCE"
 ```
 
-   ⚠️ **NEVER scope by date** (e.g. `gh pr list --search merged:>=<date>`). A date
-   window silently drops upstream commits you merely didn't cherry-pick this run —
-   the exact bug that left the marker at a run-date with most of the window
-   unprocessed. The cursor advances ONLY past commits you actually account for.
+   ⚠️ **Honesty invariant (from the past dishonesty bug):** scoping by merge date
+   is fine ONLY because every PR in the window is explicitly accounted for. The
+   old bug claimed "synced through date X" while conflicting commits in that
+   window were silently dropped, unrecorded. NEVER silently drop a RELEVANT PR:
+   relevant + un-applied → `deferred[]` with a reason (revisit next run);
+   irrelevant → bulk-skip by scope (recorded in the report). `synced_through_date`
+   advances only once every RELEVANT PR through it is ported or deferred.
 
-1. **Take the next bounded batch AFTER the cursor, oldest-first, and ACCOUNT FOR
-   EVERY commit in it** (apply OR defer — never ignore):
+1. **Select by PRIORITY across the WHOLE backlog — NOT oldest-first.** Upstream is
+   a firehose (~800 commits/week) that diverges heavily from our fork; chasing
+   commit-for-commit parity is impossible AND undesirable — most of it is
+   desktop / dashboard / tui / unused-platform / cosmetic churn we never want.
+   The goal is: **never miss a RELEVANT change, promptly.** Walking oldest-first
+   from a cursor is WRONG — it buries new security fixes behind hundreds of
+   irrelevant commits the cursor may never reach. Instead:
+
+   a. **List all merged upstream PRs since our baseline** (`synced_through_date`):
 ```bash
-# The driver is the commit list (catches everything, incl. PR-less commits).
-git log --reverse --format='%H %s' "$CURSOR"..upstream/main | head -25
+gh pr list --repo nousresearch/hermes-agent --state merged \
+  --search "merged:>=<synced_through_date>" --limit 300 \
+  --json number,title,labels,mergedAt,mergeCommit
 ```
-   For richer relevance judgement, look up the PR a commit belongs to (title /
-   labels / description):
-```bash
-gh pr list --repo nousresearch/hermes-agent --state merged --search "<sha>" \
-  --json number,title,labels,url
-```
-   For EACH commit in the batch, decide and record one of:
-   - **already-applied** — its change is already in our main (a previous
-     cherry-pick). Detect via an empty/redundant cherry-pick and skip:
-     `git cherry-pick -x <sha>` → if it reports "nothing to commit"/empty, run
-     `git cherry-pick --skip`. Counts as accounted.
-   - **apply** — relevant + conflict-free → `git cherry-pick -x <sha>`.
-   - **defer** — conflicting, irrelevant, or `.github/workflows/**` without scope
-     → do NOT apply; append `{sha, summary, reason}` to `deferred[]` in the state
-     file. Counts as accounted (recorded, not lost; owner can revisit).
+   b. **Classify each by RELEVANCE to THIS fork** — headless, server-side,
+      self-evolving; we run agent/cron/gateway/skills/mcp and deliver to Telegram;
+      we have NO desktop/dashboard/tui and do NOT use discord/whatsapp/matrix/
+      weixin/feishu/etc.:
+      - **PORT** — security/safety (mandatory); bug/perf fixes in `agent`,
+        `gateway`, `cron`, `skills`, `mcp`, `update`, `terminal`, `model`/
+        providers we use, and `telegram`.
+      - **SKIP permanently** — `desktop`, `dashboard`, `tui`, unused messaging
+        platforms, pure `docs`/`style`. Record as a bulk count + scopes in the
+        report; do NOT process commit-by-commit and NEVER let them block ports.
+   c. **Port in priority order, security FIRST and UNCAPPED:**
+      1. **ALL** security/safety PRs — **no per-run limit** (mandatory).
+      2. core bug/perf (agent/gateway/cron/skills/mcp/update/terminal).
+      3. provider/model + telegram.
+      For each PR's commit(s): `git cherry-pick -x <sha>`. Empty/redundant
+      (already applied) → `git cherry-pick --skip`. Conflict → append
+      `{sha, pr, summary, reason}` to `deferred[]` and MOVE ON — a conflict on one
+      must never block the rest. `max_commits_per_sync` bounds tiers 2-3 per run
+      (keeps one run's diff reviewable + conflict load sane); **tier-1 security is
+      exempt and always fully ported.**
+   d. **State = ported/deferred SETS, not a contiguous cursor.** Record ported PR
+      numbers + `deferred[]`; advance `synced_through_date` to the newest PR
+      `mergedAt` you evaluated. We do NOT claim contiguous commit parity (the
+      firehose makes that meaningless) — we claim "every RELEVANT PR through date
+      X is ported or deferred-with-reason".
 
 2. **Analyze the changes:**
 
@@ -140,11 +162,17 @@ git revert -m 1 <merge-commit>
 
 ⛔ **HARD RULE — NEVER wholesale-merge.** Do NOT run `git merge upstream/main`
 (it pulls the ENTIRE backlog — hundreds of commits / 600+ files — into one
-unreviewable PR; it happened once and could not even be pushed). No matter how
-far behind we are, a single run integrates **at most `max_commits_per_run` (25)**
-commits, the OLDEST first (closest to our baseline), via cherry-pick. The rest
-wait for the next run — the Mon/Wed/Fri cadence drains the backlog over a few
-weeks. Falling behind is fine; an enormous merge is not.
+unreviewable PR; it happened once and could not even be pushed). Always
+cherry-pick selected commits via a branch + PR.
+
+**Select by PRIORITY, not oldest-first (see step 1).** Upstream's volume makes
+commit-for-commit parity impossible and pointless; we port the RELEVANT subset.
+**Tier-1 security is UNCAPPED** — port every security/safety fix every run, no
+limit. `max_commits_per_sync` bounds only tiers 2-3 (core/provider/telegram) per
+run, to keep one PR reviewable and conflict-load sane; the rest of the relevant
+backlog continues next run. Irrelevant scopes (desktop/dashboard/tui/unused
+platforms) are skipped permanently, never queued. "Behind on cosmetic churn" is
+fine and expected; "behind on a security fix" is not.
 
 ⛔ Do NOT merge upstream directly into `main`. Like `evolution-implementation`,
 upstream changes go **through a separate branch + PR + CI** — NEVER a direct merge:
@@ -158,9 +186,10 @@ gh auth setup-git
 # 1. Separate branch from the current main:
 git checkout main && git pull && git checkout -b sync/upstream-YYYY-MM-DD
 
-# 2. Pick the OLDEST <=25 relevant commits — cherry-pick ONLY, never a bare
-#    `git merge upstream/main`. Oldest-first keeps history linear and conflicts small:
-git log --reverse --oneline main..upstream/main | head -25   # candidates, oldest first
+# 2. Pick by PRIORITY (security first, then core/provider/telegram) — cherry-pick
+#    ONLY, never a bare `git merge upstream/main`. Map each relevant PR (step 1)
+#    to its merge commit(s) and cherry-pick those:
+gh pr view <pr> --repo nousresearch/hermes-agent --json mergeCommit -q .mergeCommit.oid
 git cherry-pick <hash>                 # one commit (or a contiguous range) at a time
 # On conflict: resolve THAT commit (keep our evolution changes), `git add`,
 # `git cherry-pick --continue`. If a commit is too entangled to resolve cleanly,
@@ -176,8 +205,8 @@ git cherry-pick <hash>                 # one commit (or a contiguous range) at a
 # 3. Create a PR (do NOT merge into main manually):
 git push origin sync/upstream-YYYY-MM-DD
 gh pr create --base main --head sync/upstream-YYYY-MM-DD \
-  --title "[UPSTREAM] Sync: <N> commits (<from>..<to>)" \
-  --body "Cherry-picked <=25 oldest relevant upstream changes. See upstream sync report."
+  --title "[UPSTREAM] Sync: <N> relevant commits (priority-first, through <date>)" \
+  --body "Cherry-picked selected relevant upstream changes (priority-first: security, then core/provider/telegram). See upstream sync report."
 ```
 
 Merging into `main` happens only after green CI (`tests.yml`/`lint.yml`) and with branch
@@ -187,37 +216,37 @@ untrusted until it has passed CI + review. A `sync/*` branch is NOT
 `evolution/issue-*`, so evolution-integration never auto-merges it — upstream
 PRs always wait for the owner.
 
-## Advance the cursor + inherit version (do this IN the sync PR)
+## Advance the horizon + inherit version (do this IN the sync PR)
 
-After accounting for the batch, advance the cursor and stamp the version. This
-is the step that makes the sync CONVERGE — the cursor moves forward by exactly
-the batch you processed, every run, so the backlog drains deterministically.
+After every RELEVANT PR in the window is accounted for (ported / deferred /
+bulk-skipped), advance the date horizon and stamp the version.
 
 ```bash
-# LAST commit of the batch you just processed (the 25th, or fewer at the end).
-# This is the new cursor — you accounted for everything up to and including it.
-LAST=$(git log --reverse --format='%H' "$CURSOR"..upstream/main | head -25 | tail -1)
-
-# Newest upstream release tag that is an ancestor of the NEW cursor (NOT of
-# upstream's tip). Tags advance only when the cursor actually crosses one:
+# New horizon = the newest mergedAt among the PRs you evaluated this run.
+SINCE_NEW=<newest evaluated PR mergedAt, YYYY-MM-DD>
+# Newest upstream release tag merged on/before the new horizon (for the banner):
 TAG=$(for t in $(git tag -l 'v20*' | sort -Vr); do \
-        git merge-base --is-ancestor "$t" "$LAST" 2>/dev/null && { echo "$t"; break; }; \
+        td=$(git log -1 --format=%cs "$t" 2>/dev/null); \
+        case "$td" in [0-9]*) [ "$td" \> "$SINCE_NEW" ] || { echo "$t"; break; };; esac; \
       done)
 DATE=$(echo "$TAG" | sed 's/^v//')                          # e.g. 2026.6.5
 ```
 
-1. **Rewrite `.evolution/upstream-sync-state.json`** with the advanced cursor,
-   the tag/date for that cursor, and append any commits you deferred this run:
+1. **Rewrite `.evolution/upstream-sync-state.json`** — date horizon + the
+   ported/deferred/skipped accounting (NOT a contiguous commit cursor):
 ```json
 {
-  "synced_through_commit": "<LAST>",
+  "synced_through_date": "<SINCE_NEW as YYYY-MM-DD>",
   "synced_through_tag": "<TAG>",
-  "synced_through_date": "<DATE as YYYY-MM-DD>",
+  "ported_prs": [<upstream PR numbers ported, cumulative>],
   "our_version": "0.16.0",
   "synced_at": "<run date>",
-  "deferred": [ {"sha": "...", "summary": "...", "reason": "conflict|irrelevant|workflow-scope"} ]
+  "deferred": [ {"pr": 0, "sha": "...", "summary": "...", "reason": "conflict|workflow-scope"} ],
+  "skipped_scopes": {"desktop": 0, "dashboard": 0, "tui": 0, "<unused-platform>": 0}
 }
 ```
+   The honesty invariant holds: every RELEVANT PR ≤ `synced_through_date` is in
+   `ported_prs` or `deferred[]`; irrelevant ones are tallied in `skipped_scopes`.
 2. **Only if `TAG` changed** from the previous marker, update `hermes_cli/__init__.py`
    `__release_date__ = "<DATE>"` (the banner renders `Hermes Agent v<__version__>
    (<__release_date__>)`). If the batch was post-release untagged work, `TAG` is

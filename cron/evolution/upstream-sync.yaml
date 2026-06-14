@@ -1,5 +1,5 @@
 name: evolution-upstream-sync
-schedule: "0 8 * * 1,3,5"  # Mon/Wed/Fri 8 AM — 3×/week to drain the upstream backlog
+schedule: "0 8 * * *"  # daily 8 AM (before research 09:00) — catch upstream SECURITY fixes promptly; priority-first selection, not oldest-first FIFO
 enabled: true
 mode: PRIVATE
 
@@ -43,6 +43,10 @@ safety:
   require_private_mode: true
   test_after_merge: true
   auto_rollback_on_failure: true
+  # Bounds TIERS 2-3 only (core / provider / telegram) per run — keeps one PR
+  # reviewable + conflict-load sane. TIER-1 SECURITY is EXEMPT: port every
+  # security/safety fix every run, uncapped. (Selection is priority-first, not
+  # oldest-first — see the upstream-sync skill.)
   max_commits_per_sync: 25
 
 # Sync strategy
