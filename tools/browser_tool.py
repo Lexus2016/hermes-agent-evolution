@@ -49,6 +49,7 @@ Usage:
     browser_click("@e5", task_id="task_123")
 """
 
+import asyncio
 import atexit
 import functools
 import json
@@ -84,6 +85,9 @@ except Exception:
     _is_safe_url = lambda url: False  # noqa: E731 — fail-closed: block all if safety module unavailable
     _is_always_blocked_url = lambda url: True  # noqa: E731 — fail-closed on the floor too
     _normalize_url_for_request = lambda url: url  # noqa: E731 — best-effort fallback
+
+from tools import web_tools
+
 # Browser-provider ABC + registry — PR #25214 moved the per-vendor providers
 # (Browserbase / Browser Use / Firecrawl) out of ``tools/browser_providers/``
 # and into ``plugins/browser/<vendor>/``. The dispatcher consults the
@@ -2389,7 +2393,27 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
         session_info["_first_nav"] = False
         _maybe_start_recording(nav_session_key)
 
-    result = _run_browser_command(nav_session_key, "open", [url], timeout=max(_get_command_timeout(), 60))
+    # Retry-with-wait for transient navigation errors, then optionally fall
+    # back to web_extract for the same URL so callers still get content or a
+    # clear diagnostic when the browser stack cannot reach the page.
+    max_retries = 2
+    original_error: Optional[str] = None
+    retries_done = 0
+    result: Dict[str, Any] = {}
+    for attempt in range(max_retries + 1):
+        result = _run_browser_command(nav_session_key, "open", [url], timeout=max(_get_command_timeout(), 60))
+        if result.get("success"):
+            break
+        retries_done = attempt + 1
+        original_error = result.get("error", "Navigation failed")
+        logger.warning(
+            "browser_navigate: open failed for %s (attempt %d/%d): %s",
+            url, attempt + 1, max_retries + 1, original_error,
+        )
+        if attempt < max_retries:
+            sleep_time = 1.0 * (attempt + 1)
+            logger.info("browser_navigate: retrying %s after %.1fs", url, sleep_time)
+            time.sleep(sleep_time)
 
     # Remember which session served this nav so snapshot/click/fill/...
     # on the same task_id hit it (critical when hybrid routing has both a
@@ -2438,8 +2462,14 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
         response = {
             "success": True,
             "url": final_url,
-            "title": title
+            "title": title,
+            "retries": retries_done,
         }
+        if retries_done and original_error:
+            response["navigate_warning"] = (
+                f"Navigation required {retries_done} retry attempt(s) before succeeding. "
+                f"Original error: {original_error}"
+            )
         _copy_fallback_warning(response, result)
 
         # Detect common "blocked" page patterns from title/url
@@ -2489,11 +2519,64 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
             logger.debug("Auto-snapshot after navigate failed: %s", e)
 
         return json.dumps(response, ensure_ascii=False)
-    else:
-        return json.dumps({
-            "success": False,
-            "error": result.get("error", "Navigation failed")
-        }, ensure_ascii=False)
+
+    # Navigation exhausted retries. Try web_extract as a fallback.
+    fallback_used = False
+    fallback_error: Optional[str] = None
+    fallback_content: Optional[str] = None
+    try:
+        logger.warning(
+            "browser_navigate: navigation exhausted retries for %s; falling back to web_extract",
+            url,
+        )
+        fallback_used = True
+        extracted = asyncio.run(web_tools.web_extract_tool([url], format="markdown", use_llm_processing=False))
+        parsed = json.loads(extracted)
+        if parsed.get("success") is False:
+            fallback_error = parsed.get("error", "web_extract returned an error")
+        else:
+            results = parsed.get("results", [])
+            if results and results[0].get("content"):
+                fallback_content = results[0]["content"]
+            else:
+                fallback_content = results[0].get("error") if results else None
+    except Exception as e:
+        fallback_error = str(e)
+        logger.warning("browser_navigate: web_extract fallback failed for %s: %s", url, fallback_error)
+
+    diagnostic = {
+        "success": fallback_content is not None,
+        "url": url,
+        "error": None if fallback_content is not None else (
+            fallback_error or original_error or "Navigation and fallback extraction both failed"
+        ),
+        "original_error": original_error,
+        "retries": retries_done,
+        "fallback_used": fallback_used,
+        "fallback": "web_extract",
+    }
+    if fallback_content is not None:
+        diagnostic["content"] = fallback_content
+        diagnostic["source"] = "web_extract"
+    if fallback_error and fallback_content is None:
+        diagnostic["fallback_error"] = fallback_error
+
+    return json.dumps(diagnostic, ensure_ascii=False)
+
+
+def _web_extract_for_navigate(url: str) -> tuple[Optional[str], Optional[str]]:
+    """Attempt web_extract for the URL. Returns (content, error)."""
+    from tools.web_tools import web_extract_tool
+    extracted = asyncio.run(web_extract_tool([url], format="markdown", use_llm_processing=False))
+    parsed = json.loads(extracted)
+    if parsed.get("success") is False:
+        return None, parsed.get("error", "web_extract returned an error")
+    results = parsed.get("results", [])
+    if results and results[0].get("content"):
+        return results[0]["content"], None
+    if results:
+        return None, results[0].get("error") or "web_extract returned empty content"
+    return None, "web_extract returned no results"
 
 
 def browser_snapshot(
