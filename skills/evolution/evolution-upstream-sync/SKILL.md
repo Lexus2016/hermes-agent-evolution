@@ -193,8 +193,17 @@ gh pr view <pr> --repo nousresearch/hermes-agent --json mergeCommit -q .mergeCom
 git cherry-pick <hash>                 # one commit (or a contiguous range) at a time
 # On conflict: resolve THAT commit (keep our evolution changes), `git add`,
 # `git cherry-pick --continue`. If a commit is too entangled to resolve cleanly,
-# `git cherry-pick --skip` and note it in the report for a future run — do NOT
+# `git cherry-pick --skip` and DEFER it (record in deferred[] + report) — do NOT
 # fall back to a full merge to "get everything".
+#
+# ⛔ NEVER COMMIT CONFLICT MARKERS. After EVERY cherry-pick (and before
+#    --continue / before the PR), scan the worktree — a leftover marker is
+#    invalid code (it broke a sync PR once: a committed `>>>>>>>` in web_server.py
+#    = 99 syntax errors). If ANY marker remains, you did NOT resolve cleanly:
+#    abort/skip that commit and DEFER it; never `git add` a file with markers.
+# Practical guard — run after EACH cherry-pick, before committing/--continue.
+# It MUST print nothing; any output = unresolved markers = abort/skip + defer:
+git grep -lnE '^(<<<<<<<|=======|>>>>>>>)' -- ':!*.md' 2>/dev/null
 
 # 2a. WORKFLOW FILES: pushing a branch that edits `.github/workflows/**` needs the
 #     `workflow` token scope. If a picked commit touches workflows and the push is
