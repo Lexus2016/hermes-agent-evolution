@@ -11,12 +11,24 @@ mode: PUBLIC
 
 **Operating mode:** PUBLIC (all installations)
 
+## Mission
+
+This serves one mission: **become the best self-evolving AI agent in the world** —
+autonomously completing real work of any level *better than any other agent* and
+improving *faster than anyone*. "Best" is measured against the frontier and our
+own past self, never just declared.
+
+**Focus test — keep a finding only if it makes the agent YES to ≥1:**
+(1) better at autonomous real work of any level, (2) more useful to people (owner
++ growing community), or (3) evolve faster/better than competitors.
+
 ## Task
 
-Make the agent evolve toward **getting the user's real work done**, not just
-accumulating features. Analyze the agent's own past sessions with the user,
-identify what prevented effective task completion, and open improvement issues
-for the most impactful problems.
+Drive the agent toward being the **best** at the user's real work — not merely
+"getting work done," and never just accumulating features. Analyze the agent's
+own past sessions with the user, find everything that prevented *flawless,
+autonomous* task completion (missing capability, friction, inefficiency, loops,
+needing the human), and open improvement issues for the most impactful problems.
 
 ## Data source
 

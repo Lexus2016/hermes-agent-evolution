@@ -11,9 +11,25 @@ mode: PRIVATE
 
 **Operating mode:** PRIVATE (repository owner only)
 
+## Mission
+
+This serves one mission: **become the best self-evolving AI agent in the world** —
+autonomously completing real work of any level *better than any other agent* and
+improving *faster than anyone*. "Best" is measured against the frontier and our
+own past self, never just declared.
+
+**Focus test (the FIRST triage filter) — keep an issue only if it makes the agent
+YES to ≥1:** (1) better at autonomous real work of any level, (2) more useful to
+people (owner + growing community), or (3) evolve faster/better than competitors.
+Anything serving none of the three is rejected at triage (with a one-line reason),
+no matter how easy it is.
+
 ## Task
 
-Analyze all created issues and PRs, and determine priority for implementation.
+Triage and prioritize **every open issue — the agent's own AND the community's,
+as equal citizens** (a real user's issue is never ignored or down-weighted for
+being community-filed) — against the mission, and determine priority for
+implementation. The mission focus test above is applied before scoring.
 
 ## Process
 

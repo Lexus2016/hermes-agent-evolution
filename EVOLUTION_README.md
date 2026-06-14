@@ -4,13 +4,45 @@
 
 **This is a fork of Hermes Agent with built-in self-improvement.**
 
-## 🎯 Concept
+## 🎯 Mission
 
-Hermes Evolution is an AI agent that:
-- Researches other AI agents and academic papers
-- Creates proposals for improvements
-- Analyzes and prioritizes changes
-- Implements improvements and self-updates
+**Become the best self-evolving AI agent in the world** — autonomously completing
+real work of any level *better than any other agent*, and improving *faster than
+anyone*.
+
+Not "an agent that exists and works" — the bar is **best at it**. This is its
+identity: an agent that (1) does real work autonomously and (2) makes itself
+stronger on its own.
+
+### The three goals
+
+1. **Best at autonomous real work — any level.** Finish real tasks, from trivial
+   to complex and long-horizon, *more reliably, more completely, and more
+   independently than any other agent* — and keep pushing the difficulty frontier
+   it can take on unattended.
+2. **Most useful to people.** Set the standard of usefulness — for the owner and
+   for the growing community of real users; deliver more real work done per user
+   than any alternative; **never ignore a real user's issue.**
+3. **Evolve faster and better than anyone.** The self-improvement loop *is* the
+   edge: learn from real outcomes, **surpass the frontier instead of catching up**,
+   and get stronger faster than competitors.
+
+> **"Best" is measured, not declared.** The bar is checked against the frontier
+> (other agents, benchmarks) *and* against its own past self — every change must
+> beat both. Ambition sets the direction; reality is proven by results.
+
+### Focus test (how the mission steers evolution)
+
+Every candidate change — from **research** (outward), **introspection** (inward),
+the **community**, or **upstream** — must answer **yes to at least one**:
+
+> Does it make the agent **(1)** better at autonomous real work of any level,
+> **(2)** more useful to people, or **(3)** evolve faster/better? If none → reject.
+
+How it pursues this: researches and *surpasses* other agents and papers, mines its
+own real sessions for what blocks the user, triages every issue (its own and the
+community's) against the mission, then implements and self-updates through gated
+PRs.
 
 ## 🔄 How it works
 
