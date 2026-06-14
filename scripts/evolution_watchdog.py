@@ -186,6 +186,25 @@ def check_gh(runner: Callable[[List[str]], Tuple[int, str]] = _default_runner) -
     return alerts
 
 
+def check_health(evolution_dir: Path) -> List[str]:
+    """Alert when the longitudinal health sidecar reports degraded calibration.
+
+    evolution_metrics writes ``evolution-health.txt`` ending in ``| healthy`` when
+    fine, or ``| <FLAGS>`` (LOW_SUCCESS / LOW_SELECTION_EFFICIENCY) when the
+    pipeline is selecting more than it can land / rarely merging. This is what
+    makes the measurement spine ACTIONABLE instead of write-only: the owner gets
+    pinged when the pipeline's own health degrades. Silent when healthy or when
+    there is no sidecar yet (the stage-report checks already cover 'funnel didn't
+    run')."""
+    try:
+        line = (evolution_dir / "evolution-health.txt").read_text(encoding="utf-8").strip()
+    except OSError:
+        return []
+    if not line or line.endswith("| healthy"):
+        return []
+    return [f"pipeline health degraded: {line}"]
+
+
 def main() -> int:
     hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
     evolution_dir = Path(
@@ -212,6 +231,7 @@ def main() -> int:
     alerts += check_stage_reports(evolution_dir, now)
     alerts += check_jobs(jobs_file, now)
     alerts += check_gh()
+    alerts += check_health(evolution_dir)
 
     if alerts:
         print("🐶 Evolution watchdog — pipeline anomalies detected:")

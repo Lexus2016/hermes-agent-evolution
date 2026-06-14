@@ -224,3 +224,28 @@ class TestStagesMirrorCronSpecs:
                 f"watchdog STAGES says '{stage}' runs at {slot:02d}:00, "
                 f"but {stage}.yaml schedules hour {m.group(2)}"
             )
+
+
+class TestCheckHealth:
+    from evolution_watchdog import check_health
+
+    def test_healthy_sidecar_is_silent(self, tmp_path):
+        from evolution_watchdog import check_health
+        (tmp_path / "evolution-health.txt").write_text(
+            "[evolution-metrics] 5/5 active cycles: success=80% ... | healthy\n", encoding="utf-8"
+        )
+        assert check_health(tmp_path) == []
+
+    def test_flagged_sidecar_alerts(self, tmp_path):
+        from evolution_watchdog import check_health
+        (tmp_path / "evolution-health.txt").write_text(
+            "[evolution-metrics] 4/4 active cycles: success=10% ... | "
+            "LOW_SUCCESS: <1/3 of active cycles land a merge\n",
+            encoding="utf-8",
+        )
+        alerts = check_health(tmp_path)
+        assert len(alerts) == 1 and "health degraded" in alerts[0] and "LOW_SUCCESS" in alerts[0]
+
+    def test_missing_sidecar_is_silent(self, tmp_path):
+        from evolution_watchdog import check_health
+        assert check_health(tmp_path) == []
