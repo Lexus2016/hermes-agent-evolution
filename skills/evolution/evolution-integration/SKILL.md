@@ -159,7 +159,20 @@ gh pr list --repo "$REPO" --state open --limit 50 \
    guards quality, not a low ceiling.
 
 4. **Merge** (squash). `--admin` is required because branch protection mandates
-   review; the owner token authorizes it:
+   review; the owner token authorizes it.
+
+   **FIRST — branch-integrity check (you review a PR, then merge whatever its
+   branch HEAD is NOW; those can differ).** Another agent or a shared checkout
+   can push commits onto the branch between your review (2a) and this merge, and
+   `gh pr merge` lands the branch HEAD — so an un-reviewed commit rides in under
+   your approval. Before merging, confirm the commit set you reviewed is still
+   the whole PR:
+```bash
+gh pr view <N> --repo "$REPO" --json commits --jq '.commits[].oid'
+```
+   If a commit appeared that was NOT in your 2a review → do NOT merge blind:
+   re-run the code review (2a) + dead-code grep against the FULL current diff. If
+   it passes, merge; if not, send back. Only then:
 ```bash
 gh pr merge <N> --repo "$REPO" --squash --admin
 ```

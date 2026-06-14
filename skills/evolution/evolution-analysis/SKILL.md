@@ -126,9 +126,19 @@ gh issue view <N> --repo Lexus2016/hermes-agent-evolution --json body,comments
 5. **Compute Priority Score**
 
 ```python
-base_priority = (impact * 2) / effort
+base_priority = impact * 2 * (1.0 - 0.4 * effort)   # effort DAMPENS (≤40%), never divides
 final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + safety*0.3
 ```
+
+   **Effort is a bounded penalty, not a divisor.** The old `(impact*2)/effort`
+   let a trivial-but-easy issue (impact 0.2, effort 0.1 → **4.0**) outrank a
+   critical-but-hard one (impact 1.0, effort 0.8 → **2.5**) — so the agent kept
+   picking low-value quick wins (the calibration bug). With the bounded form,
+   effort only shaves up to 40% off, so **impact drives the ranking**: that same
+   critical issue now scores `1.36` base vs the trivial one's `0.38`.
+   Consequence: `base_priority` now ranges 0–2.0 (was up to ~20), so the
+   `min_priority 0.7` floor below is a **real filter** on weak/risky issues
+   instead of a near-vestigial gate everything cleared.
 
    `age = min(days_since_created / 30, 1.0)`. The age weight is **0.15** (was
    0.05) so a genuinely-valid issue that keeps losing the nightly contest still

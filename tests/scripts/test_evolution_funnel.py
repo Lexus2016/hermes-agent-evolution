@@ -8,7 +8,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from datetime import datetime  # noqa: E402
 
-from evolution_funnel import append_funnel, compute_funnel, cycle_date  # noqa: E402
+from evolution_funnel import (  # noqa: E402
+    append_funnel,
+    compute_funnel,
+    cycle_date,
+    format_summary,
+    load_records,
+    summarize,
+)
 
 
 def _write(p: Path, obj):
@@ -91,3 +98,55 @@ class TestAppendFunnel:
         lines = mf.read_text().strip().splitlines()
         assert len(lines) == 1
         assert json.loads(lines[0])["merged"] == 5
+
+
+class TestSummary:
+    def _rec(self, date, created=0, selected=0, rejected=0, merged=0, skipped=0):
+        return {
+            "date": date, "issues_created": created, "selected": selected,
+            "rejected": rejected, "merged": merged, "skipped": skipped,
+        }
+
+    def test_load_records_skips_blank_and_malformed(self, tmp_path):
+        f = tmp_path / "metrics.jsonl"
+        f.write_text(
+            json.dumps(self._rec("2026-06-10", merged=1)) + "\n\nnot-json\n"
+            + json.dumps(self._rec("2026-06-11", merged=2)) + "\n",
+            encoding="utf-8",
+        )
+        recs = load_records(f)
+        assert [r["date"] for r in recs] == ["2026-06-10", "2026-06-11"]
+
+    def test_load_records_missing_file(self, tmp_path):
+        assert load_records(tmp_path / "nope.jsonl") == []
+
+    def test_reject_rate_and_window(self):
+        recs = [self._rec(f"d{i}", selected=1, rejected=9, merged=1) for i in range(10)]
+        s = summarize(recs, last=7)
+        assert s["cycles"] == 7  # window honored
+        assert s["selected"] == 7 and s["rejected"] == 63
+        assert s["reject_rate"] == round(63 / 70, 3)  # 0.9
+        assert any("HIGH_REJECT_RATE" in f for f in s["flags"])
+
+    def test_healthy_signal_no_flags(self):
+        recs = [self._rec(f"d{i}", selected=8, rejected=2, merged=3) for i in range(5)]
+        s = summarize(recs, last=7)
+        assert s["reject_rate"] == 0.2
+        assert s["flags"] == []
+        assert "signal OK" in format_summary(s)
+
+    def test_merged_zero_streak_flag(self):
+        recs = [
+            self._rec("d1", merged=2),
+            self._rec("d2", merged=0),
+            self._rec("d3", merged=0),
+            self._rec("d4", merged=0),
+        ]
+        s = summarize(recs, last=7)
+        assert s["merged_zero_streak"] == 3
+        assert any("MERGED_ZERO" in f for f in s["flags"])
+
+    def test_empty_records_no_crash(self):
+        s = summarize([], last=7)
+        assert s["cycles"] == 0 and s["reject_rate"] == 0.0 and s["flags"] == []
+        assert "[evolution-funnel]" in format_summary(s)

@@ -34,6 +34,16 @@ Keywords: "agent", "autonomous", "LLM tool use", "multi-agent"
 
 ## Research process
 
+0. **Read the pipeline's own funnel signal FIRST** (closes the funnel feedback
+   loop — #84). Run `python scripts/evolution_funnel.py --summary --last 7` and
+   let it set this cycle's bar:
+   - `HIGH_REJECT_RATE` flag → triage has been rejecting most of what research
+     surfaces. **Raise the bar:** propose fewer, higher-evidence findings this
+     cycle; a popular/new trend is not enough.
+   - `MERGED_ZERO xN` flag → downstream integration is stuck; piling on more
+     volume won't help. Keep output lean and note the stall in the report.
+   - `signal OK` → proceed normally.
+
 1. **Scan sources** using `web_search`
 2. **Offload bulky reads to subagents.** The `delegation` toolset is enabled for
    this job. Any web dump, large diff, or long log expected to exceed ~2k tokens

@@ -97,6 +97,85 @@ def append_funnel(metrics_file: Path, record: Dict[str, Any]) -> None:
     metrics_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def load_records(metrics_file: Path) -> list[Dict[str, Any]]:
+    """Read all funnel records (one JSON object per line), oldest-first,
+    skipping blank/malformed lines."""
+    out: list[Dict[str, Any]] = []
+    if not metrics_file.exists():
+        return out
+    for ln in metrics_file.read_text(encoding="utf-8").splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            obj = json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
+    return out
+
+
+def summarize(records: list[Dict[str, Any]], last: int = 7) -> Dict[str, Any]:
+    """Aggregate the last ``last`` funnel records into a signal-quality summary
+    that evolution-research reads to self-tune selectivity (#84 feedback loop —
+    closes the previously write-only metrics.jsonl).
+
+    reject_rate = rejected / (selected + rejected) over the window: of the issues
+    that reached triage, the fraction triage turned down. A high value means
+    research is surfacing low-quality proposals, so research should tighten up.
+    """
+    recent = records[-last:] if last and last > 0 else list(records)
+
+    def _tot(k: str) -> int:
+        return sum(int(r.get(k, 0) or 0) for r in recent)
+
+    created, selected = _tot("issues_created"), _tot("selected")
+    rejected, merged, skipped = _tot("rejected"), _tot("merged"), _tot("skipped")
+    triaged = selected + rejected
+    reject_rate = (rejected / triaged) if triaged else 0.0
+
+    # Trailing run of cycles with zero merges (integration-stuck signal).
+    merged_zero_streak = 0
+    for r in reversed(recent):
+        if int(r.get("merged", 0) or 0) == 0:
+            merged_zero_streak += 1
+        else:
+            break
+
+    flags: list[str] = []
+    if reject_rate > 0.70:
+        flags.append("HIGH_REJECT_RATE: be more selective — only high-evidence proposals")
+    if merged_zero_streak >= 3:
+        flags.append(
+            f"MERGED_ZERO x{merged_zero_streak}: integration looks stuck — check CI / flaky gates"
+        )
+
+    return {
+        "cycles": len(recent),
+        "issues_created": created,
+        "selected": selected,
+        "rejected": rejected,
+        "merged": merged,
+        "skipped": skipped,
+        "reject_rate": round(reject_rate, 3),
+        "merged_zero_streak": merged_zero_streak,
+        "flags": flags,
+    }
+
+
+def format_summary(summary: Dict[str, Any]) -> str:
+    """One-line, log/agent-friendly rendering of summarize()."""
+    tail = " | ".join(summary["flags"]) if summary["flags"] else "signal OK"
+    return (
+        f"[evolution-funnel] last {summary['cycles']} cycles: "
+        f"created={summary['issues_created']} selected={summary['selected']} "
+        f"rejected={summary['rejected']} merged={summary['merged']} "
+        f"skipped={summary['skipped']} reject_rate={summary['reject_rate']:.0%} "
+        f"merged_zero_streak={summary['merged_zero_streak']} | {tail}"
+    )
+
+
 def cycle_date(now) -> str:
     """The date of the cycle to measure. This job runs in the MORNING (07:40,
     before the watchdog), so before ~08:00 the cycle that just completed is
@@ -115,6 +194,23 @@ def main(argv: list[str]) -> int:
             str(Path.home() / ".hermes" / "profiles" / "user1" / "evolution"),
         )
     )
+    args = argv[1:]
+
+    # Read-side feedback path (#84): summarize recent cycles so evolution-research
+    # can self-tune selectivity. `--summary [--last N]` (default N=7).
+    if "--summary" in args:
+        last = 7
+        if "--last" in args:
+            i = args.index("--last")
+            if i + 1 < len(args):
+                try:
+                    last = int(args[i + 1])
+                except ValueError:
+                    last = 7
+        records = load_records(evolution_dir / "metrics.jsonl")
+        print(format_summary(summarize(records, last)))
+        return 0
+
     # Explicit arg wins (manual/backfill runs); else env; else the cycle date.
     date = argv[1] if len(argv) > 1 and not argv[1].startswith("-") else ""
     date = date or os.environ.get("EVOLUTION_FUNNEL_DATE", "")
