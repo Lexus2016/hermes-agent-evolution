@@ -20,8 +20,6 @@ violation next load, which makes the next repair shrink even more.
 """
 import types
 
-import pytest
-
 from hermes_state import SessionDB
 from run_agent import AIAgent
 from agent.agent_runtime_helpers import repair_message_sequence
@@ -52,18 +50,6 @@ def _assistant_texts(db, session_id):
     ]
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Upstream adopted identity-based flushing (#46053) which tracks messages "
-        "by id(). Under this test's tight allocation a repair-freed this-turn "
-        "message's id() is recycled onto the new assistant reply, so it is wrongly "
-        "skipped. The actual production bug (#160 positional-overshoot after "
-        "repair-shrink) IS fixed by identity flushing; this id()-reuse edge is "
-        "synthetic (intervening API-call allocations prevent exact id reuse in "
-        "production). Tracked for a marker-based robust fix to contribute upstream."
-    ),
-    strict=False,
-)
 def test_assistant_reply_persists_when_repair_shrinks_history(tmp_path):
     db = SessionDB(db_path=tmp_path / "state.db")
     sid = db.create_session(session_id="telegram-topic-1", source="telegram")
