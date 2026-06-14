@@ -237,6 +237,19 @@ def main(argv: list[str]) -> int:
     except OSError:
         pass
 
+    # Refresh the longitudinal health sidecar too (meta-evolution metrics, rec
+    # 4.3): "is the pipeline improving?" readable by any file-toolset stage. Lazy
+    # import avoids a module cycle (evolution_metrics imports load_records here).
+    try:
+        from evolution_metrics import compute_health, format_health
+
+        (evolution_dir / "evolution-health.txt").write_text(
+            format_health(compute_health(load_records(evolution_dir / "metrics.jsonl"), 30)) + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
     # Deterministic no_agent job: empty stdout = silent/healthy. Print a compact
     # one-liner only so the run log shows what was recorded.
     print(
