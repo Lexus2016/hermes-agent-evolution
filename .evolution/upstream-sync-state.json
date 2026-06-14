@@ -1,9 +1,14 @@
 {
-  "synced_through_commit": "298bb93d397faffc64aa5cfd58cbd707561d292a",
+  "synced_through_commit": "2c174bce2408f5d6810b0f16dbd55cb65cd1c6e3",
   "synced_through_tag": "v2026.6.5",
-  "synced_through_date": "2026-06-05",
+  "synced_through_date": "2026-06-14",
   "our_version": "0.16.0",
-  "synced_at": "2026-06-13",
-  "deferred": [],
-  "_note": "synced_through_commit is the LOGICAL cursor: the upstream commit through which evolution-upstream-sync has ACCOUNTED for every commit (applied OR deferred). Each run processes the next <=25 commits AFTER it (oldest-first) and advances it — so nothing in the window is ever silently skipped. Seeded to the merge-base of our main and upstream/main (the honest contiguous synced point). synced_through_tag/date = newest upstream release tag that is an ancestor of the cursor (mirrored into __release_date__ for the banner); they advance ONLY when the cursor crosses a new tag. deferred[] records commits evaluated but not applied (conflict/irrelevant) with reasons, for owner review."
+  "synced_at": "2026-06-14T12:00:00Z",
+  "ported_prs": [45947, 46083, 46112, 46111, 46107, 46102, 46079],
+  "deferred": [
+    {"pr": 723, "sha": "723c2331bd236fdb9bbc0d6e6f85a1b7704e4aa1", "summary": "fix: make profile subprocess HOME policy explicit", "reason": "conflict in hermes_constants, tools/environments/local, code_execution_tool, copilot_acp_client"},
+    {"pr": 46074, "sha": "10bad2faf1c9eec161da3c844359f4f914145f6c", "summary": "fix(gateway): serialize startup auto-resume before inbound", "reason": "blocked by unresolved earlier conflict"}
+  ],
+  "skipped_scopes": {"desktop": 8, "dashboard": 3, "tui": 5, "unused-platform": 3, "docs-style": 2},
+  "_note": "synced_through_commit/date is the LOGICAL horizon: every upstream PR merged on/before this date has been accounted for (ported, deferred-with-reason, or bulk-skipped). Not a contiguous commit cursor — irrelevant scopes are skipped permanently."
 }
