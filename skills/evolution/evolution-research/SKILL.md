@@ -35,8 +35,11 @@ Keywords: "agent", "autonomous", "LLM tool use", "multi-agent"
 ## Research process
 
 0. **Read the pipeline's own funnel signal FIRST** (closes the funnel feedback
-   loop — #84). Run `python scripts/evolution_funnel.py --summary --last 7` and
-   let it set this cycle's bar:
+   loop — #84). This stage has only the `web` + `file` toolsets (no `terminal`),
+   so READ the sidecar the nightly funnel job refreshes — do NOT try to run a
+   script: open `~/.hermes/profiles/user1/evolution/funnel-summary.txt` (a single
+   `[evolution-funnel] …` line). If it's missing, treat as `signal OK` and
+   proceed. Let its flags set this cycle's bar:
    - `HIGH_REJECT_RATE` flag → triage has been rejecting most of what research
      surfaces. **Raise the bar:** propose fewer, higher-evidence findings this
      cycle; a popular/new trend is not enough.

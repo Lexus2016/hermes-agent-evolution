@@ -150,3 +150,24 @@ class TestSummary:
         s = summarize([], last=7)
         assert s["cycles"] == 0 and s["reject_rate"] == 0.0 and s["flags"] == []
         assert "[evolution-funnel]" in format_summary(s)
+
+
+class TestSummarySidecar:
+    def test_normal_run_writes_summary_sidecar(self, tmp_path, monkeypatch):
+        # evolution-research has no terminal toolset, so the no_agent funnel run
+        # must leave a file it can read. A normal main() run writes it.
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
+        (tmp_path / "metrics.jsonl").write_text(
+            json.dumps({"date": "2026-06-10", "selected": 1, "rejected": 9, "merged": 0}) + "\n",
+            encoding="utf-8",
+        )
+        from evolution_funnel import main
+
+        rc = main(["evolution_funnel.py", "2026-06-11"])
+        assert rc == 0
+        sidecar = tmp_path / "funnel-summary.txt"
+        assert sidecar.exists()
+        body = sidecar.read_text()
+        assert body.startswith("[evolution-funnel] last")
+        # the seeded 90% reject cycle should surface the directive
+        assert "HIGH_REJECT_RATE" in body
