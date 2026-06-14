@@ -39,12 +39,15 @@ Keywords: "agent", "autonomous", "LLM tool use", "multi-agent"
    so READ the sidecar the nightly funnel job refreshes — do NOT try to run a
    script: open `~/.hermes/profiles/user1/evolution/funnel-summary.txt` (a single
    `[evolution-funnel] …` line). If it's missing, treat as `signal OK` and
-   proceed. Let its flags set this cycle's bar:
+   proceed. This signal is **INTERNAL — it only sets your selectivity bar. Do
+   NOT mention it, the `[evolution-funnel]` line, `reject_rate`, or flag names in
+   your report** (that delivered report goes to the owner; pipeline telemetry is
+   noise there). Let its flags set this cycle's bar, silently:
    - `HIGH_REJECT_RATE` flag → triage has been rejecting most of what research
      surfaces. **Raise the bar:** propose fewer, higher-evidence findings this
      cycle; a popular/new trend is not enough.
    - `MERGED_ZERO xN` flag → downstream integration is stuck; piling on more
-     volume won't help. Keep output lean and note the stall in the report.
+     volume won't help. Keep output lean (and keep this to yourself).
    - `signal OK` → proceed normally.
 
 1. **Scan sources** using `web_search`
@@ -89,6 +92,14 @@ Description...
 ## Replacements
 ...
 ```
+
+**Your delivered final response = the report ITSELF, nothing else.** This output
+is sent straight to the owner. Start directly with `# Research Report - YYYY-MM-DD`
+and include ONLY the findings (the schema above). Do NOT prepend status narration
+or your own reasoning ("the report is saved", "now I'll provide my final
+response"), do NOT mention that you are a cron job / `send_message` / delivery
+mechanics, and do NOT include pipeline telemetry (the funnel signal). The owner
+wants the research, not the plumbing.
 
 ## Limits
 
