@@ -1412,6 +1412,27 @@ def _scan_assembled_cron_prompt(
     return assembled
 
 
+def strip_reasoning_for_delivery(text: str) -> str:
+    """Remove model reasoning/thinking blocks from a cron-delivered message.
+
+    Cron output must be the RESULT only — never the model's reasoning. The
+    delivery hint asks the agent for clean output, but instructions are not a
+    guarantee, so we also strip any `<think>`/`<thinking>`/`<reasoning>` blocks
+    mechanically here, at the delivery boundary. This is CRON-ONLY (interactive
+    sessions may legitimately surface reasoning); inline untagged narration is
+    handled by the delivery-hint instruction, not here."""
+    if not text:
+        return text
+    import re
+
+    return re.sub(
+        r"<(think|thinking|reasoning|reasoning_scratchpad)\b[^>]*>.*?</\1>",
+        "",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    ).strip()
+
+
 def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     """Execute a single cron job, applying any per-job profile override."""
     job_id = job["id"]
@@ -2202,7 +2223,11 @@ def tick(verbose: bool = True, adapters=None, loop=None, sync: bool = True) -> i
                 # Deliver the final response to the origin/target chat.
                 # If the agent responded with [SILENT], skip delivery (but
                 # output is already saved above).  Failed jobs always deliver.
-                deliver_content = final_response if success else f"⚠️ Cron job '{job.get('name', job['id'])}' failed:\n{error}"
+                deliver_content = (
+                    strip_reasoning_for_delivery(final_response)
+                    if success
+                    else f"⚠️ Cron job '{job.get('name', job['id'])}' failed:\n{error}"
+                )
                 # Treat whitespace-only final responses the same as empty
                 # responses: do not deliver a blank message, and let the
                 # empty-response guard below mark the run as a soft failure.
