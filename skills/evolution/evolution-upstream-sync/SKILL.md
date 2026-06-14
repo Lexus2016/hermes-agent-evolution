@@ -202,8 +202,12 @@ git cherry-pick <hash>                 # one commit (or a contiguous range) at a
 #    = 99 syntax errors). If ANY marker remains, you did NOT resolve cleanly:
 #    abort/skip that commit and DEFER it; never `git add` a file with markers.
 # Practical guard — run after EACH cherry-pick, before committing/--continue.
-# It MUST print nothing; any output = unresolved markers = abort/skip + defer:
-git grep -lnE '^(<<<<<<<|=======|>>>>>>>)' -- ':!*.md' 2>/dev/null
+# It MUST print nothing; any output = unresolved markers = abort/skip + defer.
+# Match ONLY the unambiguous sentinels `<<<<<<<` / `>>>>>>>` (a real conflict
+# always has both). Do NOT match bare `=======` — that is a legitimate comment/
+# divider in lots of code and would false-positive, needlessly deferring clean
+# commits:
+git grep -lnE '^(<<<<<<<|>>>>>>>)' -- ':!*.md' 2>/dev/null
 
 # 2a. WORKFLOW FILES: pushing a branch that edits `.github/workflows/**` needs the
 #     `workflow` token scope. If a picked commit touches workflows and the push is
