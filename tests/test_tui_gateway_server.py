@@ -9,9 +9,27 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from hermes_constants import reset_hermes_home_override, set_hermes_home_override
 from hermes_cli.active_sessions import active_session_registry_snapshot
 from tui_gateway import server
+
+
+@pytest.fixture(autouse=True)
+def _reset_process_registry():
+    """Isolate every test in this file from the global ``process_registry``
+    singleton. It is one-per-process, so queued completion events / leftover
+    watchers / consumed-session markers from one notification-poller test leak
+    into the next, inflating the emitted count (the intermittent
+    ``len(status_calls) == 3`` flake). Reset before and after each test so the
+    registry always starts empty. Scoped to this file — the poller tests and the
+    one flaky assertion all live here and run in the same shard."""
+    from tools.process_registry import process_registry
+
+    process_registry.reset()
+    yield
+    process_registry.reset()
 
 
 def test_session_create_rejects_at_active_session_limit(monkeypatch, tmp_path):
@@ -5844,6 +5862,15 @@ def test_browser_manage_connect_default_local_reports_launch_hint(monkeypatch):
             patch(
                 "hermes_cli.browser_connect.get_chrome_debug_candidates",
                 return_value=[],
+            ),
+            # No launch command available on ANY platform. Without this, macOS
+            # (Darwin) returns an `open -a "Google Chrome"` fallback even with zero
+            # candidates, so the "no executable found" branch is never hit and the
+            # test fails on macOS while passing on Linux. Patch the direct lever so
+            # the no-browser scenario is deterministic across platforms.
+            patch(
+                "hermes_cli.browser_connect.manual_chrome_debug_command",
+                return_value=None,
             ),
         ):
             resp = server.handle_request(

@@ -181,6 +181,33 @@ class ProcessRegistry:
         self._global_watch_tripped_until: float = 0.0
         self._global_watch_suppressed_during_trip: int = 0
 
+    def reset(self) -> None:
+        """Clear all in-memory state: running/finished sessions, pending
+        watchers, the completion queue, consumed-completion markers, and the
+        global watch-match circuit-breaker counters.
+
+        This object is a single per-process singleton. Without an explicit reset,
+        state from one unit test (queued events, leftover watchers, consumed
+        session ids) leaks into the next and makes queue-draining tests flaky — a
+        stale event sneaks past a drain-then-fill and inflates the count. Safe to
+        call any time: it only drops in-memory bookkeeping, never touching live
+        OS processes."""
+        with self._lock:
+            self._running.clear()
+            self._finished.clear()
+            self.pending_watchers.clear()
+            self._completion_consumed.clear()
+            while not self.completion_queue.empty():
+                try:
+                    self.completion_queue.get_nowait()
+                except Exception:
+                    break
+        with self._global_watch_lock:
+            self._global_watch_window_start = 0.0
+            self._global_watch_window_hits = 0
+            self._global_watch_tripped_until = 0.0
+            self._global_watch_suppressed_during_trip = 0
+
     @staticmethod
     def _clean_shell_noise(text: str) -> str:
         """Strip shell startup warnings from the beginning of output."""
