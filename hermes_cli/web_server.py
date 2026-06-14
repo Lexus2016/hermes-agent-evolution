@@ -6090,7 +6090,17 @@ async def add_mcp_server(body: MCPServerCreate):
         server_config["auth"] = body.auth
 
     try:
-        _save_mcp_server(name, server_config)
+        # NOTE: upstream wraps this in `_profile_scope`, a helper our fork does
+        # not have (it came from an upstream commit we haven't ported). Drop the
+        # wrapper but KEEP the security reject — _save_mcp_server returns False
+        # when mcp_security flags a suspicious command/args config (#46083).
+        if not _save_mcp_server(name, server_config):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Server '{name}' rejected: suspicious command/args configuration",
+            )
+    except HTTPException:
+        raise
     except Exception as exc:
         _log.exception("POST /api/mcp/servers failed")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -7517,6 +7527,99 @@ def _write_profile_model(profile_dir: Path, provider: str, model: str) -> None:
         save_config(cfg)
     finally:
         reset_hermes_home_override(token)
+
+
+def _write_profile_mcp_servers(profile_dir: Path, servers: List["MCPServerCreate"]) -> int:
+    """Write MCP server entries into a specific profile's config.yaml.
+
+    Scopes ``load_config``/``save_config`` to ``profile_dir`` via the
+    context-local HERMES_HOME override (same mechanism as
+    ``_write_profile_model``) so the entries land in the target profile's
+    config rather than the dashboard process's active profile.
+
+    Mirrors the per-server shape the ``POST /api/mcp/servers`` endpoint builds,
+    but batched so the whole profile-create write is a single config save.
+    Returns the number of servers written.
+    """
+    from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+    from hermes_cli.mcp_security import validate_mcp_server_entry
+
+    written = 0
+    token = set_hermes_home_override(str(profile_dir))
+    try:
+        cfg = load_config()
+        mcp = cfg.setdefault("mcp_servers", {})
+        for server in servers:
+            name = (server.name or "").strip()
+            if not name:
+                continue
+            entry: Dict[str, Any] = {}
+            if server.url:
+                entry["url"] = server.url
+            if server.command:
+                entry["command"] = server.command
+            if server.args:
+                entry["args"] = list(server.args)
+            if server.env:
+                entry["env"] = dict(server.env)
+            if server.auth:
+                entry["auth"] = server.auth
+            if not entry:
+                # Nothing usable to write (neither url nor command) — skip
+                # rather than persist an empty, unusable server stanza.
+                continue
+            issues = validate_mcp_server_entry(name, entry)
+            if issues:
+                _log.warning("Profile-create: skipping MCP server '%s': %s", name, "; ".join(issues))
+                continue
+            mcp[name] = entry
+            written += 1
+        if written:
+            save_config(cfg)
+        elif not mcp:
+            # We created an empty mcp_servers dict but wrote nothing — don't
+            # leave a stray empty key in the new profile's config.
+            cfg.pop("mcp_servers", None)
+            save_config(cfg)
+    finally:
+        reset_hermes_home_override(token)
+    return written
+
+
+def _disable_unselected_skills(profile_dir: Path, keep: List[str]) -> int:
+    """Disable every installed skill in ``profile_dir`` not in ``keep``.
+
+    Profiles manage skill activation via a *disabled* list — all installed
+    skills are active by default and users opt out. The builder's skill step
+    uses "replace" semantics: the user picks exactly which seeded built-in /
+    optional skills stay active, and everything else gets added to the disabled
+    list. (Hub skills are installed separately via subprocess and are active on
+    install.) Scoped to the profile via the HERMES_HOME override. Returns the
+    number of skills newly disabled.
+    """
+    from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+    from hermes_cli.skills_config import get_disabled_skills, save_disabled_skills
+
+    keep_set = {s.strip() for s in keep if s and s.strip()}
+    disabled_count = 0
+    token = set_hermes_home_override(str(profile_dir))
+    try:
+        installed: List[str] = []
+        skills_root = profile_dir / "skills"
+        if skills_root.is_dir():
+            for md in skills_root.rglob("SKILL.md"):
+                installed.append(md.parent.name)
+        cfg = load_config()
+        disabled = get_disabled_skills(cfg)
+        for name in installed:
+            if name not in keep_set and name not in disabled:
+                disabled.add(name)
+                disabled_count += 1
+        if disabled_count:
+            save_disabled_skills(cfg, disabled)
+    finally:
+        reset_hermes_home_override(token)
+    return disabled_count
 
 
 @app.get("/api/profiles")
