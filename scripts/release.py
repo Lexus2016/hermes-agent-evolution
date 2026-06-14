@@ -45,6 +45,15 @@ ACP_REGISTRY_MANIFEST = REPO_ROOT / "acp_registry" / "agent.json"
 
 # Auto-extracted from noreply emails + manual overrides
 AUTHOR_MAP = {
+    "kenmege@yahoo.com": "Kenmege",
+    "dkobi16@gmail.com": "Diyoncrz18",
+    "arnaud@nolimitdevelopment.com": "ali-nld",
+    "sswdarius@gmail.com": "necoweb3",
+    "peterhao@Peters-MacBook-Air.local": "pinguarmy",
+    "adalsteinnhelgason@Aalsteinns-MacBook-Pro-3.local": "AIalliAI",
+    "adalsteinnhelgason@users.noreply.github.com": "AIalliAI",
+    "zhang.hz6666@gmail.com": "HaozheZhang6",
+    "barronlroth@gmail.com": "barronlroth",
     "lexus@cdzv.com": "Lexus2016",
     "evolution@hermes.ai": "Lexus2016",  # autonomous evolution agent commits
     "konsisumer@users.noreply.github.com": "konsisumer",  # upstream sync 2026-06-10
