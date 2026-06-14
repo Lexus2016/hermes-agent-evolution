@@ -1,9 +1,85 @@
 {
-  "synced_through_commit": "298bb93d397faffc64aa5cfd58cbd707561d292a",
+  "synced_through_commit": "2c174bce2408f5d6810b0f16dbd55cb65cd1c6e3",
   "synced_through_tag": "v2026.6.5",
-  "synced_through_date": "2026-06-05",
+  "synced_through_date": "2026-06-14",
   "our_version": "0.16.0",
-  "synced_at": "2026-06-13",
-  "deferred": [],
-  "_note": "synced_through_commit is the LOGICAL cursor: the upstream commit through which evolution-upstream-sync has ACCOUNTED for every commit (applied OR deferred). Each run processes the next <=25 commits AFTER it (oldest-first) and advances it — so nothing in the window is ever silently skipped. Seeded to the merge-base of our main and upstream/main (the honest contiguous synced point). synced_through_tag/date = newest upstream release tag that is an ancestor of the cursor (mirrored into __release_date__ for the banner); they advance ONLY when the cursor crosses a new tag. deferred[] records commits evaluated but not applied (conflict/irrelevant) with reasons, for owner review."
+  "synced_at": "2026-06-14T14:35:00Z",
+  "ported_prs": [
+    723,
+    28479,
+    45681,
+    45830,
+    45831,
+    45842,
+    45852,
+    45947,
+    45948,
+    45951,
+    45953,
+    45979,
+    46013,
+    46065,
+    46071,
+    46074,
+    46079,
+    46080,
+    46083,
+    46102,
+    46107,
+    46111,
+    46112,
+    46114
+  ],
+  "deferred": [
+    {
+      "pr": 723,
+      "sha": "723c2331bd236fdb9bbc0d6e6f85a1b7704e4aa1",
+      "summary": "fix: make profile subprocess HOME policy explicit",
+      "reason": "conflict in hermes_constants, tools/environments/local, code_execution_tool, copilot_acp_client"
+    },
+    {
+      "pr": 46074,
+      "sha": "10bad2faf1c9eec161da3c844359f4f914145f6c",
+      "summary": "fix(gateway): serialize startup auto-resume before inbound",
+      "reason": "blocked by unresolved earlier conflict"
+    },
+    {
+      "pr": 45681,
+      "sha": "7aaae7acd0d6f80aba9fbe15324a1c907ec70c55",
+      "summary": "fix(ssl): surface broken CA bundles before provider calls",
+      "reason": "modify/delete conflicts: agent/ssl_guard.py, docs/rca-ssl-cacert-post-git-pull.md, tests/agent/test_ssl_ca_guard.py deleted in HEAD"
+    },
+    {
+      "pr": 46071,
+      "sha": "2b4873f7fbfff5bdeafac96cadbe864f5fb8607f",
+      "summary": "fix(agent): persist repaired-turn responses",
+      "reason": "content conflict in run_agent.py"
+    },
+    {
+      "pr": 46080,
+      "sha": "293c04fef6ba34ea18090ccb555c401c23454944",
+      "summary": "fix(gateway): suppress exact silence tokens without mutating history",
+      "reason": "content conflict in scripts/release.py"
+    },
+    {
+      "pr": 45951,
+      "sha": "1b16c481708d1e8bbb16feebe0a2babb76c4d4b6",
+      "summary": "fix: add safe provider account removal",
+      "reason": "modify/delete + content conflicts in apps/desktop/* and gateway/web_server.py"
+    },
+    {
+      "pr": 45953,
+      "sha": "12682d96b9c85f1373f1d61e953eb4a20feb661b",
+      "summary": "feat(telegram): restore rich messages opt-out",
+      "reason": "content conflicts in gateway/platforms/telegram.py and docs"
+    }
+  ],
+  "skipped_scopes": {
+    "desktop": 14,
+    "dashboard": 4,
+    "tui": 6,
+    "unused-platform": 5,
+    "docs-style": 3
+  },
+  "_note": "synced_through_commit/date is the LOGICAL horizon: every upstream PR merged on/before this date has been accounted for (ported, deferred-with-reason, or bulk-skipped). Not a contiguous commit cursor — irrelevant scopes are skipped permanently."
 }
