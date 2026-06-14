@@ -1,7 +1,7 @@
 ---
 name: evolution-upstream-sync
-description: Sync with upstream Hermes Agent and integrate relevant changes
-version: 1.0.0
+description: Keep the fork at full parity with upstream Hermes Agent via incremental merges
+version: 2.0.0
 author: Hermes Evolution
 category: evolution
 mode: PRIVATE
@@ -13,262 +13,182 @@ mode: PRIVATE
 
 ## Task
 
-Synchronize with the original Hermes Agent (upstream) and determine which changes should be integrated.
+Keep this fork at **full parity** with the original Hermes Agent (upstream): our
+fork is the base — our evolution work — and we roll **all** upstream changes into
+it. We want everything upstream has, present and future (desktop `apps/desktop`,
+TUI `ui-tui`, gateway, web, plugins, every platform). Nothing is skipped; nothing
+of ours is lost.
+
+> **Model change (v2.0.0):** the old model selectively cherry-picked a "relevant"
+> subset and *banned* `git merge upstream/main`. That is OBSOLETE. As of the
+> 2026-06-14 full-parity sync (PR #211) the fork carries upstream's entire
+> history (`git merge-base --is-ancestor upstream/main main` is true) plus our
+> evolution commits on top. We now **merge upstream wholesale, incrementally**.
+> There is no `.evolution/upstream-sync-state.json` cursor, no `deferred[]`, no
+> `skipped_scopes`, no per-run commit cap.
 
 ## Process
 
-0. **Baseline + accounting model.** State lives in
-   `.evolution/upstream-sync-state.json`. `synced_through_date` is the evaluation
-   horizon: every upstream PR merged on/before it has been ACCOUNTED for — ported,
-   deferred-with-reason (`deferred[]`), or skipped as permanently-irrelevant
-   (bulk count by scope). We do NOT chase a contiguous commit cursor or parity
-   (upstream is a firehose that diverges heavily from us — parity is impossible
-   and undesirable); we track which RELEVANT PRs are handled.
+### 0. Baseline — confirm current parity
+
 ```bash
-git fetch upstream --tags
-SINCE=$(jq -r '.synced_through_date // empty' .evolution/upstream-sync-state.json 2>/dev/null)
-[ -n "$SINCE" ] || SINCE=2026-06-05
-echo "evaluating upstream PRs merged >= $SINCE"
+gh auth setup-git                      # route git auth through gh (no GH_TOKEN export)
+git fetch upstream main --quiet && git fetch origin --quiet
+git checkout main && git pull --ff-only origin main
+BEHIND=$(git rev-list --count main..upstream/main)   # new upstream commits since last sync
+AHEAD=$(git rev-list --count upstream/main..main)    # our evolution work
+echo "behind upstream: $BEHIND | our commits ahead: $AHEAD"
 ```
 
-   ⚠️ **Honesty invariant (from the past dishonesty bug):** scoping by merge date
-   is fine ONLY because every PR in the window is explicitly accounted for. The
-   old bug claimed "synced through date X" while conflicting commits in that
-   window were silently dropped, unrecorded. NEVER silently drop a RELEVANT PR:
-   relevant + un-applied → `deferred[]` with a reason (revisit next run);
-   irrelevant → bulk-skip by scope (recorded in the report). `synced_through_date`
-   advances only once every RELEVANT PR through it is ported or deferred.
+If `BEHIND == 0` → already at parity, nothing to do; write a one-line report and stop.
+The normal steady state is `BEHIND` = a handful (one day of upstream commits).
 
-1. **Select by PRIORITY across the WHOLE backlog — NOT oldest-first.** Upstream is
-   a firehose (~800 commits/week) that diverges heavily from our fork; chasing
-   commit-for-commit parity is impossible AND undesirable — most of it is
-   desktop / dashboard / tui / unused-platform / cosmetic churn we never want.
-   The goal is: **never miss a RELEVANT change, promptly.** Walking oldest-first
-   from a cursor is WRONG — it buries new security fixes behind hundreds of
-   irrelevant commits the cursor may never reach. Instead:
+### 1. Size the merge — decide autonomous vs escalate
 
-   a. **List all merged upstream PRs since our baseline** (`synced_through_date`):
 ```bash
-gh pr list --repo nousresearch/hermes-agent --state merged \
-  --search "merged:>=<synced_through_date>" --limit 300 \
-  --json number,title,labels,mergedAt,mergeCommit
+git merge --no-ff --no-commit upstream/main || true   # stage the merge, surface conflicts
+CONFLICTS=$(git diff --name-only --diff-filter=U | wc -l)
+echo "conflicted files: $CONFLICTS"
+git diff --name-only --diff-filter=U
 ```
-   b. **Classify each by RELEVANCE to THIS fork** — headless, server-side,
-      self-evolving; we run agent/cron/gateway/skills/mcp and deliver to Telegram;
-      we have NO desktop/dashboard/tui and do NOT use discord/whatsapp/matrix/
-      weixin/feishu/etc.:
-      - **PORT** — security/safety (mandatory); bug/perf fixes in `agent`,
-        `gateway`, `cron`, `skills`, `mcp`, `update`, `terminal`, `model`/
-        providers we use, and `telegram`.
-      - **SKIP permanently** — `desktop`, `dashboard`, `tui`, unused messaging
-        platforms, pure `docs`/`style`. Record as a bulk count + scopes in the
-        report; do NOT process commit-by-commit and NEVER let them block ports.
-   c. **Port in priority order, security FIRST and UNCAPPED:**
-      1. **ALL** security/safety PRs — **no per-run limit** (mandatory).
-      2. core bug/perf (agent/gateway/cron/skills/mcp/update/terminal).
-      3. provider/model + telegram.
-      For each PR's commit(s): `git cherry-pick -x <sha>`. Empty/redundant
-      (already applied) → `git cherry-pick --skip`. Conflict → append
-      `{sha, pr, summary, reason}` to `deferred[]` and MOVE ON — a conflict on one
-      must never block the rest. `max_commits_per_sync` bounds tiers 2-3 per run
-      (keeps one run's diff reviewable + conflict load sane); **tier-1 security is
-      exempt and always fully ported.**
-   d. **State = ported/deferred SETS, not a contiguous cursor.** Record ported PR
-      numbers + `deferred[]`; advance `synced_through_date` to the newest PR
-      `mergedAt` you evaluated. We do NOT claim contiguous commit parity (the
-      firehose makes that meaningless) — we claim "every RELEVANT PR through date
-      X is ported or deferred-with-reason".
 
-2. **Analyze the changes:**
+- **`BEHIND` small (≤ ~80) AND `CONFLICTS` ≤ 10, none in core persistence/agent
+  runtime** → resolve autonomously (step 2) and open a normal PR.
+- **`BEHIND` large (a long catch-up) OR `CONFLICTS` > 10 OR any conflict in
+  `run_agent.py` / `agent/` / `cron/scheduler.py` / `hermes_cli/` persistence** →
+  this needs owner judgement. `git merge --abort`, then open a **draft** PR / file
+  an issue describing the backlog + conflict surface and STOP. Do NOT blind-resolve
+  a judgement-heavy merge autonomously — that is how features get silently dropped.
 
-Change categories:
-- **Bug fixes** — critical fixes, should be integrated
-- **Security fixes** — security fixes, mandatory
-- **Performance improvements** — performance improvements
-- **New features** — new features of the original Hermes
-- **Refactoring** — refactoring, may conflict with our changes
-- **Documentation** — documentation updates
-- **Tests** — test updates
+### 2. Resolve conflicts — authorship-driven, keep OURS, follow upstream
 
-3. **Evaluate each change:**
+For EACH conflicted file, decide by **who authored each side**, not by guesswork.
+The discriminator (run per ambiguous symbol/hunk):
 
-### Impact on evolution changes
-- **Conflicts** — conflicts with our modifications → needs manual merge
-- **Compatible** — compatible → can be merged automatically
-- **Enhances** — improves our changes → priority
-
-### Integration priority
-1. **Critical**: Security, bug fixes (must have)
-2. **High**: Performance, critical features (should have)
-3. **Medium**: New features (nice to have)
-4. **Low**: Documentation, tests (optional)
-
-4. **Create proposals:**
-
-For each relevant change, create an issue:
-
-```markdown
-# [UPSTREAM] Integrate upstream fix: description
-
-## Upstream Change
-- Commit: abc123
-- Author: original author
-- PR: link to upstream PR
-
-## Description
-What changed in upstream...
-
-## Impact on Evolution
-- Conflicts: Yes/No
-- Enhances evolution: Yes/No
-- Breaking: Yes/No
-
-## Recommendation
-- [ ] Auto-merge (if compatible)
-- [ ] Manual merge (if conflicts)
-- [ ] Skip (if not relevant)
-
-## Implementation Plan
-1. Cherry-pick commit
-2. Resolve conflicts
-3. Test evolution features
-4. Update docs
+```bash
+# Which commit introduced this code, and is it upstream's or ours?
+C=$(git log -S '<distinctive string>' --format='%H' HEAD -- <file> | tail -1)
+git merge-base --is-ancestor "$C" upstream/main \
+  && echo "UPSTREAM-authored" || echo "OURS"
 ```
+
+Resolution rules:
+- **Upstream-domain files we don't customize** (`apps/desktop/**`, `ui-tui/**`,
+  `web/**`, platforms we don't run): take upstream — `git checkout --theirs <f>`.
+  These must always be current.
+- **Our evolution additions** (telemetry, dotenv-secrets, reasoning-strip,
+  docs-only CI, evolution skills/cron/scripts): keep ours — but they are usually
+  ADDITIVE (new files / new lines) and rarely conflict. When they do, keep both
+  sides (our addition + upstream's change).
+- **Upstream feature that upstream itself REVERTED** (the code is in the
+  merge-base + in our HEAD, but `git show upstream/main:<file>` no longer has it):
+  FOLLOW the revert — drop it. It is NOT our feature; we forked before the revert.
+  (Example: per-job cron profile, added by upstream then reverted in #43956 — we
+  correctly dropped it.)
+- **Our fix vs upstream's fix for the same bug**: prefer upstream's current
+  approach unless ours is demonstrably more correct AND has a test proving it.
+  If we keep ours, the divergence must be deliberate and documented.
+- **Generated artifacts** (`website/static/api/model-catalog.json`): take upstream
+  then regenerate from our source (`python scripts/build_model_catalog.py`).
+- **`uv.lock`**: after resolving `pyproject.toml`, run `uv lock` so it matches; CI
+  runs `uv lock --locked`.
+
+⛔ **NEVER COMMIT CONFLICT MARKERS.** After resolving, the worktree MUST be
+marker-free. Match ONLY the unambiguous sentinels `<<<<<<<` / `>>>>>>>` (a real
+conflict always has both); do NOT match bare `=======` (it false-positives on
+legitimate dividers). This guard MUST print nothing before you commit:
+
+```bash
+git grep -lnE '^(<<<<<<<|>>>>>>>)' 2>/dev/null
+```
+
+A committed `>>>>>>>` is invalid code (it broke a sync PR once — 99 syntax errors).
+If any marker remains, you have NOT resolved cleanly — fix it before committing.
+
+### 3. Detect silent drops (a wholesale merge CAN drop our code)
+
+A 3-way merge silently FOLLOWS upstream's deletion of a base feature when our
+side didn't modify it — usually correct (upstream reverts), but verify nothing of
+ours that is genuinely additive vanished. Our purely-new files cannot be dropped
+(upstream's diff never mentions them), so focus on files we edited that upstream
+also changed:
+
+```bash
+# functions/classes present in our HEAD but missing from the merged tree:
+for f in run_agent.py cron/scheduler.py cron/jobs.py hermes_cli/*.py agent/*.py tools/*.py; do
+  miss=$(comm -23 \
+    <(git show HEAD:"$f" 2>/dev/null | grep -oE '^(def|class|    def) [a-zA-Z_]+' | sort -u) \
+    <(grep -oE '^(def|class|    def) [a-zA-Z_]+' "$f" 2>/dev/null | sort -u))
+  [ -n "$miss" ] && echo "### $f drops:" && echo "$miss"
+done
+```
+For each flagged symbol: run the authorship check (step 2). OUR symbol missing →
+restore it. Upstream symbol missing because upstream reverted → leave it dropped.
+Files we never touched flagged here are upstream refactors — ignore.
+
+### 4. Verify
+
+```bash
+python3 -m compileall -q cron hermes_cli agent tools scripts *.py
+uv run --extra dev python -m pytest tests/cron tests/run_agent tests/tools tests/hermes_cli -q --timeout=90
+```
+Evolution features must still pass (telemetry, dotenv-secrets, flush, docs-only CI,
+skills sync). CI's 6-shard suite is the full gate.
+
+### 5. Commit + PR (never a direct merge into `main`)
+
+```bash
+git checkout -b sync/upstream-YYYY-MM-DD
+git commit -m "Merge upstream/main into fork — sync (<BEHIND> commits)"   # the staged merge
+git push origin sync/upstream-YYYY-MM-DD
+gh pr create --base main --head sync/upstream-YYYY-MM-DD \
+  --title "[UPSTREAM] Sync upstream/main — full parity (<BEHIND> commits)" \
+  --body "git merge upstream/main. Conflicts resolved authorship-first (keep ours, follow upstream incl. reverts). See sync report."
+```
+
+- Merge into `main` only after **green CI** (`tests.yml` 6 shards + `lint.yml` +
+  `typecheck`) and owner review. Use `gh pr merge <n> --merge` (NOT squash/rebase —
+  preserve upstream's history + our commits). A `sync/*` branch is NOT
+  `evolution/issue-*`, so evolution-integration never auto-merges it.
+- **Attribution:** a wholesale merge brings new upstream contributors. If
+  `check-attribution` fails, map each unmapped email in `scripts/release.py`
+  `AUTHOR_MAP` (resolve the username via the PR author:
+  `gh pr view <PR> --repo nousresearch/hermes-agent --json author -q .author.login`,
+  or `gh api repos/nousresearch/hermes-agent/commits/<sha> --jq .author.login`).
+- **Workflow scope:** pushing a branch that edits `.github/workflows/**` needs the
+  `workflow` token scope. If the push is rejected, the merge legitimately updated
+  workflows — flag for an owner-gated push rather than dropping them.
+
+### 6. Inherit the upstream version marker (in the sync PR)
+
+After parity, stamp the banner from the newest upstream release tag that is now an
+ancestor of `main`:
+
+```bash
+TAG=$(git describe --tags --abbrev=0 --match 'v20*' upstream/main 2>/dev/null)
+DATE=$(echo "$TAG" | sed 's/^v//')        # e.g. 2026.6.14
+```
+If `TAG` advanced, update `hermes_cli/__init__.py` `__release_date__ = "<DATE>"`
+(the banner renders `Hermes Agent v<__version__> (<__release_date__>)`). Commit on
+the `sync/*` branch so it rides the same PR + CI.
 
 ## Sync frequency
 
-- **Mon / Wed / Fri** — full sync and analysis (the cron schedule). At up to 25
-  commits/run this closes a large backlog (e.g. 300+ commits behind) in weeks,
-  not months, then keeps pace.
-- **After critical updates** — if there are critical fixes in upstream
+Daily (`0 8 * * *`, before research at 09:00). Because we hold full parity, each
+run merges only ~one day of upstream commits — small and almost always
+conflict-free. Security/critical upstream fixes are therefore picked up within a
+day, automatically, without any selection step.
+
+## Rollback
+
+A merge commit is reverted with `git revert -m 1 <merge-commit>`. On the server,
+`hermes update` keeps the previous state for rollback; deploy is gated on green CI.
 
 ## Security
 
-1. **Always work in a separate branch:**
-```bash
-git checkout -b sync/upstream-YYYY-MM-DD
-```
-
-2. **Test after merge:**
-- Make sure evolution features work
-- Run the tests
-
-3. **Rollback if something broke:**
-```bash
-git revert -m 1 <merge-commit>
-```
-
-## Merge strategy — bounded, cherry-pick, ONLY via PR (safety gate)
-
-⛔ **HARD RULE — NEVER wholesale-merge.** Do NOT run `git merge upstream/main`
-(it pulls the ENTIRE backlog — hundreds of commits / 600+ files — into one
-unreviewable PR; it happened once and could not even be pushed). Always
-cherry-pick selected commits via a branch + PR.
-
-**Select by PRIORITY, not oldest-first (see step 1).** Upstream's volume makes
-commit-for-commit parity impossible and pointless; we port the RELEVANT subset.
-**Tier-1 security is UNCAPPED** — port every security/safety fix every run, no
-limit. `max_commits_per_sync` bounds only tiers 2-3 (core/provider/telegram) per
-run, to keep one PR reviewable and conflict-load sane; the rest of the relevant
-backlog continues next run. Irrelevant scopes (desktop/dashboard/tui/unused
-platforms) are skipped permanently, never queued. "Behind on cosmetic churn" is
-fine and expected; "behind on a security fix" is not.
-
-⛔ Do NOT merge upstream directly into `main`. Like `evolution-implementation`,
-upstream changes go **through a separate branch + PR + CI** — NEVER a direct merge:
-
-```bash
-# 0. `gh` is authorized via persistent `gh auth login` (~/.config/gh) from
-#    setup-hermes.sh. Do NOT export GH_TOKEN (Hermes strips it from the agent
-#    terminal). Just route git auth through gh:
-gh auth setup-git
-
-# 1. Separate branch from the current main:
-git checkout main && git pull && git checkout -b sync/upstream-YYYY-MM-DD
-
-# 2. Pick by PRIORITY (security first, then core/provider/telegram) — cherry-pick
-#    ONLY, never a bare `git merge upstream/main`. Map each relevant PR (step 1)
-#    to its merge commit(s) and cherry-pick those:
-gh pr view <pr> --repo nousresearch/hermes-agent --json mergeCommit -q .mergeCommit.oid
-git cherry-pick <hash>                 # one commit (or a contiguous range) at a time
-# On conflict: resolve THAT commit (keep our evolution changes), `git add`,
-# `git cherry-pick --continue`. If a commit is too entangled to resolve cleanly,
-# `git cherry-pick --skip` and DEFER it (record in deferred[] + report) — do NOT
-# fall back to a full merge to "get everything".
-#
-# ⛔ NEVER COMMIT CONFLICT MARKERS. After EVERY cherry-pick (and before
-#    --continue / before the PR), scan the worktree — a leftover marker is
-#    invalid code (it broke a sync PR once: a committed `>>>>>>>` in web_server.py
-#    = 99 syntax errors). If ANY marker remains, you did NOT resolve cleanly:
-#    abort/skip that commit and DEFER it; never `git add` a file with markers.
-# Practical guard — run after EACH cherry-pick, before committing/--continue.
-# It MUST print nothing; any output = unresolved markers = abort/skip + defer.
-# Match ONLY the unambiguous sentinels `<<<<<<<` / `>>>>>>>` (a real conflict
-# always has both). Do NOT match bare `=======` — that is a legitimate comment/
-# divider in lots of code and would false-positive, needlessly deferring clean
-# commits:
-git grep -lnE '^(<<<<<<<|>>>>>>>)' -- ':!*.md' 2>/dev/null
-
-# 2a. WORKFLOW FILES: pushing a branch that edits `.github/workflows/**` needs the
-#     `workflow` token scope. If a picked commit touches workflows and the push is
-#     rejected for missing scope, drop those files from this sync
-#     (`git checkout HEAD~ -- .github/workflows && git commit --amend`) and flag
-#     them for an owner-gated follow-up — do not fail the whole sync.
-
-# 3. Create a PR (do NOT merge into main manually):
-git push origin sync/upstream-YYYY-MM-DD
-gh pr create --base main --head sync/upstream-YYYY-MM-DD \
-  --title "[UPSTREAM] Sync: <N> relevant commits (priority-first, through <date>)" \
-  --body "Cherry-picked selected relevant upstream changes (priority-first: security, then core/provider/telegram). See upstream sync report."
-```
-
-Merging into `main` happens only after green CI (`tests.yml`/`lint.yml`) and with branch
-protection. Changes in critical paths (`.github/CODEOWNERS`) require owner
-review. This is the same gate that protects the entire self-evolution — upstream code is also
-untrusted until it has passed CI + review. A `sync/*` branch is NOT
-`evolution/issue-*`, so evolution-integration never auto-merges it — upstream
-PRs always wait for the owner.
-
-## Advance the horizon + inherit version (do this IN the sync PR)
-
-After every RELEVANT PR in the window is accounted for (ported / deferred /
-bulk-skipped), advance the date horizon and stamp the version.
-
-```bash
-# New horizon = the newest mergedAt among the PRs you evaluated this run.
-SINCE_NEW=<newest evaluated PR mergedAt, YYYY-MM-DD>
-# Newest upstream release tag merged on/before the new horizon (for the banner):
-TAG=$(for t in $(git tag -l 'v20*' | sort -Vr); do \
-        td=$(git log -1 --format=%cs "$t" 2>/dev/null); \
-        case "$td" in [0-9]*) [ "$td" \> "$SINCE_NEW" ] || { echo "$t"; break; };; esac; \
-      done)
-DATE=$(echo "$TAG" | sed 's/^v//')                          # e.g. 2026.6.5
-```
-
-1. **Rewrite `.evolution/upstream-sync-state.json`** — date horizon + the
-   ported/deferred/skipped accounting (NOT a contiguous commit cursor):
-```json
-{
-  "synced_through_date": "<SINCE_NEW as YYYY-MM-DD>",
-  "synced_through_tag": "<TAG>",
-  "ported_prs": [<upstream PR numbers ported, cumulative>],
-  "our_version": "0.16.0",
-  "synced_at": "<run date>",
-  "deferred": [ {"pr": 0, "sha": "...", "summary": "...", "reason": "conflict|workflow-scope"} ],
-  "skipped_scopes": {"desktop": 0, "dashboard": 0, "tui": 0, "<unused-platform>": 0}
-}
-```
-   The honesty invariant holds: every RELEVANT PR ≤ `synced_through_date` is in
-   `ported_prs` or `deferred[]`; irrelevant ones are tallied in `skipped_scopes`.
-2. **Only if `TAG` changed** from the previous marker, update `hermes_cli/__init__.py`
-   `__release_date__ = "<DATE>"` (the banner renders `Hermes Agent v<__version__>
-   (<__release_date__>)`). If the batch was post-release untagged work, `TAG` is
-   unchanged — leave `__release_date__` as-is, just advance the cursor.
-
-Commit the state file (and `__init__.py` if changed) on the `sync/upstream-*`
-branch so they ride the same PR + CI as the cherry-picked code. The cursor only
-moves forward when this PR's commits are real — so a failed/empty run leaves the
-cursor untouched and the next run retries the same batch.
+Upstream code is untrusted until it has passed CI + owner review — the same gate
+that protects the whole self-evolution pipeline. Always work on a `sync/*` branch,
+never commit conflict markers, never merge directly into `main`.
 
 ## Output format
 
@@ -278,31 +198,15 @@ Save the report to `~/.hermes/profiles/user1/evolution/upstream/YYYY-MM-DD.md`:
 # Upstream Sync Report - YYYY-MM-DD
 
 ## Summary
-- Total commits: 42
-- Relevant changes: 8
-- Conflicts: 2
-- Auto-merge candidates: 5
+- Commits merged: <BEHIND>
+- Conflicts resolved: <n>  (autonomous | escalated-to-owner)
+- Our features verified: telemetry, dotenv-secrets, flush, docs-only CI, skills
+- Banner version: v<tag>
 
-## Relevant Changes
+## Conflicts (if any)
+### <file> — <resolution: theirs|ours|both|reverted-follow>
+- rationale (authorship: upstream-reverted / our-feature / upstream-domain)
 
-### [CRITICAL] Security fix in auth
-- Commit: def456
-- Conflicts: No
-- Action: Auto-merge
-
-### [FEATURE] New tool integration
-- Commit: ghi789
-- Conflicts: Yes (with evolution/tools)
-- Action: Manual merge
-
-## Implementation Plan
-1. Cherry-pick def456 (auto)
-2. Manual merge ghi789
-...
+## Verification
+- compile: ok | pytest cron/run_agent/tools/hermes_cli: <n> passed | CI: <link>
 ```
-
-## Limits
-
-- No more than 25 upstream commits per run
-- Critical changes — priority
-- Breaking changes — always manual review
