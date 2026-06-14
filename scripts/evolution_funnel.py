@@ -225,6 +225,18 @@ def main(argv: list[str]) -> int:
 
     record = compute_funnel(evolution_dir, date)
     append_funnel(evolution_dir / "metrics.jsonl", record)
+
+    # Refresh the rolling-summary sidecar so stages WITHOUT a terminal toolset
+    # (evolution-research has only web+file) can consume the funnel feedback via
+    # the `file` toolset — they can't run `--summary` themselves (#84 loop).
+    try:
+        (evolution_dir / "funnel-summary.txt").write_text(
+            format_summary(summarize(load_records(evolution_dir / "metrics.jsonl"), 7)) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
     # Deterministic no_agent job: empty stdout = silent/healthy. Print a compact
     # one-liner only so the run log shows what was recorded.
     print(
