@@ -250,6 +250,30 @@ def main(argv: list[str]) -> int:
     except Exception:
         pass
 
+    # Refresh the realized-impact sidecar (post-merge feedback loop): "did what we
+    # MERGED actually help?" — read by analysis to shift into consolidation when
+    # the agent is shipping plausible-but-useless code, and by the watchdog to
+    # alert. Closes the blind-evolution gap (predicted impact never checked vs
+    # reality). Lazy import; never let it break the funnel job.
+    try:
+        from evolution_realized_impact import (
+            compute_realized,
+            format_realized,
+            load_ledger,
+        )
+
+        (evolution_dir / "realized-impact.txt").write_text(
+            format_realized(
+                compute_realized(
+                    load_ledger(evolution_dir / "realized" / "ledger.jsonl"), today=date
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
     # Deterministic no_agent job: empty stdout = silent/healthy. Print a compact
     # one-liner only so the run log shows what was recorded.
     print(

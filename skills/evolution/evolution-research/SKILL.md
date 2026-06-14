@@ -94,9 +94,14 @@ Save the result to `~/.hermes/profiles/user1/evolution/research/YYYY-MM-DD.md`:
 
 ### [FEATURE] Better memory management
 - **Source**: https://github.com/microsoft/autogen/pull/123
+- **Frontier standing**: behind | at-par | ahead — where THIS agent stands vs the
+  best on this capability today (the measured side of "be the best"). `behind` →
+  catch up AND surpass; `at-par` → differentiate / pull ahead; `ahead` → maintain
+  the lead. A finding that leaves us merely at-par with the field is weak.
 - **Impact**: High
 - **Effort**: Medium
-- **Priority Score**: 1.6 (0.8 * 2 / 0.5)
+- **Priority Score**: 1.36 (impact 0.8 × 2 × (1 − 0.4 × effort 0.5) — effort
+  DAMPENS, never divides; matches evolution-analysis)
 
 Description...
 

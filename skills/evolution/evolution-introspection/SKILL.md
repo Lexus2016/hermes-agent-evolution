@@ -92,9 +92,27 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
    - **Impact** = how often this blocks real user tasks × how badly
      (Critical 1.0 = task impossible / Low 0.2 = minor friction).
    - **Effort** = estimated work to fix.
-   - **Priority Score = Impact × 2 / Effort.** Keep only `>= 0.7`.
+   - **Priority Score = Impact × 2 × (1 − 0.4 × Effort).** Keep only `>= 0.7`.
+     Effort DAMPENS (≤40%), never divides — a hard-but-critical blocker must not
+     lose to a trivial-but-easy one (same calibration fix as evolution-analysis).
    - Practical blockers usually outscore nice-to-have features here — that's the
      point: real work comes first.
+
+6. **Post-merge verification — close the realized-impact loop (goal 3).** Evolution
+   is blind unless we check whether what we MERGED actually helped. You are already
+   reading real sessions here, so verify recent merges in the same pass:
+   - Read `~/.hermes/profiles/user1/evolution/realized/ledger.jsonl`; take entries
+     **merged ≥ 5 days ago with no `verdict` yet** (matured + unverified).
+   - For each, judge from the real sessions since its merge: did the `target`
+     problem RECUR (the fix didn't hold)? is the merged capability actually used?
+     did the friction it targeted disappear?
+   - Append ONE verdict line per such issue to the same ledger:
+     `{"issue": <#>, "verdict": "confirmed|no-signal|regressed", "verified_at": "<YYYY-MM-DD>", "note": "<one line of session evidence>"}`
+     — `confirmed` = problem gone / change used; `no-signal` = no evidence it
+     changed anything; `regressed` = problem recurred or got worse.
+   - Be honest: a `no-signal`/`regressed` verdict on the agent's OWN past change is
+     exactly the feedback that stops blind feature-piling (analysis reads it and
+     shifts to consolidation). Confirming uselessly to look good defeats the loop.
 
 ## Creating issues
 
@@ -186,7 +204,7 @@ A concrete fix/capability that would unblock it.
 ### Value
 - Impact: <0.2–1.0>
 - Effort: <0.1–1.0>
-- Priority Score: <impact*2/effort>
+- Priority Score: <impact*2*(1 − 0.4*effort)>
 ```
 
 ## Cross-cycle memory (optional — only if Turbo-Quant Memory is available)

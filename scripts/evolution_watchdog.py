@@ -205,6 +205,24 @@ def check_health(evolution_dir: Path) -> List[str]:
     return [f"pipeline health degraded: {line}"]
 
 
+def check_realized_impact(evolution_dir: Path) -> List[str]:
+    """Alert when the post-merge realized-impact sidecar reports blind evolution.
+
+    evolution_realized_impact writes ``realized-impact.txt`` ending in
+    ``| healthy`` when merged changes land real value, or ``| <FLAGS>``
+    (REALIZED_IMPACT_LOW / REALIZED_RATE_LOW / UNVERIFIED_BACKLOG) when the agent
+    is shipping plausible-but-useless code or the verification step has stopped
+    running. This is the loop that stops the agent from optimizing a predicted
+    impact it never checks against reality. Silent when healthy or absent."""
+    try:
+        line = (evolution_dir / "realized-impact.txt").read_text(encoding="utf-8").strip()
+    except OSError:
+        return []
+    if not line or line.endswith("| healthy"):
+        return []
+    return [f"realized-impact degraded: {line}"]
+
+
 def main() -> int:
     hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
     evolution_dir = Path(
@@ -232,6 +250,7 @@ def main() -> int:
     alerts += check_jobs(jobs_file, now)
     alerts += check_gh()
     alerts += check_health(evolution_dir)
+    alerts += check_realized_impact(evolution_dir)
 
     if alerts:
         print("🐶 Evolution watchdog — pipeline anomalies detected:")

@@ -138,13 +138,24 @@ gh issue view <N> --repo Lexus2016/hermes-agent-evolution --json body,comments
 - Age: days / 30 (max 1.0)
 - Compatibility: 1.0 (good) / 0.5 (needs refactoring) / 0.1 (breaks)
 - Safety: 0.0 (risky) / 0.5 (needs tests) / 1.0 (safe)
+- Complexity (codebase health): **+1.0** if it net-REMOVES / refactors / dedups
+  (negative LOC, kills dead code); **0.0** if neutral or a well-tested addition;
+  **−1.0** if it grows the codebase a lot with no tests/refactor (entropy). A
+  self-modifying agent that only ADDS rots its own base until it can no longer
+  understand it — so cleanups outrank equal-impact bloat, and pure-growth changes
+  are dampened.
 
 5. **Compute Priority Score**
 
 ```python
 base_priority = impact * 2 * (1.0 - 0.4 * effort)   # effort DAMPENS (≤40%), never divides
-final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + safety*0.3
+final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + safety*0.3 + complexity*0.2
 ```
+
+   **All extra terms are bounded penalties/bonuses, never divisors** (a divisor
+   reintroduces the calibration bug — see effort below). `complexity ∈ [−1, 1]`,
+   weight 0.2, so it shifts a score by at most ±0.2 — enough to make a refactor
+   beat equal-impact bloat, not enough to override real impact.
 
    **Effort is a bounded penalty, not a divisor.** The old `(impact*2)/effort`
    let a trivial-but-easy issue (impact 0.2, effort 0.1 → **4.0**) outrank a
@@ -180,6 +191,33 @@ final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + 
     - Tag the chosen issue's output entry `"selected_reason": "anti-starvation"`;
       all score-selected entries get `"selected_reason": "score"`. This makes
       starvation rescues visible in the report and in funnel metrics.
+
+6b. **Decomposition gate — long-horizon tasks of ANY level (goal 1).** A
+    high-effort issue (`effort > 0.6`: new runtime/subsystem rework, multi-file
+    capability) must NOT be selected for monolithic implementation — that is how
+    big work fails at the merge gate, so the agent learns to avoid hard tasks
+    (the opposite of "best at any level"). Instead, **decompose it first**: open
+    linked child issues (label `needs-decomposition` on the parent, reference the
+    parent in each child), each a shippable slice with `effort ≤ 0.6`, then let
+    those children compete normally. Select children, not the monolith. This is
+    how the agent takes on complexity without choking on it.
+
+6c. **Realized-impact feedback — don't evolve blind (goal 3).** Read the sidecar
+    `~/.hermes/profiles/user1/evolution/realized-impact.txt` (one
+    `[evolution-realized-impact] …` line, refreshed by the funnel job; missing →
+    treat as `healthy`). It closes the loop: it reports whether what we MERGED
+    actually delivered value. Let its flags set this cycle's bar, silently (this
+    is internal plumbing — keep it OUT of any delivered report):
+    - `REALIZED_IMPACT_LOW` (last K merges delivered nothing real) → **shift to
+      consolidation**: this cycle prefer refactor/cleanup/reliability + the
+      anti-starvation rescue; do NOT select new speculative features; note in the
+      report that the pipeline is in consolidation mode pending owner review.
+    - `REALIZED_RATE_LOW` (<50% of verified merges helped) → predicted impact is
+      over-optimistic; **raise the bar** — demand harder evidence of real impact
+      and discount your own impact estimates accordingly.
+    - `UNVERIFIED_BACKLOG` → verification isn't running; surface it (watchdog also
+      alerts) but proceed.
+    - healthy / missing → proceed normally.
 
 ## Status labels — accept/reject visible in the issue list
 

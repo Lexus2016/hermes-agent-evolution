@@ -165,6 +165,13 @@ gh pr list --repo "$REPO" --state open --limit 50 \
        is not a 10, it's an unverified guess: treat it as < 10, fix the gap, and
        restart from step 0. Act only when independent evidence — not your own
        sureness — backs the verdict.
+    5. **Anti-regression — never make the agent WORSE.** Green CI proves nothing
+       broke; it does NOT prove the change didn't quietly remove capability. Send
+       back any PR that deletes/weakens an existing test, removes a working
+       capability or flow, or drops coverage of a path it doesn't replace — UNLESS
+       that removal is itself the issue's goal (an explicit, justified cleanup).
+       "It still passes CI" is not enough: the agent must come out at least as
+       capable and reliable as before — every cycle a step up, never a step down.
     Treat it as your own project shipping to `main`: a wrong merge and a wrongly-
     dropped good idea both cost more than one outside look.
 
@@ -199,6 +206,19 @@ hermes update --yes
 ```
    If `hermes update` reports failure/rollback, STOP merging further PRs this
    cycle and record it — a merged change broke the build and was rolled back.
+
+6. **Record the merge for the realized-impact loop** (so evolution is not blind —
+   we later verify whether this change actually helped). For EACH merged PR,
+   append one line to `~/.hermes/profiles/user1/evolution/realized/ledger.jsonl`:
+```bash
+mkdir -p ~/.hermes/profiles/user1/evolution/realized
+echo '{"issue": <#>, "merged_at": "<YYYY-MM-DD>", "predicted_impact": <the issue'"'"'s analysis impact 0..1>, "target": "<one line: the concrete problem this was meant to fix>"}' \
+  >> ~/.hermes/profiles/user1/evolution/realized/ledger.jsonl
+```
+   `predicted_impact` is the impact the analysis stage assigned the issue; `target`
+   is what "done" means for it. introspection later appends a `verdict` line for
+   the same issue once it has matured. NEVER omit this — an unrecorded merge is
+   an unmeasured one.
 
 ## What to NEVER merge
 
