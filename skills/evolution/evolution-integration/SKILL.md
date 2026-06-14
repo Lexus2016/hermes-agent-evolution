@@ -136,22 +136,37 @@ gh pr list --repo "$REPO" --state open --limit 50 \
     Only PRs that pass BOTH the deterministic dead-code check and the judgement
     check proceed to merge.
 
-2b. **Self-audit your verdict before you act (do NOT rubber-stamp).** A glance at
-    a green CI is not a review. Before you merge / send-back / drop, audit your
-    OWN review with this loop:
-    0. Pause and re-focus. If you feel you are rushing or "already know" the
-       verdict, do an attention-reset first (emit 10 chars, derive the position,
-       re-read the diff fresh).
-    1. Re-check every gate step by step, honestly: Did you ACTUALLY run the
-       dead-code grep against the real diff (not assume)? Is the call site real
-       and reachable (not a test, not the module itself)? Does the change truly
-       deliver the issue's goal, or just look like it? Then rate your review 1–10.
-    2. If the score is < 10, you missed something — find it, correct your verdict,
-       and start this self-audit again from step 0.
-    3. Repeat until you complete the checks with ZERO corrections and are
-       genuinely confident. Only then act.
-    Treat it as if it were your own project shipping to `main`: a wrong merge or a
-    wrongly-dropped good idea both cost more than a careful second look.
+2b. **Self-audit — anchor confidence to an INDEPENDENT source, not to feeling
+    sure.** A green CI is not a review, and a high self-score is not evidence. The
+    exact failure this gate stops: the same model that judged (or wrote) the code
+    self-scores "10/10" and merges its own mistake. Run this loop before you act:
+    0. Attention-reset if you're rushing or "already know" the verdict (emit 10
+       chars, derive the position, re-read the diff fresh).
+    1. Re-run the concrete checks on the REAL diff, not memory: dead-code grep
+       (call site real + reachable — not a test, not the module itself); does the
+       change actually deliver the issue's goal, not just resemble it.
+    2. **External ground-truth for every factual claim the PR rests on.** If it
+       asserts something about the world — a model / endpoint / dependency exists
+       or behaves a certain way, a config key or ID is valid — confirm it against
+       the LIVE source (API, `gh`, the file itself), NOT from memory and NOT from
+       another LLM (a second model shares the same wrong belief — that is how a
+       non-existent thing gets merged). Also verify the capability premise: the
+       stage / skill that will run this can actually run it (toolset / path /
+       perms) — don't assume it can.
+    3. **High-risk PR → have a DIFFERENT model try to refute it** (catalog / config
+       / security change, public-API or schema change, > 200 lines, or any
+       external-fact claim). `delegate_task` with a different `provider` than
+       yours, asking what is WRONG with the merge — a different model has different
+       blind spots. A real problem found → fix or send back. If no second provider
+       is configured, say so and instead double down on step 2. Skip the second
+       model only for small, self-contained, low-risk diffs.
+    4. Only now rate the review 1–10 — and a 10 is valid ONLY if every claim above
+       is backed by an independent check. Confidence without external confirmation
+       is not a 10, it's an unverified guess: treat it as < 10, fix the gap, and
+       restart from step 0. Act only when independent evidence — not your own
+       sureness — backs the verdict.
+    Treat it as your own project shipping to `main`: a wrong merge and a wrongly-
+    dropped good idea both cost more than one outside look.
 
 3. **Daily limit — MAX 5 merges per run.** Quality over throughput: each PR still
    passes the full code review (2a) and self-audit (2b) before merging. The limit
