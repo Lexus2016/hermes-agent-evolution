@@ -270,6 +270,25 @@ def test_editor_with_pty_allowed():
     assert _INTERACTIVE_EDITOR_RE.search("vim config.txt")
 
 
+def test_editor_name_as_argument_substring_not_rejected():
+    """An editor NAME inside an argument (a branch name, a message) must NOT
+    trigger the guard — only an editor in COMMAND position does. Regression:
+    `git push origin evolution/issue-215-execute-code-diagnostics` matched
+    `\\bcode\\b` and was wrongly rejected, silently blocking the pipeline's pushes."""
+    from tools.terminal_tool import _INTERACTIVE_EDITOR_RE
+
+    assert not _INTERACTIVE_EDITOR_RE.search(
+        "git push origin evolution/issue-215-execute-code-diagnostics"
+    )
+    assert not _INTERACTIVE_EDITOR_RE.search(
+        "gh pr create --head evolution/issue-215-execute-code-diagnostics --title x"
+    )
+    # genuine command-position editor invocations are still caught
+    assert _INTERACTIVE_EDITOR_RE.search("echo done && vim notes.txt")
+    assert _INTERACTIVE_EDITOR_RE.search("code .")
+    assert _INTERACTIVE_EDITOR_RE.search("sudo nano /etc/hosts")
+
+
 def test_non_editor_command_unchanged():
     """Non-editor commands should not be affected by the editor guard."""
     from tools.terminal_tool import _INTERACTIVE_EDITOR_RE, _strip_quotes

@@ -69,6 +69,24 @@ class TestComputeFunnel:
         r = compute_funnel(tmp_path, "2026-01-02")
         assert r["selected"] == 0  # treated as absent, no exception
 
+    def test_introspection_list_report_does_not_crash(self, tmp_path):
+        # introspection emits a bare LIST of patterns, not a dict. Regression:
+        # `.get()` on a list raised AttributeError and killed the whole funnel
+        # job (and the realized-impact sidecar refresh riding on it).
+        d = "2026-01-03"
+        _write(tmp_path / "introspection" / f"{d}.json", [{"p": 1}, {"p": 2}, {"p": 3}])
+        r = compute_funnel(tmp_path, d)
+        assert r["introspection_patterns"] == 3  # counted straight from the list
+        assert r["selected"] == 0  # other stages absent — no crash
+
+    def test_list_shaped_reports_coerced_not_crashed(self, tmp_path):
+        # Any stage report arriving as a list must degrade to 0, never crash.
+        d = "2026-01-04"
+        _write(tmp_path / "analysis" / f"{d}.json", ["unexpected", "list"])
+        _write(tmp_path / "integration" / f"{d}.json", [{"merged": "x"}])
+        r = compute_funnel(tmp_path, d)
+        assert r["selected"] == 0 and r["merged"] == 0
+
 
 class TestCycleDate:
     def test_morning_run_measures_yesterday(self):

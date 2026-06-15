@@ -47,16 +47,29 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
     Every field defaults to 0 / {} so a missing stage report never crashes the
     metric — it just shows that stage produced nothing recorded that day.
     """
-    issues = _load_json(evolution_dir / "issues" / f"{date}.json") or {}
-    analysis = _load_json(evolution_dir / "analysis" / f"{date}.json") or {}
-    integration = _load_json(evolution_dir / "integration" / f"{date}.json") or {}
-    introspection = _load_json(evolution_dir / "introspection" / f"{date}.json") or {}
+    # Stage reports are normally dicts, but some stages write a bare LIST (e.g.
+    # introspection emits a list of patterns). Coerce non-dicts to {} so .get()
+    # never crashes the metric — a list-shaped report previously raised
+    # AttributeError and killed the whole funnel job (and the realized-impact
+    # sidecar refresh that now rides on it).
+    def _as_dict(x: Any) -> Dict[str, Any]:
+        return x if isinstance(x, dict) else {}
+
+    issues_raw = _load_json(evolution_dir / "issues" / f"{date}.json")
+    analysis = _as_dict(_load_json(evolution_dir / "analysis" / f"{date}.json"))
+    integration = _as_dict(_load_json(evolution_dir / "integration" / f"{date}.json"))
+    introspection_raw = _load_json(evolution_dir / "introspection" / f"{date}.json")
+    issues = _as_dict(issues_raw)
 
     selected = analysis.get("selected_for_implementation") or []
     rejected = analysis.get("rejected") or []
     merged = integration.get("merged") or []
     skipped = integration.get("skipped") or []
-    patterns = introspection.get("patterns_found") or []
+    # introspection may be a bare list of patterns OR a dict with patterns_found.
+    if isinstance(introspection_raw, list):
+        patterns = introspection_raw
+    else:
+        patterns = _as_dict(introspection_raw).get("patterns_found") or []
     created = issues.get("issues_created") or []
 
     return {

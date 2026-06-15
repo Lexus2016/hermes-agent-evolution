@@ -1692,8 +1692,18 @@ _SHELL_LEVEL_BACKGROUND_RE = re.compile(
 _INLINE_BACKGROUND_AMP_RE = re.compile(r"\s&\s")
 _TRAILING_BACKGROUND_AMP_RE = re.compile(r"\s&\s*(?:#.*)?$")
 
+# Match an interactive editor only when it is the COMMAND being run — at the
+# start of the command line or right after a shell separator (``;`` ``&`` ``|``
+# ``&&`` ``||`` ``$(``), optionally behind ``sudo``/``env VAR=…``. A bare ``\b``
+# match falsely fired on editor NAMES appearing as substrings in arguments — e.g.
+# ``git push origin evolution/issue-215-execute-code-diagnostics`` matched
+# ``\bcode\b`` and was wrongly rejected as "interactive editor", silently blocking
+# the evolution pipeline's pushes. Mirrors the background-command detector above.
 _INTERACTIVE_EDITOR_RE = re.compile(
-    r"\b(?:nano|vi|vim|emacs|micro|joe|jed|kate|gedit|subl|code)\b", re.IGNORECASE
+    r"(?:^|[;&|]\s*|&&\s*|\|\|\s*|\$\(\s*)"
+    r"(?:sudo\s+)?(?:env\s+\S+=\S+\s+)*"
+    r"(?:nano|vi|vim|emacs|micro|joe|jed|kate|gedit|subl|code)\b",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
