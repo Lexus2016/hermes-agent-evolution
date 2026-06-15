@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shlex
 import socket
 import subprocess
@@ -47,6 +48,85 @@ _IS_WINDOWS = platform.system() == "Windows"
 from typing import Any, Dict, List, Optional
 
 from tools.thread_context import propagate_context_to_thread
+
+
+# ---------------------------------------------------------------------------
+# Failure classification helper (evolution #215)
+# ---------------------------------------------------------------------------
+
+_MISSING_PKG_RE = re.compile(
+    r"(?:ModuleNotFoundError|ImportError|No module named|cannot import name)"
+    r"(?:.*?'([^']+)'|.*?\"([^\"]+)\")?",
+    re.IGNORECASE,
+)
+_SYNTAX_RE = re.compile(r"(?:SyntaxError|IndentationError|TabError)", re.IGNORECASE)
+
+
+def _classify_execution_failure(
+    exit_code: int,
+    stderr_text: str,
+    status: str,
+    timeout_value: int,
+) -> Dict[str, Any]:
+    """Return structured diagnostic for a failed execute_code run."""
+    stderr_text = (stderr_text or "").strip()
+    diag: Dict[str, Any] = {
+        "exit_code": exit_code,
+        "stderr": stderr_text,
+    }
+
+    if status == "timeout":
+        diag["status"] = "timeout"
+        diag["classification"] = "timeout"
+        diag["error"] = f"Script timed out after {timeout_value}s and was killed."
+        diag["suggestion"] = (
+            "The script exceeded the timeout. "
+            "Increase the timeout in config.yaml (code_execution.timeout), "
+            "or split the work into smaller steps."
+        )
+        return diag
+
+    # Missing package detection
+    match = _MISSING_PKG_RE.search(stderr_text)
+    if match:
+        pkg = match.group(1) or match.group(2) or "unknown package"
+        diag["status"] = "error"
+        diag["classification"] = "missing_package"
+        diag["error"] = f"Missing Python package: {pkg}"
+        diag["missing_package"] = pkg
+        diag["suggestion"] = (
+            f"Install the missing package, e.g. `uv pip install --python=<venv> {pkg}` "
+            "or add it to the project dependencies, then rerun the script."
+        )
+        return diag
+
+    # Syntax / indentation error
+    if _SYNTAX_RE.search(stderr_text):
+        diag["status"] = "error"
+        diag["classification"] = "syntax_error"
+        diag["error"] = "Script has a syntax or indentation error"
+        diag["suggestion"] = (
+            "Review the stderr traceback, fix the syntax/indentation issue, "
+            "and rerun the script."
+        )
+        return diag
+
+    if exit_code == 0:
+        # Should not reach here, but keep safe
+        diag["status"] = "error"
+        diag["classification"] = "unknown"
+        diag["error"] = "Execution finished with unexpected status"
+        diag["suggestion"] = "Check the output and retry."
+        return diag
+
+    diag["status"] = "error"
+    diag["classification"] = "nonzero_exit"
+    diag["error"] = stderr_text or f"Script exited with code {exit_code}"
+    diag["suggestion"] = (
+        "Inspect the exit code and stderr above. If the command is external, "
+        "run it in terminal() to debug interactively."
+    )
+    return diag
 
 # Availability gate.  On Windows we fall back to loopback TCP for the
 # sandbox RPC transport (AF_UNIX is unreliable on Windows Python) — see
@@ -1062,7 +1142,13 @@ def _execute_remote(
         )
     elif exit_code != 0:
         result["status"] = "error"
-        result["error"] = f"Script exited with code {exit_code}"
+        diag = _classify_execution_failure(
+            exit_code=exit_code,
+            stderr_text="",
+            status="error",
+            timeout_value=timeout,
+        )
+        result.update(diag)
 
     return json.dumps(result, ensure_ascii=False)
 
@@ -1454,8 +1540,17 @@ def execute_code(
         }
 
         if status == "timeout":
-            timeout_msg = f"Script timed out after {timeout}s and was killed."
-            result["error"] = timeout_msg
+            diag = _classify_execution_failure(
+                exit_code=exit_code,
+                stderr_text=stderr_text,
+                status="timeout",
+                timeout_value=timeout,
+            )
+            # Keep the original timeout status for backward compatibility with
+            # tests/agents that key off "status", but enrich with classification
+            # and suggestion fields.
+            result.update(diag)
+            timeout_msg = diag["error"]
             # Include timeout message in output so the LLM always surfaces it
             # to the user.  When output is empty, models often treat the result
             # as "nothing happened" and produce an empty response, which the
@@ -1472,8 +1567,14 @@ def execute_code(
             result["output"] = stdout_text + "\n[execution interrupted — user sent a new message]"
         elif exit_code != 0:
             result["status"] = "error"
-            result["error"] = stderr_text or f"Script exited with code {exit_code}"
-            # Include stderr in output so the LLM sees the traceback
+            diag = _classify_execution_failure(
+                exit_code=exit_code,
+                stderr_text=stderr_text,
+                status="error",
+                timeout_value=timeout,
+            )
+            result.update(diag)
+            # Surface stderr in output so the LLM sees the traceback
             if stderr_text:
                 result["output"] = stdout_text + "\n--- stderr ---\n" + stderr_text
 
