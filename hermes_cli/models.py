@@ -61,7 +61,6 @@ OPENROUTER_MODELS: list[tuple[str, str]] = [
     # MiniMax
     ("minimax/minimax-m3",                     ""),
     # Z-AI
-    ("z-ai/glm-5.2",                       ""),
     ("z-ai/glm-5.1",                           ""),
     # Xiaomi
     ("xiaomi/mimo-v2.5-pro",                   ""),
@@ -183,7 +182,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         # MiniMax
         "minimax/minimax-m3",
         # Z-AI
-        "z-ai/glm-5.2",
         "z-ai/glm-5.1",
         # Xiaomi
         "xiaomi/mimo-v2.5-pro",
@@ -278,10 +276,8 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         # (map to OpenRouter defaults — users get familiar picks on NIM)
         "qwen/qwen3.5-397b-a17b",
         "deepseek-ai/deepseek-v3.2",
-        "moonshotai/kimi-k2.7-code",
         "moonshotai/kimi-k2.6",
         "minimaxai/minimax-m2.5",
-        "z-ai/glm-5.2",
         "z-ai/glm5",
         "openai/gpt-oss-120b",
     ],
@@ -296,7 +292,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "kimi-k2-0905-preview",
     ],
     "kimi-coding-cn": [
-        "kimi-k2.7-code",
         "kimi-k2.6",
         "kimi-k2.5",
         "kimi-k2-thinking",
@@ -308,7 +303,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "step-3.5-flash-2603",
     ],
     "moonshot": [
-        "kimi-k2.7-code",
         "kimi-k2.6",
         "kimi-k2.5",
         "kimi-k2-thinking",
@@ -368,7 +362,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "trinity-mini",
     ],
     "gmi": [
-        "zai-org/GLM-5.2",
         "zai-org/GLM-5.1-FP8",
         "deepseek-ai/DeepSeek-V3.2",
         "moonshotai/Kimi-K2.5",
@@ -414,10 +407,8 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "big-pickle",
     ],
     "opencode-go": [
-        "kimi-k2.7-code",
         "kimi-k2.6",
         "kimi-k2.5",
-        "glm-5.2",
         "glm-5.1",
         "glm-5",
         "mimo-v2.5-pro",
@@ -475,11 +466,9 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "deepseek-ai/DeepSeek-V3.2",
         "MiniMaxAI/MiniMax-M2.5",
         "zai-org/GLM-5",
-        "zai-org/GLM-5.2",
         "XiaomiMiMo/MiMo-V2-Flash",
         "moonshotai/Kimi-K2-Thinking",
         "moonshotai/Kimi-K2.6",
-        "moonshotai/Kimi-K2.7-Code",
     ],
     # AWS Bedrock — static fallback list used when dynamic discovery is
     # unavailable (no boto3, no credentials, or API error).  The agent
@@ -2381,13 +2370,16 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
             if api_key:
                 live = _p.fetch_models(api_key=api_key)
                 if live:
-                    curated = list(_PROVIDER_MODELS.get(normalized, []))
-                    merged = list(curated)
-                    merged_lower = {m.lower() for m in curated}
-                    for m in live:
-                        if m.lower() not in merged_lower:
-                            merged.append(m)
-                    return merged
+                    if normalized in {"kimi-coding", "kimi-coding-cn"}:
+                        curated = list(_PROVIDER_MODELS.get(normalized, []))
+                        merged = list(curated)
+                        merged_lower = {m.lower() for m in curated}
+                        for m in live:
+                            if m.lower() not in merged_lower:
+                                merged.append(m)
+                                merged_lower.add(m.lower())
+                        return merged
+                    return live
             # Use profile's fallback_models if defined
             if _p.fallback_models:
                 return list(_p.fallback_models)
@@ -3920,35 +3912,27 @@ def validate_requested_model(
                 "recognized": True,
                 "message": None,
             }
+        else:
+            # API responded but model is not listed.  Accept anyway —
+            # the user may have access to models not shown in the public
+            # listing (e.g. Z.AI Pro/Max plans can use glm-5 on coding
+            # endpoints even though it's not in /models).  Warn but allow.
 
-        # Check if the model is in our static curated listing for this provider
-        curated_models = _PROVIDER_MODELS.get(normalized, [])
-        if requested_for_lookup in set(curated_models):
-            return {
-                "accepted": True,
-                "persist": True,
-                "recognized": True,
-                "message": (
-                    f"Note: `{requested}` was not found in this provider's live model listing, "
-                    f"but is recognized by Hermes."
-                ),
-            }
+            # Auto-correct if the top match is very similar (e.g. typo)
+            auto = get_close_matches(requested_for_lookup, api_models, n=1, cutoff=0.9)
+            if auto:
+                return {
+                    "accepted": True,
+                    "persist": True,
+                    "recognized": True,
+                    "corrected_model": auto[0],
+                    "message": f"Auto-corrected `{requested}` → `{auto[0]}`",
+                }
 
-        # Auto-correct if the top match is very similar (e.g. typo)
-        auto = get_close_matches(requested_for_lookup, api_models, n=1, cutoff=0.9)
-        if auto:
-            return {
-                "accepted": True,
-                "persist": True,
-                "recognized": True,
-                "corrected_model": auto[0],
-                "message": f"Auto-corrected `{requested}` → `{auto[0]}`",
-            }
-
-        suggestions = get_close_matches(requested, api_models, n=3, cutoff=0.5)
-        suggestion_text = ""
-        if suggestions:
-            suggestion_text = "\n  Similar models: " + ", ".join(f"`{s}`" for s in suggestions)
+            suggestions = get_close_matches(requested, api_models, n=3, cutoff=0.5)
+            suggestion_text = ""
+            if suggestions:
+                suggestion_text = "\n  Similar models: " + ", ".join(f"`{s}`" for s in suggestions)
 
         return {
             "accepted": False,
