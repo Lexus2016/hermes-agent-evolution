@@ -203,6 +203,15 @@ gh pr merge <N> --repo "$REPO" --squash --admin
    the OFFICIAL updater — it has snapshot + automatic rollback on failure:
 ```bash
 hermes update --yes
+# Re-deploy evolution scripts + cron from the freshly-updated checkout. The
+# scheduler runs scripts from HERMES_HOME/scripts and cron jobs from
+# ~/.hermes/cron/jobs.json — NOT from the repo checkout. `hermes update` only
+# refreshes the checkout, so a merged fix to scripts/evolution_*.py (e.g. a
+# funnel crash fix) or a cron yaml never reaches the scheduler until this runs.
+# Skipping it is exactly why a "merged + deployed" script fix kept failing in
+# prod with its old bug. register_evolution_cron copies the whole evolution_*
+# script family + reconciles jobs.json; it is idempotent.
+python3 scripts/register_evolution_cron.py
 ```
    If `hermes update` reports failure/rollback, STOP merging further PRs this
    cycle and record it — a merged change broke the build and was rolled back.

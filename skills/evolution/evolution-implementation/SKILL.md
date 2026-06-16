@@ -143,6 +143,21 @@ python -m pytest tests/ -x -q
   ```
 - Only when local checks are green do you continue to commit + push + PR.
 
+### ⛔ Protect your work — COMMIT before any cleanup
+NEVER run `git checkout -- <tracked file>`, `git restore`, `git reset --hard`, or
+`git stash` to "clean up reformat noise" on changes you have NOT yet committed —
+it silently discards the whole implementation. (This destroyed a completed run:
+the source files were reset to `main`, leaving only a broken half-re-applied
+patch and a missing PR.) The order is fixed and non-negotiable:
+1. **Commit first** — `git add -A && git commit …`. Your work is now safe in a
+   commit; nothing below can lose it.
+2. THEN, if there is genuine noise (e.g. an accidental full-file reformat), fix it
+   in a FOLLOW-UP commit, or `git checkout -- <only-that-one-file>` ONLY after
+   confirming that file has no changes you want. Never blanket-discard tracked
+   changes you haven't inspected file-by-file. When unsure, commit and let the
+   code-review gate sort it out — a noisy commit is recoverable, a discarded one
+   is not.
+
 ### Authorize git (gh is already logged in)
 ```bash
 # `gh` is authorized via persistent `gh auth login` (~/.config/gh), set up by

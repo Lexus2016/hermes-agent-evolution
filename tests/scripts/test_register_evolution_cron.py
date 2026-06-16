@@ -284,3 +284,67 @@ class TestFindVenvPython:
         venv_py.write_text("#!/bin/sh\n")
         venv_py.chmod(0o644)  # not executable
         assert mod._find_venv_python(tmp_path) is None
+
+
+class TestInstallEvolutionHelpers:
+    """The whole evolution_*.py family is mirrored into HERMES_HOME/scripts so a
+    no_agent script's sibling import (funnel -> metrics/realized_impact) resolves
+    from the one dir the scheduler executes from. Without this the import is
+    silently swallowed and the dependent sidecar freezes — the deploy gap that
+    let the funnel run against a stale copy on the server."""
+
+    def _fake_repo(self, tmp_path):
+        repo = tmp_path / "repo"
+        scripts = repo / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "evolution_funnel.py").write_text("# funnel\n")
+        (scripts / "evolution_metrics.py").write_text("# metrics\n")
+        (scripts / "evolution_realized_impact.py").write_text("# realized\n")
+        # A sibling that must NOT be picked up by the evolution_*.py glob.
+        (scripts / "register_evolution_cron.py").write_text("# registrar\n")
+        (scripts / "helper.py").write_text("# unrelated\n")
+        return repo
+
+    def test_installs_whole_family(self, tmp_path, monkeypatch):
+        mod = _import_module()
+        repo = self._fake_repo(tmp_path)
+        home = tmp_path / "hermes-home"
+        home.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(home))
+
+        installed = mod._install_evolution_helpers(repo)
+
+        assert sorted(installed) == [
+            "evolution_funnel.py",
+            "evolution_metrics.py",
+            "evolution_realized_impact.py",
+        ]
+        scripts = home / "scripts"
+        assert (scripts / "evolution_funnel.py").is_file()
+        assert (scripts / "evolution_metrics.py").is_file()
+        assert (scripts / "evolution_realized_impact.py").is_file()
+        # The registrar itself and unrelated scripts are NOT installed by glob.
+        assert not (scripts / "register_evolution_cron.py").exists()
+        assert not (scripts / "helper.py").exists()
+
+    def test_refreshes_stale_copies(self, tmp_path, monkeypatch):
+        mod = _import_module()
+        repo = self._fake_repo(tmp_path)
+        (repo / "scripts" / "evolution_funnel.py").write_text("# NEW funnel\n")
+        home = tmp_path / "hermes-home"
+        (home / "scripts").mkdir(parents=True)
+        stale = home / "scripts" / "evolution_funnel.py"
+        stale.write_text("# stale\n")
+        monkeypatch.setenv("HERMES_HOME", str(home))
+
+        mod._install_evolution_helpers(repo)
+
+        assert stale.read_text() == "# NEW funnel\n"
+
+    def test_no_family_returns_empty(self, tmp_path, monkeypatch):
+        mod = _import_module()
+        repo = tmp_path / "repo"
+        (repo / "scripts").mkdir(parents=True)
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+
+        assert mod._install_evolution_helpers(repo) == []

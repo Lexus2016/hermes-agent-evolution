@@ -148,6 +148,25 @@ def _install_access_gate(repo_root: Path) -> str | None:
     return _install_script(repo_root, "evolution_access_gate.sh")
 
 
+def _install_evolution_helpers(repo_root: Path) -> list[str]:
+    """Install the whole ``evolution_*.py`` script family into HERMES_HOME/scripts.
+
+    The per-job loop installs only each no_agent job's own ``script``. But those
+    scripts IMPORT siblings — e.g. evolution_funnel imports evolution_metrics and
+    evolution_realized_impact to refresh its health/realized-impact sidecars. A
+    sibling that lives only in the repo checkout (not in HERMES_HOME/scripts, where
+    the scheduler runs) raises ImportError at runtime and the refresh silently
+    no-ops (the import is guarded), so the sidecars freeze and the watchdog reads
+    stale health. Installing the whole family keeps every intra-family import
+    resolvable from the one directory the scheduler executes from. Future helper
+    scripts are picked up automatically by the glob."""
+    installed: list[str] = []
+    for src in sorted((repo_root / "scripts").glob("evolution_*.py")):
+        if _install_script(repo_root, src.name):
+            installed.append(src.name)
+    return installed
+
+
 def main(argv: list[str]) -> int:
     dry_run = "--dry-run" in argv
     positional = [a for a in argv[1:] if not a.startswith("--")]
@@ -175,6 +194,10 @@ def main(argv: list[str]) -> int:
     # Install the GitHub-access wake-gate and attach it to every evolution job,
     # so the expensive LLM agent only runs when GitHub is actually reachable.
     gate_script = None if dry_run else _install_access_gate(repo_root)
+
+    # Install the whole evolution_* helper family so no_agent scripts' sibling
+    # imports (funnel -> metrics/realized_impact) resolve in HERMES_HOME/scripts.
+    helper_scripts = [] if dry_run else _install_evolution_helpers(repo_root)
 
     existing_jobs = {str(j.get("name", "")).strip(): j for j in load_jobs()}
     existing_names = set(existing_jobs)
@@ -301,7 +324,8 @@ def main(argv: list[str]) -> int:
     verb = "would register" if dry_run else "registered"
     print(
         f"[evolution-cron] {verb}={len(created)} reconciled={len(updated)} "
-        f"skipped(unchanged)={len(skipped)} failed={len(failed)}"
+        f"skipped(unchanged)={len(skipped)} failed={len(failed)} "
+        f"helper_scripts_installed={len(helper_scripts)}"
     )
     for name, jid in created:
         print(f"  + {name} ({jid})")
