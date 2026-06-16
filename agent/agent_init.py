@@ -1096,10 +1096,15 @@ def init_agent(
     except Exception:
         _agent_cfg = {}
     try:
+        from agent.policy_interceptors import build_registry_from_config
+        _policy_registry = build_registry_from_config(
+            _agent_cfg.get("policy_interceptors", {})
+        )
         agent._tool_guardrails = ToolCallGuardrailController(
             ToolCallGuardrailConfig.from_mapping(
                 _agent_cfg.get("tool_loop_guardrails", {})
-            )
+            ),
+            policy_registry=_policy_registry,
         )
     except Exception as _tlg_err:
         _ra().logger.warning("Tool loop guardrail config ignored: %s", _tlg_err)
