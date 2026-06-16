@@ -2506,12 +2506,30 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
         except Exception as e:
             logger.debug("Auto-snapshot after navigate failed: %s", e)
 
+        # Navigation succeeded — clear this URL's failure streak (#234/#213).
+        try:
+            from tools.browser_navigate_fallback import reset_nav_failures
+            reset_nav_failures(url)
+        except Exception:  # pragma: no cover - never let bookkeeping break nav
+            pass
         return json.dumps(response, ensure_ascii=False)
     else:
-        return json.dumps({
-            "success": False,
-            "error": result.get("error", "Navigation failed")
-        }, ensure_ascii=False)
+        # Navigation failed. Classify the failure, attempt a web_extract fallback
+        # for the same URL, and cap per-URL retries so a broken page/backend can't
+        # drive an unbounded browser_navigate spiral (#234/#213). Lazy import to
+        # avoid a browser_tool <-> web_tools cycle.
+        try:
+            from tools.browser_navigate_fallback import build_navigation_failure
+            return json.dumps(
+                build_navigation_failure(url, result.get("error")),
+                ensure_ascii=False,
+            )
+        except Exception as _fb_err:  # pragma: no cover - degrade to plain error
+            logger.debug("browser_navigate fallback failed: %s", _fb_err)
+            return json.dumps({
+                "success": False,
+                "error": result.get("error", "Navigation failed"),
+            }, ensure_ascii=False)
 
 
 def browser_snapshot(
