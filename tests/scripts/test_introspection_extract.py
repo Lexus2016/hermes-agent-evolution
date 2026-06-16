@@ -167,3 +167,13 @@ class TestRequestDump:
         (tmp_path / "request_dump_list.json").write_text("[1,2,3]", encoding="utf-8")
         d = build_digest(tmp_path, window_days=7)
         assert d["sessions_scanned"] == 0  # both skipped, no exception
+
+    def test_failure_category_preferred_over_raw_type(self, tmp_path):
+        # #236: dumps now carry a structured failure_category; introspection keys
+        # provider_errors by it (recovery class) so recurring bad provider-model
+        # pairs group as e.g. 429:rate_limit instead of 429:RuntimeError (#237 pt3).
+        _dump(tmp_path, "d1", [_asst("x", "c1"), _tool("c1", "ok")],
+              session_id="s1", error={"type": "RuntimeError", "status_code": 429,
+                                      "failure_category": "rate_limit"})
+        d = build_digest(tmp_path, window_days=7)
+        assert d["signals"]["provider_errors"] == {"429:rate_limit": 1}

@@ -1229,6 +1229,24 @@ def dump_api_request_debug(
                 except Exception as e:
                     _ra().logger.debug("Could not extract error response details: %s", e)
 
+            # Structured failure category from the shared classifier (#236): so a
+            # RuntimeError and a BadRequestError from the same model no longer look
+            # identical at the dump level, and introspection (#238) can group
+            # provider failures by recovery class instead of raw exception type.
+            # Pure classification — never touches dispatch/failover.
+            try:
+                from agent.error_classifier import classify_api_error
+
+                classified = classify_api_error(
+                    error,
+                    provider=getattr(agent, "provider", "") or "",
+                    model=getattr(agent, "model", "") or "",
+                )
+                error_info["failure_category"] = classified.reason.value
+                error_info["retryable"] = classified.retryable
+            except Exception as e:
+                _ra().logger.debug("Could not classify error for debug dump: %s", e)
+
             dump_payload["error"] = error_info
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")

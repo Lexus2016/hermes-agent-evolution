@@ -162,8 +162,12 @@ def scan_request_dump(obj: Dict[str, Any]) -> Dict[str, Any]:
     err = obj.get("error")
     if isinstance(err, dict):
         status = err.get("status_code") or err.get("response_status")
-        etype = err.get("type") or "error"
-        provider_errors[f"{status}:{etype}" if status else str(etype)] += 1
+        # Prefer the structured recovery class (#236) over the raw exception type:
+        # `rate_limit`/`auth`/`model_not_found` groups recurring bad provider-model
+        # pairs far better than `RuntimeError`/`BadRequestError` (#237 pt3). Falls
+        # back to the exception type for dumps written before failure_category.
+        label = err.get("failure_category") or err.get("type") or "error"
+        provider_errors[f"{status}:{label}" if status else str(label)] += 1
     s["provider_errors"] = dict(provider_errors)
     body = obj.get("request", {}).get("body") if isinstance(obj.get("request"), dict) else None
     model = body.get("model") if isinstance(body, dict) else None
