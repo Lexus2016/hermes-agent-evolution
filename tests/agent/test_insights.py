@@ -730,3 +730,211 @@ class TestEdgeCases:
         # Depending on timing, might catch the session if created <1s ago
         # Just verify it doesn't crash
         assert "empty" in report
+
+
+# =========================================================================
+# Cost attribution — per-tool and per-subagent (issue #254)
+# =========================================================================
+
+@pytest.fixture()
+def cost_db(db):
+    """A DB with a priced parent session + a priced subagent (delegate) child."""
+    # Parent CLI session: priced anthropic model, two distinct tools used once each.
+    db.create_session(
+        session_id="parent",
+        source="cli",
+        model="anthropic/claude-sonnet-4-20250514",
+    )
+    db.update_token_counts(
+        "parent", input_tokens=100000, output_tokens=20000,
+        billing_provider="anthropic",
+    )
+    # read_file returns a large payload (60 chars); delegate returns a small
+    # one (20 chars) — so payload-weighted attribution gives read_file 3x the
+    # share of delegate (60/80 vs 20/80 of the parent's $0.60).
+    db.append_message("parent", role="assistant", content="read it",
+                      tool_calls=[{"function": {"name": "read_file"}}])
+    db.append_message("parent", role="tool", content="x" * 60, tool_name="read_file")
+    db.append_message("parent", role="assistant", content="delegate it",
+                      tool_calls=[{"function": {"name": "delegate"}}])
+    db.append_message("parent", role="tool", content="y" * 20, tool_name="delegate")
+
+    # Subagent (delegate) child: own row, source='subagent', parent linked.
+    db.create_session(
+        session_id="child",
+        source="subagent",
+        model="anthropic/claude-haiku-4-5",
+        parent_session_id="parent",
+        model_config={"_delegate_from": "parent"},
+    )
+    db.update_token_counts(
+        "child", input_tokens=30000, output_tokens=5000,
+        billing_provider="anthropic",
+    )
+    db.append_message("child", role="assistant", content="run it",
+                      tool_calls=[{"function": {"name": "terminal"}}])
+    db.append_message("child", role="tool", content="output", tool_name="terminal")
+
+    db._conn.commit()
+    return db
+
+
+class TestToolCostAttribution:
+    def test_generate_includes_tool_costs_and_method(self, cost_db):
+        report = InsightsEngine(cost_db).generate(days=30)
+        assert report["cost_attribution"] == (
+            "proportional_by_response_chars_fallback_call_count"
+        )
+        tool_costs = {t["tool"]: t for t in report["tool_costs"]}
+        assert set(tool_costs) == {"read_file", "delegate", "terminal"}
+
+    def test_session_cost_split_by_payload_size(self, cost_db):
+        report = InsightsEngine(cost_db).generate(days=30)
+        tool_costs = {t["tool"]: t for t in report["tool_costs"]}
+        # Parent session cost (sonnet: 100k in * $3 + 20k out * $15 per 1M = $0.60)
+        # is split by response payload size: read_file 60 chars, delegate 20 →
+        # $0.45 / $0.15.
+        assert tool_costs["read_file"]["cost"] == pytest.approx(0.45, abs=1e-6)
+        assert tool_costs["delegate"]["cost"] == pytest.approx(0.15, abs=1e-6)
+        # Child session cost (haiku: 30k*$1 + 5k*$5 per 1M = $0.055) → its 1 tool.
+        assert tool_costs["terminal"]["cost"] == pytest.approx(0.055, abs=1e-6)
+
+    def test_tool_cost_percentages_sum_to_100(self, cost_db):
+        report = InsightsEngine(cost_db).generate(days=30)
+        total_pct = sum(t["percentage"] for t in report["tool_costs"])
+        assert total_pct == pytest.approx(100.0, abs=0.1)
+
+    def test_falls_back_to_call_count_without_payload_chars(self, db):
+        """When tool_name (and thus payload chars) is absent, split by calls."""
+        db.create_session(
+            session_id="s1", source="cli",
+            model="anthropic/claude-sonnet-4-20250514",
+        )
+        db.update_token_counts("s1", input_tokens=100000, output_tokens=20000,
+                               billing_provider="anthropic")
+        # CLI-style: tool_calls JSON only, no tool_name on the tool rows → no
+        # payload-char weight available, so the $0.60 splits evenly by call.
+        db.append_message("s1", role="assistant", content="a",
+                          tool_calls=[{"id": "c1", "function": {"name": "read_file"}}])
+        db.append_message("s1", role="tool", content="r1", tool_call_id="c1")
+        db.append_message("s1", role="assistant", content="b",
+                          tool_calls=[{"id": "c2", "function": {"name": "terminal"}}])
+        db.append_message("s1", role="tool", content="r2", tool_call_id="c2")
+        db._conn.commit()
+
+        report = InsightsEngine(db).generate(days=30)
+        tool_costs = {t["tool"]: t for t in report["tool_costs"]}
+        assert tool_costs["read_file"]["cost"] == pytest.approx(0.30, abs=1e-6)
+        assert tool_costs["terminal"]["cost"] == pytest.approx(0.30, abs=1e-6)
+
+    def test_custom_model_session_contributes_zero_tool_cost(self, db):
+        """Tools used only in unpriced sessions get counted but $0 cost."""
+        db.create_session(session_id="s1", source="cli", model="my-local-llama")
+        db.update_token_counts("s1", input_tokens=50000, output_tokens=10000)
+        db.append_message("s1", role="assistant", content="x",
+                          tool_calls=[{"function": {"name": "terminal"}}])
+        db.append_message("s1", role="tool", content="y", tool_name="terminal")
+        db._conn.commit()
+
+        report = InsightsEngine(db).generate(days=30)
+        terminal = next(t for t in report["tool_costs"] if t["tool"] == "terminal")
+        assert terminal["calls"] == 1
+        assert terminal["cost"] == 0.0
+
+
+class TestSubagentCostAttribution:
+    def test_subagent_section_isolates_delegate_sessions(self, cost_db):
+        report = InsightsEngine(cost_db).generate(days=30)
+        sub = report["subagents"]
+        assert sub["subagent_sessions"] == 1
+        assert sub["total_cost"] == pytest.approx(0.055, abs=1e-6)
+        assert sub["total_tokens"] == 35000
+        by_model = {m["model"]: m for m in sub["by_model"]}
+        assert "claude-haiku-4-5" in by_model
+        assert by_model["claude-haiku-4-5"]["sessions"] == 1
+        assert by_model["claude-haiku-4-5"]["cost"] == pytest.approx(0.055, abs=1e-6)
+
+    def test_no_subagents_yields_empty_section(self, db):
+        db.create_session(session_id="s1", source="cli", model="gpt-4o")
+        db.update_token_counts("s1", input_tokens=1000, output_tokens=500,
+                               billing_provider="openai")
+        db._conn.commit()
+        report = InsightsEngine(db).generate(days=30)
+        assert report["subagents"]["subagent_sessions"] == 0
+        assert report["subagents"]["by_model"] == []
+
+
+class TestCostBreakdown:
+    def test_empty_db(self, db):
+        report = InsightsEngine(db).cost_breakdown(days=30)
+        assert report["empty"] is True
+        assert report["sessions"] == []
+        assert report["totals"]["estimated_cost"] == 0.0
+
+    def test_per_session_rows_and_totals(self, cost_db):
+        report = InsightsEngine(cost_db).cost_breakdown(days=30)
+        assert report["empty"] is False
+        assert report["totals"]["total_sessions"] == 2
+        # $0.60 (parent) + $0.055 (child) = $0.655
+        assert report["totals"]["estimated_cost"] == pytest.approx(0.655, abs=1e-6)
+
+        rows = {r["session_id"]: r for r in report["sessions"]}
+        assert rows["parent"]["is_subagent"] is False
+        assert rows["child"]["is_subagent"] is True
+        assert rows["child"]["parent_session_id"] == "parent"
+        assert rows["parent"]["estimated_cost"] == pytest.approx(0.60, abs=1e-6)
+
+    def test_rows_sorted_by_cost_desc(self, cost_db):
+        report = InsightsEngine(cost_db).cost_breakdown(days=30)
+        costs = [r["estimated_cost"] for r in report["sessions"]]
+        assert costs == sorted(costs, reverse=True)
+
+    def test_limit_caps_session_rows(self, cost_db):
+        report = InsightsEngine(cost_db).cost_breakdown(days=30, limit=1)
+        assert len(report["sessions"]) == 1
+        # Highest-spend session retained.
+        assert report["sessions"][0]["session_id"] == "parent"
+
+    def test_limit_zero_returns_all(self, cost_db):
+        report = InsightsEngine(cost_db).cost_breakdown(days=30, limit=0)
+        assert len(report["sessions"]) == 2
+
+    def test_source_filter(self, cost_db):
+        report = InsightsEngine(cost_db).cost_breakdown(days=30, source="subagent")
+        assert report["totals"]["total_sessions"] == 1
+        assert report["sessions"][0]["session_id"] == "child"
+
+    def test_report_is_json_serializable(self, cost_db):
+        import json as _json
+        report = InsightsEngine(cost_db).cost_breakdown(days=30)
+        _json.dumps(report)  # raises if non-serializable types leaked in
+
+
+class TestCostTerminalFormatting:
+    def test_format_has_all_sections(self, cost_db):
+        engine = InsightsEngine(cost_db)
+        text = engine.format_cost_terminal(engine.cost_breakdown(days=30))
+        assert "Hermes Cost Attribution" in text
+        assert "Per-Session Spend" in text
+        assert "Per-Tool Cost" in text
+        assert "Subagent" in text
+        assert "proportional_by_response_chars" in text
+
+    def test_format_marks_subagent_rows(self, cost_db):
+        engine = InsightsEngine(cost_db)
+        text = engine.format_cost_terminal(engine.cost_breakdown(days=30))
+        assert "↳" in text  # subagent marker
+
+    def test_format_empty(self, db):
+        engine = InsightsEngine(db)
+        text = engine.format_cost_terminal(engine.cost_breakdown(days=30))
+        assert "No sessions found" in text
+
+    def test_format_no_subagents_note(self, db):
+        db.create_session(session_id="s1", source="cli", model="gpt-4o")
+        db.update_token_counts("s1", input_tokens=1000, output_tokens=500,
+                               billing_provider="openai")
+        db._conn.commit()
+        engine = InsightsEngine(db)
+        text = engine.format_cost_terminal(engine.cost_breakdown(days=30))
+        assert "No subagent" in text
