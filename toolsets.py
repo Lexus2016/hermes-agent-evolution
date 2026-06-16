@@ -71,6 +71,10 @@ _HERMES_CORE_TOOLS = [
     "kanban_complete", "kanban_block", "kanban_heartbeat",
     "kanban_comment", "kanban_create", "kanban_link",
     "kanban_unblock",
+    # Agent-team coordination — only in schema inside a teammate session
+    # (HERMES_TEAM_ID env set by the lead). Gated via check_fn in
+    # tools/agent_team_tools.py.
+    "team_task", "team_message",
     # Computer use (macOS, gated on cua-driver being installed via check_fn)
     "computer_use",
 ]
@@ -247,6 +251,19 @@ TOOLSETS = {
         "description": "Spawn subagents with isolated context for complex subtasks",
         "tools": ["delegate_task"],
         "includes": []
+    },
+
+    "agent_team": {
+        "description": (
+            "Agent-team coordination — only active inside a teammate session "
+            "spawned by the lead (HERMES_TEAM_ID env set). Gives teammates a "
+            "shared task list (claim/complete) and direct teammate-to-teammate "
+            "messaging, so peers self-coordinate instead of routing everything "
+            "back through the lead. Gated via check_fn in "
+            "tools/agent_team_tools.py."
+        ),
+        "tools": ["team_task", "team_message"],
+        "includes": [],
     },
 
     # "honcho" toolset removed — Honcho is now a memory provider plugin.

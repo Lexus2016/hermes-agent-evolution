@@ -54,6 +54,94 @@ DELEGATE_BLOCKED_TOOLS = frozenset(
 
 
 # ---------------------------------------------------------------------------
+# Agent-team identity (GitHub issue #252)
+# ---------------------------------------------------------------------------
+# A teammate is a delegated child that additionally carries a (team_id, member)
+# identity so it can use the shared task-list + peer-messaging tools in
+# tools/agent_team_tools.py. The lead opts a task into a team by adding a
+# ``team`` field: {"team_id": "<slug>", "member": "<slug>"}.
+import contextlib  # noqa: E402  (grouped with the team helpers below)
+
+
+def _resolve_team_identity(task: Dict[str, Any], task_index: int):
+    """Return a validated ``(team_id, member)`` tuple for *task*, or None.
+
+    The lead opts a task into a team via a ``team`` dict on the task. A missing
+    member name falls back to a positional ``teammate-<index>`` so the lead can
+    leave it implicit. Invalid slugs are dropped (logged) rather than raising,
+    so a malformed team field degrades to a plain delegation instead of failing
+    the whole batch.
+    """
+    team = task.get("team")
+    if not isinstance(team, dict):
+        return None
+    from tools.agent_team import is_valid_slug
+
+    team_id = str(team.get("team_id") or "").strip()
+    if not team_id or not is_valid_slug(team_id):
+        logger.warning(
+            "delegate_task: ignoring team field with invalid team_id %r",
+            team.get("team_id"),
+        )
+        return None
+    member = str(team.get("member") or "").strip() or f"teammate-{task_index}"
+    if not is_valid_slug(member):
+        logger.warning(
+            "delegate_task: ignoring team field with invalid member %r",
+            team.get("member"),
+        )
+        return None
+    return (team_id, member)
+
+
+def _ensure_team_toolset(child_toolsets, parent_agent):
+    """Ensure the ``agent_team`` toolset is present for a teammate child.
+
+    The team tools are gated by check_fn (only visible to teammates), so adding
+    the toolset to a child that the lead designated a teammate is safe even when
+    the parent did not explicitly enable it — capability is granted by team
+    membership, mirroring how role='orchestrator' re-adds 'delegation'.
+    """
+    if child_toolsets is None:
+        # Inherit-from-parent path: start from the parent's enabled toolsets so
+        # we don't accidentally widen the child to all tools.
+        parent_enabled = getattr(parent_agent, "enabled_toolsets", None)
+        base = list(parent_enabled) if parent_enabled is not None else list(DEFAULT_TOOLSETS)
+    else:
+        base = list(child_toolsets)
+    if "agent_team" not in base:
+        base.append("agent_team")
+    return base
+
+
+@contextlib.contextmanager
+def _team_identity_scope(team_identity):
+    """Bind the team identity on the current thread for the duration of a block.
+
+    Used around child construction (which resolves the child's tool schema once)
+    so the team tools' check_fn sees an active identity and includes them.
+    """
+    if team_identity is None:
+        yield
+        return
+    from tools.agent_team import (
+        clear_thread_identity,
+        set_thread_identity,
+    )
+    from tools.registry import invalidate_check_fn_cache
+
+    set_thread_identity(team_identity[0], team_identity[1])
+    # The team tools' check_fn is TTL-cached; invalidate so a stale "no team"
+    # result from this (lead) thread does not hide the tools at build time.
+    invalidate_check_fn_cache()
+    try:
+        yield
+    finally:
+        clear_thread_identity()
+        invalidate_check_fn_cache()
+
+
+# ---------------------------------------------------------------------------
 # Subagent approval callbacks
 # ---------------------------------------------------------------------------
 # Subagents run inside a ThreadPoolExecutor worker. The CLI's interactive
@@ -1463,6 +1551,15 @@ def _run_single_child(
     """
     child_start = time.monotonic()
 
+    # Agent-team identity (issue #252): rebind this worker thread's team
+    # identity so the team tools resolve the right team + member when the
+    # teammate calls them. Cleared in the finally block at the end of the run.
+    _team_identity = getattr(child, "_team_identity", None)
+    if _team_identity is not None:
+        from tools.agent_team import set_thread_identity
+
+        set_thread_identity(_team_identity[0], _team_identity[1])
+
     # Get the progress callback from the child agent
     child_progress_cb = getattr(child, "tool_progress_callback", None)
 
@@ -2011,6 +2108,16 @@ def _run_single_child(
             except Exception as exc:
                 logger.debug("Failed to release credential lease: %s", exc)
 
+        # Drop this worker thread's agent-team identity (issue #252) so a
+        # recycled pool thread does not inherit a stale team binding.
+        if _team_identity is not None:
+            try:
+                from tools.agent_team import clear_thread_identity
+
+                clear_thread_identity()
+            except Exception as exc:
+                logger.debug("Failed to clear team identity: %s", exc)
+
         # Restore the parent's tool names so the process-global is correct
         # for any subsequent execute_code calls or other consumers.
         import model_tools
@@ -2224,29 +2331,44 @@ def delegate_task(
             # Per-task role beats top-level; normalise again so unknown
             # per-task values warn and degrade to leaf uniformly.
             effective_role = _normalize_role(t.get("role") or top_role)
-            child = _build_child_agent(
-                task_index=i,
-                goal=t["goal"],
-                context=t.get("context"),
-                toolsets=t.get("toolsets") or toolsets,
-                model=creds["model"],
-                max_iterations=effective_max_iter,
-                task_count=n_tasks,
-                parent_agent=parent_agent,
-                override_provider=creds["provider"],
-                override_base_url=creds["base_url"],
-                override_api_key=creds["api_key"],
-                override_api_mode=creds["api_mode"],
-                override_acp_command=t.get("acp_command")
-                or acp_command
-                or creds.get("command"),
-                override_acp_args=(
-                    task_acp_args
-                    if task_acp_args is not None
-                    else (acp_args if acp_args is not None else creds.get("args"))
-                ),
-                role=effective_role,
-            )
+            # Resolve optional agent-team identity for this teammate (issue
+            # #252). When present, the child becomes a team member with the
+            # shared task-list + peer-messaging tools. Children run as
+            # in-process worker threads sharing os.environ, so identity is
+            # carried via a threading.local set around construction (so the
+            # team tools' check_fn passes and the tools land in agent.tools,
+            # which is resolved once at build time) and re-set at run time.
+            team_identity = _resolve_team_identity(t, i)
+            child_toolsets = t.get("toolsets") or toolsets
+            if team_identity is not None:
+                child_toolsets = _ensure_team_toolset(child_toolsets, parent_agent)
+            with _team_identity_scope(team_identity):
+                child = _build_child_agent(
+                    task_index=i,
+                    goal=t["goal"],
+                    context=t.get("context"),
+                    toolsets=child_toolsets,
+                    model=creds["model"],
+                    max_iterations=effective_max_iter,
+                    task_count=n_tasks,
+                    parent_agent=parent_agent,
+                    override_provider=creds["provider"],
+                    override_base_url=creds["base_url"],
+                    override_api_key=creds["api_key"],
+                    override_api_mode=creds["api_mode"],
+                    override_acp_command=t.get("acp_command")
+                    or acp_command
+                    or creds.get("command"),
+                    override_acp_args=(
+                        task_acp_args
+                        if task_acp_args is not None
+                        else (acp_args if acp_args is not None else creds.get("args"))
+                    ),
+                    role=effective_role,
+                )
+            # Stamp the identity onto the child so _run_single_child can rebind
+            # the threading.local inside the worker thread that runs it.
+            child._team_identity = team_identity
             # Override with correct parent tool names (before child construction mutated global)
             child._delegate_saved_tool_names = _parent_tool_names
             children.append((i, t, child))
@@ -3045,6 +3167,40 @@ DELEGATE_TASK_SCHEMA = {
                             "type": "string",
                             "enum": ["leaf", "orchestrator"],
                             "description": "Per-task role override. See top-level 'role' for semantics.",
+                        },
+                        "team": {
+                            "type": "object",
+                            "description": (
+                                "Opt this task into an agent TEAM. Teammates "
+                                "in the same team_id share a task list and can "
+                                "message each other directly via the team_task "
+                                "and team_message tools (granted automatically). "
+                                "Use this when subtasks must self-coordinate "
+                                "(claim shared work, hand off sub-problems) "
+                                "rather than run fully independently. Give every "
+                                "teammate in one delegate_task call the SAME "
+                                "team_id and a DISTINCT member name."
+                            ),
+                            "properties": {
+                                "team_id": {
+                                    "type": "string",
+                                    "description": (
+                                        "Shared team identifier (letters, "
+                                        "digits, '.', '_', '-'; max 64 chars). "
+                                        "All teammates that should coordinate "
+                                        "must use the same value."
+                                    ),
+                                },
+                                "member": {
+                                    "type": "string",
+                                    "description": (
+                                        "This teammate's name within the team "
+                                        "(same charset as team_id). Defaults to "
+                                        "'teammate-<index>' if omitted."
+                                    ),
+                                },
+                            },
+                            "required": ["team_id"],
                         },
                     },
                     "required": ["goal"],
