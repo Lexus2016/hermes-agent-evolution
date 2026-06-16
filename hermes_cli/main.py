@@ -12034,6 +12034,33 @@ def main():
         help="Session ID to analyze (default: most recent session)",
     )
 
+    sessions_cost = sessions_subparsers.add_parser(
+        "cost",
+        help="Show per-session spend plus per-tool and per-subagent cost breakdown",
+        description=(
+            "Per-session estimated spend with per-tool and per-subagent "
+            "(delegate) cost attribution. Reuses the same cost model as "
+            "'hermes insights' / /insights."
+        ),
+    )
+    sessions_cost.add_argument(
+        "--days", type=int, default=30, help="Number of days to analyze (default: 30)"
+    )
+    sessions_cost.add_argument(
+        "--source", help="Filter by platform (cli, telegram, subagent, etc.)"
+    )
+    sessions_cost.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Max per-session rows to show (0 for all; default: 20)",
+    )
+    sessions_cost.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the raw cost report as JSON instead of a table",
+    )
+
     def _confirm_prompt(prompt: str) -> bool:
         """Prompt for y/N confirmation, safe against non-TTY environments."""
         try:
@@ -12297,6 +12324,20 @@ def main():
             engine = EntropyEngine()
             report = engine.analyze(resolved, data.get("messages", []))
             print(format_report_terminal(report))
+
+        elif action == "cost":
+            from agent.insights import InsightsEngine
+
+            engine = InsightsEngine(db)
+            report = engine.cost_breakdown(
+                days=args.days,
+                source=getattr(args, "source", None),
+                limit=getattr(args, "limit", 20),
+            )
+            if getattr(args, "json", False):
+                print(_json.dumps(report, ensure_ascii=False, indent=2))
+            else:
+                print(engine.format_cost_terminal(report))
 
         else:
             sessions_parser.print_help()
