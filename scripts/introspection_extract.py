@@ -5,10 +5,17 @@ evolution-introspection previously loaded RAW session transcripts (last 7 days)
 into the LLM context — unbounded megabytes, the single largest context bomb in
 the pipeline, AND it put the user's private text into the model context.
 
-This script (no LLM) scans the session JSONL files for PROBLEM SIGNALS only and
-emits a compact, ANONYMIZED digest — counts per signal/tool, generic shapes,
-never raw content. The skill feeds ONLY this digest to the model. Raw private
-text never enters the context (complements the PII redaction gate #82).
+This script (no LLM) scans the session files for PROBLEM SIGNALS only and emits
+a compact, ANONYMIZED digest — counts per signal/tool, generic shapes, never
+raw content. The skill feeds ONLY this digest to the model. Raw private text
+never enters the context (complements the PII redaction gate #82).
+
+Two on-disk session formats are scanned (#238): the upstream ``*.jsonl``
+transcripts AND ``request_dump_*.json`` snapshots, which some installs persist
+instead. A request dump carries the same role-tagged messages at
+``request.body.messages`` plus a provider ``error`` object; ignoring it left
+those installs reporting ``sessions_scanned: 0`` and blinded the whole
+self-improvement loop.
 
 Signals extracted:
   * tool_failures  — tool results that look like failures, attributed to the
@@ -18,6 +25,9 @@ Signals extracted:
   * refusals       — assistant text expressing "I can't / no access / denied".
   * repeated_tool_runs — same tool called many times consecutively (the spiral
     shape loop_guard guards against), counted per session.
+  * provider_errors — from request_dump error objects: ``status_code:type``
+    only (never the response body/text, which can echo private content).
+  * models_used    — the model id from each request dump (anonymized metadata).
 
 Output: a JSON digest to stdout (and optionally a file), a few KB max.
 """
@@ -67,8 +77,11 @@ def _iter_lines(path: Path):
         return
 
 
-def scan_session(path: Path) -> Dict[str, Any]:
-    """Return per-session signal counts (no raw text)."""
+def scan_messages(messages) -> Dict[str, Any]:
+    """Return per-session signal counts (no raw text) from an iterable of
+    role-tagged message dicts. Shared by the JSONL transcript path and the
+    request_dump_*.json path (#238) so both formats yield the identical digest.
+    """
     tool_failures: Counter = Counter()
     timeouts = 0
     refusals = 0
@@ -77,7 +90,9 @@ def scan_session(path: Path) -> Dict[str, Any]:
     consec_n = 0
     max_runs: Counter = Counter()  # tool -> max consecutive in this session
 
-    for obj in _iter_lines(path):
+    for obj in messages:
+        if not isinstance(obj, dict):
+            continue
         role = obj.get("role")
         if role == "assistant":
             tcs = obj.get("tool_calls") or []
@@ -119,31 +134,104 @@ def scan_session(path: Path) -> Dict[str, Any]:
     }
 
 
+def scan_session(path: Path) -> Dict[str, Any]:
+    """Per-session signals from a JSONL transcript (one JSON object per line)."""
+    return scan_messages(_iter_lines(path))
+
+
+def _request_dump_messages(obj: Dict[str, Any]) -> List[Any]:
+    """The conversation messages carried inside a request_dump_*.json snapshot
+    live at request.body.messages — the same role-tagged shape as a JSONL
+    transcript, so scan_messages handles it directly."""
+    req = obj.get("request") if isinstance(obj, dict) else None
+    body = req.get("body") if isinstance(req, dict) else None
+    msgs = body.get("messages") if isinstance(body, dict) else None
+    return msgs if isinstance(msgs, list) else []
+
+
+def scan_request_dump(obj: Dict[str, Any]) -> Dict[str, Any]:
+    """Per-session signals from a request_dump_*.json snapshot (#238).
+
+    Reuses scan_messages over request.body.messages, and adds the provider-layer
+    error signal from the top-level ``error`` object — but ONLY its status code
+    and error type, never ``message``/``body``/``response_text`` (those can echo
+    private content; the no-raw-text contract still holds). Also records the
+    model id used, which is anonymized metadata, not user content."""
+    s = scan_messages(_request_dump_messages(obj))
+    provider_errors: Counter = Counter()
+    err = obj.get("error")
+    if isinstance(err, dict):
+        status = err.get("status_code") or err.get("response_status")
+        etype = err.get("type") or "error"
+        provider_errors[f"{status}:{etype}" if status else str(etype)] += 1
+    s["provider_errors"] = dict(provider_errors)
+    body = obj.get("request", {}).get("body") if isinstance(obj.get("request"), dict) else None
+    model = body.get("model") if isinstance(body, dict) else None
+    s["models"] = {model: 1} if isinstance(model, str) and model else {}
+    return s
+
+
+def _fresh(path: Path, cutoff: float) -> bool:
+    try:
+        return path.stat().st_mtime >= cutoff
+    except OSError:
+        return False
+
+
 def build_digest(sessions_dir: Path, window_days: int = 7, now: float | None = None) -> Dict[str, Any]:
     now = now if now is not None else time.time()
     cutoff = now - window_days * 86400
     failures: Counter = Counter()
     timeouts = 0
     refusals = 0
+    provider_errors: Counter = Counter()
+    models: Counter = Counter()
     repeated: Dict[str, Dict[str, int]] = {}  # tool -> {max_consecutive, sessions}
     scanned = 0
 
-    files = sorted(sessions_dir.glob("*.jsonl")) if sessions_dir.is_dir() else []
-    for path in files:
-        try:
-            if path.stat().st_mtime < cutoff:
-                continue
-        except OSError:
-            continue
-        scanned += 1
-        s = scan_session(path)
-        failures.update(s["tool_failures"])
-        timeouts += s["timeouts"]
-        refusals += s["refusals"]
-        for tool, n in s["repeated_tool_runs"].items():
+    def _aggregate(s: Dict[str, Any]) -> None:
+        nonlocal timeouts, refusals
+        failures.update(s.get("tool_failures", {}))
+        timeouts += s.get("timeouts", 0)
+        refusals += s.get("refusals", 0)
+        provider_errors.update(s.get("provider_errors", {}))
+        models.update(s.get("models", {}))
+        for tool, n in s.get("repeated_tool_runs", {}).items():
             r = repeated.setdefault(tool, {"max_consecutive": 0, "sessions": 0})
             r["max_consecutive"] = max(r["max_consecutive"], n)
             r["sessions"] += 1
+
+    if sessions_dir.is_dir():
+        # 1. Native JSONL transcripts (the upstream session format).
+        for path in sorted(sessions_dir.glob("*.jsonl")):
+            if not _fresh(path, cutoff):
+                continue
+            scanned += 1
+            _aggregate(scan_session(path))
+
+        # 2. request_dump_*.json snapshots (#238 — this install persists sessions
+        #    this way, so the JSONL glob found zero and the whole pipeline went
+        #    blind). Multiple dumps of one session each carry a growing prefix of
+        #    the same conversation, so dedup by session_id keeping the most
+        #    complete snapshot — one session contributes its signals once.
+        dumps: Dict[str, tuple] = {}  # session_id -> (msg_count, obj)
+        for path in sorted(sessions_dir.glob("request_dump_*.json")):
+            if not _fresh(path, cutoff):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                    obj = json.load(fh)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(obj, dict):
+                continue
+            sid = obj.get("session_id") or path.stem
+            n_msgs = len(_request_dump_messages(obj))
+            if n_msgs >= dumps.get(sid, (-1, None))[0]:
+                dumps[sid] = (n_msgs, obj)
+        for _sid, (_n, obj) in dumps.items():
+            scanned += 1
+            _aggregate(scan_request_dump(obj))
 
     return {
         "window_days": window_days,
@@ -153,6 +241,8 @@ def build_digest(sessions_dir: Path, window_days: int = 7, now: float | None = N
             "timeouts": timeouts,
             "refusals_or_access_denied": refusals,
             "repeated_tool_runs": repeated,
+            "provider_errors": dict(provider_errors.most_common()),
+            "models_used": dict(models.most_common()),
         },
     }
 
