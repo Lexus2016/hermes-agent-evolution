@@ -30,7 +30,7 @@ import re
 import difflib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from pathlib import Path
 from tools.binary_extensions import BINARY_EXTENSIONS
 
@@ -152,6 +152,64 @@ def _is_write_denied(path: str) -> bool:
 # Result Data Classes
 # =============================================================================
 
+def classify_file_error(
+    error: Optional[str], *, similar_files: Optional[List[str]] = None
+) -> Optional[Tuple[str, str]]:
+    """Map a read/patch error string to ``(error_class, recovery)`` for #216, or
+    None when there is no error. Lets the model route to the right recovery —
+    create the file, fix the patch text, use a different tool — instead of
+    re-issuing the same failing call. Derived from the already-set ``error``
+    string so no error-producing site has to be touched."""
+    if not error:
+        return None
+    low = error.lower()
+    if "denied" in low or "protected" in low or "permission" in low:
+        return "permission", (
+            "The path is protected/denied and can't be elevated. Use an allowed "
+            "path — do NOT retry the same one."
+        )
+    if "binary file" in low:
+        return "binary", (
+            "This is a binary file. Don't read it as text; use a tool suited to the "
+            "file type."
+        )
+    if "not found" in low or "no such file" in low:
+        if similar_files:
+            return "fuzzy_match", (
+                "The exact path wasn't found. Did you mean one of: "
+                f"{', '.join(similar_files[:5])}? Otherwise create it with write_file."
+            )
+        return "not_found", (
+            "The file doesn't exist. Create it with write_file, or re-check the path "
+            "(it may be dynamic) — don't repeat the same read."
+        )
+    if "parse patch" in low or ("parse" in low and "patch" in low):
+        return "patch_parse", (
+            "The patch couldn't be parsed. Fix the patch format/markers before retrying."
+        )
+    if "verification" in low:
+        return "verification", (
+            "The write succeeded but re-read verification failed. Re-read the file to "
+            "see actual state before editing again."
+        )
+    if "did not match" in low or "no match" in low or ("match" in low and "block" in low):
+        return "fuzzy_match", (
+            "The search block didn't match the file. Re-read the file and copy the EXACT "
+            "current text into the patch — don't retry the same block."
+        )
+    if "failed to write" in low or ("write" in low and "fail" in low):
+        return "write_error", (
+            "The write failed. Check disk space / permissions and the path before retrying."
+        )
+    if "failed to read" in low:
+        return "read_error", (
+            "The read failed. Check the path/permissions; don't repeat the same call blindly."
+        )
+    return "error", (
+        "The operation failed. Read the message, fix the root cause, and CHANGE the call."
+    )
+
+
 @dataclass
 class ReadResult:
     """Result from reading a file."""
@@ -167,9 +225,13 @@ class ReadResult:
     dimensions: Optional[str] = None  # For images: "WIDTHxHEIGHT"
     error: Optional[str] = None
     similar_files: List[str] = field(default_factory=list)
-    
+
     def to_dict(self) -> dict:
-        return {k: v for k, v in self.__dict__.items() if v is not None and v != []}
+        d = {k: v for k, v in self.__dict__.items() if v is not None and v != []}
+        hit = classify_file_error(self.error, similar_files=self.similar_files)
+        if hit:
+            d["error_class"], d["recovery"] = hit
+        return d
 
 
 @dataclass
@@ -221,6 +283,9 @@ class PatchResult:
             result["lsp_diagnostics"] = self.lsp_diagnostics
         if self.error:
             result["error"] = self.error
+            hit = classify_file_error(self.error)
+            if hit:
+                result["error_class"], result["recovery"] = hit
         return result
 
 
