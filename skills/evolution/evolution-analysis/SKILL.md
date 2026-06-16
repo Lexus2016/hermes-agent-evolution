@@ -219,6 +219,46 @@ final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + 
       alerts) but proceed.
     - healthy / missing → proceed normally.
 
+## Orchestrator-workers evaluator-optimizer gate (research synthesis) — #230
+
+When a single issue is open-ended enough that one reasoning pass under-serves it
+(a `[FEATURE]`/`[IMPROVEMENT]` that asks you to *synthesize a recommendation* or
+*compare options*, not a one-line fix), run it as an **orchestrator-workers +
+evaluator-optimizer** loop instead of a single shot:
+
+1. **Orchestrate** — fan the sub-task out into N independent worker passes
+   (`delegate_task`, the `delegation` toolset is enabled here). Each worker
+   returns one candidate result.
+2. **Evaluate (deterministic)** — score each candidate against a small rubric
+   (`relevance`, `evidence`, `specificity`, `correctness`, each 0..1), then let a
+   deterministic gate pick the best and decide whether to accept or refine. Do
+   NOT grade your own work with the model and declare victory — that converges to
+   a false 10/10 and never stops. Use the gate:
+
+```bash
+# candidates.json = [{"scores": {"relevance": 0.8, "evidence": 0.7,
+#                                "specificity": 0.6, "correctness": 0.9}}, ...]
+# (one object per worker pass; "scores" are YOUR rubric grades of that candidate)
+python scripts/evolution_evaluator.py --threshold 0.75 --pass 1 --max-passes 3 candidates.json
+```
+   It prints one JSON verdict and sets a distinct exit code so a shell loop can
+   branch without parsing JSON:
+   - `ACCEPT` (exit 0) — best candidate clears the bar; use `best_index`, stop.
+   - `OPTIMIZE` (exit 10) — below the bar but passes remain; have the optimizer
+     refine the best candidate (feed it the gaps), bump `--pass`, re-run workers,
+     re-evaluate.
+   - `STOP_BUDGET` (exit 11) — below the bar and the pass budget is spent; take
+     the best-so-far and flag it unconverged. **The loop ALWAYS terminates** —
+     `OPTIMIZE` is only ever returned while `--pass` < `--max-passes`.
+3. **Optimize** — on `OPTIMIZE`, the refinement is the model's job (rewrite the
+   best candidate addressing its weakest rubric criteria); the gate only decides
+   *whether* to keep looping and *which* candidate is current best.
+
+This is a self-contained first increment of #230: the deterministic referee
+(`scripts/evolution_evaluator.py`) that keeps the loop honest and bounded. Deep
+pipeline wiring — automatic worker fan-out for every issue, persisting per-pass
+candidates to the kanban board — is deferred.
+
 ## Status labels — accept/reject visible in the issue list
 
 The evolution pipeline tags every issue with ONE canonical status label so the
