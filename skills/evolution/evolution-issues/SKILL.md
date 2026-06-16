@@ -17,6 +17,18 @@ Create GitHub issues and pull requests based on research.
 ## Process
 
 1. **Load** the latest research report from `~/.hermes/profiles/user1/evolution/research/`
+1a. **Also mine the agent's OWN traces for weaknesses (#248).** Research is the
+    external signal; the agent's own execution traces are the internal one. Run
+    the deterministic trace miner and consider its weakness records alongside the
+    research proposals — a recurring `provider_error` / `retry_spiral` /
+    `tool_failure` cluster from real usage is a high-signal candidate (it's a
+    *demonstrated* problem, not a trend):
+    ```bash
+    python scripts/evolution_trace_miner.py --days=7    # JSON weakness records (or read weaknesses-latest.json sidecar)
+    ```
+    Treat each weakness cluster as a proposal input: run it through the same
+    self-critique + dedup gates below before filing. The miner emits only
+    anonymized counts/classes/labels — never raw trace content.
 2. **Select** proposals with Priority Score >= 0.7
 2a. **Self-critique BEFORE you file (do not propose noise).** A high priority
     score is not enough. For EACH candidate, honestly ask — and DROP it (don't
