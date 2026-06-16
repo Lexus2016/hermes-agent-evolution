@@ -856,6 +856,35 @@ def _serve_plugin_skill(
     )
 
 
+def _suggest_skill_names(name: str, all_names: List[str], n: int = 3) -> List[str]:
+    """Closest skill-name matches for a missing/renamed skill (#232).
+
+    A renamed or mistyped skill's requested name is near its real name, so a
+    ranked "did you mean?" beats an arbitrary alphabetical slice. Each candidate
+    is scored by the best of: full-name similarity, leaf-name similarity, and a
+    strong bonus when the requested leaf is a substring of the candidate's leaf
+    (the common rename/abbreviation case). Returns up to ``n`` above threshold."""
+    import difflib
+
+    if not name or not all_names:
+        return []
+    q = name.lower()
+    q_leaf = q.rsplit("/", 1)[-1]
+    scored: List[Tuple[float, str]] = []
+    for cand in all_names:
+        c = cand.lower()
+        c_leaf = c.rsplit("/", 1)[-1]
+        score = max(
+            difflib.SequenceMatcher(None, q, c).ratio(),
+            difflib.SequenceMatcher(None, q_leaf, c_leaf).ratio(),
+        )
+        if q_leaf and q_leaf in c_leaf:
+            score = max(score, 0.9)  # requested leaf is a substring — strong signal
+        scored.append((score, cand))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [cand for sc, cand in scored if sc >= 0.5][:n]
+
+
 def skill_view(
     name: str,
     file_path: str = None,
@@ -1085,16 +1114,21 @@ def skill_view(
             skill_dir, skill_md = candidates[0]
 
         if not skill_md or not skill_md.exists():
-            available = [s["name"] for s in _sort_skills(_find_all_skills())[:20]]
-            return json.dumps(
-                {
-                    "success": False,
-                    "error": f"Skill '{name}' not found.",
-                    "available_skills": available,
-                    "hint": "Use skills_list to see all available skills",
-                },
-                ensure_ascii=False,
-            )
+            all_names = [s["name"] for s in _sort_skills(_find_all_skills())]
+            did_you_mean = _suggest_skill_names(name, all_names)
+            resp = {
+                "success": False,
+                "error": f"Skill '{name}' not found.",
+                "available_skills": all_names[:20],
+                "hint": "Use skills_list to see all available skills",
+            }
+            if did_you_mean:
+                resp["did_you_mean"] = did_you_mean
+                resp["hint"] = (
+                    f"Closest matches: {', '.join(did_you_mean)}. "
+                    "Skill may have been renamed — use skills_list to confirm."
+                )
+            return json.dumps(resp, ensure_ascii=False)
 
         # Read the file once — reused for platform check and main content below
         try:
