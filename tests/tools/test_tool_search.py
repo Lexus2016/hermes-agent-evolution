@@ -82,6 +82,31 @@ class TestConfigParsing:
         assert cfg.max_search_limit == 50
         assert cfg.search_default_limit <= cfg.max_search_limit
 
+    def test_defer_core_toolsets_default_empty(self):
+        from tools.tool_search import ToolSearchConfig
+        assert ToolSearchConfig.from_raw(None).defer_core_toolsets == frozenset()
+        assert ToolSearchConfig.from_raw({"enabled": "on"}).defer_core_toolsets == frozenset()
+
+    def test_defer_core_toolsets_list_form(self):
+        from tools.tool_search import ToolSearchConfig
+        cfg = ToolSearchConfig.from_raw({"defer_core_toolsets": ["browser", "tts"]})
+        assert cfg.defer_core_toolsets == frozenset({"browser", "tts"})
+
+    def test_defer_core_toolsets_comma_string_form(self):
+        from tools.tool_search import ToolSearchConfig
+        cfg = ToolSearchConfig.from_raw({"defer_core_toolsets": "browser, tts ,"})
+        assert cfg.defer_core_toolsets == frozenset({"browser", "tts"})
+
+    def test_defer_core_toolsets_garbage_is_dropped(self):
+        """A malformed entry must never crash assembly — non-strings are dropped."""
+        from tools.tool_search import ToolSearchConfig, _parse_toolset_list
+        assert _parse_toolset_list(123) == frozenset()
+        assert _parse_toolset_list({"a": 1}) == frozenset()
+        assert _parse_toolset_list([1, "tts", None, ""]) == frozenset({"tts"})
+        # And the full path tolerates it too.
+        cfg = ToolSearchConfig.from_raw({"defer_core_toolsets": 123})
+        assert cfg.defer_core_toolsets == frozenset()
+
 
 # ---------------------------------------------------------------------------
 # Classification — the hard invariant: core tools NEVER defer.
@@ -126,6 +151,178 @@ class TestClassification:
         names = {(td.get("function") or {}).get("name") for td in visible}
         assert "xx_unknown_tool" in names
         assert deferrable == []
+
+
+# ---------------------------------------------------------------------------
+# Config-driven deferral of native (core) tool sets — issue #229 increment.
+#
+# By default core tools never defer. An operator can opt a *native* toolset
+# in to progressive disclosure via tools.tool_search.defer_core_toolsets;
+# those core tools then behave like any other deferrable tool. The hard
+# invariant is that assembly-time classification and dispatch/scope-time
+# validation agree (effective_core_tool_names is the single source of truth),
+# so an opted-in core tool deferred from the visible array is always callable
+# back through the bridge — never a silent dropout.
+# ---------------------------------------------------------------------------
+
+
+class TestCoreToolsetDeferral:
+    # The browser toolset is a representative native tool set: ~10 core
+    # browser_* tools, reliably present in the default tool definitions,
+    # and a real candidate for deferral (a coding/chat session that rarely
+    # browses pays all ~10 schemas every turn).
+    _DEMO_TOOLSET = "browser"
+    _DEMO_TOOL = "browser_click"
+    _PROTECTED_TOOL = "terminal"  # core, in a different toolset — must stay direct.
+
+    @pytest.fixture(autouse=True)
+    def _populate_registry(self):
+        """is_deferrable_tool_name resolves the tool via the live registry, so
+        the tool modules must be imported/registered first — exactly as they
+        are at runtime before any assembly. Importing model_tools and pulling
+        the definitions once triggers registration."""
+        import model_tools
+        model_tools.get_tool_definitions(quiet_mode=True, skip_tool_search_assembly=True)
+
+    def _cfg(self, **over):
+        from tools.tool_search import ToolSearchConfig
+        raw = {"enabled": "on", "defer_core_toolsets": [self._DEMO_TOOLSET]}
+        raw.update(over)
+        return ToolSearchConfig.from_raw(raw)
+
+    def test_effective_core_unchanged_by_default(self):
+        from tools.tool_search import (
+            effective_core_tool_names, _hermes_core_tools, ToolSearchConfig,
+        )
+        cfg = ToolSearchConfig.from_raw({"enabled": "on"})
+        assert effective_core_tool_names(cfg) == _hermes_core_tools()
+
+    def test_effective_core_subtracts_opted_in_toolset(self):
+        from tools.tool_search import effective_core_tool_names, _hermes_core_tools
+        raw_core = _hermes_core_tools()
+        # Pre-condition: the demo tool is genuinely a core tool.
+        assert self._DEMO_TOOL in raw_core
+        eff = effective_core_tool_names(self._cfg())
+        assert self._DEMO_TOOL not in eff, (
+            "opted-in core toolset member must drop out of the never-defer set"
+        )
+        # An unrelated core tool stays protected.
+        assert self._PROTECTED_TOOL in eff
+
+    def test_opted_in_core_tool_is_deferrable(self):
+        from tools.tool_search import is_deferrable_tool_name
+        assert is_deferrable_tool_name(self._DEMO_TOOL, self._cfg())
+        # Default config: still never deferrable.
+        from tools.tool_search import ToolSearchConfig
+        assert not is_deferrable_tool_name(
+            self._DEMO_TOOL, ToolSearchConfig.from_raw({"enabled": "on"})
+        )
+
+    def test_protected_core_tool_never_deferrable_even_when_opting_browser(self):
+        from tools.tool_search import is_deferrable_tool_name
+        assert not is_deferrable_tool_name(self._PROTECTED_TOOL, self._cfg())
+
+    def test_classify_defers_opted_in_native_toolset(self):
+        import model_tools
+        from tools.tool_search import classify_tools
+        defs = model_tools.get_tool_definitions(
+            quiet_mode=True, skip_tool_search_assembly=True,
+        ) or []
+        visible, deferrable = classify_tools(defs, self._cfg())
+        deferred_names = {(td.get("function") or {}).get("name") for td in deferrable}
+        visible_names = {(td.get("function") or {}).get("name") for td in visible}
+        browser_deferred = {n for n in deferred_names if n.startswith("browser_")}
+        # The browser toolset registers ~9-12 browser_* tools depending on
+        # which are gated on/off in the environment; the mechanism is proven
+        # by deferring the whole native set, not by an exact count.
+        assert len(browser_deferred) >= 5, (
+            f"expected the native browser toolset deferred, got {sorted(browser_deferred)}"
+        )
+        # Protected core tool stays in the visible array.
+        assert self._PROTECTED_TOOL in visible_names
+
+    def test_assembly_defers_native_toolset_and_reports_savings(self):
+        """assemble_tool_defs both defers the opted-in native tools AND reports
+        the token savings (deferred_tokens) so the win can be measured."""
+        import model_tools
+        from tools.tool_search import assemble_tool_defs, ToolSearchConfig
+        defs = model_tools.get_tool_definitions(
+            quiet_mode=True, skip_tool_search_assembly=True,
+        ) or []
+        baseline = assemble_tool_defs(
+            defs, context_length=200_000,
+            config=ToolSearchConfig.from_raw({"enabled": "on"}),
+        )
+        opted = assemble_tool_defs(defs, context_length=200_000, config=self._cfg())
+        # Opting browser in must add browser_* to the deferred count and
+        # the measured deferred-token total grows accordingly.
+        assert opted.deferred_count > baseline.deferred_count
+        assert opted.deferred_tokens > baseline.deferred_tokens
+        result_names = {(td.get("function") or {}).get("name") for td in opted.tool_defs}
+        # The deferred browser tools are no longer in the model-visible array.
+        assert not any(n.startswith("browser_") for n in result_names)
+        # Protected core tool is still visible.
+        assert self._PROTECTED_TOOL in result_names
+
+    def test_roundtrip_invariant_opted_in_core_tool_is_callable_back(self):
+        """The OpenClaw silent-dropout guard for opted-in core tools: a tool
+        deferred from the visible array MUST be in the scoped deferrable set,
+        resolvable via tool_call, and describable via tool_describe."""
+        import model_tools
+        from tools.tool_search import (
+            scoped_deferrable_names, resolve_underlying_call, dispatch_tool_describe,
+        )
+        cfg = self._cfg()
+        defs = model_tools.get_tool_definitions(
+            quiet_mode=True, skip_tool_search_assembly=True,
+        ) or []
+        scope = scoped_deferrable_names(defs, cfg)
+        assert self._DEMO_TOOL in scope
+        name, _args, err = resolve_underlying_call(
+            {"name": self._DEMO_TOOL, "arguments": {}}, cfg,
+        )
+        assert err is None and name == self._DEMO_TOOL
+        described = json.loads(
+            dispatch_tool_describe(
+                {"name": self._DEMO_TOOL}, current_tool_defs=defs, config=cfg,
+            )
+        )
+        assert "parameters" in described
+
+    def test_default_config_keeps_native_tool_direct(self):
+        """The inverse of the round-trip: with no opt-in, the core tool stays
+        direct and the bridge refuses to resolve it (use it directly)."""
+        from tools.tool_search import ToolSearchConfig, resolve_underlying_call
+        cfg = ToolSearchConfig.from_raw({"enabled": "on"})
+        _name, _args, err = resolve_underlying_call(
+            {"name": self._DEMO_TOOL, "arguments": {}}, cfg,
+        )
+        assert err is not None
+        assert "not a deferrable" in err
+
+    def test_naming_non_core_toolset_is_a_noop(self):
+        """Opting in a toolset with no core members changes nothing — those
+        tools were already deferrable (or non-existent)."""
+        from tools.tool_search import effective_core_tool_names, _hermes_core_tools, ToolSearchConfig
+        cfg = ToolSearchConfig.from_raw(
+            {"enabled": "on", "defer_core_toolsets": ["xx_no_such_toolset"]}
+        )
+        assert effective_core_tool_names(cfg) == _hermes_core_tools()
+
+    def test_opted_in_core_tool_deferrable_without_registry_entry(self, monkeypatch):
+        """Registry-timing invariant: an opted-in core tool stays deferrable
+        even if the registry has no entry for it at the exact moment of the
+        check. Otherwise a transient registry gap would flip the tool to
+        'not deferrable' at dispatch and make it uncallable through the bridge
+        (silent dropout). The tool's membership in _HERMES_CORE_TOOLS is
+        authoritative — no registry round-trip required."""
+        import tools.tool_search as ts
+        from tools.registry import registry
+        # Force the registry lookup to behave as if the tool isn't registered.
+        monkeypatch.setattr(registry, "get_entry", lambda _name: None)
+        assert ts.is_deferrable_tool_name(self._DEMO_TOOL, self._cfg())
+        # The same gap leaves a non-opted-in core tool firmly NOT deferrable.
+        assert not ts.is_deferrable_tool_name(self._PROTECTED_TOOL, self._cfg())
 
 
 # ---------------------------------------------------------------------------

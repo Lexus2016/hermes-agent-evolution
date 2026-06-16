@@ -68,6 +68,11 @@ class ToolSearchConfig:
     threshold_pct: float  # 0..100 — only used when enabled == "auto"
     search_default_limit: int
     max_search_limit: int
+    # Native (core) toolsets the operator has opted in to progressive
+    # disclosure. Empty by default — core tools never defer unless their
+    # toolset name appears here. See ``effective_core_tool_names`` for how
+    # this subtracts opted-in core tools from the never-defer set.
+    defer_core_toolsets: frozenset[str] = frozenset()
 
     @classmethod
     def from_raw(cls, raw: Any) -> "ToolSearchConfig":
@@ -111,7 +116,26 @@ class ToolSearchConfig:
             threshold_pct=threshold_pct,
             search_default_limit=search_default_limit,
             max_search_limit=max_search_limit,
+            defer_core_toolsets=_parse_toolset_list(raw.get("defer_core_toolsets")),
         )
+
+
+def _parse_toolset_list(value: Any) -> frozenset[str]:
+    """Coerce a raw config value into a frozenset of toolset names.
+
+    Accepts a list of strings or a single comma-separated string. Non-string
+    members and blanks are dropped so a malformed entry can't crash assembly.
+    """
+    if value is None:
+        return frozenset()
+    if isinstance(value, str):
+        items = value.split(",")
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        items = list(value)
+    else:
+        return frozenset()
+    names = {str(item).strip() for item in items if isinstance(item, str) and str(item).strip()}
+    return frozenset(names)
 
 
 def _safe_int(value: Any, fallback: int) -> int:
@@ -147,8 +171,8 @@ def load_config() -> ToolSearchConfig:
 # ---------------------------------------------------------------------------
 
 
-def _core_tool_names() -> frozenset[str]:
-    """Return the set of tool names that must NEVER be deferred.
+def _hermes_core_tools() -> frozenset[str]:
+    """Return the raw ``_HERMES_CORE_TOOLS`` set, unfiltered by config.
 
     Imported lazily because ``toolsets`` imports from ``tools.registry``
     and we don't want a hard cycle.
@@ -160,18 +184,92 @@ def _core_tool_names() -> frozenset[str]:
         return frozenset()
 
 
-def is_deferrable_tool_name(name: str) -> bool:
+def _core_tools_in_toolsets(toolset_names: frozenset[str]) -> frozenset[str]:
+    """Return the core tools that belong to any of ``toolset_names``.
+
+    A core tool "belongs to" a toolset if the static ``TOOLSETS`` mapping or
+    the live registry places it there. Resolved against both so an operator
+    can name either a static toolset (e.g. ``image_gen``) or a registry
+    toolset. Only names that are actually in ``_HERMES_CORE_TOOLS`` are
+    returned — naming a non-core toolset is a no-op (those tools are already
+    deferrable by default).
+    """
+    if not toolset_names:
+        return frozenset()
+    core = _hermes_core_tools()
+    if not core:
+        return frozenset()
+    members: set[str] = set()
+    try:
+        from toolsets import resolve_toolset
+    except Exception:
+        resolve_toolset = None
+    try:
+        from tools.registry import registry
+    except Exception:
+        registry = None
+    for ts in toolset_names:
+        if resolve_toolset is not None:
+            try:
+                members.update(resolve_toolset(ts))
+            except Exception:
+                pass
+        if registry is not None:
+            try:
+                members.update(registry.get_tool_names_for_toolset(ts))
+            except Exception:
+                pass
+    return frozenset(members & core)
+
+
+def effective_core_tool_names(config: Optional[ToolSearchConfig] = None) -> frozenset[str]:
+    """Return the set of tool names that must NEVER be deferred.
+
+    Starts from ``_HERMES_CORE_TOOLS`` and subtracts any core tool whose
+    toolset the operator opted in to progressive disclosure via
+    ``tools.tool_search.defer_core_toolsets``. This is the single source of
+    truth consulted by ``is_deferrable_tool_name``, so assembly-time
+    classification and dispatch/scope-time validation always agree — a core
+    tool deferred at assembly is callable back via the bridge, and one that
+    is not deferred is rejected by the bridge. Mismatch here is exactly the
+    OpenClaw silent-dropout class of bug.
+    """
+    core = _hermes_core_tools()
+    if config is None:
+        config = load_config()
+    opted_in = _core_tools_in_toolsets(config.defer_core_toolsets)
+    if not opted_in:
+        return core
+    return frozenset(core - opted_in)
+
+
+def is_deferrable_tool_name(name: str, config: Optional[ToolSearchConfig] = None) -> bool:
     """Return True if a tool with this name is *eligible* for deferral.
 
     A tool is deferrable iff it is registered with an MCP toolset prefix
-    OR it is not in ``_HERMES_CORE_TOOLS``. Core tools are never deferred
-    even when their toolset is technically plugin-provided (this protects
-    against accidental shadowing).
+    OR it is not in the *effective* core set. Core tools are never deferred
+    (this protects against accidental shadowing) unless their toolset is
+    explicitly opted in via ``defer_core_toolsets``.
+
+    ``config`` is resolved from the user config when omitted so the
+    no-config call sites (bridge dispatch, scope validation) stay in sync
+    with assembly-time classification.
     """
     if name in BRIDGE_TOOL_NAMES:
         return False
-    if name in _core_tool_names():
+    if config is None:
+        config = load_config()
+    if name in effective_core_tool_names(config):
         return False
+    # An opted-in core tool is a *known* real tool (it is in
+    # _HERMES_CORE_TOOLS, just excluded from the effective never-defer set).
+    # Treat it as deferrable directly rather than re-resolving it through the
+    # registry: that keeps the assembly/dispatch decision invariant under
+    # transient registry state (a core tool that is unregistered at the exact
+    # moment of a dispatch check would otherwise flip to "not deferrable" and
+    # become uncallable through the bridge — a silent dropout).
+    if name in _hermes_core_tools():
+        return True
     # Check registry toolset for MCP prefix.
     try:
         from tools.registry import registry
@@ -186,13 +284,19 @@ def is_deferrable_tool_name(name: str) -> bool:
         return False
 
 
-def classify_tools(tool_defs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def classify_tools(
+    tool_defs: List[Dict[str, Any]],
+    config: Optional[ToolSearchConfig] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Split a tool-defs list into (visible, deferrable).
 
     ``visible`` retains every tool that must stay in the model-facing array:
-    every core tool, plus any tool we can't classify. ``deferrable`` is the
-    candidate set for catalog entry.
+    every effective-core tool, plus any tool we can't classify. ``deferrable``
+    is the candidate set for catalog entry. ``config`` is resolved from the
+    user config when omitted.
     """
+    if config is None:
+        config = load_config()
     visible: List[Dict[str, Any]] = []
     deferrable: List[Dict[str, Any]] = []
     for td in tool_defs:
@@ -202,7 +306,7 @@ def classify_tools(tool_defs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]
             # Should never happen — bridge tools are added after classification —
             # but be defensive.
             continue
-        if is_deferrable_tool_name(name):
+        if is_deferrable_tool_name(name, config):
             deferrable.append(td)
         else:
             visible.append(td)
@@ -551,7 +655,7 @@ def assemble_tool_defs(
     incoming = [td for td in tool_defs
                 if (td.get("function") or {}).get("name") not in BRIDGE_TOOL_NAMES]
 
-    visible, deferrable = classify_tools(incoming)
+    visible, deferrable = classify_tools(incoming, config)
     if not deferrable:
         return AssemblyResult(tool_defs=incoming, activated=False)
 
@@ -619,7 +723,7 @@ def dispatch_tool_search(args: Dict[str, Any],
     else:
         limit = max(1, min(config.max_search_limit, _safe_int(raw_limit, config.search_default_limit)))
 
-    _, deferrable = classify_tools(current_tool_defs)
+    _, deferrable = classify_tools(current_tool_defs, config)
     catalog = build_catalog(deferrable)
     hits = search_catalog(catalog, query, limit=limit)
     return json.dumps({
@@ -631,19 +735,22 @@ def dispatch_tool_search(args: Dict[str, Any],
 
 def dispatch_tool_describe(args: Dict[str, Any],
                            *,
-                           current_tool_defs: List[Dict[str, Any]]) -> str:
+                           current_tool_defs: List[Dict[str, Any]],
+                           config: Optional[ToolSearchConfig] = None) -> str:
     """Execute the ``tool_describe`` bridge tool. Returns a JSON string."""
+    if config is None:
+        config = load_config()
     name = str(args.get("name") or "").strip()
     if not name:
         return json.dumps({"error": "name is required"}, ensure_ascii=False)
-    if not is_deferrable_tool_name(name):
+    if not is_deferrable_tool_name(name, config):
         return json.dumps({
             "error": (
                 f"'{name}' is not a deferrable tool. If you see it in the tools list "
                 "already, call it directly; otherwise check the spelling against tool_search."
             ),
         }, ensure_ascii=False)
-    _, deferrable = classify_tools(current_tool_defs)
+    _, deferrable = classify_tools(current_tool_defs, config)
     for td in deferrable:
         fn = td.get("function") or {}
         if fn.get("name") == name:
@@ -657,7 +764,10 @@ def dispatch_tool_describe(args: Dict[str, Any],
     }, ensure_ascii=False)
 
 
-def scoped_deferrable_names(tool_defs: List[Dict[str, Any]]) -> frozenset[str]:
+def scoped_deferrable_names(
+    tool_defs: List[Dict[str, Any]],
+    config: Optional[ToolSearchConfig] = None,
+) -> frozenset[str]:
     """Return the set of deferrable tool names present in ``tool_defs``.
 
     ``tool_defs`` is expected to be the *pre-assembly* tool list for the
@@ -668,16 +778,25 @@ def scoped_deferrable_names(tool_defs: List[Dict[str, Any]]) -> frozenset[str]:
     scoping gate by both the ``model_tools`` bridge dispatch and the
     ``tool_executor`` unwrap so a restricted-toolset session can never invoke
     an out-of-scope tool via the bridge.
+
+    ``config`` is resolved from the user config when omitted so the scope gate
+    sees the same deferred set as assembly (including any opted-in core
+    toolsets).
     """
+    if config is None:
+        config = load_config()
     names: set[str] = set()
     for td in tool_defs:
         name = (td.get("function") or {}).get("name", "")
-        if name and is_deferrable_tool_name(name):
+        if name and is_deferrable_tool_name(name, config):
             names.add(name)
     return frozenset(names)
 
 
-def resolve_underlying_call(args: Dict[str, Any]) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:
+def resolve_underlying_call(
+    args: Dict[str, Any],
+    config: Optional[ToolSearchConfig] = None,
+) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:
     """Parse a ``tool_call`` invocation into (underlying_name, args, error_msg).
 
     Used by:
@@ -685,8 +804,13 @@ def resolve_underlying_call(args: Dict[str, Any]) -> Tuple[Optional[str], Dict[s
     * the display layer (so the activity feed shows the underlying tool),
     * the trajectory recorder.
 
+    ``config`` is resolved from the user config when omitted so the
+    deferrability check matches assembly-time classification.
+
     On parse error, returns ``(None, {}, error_message)``.
     """
+    if config is None:
+        config = load_config()
     name = str(args.get("name") or "").strip()
     if not name:
         return None, {}, "tool_call requires a 'name' argument"
@@ -702,7 +826,7 @@ def resolve_underlying_call(args: Dict[str, Any]) -> Tuple[Optional[str], Dict[s
             return None, {}, f"tool_call 'arguments' is not valid JSON: {e}"
     if not isinstance(raw_args, dict):
         return None, {}, "tool_call 'arguments' must be an object"
-    if not is_deferrable_tool_name(name):
+    if not is_deferrable_tool_name(name, config):
         return None, {}, (
             f"'{name}' is not a deferrable tool. If it appears in the model-facing tools "
             "list already, call it directly instead of via tool_call."
@@ -719,6 +843,7 @@ __all__ = [
     "CatalogEntry",
     "AssemblyResult",
     "load_config",
+    "effective_core_tool_names",
     "is_deferrable_tool_name",
     "classify_tools",
     "estimate_tokens_from_schemas",
