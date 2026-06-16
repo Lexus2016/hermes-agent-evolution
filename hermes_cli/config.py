@@ -1147,6 +1147,20 @@ DEFAULT_CONFIG = {
         },
     },
 
+    # Pluggable, deterministic per-policy interceptors that run before tool
+    # execution, alongside the loop guardrails above. Each named policy can
+    # allow / deny / rewrite a tool call. Disabled by default (opt-in); a
+    # denied policy blocks the call regardless of tool_loop_guardrails settings.
+    # Built-in policy ids: "require_read_before_write", "deny_tools".
+    "policy_interceptors": {
+        "enabled": False,
+        "policies": [
+            # Starter policy: reject a write to a path not yet read this turn.
+            # {"policy": "require_read_before_write"},
+            # {"policy": "deny_tools", "options": {"tools": []}},
+        ],
+    },
+
     "compression": {
         "enabled": True,
         "threshold": 0.50,            # compress when context usage exceeds this ratio
