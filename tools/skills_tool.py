@@ -42,16 +42,30 @@ SKILL.md Format (YAML Frontmatter, agentskills.io compatible):
     metadata:                     # Optional, arbitrary key-value (agentskills.io)
       hermes:
         tags: [fine-tuning, llm]
-        related_skills: [peft, lora]
+        related_skills: [peft, lora]   # folded into graph.composes-with
+        graph:                         # Optional — Skills-as-Graph (AIP) edges
+          requires: [base-skill]       #   hard prerequisites (loaded transitively)
+          conflicts-with: [other]      #   cannot be co-loaded with these
+          composes-with: [partner]     #   canonical composition partners
+          deprecates: [old-skill]      #   supersedes these (governance)
     ---
 
     # Skill Title
 
     Full instructions and content here...
 
+Skill graph (issue #246): the four typed edges under metadata.hermes.graph form
+a dependency/composition/governance graph over skills. ``requires`` is a hard
+prerequisite (a missing or cyclic ``requires`` is a validation error); the other
+three are advisory/governance edges (a missing target is a warning only, since it
+may reference a skill in another profile or plugin). The legacy ``related_skills``
+list is folded into ``composes-with`` for backward compatibility. Query it via the
+``skill_relationships`` tool or ``agent.skill_graph.SkillGraph``.
+
 Available tools:
 - skills_list: List skills with metadata (progressive disclosure tier 1)
 - skill_view: Load full skill content (progressive disclosure tier 2-3)
+- skill_relationships: Inspect the skill graph — edges, requires-closure, blast radius
 
 Usage:
     from tools.skills_tool import skills_list, skill_view, check_skills_requirements
@@ -796,6 +810,78 @@ def skills_search(query: str, limit: int = 5) -> str:
                 "skills": results,
                 "count": len(results),
                 "hint": "Use skill_view(name) to load full content for a relevant skill",
+            },
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        return tool_error(str(e), success=False)
+
+
+# ── Skill graph (AIP) ──────────────────────────────────────────────────────
+
+
+def _build_skill_graph():
+    """Build a :class:`SkillGraph` over every scanned skills directory.
+
+    Uses the same directory set the registry scans (local ``~/.hermes/skills``
+    first, then configured external dirs) so graph queries see exactly the
+    skills the agent could load.
+    """
+    from agent.skill_graph import SkillGraph
+    from agent.skill_utils import get_external_skills_dirs
+
+    dirs = []
+    if SKILLS_DIR.exists():
+        dirs.append(SKILLS_DIR)
+    dirs.extend(get_external_skills_dirs())
+    return SkillGraph.from_skills_dirs(dirs)
+
+
+def skill_relationships(name: str = None) -> str:
+    """Report the dependency/composition/governance graph around skill(s).
+
+    With *name*: returns that skill's declared edges, its transitive
+    ``requires`` closure (the minimal set to load it), and its blast radius
+    (dependents / conflicts / composition partners).  Without *name*: validates
+    the whole graph (missing edge targets, ``requires`` cycles, conflicts) and
+    returns the dependency-first topological order.
+
+    Returns a JSON string.  This is the agent-facing surface of the
+    Skills-as-Graph layer (issue #246, first increment).
+    """
+    try:
+        graph = _build_skill_graph()
+        validation = graph.validate()
+
+        if name:
+            if name not in graph:
+                suggestions = _suggest_skill_names(name, graph.names())
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"Skill '{name}' not found in the skill graph.",
+                        "suggestions": suggestions,
+                    },
+                    ensure_ascii=False,
+                )
+            return json.dumps(
+                {
+                    "success": True,
+                    "skill": name,
+                    "edges": graph.edges_of(name),
+                    "closure": graph.closure(name),
+                    "blast_radius": graph.blast(name),
+                    "graph_ok": validation.ok,
+                },
+                ensure_ascii=False,
+            )
+
+        return json.dumps(
+            {
+                "success": True,
+                "skill_count": len(graph),
+                "validation": validation.as_dict(),
+                "topological_order": graph.topological_order(),
             },
             ensure_ascii=False,
         )
@@ -1728,6 +1814,21 @@ SKILLS_SEARCH_SCHEMA = {
     },
 }
 
+SKILL_RELATIONSHIPS_SCHEMA = {
+    "name": "skill_relationships",
+    "description": "Inspect the skill dependency/composition graph (AIP). With a skill name: returns its declared edges (requires / conflicts-with / composes-with / deprecates), its transitive 'requires' closure (the minimal set to load it), and its blast radius (dependents, conflicts, composition partners). Without a name: validates the whole graph (missing targets, requires-cycles, conflicts) and returns the dependency-first load order.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "OPTIONAL: skill name to inspect. Omit to validate and order the whole graph.",
+            }
+        },
+        "required": [],
+    },
+}
+
 registry.register(
     name="skills_search",
     toolset="skills",
@@ -1737,4 +1838,12 @@ registry.register(
     ),
     check_fn=check_skills_requirements,
     emoji="🔎",
+)
+registry.register(
+    name="skill_relationships",
+    toolset="skills",
+    schema=SKILL_RELATIONSHIPS_SCHEMA,
+    handler=lambda args, **kw: skill_relationships(name=args.get("name")),
+    check_fn=check_skills_requirements,
+    emoji="🕸️",
 )
