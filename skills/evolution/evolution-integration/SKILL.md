@@ -223,14 +223,22 @@ if [ "$ISTATE" = "OPEN" ]; then
   # Partial increment of a roadmap issue. Pull the Deferred block from the PR body.
   REMAIN=$(gh pr view <N> --repo "$REPO" --json body --jq .body \
     | sed -n '/[Dd]eferred (next increment)/,$p')
+  # case-insensitive ("i"): the brief is written "Increment N of roadmap" (capital I)
   INC=$(( $(gh issue view <issue#> --repo "$REPO" --json comments --jq \
-    '[.comments[]|select(.body|test("increment [0-9]+ of roadmap"))]|length') + 1 ))
-  if [ -z "$REMAIN" ] || [ "$INC" -ge 5 ]; then
-    # Nothing meaningful left (Closes was just forgotten), OR we hit the loop cap:
-    # close it. If real work still remains at the cap, also open ONE fresh issue
-    # for the remainder so it re-enters scoring honestly instead of cycling forever.
+    '[.comments[]|select(.body|test("increment [0-9]+ of roadmap"; "i"))]|length') + 1 ))
+  # DEFAULT = RE-QUEUE, not close. The issue is open ONLY because the PR omitted
+  # `Closes #NN` — i.e. the author signalled more work remains. CLOSE only at the
+  # hard cap (a feature that won't converge); never close just because $REMAIN
+  # failed to parse (a differently-worded Deferred block must NOT silently drop the
+  # rest of a roadmap — that is the exact premature-close bug we are fixing). If the
+  # block didn't parse, re-queue with a generic brief pointing at the PR.
+  if [ "$INC" -ge 5 ]; then
+    # Loop cap: a feature that hasn't converged in 5 increments. Close it and open
+    # ONE fresh issue for the genuine remainder so it re-enters scoring honestly.
     gh issue close <issue#> --repo "$REPO" \
-      --comment "Roadmap delivered across $INC increment(s); final slice in PR #<N>. Closing. (If scope remains, it was re-filed as a fresh issue.)"
+      --comment "Roadmap reached the $INC-increment cap; latest slice in PR #<N>. Closing to avoid an unbounded loop. Remaining scope (if any) re-filed as a fresh issue for honest re-scoring:
+$REMAIN"
+    # (then: gh issue create … with $REMAIN, label research-generated, if non-empty)
   else
     # Re-queue for the next increment: non-terminal label + continuation brief.
     gh label create next-increment --color 1d76db \
@@ -239,7 +247,7 @@ if [ "$ISTATE" = "OPEN" ]; then
       --add-label next-increment --remove-label accepted 2>/dev/null || true
     gh issue comment <issue#> --repo "$REPO" --body \
       "Increment $INC of roadmap landed in PR #<N> (merged). Remaining for next increment:
-$REMAIN
+${REMAIN:-See PR #<N> — Deferred block did not parse; derive the remaining scope from the PR and the issue's success criteria.}
 
 Re-queued — evolution-analysis will pick this up (priority, like \`needs-work\`) and build the next slice from current \`main\`."
   fi
