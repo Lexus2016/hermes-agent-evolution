@@ -96,3 +96,26 @@ class TestCodingContextBlock:
         monkeypatch.setenv("TERMINAL_CWD", str(tmp_path))
         agent = _make_agent(valid_tool_names=[], platform="cli")
         assert "coding agent" not in _stable_prompt(agent)
+
+
+class TestTqmemoryGuidance:
+    """TQMEMORY_GUIDANCE is injected only when the tqmemory MCP tools (named
+    ``mcp_tqmemory_*``) are actually loaded in the session."""
+
+    MARKER = "Persistent project memory (tqmemory)"
+
+    def test_injected_when_tqmemory_tools_present(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TERMINAL_CWD", str(tmp_path))  # non-git → no coding block
+        agent = _make_agent(
+            valid_tool_names=["read_file", "mcp_tqmemory_semantic_search"],
+            platform="cli",
+        )
+        assert self.MARKER in _stable_prompt(agent)
+
+    def test_absent_without_tqmemory_tools(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TERMINAL_CWD", str(tmp_path))
+        agent = _make_agent(
+            valid_tool_names=["read_file", "memory", "session_search"],
+            platform="cli",
+        )
+        assert self.MARKER not in _stable_prompt(agent)

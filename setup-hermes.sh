@@ -518,45 +518,17 @@ if [ "${HERMES_NO_STAR:-0}" != "1" ]; then
     fi
 fi
 
-# --- Optional: Turbo-Quant Memory MCP for evolution introspection -----------
-# Local-first MCP memory server (github.com/Lexus2016/turbo_quant_memory). When
-# present, evolution skills get typed cross-cycle memory (decisions/lessons,
-# semantic dedup, knowledge graph) instead of re-deriving everything each run.
-# Best-effort + opt-out (HERMES_NO_TQMEMORY=1); NEVER fails the install — a
-# missing memory server just means evolution runs as it did before.
-if [ "${HERMES_NO_TQMEMORY:-0}" != "1" ] && command -v uv >/dev/null 2>&1; then
-    if command -v turbo-memory-mcp >/dev/null 2>&1; then
-        uv tool upgrade turbo-memory-mcp >/dev/null 2>&1 || true
-    else
-        echo "🧠 Installing Turbo-Quant Memory MCP (one-time, may take a minute)…"
-        uv tool install "git+https://github.com/Lexus2016/turbo_quant_memory" >/dev/null 2>&1 || true
-    fi
-    hash -r 2>/dev/null || true   # pick up a freshly-installed shim in ~/.local/bin
-    TQM_PATH="$(command -v turbo-memory-mcp 2>/dev/null || true)"
-    if [ -n "$TQM_PATH" ]; then
-        # Register with Hermes only if absent (skips the interactive overwrite
-        # prompt). Register with the ABSOLUTE shim path: the gateway/cron process
-        # PATH does NOT include ~/.local/bin, so a bare 'turbo-memory-mcp' command
-        # fails at runtime ("No such file or directory") even though the server
-        # shows "enabled". 'yes |' answers the non-interactive "enable all tools"
-        # prompt so the add actually completes.
-        if ! "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.main mcp list 2>/dev/null | grep -qi "tqmemory"; then
-            # TQMEMORY_MIGRATE_ON_STARTUP=1: when auto-update bumps the tqmemory
-            # binary to a version with a pending schema migration, the next
-            # daemon start applies it (taking a rolling snapshot first) instead
-            # of silently serving a stale schema or dead-locking on 'migrate
-            # --apply'. Without this, 'uv tool upgrade' updates the code but
-            # leaves the storage un-migrated.
-            yes | "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.main mcp add tqmemory \
-                --command "$TQM_PATH" --args serve \
-                --env TQMEMORY_MIGRATE_ON_STARTUP=1 >/dev/null 2>&1 || true
-        fi
-        echo "🧠 Turbo-Quant Memory ready for evolution introspection (opt out: HERMES_NO_TQMEMORY=1)."
-    else
-        echo "ℹ️  Turbo-Quant Memory not installed (optional) — evolution runs without it."
-    fi
-elif [ "${HERMES_NO_TQMEMORY:-0}" != "1" ]; then
-    echo "ℹ️  'uv' not found — skipping optional Turbo-Quant Memory. Evolution runs without it."
+# --- Turbo-Quant Memory MCP: install + register in ALL profiles -------------
+# tqmemory is a headline feature of this fork: efficient, economical
+# out-of-window memory so the agent loses nothing between sessions. All the
+# heavy lifting — uv install, ABSOLUTE-path registration into EVERY profile's
+# top-level `mcp_servers` block, verification, and opt-out handling — lives in
+# one Python module that `hermes update` reuses too, so install and update
+# share a single, self-healing, idempotent code path. The module prints its
+# own status and NEVER fails the install (tqmemory is optional). Opt out with
+# HERMES_NO_TQMEMORY=1 (or, persistently, memory.tqmemory_autoinstall: false).
+if [ "${HERMES_NO_TQMEMORY:-0}" != "1" ]; then
+    "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.tqmemory_setup || true
 fi
 
 # Ask if they want to run setup wizard now

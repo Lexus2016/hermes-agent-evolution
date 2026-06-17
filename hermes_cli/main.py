@@ -8449,6 +8449,16 @@ def cmd_update(args):
     _update_io_state = _install_hangup_protection(gateway_mode=gateway_mode)
     try:
         _cmd_update_impl(args, gateway_mode=gateway_mode)
+        # Safety net: the git update path reconciles tqmemory before its gateway
+        # restart (immediate effect). The pip/zip update paths bypass that block,
+        # so ensure it ran at least once here too. ``once=True`` makes this a cheap
+        # no-op when the git path already did it. Non-fatal.
+        try:
+            from hermes_cli.tqmemory_setup import reconcile_tqmemory
+
+            reconcile_tqmemory(quiet=True, once=True)
+        except Exception as _tqm_exc:
+            logger.debug("tqmemory safety-net reconcile failed: %s", _tqm_exc)
     finally:
         _finalize_update_output(_update_io_state)
 
@@ -9136,6 +9146,23 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 print(f"\n-> Honcho: synced {synced} profile(s)")
         except Exception:
             pass  # honcho plugin not installed or not configured
+
+        # Ensure Turbo-Quant Memory (tqmemory) is installed and registered in
+        # every profile, so the agent's out-of-window memory works in ALL
+        # sessions. Self-healing: a machine that missed MCP registration at
+        # install time recovers here on the next `hermes update` (including the
+        # daily auto-update cron), on every OS. Runs before the gateway restart
+        # below so the restarted gateway picks up the new mcp_servers entry.
+        # Idempotent + non-fatal — tqmemory is optional and must never break an
+        # update. Opt out with HERMES_NO_TQMEMORY=1 / memory.tqmemory_autoinstall.
+        try:
+            from hermes_cli.tqmemory_setup import reconcile_tqmemory
+
+            print()
+            print("→ Ensuring Turbo-Quant Memory (tqmemory) is configured...")
+            reconcile_tqmemory(quiet=False)
+        except Exception as e:
+            logger.debug("tqmemory reconcile during update failed: %s", e)
 
         # Check for config migrations
         print()

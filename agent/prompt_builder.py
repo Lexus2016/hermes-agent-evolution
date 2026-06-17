@@ -170,6 +170,45 @@ SESSION_SEARCH_GUIDANCE = (
     "asking them to repeat themselves."
 )
 
+# Turbo-Quant Memory (tqmemory) — a headline feature of this fork. Distinct from
+# the built-in `memory` tool above: it is a richer, searchable, typed project
+# store (decisions / lessons / patterns / handoffs) with semantic + keyword
+# retrieval and a knowledge graph. Use BOTH — they complement each other. Only
+# injected when the tqmemory MCP is actually connected (its tools appear as
+# `mcp_tqmemory_*`), so this text never lies about an unavailable capability.
+TQMEMORY_GUIDANCE = (
+    "# Persistent project memory (tqmemory)\n"
+    "You have Turbo-Quant Memory connected via the `mcp_tqmemory_*` tools — an "
+    "efficient, economical out-of-window store so you lose nothing between "
+    "sessions. Use it CONSISTENTLY, in every project session, alongside the "
+    "built-in memory tool (it does not replace it).\n"
+    "At the start of a non-trivial task or a resumed session, recover prior "
+    "context BEFORE re-deriving it: call `mcp_tqmemory_recent_context` (\"where "
+    "did I leave off\") or `mcp_tqmemory_semantic_search` (scope=\"hybrid\") for "
+    "earlier decisions, lessons, and handoffs.\n"
+    "As work proceeds, persist durable knowledge with `mcp_tqmemory_remember_note`: "
+    "kind=\"decision\" for a technical choice and its rationale, kind=\"lesson\" for "
+    "a bug fix or gotcha, kind=\"pattern\" for a reusable approach, and a "
+    "kind=\"handoff\" session summary when pausing or finishing. Keep notes "
+    "concise, declarative, and actionable; save immediately rather than batching.\n"
+    "To connect or repair this memory, use `hermes mcp add tqmemory ...` or the "
+    "top-level `mcp_servers:` key in config.yaml. NEVER hand-edit a `mcp.servers` "
+    "block — that is the wrong key for this fork and crashes the gateway.\n"
+    "Do it the RIGHT way — never improvise these anti-patterns: "
+    "(1) Do NOT write raw note JSON by hand into "
+    "`~/.turbo-quant-memory/.../notes/`. Such files are NOT searchable until a "
+    "later write re-syncs the index, and are silently quarantined if the schema "
+    "is even slightly off — use `mcp_tqmemory_remember_note`, which writes the "
+    "record AND indexes it atomically. "
+    "(2) There is NO command-line way to save a note: the `turbo-memory-mcp` CLI "
+    "only exposes serve / migrate / secret-set / prune-orphans / doctor, so do "
+    "NOT shell out via subprocess to 'remember' something. "
+    "(3) The config key is the top-level `mcp_servers`, never `mcp.servers`.\n"
+    "If the `mcp_tqmemory_*` tools are absent in a session, memory is simply "
+    "unavailable there — say so and re-enable it with `hermes mcp add tqmemory "
+    "...`; do NOT fake persistence by writing files or editing config by hand."
+)
+
 SKILLS_GUIDANCE = (
     "After completing a complex task (5+ tool calls), fixing a tricky error, "
     "or discovering a non-trivial workflow, save the approach as a "

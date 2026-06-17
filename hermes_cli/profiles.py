@@ -970,6 +970,18 @@ def create_profile(
     # unit-generation paths handle gateway lifecycle.
     _maybe_register_gateway_service(canon)
 
+    # Wire up Turbo-Quant Memory (tqmemory) for this profile from day one, so the
+    # agent's out-of-window memory works here without waiting for the next
+    # `hermes update` reconcile. Cloned profiles already inherit the entry from
+    # the source config.yaml; this also covers fresh (non-clone) profiles.
+    # Register-only (no install/network), best-effort, opt-out aware, non-fatal.
+    try:
+        from hermes_cli.tqmemory_setup import register_for_profile
+
+        register_for_profile(profile_dir / "config.yaml")
+    except Exception:
+        pass  # tqmemory is optional and must never break profile creation
+
     return profile_dir
 
 

@@ -115,6 +115,20 @@ else
     echo "ℹ️  No code change — already current (re-run is harmless)."
 fi
 
+# 5b. Ensure Turbo-Quant Memory (tqmemory) on the documented install path ----
+# `hermes update` reconciles tqmemory internally (install if missing + register
+# in every profile), but on a FRESH install the checkout install.sh just cloned
+# is already current, so the update above is a no-op and may skip that internal
+# reconcile. Run it explicitly here when nothing changed, so brand-new installs
+# still get the memory installed + registered. Idempotent + non-fatal; honours
+# HERMES_NO_TQMEMORY=1 (and the persistent memory.tqmemory_autoinstall flag).
+if [ "$CODE_CHANGED" = "0" ] && [ "${HERMES_NO_TQMEMORY:-0}" != "1" ]; then
+    echo ""
+    echo "🧠 Ensuring Turbo-Quant Memory (tqmemory)..."
+    HERMES_HOME="$HOME_DIR" "$PY" -c "import sys; sys.path.insert(0, '$INSTALL_DIR'); from hermes_cli.tqmemory_setup import reconcile_tqmemory; reconcile_tqmemory()" 2>&1 | tail -2 \
+        || echo "ℹ️  tqmemory setup skipped (optional)."
+fi
+
 # 6. Force-fresh the evolution skills (heals legacy 'local' copies) ---------
 # Drop evolution entries from the bundled manifest, remove the dir, re-seed —
 # otherwise skills_sync may keep stale 'local' copies or skip re-adding ones

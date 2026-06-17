@@ -42,6 +42,7 @@ from agent.prompt_builder import (
     TASK_COMPLETION_GUIDANCE,
     TOOL_USE_ENFORCEMENT_GUIDANCE,
     TOOL_USE_ENFORCEMENT_MODELS,
+    TQMEMORY_GUIDANCE,
     drain_truncation_warnings,
 )
 from agent.runtime_cwd import resolve_context_cwd
@@ -144,6 +145,15 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         tool_guidance.append(KANBAN_GUIDANCE)
     if tool_guidance:
         stable_parts.append(" ".join(tool_guidance))
+
+    # Turbo-Quant Memory (tqmemory) — a headline feature of this fork. Injected
+    # only when its MCP tools are actually connected (they appear as
+    # ``mcp_tqmemory_*``), so the prompt never claims a capability the session
+    # lacks. Separate block (not merged into the space-joined tool_guidance)
+    # because the text is multi-paragraph with its own heading. Complements, and
+    # does not replace, the built-in MEMORY_GUIDANCE above.
+    if any(str(n).startswith("mcp_tqmemory_") for n in agent.valid_tool_names):
+        stable_parts.append(TQMEMORY_GUIDANCE)
 
     # Steering only lands inside tool results, so it's only reachable when the
     # agent has tools. Static text → byte-stable prompt (no cache hit).
