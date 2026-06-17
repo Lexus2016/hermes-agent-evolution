@@ -203,6 +203,7 @@ def _billing_or_entitlement_message(
     provider_label = (provider or "").strip() or "the selected provider"
     model_label = (model or "").strip() or "the selected model"
     lines = [
+        "HTTP 402 Payment Required — the provider account is out of credit or quota.",
         (
             f"{provider_label} reported that billing, credits, or account "
             f"entitlement is exhausted for {model_label}."
