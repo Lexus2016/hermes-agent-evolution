@@ -26,6 +26,17 @@ Implement selected issues, create versions, and self-update.
     with `"skipped": "stale analysis input (<date>) — upstream stage failed"`
     and STOP. Acting on outdated decisions is worse than skipping a cycle.
 
+1a0. **`next-increment` issues — CONTINUE a multi-phase roadmap feature.** If a
+    selected issue is labelled `next-increment`, a PRIOR increment already MERGED
+    and integration left a continuation brief in the comments listing what REMAINS
+    (`gh issue view <N> --repo Lexus2016/hermes-agent-evolution --comments`). The
+    capability PARTIALLY exists on `main` already — do NOT re-implement it and do
+    NOT treat the existing code as "already done". Branch FRESH from current `main`
+    (the prior increment is already there), read the brief, and implement the NEXT
+    coherent, independently-mergeable slice. In the PR, declare scope honestly
+    (see "Create a PR" below): `Closes #N` only if THIS slice finishes the issue;
+    otherwise list a `Deferred (next increment)` block so integration re-queues it.
+
 1a. **`needs-work` issues — YOUR call: rework or consciously drop.** If a selected
     issue is labelled `needs-work`, a previous PR failed code review and was sent
     back. FIRST read the rework brief in the issue comments
@@ -167,10 +178,22 @@ gh auth setup-git    # makes git https push/pull use gh's stored credentials
 ```
 
 ### Commit
+
+**Declare scope honestly — `Closes` ONLY if this slice fully delivers the issue.**
+A GitHub closing keyword (`Closes #123`) auto-closes the issue on squash-merge.
+Use it ONLY when THIS PR satisfies the issue's success criteria end-to-end. For a
+multi-phase / `roadmap` issue where you land just one coherent slice and defer the
+rest, do NOT write `Closes` (that would close it with ~75% of the work undone);
+instead, in the PR body, add a `Deferred (next increment):` block naming exactly
+what remains — integration reads it post-merge and re-queues the issue as
+`next-increment` so the pipeline finishes it later (see "Create a PR").
+
 ```bash
 git add .
 git commit -m "feat: implement feature name
 
+# Final slice → 'Closes #123'.  Partial roadmap slice → OMIT Closes (the PR body's
+# 'Deferred (next increment)' block re-queues it instead).
 Closes #123
 
 Co-Authored-By: Hermes Evolution <evolution@hermes.ai>"
@@ -186,19 +209,29 @@ git push origin evolution/issue-123-feature-name
 ⛔ Direct merge into `main` is FORBIDDEN. Create a PR and STOP there:
 
 ```bash
+# FINAL slice (fully delivers the issue):
 gh pr create --base main --head evolution/issue-123-feature-name \
   --title "feat: <feature name> (Closes #123)" \
   --body "Automated evolution PR for issue #123."
+
+# PARTIAL slice of a multi-phase / roadmap issue — OMIT Closes from title AND body,
+# and list what remains so integration re-queues it as next-increment:
+#   gh pr create --base main --head evolution/issue-123-feature-name \
+#     --title "feat: <feature name> — increment 1 of #123" \
+#     --body $'First coherent slice of #123.\n\nDeferred (next increment):\n- step 2 ...\n- step 3 ...'
 ```
 
-Once the PR is open, flip the issue to the terminal `accepted` status so the
-owner sees — straight from the issue list — that this idea actually went to a
-PR. If it was a `needs-work` rework, drop that transient label now:
+Once the PR is open, flip the issue to `accepted` so the owner sees — straight
+from the issue list — that this idea actually went to a PR. Drop any transient
+label it carried (`needs-work` rework OR `next-increment` continuation) now —
+the issue is back "in a PR". If this PR is a PARTIAL roadmap slice, integration
+will flip it BACK to `next-increment` post-merge (it can't be decided until the
+merge lands); if it `Closes #N`, it closes on merge. Either way, set `accepted` here:
 ```bash
 gh label create accepted --color 0e8a16 \
   --description "Accepted by evolution — sent to a PR" 2>/dev/null || true
 gh issue edit <issue#> --repo Lexus2016/hermes-agent-evolution \
-  --add-label accepted --remove-label needs-work 2>/dev/null || true
+  --add-label accepted --remove-label needs-work --remove-label next-increment 2>/dev/null || true
 ```
 
 Merging happens ONLY after green CI tests

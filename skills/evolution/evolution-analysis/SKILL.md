@@ -70,19 +70,28 @@ gh issue view <N> --repo Lexus2016/hermes-agent-evolution --json body,comments
    a false positive here silently kills the whole day's cycle, so judge
    by SLOTS, not by dates.
 
-2. **Rework first — `needs-work` issues are PRIORITY, not rejects.** An issue
-   labelled `needs-work` was ALREADY judged worth doing and attempted; a PR
-   failed code review and was sent back with a rework brief (in the issue
-   comments). Do NOT reject it as "already exists / already tried" — that throws
-   away a wanted idea. Instead SELECT it for implementation (give it priority, it
-   has momentum) so implementation can read the brief and finish it properly (or
-   consciously drop it). Only skip a `needs-work` issue if it is now genuinely
-   harmful or obsolete — and then close it with a reason AND the `rejected` label
-   (see step 3), don't just ignore it.
+2. **Momentum first — `needs-work` AND `next-increment` issues are PRIORITY, not
+   rejects.** Two non-terminal labels mark issues already judged worth doing and
+   already in motion. SELECT both for implementation (give them priority — they
+   have momentum) and read the brief in the issue comments. Do NOT reject either
+   as "already exists / already tried" — that throws away wanted, in-progress work:
+   - **`needs-work`** — a previous PR failed code review and was sent back with a
+     rework brief. Implementation reworks it (or consciously drops it).
+   - **`next-increment`** — a previous increment of a multi-phase `roadmap` issue
+     was MERGED, and a continuation brief (in the issue comments) lists what
+     REMAINS. The capability PARTIALLY exists on `main`; the issue tracks the
+     deferred slices. Implementation builds the next coherent slice from current
+     `main`. ⚠️ CRITICAL: do NOT let the "already-exists" triage (step 3) reject
+     it just because increment-1's code is now present — the brief says what is
+     still MISSING, and that remaining work is the entire point. This is the gate
+     that keeps multi-phase features advancing instead of stalling at slice 1.
+   Only skip such an issue if it is now genuinely harmful or obsolete — then close
+   it with a reason AND the `rejected` label (see step 3), don't just ignore it.
 
 3. **Viability triage — REJECT before you rank.** Implementing the wrong thing
    costs far more than skipping it. For EACH remaining open issue (NOT already
-   handled as `needs-work` above), first decide whether it should exist at all.
+   handled as `needs-work` / `next-increment` above), first decide whether it
+   should exist at all.
    REJECT it (do not rank, do not implement) if ANY holds:
    - **Already implemented** — the capability already exists. You MUST check the
      codebase before assuming it's new, e.g.:
@@ -270,12 +279,21 @@ owner can see, straight from the GitHub issue list, what happened to each idea
 | `accepted` | green `0e8a16` | Sent to a PR / implemented | evolution-implementation (when the PR is opened) |
 | `rejected` | red `b60205` | Turned down — see closing comment | analysis triage, or implementation final re-check / conscious drop |
 | `needs-work` | orange `d93f0b` | A PR was bounced back; rework in progress | evolution-integration (code-review gate) |
+| `next-increment` | blue `1d76db` | A roadmap increment merged; more deferred — re-queued | evolution-integration (post-merge, partial increment) |
 
-`accepted` and `rejected` are terminal. `needs-work` is transient: it becomes
-`accepted` once a reworked PR is opened, or `rejected` if implementation drops
-it. **This skill only ever sets `rejected`** (on triage rejects). Do NOT mark an
-issue `accepted` here — selection is a recommendation; `accepted` means the code
-actually went to a PR, which only implementation can confirm.
+`accepted` and `rejected` are terminal. `needs-work` and `next-increment` are
+TRANSIENT — they cycle back into selection (step 2):
+- `needs-work` becomes `accepted` once a reworked PR is opened, or `rejected` if
+  implementation drops it.
+- `next-increment` becomes `accepted` again when the next increment's PR opens,
+  and is finally CLOSED (by integration) when an increment's PR carries `Closes
+  #N` — i.e. when the multi-phase feature is fully delivered. Without this label
+  a `roadmap` issue stalls forever at slice 1 (`accepted` is terminal, and its
+  partial code trips the already-exists triage).
+**This skill only ever sets `rejected`** (on triage rejects). Do NOT mark an
+issue `accepted` / `next-increment` here — selection is a recommendation; those
+states mean the code actually went to / came back from a PR, which only
+implementation and integration can confirm.
 
 ## Output format
 
