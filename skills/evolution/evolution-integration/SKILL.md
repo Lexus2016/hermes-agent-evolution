@@ -223,8 +223,9 @@ if [ "$ISTATE" = "OPEN" ]; then
   # Partial increment of a roadmap issue. Pull the Deferred block from the PR body.
   REMAIN=$(gh pr view <N> --repo "$REPO" --json body --jq .body \
     | sed -n '/[Dd]eferred (next increment)/,$p')
+  # case-insensitive ("i"): the brief is written "Increment N of roadmap" (capital I)
   INC=$(( $(gh issue view <issue#> --repo "$REPO" --json comments --jq \
-    '[.comments[]|select(.body|test("increment [0-9]+ of roadmap"))]|length') + 1 ))
+    '[.comments[]|select(.body|test("increment [0-9]+ of roadmap"; "i"))]|length') + 1 ))
   if [ -z "$REMAIN" ] || [ "$INC" -ge 5 ]; then
     # Nothing meaningful left (Closes was just forgotten), OR we hit the loop cap:
     # close it. If real work still remains at the cap, also open ONE fresh issue
