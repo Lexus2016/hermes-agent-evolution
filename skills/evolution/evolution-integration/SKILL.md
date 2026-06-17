@@ -40,6 +40,15 @@ gh pr list --repo "$REPO" --state open --limit 50 \
   --json number,title,headRefName,author,mergeable,mergeStateStatus
 ```
 
+1a. **Idle cycle — STILL write a report.** If there are no `evolution/issue-*`
+    candidate PRs (e.g. analysis selected 0 upstream, so implementation opened
+    none), this cycle has nothing to merge. That is NORMAL, not a failure — but
+    you MUST still write the stage report (`"merged": []`, `"skipped": []`, plus
+    a `"note"` like `"idle: no eligible evolution PRs this cycle"`) and then
+    stop. A MISSING report makes the watchdog report the job as died/never-ran.
+    Every run leaves a record — exactly like implementation writes a "No
+    implementation work" report on an idle cycle.
+
 2. **Gate each PR — merge ONLY if EVERY condition holds** (skip otherwise):
    - **Branch** is `evolution/issue-*` (agent-authored). NEVER touch dependabot,
      human, or any other branch.
@@ -247,7 +256,9 @@ echo '{"issue": <#>, "merged_at": "<YYYY-MM-DD>", "predicted_impact": <the issue
 > is not currently open per `gh pr list`, you hallucinated — STOP and redo from
 > the real list.
 
-Save to `~/.hermes/profiles/user1/evolution/integration/YYYY-MM-DD.json`:
+Save to `~/.hermes/profiles/user1/evolution/integration/YYYY-MM-DD.json` on
+**EVERY** run — including idle cycles (`merged: []`, `skipped: []`): a missing
+report is read by the watchdog as a dead job.
 
 ```json
 {
@@ -257,7 +268,8 @@ Save to `~/.hermes/profiles/user1/evolution/integration/YYYY-MM-DD.json`:
   ],
   "skipped": [
     {"pr": "<real PR number>", "reason": "<real failing/pending check or conflict>"}
-  ]
+  ],
+  "note": "<optional — e.g. 'idle: no eligible evolution PRs this cycle'>"
 }
 ```
 

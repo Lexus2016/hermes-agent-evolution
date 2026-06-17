@@ -70,6 +70,35 @@ class TestStageReports:
         alerts = check_stage_reports(tmp_path, NOW)
         assert len(alerts) == len(STAGES)
 
+    def _jobs_file(self, tmp_path, name, *, status="ok", last_run="2026-06-10T22:01:00"):
+        f = tmp_path / "jobs.json"
+        f.write_text(json.dumps({"jobs": [
+            {"name": name, "enabled": True, "last_status": status, "last_run_at": last_run}
+        ]}))
+        return f
+
+    def test_missing_report_quiet_when_job_ran_clean(self, tmp_path):
+        # implementation report missing, but its cron job ran ok at/after the
+        # 22:00 slot for the expected date (2026-06-10) → idle clean cycle, no alert.
+        self._make_reports(tmp_path, skip=("implementation",))
+        jf = self._jobs_file(tmp_path, "evolution-implementation")
+        assert check_stage_reports(tmp_path, NOW, jf) == []
+
+    def test_missing_report_alerts_when_job_errored(self, tmp_path):
+        # missing report + job FAILED → still a real anomaly.
+        self._make_reports(tmp_path, skip=("implementation",))
+        jf = self._jobs_file(tmp_path, "evolution-implementation", status="error")
+        alerts = check_stage_reports(tmp_path, NOW, jf)
+        assert len(alerts) == 1 and "implementation" in alerts[0]
+
+    def test_missing_report_alerts_when_job_ran_before_slot(self, tmp_path):
+        # job ran ok but BEFORE the slot (stale/previous day) → not this slot's
+        # clean run → still alert.
+        self._make_reports(tmp_path, skip=("integration",))
+        jf = self._jobs_file(tmp_path, "evolution-integration", last_run="2026-06-09T23:00:00")
+        alerts = check_stage_reports(tmp_path, NOW, jf)
+        assert len(alerts) == 1 and "integration" in alerts[0]
+
 
 class TestJobsHealth:
     def _jobs_file(self, tmp_path, jobs):

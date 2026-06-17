@@ -72,13 +72,55 @@ def expected_report_date(now: datetime, slot_hour: int, grace_hours: int = GRACE
     return day.isoformat()
 
 
-def check_stage_reports(evolution_dir: Path, now: datetime) -> List[str]:
-    """Alert for every stage whose expected report is missing or trivial."""
+def _load_jobs(jobs_file: Path | None) -> List[dict]:
+    if jobs_file is None:
+        return []
+    try:
+        data = json.loads(jobs_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return data.get("jobs", data if isinstance(data, list) else [])
+
+
+def _stage_ran_clean_for_slot(jobs: List[dict], stage: str, date: str, slot_hour: int) -> bool:
+    """True when the cron job for ``stage`` ran with ``last_status == "ok"`` at or
+    after its slot on ``date``. A MISSING report is only a death if the job did
+    NOT run clean for the slot: when it did, the stage executed and simply had
+    nothing to do (e.g. analysis selected 0 → implementation/integration are
+    legitimately idle and need not emit a report). That is a clean idle cycle,
+    not 'the job died without record'."""
+    name = f"evolution-{stage}"
+    for job in jobs:
+        if str(job.get("name", "")) != name:
+            continue
+        if job.get("last_status") != "ok":
+            return False
+        last_run = _parse_iso(job.get("last_run_at"))
+        if last_run is None:
+            return False
+        try:
+            slot_dt = datetime.fromisoformat(date).replace(hour=slot_hour)
+        except ValueError:
+            return False
+        return last_run >= slot_dt
+    return False
+
+
+def check_stage_reports(
+    evolution_dir: Path, now: datetime, jobs_file: Path | None = None
+) -> List[str]:
+    """Alert for every stage whose expected report is missing or trivial.
+
+    A missing report is suppressed (not a death) when the stage's cron job ran
+    clean for the slot — see ``_stage_ran_clean_for_slot``."""
     alerts: List[str] = []
+    jobs = _load_jobs(jobs_file)
     for stage, (slot_hour, ext) in STAGES.items():
         date = expected_report_date(now, slot_hour)
         report = evolution_dir / stage / f"{date}.{ext}"
         if not report.exists():
+            if _stage_ran_clean_for_slot(jobs, stage, date, slot_hour):
+                continue  # ran clean, nothing to do — idle cycle, not a death
             alerts.append(
                 f"stage '{stage}': expected report {report.name} is MISSING "
                 f"(slot {slot_hour:02d}:00 + {GRACE_HOURS}h grace passed; "
@@ -246,7 +288,7 @@ def main() -> int:
         now = datetime.now()
 
     alerts: List[str] = []
-    alerts += check_stage_reports(evolution_dir, now)
+    alerts += check_stage_reports(evolution_dir, now, jobs_file)
     alerts += check_jobs(jobs_file, now)
     alerts += check_gh()
     alerts += check_health(evolution_dir)
