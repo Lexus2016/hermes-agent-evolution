@@ -496,6 +496,7 @@ def run_conversation(
             task_id=task_id,
             stream_callback=stream_callback,
             persist_user_message=persist_user_message,
+            persist_user_timestamp=persist_user_timestamp,
         )
         if isinstance(result, dict):
             hermes_telemetry.set_attributes(
@@ -513,6 +514,7 @@ def _run_conversation_impl(
     task_id: str = None,
     stream_callback: Optional[callable] = None,
     persist_user_message: Optional[str] = None,
+    persist_user_timestamp: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
     Run a complete conversation with tool calling until completion.
