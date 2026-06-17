@@ -208,6 +208,47 @@ gh pr view <N> --repo "$REPO" --json commits --jq '.commits[].oid'
 gh pr merge <N> --repo "$REPO" --squash --admin
 ```
 
+4a. **Continue or close — keep multi-phase `roadmap` issues moving (don't let them
+    stall at slice 1).** A PR that carries `Closes #NN` auto-closes its issue on
+    merge — done, nothing to do here. But a PARTIAL increment of a multi-phase
+    issue intentionally OMITS `Closes` and lists a `Deferred (next increment):`
+    block, so after merge its issue is **still open** and still labelled
+    `accepted` (terminal) — which would freeze it forever (analysis never
+    re-selects `accepted`, and the now-merged slice trips its already-exists
+    triage). Fix that here, right after the merge:
+```bash
+# Did the merge close the issue? (PR had Closes #NN → GitHub closed it)
+ISTATE=$(gh issue view <issue#> --repo "$REPO" --json state --jq .state 2>/dev/null)
+if [ "$ISTATE" = "OPEN" ]; then
+  # Partial increment of a roadmap issue. Pull the Deferred block from the PR body.
+  REMAIN=$(gh pr view <N> --repo "$REPO" --json body --jq .body \
+    | sed -n '/[Dd]eferred (next increment)/,$p')
+  INC=$(( $(gh issue view <issue#> --repo "$REPO" --json comments --jq \
+    '[.comments[]|select(.body|test("increment [0-9]+ of roadmap"))]|length') + 1 ))
+  if [ -z "$REMAIN" ] || [ "$INC" -ge 5 ]; then
+    # Nothing meaningful left (Closes was just forgotten), OR we hit the loop cap:
+    # close it. If real work still remains at the cap, also open ONE fresh issue
+    # for the remainder so it re-enters scoring honestly instead of cycling forever.
+    gh issue close <issue#> --repo "$REPO" \
+      --comment "Roadmap delivered across $INC increment(s); final slice in PR #<N>. Closing. (If scope remains, it was re-filed as a fresh issue.)"
+  else
+    # Re-queue for the next increment: non-terminal label + continuation brief.
+    gh label create next-increment --color 1d76db \
+      --description "Roadmap increment merged; more deferred — re-queued" 2>/dev/null || true
+    gh issue edit <issue#> --repo "$REPO" \
+      --add-label next-increment --remove-label accepted 2>/dev/null || true
+    gh issue comment <issue#> --repo "$REPO" --body \
+      "Increment $INC of roadmap landed in PR #<N> (merged). Remaining for next increment:
+$REMAIN
+
+Re-queued — evolution-analysis will pick this up (priority, like \`needs-work\`) and build the next slice from current \`main\`."
+  fi
+fi
+```
+    The loop terminates naturally: each increment shrinks the Deferred list until
+    one PR finally carries `Closes #NN`. The `INC >= 5` cap is a backstop against
+    a feature that never converges — close it and re-file the genuine remainder.
+
 5. **Self-update onto the merged code** (this is what makes evolution real). Use
    the OFFICIAL updater — it has snapshot + automatic rollback on failure:
 ```bash
