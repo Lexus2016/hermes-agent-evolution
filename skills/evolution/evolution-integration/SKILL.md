@@ -212,15 +212,34 @@ gh pr merge <N> --repo "$REPO" --squash --admin
    the OFFICIAL updater — it has snapshot + automatic rollback on failure:
 ```bash
 hermes update --yes
-# Re-deploy evolution scripts + cron from the freshly-updated checkout. The
-# scheduler runs scripts from HERMES_HOME/scripts and cron jobs from
-# ~/.hermes/cron/jobs.json — NOT from the repo checkout. `hermes update` only
-# refreshes the checkout, so a merged fix to scripts/evolution_*.py (e.g. a
-# funnel crash fix) or a cron yaml never reaches the scheduler until this runs.
-# Skipping it is exactly why a "merged + deployed" script fix kept failing in
-# prod with its old bug. register_evolution_cron copies the whole evolution_*
-# script family + reconciles jobs.json; it is idempotent.
+# CRITICAL: sync THIS working checkout to the just-merged origin/main BEFORE
+# register. `hermes update` refreshes the install dir, but it can leave the
+# checkout you're standing in BEHIND origin/main (observed: it stayed 1 commit
+# behind after a merge). register_evolution_cron copies scripts FROM this
+# checkout into HERMES_HOME/scripts — so a stale checkout makes it copy
+# PRE-merge scripts, and the no_agent fix (funnel/watchdog/etc.) silently never
+# deploys. The tree is clean at this step (we only ran gh, no edits), so a
+# fast-forward to origin/main is safe and deterministic:
+git fetch origin --quiet && git checkout main 2>/dev/null && git reset --hard origin/main
+# Re-deploy evolution scripts + cron. The scheduler runs scripts from
+# HERMES_HOME/scripts and cron jobs from ~/.hermes/cron/jobs.json — NOT from the
+# repo checkout. register_evolution_cron copies the whole evolution_* script
+# family + reconciles jobs.json; it is idempotent.
 python3 scripts/register_evolution_cron.py
+# Verify the deploy actually landed (a no_agent fix is worthless if it didn't
+# reach HERMES_HOME/scripts): spot-check that the copy matches the checkout.
+for s in evolution_funnel evolution_watchdog; do
+  diff -q "scripts/$s.py" "${HERMES_HOME:-$HOME/.hermes}/scripts/$s.py" >/dev/null 2>&1 \
+    || echo "WARN: $s.py did NOT deploy to HERMES_HOME/scripts — investigate before relying on it"
+done
+# The SKILLS the agent READS live in the profile (profiles/<profile>/skills/),
+# seeded as COPIES by `hermes update` — which KEEPS copies it deems
+# user-modified, so a merged evolution-SKILL change (e.g. this very file) can
+# silently never reach the running agent. Force-sync our own evolution skills
+# (system-managed, not user content) from the just-synced checkout:
+PROFILE_SKILLS="${HERMES_HOME:-$HOME/.hermes}/profiles/user1/skills/evolution"
+[ -d "$PROFILE_SKILLS" ] && cp -rf skills/evolution/. "$PROFILE_SKILLS"/ \
+  && echo "evolution skills synced to profile" || echo "WARN: profile skills dir absent"
 ```
    If `hermes update` reports failure/rollback, STOP merging further PRs this
    cycle and record it — a merged change broke the build and was rolled back.
