@@ -1361,9 +1361,20 @@ def build_skills_system_prompt(
             for k, v in (snapshot.get("category_descriptions") or {}).items()
         }
     else:
-        # Cold path: full filesystem scan + write snapshot for next time
+        # Cold path: full filesystem scan + write snapshot for next time.
+        #
+        # Skill file order: by default this is the flat directory order from
+        # iter_skill_index_files (unchanged, byte-identical to pre-#298). When
+        # the opt-in v2 loader is enabled (skills.skills_loader_v2 /
+        # HERMES_SKILLS_LOADER_V2, default OFF) the SKILL.md files are returned
+        # in topological (dependency-first) order instead, with the flat order
+        # used as a fallback for un-graphed/legacy skills and on requires
+        # cycles. iter_skill_files_for_load delegates to the exact same flat
+        # scan when the flag is off, so nothing changes for existing profiles.
+        from agent.skills_loader_v2 import iter_skill_files_for_load
+
         skill_entries: list[dict] = []
-        for skill_file in iter_skill_index_files(skills_dir, "SKILL.md"):
+        for skill_file in iter_skill_files_for_load(skills_dir):
             is_compatible, frontmatter, desc = _parse_skill_file(skill_file)
             entry = _build_snapshot_entry(skill_file, skills_dir, frontmatter, desc)
             skill_entries.append(entry)
