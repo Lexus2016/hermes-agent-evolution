@@ -5407,6 +5407,14 @@ class AIAgent:
         """
         tool_calls = assistant_message.tool_calls
 
+        # Snapshot the live turn messages so a delegate_task call in THIS batch
+        # can optionally collapse parent history into a child's context
+        # (handoff_mode='collapsed_summary', issue #319). This is a plain
+        # reference, written every turn but read ONLY when collapse-mode is
+        # explicitly requested — the default delegation flow never touches it,
+        # so behavior stays byte-identical when no handoff_mode is passed.
+        self._delegate_handoff_messages = messages
+
         # Plan-and-execute (#290): emit the committed plan once, just before the
         # first tool dispatch of a turn. Inert by default — no-op unless an
         # active plan has been set on session state (nothing in the default loop
@@ -5450,6 +5458,7 @@ class AIAgent:
             acp_args=function_args.get("acp_args"),
             role=function_args.get("role"),
             background=function_args.get("background"),
+            handoff_mode=function_args.get("handoff_mode"),
             parent_agent=self,
         )
 

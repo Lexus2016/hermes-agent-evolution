@@ -805,6 +805,150 @@ def check_delegate_requirements() -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# Handoff collapse-mode (GitHub issue #319)
+# ---------------------------------------------------------------------------
+# Context isolation already ships: children NEVER receive parent history
+# (_build_child_system_prompt passes only goal + the explicit `context` string;
+# the schema even tells the model the subagent "knows nothing about your
+# conversation history"). The genuinely-new piece this adds is an OPTIONAL
+# collapse-mode that routes the parent's recent conversation through the
+# EXISTING ContextCompressor and threads the resulting summary into the child's
+# `context` field — a standardized handoff that condenses prior turns into a
+# single background message instead of forcing the model to hand-author it.
+#
+# Default behavior is byte-identical: handoff_mode=None means the helper below
+# is never called and the `context` string reaches the child exactly as before.
+HANDOFF_MODE_COLLAPSED_SUMMARY = "collapsed_summary"
+_VALID_HANDOFF_MODES = frozenset({HANDOFF_MODE_COLLAPSED_SUMMARY})
+
+# A handoff collapse with fewer than this many parent turns is a no-op: there is
+# nothing worth summarizing, and an LLM round-trip would only add latency/cost
+# while producing a summary thinner than the raw turns it replaces.
+_HANDOFF_MIN_TURNS = 2
+
+# Label that introduces the collapsed summary inside the child's context so the
+# child can tell condensed background apart from caller-authored context.
+_HANDOFF_COLLAPSE_HEADER = (
+    "[COLLAPSED PARENT CONVERSATION — background reference only]"
+)
+
+
+def _collapsible_parent_turns(parent_agent) -> List[Dict[str, Any]]:
+    """Return the parent's recent conversation turns eligible for collapse.
+
+    Reads the live turn snapshot the conversation loop stashes on the parent
+    agent (``_delegate_handoff_messages``). Strips the leading ``system``
+    message (the child gets its own focused system prompt) and the trailing
+    assistant message that carries the in-flight ``delegate_task`` tool call
+    (collapsing the call that triggered this handoff into its own context is
+    circular and useless).
+
+    Returns an empty list when no snapshot is available — keeping collapse-mode
+    a safe no-op for callers (tests, ACP transports, custom embeddings) that
+    never populate the snapshot.
+    """
+    snapshot = getattr(parent_agent, "_delegate_handoff_messages", None)
+    if not isinstance(snapshot, list) or not snapshot:
+        return []
+
+    turns = [m for m in snapshot if isinstance(m, dict)]
+    # Drop the system prompt — the child builds its own.
+    if turns and turns[0].get("role") == "system":
+        turns = turns[1:]
+    # Drop a trailing assistant turn that only exists to carry the
+    # delegate_task tool call that triggered this handoff.
+    if turns and turns[-1].get("role") == "assistant" and turns[-1].get("tool_calls"):
+        turns = turns[:-1]
+    return turns
+
+
+def _build_collapsed_handoff_context(
+    parent_agent,
+    existing_context: Optional[str],
+) -> Optional[str]:
+    """Collapse the parent's recent conversation into the child's ``context``.
+
+    Reuses the parent's existing ``ContextCompressor`` (``_generate_summary``)
+    to condense prior turns into a single structured summary, then merges it
+    with any caller-supplied ``context``. Returns ``existing_context`` unchanged
+    when collapse is impossible or unhelpful, so the caller can assign the
+    return value back unconditionally:
+
+      - no compressor on the parent          -> unchanged
+      - fewer than ``_HANDOFF_MIN_TURNS``    -> unchanged (no-op short history)
+      - summarizer returns nothing / errors  -> unchanged (compressor handles
+        its own failures and returns None)
+
+    The collapsed summary is PREPENDED to the existing context: condensed
+    history is background, the caller's explicit context is the foreground the
+    child should act on.
+    """
+    compressor = getattr(parent_agent, "context_compressor", None)
+    if compressor is None or not hasattr(compressor, "_generate_summary"):
+        return existing_context
+
+    turns = _collapsible_parent_turns(parent_agent)
+    if len(turns) < _HANDOFF_MIN_TURNS:
+        return existing_context
+
+    try:
+        summary = compressor._generate_summary(turns)
+    except Exception as exc:  # defensive: a handoff must never break delegation
+        logger.warning(
+            "delegate_task: collapsed-summary handoff failed (%s); "
+            "falling back to caller-supplied context unchanged.",
+            exc,
+        )
+        return existing_context
+
+    if not summary or not str(summary).strip():
+        return existing_context
+
+    collapsed = f"{_HANDOFF_COLLAPSE_HEADER}\n{str(summary).strip()}"
+    if existing_context and str(existing_context).strip():
+        return f"{collapsed}\n\n{str(existing_context).strip()}"
+    return collapsed
+
+
+def _apply_handoff_collapse(
+    task_list: List[Dict[str, Any]],
+    handoff_mode: Optional[str],
+    parent_agent,
+) -> None:
+    """Mutate ``task_list`` in place, collapsing parent history into each task's
+    ``context`` when ``handoff_mode`` requests it.
+
+    No-op (and therefore byte-identical to the historical flow) unless
+    ``handoff_mode == 'collapsed_summary'``. An unknown mode is logged and
+    ignored rather than raising, so a stale/garbled schema value degrades to
+    today's behavior instead of breaking delegation.
+    """
+    if not handoff_mode:
+        return
+    if handoff_mode not in _VALID_HANDOFF_MODES:
+        logger.debug(
+            "delegate_task: ignoring unknown handoff_mode=%r (valid: %s)",
+            handoff_mode, sorted(_VALID_HANDOFF_MODES),
+        )
+        return
+
+    # Generate the collapsed summary ONCE per delegate_task call — the parent
+    # history is identical for every task in a batch, so re-summarizing per task
+    # would multiply LLM cost with no benefit.
+    collapsed = _build_collapsed_handoff_context(parent_agent, None)
+    if collapsed is None:
+        return  # collapse was a no-op; leave every task's context untouched
+
+    header_block = collapsed  # already carries the header + summary
+    for task in task_list:
+        existing = task.get("context")
+        if existing and str(existing).strip():
+            task["context"] = f"{header_block}\n\n{str(existing).strip()}"
+        else:
+            task["context"] = header_block
+
+
 def _build_child_system_prompt(
     goal: str,
     context: Optional[str] = None,
@@ -2386,6 +2530,7 @@ def delegate_task(
     acp_args: Optional[List[str]] = None,
     role: Optional[str] = None,
     background: Optional[bool] = None,
+    handoff_mode: Optional[str] = None,
     parent_agent=None,
 ) -> str:
     """
@@ -2399,6 +2544,15 @@ def delegate_task(
     'leaf' (default) cannot; 'orchestrator' retains the delegation
     toolset and can spawn its own workers, bounded by
     delegation.max_spawn_depth.  Per-task role beats the top-level one.
+
+    The optional 'handoff_mode' parameter controls how parent conversation
+    history is handed to children. Default (None) is unchanged: children
+    receive ONLY the explicit ``context`` string and never see parent history.
+    When set to 'collapsed_summary', the parent's recent conversation is
+    condensed via the existing ContextCompressor and prepended to each task's
+    ``context`` as background reference — a standardized handoff that collapses
+    prior turns into a single message instead of forcing the model to
+    hand-author the relevant background.
 
     Returns JSON with results array, one entry per task.
     """
@@ -2509,6 +2663,13 @@ def delegate_task(
             )
         if not task.get("goal", "").strip():
             return tool_error(f"Task {i} is missing a 'goal'.")
+
+    # Handoff collapse-mode (#319): when requested, condense the parent's
+    # recent conversation into each task's `context` via the existing
+    # ContextCompressor. No-op (byte-identical to the historical flow) when
+    # handoff_mode is None/unset, when the parent exposes no history snapshot,
+    # or when there is too little history to be worth summarizing.
+    _apply_handoff_collapse(task_list, handoff_mode, parent_agent)
 
     overall_start = time.monotonic()
     results = []
@@ -3458,6 +3619,22 @@ DELEGATE_TASK_SCHEMA = {
                     "Leave empty unless acp_command is explicitly provided."
                 ),
             },
+            "handoff_mode": {
+                "type": "string",
+                "enum": ["collapsed_summary"],
+                "description": (
+                    "Optional handoff strategy for parent conversation history. "
+                    "Omit (default) and children receive ONLY the explicit "
+                    "'context' you write — they never see your conversation "
+                    "history. Set to 'collapsed_summary' to additionally condense "
+                    "your recent conversation into a single background summary "
+                    "(via the same compressor used for context compaction) and "
+                    "prepend it to each task's 'context'. Use it when the subagent "
+                    "genuinely needs the prior discussion as background and "
+                    "hand-writing that context would be lossy or tedious; skip it "
+                    "for self-contained tasks where a focused 'context' is enough."
+                ),
+            },
         },
         "required": [],
     },
@@ -3481,6 +3658,7 @@ registry.register(
         acp_args=args.get("acp_args"),
         role=args.get("role"),
         background=args.get("background"),
+        handoff_mode=args.get("handoff_mode"),
         parent_agent=kw.get("parent_agent"),
     ),
     check_fn=check_delegate_requirements,
