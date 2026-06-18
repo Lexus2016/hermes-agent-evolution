@@ -41,7 +41,8 @@ def test_memory_schema_is_well_formed():
     assert params["type"] == "object"
     assert params["required"] == ["action", "target"]
     # Nested ``enum`` on property values is fine — only top-level is forbidden.
-    assert params["properties"]["action"]["enum"] == ["add", "replace", "remove"]
+    # 'search' was added by #316 (provenance retrieval filter).
+    assert params["properties"]["action"]["enum"] == ["add", "replace", "remove", "search"]
     assert params["properties"]["target"]["enum"] == ["memory", "user"]
 
 
