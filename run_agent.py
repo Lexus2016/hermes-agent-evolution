@@ -5145,6 +5145,106 @@ class AIAgent:
         if emit_plan(plan, emit=self._emit_status):
             self._plan_emitted_for_turn = True
 
+    def _check_step_divergence_after_tool_calls(self, messages: list) -> None:
+        """Lookahead replan check, run once after a turn's tool dispatch (#291).
+
+        Plan-and-execute child #2. When an active plan is set, the agent tracks a
+        per-turn :class:`agent.plan_lookahead.PlanProgress` cursor over its steps.
+        After the turn's tool calls complete, this compares the freshly observed
+        tool result against the current step's ``expected_observation`` via the
+        pure :func:`agent.plan_lookahead.evaluate_divergence`. If they diverged,
+        it fires the replan-trigger seam — which only does anything when a
+        ``replanner`` callable has been wired (sibling #292); otherwise it is a
+        no-op and the current plan stands. Either way the cursor advances.
+
+        Default-off by construction, mirroring ``_emit_plan_before_tool_calls``:
+        with no ``self._active_plan`` this returns immediately, so the agent's
+        observable behavior is unchanged until a future slice opts in by building
+        and assigning a plan. This neither selects tools nor mutates ``messages``.
+        """
+        plan = getattr(self, "_active_plan", None)
+        if plan is None:
+            return
+
+        from agent.plan_lookahead import (
+            PlanProgress,
+            evaluate_divergence,
+            should_replan,
+            trigger_replan,
+        )
+
+        # Lazily create / re-sync the per-turn progress cursor against the active
+        # plan. A replan that swaps ``_active_plan`` invalidates an old cursor, so
+        # rebuild whenever the tracked plan identity drifts.
+        progress = getattr(self, "_plan_progress", None)
+        if not isinstance(progress, PlanProgress) or progress.plan is not plan:
+            progress = PlanProgress(plan)
+            self._plan_progress = progress
+
+        step = progress.current()
+        if step is None:
+            return  # plan already exhausted — nothing left to judge
+
+        observed = self._latest_tool_observation(messages)
+        result = evaluate_divergence(observed, step)
+        if result.diverged:
+            try:
+                self._emit_status(
+                    f"↪ plan step {step.index} diverged: {result.reason}"
+                )
+            except Exception:
+                pass
+            new_plan = trigger_replan(
+                plan,
+                step,
+                observed or "",
+                result,
+                replanner=getattr(self, "_replanner", None),
+            )
+            if new_plan is not None:
+                # A replanner produced a fresh plan: adopt it, re-arm emission so
+                # the new plan prints next turn, and reset the cursor.
+                self._active_plan = new_plan
+                self._plan_emitted_for_turn = False
+                progress.adopt(new_plan)
+                return
+        # No replan (or none wired): treat the current step as observed and move
+        # the cursor forward so the next turn judges the next step.
+        if not should_replan(result):
+            progress.advance()
+        else:
+            # Diverged but nothing replanned — still advance so a stuck step
+            # can't wedge the cursor and re-fire forever on the same observation.
+            progress.advance()
+
+    @staticmethod
+    def _latest_tool_observation(messages: list) -> Optional[str]:
+        """Extract the most recent tool-result text from ``messages``.
+
+        Reads the trailing ``role == "tool"`` message(s) appended by this turn's
+        dispatch and returns their textual content, or ``None`` if the last
+        message isn't a tool result (e.g. an assistant message with no calls).
+        Multimodal (list) content is reduced to its text parts; non-text is
+        ignored. Pure read — never mutates ``messages``.
+        """
+        if not messages:
+            return None
+        texts: List[str] = []
+        for msg in reversed(messages):
+            if not isinstance(msg, dict) or msg.get("role") != "tool":
+                break
+            content = msg.get("content")
+            if isinstance(content, str):
+                texts.append(content)
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        texts.append(part["text"])
+        if not texts:
+            return None
+        # ``reversed`` collected newest-first; restore chronological order.
+        return "\n".join(reversed(texts))
+
     def _execute_tool_calls(self, assistant_message, messages: list, effective_task_id: str, api_call_count: int = 0) -> None:
         """Execute tool calls from the assistant message and append results to messages.
 
@@ -5173,6 +5273,12 @@ class AIAgent:
             )
         finally:
             self._executing_tools = False
+            # Plan-and-execute (#291): after this turn's tool results land, check
+            # whether the observation diverged from the active plan's current
+            # step and trigger a replan if so. Inert by default — no-op unless an
+            # active plan has been set (nothing in the default loop sets one).
+            # See ``_check_step_divergence_after_tool_calls``.
+            self._check_step_divergence_after_tool_calls(messages)
 
     def _dispatch_delegate_task(self, function_args: dict) -> str:
         """Single call site for delegate_task dispatch.
