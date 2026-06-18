@@ -5121,6 +5121,30 @@ class AIAgent:
         self._set_tool_guardrail_halt(decision)
         return toolguard_synthetic_result(decision)
 
+    def _emit_plan_before_tool_calls(self) -> None:
+        """Emit the active plan once, just before this turn's tool dispatch.
+
+        Plan-and-execute slice (#290): a safe, inert emission seam. The agent
+        keeps an optional active plan on session state (``self._active_plan``,
+        ``None`` by default). When set to a :class:`agent.plan_schema.Plan`,
+        this renders it through ``_emit_status`` exactly once per turn (guarded
+        by ``self._plan_emitted_for_turn`` so a multi-iteration turn doesn't
+        reprint it). When unset — the default — this is a no-op, so the agent's
+        observable behavior is unchanged until a future slice (#292) opts in by
+        building and assigning a plan.
+
+        Deliberately scope-bounded: this neither builds a plan, reads one back,
+        nor influences tool selection. It is store-and-show only.
+        """
+        plan = getattr(self, "_active_plan", None)
+        if plan is None:
+            return
+        if getattr(self, "_plan_emitted_for_turn", False):
+            return
+        from agent.plan_schema import emit_plan
+        if emit_plan(plan, emit=self._emit_status):
+            self._plan_emitted_for_turn = True
+
     def _execute_tool_calls(self, assistant_message, messages: list, effective_task_id: str, api_call_count: int = 0) -> None:
         """Execute tool calls from the assistant message and append results to messages.
 
@@ -5129,6 +5153,12 @@ class AIAgent:
         file reads/writes may do so only when their target paths do not overlap.
         """
         tool_calls = assistant_message.tool_calls
+
+        # Plan-and-execute (#290): emit the committed plan once, just before the
+        # first tool dispatch of a turn. Inert by default — no-op unless an
+        # active plan has been set on session state (nothing in the default loop
+        # sets one). See ``_emit_plan_before_tool_calls``.
+        self._emit_plan_before_tool_calls()
 
         # Allow _vprint during tool execution even with stream consumers
         self._executing_tools = True

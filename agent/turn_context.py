@@ -145,6 +145,10 @@ def build_turn_context(
     agent._tool_guardrails.reset_for_turn()
     agent._tool_guardrail_halt_decision = None
     agent._vision_supported = True
+    # Plan-and-execute (#290): re-arm the once-per-turn plan emission guard so
+    # an active plan (if any) is re-emitted at the start of each turn. Inert
+    # unless ``agent._active_plan`` is set — see ``_emit_plan_before_tool_calls``.
+    agent._plan_emitted_for_turn = False
 
     # Pre-turn connection health check: clean up dead TCP connections.
     if agent.api_mode != "anthropic_messages":
