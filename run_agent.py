@@ -2521,6 +2521,56 @@ class AIAgent:
             for path in targets:
                 state.pop(path, None)
 
+    def _consult_verify_policy(
+        self,
+        tool_name: str,
+        args: Dict[str, Any],
+        result: Any,
+        is_error: bool,
+    ) -> None:
+        """Advisory Gather-Act-Verify consult after a *successful* mutating call.
+
+        Issue #293. Opt-in and side-effect free: when the verify-policy feature
+        is enabled (default OFF) and a verifier is registered for ``tool_name``,
+        run it and record/log the structured :class:`VerifyOutcome`. This NEVER
+        retries, blocks, or rewrites the call — retry-on-mismatch is the sibling
+        #294. Distinct from the turn-end file-mutation *failure* footer: that
+        surfaces writes that FAILED; this verifies writes that SUCCEEDED.
+
+        Gated so the agent behaves identically when the feature is off OR no
+        verifier is registered. Any error is swallowed — a verifier can never
+        affect the turn.
+        """
+        if is_error:
+            return  # only verify calls the tool reported as successful
+        try:
+            from agent.verify_policy import verify_policy_enabled
+            if not verify_policy_enabled():
+                return
+            state = getattr(self, "_verify_policy_state", None)
+            if state is None or not state.registry.has_verifier(tool_name):
+                return
+            outcome = state.registry.consult(tool_name, args, result)
+            if outcome.status == "skipped":
+                return
+            state.outcomes.append(outcome)
+            if outcome.status == "mismatch":
+                logger.warning(
+                    "verify-policy: %s did not confirm %s (%s)",
+                    outcome.verifier, tool_name, outcome.detail,
+                )
+            elif outcome.status == "error":
+                logger.debug(
+                    "verify-policy: verifier %s errored for %s: %s",
+                    outcome.verifier, tool_name, outcome.detail,
+                )
+            else:
+                logger.info(
+                    "verify-policy: %s confirmed %s", outcome.verifier, tool_name,
+                )
+        except Exception as _vp_err:
+            logger.debug("verify-policy consult failed: %s", _vp_err)
+
     def _file_mutation_verifier_enabled(self) -> bool:
         """Check whether the per-turn file-mutation verifier footer is on.
 

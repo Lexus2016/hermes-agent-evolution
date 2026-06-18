@@ -351,6 +351,16 @@ def build_turn_context(
     # Per-turn file-mutation verifier state.
     agent._turn_failed_file_mutations = {}
 
+    # Gather-Act-Verify (#293): lazily-built verify-policy registry + per-turn
+    # advisory-outcome ledger. The registry persists across turns (verifiers are
+    # registered once by skills/config); only the per-turn outcome list resets.
+    _vp_state = getattr(agent, "_verify_policy_state", None)
+    if _vp_state is None:
+        from agent.verify_policy import _AgentVerifyState
+        agent._verify_policy_state = _AgentVerifyState()
+    else:
+        _vp_state.outcomes.clear()
+
     # Record the execution thread so interrupt()/clear_interrupt() can scope
     # the tool-level interrupt signal to THIS agent's thread only.
     agent._execution_thread_id = threading.current_thread().ident
