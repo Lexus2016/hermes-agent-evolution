@@ -43,7 +43,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -692,6 +692,25 @@ class AgentJudge:
             session_id, messages, self.rubric, summary=summary
         )
 
+    def score_replay(
+        self,
+        session_id: str,
+        messages: Sequence[Dict[str, Any]],
+        *,
+        task: Optional[str] = None,
+        use_llm: bool = False,
+    ) -> Dict[str, Any]:
+        """Score a trace step-by-step: overall verdict + per-step heuristic.
+
+        Engine-level entry point onto :func:`score_replayed_trace`, so the replay
+        subsystem is reachable from the same object callers already use for
+        whole-trace scoring (a dashboard/CLI consumes this rather than the bare
+        module function).
+        """
+        return score_replayed_trace(
+            session_id, messages, self.rubric, task=task, use_llm=use_llm
+        )
+
     def format_report_terminal(self, verdict: JudgeVerdict) -> str:
         """Return a compact, terminal-ready verdict summary."""
         return format_report_terminal(verdict, self.rubric)
@@ -716,3 +735,133 @@ def format_report_terminal(verdict: JudgeVerdict, rubric: Rubric = DEFAULT_RUBRI
     if verdict.rationale:
         lines.append(f"  {verdict.rationale}")
     return "\n".join(lines)
+
+
+# ── Trace replay subsystem (increment of #304) ───────────────────────────
+
+
+def _replay_content_text(content: Any) -> str:
+    """Best-effort plain text for an assistant message's ``content``.
+
+    Tolerates the three shapes a recorded trace can carry: a plain string, a
+    multimodal block list (text blocks concatenated), or anything else (→ "").
+    Never raises — replay must survive whatever a session log contains.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: List[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and isinstance(block.get("text"), str):
+                parts.append(block["text"])
+        return " ".join(parts)
+    return ""
+
+
+def replay_trace_steps(
+    messages: Sequence[Dict[str, Any]],
+) -> Iterator[Dict[str, Any]]:
+    """Yield the high-level decision steps in a recorded trace.
+
+    Emits one record per assistant turn that either (a) contains plain text
+    reasoning/answer, or (b) invokes at least one tool.  Tool turns are paired
+    with the immediately following tool result(s) so callers can judge whether
+    each decision was validated by the environment.
+
+    Yields dicts of shape::
+
+        {
+            "step": int,
+            "role": "assistant",
+            "content": str,
+            "tool_calls": List[Dict[str, Any]],
+            "tool_results": List[Dict[str, Any]],
+            "has_final_answer": bool,
+        }
+
+    Pure, deterministic, no LLM — safe to call from dashboards or CI.  Multimodal
+    and malformed content are tolerated (coerced to text), never raising.
+    """
+    step = 0
+    for i, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "assistant":
+            continue
+        text = _replay_content_text(msg.get("content"))
+        tool_calls = msg.get("tool_calls") or []
+        if not text.strip() and not tool_calls:
+            continue
+        step += 1
+        tool_results: List[Dict[str, Any]] = []
+        if tool_calls:
+            # Collect the next contiguous tool result messages.
+            j = i + 1
+            while j < len(messages):
+                nxt = messages[j]
+                if not isinstance(nxt, dict) or nxt.get("role") != "tool":
+                    break
+                tool_results.append(nxt)
+                j += 1
+        yield {
+            "step": step,
+            "role": "assistant",
+            "content": text,
+            "tool_calls": list(tool_calls),
+            "tool_results": tool_results,
+            "has_final_answer": bool(text.strip() and not tool_calls),
+        }
+
+
+def score_replayed_trace(
+    session_id: str,
+    messages: Sequence[Dict[str, Any]],
+    rubric: Rubric = DEFAULT_RUBRIC,
+    *,
+    task: Optional[str] = None,
+    use_llm: bool = False,
+) -> Dict[str, Any]:
+    """Score a recorded trace step-by-step.
+
+    Returns a dict containing the original ``AgentJudge`` verdict plus a
+    ``steps`` list with per-step summary data.  Each step's score is heuristic
+    only: 1.0 when the step produced a tool result with no failure marker, 0.0
+    when every result looks like a failure, and 0.5 for a pure-reasoning step
+    that produced no tool result.  This is the deterministic, cheap baseline;
+    LLM scoring of individual steps is intentionally deferred (kept small +
+    independently testable).
+    """
+    verdict = AgentJudge(rubric).score(
+        session_id, messages, task=task, use_llm=use_llm
+    )
+    steps: List[Dict[str, Any]] = []
+    for step in replay_trace_steps(messages):
+        failures = sum(
+            1
+            for r in step["tool_results"]
+            if _looks_like_failure(r.get("content") if isinstance(r, dict) else r)
+        )
+        total = len(step["tool_results"])
+        if total == 0:
+            step_score = 0.5
+        elif failures == 0:
+            step_score = 1.0
+        else:
+            step_score = 0.0
+        steps.append(
+            {
+                "step": step["step"],
+                "has_final_answer": step["has_final_answer"],
+                "tool_count": len(step["tool_calls"]),
+                "tool_result_count": total,
+                "tool_failure_count": failures,
+                "score": step_score,
+            }
+        )
+    return {
+        "session_id": session_id,
+        "verdict": verdict.to_dict(),
+        "steps": steps,
+    }

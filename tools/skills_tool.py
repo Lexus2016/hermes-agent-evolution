@@ -8,6 +8,9 @@ and optional supporting files like references, templates, and examples.
 
 Inspired by Anthropic's Claude Skills system with progressive disclosure architecture:
 - Metadata (name ≤64 chars, description ≤1024 chars) - shown in skills_list
+- Schema (inputs / outputs / examples / required env) - loaded via
+  skill_view(name, schema_only=True) — a cheap middle tier between the
+  name+description listing and the full body (issue #303)
 - Full Instructions - loaded via skill_view when needed
 - Linked Files (references, templates) - loaded on demand
 
@@ -30,6 +33,14 @@ SKILL.md Format (YAML Frontmatter, agentskills.io compatible):
     name: skill-name              # Required, max 64 chars
     description: Brief description # Required, max 1024 chars
     version: 1.0.0                # Optional
+    inputs:                       # Optional — schema tier (issue #303)
+      - name: dataset_path        #   What the skill consumes. Free-form;
+        description: Path to data  #   surfaced verbatim by schema_only loads.
+    outputs:                      # Optional — what the skill produces
+      - name: report
+        description: Markdown summary
+    examples:                     # Optional — short usage examples (str or dict)
+      - "skill_view('my-skill')"
     license: MIT                  # Optional (agentskills.io)
     platforms: [macos]            # Optional — restrict to specific OS platforms
                                   #   Valid: macos, linux, windows
@@ -562,6 +573,60 @@ def _parse_tags(tags_value) -> List[str]:
     return [t.strip().strip("\"'") for t in tags_value.split(",") if t.strip()]
 
 
+def _normalize_schema_examples(value: Any) -> List[Any]:
+    """Coerce a raw frontmatter ``examples`` value into a clean list.
+
+    Accepts a single example (str/dict) or a list of them. Blank strings and
+    non-str/dict members are dropped so a malformed entry can't bloat the
+    schema tier. Order is preserved.
+    """
+    if not value:
+        return []
+    items = value if isinstance(value, list) else [value]
+    examples: List[Any] = []
+    for item in items:
+        if isinstance(item, dict):
+            examples.append(item)
+        elif isinstance(item, str) and item.strip():
+            examples.append(item.strip())
+    return examples
+
+
+def extract_skill_schema(frontmatter: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract the structured invocation schema declared in skill frontmatter.
+
+    This is the middle progressive-disclosure tier (issue #303, child of #229):
+    ``skills_list`` exposes name+description (tier 1) and ``skill_view`` loads the
+    full SKILL.md body (tier 3). The schema is the cheap-to-load contract — what
+    the skill takes (``inputs``), what it produces (``outputs``), the credentials
+    it needs (``required_environment_variables``, surfaced here read-only), and a
+    few usage ``examples`` — without paying for the whole instruction body.
+
+    Fields are read verbatim from frontmatter (the YAML loader already gives us
+    lists/dicts). Absent fields are simply omitted, so a skill that declares no
+    schema yields an empty dict. The required-env list reuses the same
+    normalization as ``skill_view`` so the two never disagree.
+    """
+    schema: Dict[str, Any] = {}
+
+    inputs = frontmatter.get("inputs")
+    if inputs:
+        schema["inputs"] = inputs
+
+    outputs = frontmatter.get("outputs")
+    if outputs:
+        schema["outputs"] = outputs
+
+    examples = _normalize_schema_examples(frontmatter.get("examples"))
+    if examples:
+        schema["examples"] = examples
+
+    required_env_vars = _get_required_environment_variables(frontmatter)
+    if required_env_vars:
+        schema["required_environment_variables"] = required_env_vars
+
+    return schema
+
 
 def _get_disabled_skill_names() -> Set[str]:
     """Load disabled skill names from config.
@@ -1038,6 +1103,7 @@ def skill_view(
     file_path: str = None,
     task_id: str = None,
     preprocess: bool = True,
+    schema_only: bool = False,
 ) -> str:
     """
     View the content of a skill or a specific file within a skill directory.
@@ -1050,6 +1116,16 @@ def skill_view(
         preprocess: Apply configured SKILL.md template and inline shell rendering
             to main skill content. Internal slash/preload callers disable this
             because they render the skill message themselves.
+        schema_only: Progressive-disclosure middle tier (issue #303). When True,
+            resolve the skill (all security/platform/disabled gates still run) and
+            return only its name, description, and structured ``schema`` (inputs /
+            outputs / examples / required env), WITHOUT loading the full SKILL.md
+            body, preprocessing it, or triggering env-capture side effects. This is
+            the cheap "what does this skill take and produce?" load that sits
+            between ``skills_list`` (name+description) and a full ``skill_view``.
+            Ignored when ``file_path`` is given (a linked-file read is already
+            scoped). Plugin-provided skills currently fall through to the full
+            load.
 
     Returns:
         JSON string with skill content or error message
@@ -1368,6 +1444,27 @@ def skill_view(
                 ensure_ascii=False,
             )
 
+        # Progressive-disclosure middle tier (issue #303): return just the
+        # structured schema (inputs/outputs/examples/required-env) without the
+        # full body, preprocessing, or env-capture side effects. A file_path
+        # read is already a scoped load, so schema_only does not apply there.
+        if schema_only and not file_path:
+            schema_name = parsed_frontmatter.get("name", resolved_name)
+            return json.dumps(
+                {
+                    "success": True,
+                    "name": schema_name,
+                    "description": parsed_frontmatter.get("description", ""),
+                    "schema": extract_skill_schema(parsed_frontmatter),
+                    "schema_only": True,
+                    "hint": (
+                        "Schema only. Call skill_view(name) without schema_only "
+                        "to load the full instructions."
+                    ),
+                },
+                ensure_ascii=False,
+            )
+
         # If a specific file path is requested, read that instead
         if file_path and skill_dir:
             from tools.path_security import validate_within_dir, has_traversal_component
@@ -1654,6 +1751,14 @@ def skill_view(
             else SkillReadinessStatus.AVAILABLE.value,
         }
 
+        # Surface the structured schema (inputs/outputs/examples/required-env)
+        # alongside the full content too — same tier-2 contract a schema_only
+        # load returns, so callers see one consistent ``schema`` shape. Omitted
+        # when the skill declares no schema, keeping the response lean.
+        skill_schema = extract_skill_schema(frontmatter)
+        if skill_schema:
+            result["schema"] = skill_schema
+
         setup_help = next((e["help"] for e in required_env_vars if e.get("help")), None)
         if setup_help:
             result["setup_help"] = setup_help
@@ -1767,6 +1872,10 @@ SKILL_VIEW_SCHEMA = {
                 "type": "string",
                 "description": "OPTIONAL: Path to a linked file within the skill (e.g., 'references/api.md', 'templates/config.yaml', 'scripts/validate.py'). Omit to get the main SKILL.md content.",
             },
+            "schema_only": {
+                "type": "boolean",
+                "description": "OPTIONAL: When true, return only the skill's name, description, and structured schema (inputs/outputs/examples/required env) WITHOUT loading the full SKILL.md body — a cheap 'what does this skill take and produce?' preview between skills_list and a full load. Ignored if file_path is set.",
+            },
         },
         "required": ["name"],
     },
@@ -1786,8 +1895,12 @@ def _skill_view_with_bump(args, **kw):
     """Invoke skill_view, then bump view_count on success. Best-effort: a
     telemetry failure never breaks the tool call."""
     name = args.get("name", "")
+    schema_only = bool(args.get("schema_only"))
     result = skill_view(
-        name, file_path=args.get("file_path"), task_id=kw.get("task_id")
+        name,
+        file_path=args.get("file_path"),
+        task_id=kw.get("task_id"),
+        schema_only=schema_only,
     )
     try:
         parsed = json.loads(result)
@@ -1798,10 +1911,13 @@ def _skill_view_with_bump(args, **kw):
             if resolved:
                 from tools.skill_usage import bump_use, bump_view
                 bump_view(str(resolved))
-                # A skill_view tool call is the agent actively loading the skill
-                # to act on it — that counts as use, not just a browse/view.
-                # Curator's stale timer keys off last_used_at (see agent/curator.py).
-                bump_use(str(resolved))
+                # A full skill_view tool call is the agent actively loading the
+                # skill to act on it — that counts as use, not just a browse.
+                # A schema_only load is a cheap preview (tier 2), so it bumps
+                # view but NOT use — it must not reset the Curator stale timer,
+                # which keys off last_used_at (see agent/curator.py).
+                if not schema_only:
+                    bump_use(str(resolved))
     except Exception:
         pass
     return result
