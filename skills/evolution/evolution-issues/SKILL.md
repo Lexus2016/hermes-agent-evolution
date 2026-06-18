@@ -86,6 +86,31 @@ Create GitHub issues and pull requests based on research.
     or deliberately dropped even when no issue exists for it. Skip silently if the
     tools are absent; never depend on them.
 
+2c. **Deterministic pre-submission gate — shift triage LEFT (#336).** The
+    by-meaning comparison in 2b is a judgement call made in-context; back it with
+    a DETERMINISTIC gate so the CREATE / SKIP-duplicate decision is reproducible
+    and auditable. For EACH surviving proposal, consult the gate BEFORE
+    `gh issue create`. It fetches the currently-OPEN issues itself (via `gh issue
+    list`, behind an injectable seam) and scores the draft title against them:
+    ```bash
+    python scripts/evolution_pre_submit_triage.py decide "<proposal title>" \
+      --repo Lexus2016/hermes-agent-evolution
+    # prints one JSON line: {"decision","matched_issue","score","reason"}
+    # exit 0  = CREATE (proceed to step 3)
+    # exit 10 = SKIP-duplicate (do NOT create; record as considered)
+    ```
+    **CONSERVATIVE RULE — create on doubt (anti-fabrication guard).** The gate
+    SKIPS only on a HIGH-confidence title overlap (Dice >= 0.85) against an
+    **OPEN** issue; every weaker or ambiguous match returns CREATE. This is
+    deliberate: the project's documented failure mode is triage FABRICATING a
+    rejection and wrongly closing a real issue (#83/#101). A wrongful SKIP
+    silently suppresses a genuine proposal; a needless CREATE is cheaply closed
+    by later analysis. So NEVER skip on a weak match — when in doubt, file.
+    On a SKIP, record it as a considered duplicate (step after creation, below)
+    and move on; on CREATE, continue to step 3. (Scope of this gate is dedup
+    against OPEN issues only; coverage/LLM-confidence and per-fork isolation are
+    follow-ups, not part of it.)
+
 3. **Create issues** (only for proposals that survived BOTH 2a and 2b) via the
    `gh` CLI (terminal tool). `gh` is already authorized via persistent `gh auth login`.
 
@@ -229,6 +254,7 @@ the raw text of research sources. Before creating an issue:
 
 Check before creating:
 - [ ] A similar idea has not already been proposed
+- [ ] The deterministic pre-submission gate returned CREATE (exit 0), not SKIP (exit 10)
 - [ ] The issue does not already exist
 - [ ] There is research evidence
 - [ ] There is an implementation plan
