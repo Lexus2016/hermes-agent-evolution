@@ -60,6 +60,106 @@ ENTRY_DELIMITER = "\n§\n"
 
 
 # ---------------------------------------------------------------------------
+# Source-provenance tagging (issue #316)
+#
+# Every memory entry can carry a *source class* (who/what produced it) and a
+# *trust tier* (how much to trust it). This is the first slice of the
+# memory-poisoning-guard epic (#315): here we only RECORD provenance and let
+# retrieval FILTER on it. The block/warn/strip enforcement lives in #315.
+#
+# Backward-compatibility is the hard constraint:
+#   * Old §-delimited files predate provenance. Their entries are plain
+#     strings with no trailer; they parse to the safe defaults below.
+#   * A *default* add (no explicit provenance) writes the entry verbatim —
+#     NO trailer — so on-disk bytes and no-filter retrieval stay identical to
+#     pre-#316 behaviour and the external-drift round-trip check is unaffected.
+#   * Only when explicit provenance is supplied do we append a single visible
+#     trailer to the entry string. The trailer is part of the stored string,
+#     so disk serialization stays ``ENTRY_DELIMITER.join(strings)`` and old
+#     readers treat it as ordinary entry text rather than choking on it.
+#
+# Trailer format (appended to the entry text, separated by a single space):
+#     ⟦src:<source_class>|trust:<trust_tier>⟧
+# The brackets U+27E6/U+27E7 are visible (not invisible-unicode) so the threat
+# scanner does not flag them, and they are vanishingly unlikely to collide
+# with real entry content.
+# ---------------------------------------------------------------------------
+
+# source classes; "unknown" is the safe fallback for any entry whose origin we
+# cannot establish (e.g. legacy files).
+SOURCE_CLASSES = (
+    "user_input",
+    "external_tool",
+    "agent_authored",
+    "system",
+    "unknown",
+)
+
+# trust tiers ordered LOW -> HIGH so ``min_trust`` is a simple index compare.
+# "unknown" sits at the bottom: an untagged legacy entry must never clear a
+# trust bar it was never evaluated against.
+TRUST_TIERS = ("unknown", "untrusted", "low", "medium", "trusted")
+
+DEFAULT_SOURCE_CLASS = "unknown"
+DEFAULT_TRUST_TIER = "unknown"
+
+# Sentinels — kept as literals so parse/encode share one source.
+_PROV_OPEN = "⟦src:"
+_PROV_CLOSE = "⟧"
+
+
+def _trust_rank(tier: str) -> int:
+    """Return the ordering rank of a trust tier (unknown lowest). -1 if invalid."""
+    try:
+        return TRUST_TIERS.index(tier)
+    except ValueError:
+        return -1
+
+
+def encode_provenance(text: str, source_class: str, trust_tier: str) -> str:
+    """Return the on-disk string for ``text`` with a provenance trailer.
+
+    When ``source_class`` and ``trust_tier`` are BOTH the safe defaults, the
+    text is returned unchanged (no trailer) so default adds stay byte-identical
+    to the pre-#316 format. Otherwise a single ``⟦src:…|trust:…⟧`` trailer is
+    appended, separated by one space.
+    """
+    text = text.strip()
+    if source_class == DEFAULT_SOURCE_CLASS and trust_tier == DEFAULT_TRUST_TIER:
+        return text
+    return f"{text} {_PROV_OPEN}{source_class}|trust:{trust_tier}{_PROV_CLOSE}"
+
+
+def parse_provenance(stored: str):
+    """Split a stored entry into ``(display_text, source_class, trust_tier)``.
+
+    Entries written before #316 (and default adds) have no trailer, so they
+    parse to ``(stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER)``. A trailing
+    ``⟦src:<class>|trust:<tier>⟧`` token, if present and well-formed with a
+    recognised class+tier, is stripped from the display text and returned as
+    the provenance. A malformed or unrecognised trailer is left as part of the
+    text (treated as ordinary content) and defaults are returned — we never
+    guess provenance from garbage.
+    """
+    s = stored.rstrip()
+    if not s.endswith(_PROV_CLOSE):
+        return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER
+    open_at = s.rfind(_PROV_OPEN)
+    if open_at == -1:
+        return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER
+    inner = s[open_at + len(_PROV_OPEN):-len(_PROV_CLOSE)]
+    # inner looks like "<source_class>|trust:<trust_tier>"
+    if "|trust:" not in inner:
+        return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER
+    src, tier = inner.split("|trust:", 1)
+    if src not in SOURCE_CLASSES or tier not in TRUST_TIERS:
+        # Unrecognised vocabulary — treat the whole thing as plain content.
+        return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER
+    display = s[:open_at].rstrip()
+    return display, src, tier
+
+
+# ---------------------------------------------------------------------------
 # Memory content scanning — lightweight check for injection/exfiltration
 # in content that gets injected into the system prompt.
 #
@@ -78,6 +178,21 @@ from tools.threat_patterns import first_threat_message as _first_threat_message
 def _scan_memory_content(content: str) -> Optional[str]:
     """Scan memory content for injection/exfil patterns. Returns error string if blocked."""
     return _first_threat_message(content, scope="strict")
+
+
+def _validate_provenance(source_class: str, trust_tier: str) -> Optional[str]:
+    """Return an error string if provenance values are out of vocabulary, else None."""
+    if source_class not in SOURCE_CLASSES:
+        return (
+            f"Invalid source_class '{source_class}'. "
+            f"Use one of: {', '.join(SOURCE_CLASSES)}."
+        )
+    if trust_tier not in TRUST_TIERS:
+        return (
+            f"Invalid trust_tier '{trust_tier}'. "
+            f"Use one of: {', '.join(TRUST_TIERS)}."
+        )
+    return None
 
 
 def _drift_error(path: "Path", bak_path: str) -> Dict[str, Any]:
@@ -181,6 +296,11 @@ class MemoryStore:
         live state for the user to inspect and delete.
 
         Empty or already-block-marker entries pass through unchanged.
+
+        Provenance trailers (#316) are stripped before rendering: the snapshot
+        shows the clean display text, never the ``⟦src:…⟧`` sentinel. The scan
+        still runs over the raw entry so threat detection is unaffected, and
+        untagged legacy entries render byte-identically to before.
         """
         from tools.threat_patterns import scan_for_threats
 
@@ -202,7 +322,9 @@ class MemoryStore:
                     f"to delete the original.]"
                 )
             else:
-                sanitized.append(entry)
+                # Render clean display text (no provenance trailer). For
+                # untagged entries this is the entry verbatim.
+                sanitized.append(parse_provenance(entry)[0])
         return sanitized
 
     @staticmethod
@@ -294,16 +416,35 @@ class MemoryStore:
             return self.user_char_limit
         return self.memory_char_limit
 
-    def add(self, target: str, content: str) -> Dict[str, Any]:
-        """Append a new entry. Returns error if it would exceed the char limit."""
+    def add(
+        self,
+        target: str,
+        content: str,
+        source_class: str = DEFAULT_SOURCE_CLASS,
+        trust_tier: str = DEFAULT_TRUST_TIER,
+    ) -> Dict[str, Any]:
+        """Append a new entry. Returns error if it would exceed the char limit.
+
+        ``source_class`` / ``trust_tier`` tag the entry's provenance (#316).
+        When both are the safe defaults the entry is stored verbatim (no
+        trailer) so the on-disk format is byte-identical to pre-#316.
+        """
         content = content.strip()
         if not content:
             return {"success": False, "error": "Content cannot be empty."}
 
-        # Scan for injection/exfiltration before accepting
+        prov_error = _validate_provenance(source_class, trust_tier)
+        if prov_error:
+            return {"success": False, "error": prov_error}
+
+        # Scan the user-visible content (not the provenance trailer) for
+        # injection/exfiltration before accepting.
         scan_error = _scan_memory_content(content)
         if scan_error:
             return {"success": False, "error": scan_error}
+
+        # The string actually stored on disk carries the optional trailer.
+        stored = encode_provenance(content, source_class, trust_tier)
 
         with self._file_lock(self._path_for(target)):
             # Re-read from disk under lock to pick up writes from other sessions.
@@ -317,12 +458,13 @@ class MemoryStore:
             entries = self._entries_for(target)
             limit = self._char_limit(target)
 
-            # Reject exact duplicates
-            if content in entries:
+            # Reject exact duplicates (compare on the stored form, which
+            # includes provenance — a re-tag of the same text is not a dup).
+            if stored in entries:
                 return self._success_response(target, "Entry already exists (no duplicate added).")
 
             # Calculate what the new total would be
-            new_entries = entries + [content]
+            new_entries = entries + [stored]
             new_total = len(ENTRY_DELIMITER.join(new_entries))
 
             if new_total > limit:
@@ -340,14 +482,27 @@ class MemoryStore:
                     "usage": f"{current:,}/{limit:,}",
                 }
 
-            entries.append(content)
+            entries.append(stored)
             self._set_entries(target, entries)
             self.save_to_disk(target)
 
         return self._success_response(target, "Entry added.")
 
-    def replace(self, target: str, old_text: str, new_content: str) -> Dict[str, Any]:
-        """Find entry containing old_text substring, replace it with new_content."""
+    def replace(
+        self,
+        target: str,
+        old_text: str,
+        new_content: str,
+        source_class: str = DEFAULT_SOURCE_CLASS,
+        trust_tier: str = DEFAULT_TRUST_TIER,
+    ) -> Dict[str, Any]:
+        """Find entry containing old_text substring, replace it with new_content.
+
+        ``source_class`` / ``trust_tier`` re-tag the replacement's provenance
+        (#316). Defaults keep the stored form trailer-free (byte-compatible).
+        The ``old_text`` match runs against each entry's DISPLAY text so a user
+        matching on visible content still finds an entry that carries a trailer.
+        """
         old_text = old_text.strip()
         new_content = new_content.strip()
         if not old_text:
@@ -355,10 +510,16 @@ class MemoryStore:
         if not new_content:
             return {"success": False, "error": "new_content cannot be empty. Use 'remove' to delete entries."}
 
+        prov_error = _validate_provenance(source_class, trust_tier)
+        if prov_error:
+            return {"success": False, "error": prov_error}
+
         # Scan replacement content for injection/exfiltration
         scan_error = _scan_memory_content(new_content)
         if scan_error:
             return {"success": False, "error": scan_error}
+
+        stored_new = encode_provenance(new_content, source_class, trust_tier)
 
         with self._file_lock(self._path_for(target)):
             bak = self._reload_target(target)
@@ -366,7 +527,10 @@ class MemoryStore:
                 return _drift_error(self._path_for(target), bak)
 
             entries = self._entries_for(target)
-            matches = [(i, e) for i, e in enumerate(entries) if old_text in e]
+            matches = [
+                (i, e) for i, e in enumerate(entries)
+                if old_text in parse_provenance(e)[0]
+            ]
 
             if not matches:
                 return {"success": False, "error": f"No entry matched '{old_text}'."}
@@ -375,7 +539,10 @@ class MemoryStore:
                 # If all matches are identical (exact duplicates), operate on the first one
                 unique_texts = {e for _, e in matches}
                 if len(unique_texts) > 1:
-                    previews = [e[:80] + ("..." if len(e) > 80 else "") for _, e in matches]
+                    previews = [
+                        parse_provenance(e)[0][:80] + ("..." if len(parse_provenance(e)[0]) > 80 else "")
+                        for _, e in matches
+                    ]
                     return {
                         "success": False,
                         "error": f"Multiple entries matched '{old_text}'. Be more specific.",
@@ -388,7 +555,7 @@ class MemoryStore:
 
             # Check that replacement doesn't blow the budget
             test_entries = entries.copy()
-            test_entries[idx] = new_content
+            test_entries[idx] = stored_new
             new_total = len(ENTRY_DELIMITER.join(test_entries))
 
             if new_total > limit:
@@ -405,7 +572,7 @@ class MemoryStore:
                     "usage": f"{current:,}/{limit:,}",
                 }
 
-            entries[idx] = new_content
+            entries[idx] = stored_new
             self._set_entries(target, entries)
             self.save_to_disk(target)
 
@@ -423,7 +590,10 @@ class MemoryStore:
                 return _drift_error(self._path_for(target), bak)
 
             entries = self._entries_for(target)
-            matches = [(i, e) for i, e in enumerate(entries) if old_text in e]
+            matches = [
+                (i, e) for i, e in enumerate(entries)
+                if old_text in parse_provenance(e)[0]
+            ]
 
             if not matches:
                 return {"success": False, "error": f"No entry matched '{old_text}'."}
@@ -432,7 +602,10 @@ class MemoryStore:
                 # If all matches are identical (exact duplicates), remove the first one
                 unique_texts = {e for _, e in matches}
                 if len(unique_texts) > 1:
-                    previews = [e[:80] + ("..." if len(e) > 80 else "") for _, e in matches]
+                    previews = [
+                        parse_provenance(e)[0][:80] + ("..." if len(parse_provenance(e)[0]) > 80 else "")
+                        for _, e in matches
+                    ]
                     return {
                         "success": False,
                         "error": f"Multiple entries matched '{old_text}'. Be more specific.",
@@ -446,6 +619,43 @@ class MemoryStore:
             self.save_to_disk(target)
 
         return self._success_response(target, "Entry removed.")
+
+    def search(
+        self,
+        target: str,
+        source_filter: Optional[object] = None,
+        min_trust: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return live entries as provenance-resolved rows, optionally filtered.
+
+        Each row is ``{"text": <display>, "source_class": ..., "trust_tier": ...}``.
+        Entries with no provenance trailer (legacy + default adds) resolve to
+        the safe defaults. With NO filters this returns every entry in order —
+        the no-filter call is the byte-compatible "read everything" path.
+
+        Filters (#316 retrieval-time selection — tagging only, no enforcement):
+          * ``source_filter``: a source_class string or iterable of them; keep
+            entries whose source_class is in the set.
+          * ``min_trust``: a trust tier; keep entries whose tier ranks >= it.
+        """
+        if isinstance(source_filter, str):
+            allowed = {source_filter}
+        elif source_filter is None:
+            allowed = None
+        else:
+            allowed = set(source_filter)
+
+        min_rank = _trust_rank(min_trust) if min_trust is not None else None
+
+        rows: List[Dict[str, Any]] = []
+        for entry in self._entries_for(target):
+            text, src, tier = parse_provenance(entry)
+            if allowed is not None and src not in allowed:
+                continue
+            if min_rank is not None and _trust_rank(tier) < min_rank:
+                continue
+            rows.append({"text": text, "source_class": src, "trust_tier": tier})
+        return rows
 
     def format_for_system_prompt(self, target: str) -> Optional[str]:
         """
@@ -607,12 +817,15 @@ class MemoryStore:
 
 
 def _apply_write_gate(action: str, target: str, content: Optional[str],
-                      old_text: Optional[str]) -> Optional[str]:
+                      old_text: Optional[str],
+                      source_class: str = DEFAULT_SOURCE_CLASS,
+                      trust_tier: str = DEFAULT_TRUST_TIER) -> Optional[str]:
     """Evaluate the memory write gate. Returns a JSON tool-result string when
     the write should NOT proceed normally (blocked or staged), or None when the
     caller should perform the real write.
 
-    Only the mutating actions (add/replace/remove) are gated.
+    Only the mutating actions (add/replace/remove) are gated. Provenance tags
+    (#316) ride along in the staged payload so an approved write keeps them.
     """
     if action not in {"add", "replace", "remove"}:
         return None
@@ -650,6 +863,8 @@ def _apply_write_gate(action: str, target: str, content: Optional[str],
         "target": target,
         "content": content,
         "old_text": old_text,
+        "source_class": source_class,
+        "trust_tier": trust_tier,
     }
     record = wa.stage_write(
         wa.MEMORY, payload,
@@ -668,10 +883,17 @@ def memory_tool(
     target: str = "memory",
     content: str = None,
     old_text: str = None,
+    source_class: str = DEFAULT_SOURCE_CLASS,
+    trust_tier: str = DEFAULT_TRUST_TIER,
+    source_filter: Optional[object] = None,
+    min_trust: Optional[str] = None,
     store: Optional[MemoryStore] = None,
 ) -> str:
     """
     Single entry point for the memory tool. Dispatches to MemoryStore methods.
+
+    ``source_class`` / ``trust_tier`` tag provenance on add/replace (#316).
+    ``source_filter`` / ``min_trust`` filter the ``search`` action's results.
 
     Returns JSON string with results.
     """
@@ -680,6 +902,14 @@ def memory_tool(
 
     if target not in {"memory", "user"}:
         return tool_error(f"Invalid target '{target}'. Use 'memory' or 'user'.", success=False)
+
+    # search is a read-only retrieval path — no gate, no required content.
+    if action == "search":
+        rows = store.search(target, source_filter=source_filter, min_trust=min_trust)
+        return json.dumps(
+            {"success": True, "target": target, "results": rows, "result_count": len(rows)},
+            ensure_ascii=False,
+        )
 
     # Validate required params BEFORE the gate so an invalid write is rejected
     # immediately instead of being staged and only failing at approve time.
@@ -693,21 +923,28 @@ def memory_tool(
 
     # Approval gate: when on, stages the write (background/gateway) or prompts
     # inline (interactive CLI); when off (default) passes straight through.
-    gate_result = _apply_write_gate(action, target, content, old_text)
+    gate_result = _apply_write_gate(
+        action, target, content, old_text,
+        source_class=source_class, trust_tier=trust_tier,
+    )
     if gate_result is not None:
         return gate_result
 
     if action == "add":
-        result = store.add(target, content)
+        result = store.add(target, content, source_class=source_class, trust_tier=trust_tier)
 
     elif action == "replace":
-        result = store.replace(target, old_text, content)
+        result = store.replace(
+            target, old_text, content, source_class=source_class, trust_tier=trust_tier
+        )
 
     elif action == "remove":
         result = store.remove(target, old_text)
 
     else:
-        return tool_error(f"Unknown action '{action}'. Use: add, replace, remove", success=False)
+        return tool_error(
+            f"Unknown action '{action}'. Use: add, replace, remove, search", success=False
+        )
 
     return json.dumps(result, ensure_ascii=False)
 
@@ -727,10 +964,14 @@ def apply_memory_pending(payload: Dict[str, Any], store: "MemoryStore") -> Dict[
     target = payload.get("target", "memory")
     content = payload.get("content") or ""
     old_text = payload.get("old_text") or ""
+    source_class = payload.get("source_class", DEFAULT_SOURCE_CLASS)
+    trust_tier = payload.get("trust_tier", DEFAULT_TRUST_TIER)
     if action == "add":
-        return store.add(target, content)
+        return store.add(target, content, source_class=source_class, trust_tier=trust_tier)
     if action == "replace":
-        return store.replace(target, old_text, content)
+        return store.replace(
+            target, old_text, content, source_class=source_class, trust_tier=trust_tier
+        )
     if action == "remove":
         return store.remove(target, old_text)
     return {"success": False, "error": f"Unknown staged action '{action}'."}
@@ -759,7 +1000,13 @@ MEMORY_SCHEMA = {
         "- 'user': who the user is -- name, role, preferences, communication style, pet peeves\n"
         "- 'memory': your notes -- environment facts, project conventions, tool quirks, lessons learned\n\n"
         "ACTIONS: add (new entry), replace (update existing -- old_text identifies it), "
-        "remove (delete -- old_text identifies it).\n\n"
+        "remove (delete -- old_text identifies it), search (read entries, optionally "
+        "filtered by provenance).\n\n"
+        "PROVENANCE (optional, on add/replace): tag where the fact came from. "
+        "source_class = user_input (the user told you), external_tool (a tool/API "
+        "returned it), agent_authored (YOUR own inference -- treat as a guess), or "
+        "system. trust_tier rates reliability. Tagging agent_authored guesses keeps "
+        "them distinguishable from facts the user actually stated.\n\n"
         "SKIP: trivial/obvious info, things easily re-discovered, raw data dumps, and temporary task state."
     ),
     "parameters": {
@@ -767,7 +1014,7 @@ MEMORY_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "replace", "remove"],
+                "enum": ["add", "replace", "remove", "search"],
                 "description": "The action to perform."
             },
             "target": {
@@ -782,6 +1029,32 @@ MEMORY_SCHEMA = {
             "old_text": {
                 "type": "string",
                 "description": "Short unique substring identifying the entry to replace or remove."
+            },
+            "source_class": {
+                "type": "string",
+                "enum": list(SOURCE_CLASSES),
+                "description": (
+                    "Optional provenance for 'add'/'replace': who produced this fact. "
+                    "Defaults to 'unknown'. Use 'agent_authored' for your own guesses."
+                ),
+            },
+            "trust_tier": {
+                "type": "string",
+                "enum": list(TRUST_TIERS),
+                "description": (
+                    "Optional provenance for 'add'/'replace': how reliable this fact is. "
+                    "Defaults to 'unknown'."
+                ),
+            },
+            "source_filter": {
+                "type": "array",
+                "items": {"type": "string", "enum": list(SOURCE_CLASSES)},
+                "description": "Optional for 'search': keep only entries with these source classes.",
+            },
+            "min_trust": {
+                "type": "string",
+                "enum": list(TRUST_TIERS),
+                "description": "Optional for 'search': keep only entries at or above this trust tier.",
             },
         },
         "required": ["action", "target"],
@@ -801,6 +1074,10 @@ registry.register(
         target=args.get("target", "memory"),
         content=args.get("content"),
         old_text=args.get("old_text"),
+        source_class=args.get("source_class", DEFAULT_SOURCE_CLASS),
+        trust_tier=args.get("trust_tier", DEFAULT_TRUST_TIER),
+        source_filter=args.get("source_filter"),
+        min_trust=args.get("min_trust"),
         store=kw.get("store")),
     check_fn=check_memory_requirements,
     emoji="🧠",

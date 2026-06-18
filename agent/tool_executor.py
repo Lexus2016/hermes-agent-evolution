@@ -1029,11 +1029,16 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
             def _execute(next_args: dict) -> Any:
                 target = next_args.get("target", "memory")
                 from tools.memory_tool import memory_tool as _memory_tool
+                from tools.memory_tool import DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER
                 result = _memory_tool(
                     action=next_args.get("action"),
                     target=target,
                     content=next_args.get("content"),
                     old_text=next_args.get("old_text"),
+                    source_class=next_args.get("source_class", DEFAULT_SOURCE_CLASS),
+                    trust_tier=next_args.get("trust_tier", DEFAULT_TRUST_TIER),
+                    source_filter=next_args.get("source_filter"),
+                    min_trust=next_args.get("min_trust"),
                     store=agent._memory_store,
                 )
                 # Bridge: notify external memory provider of built-in memory writes
