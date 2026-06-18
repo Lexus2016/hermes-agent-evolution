@@ -180,6 +180,30 @@ def _scan_memory_content(content: str) -> Optional[str]:
     return _first_threat_message(content, scope="strict")
 
 
+def _make_provenance(source_class: str, trust_tier: str):
+    """Build a guard ``Provenance`` from the entry's source class + trust tier.
+
+    Imported lazily so ``tools.memory_tool`` keeps no hard dependency on the
+    optional guard module (the default-off path never touches it).
+    """
+    from agent.memory_guard import Provenance
+    return Provenance(source_class=source_class, trust_tier=trust_tier)
+
+
+def _log_guard_event(action: str, target: str, event: Dict[str, Any]) -> None:
+    """Emit a structured guard event to the logger (warn/strip decisions).
+
+    Block decisions surface to the model via the tool error already; warn/strip
+    allow the write to proceed, so we log them here so the decision is visible in
+    the trace (issue #315 success criterion: "policy violations produce
+    structured guard events").
+    """
+    logger.warning(
+        "memory guard event: op=%s target=%s %s",
+        action, target, json.dumps(event, ensure_ascii=False),
+    )
+
+
 def _validate_provenance(source_class: str, trust_tier: str) -> Optional[str]:
     """Return an error string if provenance values are out of vocabulary, else None."""
     if source_class not in SOURCE_CLASSES:
@@ -236,13 +260,22 @@ class MemoryStore:
         Tool responses always reflect this live state.
     """
 
-    def __init__(self, memory_char_limit: int = 4000, user_char_limit: int = 2500):
+    def __init__(self, memory_char_limit: int = 4000, user_char_limit: int = 2500,
+                 guard: Optional[object] = None):
         self.memory_entries: List[str] = []
         self.user_entries: List[str] = []
         self.memory_char_limit = memory_char_limit
         self.user_char_limit = user_char_limit
         # Frozen snapshot for system prompt -- set once at load_from_disk()
         self._system_prompt_snapshot: Dict[str, str] = {"memory": "", "user": ""}
+        # Optional memory-poisoning guard (issue #315). DEFAULT None: when unset,
+        # the write path keeps its pre-#315 binary-block behaviour exactly (see
+        # _gate_write). A MemoryGuardPolicy here routes a scan hit through
+        # block/warn/strip actions keyed off provenance instead.
+        self._guard = guard
+        # Provenance of the write currently being gated; set by add/replace just
+        # before calling _gate_write. Default None -> guard uses safe defaults.
+        self._last_provenance = None
 
     def load_from_disk(self):
         """Load entries from MEMORY.md and USER.md, capture system prompt snapshot.
@@ -416,6 +449,39 @@ class MemoryStore:
             return self.user_char_limit
         return self.memory_char_limit
 
+    def _gate_write(self, content: str):
+        """Decide whether ``content`` may be written, reusing the threat scanner.
+
+        Returns ``(error, effective_content, guard_event)``:
+
+        * ``error`` — a non-None error string means BLOCK the write.
+        * ``effective_content`` — the content to actually store (may differ from
+          the input only when a guard ``strip`` action fired).
+        * ``guard_event`` — an optional structured dict describing a warn/strip
+          decision, for the caller to log; ``None`` for the legacy path and for
+          clean content.
+
+        DEFAULT-OFF / BACKWARD-COMPAT (issue #315): when ``self._guard`` is
+        ``None`` (the default) this collapses to the pre-#315 behaviour — the
+        existing binary ``_scan_memory_content`` block — so clean writes pass and
+        poisoned writes are refused exactly as before, with no strip/warn and no
+        event. The guard only participates when explicitly configured on.
+        """
+        if self._guard is None:
+            # Legacy path: binary block, byte-identical to pre-#315.
+            return _scan_memory_content(content), content, None
+
+        # The entry's provenance is already resolved by the caller into
+        # self._last_provenance; the guard routes its action off the source
+        # class. It reuses the existing scanner internally for detection.
+        outcome = self._guard.evaluate(content, self._last_provenance)
+        if not outcome.allowed:
+            return outcome.message, content, None
+        if outcome.action in ("warn", "strip"):
+            return None, outcome.content, outcome.to_event()
+        # allow (clean content, or an explicit allow rule): no event.
+        return None, outcome.content, None
+
     def add(
         self,
         target: str,
@@ -438,10 +504,16 @@ class MemoryStore:
             return {"success": False, "error": prov_error}
 
         # Scan the user-visible content (not the provenance trailer) for
-        # injection/exfiltration before accepting.
-        scan_error = _scan_memory_content(content)
+        # injection/exfiltration before accepting. With no guard configured
+        # (default) this is the pre-#315 binary block; a configured guard may
+        # instead warn (store as-is) or strip (store the excised content).
+        if self._guard is not None:
+            self._last_provenance = _make_provenance(source_class, trust_tier)
+        scan_error, content, guard_event = self._gate_write(content)
         if scan_error:
             return {"success": False, "error": scan_error}
+        if guard_event is not None:
+            _log_guard_event("add", target, guard_event)
 
         # The string actually stored on disk carries the optional trailer.
         stored = encode_provenance(content, source_class, trust_tier)
@@ -514,10 +586,15 @@ class MemoryStore:
         if prov_error:
             return {"success": False, "error": prov_error}
 
-        # Scan replacement content for injection/exfiltration
-        scan_error = _scan_memory_content(new_content)
+        # Scan replacement content for injection/exfiltration. Guard-off
+        # (default) = pre-#315 binary block; guard-on may warn or strip.
+        if self._guard is not None:
+            self._last_provenance = _make_provenance(source_class, trust_tier)
+        scan_error, new_content, guard_event = self._gate_write(new_content)
         if scan_error:
             return {"success": False, "error": scan_error}
+        if guard_event is not None:
+            _log_guard_event("replace", target, guard_event)
 
         stored_new = encode_provenance(new_content, source_class, trust_tier)
 

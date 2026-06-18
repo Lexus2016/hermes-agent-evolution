@@ -1131,9 +1131,19 @@ def init_agent(
             agent._memory_nudge_interval = int(mem_config.get("nudge_interval", 10))
             if agent._memory_enabled or agent._user_profile_enabled:
                 from tools.memory_tool import MemoryStore
+                # Memory-poisoning guard (issue #315): None unless memory.guard
+                # is explicitly enabled in config, so the default path keeps the
+                # pre-#315 binary-block write behaviour exactly.
+                _mem_guard = None
+                try:
+                    from agent.memory_guard import build_memory_guard_from_config
+                    _mem_guard = build_memory_guard_from_config(mem_config.get("guard"))
+                except Exception:
+                    _mem_guard = None
                 agent._memory_store = MemoryStore(
                     memory_char_limit=mem_config.get("memory_char_limit", 4000),
                     user_char_limit=mem_config.get("user_char_limit", 1375),
+                    guard=_mem_guard,
                 )
                 agent._memory_store.load_from_disk()
         except Exception:

@@ -1770,6 +1770,23 @@ DEFAULT_CONFIG = {
         "write_approval": False,
         "memory_char_limit": 2200,   # ~800 tokens at 2.75 chars/token
         "user_char_limit": 1375,     # ~500 tokens at 2.75 chars/token
+        # Memory-poisoning guard (issue #315). DEFAULT-OFF: when enabled is
+        # false (default), memory writes behave exactly as before — the
+        # existing binary threat-scan block still applies; no warn/strip.
+        # When enabled, a scan hit is routed through a block/warn/strip action
+        # keyed off the entry's provenance source_class (#316). Rules are tried
+        # in order, first match wins; flagged content with no matching rule
+        # falls back to default_action (block). Actions: block | warn | strip.
+        "guard": {
+            "enabled": False,
+            "default_action": "block",
+            "rules": [
+                # {"action": "block", "source_classes": ["agent_authored"],
+                #  "name": "poisoned-agent-write"},
+                # {"action": "strip", "source_classes": ["external_tool"]},
+                # {"action": "warn",  "source_classes": ["user_input"]},
+            ],
+        },
         # External memory provider plugin (empty = built-in only).
         # Set to a provider name to activate: "openviking", "mem0",
         # "hindsight", "holographic", "retaindb", "byterover".

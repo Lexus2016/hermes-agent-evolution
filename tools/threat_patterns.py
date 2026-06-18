@@ -224,6 +224,40 @@ def scan_for_threats(content: str, scope: str = "context") -> List[str]:
     return findings
 
 
+def scan_for_threat_spans(content: str, scope: str = "strict") -> List[Tuple[int, int, str]]:
+    """Return ``(start, end, pattern_id)`` spans of every threat match in ``content``.
+
+    Reuses the SAME compiled pattern sets as :func:`scan_for_threats` (no new
+    pattern logic) but reports character spans so a caller can excise the
+    offending substring (the memory-guard ``strip`` action, issue #315).
+
+    Invisible-unicode hits are reported as zero-width spans ``(i, i+1, id)``
+    at each offending codepoint so they can be removed too. Spans are returned
+    sorted by start offset; overlapping spans from different patterns are left
+    as-is for the caller to merge.
+    """
+    if not content:
+        return []
+
+    spans: List[Tuple[int, int, str]] = []
+
+    # Invisible unicode — per-occurrence spans (scan_for_threats reports these
+    # once per distinct codepoint; for stripping we need every position).
+    for idx, ch in enumerate(content):
+        if ch in INVISIBLE_CHARS:
+            spans.append((idx, idx + 1, f"invisible_unicode_U+{ord(ch):04X}"))
+
+    patterns = _COMPILED.get(scope)
+    if patterns is None:
+        raise ValueError(f"scan_for_threat_spans: unknown scope {scope!r}")
+    for compiled, pid in patterns:
+        for match in compiled.finditer(content):
+            spans.append((match.start(), match.end(), pid))
+
+    spans.sort(key=lambda s: (s[0], s[1]))
+    return spans
+
+
 def first_threat_message(content: str, scope: str = "strict") -> Optional[str]:
     """Return a human-readable error string for the first threat found, or None.
 
@@ -248,5 +282,6 @@ def first_threat_message(content: str, scope: str = "strict") -> Optional[str]:
 __all__ = [
     "INVISIBLE_CHARS",
     "scan_for_threats",
+    "scan_for_threat_spans",
     "first_threat_message",
 ]
