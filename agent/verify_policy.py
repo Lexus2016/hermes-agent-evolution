@@ -31,11 +31,13 @@ this registry reads successes.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 # Canonical names of the mutating tools that MUST be verifiable. Mirrors the
 # tools called out in #293. Kept local (not imported from tool_guardrails'
@@ -312,6 +314,215 @@ class VerifyPolicy:
         )
 
 
+# ── default verifiers for the built-in mutating tools (#294) ─────────────────
+# #294 ships the *defaults* the registry (#293) was built to hold: a
+# file-existence check for writes/patches and an exit-code (+ optional grep)
+# check for terminal. Each reuses the #293 factories so the contract — pure,
+# never-raises, advisory — is unchanged. ``register_default_verifiers`` is the
+# single entry point a bootstrap/config layer calls; nothing here runs unless
+# the agent has opted in via ``verify_policy_enabled()`` (default OFF).
+
+# Header lines of a V4A patch name the file(s) it touches; the patch arg shape
+# carries no plain ``path`` for these. Mirrors the extraction in
+# ``patch_tool`` (tools/file_tools.py) so the default patch verifier checks the
+# same files the patch claimed to write.
+_V4A_FILE_HEADER = re.compile(
+    r"^\*\*\*\s+(?:Update|Add)\s+File:\s*(.+)$", re.MULTILINE
+)
+
+
+def _patch_path_resolver(call: VerifyCall) -> list[str]:
+    """Resolve the file(s) a ``patch`` call should have produced.
+
+    Two shapes, matching ``patch_tool``:
+
+    * ``mode="replace"`` (default) → the explicit ``path`` arg.
+    * ``mode="patch"`` (V4A) → the ``Update``/``Add File:`` headers inside the
+      ``patch`` content. ``Delete File:`` headers are intentionally skipped —
+      a successful delete means the path should be *absent*, which a
+      file-exists verifier would wrongly flag as a mismatch.
+
+    An unresolvable shape returns ``[]`` → "nothing to check" → confirmed, so a
+    patch form this resolver doesn't model never produces a false mismatch.
+    """
+    paths: list[str] = []
+    explicit = call.args.get("path")
+    if isinstance(explicit, str) and explicit:
+        paths.append(explicit)
+    patch_body = call.args.get("patch")
+    if isinstance(patch_body, str) and patch_body:
+        for match in _V4A_FILE_HEADER.finditer(patch_body):
+            header_path = match.group(1).strip()
+            if header_path:
+                paths.append(header_path)
+    return paths
+
+
+def make_terminal_verifier(
+    *,
+    expect_in_output: str | Sequence[str] | None = None,
+) -> Verifier:
+    """Default ``terminal`` verifier: confirm by the call's own JSON result.
+
+    The ``terminal`` tool returns a JSON string with an ``exit_code`` (int) and
+    an ``output`` (str). Unlike the file/command verifiers, this one does NOT
+    spawn a subprocess — it re-reads what the call already reported, so it adds
+    no latency and cannot itself mutate state. A call is confirmed when:
+
+    * ``exit_code == 0`` (the command the model ran actually succeeded), AND
+    * every string in ``expect_in_output`` (if any) appears in ``output`` — the
+      "grep" half of the #294 contract, letting a registrant assert the command
+      produced the artifact text it promised, not merely exited 0.
+
+    A result that isn't parseable JSON, or carries no ``exit_code``, resolves to
+    "nothing to check" → confirmed: the default verifier must not turn a result
+    it can't read into a false mismatch (that's an ``error``-shaped situation,
+    and this predicate stays advisory). ``expect_in_output`` accepts a single
+    string or a sequence; all must be present.
+    """
+    if expect_in_output is None:
+        needles: tuple[str, ...] = ()
+    elif isinstance(expect_in_output, str):
+        needles = (expect_in_output,)
+    else:
+        needles = tuple(expect_in_output)
+
+    def _verify(call: VerifyCall) -> bool:
+        payload = call.result
+        if not isinstance(payload, str) or not payload.strip():
+            return True  # nothing to read → not this verifier's place to deny
+        try:
+            parsed = json.loads(payload)
+        except (ValueError, TypeError):
+            return True
+        if not isinstance(parsed, dict) or "exit_code" not in parsed:
+            return True
+        if parsed.get("exit_code") != 0:
+            return False
+        if needles:
+            output = parsed.get("output")
+            text = output if isinstance(output, str) else ""
+            return all(needle in text for needle in needles)
+        return True
+
+    return _verify
+
+
+def register_default_verifiers(policy: VerifyPolicy) -> VerifyPolicy:
+    """Register #294's default verifiers for the built-in mutating tools.
+
+    Idempotency: tools that already have a verifier are left untouched, so a
+    skill that registered a custom check before bootstrap wins and a second
+    bootstrap call doesn't stack duplicate defaults. Returns ``policy`` for
+    chaining. After this runs, ``policy.missing_verifier_tools()`` is empty.
+
+    Defaults, one per #294's mapping:
+
+    * ``write_file`` / ``write_to_file`` → file-existence (the write landed).
+    * ``patch`` → file-existence over the resolved target path(s) — explicit
+      ``path`` for replace mode, V4A ``Update``/``Add File:`` headers otherwise.
+    * ``terminal`` → exit-code (== 0) read from the call's own JSON result, the
+      grep half available via ``make_terminal_verifier(expect_in_output=...)``.
+    """
+    if not policy.has_verifier("write_file"):
+        policy.register(
+            "write_file", make_file_exists_verifier(), name="default-file-exists"
+        )
+    if not policy.has_verifier("write_to_file"):
+        policy.register(
+            "write_to_file", make_file_exists_verifier(), name="default-file-exists"
+        )
+    if not policy.has_verifier("patch"):
+        policy.register(
+            "patch",
+            make_file_exists_verifier(path_resolver=_patch_path_resolver),
+            name="default-patch-exists",
+        )
+    if not policy.has_verifier("terminal"):
+        policy.register(
+            "terminal", make_terminal_verifier(), name="default-exit-code"
+        )
+    return policy
+
+
+# ── retry-on-mismatch, capped at 1 (#294) ────────────────────────────────────
+# When a default (or custom) verifier reports a ``mismatch`` and the feature is
+# ON, #294 surfaces the verifier output back to the model and re-runs the
+# mutating call ONCE. A second mismatch aborts to the user — we never loop more
+# than once. This is the only *behavioral* half of Gather-Act-Verify; it stays
+# entirely behind ``verify_policy_enabled()`` so a disabled agent is
+# byte-identical to before. The policy is expressed as a pure decision over a
+# consult outcome + an attempt counter, so it is testable without a live agent.
+
+# How many times a single mutating call may be re-executed after a mismatch.
+MAX_VERIFY_RETRIES = 1
+
+
+@dataclass(frozen=True)
+class RetryDecision:
+    """Pure decision for what to do after consulting a mutating call.
+
+    * ``retry``    — re-execute the call once, then re-consult (only on the
+      first mismatch).
+    * ``abort``    — a mismatch persisted past the retry cap; surface to the
+      user and stop treating the step as complete.
+    * ``feedback`` — the verifier output to append to the tool result the model
+      sees (empty when there is nothing to surface, i.e. ok/skipped).
+    """
+
+    retry: bool
+    abort: bool
+    feedback: str = ""
+
+    @property
+    def acted(self) -> bool:
+        """True when the decision changes turn behaviour (retry or abort)."""
+        return self.retry or self.abort
+
+
+def _verifier_feedback(outcome: VerifyOutcome, *, retrying: bool) -> str:
+    """Human-readable block surfaced to the model for a non-confirming consult."""
+    head = (
+        f"[verify] {outcome.tool_name}: {outcome.verifier} reported "
+        f"{outcome.status} — {outcome.detail}"
+    )
+    if retrying:
+        return head + " Re-running the call once to reconcile the outcome."
+    return (
+        head
+        + " The mutation could not be confirmed after one retry; aborting to the"
+        " user instead of reporting success."
+    )
+
+
+def decide_retry(outcome: VerifyOutcome, attempts: int) -> RetryDecision:
+    """Map a consult ``outcome`` + prior ``attempts`` to a :class:`RetryDecision`.
+
+    ``attempts`` is the number of times the call has ALREADY been re-executed
+    by the retry path (0 on the first consult). The contract:
+
+    * ``ok`` / ``skipped`` / ``error`` → no action. A verifier that couldn't run
+      (``error``) is advisory only; we do not retry on it, matching the #293
+      rule that a broken checker never claims the mutation failed.
+    * first ``mismatch`` (``attempts < MAX_VERIFY_RETRIES``) → ``retry`` with
+      feedback announcing the re-run.
+    * mismatch past the cap (``attempts >= MAX_VERIFY_RETRIES``) → ``abort`` with
+      feedback telling the model the call is being surfaced to the user.
+
+    This is pure: it never runs anything, so the retry cap is enforced in one
+    auditable place and ``MAX_VERIFY_RETRIES == 1`` guarantees at most one re-run.
+    """
+    if outcome.status != "mismatch":
+        return RetryDecision(retry=False, abort=False)
+    if attempts < MAX_VERIFY_RETRIES:
+        return RetryDecision(
+            retry=True, abort=False, feedback=_verifier_feedback(outcome, retrying=True)
+        )
+    return RetryDecision(
+        retry=False, abort=True, feedback=_verifier_feedback(outcome, retrying=False)
+    )
+
+
 # ── advisory consult gate ────────────────────────────────────────────────────
 # The wiring point in the dispatch path is opt-in: the agent behaves identically
 # unless this is explicitly turned on. Default OFF so #293 ships without
@@ -351,10 +562,34 @@ class _AgentVerifyState:
     optional seam. ``outcomes`` accumulates this turn's advisory results purely
     for logging / introspection; it is reset each turn alongside the existing
     ``_turn_failed_file_mutations`` state.
+
+    ``retry_attempts`` (#294) tracks how many times a given mutating call has
+    already been surfaced back to the model after a mismatch, keyed by a stable
+    signature of the call. It enforces the retry cap (:data:`MAX_VERIFY_RETRIES`)
+    across the turn so a call can be surfaced for re-run at most once before the
+    seam aborts to the user. ``defaults_registered`` guards one-time bootstrap
+    of the default verifiers. Both persist across turns (the cap is per call,
+    not per turn) while ``outcomes`` resets.
     """
 
     registry: VerifyPolicy = field(default_factory=VerifyPolicy)
     outcomes: list[VerifyOutcome] = field(default_factory=list)
+    retry_attempts: dict[str, int] = field(default_factory=dict)
+    defaults_registered: bool = False
+
+
+def call_signature(tool_name: str, args: Mapping[str, Any]) -> str:
+    """Stable per-call key for the retry counter.
+
+    Same tool + same args == same logical call, so a re-issued identical
+    mutating call maps to the same counter and is correctly capped. Args are
+    serialized deterministically; unserializable values fall back to ``repr``.
+    """
+    try:
+        arg_repr = json.dumps(args, sort_keys=True, default=repr, ensure_ascii=False)
+    except (TypeError, ValueError):
+        arg_repr = repr(sorted(args.items(), key=lambda kv: kv[0]))
+    return f"{tool_name}::{arg_repr}"
 
 
 __all__ = [
@@ -367,6 +602,12 @@ __all__ = [
     "make_file_exists_verifier",
     "make_command_verifier",
     "make_predicate_verifier",
+    "make_terminal_verifier",
+    "register_default_verifiers",
     "split_command",
     "verify_policy_enabled",
+    "MAX_VERIFY_RETRIES",
+    "RetryDecision",
+    "decide_retry",
+    "call_signature",
 ]
