@@ -684,14 +684,19 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
                 except Exception as _ver_err:
                     logging.debug("file-mutation verifier record failed: %s", _ver_err)
 
-                # Gather-Act-Verify advisory consult (#293). Opt-in, default
-                # off; runs a registered verifier against a *successful*
-                # mutating call and records the outcome. Never retries/blocks
-                # — that is #294. The helper is fully self-gating.
+                # Gather-Act-Verify consult (#293 seam, #294 retry). Opt-in,
+                # default off; runs a registered verifier against a *successful*
+                # mutating call. On mismatch the helper returns feedback text to
+                # surface to the model (retry once, then abort to user); it
+                # never re-executes the tool here. When the feature is off it
+                # returns None and this is byte-identical to #293. Only a plain
+                # string result can carry the appended feedback.
                 try:
-                    agent._consult_verify_policy(
+                    _vp_feedback = agent._consult_verify_policy(
                         function_name, function_args, function_result, is_error,
                     )
+                    if _vp_feedback and isinstance(function_result, str):
+                        function_result += "\n\n" + _vp_feedback
                 except Exception as _vp_err:
                     logging.debug("verify-policy consult failed: %s", _vp_err)
 
@@ -1345,14 +1350,17 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
             except Exception as _ver_err:
                 logging.debug("file-mutation verifier record failed: %s", _ver_err)
 
-            # Gather-Act-Verify advisory consult (#293) — see the concurrent
-            # path for rationale. Opt-in, default off; verify-after-success,
-            # never retries/blocks (#294). Both dispatch paths feed the same
-            # advisory seam.
+            # Gather-Act-Verify consult (#293 seam, #294 retry) — see the
+            # concurrent path for rationale. Opt-in, default off. On mismatch
+            # the helper returns feedback to surface to the model (retry once,
+            # then abort to user); off → None → byte-identical to #293. Both
+            # dispatch paths feed the same seam.
             try:
-                agent._consult_verify_policy(
+                _vp_feedback = agent._consult_verify_policy(
                     function_name, function_args, function_result, _is_error_result,
                 )
+                if _vp_feedback and isinstance(function_result, str):
+                    function_result += "\n\n" + _vp_feedback
             except Exception as _vp_err:
                 logging.debug("verify-policy consult failed: %s", _vp_err)
 

@@ -2527,49 +2527,93 @@ class AIAgent:
         args: Dict[str, Any],
         result: Any,
         is_error: bool,
-    ) -> None:
-        """Advisory Gather-Act-Verify consult after a *successful* mutating call.
+    ) -> Optional[str]:
+        """Gather-Act-Verify consult after a *successful* mutating call.
 
-        Issue #293. Opt-in and side-effect free: when the verify-policy feature
-        is enabled (default OFF) and a verifier is registered for ``tool_name``,
-        run it and record/log the structured :class:`VerifyOutcome`. This NEVER
-        retries, blocks, or rewrites the call — retry-on-mismatch is the sibling
-        #294. Distinct from the turn-end file-mutation *failure* footer: that
-        surfaces writes that FAILED; this verifies writes that SUCCEEDED.
+        Issue #293 shipped the advisory consult; issue #294 adds the default
+        verifiers and the **retry-on-mismatch** behaviour wired here. When the
+        feature is enabled (default OFF):
 
-        Gated so the agent behaves identically when the feature is off OR no
-        verifier is registered. Any error is swallowed — a verifier can never
-        affect the turn.
+        1. lazily register the default verifiers (file-exists for writes/patch,
+           exit-code for terminal) the first time, and consult them;
+        2. on ``ok`` / ``skipped`` / ``error`` → behave exactly as #293 (log,
+           nothing surfaced) and return ``None``;
+        3. on the **first** ``mismatch`` for this call → surface the verifier
+           output to the model by returning a feedback string the dispatch path
+           appends to the tool result, and bump the per-call attempt counter so
+           the next identical call is the (capped) retry;
+        4. on a ``mismatch`` past :data:`MAX_VERIFY_RETRIES` (==1) → return an
+           **abort** feedback string telling the model not to claim success and
+           to surface the failure to the user.
+
+        The return value is the only behavioral change, and it only ever appends
+        a tool-result observation (preserving prompt caching — #282 item 4). It
+        NEVER re-executes the tool in-process (so a patch can't be double-applied)
+        and NEVER loops: the cap is enforced by the pure :func:`decide_retry`.
+        Distinct from the turn-end file-mutation *failure* footer: that surfaces
+        writes that FAILED; this verifies writes that SUCCEEDED.
+
+        Gated so the agent behaves byte-identically when the feature is off OR no
+        verifier is registered (returns ``None``). Any error is swallowed — a
+        verifier can never affect the turn.
         """
         if is_error:
-            return  # only verify calls the tool reported as successful
+            return None  # only verify calls the tool reported as successful
         try:
-            from agent.verify_policy import verify_policy_enabled
+            from agent.verify_policy import (
+                call_signature,
+                decide_retry,
+                register_default_verifiers,
+                verify_policy_enabled,
+            )
             if not verify_policy_enabled():
-                return
+                return None
             state = getattr(self, "_verify_policy_state", None)
-            if state is None or not state.registry.has_verifier(tool_name):
-                return
+            if state is None:
+                return None
+            # #294: register the default verifiers once, behind the gate. A
+            # custom verifier registered earlier by a skill is preserved
+            # (register_default_verifiers is idempotent / non-clobbering).
+            if not state.defaults_registered:
+                register_default_verifiers(state.registry)
+                state.defaults_registered = True
+            if not state.registry.has_verifier(tool_name):
+                return None
             outcome = state.registry.consult(tool_name, args, result)
             if outcome.status == "skipped":
-                return
+                return None
             state.outcomes.append(outcome)
-            if outcome.status == "mismatch":
-                logger.warning(
-                    "verify-policy: %s did not confirm %s (%s)",
-                    outcome.verifier, tool_name, outcome.detail,
-                )
-            elif outcome.status == "error":
+            if outcome.status == "error":
                 logger.debug(
                     "verify-policy: verifier %s errored for %s: %s",
                     outcome.verifier, tool_name, outcome.detail,
                 )
-            else:
+                return None
+            if outcome.status == "ok":
                 logger.info(
                     "verify-policy: %s confirmed %s", outcome.verifier, tool_name,
                 )
+                return None
+
+            # outcome.status == "mismatch": apply the capped retry policy.
+            sig = call_signature(tool_name, args)
+            attempts = state.retry_attempts.get(sig, 0)
+            decision = decide_retry(outcome, attempts)
+            if decision.retry:
+                state.retry_attempts[sig] = attempts + 1
+                logger.warning(
+                    "verify-policy: %s did not confirm %s (%s) — surfacing for retry",
+                    outcome.verifier, tool_name, outcome.detail,
+                )
+            elif decision.abort:
+                logger.warning(
+                    "verify-policy: %s still did not confirm %s after retry — aborting to user",
+                    outcome.verifier, tool_name,
+                )
+            return decision.feedback or None
         except Exception as _vp_err:
             logger.debug("verify-policy consult failed: %s", _vp_err)
+            return None
 
     def _file_mutation_verifier_enabled(self) -> bool:
         """Check whether the per-turn file-mutation verifier footer is on.
