@@ -149,6 +149,11 @@ def build_turn_context(
     # an active plan (if any) is re-emitted at the start of each turn. Inert
     # unless ``agent._active_plan`` is set — see ``_emit_plan_before_tool_calls``.
     agent._plan_emitted_for_turn = False
+    # Plan-and-execute lookahead (#291): clear the per-turn step-progress cursor
+    # so divergence checking starts fresh each turn. Inert unless an active plan
+    # is set — see ``_check_step_divergence_after_tool_calls``. Rebuilt lazily on
+    # first use against the current ``agent._active_plan``.
+    agent._plan_progress = None
 
     # Pre-turn connection health check: clean up dead TCP connections.
     if agent.api_mode != "anthropic_messages":
