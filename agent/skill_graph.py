@@ -116,17 +116,46 @@ def extract_skill_edges(frontmatter: Dict[str, Any]) -> Dict[str, List[str]]:
     return edges
 
 
+def extract_skill_provides(frontmatter: Dict[str, Any]) -> List[str]:
+    """Extract the capabilities a skill declares it ``provides`` (issue #297).
+
+    Reads ``metadata.hermes.graph.provides`` — a flat list of capability names.
+    A capability is an *abstract ability* (e.g. ``web-search``, ``pdf-export``),
+    NOT a skill name: several skills may provide the same capability, and a
+    ``requires`` edge may name either a concrete skill or a capability. Capability
+    ``requires`` are satisfied when some skill in the graph provides that
+    capability (see :meth:`SkillGraph.validate`). Malformed structures yield an
+    empty list rather than raising, mirroring :func:`extract_skill_edges`.
+    """
+    metadata = frontmatter.get("metadata")
+    if not isinstance(metadata, dict):
+        return []
+    hermes = metadata.get("hermes")
+    if not isinstance(hermes, dict):
+        return []
+    graph = hermes.get("graph")
+    if not isinstance(graph, dict):
+        return []
+    return _normalize_edge_targets(graph.get("provides"))
+
+
 @dataclass
 class SkillNode:
-    """A single skill in the graph and its declared outbound edges."""
+    """A single skill in the graph: its declared outbound edges and the
+    capabilities it ``provides``."""
 
     name: str
     category: Optional[str] = None
     path: Optional[str] = None
     edges: Dict[str, List[str]] = field(default_factory=dict)
+    provides: List[str] = field(default_factory=list)
 
     def targets(self, edge_type: str) -> List[str]:
         return list(self.edges.get(edge_type, []))
+
+    def provided(self) -> List[str]:
+        """Capabilities this skill declares it provides."""
+        return list(self.provides)
 
 
 @dataclass
@@ -148,6 +177,11 @@ class GraphValidation:
     ``conflicts`` are reported as facts — two skills declaring
     ``conflicts-with`` each other is something the agent must avoid co-loading,
     but it does not make the graph invalid.
+
+    ``capability_conflicts`` (issue #299) report capabilities that more than one
+    skill ``provides``. That is a load-time *warning*, not an error: overlapping
+    providers are often legitimate (interchangeable implementations), but the
+    agent should know that resolving such a capability is ambiguous.
     """
 
     ok: bool
@@ -157,6 +191,7 @@ class GraphValidation:
     # Warnings (do NOT drive ok):
     missing_warnings: List[Tuple[str, str, str]]  # (source, edge_type, missing_target)
     conflicts: List[Tuple[str, str]]  # sorted (a, b) pairs
+    capability_conflicts: List[Tuple[str, List[str]]]  # (capability, sorted providers)
 
     @property
     def missing_targets(self) -> List[Tuple[str, str, str]]:
@@ -178,6 +213,10 @@ class GraphValidation:
                 for (s, e, t) in self.missing_warnings
             ],
             "conflicts": [{"a": a, "b": b} for (a, b) in self.conflicts],
+            "capability_conflicts": [
+                {"capability": cap, "providers": providers}
+                for (cap, providers) in self.capability_conflicts
+            ],
         }
 
 
@@ -219,6 +258,7 @@ class SkillGraph:
                 category=categories.get(name),
                 path=paths.get(name),
                 edges=extract_skill_edges(frontmatter or {}),
+                provides=extract_skill_provides(frontmatter or {}),
             )
         return cls(nodes)
 
@@ -255,6 +295,7 @@ class SkillGraph:
                     category=category,
                     path=rel,
                     edges=extract_skill_edges(frontmatter),
+                    provides=extract_skill_provides(frontmatter),
                 )
         return cls(nodes)
 
@@ -293,8 +334,17 @@ class SkillGraph:
           * a ``composes-with`` / ``conflicts-with`` / ``deprecates`` edge points
             at a skill not in the graph — these are advisory/governance edges
             that may legitimately reference skills in another profile or plugin;
-          * declared ``conflicts-with`` pairs.
+          * declared ``conflicts-with`` pairs;
+          * a capability ``provided`` by more than one skill (ambiguous resolution).
+
+        A ``requires`` target is satisfied (issue #297) when it names either a
+        skill in the graph OR a capability some skill ``provides``; only a target
+        that is neither is a missing-requires error. (Capability ``requires`` are
+        resolved for validation/reject here; expanding them into the load
+        ``closure``/topological order — where the provider choice may be
+        ambiguous — is deferred to the topological-loader increment, #298.)
         """
+        caps = self._capabilities()
         missing_requires: List[Tuple[str, str]] = []
         missing_warnings: List[Tuple[str, str, str]] = []
         for node in self._nodes.values():
@@ -303,12 +353,15 @@ class SkillGraph:
                     if target in self._nodes:
                         continue
                     if etype == "requires":
+                        if target in caps:
+                            continue  # satisfied by a capability provider
                         missing_requires.append((node.name, target))
                     else:
                         missing_warnings.append((node.name, etype, target))
 
         cycles = self._find_requires_cycles()
         conflicts = self._collect_conflicts()
+        capability_conflicts = self._collect_capability_conflicts()
 
         ok = not missing_requires and not cycles
         # Sort for deterministic output.
@@ -321,6 +374,7 @@ class SkillGraph:
             requires_cycles=cycles,
             missing_warnings=missing_warnings,
             conflicts=conflicts,
+            capability_conflicts=capability_conflicts,
         )
 
     def _requires_targets(self, name: str) -> List[str]:
@@ -391,6 +445,38 @@ class SkillGraph:
                 pair = tuple(sorted((node.name, target)))
                 pairs.add(pair)  # type: ignore[arg-type]
         return list(pairs)
+
+    def _collect_capability_conflicts(self) -> List[Tuple[str, List[str]]]:
+        """Capabilities provided by more than one skill (issue #299 warning)."""
+        return [
+            (cap, providers)
+            for cap, providers in self.capability_surface().items()
+            if len(providers) > 1
+        ]
+
+    # ── Capabilities (governance surface, issue #299) ─────────────────────
+
+    def _capabilities(self) -> Set[str]:
+        """Every capability provided by any skill in the graph."""
+        caps: Set[str] = set()
+        for node in self._nodes.values():
+            caps.update(node.provided())
+        return caps
+
+    def capability_surface(self) -> Dict[str, List[str]]:
+        """The resolved "what can I do?" surface: capability -> providing skills.
+
+        A capability is an abstract ability declared via ``provides``; one or
+        more skills may provide it.  Returns a dict keyed by capability name
+        (sorted) with deterministically sorted provider-skill lists.  Capabilities
+        with two or more providers are also surfaced by :meth:`validate` as
+        ``capability_conflicts`` (ambiguous resolution is a load-time warning).
+        """
+        surface: Dict[str, Set[str]] = {}
+        for node in self._nodes.values():
+            for cap in node.provided():
+                surface.setdefault(cap, set()).add(node.name)
+        return {cap: sorted(skills) for cap, skills in sorted(surface.items())}
 
     # ── Queries ───────────────────────────────────────────────────────────
 

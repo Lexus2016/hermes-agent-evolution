@@ -908,14 +908,16 @@ def _build_skill_graph():
 def skill_relationships(name: str = None) -> str:
     """Report the dependency/composition/governance graph around skill(s).
 
-    With *name*: returns that skill's declared edges, its transitive
-    ``requires`` closure (the minimal set to load it), and its blast radius
-    (dependents / conflicts / composition partners).  Without *name*: validates
-    the whole graph (missing edge targets, ``requires`` cycles, conflicts) and
-    returns the dependency-first topological order.
+    With *name*: returns that skill's declared edges, the capabilities it
+    ``provides``, its transitive ``requires`` closure (the minimal set to load
+    it), and its blast radius (dependents / conflicts / composition partners).
+    Without *name*: validates the whole graph (missing edge targets, ``requires``
+    cycles, conflicts, capability conflicts), returns the dependency-first
+    topological order, and the resolved capability surface (``what can I do?`` —
+    capability -> providing skills).
 
     Returns a JSON string.  This is the agent-facing surface of the
-    Skills-as-Graph layer (issue #246, first increment).
+    Skills-as-Graph layer (issue #246; capability/governance increment #297+#299).
     """
     try:
         graph = _build_skill_graph()
@@ -932,11 +934,13 @@ def skill_relationships(name: str = None) -> str:
                     },
                     ensure_ascii=False,
                 )
+            node = graph.node(name)
             return json.dumps(
                 {
                     "success": True,
                     "skill": name,
                     "edges": graph.edges_of(name),
+                    "provides": node.provided() if node else [],
                     "closure": graph.closure(name),
                     "blast_radius": graph.blast(name),
                     "graph_ok": validation.ok,
@@ -950,6 +954,7 @@ def skill_relationships(name: str = None) -> str:
                 "skill_count": len(graph),
                 "validation": validation.as_dict(),
                 "topological_order": graph.topological_order(),
+                "capability_surface": graph.capability_surface(),
             },
             ensure_ascii=False,
         )
