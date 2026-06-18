@@ -5239,6 +5239,65 @@ class AIAgent:
         if emit_plan(plan, emit=self._emit_status):
             self._plan_emitted_for_turn = True
 
+    def _plan_mode_enabled(self) -> bool:
+        """Whether plan-and-execute mode is opted in. **Default: off** (#292).
+
+        The final child of the plan-and-execute decomposition (#283). #290/#291
+        shipped the emission and divergence seams *inert* — they self-gate to a
+        no-op until ``self._active_plan`` is set, and nothing in the default loop
+        sets one. This flag is the opt-in that allows it to be set.
+
+        Resolution lives in :func:`agent.plan_mode.plan_mode_enabled`:
+        ``HERMES_PLAN_MODE`` env var overrides the ``plan_mode`` config key, and
+        the default is ``False`` — so with no opt-in the agent's behavior is
+        byte-identical to the pre-plan-mode baseline. Exposed as a method so
+        tests (and the eval harness) can patch a single seam, mirroring
+        ``_file_mutation_verifier_enabled``.
+        """
+        try:
+            from agent.plan_mode import plan_mode_enabled
+            return plan_mode_enabled()
+        except Exception:
+            # A flag-read failure must never break a turn — fall back to off,
+            # the behavior-preserving default.
+            return False
+
+    def _maybe_activate_plan_mode(self, user_message: str) -> None:
+        """Build and arm an active plan for this run — only when plan mode is on.
+
+        This is the single bridge between the opt-in flag and the otherwise-inert
+        #290/#291 seams. When :meth:`_plan_mode_enabled` is ``False`` (the
+        default) this returns immediately without touching ``self._active_plan``,
+        so the emission and divergence hooks stay no-ops and the agent behaves
+        exactly as it did before plan mode existed.
+
+        When the flag is on, it derives a deterministic, model-free plan from the
+        user's task (:func:`agent.plan_mode.build_stub_plan`) and assigns it to
+        ``self._active_plan`` (re-arming per-run emission). That assignment is
+        what flips ``_emit_plan_before_tool_calls`` and
+        ``_check_step_divergence_after_tool_calls`` live. A real LLM planner is a
+        drop-in replacement behind this same assignment.
+
+        Idempotent per run: if a plan is already active (e.g. a multi-turn
+        conversation, or a replanner already swapped one in) it is left alone.
+        """
+        if not self._plan_mode_enabled():
+            return
+        if getattr(self, "_active_plan", None) is not None:
+            return
+        try:
+            from agent.plan_mode import build_stub_plan
+            plan = build_stub_plan(user_message)
+        except Exception:
+            plan = None
+        if plan is None:
+            return
+        self._active_plan = plan
+        # Re-arm emission so the freshly built plan prints before this run's
+        # first tool dispatch, and reset the progress cursor for the new plan.
+        self._plan_emitted_for_turn = False
+        self._plan_progress = None
+
     def _check_step_divergence_after_tool_calls(self, messages: list) -> None:
         """Lookahead replan check, run once after a turn's tool dispatch (#291).
 

@@ -601,6 +601,14 @@ def _run_conversation_impl(
             should_review_memory=_should_review_memory,
         )
 
+    # Plan-and-execute opt-in (#292, final child of #283): when plan mode is
+    # explicitly enabled (HERMES_PLAN_MODE env / plan_mode config — default OFF),
+    # build a plan from this run's task and arm it on ``agent._active_plan``,
+    # which flips the otherwise-inert #290 emission and #291 divergence hooks
+    # live. With the flag off this is a no-op and behavior is byte-identical to
+    # the ReAct baseline. See ``AIAgent._maybe_activate_plan_mode``.
+    agent._maybe_activate_plan_mode(user_message)
+
     while (api_call_count < agent.max_iterations and agent.iteration_budget.remaining > 0) or agent._budget_grace_call:
         # Reset per-turn checkpoint dedup so each iteration can take one snapshot
         agent._checkpoint_mgr.new_turn()
