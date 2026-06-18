@@ -684,6 +684,17 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
                 except Exception as _ver_err:
                     logging.debug("file-mutation verifier record failed: %s", _ver_err)
 
+                # Gather-Act-Verify advisory consult (#293). Opt-in, default
+                # off; runs a registered verifier against a *successful*
+                # mutating call and records the outcome. Never retries/blocks
+                # — that is #294. The helper is fully self-gating.
+                try:
+                    agent._consult_verify_policy(
+                        function_name, function_args, function_result, is_error,
+                    )
+                except Exception as _vp_err:
+                    logging.debug("verify-policy consult failed: %s", _vp_err)
+
             if not blocked and agent.tool_progress_callback:
                 try:
                     agent.tool_progress_callback(
@@ -1333,6 +1344,17 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
                 )
             except Exception as _ver_err:
                 logging.debug("file-mutation verifier record failed: %s", _ver_err)
+
+            # Gather-Act-Verify advisory consult (#293) — see the concurrent
+            # path for rationale. Opt-in, default off; verify-after-success,
+            # never retries/blocks (#294). Both dispatch paths feed the same
+            # advisory seam.
+            try:
+                agent._consult_verify_policy(
+                    function_name, function_args, function_result, _is_error_result,
+                )
+            except Exception as _vp_err:
+                logging.debug("verify-policy consult failed: %s", _vp_err)
 
         if not _execution_blocked and agent.tool_progress_callback:
             try:
