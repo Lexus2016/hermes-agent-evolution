@@ -31,6 +31,12 @@ Design constraints (this changes how skills load for EVERY profile):
   :func:`ordered_skill_files` raises :class:`SkillRequiresCycleError` naming the
   cycle so the caller can log it and fall back to the flat loader rather than
   silently loading in an arbitrary order.
+* **Warn on capability conflicts.**  When the graph reports a capability
+  provided by two or more loaded skills (``GraphValidation.capability_conflicts``,
+  issue #299), :func:`ordered_skill_files` logs a load-time WARNING naming the
+  capability and its providers.  This is advisory only — it never changes the
+  load order or the returned file set, and (being on the v2 path) it never fires
+  when the flag is off.
 """
 
 from __future__ import annotations
@@ -38,7 +44,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from agent.skill_graph import SkillGraph
 from agent.skill_utils import iter_skill_index_files, parse_frontmatter
@@ -104,6 +110,37 @@ def v2_enabled() -> bool:
         return False
 
 
+def _warn_capability_conflicts(
+    validation, skills_dir: Path
+) -> List[Tuple[str, List[str]]]:
+    """Log a load-time warning for each ambiguously-provided capability (#299).
+
+    A *capability conflict* is a capability (an abstract ability declared via
+    ``provides``) that two or more loaded skills offer — resolving it is then
+    ambiguous.  This is advisory, not an error: interchangeable providers are
+    often legitimate.  The detection itself lives in
+    :meth:`agent.skill_graph.SkillGraph.validate`
+    (``GraphValidation.capability_conflicts``); this only surfaces the result as
+    a log line at load time, the remaining slice of #299.
+
+    Takes the already-computed :class:`~agent.skill_graph.GraphValidation` so it
+    reuses the graph the caller already built — it never rebuilds anything.
+    Returns the conflicts it warned about (empty when there are none), purely so
+    callers/tests can introspect; the side effect is the log line(s).
+    """
+    conflicts = validation.capability_conflicts
+    for capability, providers in conflicts:
+        logger.warning(
+            "skills_loader_v2: capability %r is provided by %d skills (%s) in "
+            "%s — resolution is ambiguous (capability conflict)",
+            capability,
+            len(providers),
+            ", ".join(providers),
+            skills_dir,
+        )
+    return conflicts
+
+
 def _name_for_skill_file(skill_file: Path, skills_dir: Path) -> str:
     """Resolve the graph node name for a ``SKILL.md`` path.
 
@@ -154,6 +191,11 @@ def ordered_skill_files(skills_dir: Path) -> List[Path]:
     validation = graph.validate()
     if validation.requires_cycles:
         raise SkillRequiresCycleError(validation.requires_cycles)
+
+    # Load-time governance warning (issue #299): a capability provided by 2+
+    # skills is ambiguous to resolve. Advisory only — it never changes the load
+    # order or the returned file set. Reuses the validation computed just above.
+    _warn_capability_conflicts(validation, skills_dir)
 
     # Map each discovered file to its graph node name. A name may map to several
     # files if two skill dirs share a frontmatter name; the graph keeps only the
