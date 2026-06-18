@@ -24,6 +24,7 @@ from agent.skill_graph import (
     EDGE_TYPES,
     SkillGraph,
     extract_skill_edges,
+    extract_skill_provides,
 )
 
 
@@ -447,6 +448,106 @@ def test_to_dot_conflict_rendered_once():
     assert dot.count('label="conflicts-with"') == 1
 
 
+# ── provides / capabilities (issue #297 + #299) ─────────────────────────────
+
+
+def test_extract_provides_empty_and_malformed():
+    assert extract_skill_provides({}) == []
+    assert extract_skill_provides({"metadata": "oops"}) == []
+    assert extract_skill_provides({"metadata": {"hermes": {"graph": "oops"}}}) == []
+
+
+def test_extract_provides_list_and_string_forms():
+    fm = _fm(provides=["web-search", "pdf-export"])
+    assert extract_skill_provides(fm) == ["web-search", "pdf-export"]
+    fm2 = {"metadata": {"hermes": {"graph": {"provides": "a, b"}}}}
+    assert extract_skill_provides(fm2) == ["a", "b"]
+
+
+def test_node_carries_provides():
+    g = _graph({"searcher": _fm(provides=["web-search"]), "plain": {}})
+    assert g.node("searcher").provided() == ["web-search"]
+    assert g.node("plain").provided() == []
+
+
+def test_capability_surface_maps_capability_to_providers():
+    g = _graph(
+        {
+            "brave": _fm(provides=["web-search"]),
+            "google": _fm(provides=["web-search"]),
+            "pdfkit": _fm(provides=["pdf-export"]),
+            "plain": {},
+        }
+    )
+    surface = g.capability_surface()
+    assert surface == {
+        "pdf-export": ["pdfkit"],
+        "web-search": ["brave", "google"],  # sorted providers
+    }
+
+
+def test_requires_satisfied_by_capability_provider():
+    # `report` requires the `web-search` capability, provided by `brave`.
+    g = _graph(
+        {
+            "report": _fm(requires=["web-search"]),
+            "brave": _fm(provides=["web-search"]),
+        }
+    )
+    v = g.validate()
+    assert v.ok  # capability requirement is satisfied, not a missing target
+    assert v.missing_requires == []
+
+
+def test_requires_capability_with_no_provider_is_missing():
+    g = _graph({"report": _fm(requires=["web-search"])})
+    v = g.validate()
+    assert not v.ok
+    assert ("report", "web-search") in v.missing_requires
+
+
+def test_capability_provided_twice_is_a_warning_not_error():
+    g = _graph(
+        {
+            "brave": _fm(provides=["web-search"]),
+            "google": _fm(provides=["web-search"]),
+        }
+    )
+    v = g.validate()
+    assert v.ok  # ambiguous provider is a warning, graph stays valid
+    assert ("web-search", ["brave", "google"]) in v.capability_conflicts
+
+
+def test_single_provider_is_not_a_capability_conflict():
+    g = _graph({"brave": _fm(provides=["web-search"]), "other": {}})
+    v = g.validate()
+    assert v.capability_conflicts == []
+
+
+def test_validation_as_dict_includes_capability_conflicts():
+    g = _graph(
+        {"a": _fm(provides=["cap"]), "b": _fm(provides=["cap"])}
+    )
+    d = g.validate().as_dict()
+    assert d["capability_conflicts"] == [
+        {"capability": "cap", "providers": ["a", "b"]}
+    ]
+
+
+def test_capability_requires_does_not_pollute_skill_closure():
+    # closure stays skill-name based; a capability requirement is validated but
+    # not auto-expanded into the load closure (deferred to #298).
+    g = _graph(
+        {
+            "report": _fm(requires=["web-search", "lib"]),
+            "lib": {},
+            "brave": _fm(provides=["web-search"]),
+        }
+    )
+    assert g.validate().ok
+    assert g.closure("report") == ["lib", "report"]
+
+
 # ── from_skills_dirs + skill_relationships wiring ───────────────────────────
 
 
@@ -501,8 +602,13 @@ def test_skill_relationships_tool_over_real_dir(tmp_path, monkeypatch):
     """End-to-end: the tools.skills_tool.skill_relationships agent surface."""
     home = tmp_path / ".hermes"
     skills = home / "skills"
-    _write_skill(skills, "cat", "app", graph_block="      requires: [lib]")
-    _write_skill(skills, "cat", "lib")
+    _write_skill(
+        skills,
+        "cat",
+        "app",
+        graph_block="      requires: [lib]\n      provides: [report-gen]",
+    )
+    _write_skill(skills, "cat", "lib", graph_block="      provides: [data-access]")
 
     monkeypatch.setenv("HERMES_HOME", str(home))
     import importlib
@@ -521,12 +627,19 @@ def test_skill_relationships_tool_over_real_dir(tmp_path, monkeypatch):
     assert whole["topological_order"].index("lib") < whole[
         "topological_order"
     ].index("app")
+    # Capability surface ("what can I do?") is exposed.
+    assert whole["capability_surface"] == {
+        "data-access": ["lib"],
+        "report-gen": ["app"],
+    }
+    assert whole["validation"]["capability_conflicts"] == []
 
     # Single-skill mode.
     one = json.loads(mod.skill_relationships("app"))
     assert one["success"] is True
     assert one["skill"] == "app"
     assert one["edges"]["requires"] == ["lib"]
+    assert one["provides"] == ["report-gen"]
     assert one["closure"] == ["lib", "app"]
     assert one["blast_radius"] == {
         "dependents": [],
