@@ -621,6 +621,59 @@ def _get_inherit_mcp_toolsets() -> bool:
     return is_truthy_value(cfg.get("inherit_mcp_toolsets"), default=True)
 
 
+def _get_shallow_retry_budget() -> int:
+    """Read delegation.shallow_retry_max — bounded auto-retry budget (issue #323).
+
+    Number of times a *shallow* delegation (child completed with ZERO tool
+    calls) is automatically re-run with an escalated goal before giving up
+    and surfacing the shallow result to the parent. Default 1 (one retry);
+    0 disables auto-retry entirely (legacy advise-only behaviour); clamped
+    to ``_SHALLOW_RETRY_BUDGET_MAX`` so a misconfigured value can never make
+    delegation loop unbounded. Also honours the env override
+    ``DELEGATION_SHALLOW_RETRY_MAX`` for ops without a config file.
+
+    This budget only ever applies on an already-detected shallow result, so
+    a healthy first-try (tool-using) delegation is never slowed by it.
+    """
+    cfg = _load_config()
+    val = cfg.get("shallow_retry_max")
+    if val is None:
+        env_val = os.getenv("DELEGATION_SHALLOW_RETRY_MAX")
+        val = env_val if env_val not in (None, "") else None
+    if val is None:
+        return _DEFAULT_SHALLOW_RETRY_BUDGET
+    try:
+        ival = int(val)
+    except (TypeError, ValueError):
+        logger.warning(
+            "delegation.shallow_retry_max=%r is not a valid integer; using default %d",
+            val,
+            _DEFAULT_SHALLOW_RETRY_BUDGET,
+        )
+        return _DEFAULT_SHALLOW_RETRY_BUDGET
+    return max(0, min(_SHALLOW_RETRY_BUDGET_MAX, ival))
+
+
+def _escalate_shallow_goal(original_goal: str, attempt: int) -> str:
+    """Build an escalated re-delegation goal referencing the no-tool failure.
+
+    Prepends a hard, unambiguous instruction that the child's previous attempt
+    produced narrative text without executing any tool, and that its FIRST
+    action this time must be a tool call. The original goal is preserved
+    verbatim below the escalation so the child still knows what to do.
+    """
+    return (
+        "RETRY (escalated): your PREVIOUS attempt at this task FAILED — you "
+        "returned narrative text and did NOT execute any tool. Describing a "
+        "tool call is not the same as making one. This time your FIRST action "
+        "MUST be a real tool call; do not output any prose before it. Do the "
+        "actual work with your tools and report the concrete artifacts "
+        f"(file contents, search results, command output).\n\n"
+        f"(retry {attempt}/{_SHALLOW_RETRY_BUDGET_MAX})\n\n"
+        f"ORIGINAL TASK:\n{original_goal}"
+    )
+
+
 def _is_mcp_toolset_name(name: str) -> bool:
     """Return True for canonical MCP toolsets and their registered aliases."""
     if not name:
@@ -697,6 +750,17 @@ _HEARTBEAT_INTERVAL = 30  # seconds between parent activity heartbeats during de
 _HEARTBEAT_STALE_CYCLES_IDLE = 15  # 15 * 30s = 450s idle between turns → stale
 _HEARTBEAT_STALE_CYCLES_IN_TOOL = 40  # 40 * 30s = 1200s stuck on same tool → stale
 DEFAULT_TOOLSETS = ["terminal", "file", "web"]
+
+# Shallow-delegation auto-retry (issue #323). When a child completes WITHOUT
+# making any tool call (the "narrative text instead of tool execution" failure
+# mode), the round-trip is already wasted — re-delegating once with an
+# escalated goal recovers it without spending the parent's reasoning budget on
+# a manual re-delegate. Strictly bounded: at most _SHALLOW_RETRY_BUDGET_MAX
+# extra runs, and only ever on an already-detected shallow result (a healthy,
+# tool-using delegation never enters this path). Operators tune it via
+# delegation.shallow_retry_max (0 disables; clamped to the ceiling).
+_SHALLOW_RETRY_BUDGET_MAX = 2  # hard ceiling on auto-retries per child
+_DEFAULT_SHALLOW_RETRY_BUDGET = 1  # default: one escalated retry
 
 
 # ---------------------------------------------------------------------------
@@ -1547,6 +1611,84 @@ def _dump_subagent_timeout_diagnostic(
         return None
 
 
+def _derive_child_outcome(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Derive status, summary, and tool_trace from a child run_conversation result.
+
+    Pure function (no agent/IO) so it can be applied to BOTH the initial run
+    and any shallow-retry re-run (issue #323) without duplicating the parsing
+    logic. Returns a dict with: summary, completed, interrupted, api_calls,
+    status, tool_trace, exit_reason.
+    """
+    summary = result.get("final_response") or ""
+    completed = result.get("completed", False)
+    interrupted = result.get("interrupted", False)
+    api_calls = result.get("api_calls", 0)
+
+    if interrupted:
+        status = "interrupted"
+    elif summary:
+        # A summary means the subagent produced usable output. exit_reason
+        # ("completed" vs "max_iterations") already tells the parent *how*
+        # the task ended.
+        status = "completed"
+    else:
+        status = "failed"
+
+    # Build tool trace from conversation messages (already in memory).
+    # Uses tool_call_id to correctly pair parallel tool calls with results.
+    tool_trace: list[Dict[str, Any]] = []
+    trace_by_id: Dict[str, Dict[str, Any]] = {}
+    messages = result.get("messages") or []
+    if isinstance(messages, list):
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("role") == "assistant":
+                for tc in msg.get("tool_calls") or []:
+                    fn = tc.get("function", {})
+                    entry_t = {
+                        "tool": fn.get("name", "unknown"),
+                        "args_bytes": len(fn.get("arguments", "")),
+                    }
+                    tool_trace.append(entry_t)
+                    tc_id = tc.get("id")
+                    if tc_id:
+                        trace_by_id[tc_id] = entry_t
+            elif msg.get("role") == "tool":
+                content = _stringify_tool_content(msg.get("content", ""))
+                is_error = _looks_like_error_output(content)
+                result_meta = {
+                    "result_bytes": len(content),
+                    "status": "error" if is_error else "ok",
+                }
+                # Match by tool_call_id for parallel calls
+                tc_id = msg.get("tool_call_id")
+                target = trace_by_id.get(tc_id) if tc_id else None
+                if target is not None:
+                    target.update(result_meta)
+                elif tool_trace:
+                    # Fallback for messages without tool_call_id
+                    tool_trace[-1].update(result_meta)
+
+    # Determine exit reason
+    if interrupted:
+        exit_reason = "interrupted"
+    elif completed:
+        exit_reason = "completed"
+    else:
+        exit_reason = "max_iterations"
+
+    return {
+        "summary": summary,
+        "completed": completed,
+        "interrupted": interrupted,
+        "api_calls": api_calls,
+        "status": status,
+        "tool_trace": tool_trace,
+        "exit_reason": exit_reason,
+    }
+
+
 def _run_single_child(
     task_index: int,
     goal: str,
@@ -1870,64 +2012,89 @@ def _run_single_child(
 
         duration = round(time.monotonic() - child_start, 2)
 
-        summary = result.get("final_response") or ""
-        completed = result.get("completed", False)
-        interrupted = result.get("interrupted", False)
-        api_calls = result.get("api_calls", 0)
+        _outcome = _derive_child_outcome(result)
+        summary = _outcome["summary"]
+        completed = _outcome["completed"]
+        interrupted = _outcome["interrupted"]
+        api_calls = _outcome["api_calls"]
+        status = _outcome["status"]
+        tool_trace = _outcome["tool_trace"]
+        exit_reason = _outcome["exit_reason"]
 
-        if interrupted:
-            status = "interrupted"
-        elif summary:
-            # A summary means the subagent produced usable output.
-            # exit_reason ("completed" vs "max_iterations") already
-            # tells the parent *how* the task ended.
-            status = "completed"
-        else:
-            status = "failed"
-
-        # Build tool trace from conversation messages (already in memory).
-        # Uses tool_call_id to correctly pair parallel tool calls with results.
-        tool_trace: list[Dict[str, Any]] = []
-        trace_by_id: Dict[str, Dict[str, Any]] = {}
-        messages = result.get("messages") or []
-        if isinstance(messages, list):
-            for msg in messages:
-                if not isinstance(msg, dict):
-                    continue
-                if msg.get("role") == "assistant":
-                    for tc in msg.get("tool_calls") or []:
-                        fn = tc.get("function", {})
-                        entry_t = {
-                            "tool": fn.get("name", "unknown"),
-                            "args_bytes": len(fn.get("arguments", "")),
-                        }
-                        tool_trace.append(entry_t)
-                        tc_id = tc.get("id")
-                        if tc_id:
-                            trace_by_id[tc_id] = entry_t
-                elif msg.get("role") == "tool":
-                    content = _stringify_tool_content(msg.get("content", ""))
-                    is_error = _looks_like_error_output(content)
-                    result_meta = {
-                        "result_bytes": len(content),
-                        "status": "error" if is_error else "ok",
-                    }
-                    # Match by tool_call_id for parallel calls
-                    tc_id = msg.get("tool_call_id")
-                    target = trace_by_id.get(tc_id) if tc_id else None
-                    if target is not None:
-                        target.update(result_meta)
-                    elif tool_trace:
-                        # Fallback for messages without tool_call_id
-                        tool_trace[-1].update(result_meta)
-
-        # Determine exit reason
-        if interrupted:
-            exit_reason = "interrupted"
-        elif completed:
-            exit_reason = "completed"
-        else:
-            exit_reason = "max_iterations"
+        # Bounded shallow-delegation auto-retry (issue #323). A child that
+        # COMPLETED but made ZERO tool calls returned narrative text instead
+        # of executing tools — the round-trip is already wasted. Re-run the
+        # SAME child with an escalated goal that references the failure and
+        # demands a tool call first. Strictly additive and bounded:
+        #   - only ever fires on an already-shallow, completed result, so a
+        #     healthy tool-using first attempt is never re-run (hot-path safe);
+        #   - capped at _get_shallow_retry_budget() (<= _SHALLOW_RETRY_BUDGET_MAX)
+        #     retries — the loop can never run unbounded;
+        #   - the first attempt to actually call a tool wins and replaces the
+        #     shallow outcome; if every retry is still shallow we keep the
+        #     original shallow result and fall through to the warning below.
+        # No double-execution risk beyond what a manual re-delegate would
+        # incur: the parent was already told to re-delegate this exact goal.
+        #
+        # Orchestrators are EXCLUDED: their real work is sub-delegation, which
+        # never shows up as a tool_trace, so a delegating orchestrator looks
+        # "shallow" but isn't — and re-running one would re-fire its child
+        # delegations (duplicate side-effecting work). Only leaf children,
+        # whose job is to actually call tools, are eligible for auto-retry.
+        shallow_retries = 0
+        _child_is_orchestrator = (
+            getattr(child, "_delegate_role", None) == "orchestrator"
+        )
+        if status == "completed" and not tool_trace and not _child_is_orchestrator:
+            retry_budget = _get_shallow_retry_budget()
+            while shallow_retries < retry_budget and not tool_trace:
+                shallow_retries += 1
+                escalated_goal = _escalate_shallow_goal(goal, shallow_retries)
+                logger.info(
+                    "Subagent %d shallow result (no tool calls); auto-retry "
+                    "%d/%d with escalated goal",
+                    task_index,
+                    shallow_retries,
+                    retry_budget,
+                )
+                try:
+                    retry_result = child.run_conversation(
+                        user_message=escalated_goal,
+                        task_id=child_task_id,
+                        stream_callback=_relay_child_text,
+                    )
+                except Exception as _retry_exc:
+                    # A retry failure must never break the delegation — fall
+                    # back to the original shallow result and stop retrying.
+                    logger.warning(
+                        "Subagent %d shallow auto-retry %d raised %s; keeping "
+                        "original shallow result",
+                        task_index,
+                        shallow_retries,
+                        type(_retry_exc).__name__,
+                    )
+                    break
+                _retry_outcome = _derive_child_outcome(retry_result)
+                # Only adopt the retry if it actually produced tool calls —
+                # an interrupted/failed/still-shallow retry must not clobber
+                # the (at least completed) original summary.
+                if _retry_outcome["tool_trace"]:
+                    result = retry_result
+                    summary = _retry_outcome["summary"]
+                    completed = _retry_outcome["completed"]
+                    interrupted = _retry_outcome["interrupted"]
+                    api_calls = _retry_outcome["api_calls"]
+                    status = _retry_outcome["status"]
+                    tool_trace = _retry_outcome["tool_trace"]
+                    exit_reason = _retry_outcome["exit_reason"]
+                    logger.info(
+                        "Subagent %d recovered on shallow auto-retry %d "
+                        "(%d tool call(s))",
+                        task_index,
+                        shallow_retries,
+                        len(tool_trace),
+                    )
+                # else: still shallow — loop again until budget exhausted.
 
         # Extract token counts (safe for mock objects)
         _input_tokens = getattr(child, "session_prompt_tokens", 0)
@@ -1972,20 +2139,35 @@ def _run_single_child(
         if status == "failed":
             entry["error"] = result.get("error", "Subagent did not produce a response.")
 
+        # Surface the bounded auto-retry count (issue #323) so callers and
+        # trace-mining (#248) can see recovery happened. Absent (not 0) when
+        # no retry was attempted, to avoid noise on the healthy path.
+        if shallow_retries:
+            entry["shallow_retries"] = shallow_retries
+
         # Shallow-delegation detector (issue 102): a child that made ZERO
         # tool calls answered from its own head. For the dominant delegation
         # use case (read/filter/compute on real data) that narrative is a
         # non-result — flag it loudly IN the summary so the parent model
         # cannot miss it, plus a structured field for programmatic callers.
+        # Issue #323: by this point the bounded auto-retry above has already
+        # tried (and failed) to recover, so this only fires when retries were
+        # exhausted or disabled — the warning still tells the parent to act.
         if status == "completed" and not tool_trace:
             entry["shallow_result"] = True
+            _retry_note = (
+                f" Auto-retry exhausted ({shallow_retries} attempt(s)) and the "
+                "subagent still made no tool calls."
+                if shallow_retries
+                else ""
+            )
             entry["summary"] = (
                 "⚠️ SHALLOW DELEGATION: this subagent made NO tool calls — "
                 "the text below is narrative from model memory, not "
                 "extracted data. If you asked for file contents, search "
                 "results, or computed values, treat this as a failure and "
                 "either re-delegate with explicit tool instructions or do "
-                "the work inline.\n\n" + summary
+                "the work inline." + _retry_note + "\n\n" + summary
             )
 
         # Cross-agent file-state reminder.  If this subagent wrote any
