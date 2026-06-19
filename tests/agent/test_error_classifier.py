@@ -9,6 +9,8 @@ from agent.error_classifier import (
     _extract_error_body,
     _extract_error_code,
     _classify_402,
+    model_id_suffix_variants,
+    next_untried_model_variant,
 )
 
 
@@ -1654,3 +1656,48 @@ class TestMultimodalToolContentUnsupported:
         e = MockAPIError("bad request: missing field 'model'", status_code=400)
         result = classify_api_error(e, provider="openrouter", model="anthropic/claude-sonnet-4")
         assert result.reason != FailoverReason.multimodal_tool_content_unsupported
+
+
+# ── Model 404 suffix-variant self-correction (#348) ────────────────────
+
+class TestModelSuffixVariants:
+    def test_bare_id_yields_cloud_then_local(self):
+        assert model_id_suffix_variants("glm-4") == ["glm-4:cloud", "glm-4:local"]
+
+    def test_already_suffixed_yields_nothing(self):
+        # An explicit ``:suffix`` is the user's choice — never second-guess it.
+        assert model_id_suffix_variants("glm-4:cloud") == []
+        assert model_id_suffix_variants("openrouter:anthropic/claude") == []
+
+    def test_blank_or_empty_yields_nothing(self):
+        assert model_id_suffix_variants("") == []
+        assert model_id_suffix_variants("   ") == []
+
+    def test_whitespace_is_trimmed(self):
+        assert model_id_suffix_variants("  kimi-k2  ") == ["kimi-k2:cloud", "kimi-k2:local"]
+
+
+class TestNextUntriedModelVariant:
+    def test_first_call_returns_cloud(self):
+        assert next_untried_model_variant("glm-4", {"glm-4"}) == "glm-4:cloud"
+
+    def test_skips_already_tried(self):
+        assert next_untried_model_variant("glm-4", {"glm-4", "glm-4:cloud"}) == "glm-4:local"
+
+    def test_exhausted_returns_none(self):
+        tried = {"glm-4", "glm-4:cloud", "glm-4:local"}
+        assert next_untried_model_variant("glm-4", tried) is None
+
+    def test_suffixed_base_has_no_variants(self):
+        assert next_untried_model_variant("glm-4:cloud", {"glm-4:cloud"}) is None
+
+    def test_bounded_two_step_progression(self):
+        # The exact loop the conversation handler runs: base 404 → :cloud 404 →
+        # :local 404 → give up (fall through to provider fallback / abort).
+        base, tried = "qwen3", {"qwen3"}
+        seq = []
+        while (v := next_untried_model_variant(base, tried)) is not None:
+            seq.append(v)
+            tried.add(v)
+        assert seq == ["qwen3:cloud", "qwen3:local"]
+
