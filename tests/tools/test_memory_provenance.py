@@ -94,9 +94,13 @@ class TestDefaultAddByteCompatible:
         assert rows[0]["trust_tier"] == DEFAULT_TRUST_TIER
 
     def test_default_add_entries_list_unchanged(self, store):
-        """The legacy ``entries`` field in the response stays plain strings."""
+        """A default add stays byte-compatible: the stored entry is the plain
+        string. Upstream's success response carries entry_count (not the full
+        entries list, to avoid model thrash), so verify the stored data directly."""
         result = store.add("memory", "legacy shape")
-        assert result["entries"] == ["legacy shape"]
+        assert result["success"] is True
+        assert result["entry_count"] == 1
+        assert store._entries_for("memory") == ["legacy shape"]
 
 
 # ---------------------------------------------------------------------------
