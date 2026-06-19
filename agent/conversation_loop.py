@@ -29,7 +29,11 @@ from typing import Any, Dict, List, Optional
 
 from agent.codex_responses_adapter import _summarize_user_message_for_log
 from agent.display import KawaiiSpinner
-from agent.error_classifier import FailoverReason, classify_api_error
+from agent.error_classifier import (
+    FailoverReason,
+    classify_api_error,
+    next_untried_model_variant,
+)
 from agent.iteration_budget import IterationBudget
 from agent.turn_context import build_turn_context
 from agent.turn_retry_state import TurnRetryState
@@ -3253,6 +3257,41 @@ def _run_conversation_impl(
                 ) and not is_context_length_error
 
                 if is_client_error:
+                    # ── Model 404 self-correct (#348) — try suffix variants of
+                    #    the SAME model before switching providers. A bare model
+                    #    id (no ``:suffix``) that 404s often resolves once
+                    #    suffixed (``glm-4`` → ``glm-4:cloud``). Try each untried
+                    #    variant once; only on exhaustion do we fall through to
+                    #    the provider fallback / abort below. Variants are derived
+                    #    from the ORIGINAL id so a mutated ``agent.model`` from a
+                    #    prior attempt doesn't shrink the candidate set.
+                    if classified.reason == FailoverReason.model_not_found:
+                        _mnf_base = getattr(agent, "_model_404_base", None)
+                        _mnf_tried = getattr(agent, "_model_404_tried", None)
+                        # Fresh model (first 404, or the user switched models
+                        # mid-session) → restart the variant search from it so a
+                        # stale base never narrows the candidates.
+                        if _mnf_tried is None or (agent.model or "") not in _mnf_tried:
+                            _mnf_base = agent.model or ""
+                            _mnf_tried = {_mnf_base}
+                        _variant = next_untried_model_variant(_mnf_base, _mnf_tried)
+                        if _variant is not None:
+                            _mnf_tried.add(_variant)
+                            agent._model_404_base = _mnf_base
+                            agent._model_404_tried = _mnf_tried
+                            agent._buffer_status(
+                                f"⚠️ Model '{agent.model}' not found — trying '{_variant}'..."
+                            )
+                            agent._vprint(
+                                f"{agent.log_prefix}   💡 Model not found; self-correcting "
+                                f"to suffixed variant '{_variant}'.",
+                                force=True,
+                            )
+                            agent.model = _variant
+                            retry_count = 0
+                            compression_attempts = 0
+                            _retry.primary_recovery_attempted = False
+                            continue
                     # Try fallback before aborting — a different provider may
                     # not have the same issue (rate limit, auth, etc.). Only
                     # announce the attempt when a fallback chain actually

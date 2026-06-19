@@ -252,6 +252,35 @@ _MODEL_NOT_FOUND_PATTERNS = [
     "unsupported model",
 ]
 
+
+def model_id_suffix_variants(model: str) -> list[str]:
+    """Candidate suffixed variants of a *bare* model id, in priority order (#348).
+
+    A bare model id (no provider ``:suffix``) that 404s with "model not found"
+    frequently resolves once suffixed — e.g. ``glm-4`` → ``glm-4:cloud`` — because
+    the catalog only exposes the suffixed form (Ollama Cloud, vLLM tiers, etc.).
+    Returns ``[]`` when the id already carries a ``:suffix`` (we never second-guess
+    an explicit choice) or is empty/blank.
+    """
+    model = (model or "").strip()
+    if not model or ":" in model:
+        return []
+    return [f"{model}:cloud", f"{model}:local"]
+
+
+def next_untried_model_variant(base_model: str, tried: "set[str] | frozenset[str]") -> str | None:
+    """Next ``model:suffix`` variant of ``base_model`` not present in ``tried``.
+
+    Drives the bounded 404 self-correction loop (#348): callers pass the original
+    bare id and the set of ids already attempted; ``None`` means "no variant left,
+    fall through to provider fallback / abort".
+    """
+    for candidate in model_id_suffix_variants(base_model):
+        if candidate not in tried:
+            return candidate
+    return None
+
+
 # Request-validation patterns — the request is malformed and will fail
 # identically on every retry. Some OpenAI-compatible gateways (notably
 # codex.nekos.me) return these as 5xx instead of the standard 4xx, which
