@@ -5,6 +5,8 @@ thundering-herd retry spikes when multiple sessions hit the same
 rate-limited provider concurrently.
 """
 
+import calendar
+import email.utils
 import random
 import threading
 import time
@@ -47,7 +49,7 @@ def jittered_backoff(
     if exponent >= 63 or base_delay <= 0:
         delay = max_delay
     else:
-        delay = min(base_delay * (2 ** exponent), max_delay)
+        delay = min(base_delay * (2**exponent), max_delay)
 
     # Seed from time + counter for decorrelation even with coarse clocks.
     seed = (time.time_ns() ^ (tick * 0x9E3779B9)) & 0xFFFFFFFF
@@ -55,3 +57,35 @@ def jittered_backoff(
     jitter = rng.uniform(0, jitter_ratio * delay)
 
     return delay + jitter
+
+
+def extract_retry_after_seconds(
+    retry_after: str | None, now: float | None = None
+) -> float | None:
+    """Parse a Retry-After value into seconds from now.
+
+    Supports both integer seconds (RFC 7231 §7.1.3) and HTTP-date strings
+    (RFC 7231 §7.1.1.2).  Returns None for malformed/empty values.
+    Caps the result at 300 seconds (5 minutes) so a far-future Retry-After
+    header cannot stall the agent indefinitely.
+    """
+    if not retry_after or not isinstance(retry_after, str):
+        return None
+    retry_after = retry_after.strip()
+    if not retry_after:
+        return None
+
+    # Try integer seconds first.
+    try:
+        return min(float(retry_after), 300.0)
+    except (TypeError, ValueError):
+        pass
+
+    # Try HTTP-date (e.g. "Wed, 21 Oct 2015 07:28:00 GMT").
+    try:
+        parsed = email.utils.parsedate_to_datetime(retry_after)
+        retry_time = calendar.timegm(parsed.utctimetuple())
+        now = now if now is not None else time.time()
+        return max(0.0, min(retry_time - now, 300.0))
+    except Exception:
+        return None
