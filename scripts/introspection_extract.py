@@ -180,6 +180,75 @@ def scan_session(path: Path) -> Dict[str, Any]:
     return scan_messages(_iter_lines(path))
 
 
+def _sessions_from_db(db_path: Path, cutoff: float) -> List[List[Dict[str, Any]]]:
+    """Return sessions from SessionDB SQLite as message-dict lists (#399).
+
+    The ``state.db`` ``messages`` table carries conversation history for
+    installations that persist via SQLite instead of on-disk ``*.jsonl`` files.
+    Each session's messages are grouped by ``session_id`` and ordered by
+    ``timestamp``, then cast to the same dict shape ``scan_messages()`` expects
+    — ``role``, ``content``, ``tool_calls`` (parsed from JSON text for
+    assistant turns), ``tool_call_id`` (for tool results).
+
+    Returns an empty list when the db is missing, unreadable, or has no
+    ``messages`` table (the existing file-based paths still fire).
+    """
+    try:
+        import sqlite3  # noqa: PLC0415 — stdlib, acceptable import delay
+    except ImportError:
+        return []
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+    except (sqlite3.OperationalError, OSError):
+        return []
+
+    try:
+        c.execute(
+            "SELECT DISTINCT session_id FROM messages WHERE timestamp >= ? ORDER BY session_id",
+            (cutoff,),
+        )
+        session_ids = [row["session_id"] for row in c.fetchall()]
+    except sqlite3.OperationalError:
+        conn.close()
+        return []
+
+    sessions: List[List[Dict[str, Any]]] = []
+    for sid in session_ids:
+        c.execute(
+            "SELECT role, content, tool_call_id, tool_calls, tool_name "
+            "FROM messages WHERE session_id = ? AND timestamp >= ? "
+            "ORDER BY timestamp ASC",
+            (sid, cutoff),
+        )
+        msgs: List[Dict[str, Any]] = []
+        for row in c.fetchall():
+            msg: Dict[str, Any] = {"role": row["role"]}
+            content = row["content"]
+            if content is not None:
+                msg["content"] = content
+            if row["role"] == "assistant":
+                tc_raw = row["tool_calls"]
+                if tc_raw:
+                    try:
+                        parsed = json.loads(tc_raw)
+                        if isinstance(parsed, list):
+                            msg["tool_calls"] = parsed
+                    except (ValueError, TypeError):
+                        pass
+            elif row["role"] == "tool":
+                tci = row["tool_call_id"]
+                if tci:
+                    msg["tool_call_id"] = tci
+            msgs.append(msg)
+        sessions.append(msgs)
+
+    conn.close()
+    return sessions
+
+
 def _request_dump_messages(obj: Dict[str, Any]) -> List[Any]:
     """The conversation messages carried inside a request_dump_*.json snapshot
     live at request.body.messages — the same role-tagged shape as a JSONL
@@ -223,7 +292,22 @@ def _fresh(path: Path, cutoff: float) -> bool:
         return False
 
 
-def build_digest(sessions_dir: Path, window_days: int = 7, now: float | None = None) -> Dict[str, Any]:
+def build_digest(
+    sessions_dir: Path,
+    window_days: int = 7,
+    now: float | None = None,
+    db_path: Path | None = None,
+) -> Dict[str, Any]:
+    """Build a compact, ANONYMIZED signal digest from session data.
+
+    Scans three data sources in order:
+      1. ``*.jsonl`` transcripts (the upstream format);
+      2. ``request_dump_*.json`` snapshots (#238);
+      3. SessionDB SQLite ``state.db`` → ``messages`` table (#399).
+
+    Each source reuses the same ``scan_messages()`` path so all produce the
+    identical digest shape.
+    """
     now = now if now is not None else time.time()
     cutoff = now - window_days * 86400
     failures: Counter = Counter()
@@ -278,6 +362,15 @@ def build_digest(sessions_dir: Path, window_days: int = 7, now: float | None = N
             scanned += 1
             _aggregate(scan_request_dump(obj))
 
+    # 3. SessionDB SQLite (#399 — reads state.db messages table when it exists,
+    #    covering installations where sessions live in the DB rather than in
+    #    on-disk files. Grouped by session_id, dedup'd within the query, and
+    #    fed through scan_messages() just like the file-based paths.)
+    if db_path is not None and db_path.is_file():
+        for msgs in _sessions_from_db(db_path, cutoff):
+            scanned += 1
+            _aggregate(scan_messages(msgs))
+
     return {
         "window_days": window_days,
         "sessions_scanned": scanned,
@@ -304,7 +397,10 @@ def main(argv: List[str]) -> int:
                 days = int(a.split("=", 1)[1])
             except ValueError:
                 pass
-    digest = build_digest(_sessions_dir(), window_days=days)
+    hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+    sessions_dir = hermes_home / "sessions"
+    state_db = hermes_home / "state.db"
+    digest = build_digest(sessions_dir, window_days=days, db_path=state_db)
     print(json.dumps(digest, indent=2, sort_keys=True))
     return 0
 

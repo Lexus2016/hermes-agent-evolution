@@ -115,7 +115,9 @@ def main(argv: List[str]) -> int:
                 pass
 
     sessions_dir = _sessions_dir()
-    digest = build_digest(sessions_dir, window_days=days)
+    hermes_home = sessions_dir.parent
+    state_db = hermes_home / "state.db"
+    digest = build_digest(sessions_dir, window_days=days, db_path=state_db)
     records = mine_weaknesses(digest, min_count=min_count)
 
     payload = {
