@@ -63,6 +63,49 @@ def _scan_context_content(content: str, filename: str) -> str:
     return content
 
 
+# Marker emitted by _resolve_claude_imports for each inlined @import. Matched
+# here so the cross-seam scan can drop it and see the surrounding bodies as one
+# contiguous stream.
+_IMPORT_MARKER_RE = re.compile(r"^>[ \t]*imported from[ \t].*$", re.MULTILINE)
+
+
+def _section_body(section: str) -> str:
+    """Return the body of a rendered ``## <label>\\n\\n<body>`` section.
+
+    Drops only the leading ``## <label>`` header line we add ourselves, so the
+    document's own markdown headings inside <body> are preserved.
+    """
+    parts = section.split("\n\n", 1)
+    return parts[1] if len(parts) == 2 else section
+
+
+def _scan_context_seams(seam_text: str, label: str) -> Optional[str]:
+    """Catch a prompt injection split ACROSS the seam between concatenated
+    context fragments.
+
+    Per-fragment scanning (``_scan_context_content`` on each file/import) is
+    blind to this: the structural markers between fragments (``## label``
+    headers, ``> imported from ...`` import markers) insert non-word characters
+    that break a contiguous regex, so a payload whose halves live in two
+    adjacent fragments slips through. Callers pass the fragment bodies already
+    joined with those markers removed; this scans them as one stream.
+
+    Returns a BLOCKED placeholder string when a cross-seam threat is found,
+    else None. Blocking the whole source is the fail-safe choice: the
+    *combination* is what is malicious.
+    """
+    findings = _scan_for_threats(seam_text, scope="context")
+    if not findings:
+        return None
+    logger.warning(
+        "Context %s blocked (cross-source seam): %s", label, ", ".join(findings)
+    )
+    return (
+        f"[BLOCKED: {label} contained potential prompt injection spanning "
+        f"concatenated sources ({', '.join(findings)}). Content not loaded.]"
+    )
+
+
 def _find_git_root(start: Path) -> Optional[Path]:
     """Walk *start* and its parents looking for a ``.git`` directory.
 
@@ -1920,6 +1963,14 @@ def _load_agents_md(cwd_path: Path, context_length: Optional[int] = None) -> str
         "AGENTS.md context loaded from: %s",
         ", ".join(str(p) for p in loaded_paths),
     )
+    # Cross-source seam scan: catch an injection split across two adjacent
+    # AGENTS.md files (each scanned clean individually) by scanning the joined
+    # bodies (without the ## headers) as one stream.
+    seam_block = _scan_context_seams(
+        "\n".join(_section_body(s) for s in [*base, *overrides]), "AGENTS.md"
+    )
+    if seam_block:
+        return seam_block
     merged = "\n\n".join([*base, *overrides])
     return _truncate_content(
         merged, "AGENTS.md", context_length=context_length,
@@ -1945,6 +1996,16 @@ def _load_claude_md(cwd_path: Path, context_length: Optional[int] = None) -> str
                     # paths like @config/system.md.
                     content = _resolve_claude_imports(content, cwd_path)
                     content = _scan_context_content(content, name)
+                    # Cross-source seam scan: the blockquote import markers
+                    # still break a contiguous regex, so a payload split
+                    # body-head→import or import→import survives the re-scan
+                    # above. Strip the markers and scan the bodies as one
+                    # stream to catch it.
+                    seam_block = _scan_context_seams(
+                        _IMPORT_MARKER_RE.sub("", content), name
+                    )
+                    if seam_block:
+                        return seam_block
                     result = f"## {name}\n\n{content}"
                     return _truncate_content(
                         result, "CLAUDE.md", context_length=context_length,
