@@ -1931,8 +1931,14 @@ def _load_claude_md(cwd_path: Path, context_length: Optional[int] = None) -> str
             try:
                 content = candidate.read_text(encoding="utf-8").strip()
                 if content:
-                    content = _resolve_claude_imports(content, cwd_path)
+                    # Scan the CLAUDE.md body FIRST, then inline imports (each
+                    # imported file is scanned individually inside
+                    # _resolve_claude_imports). The assembled result is NOT
+                    # re-scanned — re-scanning would trip the injection scanner
+                    # on our own generated "<!-- imported from ... -->" marker
+                    # whenever the import path contains a flagged keyword.
                     content = _scan_context_content(content, name)
+                    content = _resolve_claude_imports(content, cwd_path)
                     result = f"## {name}\n\n{content}"
                     return _truncate_content(
                         result, "CLAUDE.md", context_length=context_length,

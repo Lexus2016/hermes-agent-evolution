@@ -845,6 +845,20 @@ class TestBuildContextFilesPrompt:
         assert "BLOCKED" in result
         assert "reveal secrets" not in result
 
+    def test_claude_md_import_keyword_path_not_blocked(self, tmp_path):
+        """A benign import whose PATH contains a scanner keyword must not block
+        the whole CLAUDE.md (regression: the generated import marker was
+        re-scanned and tripped html_comment_injection on paths like
+        config/system.md)."""
+        sub = tmp_path / "config"
+        sub.mkdir()
+        (sub / "system.md").write_text("Rule: prefer composition over inheritance.")
+        import_line = "@" + "config/system.md"
+        (tmp_path / "CLAUDE.md").write_text("Project notes.\n\n" + import_line + "\n")
+        result = build_context_files_prompt(cwd=str(tmp_path))
+        assert "Rule: prefer composition over inheritance." in result
+        assert "BLOCKED" not in result
+
     # --- .hermes.md / HERMES.md discovery ---
 
     def test_loads_hermes_md(self, tmp_path):
