@@ -7,6 +7,7 @@ assemble pieces, then combines them with memory and ephemeral prompts.
 import json
 import logging
 import os
+import re
 import threading
 import contextvars
 from collections import OrderedDict
@@ -76,6 +77,91 @@ def _find_git_root(start: Path) -> Optional[Path]:
 
 
 _HERMES_MD_NAMES = (".hermes.md", "HERMES.md")
+_AGENTS_MD_NAMES = ("AGENTS.md", "agents.md")
+_AGENTS_OVERRIDE_NAMES = ("AGENTS.override.md", "agents.override.md")
+
+# CLAUDE.md / AGENTS.md import directive: a line that is just ``@path`` pulls
+# in the referenced file (Claude Code / agents.md convention).
+_IMPORT_RE = re.compile(r"^[ \t]*@([^\s]+)[ \t]*$", re.MULTILINE)
+
+
+def _dirs_root_to_cwd(cwd_path: Path) -> list[Path]:
+    """Directories from the git root (inclusive) down to *cwd*.
+
+    Ordered root-first, cwd-last, so concatenated content places deeper
+    (closer-to-cwd) instructions later — letting the most specific file win
+    on conflict. When *cwd* is not inside a git repo, only *cwd* itself is
+    returned (we never walk the whole filesystem).
+    """
+    cwd_path = cwd_path.resolve()
+    stop_at = _find_git_root(cwd_path)
+    if not stop_at:
+        return [cwd_path]
+    chain: list[Path] = []
+    for directory in [cwd_path, *cwd_path.parents]:
+        chain.append(directory)
+        if directory == stop_at:
+            break
+    return list(reversed(chain))
+
+
+def _read_context_section(path: Path, label_base: Path) -> str:
+    """Read one context file into a sanitized ``## <label>\\n\\n<body>`` block.
+
+    Returns an empty string when the file is missing, empty, or unreadable.
+    The body is frontmatter-stripped and scanned for prompt injection
+    before inclusion (a blocked file yields a safe ``[BLOCKED: ...]`` note).
+    """
+    try:
+        content = path.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        logger.debug("Could not read %s: %s", path, e)
+        return ""
+    if not content:
+        return ""
+    content = _strip_yaml_frontmatter(content)
+    try:
+        label = str(path.relative_to(label_base))
+    except ValueError:
+        label = path.name
+    content = _scan_context_content(content, label)
+    return f"## {label}\n\n{content}"
+
+
+def _resolve_claude_imports(content: str, base_dir: Path) -> str:
+    """Inline single-level ``@path`` imports inside CLAUDE.md.
+
+    Each ``@relative/path.md`` line is replaced by the imported file's
+    sanitized body. Imports resolve relative to *base_dir* and must stay
+    within it (no ``../`` traversal escapes). Only one level is resolved —
+    ``@imports`` inside imported files are left literal — to avoid cycles
+    and unbounded expansion.
+    """
+    base_resolved = base_dir.resolve()
+
+    def _replace(match: "re.Match[str]") -> str:
+        rel = match.group(1)
+        target = (base_dir / rel).resolve()
+        try:
+            target.relative_to(base_resolved)
+        except ValueError:
+            logger.debug("Ignoring CLAUDE.md import outside base dir: %s", rel)
+            return match.group(0)
+        if not target.is_file():
+            logger.debug("CLAUDE.md import not found: %s", target)
+            return match.group(0)
+        try:
+            imported = target.read_text(encoding="utf-8").strip()
+        except Exception as e:
+            logger.debug("Could not read CLAUDE.md import %s: %s", target, e)
+            return match.group(0)
+        if not imported:
+            return match.group(0)
+        imported = _strip_yaml_frontmatter(imported)
+        imported = _scan_context_content(imported, rel)
+        return f"<!-- imported from {rel} -->\n{imported}"
+
+    return _IMPORT_RE.sub(_replace, content)
 
 
 def _find_hermes_md(cwd: Path) -> Optional[Path]:
@@ -1790,32 +1876,62 @@ def _load_hermes_md(cwd_path: Path, context_length: Optional[int] = None) -> str
 
 
 def _load_agents_md(cwd_path: Path, context_length: Optional[int] = None) -> str:
-    """AGENTS.md — top-level only (no recursive walk)."""
-    for name in ["AGENTS.md", "agents.md"]:
-        candidate = cwd_path / name
-        if candidate.exists():
-            try:
-                content = candidate.read_text(encoding="utf-8").strip()
-                if content:
-                    content = _scan_context_content(content, name)
-                    result = f"## {name}\n\n{content}"
-                    return _truncate_content(
-                        result, "AGENTS.md", context_length=context_length,
-                        read_path=str(candidate),
-                    )
-            except Exception as e:
-                logger.debug("Could not read %s: %s", candidate, e)
-    return ""
+    """AGENTS.md per the AGENTS.md standard (nested walk + overrides).
+
+    Walks from the git root down to *cwd*, collecting every ``AGENTS.md``
+    (root-first, so the nearest file's instructions come last and win on
+    conflict). ``AGENTS.override.md`` files are gathered separately and
+    appended after all ``AGENTS.md`` content, giving them the highest
+    precedence. Each file is scanned for prompt injection individually; the
+    merged blob is size-capped as a whole. The set of loaded files is logged
+    at debug level so users can verify which rules were applied.
+    """
+    git_root = _find_git_root(cwd_path) or cwd_path
+    base: list[str] = []
+    overrides: list[str] = []
+    loaded_paths: list[Path] = []
+
+    for directory in _dirs_root_to_cwd(cwd_path):
+        for name in _AGENTS_MD_NAMES:
+            candidate = directory / name
+            if candidate.is_file():
+                section = _read_context_section(candidate, git_root)
+                if section:
+                    base.append(section)
+                    loaded_paths.append(candidate)
+                break  # one AGENTS.md per directory
+        for name in _AGENTS_OVERRIDE_NAMES:
+            candidate = directory / name
+            if candidate.is_file():
+                section = _read_context_section(candidate, git_root)
+                if section:
+                    overrides.append(section)
+                    loaded_paths.append(candidate)
+                break
+
+    if not base and not overrides:
+        return ""
+
+    logger.debug(
+        "AGENTS.md context loaded from: %s",
+        ", ".join(str(p) for p in loaded_paths),
+    )
+    merged = "\n\n".join([*base, *overrides])
+    return _truncate_content(
+        merged, "AGENTS.md", context_length=context_length,
+        read_path=str(loaded_paths[-1]) if loaded_paths else "AGENTS.md",
+    )
 
 
 def _load_claude_md(cwd_path: Path, context_length: Optional[int] = None) -> str:
-    """CLAUDE.md / claude.md — cwd only."""
+    """CLAUDE.md / claude.md — cwd only, with ``@path`` imports resolved."""
     for name in ["CLAUDE.md", "claude.md"]:
         candidate = cwd_path / name
         if candidate.exists():
             try:
                 content = candidate.read_text(encoding="utf-8").strip()
                 if content:
+                    content = _resolve_claude_imports(content, cwd_path)
                     content = _scan_context_content(content, name)
                     result = f"## {name}\n\n{content}"
                     return _truncate_content(
@@ -1869,8 +1985,8 @@ def build_context_files_prompt(
 
     Priority (first found wins — only ONE project context type is loaded):
       1. .hermes.md / HERMES.md  (walk to git root)
-      2. AGENTS.md / agents.md   (cwd only)
-      3. CLAUDE.md / claude.md   (cwd only)
+      2. AGENTS.md / agents.md   (nested walk git-root→cwd, + AGENTS.override.md)
+      3. CLAUDE.md / claude.md   (cwd only, with @path imports resolved)
       4. .cursorrules / .cursor/rules/*.mdc  (cwd only)
 
     SOUL.md from HERMES_HOME is independent and always included when present.
