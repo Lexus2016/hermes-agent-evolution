@@ -52,6 +52,11 @@ DAILY_STALE_HOURS = 26
 WEEKLY_STALE_HOURS = 8 * 24
 STUCK_RUNNING_HOURS = 12
 MIN_GH_RATE_REMAINING = 200
+# Alert when the fork falls this far behind upstream — the autonomous
+# upstream-sync's own auto-merge ceiling. Past it the daily sync escalates
+# (files an [UPSTREAM] issue) instead of merging, and without this check the
+# fork silently accumulates a backlog for days (2026-06-19 → 301 behind).
+UPSTREAM_BEHIND_ALERT = 80
 
 # Jobs that are weekly, not daily (looser staleness threshold).
 WEEKLY_JOBS = {"evolution-upstream-sync"}
@@ -228,6 +233,66 @@ def check_gh(runner: Callable[[List[str]], Tuple[int, str]] = _default_runner) -
     return alerts
 
 
+def _resolve_repo_dir() -> Path | None:
+    """Locate the git repo to inspect for upstream lag.
+
+    The watchdog runs as a no_agent script copied to HERMES_HOME/scripts, i.e.
+    OUTSIDE the repo, so we resolve the repo explicitly: an env override, then
+    the in-tree location (when run from the repo), then the common server
+    install / agent-clone paths. Returns None when none is a git repo — the
+    caller then skips the check silently.
+    """
+    candidates = [
+        os.environ.get("EVOLUTION_REPO_DIR"),
+        str(Path(__file__).resolve().parent.parent),  # scripts/ -> repo root (in-tree)
+        "/usr/local/lib/hermes-agent",
+        str(Path.home() / "hermes-agent-evolution"),
+    ]
+    for cand in candidates:
+        if cand and (Path(cand) / ".git").exists():
+            return Path(cand)
+    return None
+
+
+def check_upstream_lag(
+    runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
+    repo_dir: Path | None = None,
+) -> List[str]:
+    """Alert when the fork is too far behind upstream (sync stuck).
+
+    The daily upstream-sync can run "ok" every day yet never MERGE — once a
+    core conflict appears it escalates (files an [UPSTREAM] issue) and the fork
+    falls further behind each day. ``check_jobs`` only sees the job ran, not
+    that nothing landed. This check reads the real distance to ``upstream/main``
+    so the owner is pinged within a day instead of noticing weeks later.
+
+    Silent (returns []) when the repo can't be located or ``upstream/main`` is
+    unavailable — best-effort, never a false alarm from a missing remote.
+    """
+    repo = repo_dir or _resolve_repo_dir()
+    if repo is None:
+        return []
+    try:
+        rc, out = runner(
+            ["git", "-C", str(repo), "rev-list", "--count", "HEAD..upstream/main"]
+        )
+    except Exception:  # noqa: BLE001 — any git/spawn failure: skip silently
+        return []
+    if rc != 0:
+        return []
+    try:
+        behind = int(out.strip().split()[0])
+    except (ValueError, IndexError):
+        return []
+    if behind > UPSTREAM_BEHIND_ALERT:
+        return [
+            f"upstream sync stuck: fork is {behind} commits behind upstream/main "
+            f"(threshold {UPSTREAM_BEHIND_ALERT}). The daily sync escalates instead "
+            f"of merging — resolve the backlog (see the open [UPSTREAM] issue)."
+        ]
+    return []
+
+
 def check_health(evolution_dir: Path) -> List[str]:
     """Alert when the longitudinal health sidecar reports degraded calibration.
 
@@ -291,6 +356,7 @@ def main() -> int:
     alerts += check_stage_reports(evolution_dir, now, jobs_file)
     alerts += check_jobs(jobs_file, now)
     alerts += check_gh()
+    alerts += check_upstream_lag()
     alerts += check_health(evolution_dir)
     alerts += check_realized_impact(evolution_dir)
 

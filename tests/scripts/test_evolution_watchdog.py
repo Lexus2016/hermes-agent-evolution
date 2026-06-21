@@ -13,6 +13,7 @@ from evolution_watchdog import (  # noqa: E402
     check_gh,
     check_jobs,
     check_stage_reports,
+    check_upstream_lag,
     expected_report_date,
 )
 
@@ -222,6 +223,59 @@ class TestGhCheck:
 
         alerts = check_gh(runner=fake_run)
         assert len(alerts) >= 1
+
+
+class TestUpstreamLag:
+    REPO = Path("/repo")  # bypass _resolve_repo_dir via explicit repo_dir
+
+    def test_behind_over_threshold_alerts(self):
+        def fake_run(cmd):
+            assert "rev-list" in cmd
+            return (0, "301\n")
+
+        alerts = check_upstream_lag(runner=fake_run, repo_dir=self.REPO)
+        assert any("behind upstream" in a for a in alerts)
+        assert any("301" in a for a in alerts)
+
+    def test_within_threshold_silent(self):
+        def fake_run(cmd):
+            return (0, "9\n")
+
+        assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []
+
+    def test_at_threshold_silent(self):
+        def fake_run(cmd):
+            return (0, "80\n")  # exactly the threshold is not "over"
+
+        assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []
+
+    def test_git_failure_silent(self):
+        def fake_run(cmd):
+            return (1, "fatal: bad revision 'upstream/main'")
+
+        assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []
+
+    def test_garbage_output_silent(self):
+        def fake_run(cmd):
+            return (0, "not-a-number")
+
+        assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []
+
+    def test_spawn_error_silent(self):
+        def fake_run(cmd):
+            raise FileNotFoundError("git")
+
+        assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []
+
+    def test_no_repo_silent(self, monkeypatch):
+        import evolution_watchdog as w
+
+        monkeypatch.setattr(w, "_resolve_repo_dir", lambda: None)
+
+        def fake_run(cmd):
+            raise AssertionError("runner must not run when repo is unresolved")
+
+        assert check_upstream_lag(runner=fake_run) == []
 
 
 class TestStagesMirrorCronSpecs:
