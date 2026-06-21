@@ -3133,7 +3133,12 @@ def _run_conversation_impl(
                         "api_calls": api_call_count,
                         "completed": False,
                         "failed": True,
-                        "error": str(api_error),
+                        # Use the summarized error, not str(api_error): a 403
+                        # Cloudflare challenge body is ~60 KB of raw HTML and
+                        # must not leak into result['error'] (it gets delivered
+                        # to chat). Matches the other non-retryable paths.
+                        # See test_nonretryable_error_html_summary.
+                        "error": _nr_summary,
                         "failure_reason": classified.reason.value,
                     }
 

@@ -56,8 +56,11 @@ class TestBlankSlateMinimalToolsets:
         names = sorted(
             {(d.get("function") or {}).get("name") or d.get("name") for d in defs}
         )
-        assert names == ["patch", "process", "read_file", "search_files",
-                         "terminal", "write_file"]
+        # repo_map is an evolution-fork addition (#320) that lives in the file
+        # toolset, so blank-slate (file + terminal) includes it. Upstream's
+        # baseline lacks it — keep it in this expected set on the fork.
+        assert names == ["patch", "process", "read_file", "repo_map",
+                         "search_files", "terminal", "write_file"]
 
 
 class TestBlankSlateMinimizeConfig:
