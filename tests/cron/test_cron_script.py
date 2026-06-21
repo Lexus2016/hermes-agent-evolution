@@ -198,21 +198,26 @@ class TestRunJobScript:
         assert parsed["new_prs"][0]["number"] == 42
 
     def test_script_reads_env_from_hermes_dotenv(self, cron_env):
-        """no_agent scripts should inherit API keys from HERMES_HOME/.env."""
+        """no_agent scripts inherit NON-provider config from HERMES_HOME/.env.
+
+        Provider secrets (OPENROUTER_API_KEY, etc.) are stripped per upstream
+        SECURITY.md §2.3 — see test_script_subprocess_env_sanitized. Non-secret
+        config from .env still reaches the script.
+        """
         from cron.scheduler import _run_job_script
 
         env_file = cron_env / ".env"
-        env_file.write_text("OPENROUTER_API_KEY=sk-test-123\n")
+        env_file.write_text("EVOLUTION_PIPELINE_REGION=eu-west\n")
 
         script = cron_env / "scripts" / "read_env.py"
         script.write_text(textwrap.dedent("""\
             import os
-            print(os.getenv("OPENROUTER_API_KEY", "MISSING"))
+            print(os.getenv("EVOLUTION_PIPELINE_REGION", "MISSING"))
         """))
 
         success, output = _run_job_script("read_env.py")
         assert success is True
-        assert output == "sk-test-123"
+        assert output == "eu-west"
 
 
 class TestBuildJobPromptWithScript:

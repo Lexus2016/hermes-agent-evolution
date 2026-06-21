@@ -1086,6 +1086,11 @@ def _run_job_script(script_path: str) -> tuple[bool, str]:
             text=True,
             timeout=script_timeout,
             cwd=str(path.parent),
+            # Start from our profile-built run_env (HERMES_HOME, profile HOME,
+            # non-provider .env config) then strip provider secrets per upstream
+            # SECURITY.md §2.3: cron scripts must NOT inherit Hermes provider env
+            # (anti-exfiltration). Our no_agent scripts (evolution_watchdog/funnel)
+            # don't read provider keys from env, so this is safe.
             env=_sanitize_subprocess_env(run_env),
             **popen_kwargs,
         )
