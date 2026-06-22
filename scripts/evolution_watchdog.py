@@ -41,9 +41,13 @@ from typing import Callable, Dict, List, Tuple
 STAGES: Dict[str, Tuple[int, str]] = {
     "research": (9, "md"),
     "introspection": (20, "json"),
-    "analysis": (21, "json"),
-    "implementation": (22, "md"),
-    "integration": (23, "json"),
+    # analysis/implementation/integration run every 4h (processing throughput);
+    # the slot here is the FIRST daily slot — the watchdog only needs "a report
+    # for today exists by then", and reports are date-keyed (overwritten each
+    # run). Mirrors cron/evolution/*.yaml first hour (locked by the mirror test).
+    "analysis": (1, "json"),
+    "implementation": (2, "md"),
+    "integration": (3, "json"),
 }
 
 GRACE_HOURS = 2
