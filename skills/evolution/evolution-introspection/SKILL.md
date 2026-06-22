@@ -130,6 +130,19 @@ gh label create ux           --repo "$REPO" --color fbca04 --description "Intera
 # 'bug' and 'enhancement' are standard GitHub labels, present by default.
 ```
 
+**Backlog gate — bugs ALWAYS, features only when there's room.** The pipeline
+generates more than it implements, so an unbounded backlog is the recurring "too
+many unprocessed issues". Consult the generation gate before creating:
+```bash
+python scripts/evolution_backlog_gate.py check   # exit 1 = THROTTLE features
+```
+- ALWAYS create `[FIX]` issues — a real defect blocks work and is never throttled
+  (label them `bug` so they're correctly excluded from the backlog cap).
+- If the gate exits 1 (throttle), create ONLY the `[FIX]` issues this cycle and
+  SKIP `[CAPABILITY]` / `[UX]` / `[PERFORMANCE]` (feature-like; they can wait for
+  the backlog to drain). If it exits 0, create all categories as usual.
+- Fail-OPEN: if the gate can't run, proceed normally.
+
 **Deduplicate first (MANDATORY — many installations file in parallel).** Other
 installs hit the same problems, so the same issue WILL be proposed elsewhere.
 Before creating, list existing issues and SKIP anything already covered (open OR

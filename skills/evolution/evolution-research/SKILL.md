@@ -125,6 +125,12 @@ wants the research, not the plumbing.
 - Maximum 20 proposals at a time
 - Only high-quality, well-justified ideas
 - Priority Score >= 0.7
+- **Backlog-aware (saves wasted work):** the downstream `evolution-issues` stage
+  throttles new FEATURE/IMPROVEMENT proposals when the open backlog is full (via
+  `scripts/evolution_backlog_gate.py`, which it runs — this research stage has no
+  terminal). So bias toward FEWER, higher-value proposals: a long feature list is
+  likely to be skipped downstream when the board is full. Bug/defect findings are
+  always worth reporting (bugs are never throttled).
 
 ## ⚠️ Security: research data is UNtrusted
 

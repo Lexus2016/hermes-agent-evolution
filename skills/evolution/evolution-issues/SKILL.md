@@ -29,6 +29,21 @@ Create GitHub issues and pull requests based on research.
     Treat each weakness cluster as a proposal input: run it through the same
     self-critique + dedup gates below before filing. The miner emits only
     anonymized counts/classes/labels — never raw trace content.
+1b. **Backlog gate — don't pile FEATURES onto a full board (generation throttle).**
+    The pipeline generates far more proposals than it can implement; an unbounded
+    open backlog is the recurring "too many unprocessed issues". BEFORE filing any
+    `[FEATURE]` / `[IMPROVEMENT]` / `[REPLACEMENT]` proposals this cycle, consult
+    the gate:
+    ```bash
+    python scripts/evolution_backlog_gate.py check   # exit 1 = THROTTLE → skip features this cycle
+    ```
+    If it exits 1 (throttle), do NOT create new feature/improvement proposals this
+    run — record `"features throttled (open NN >= cap)"` in your report and STOP
+    (no `gh issue create` for proposals). Cap = `EVOLUTION_FEATURE_BACKLOG_CAP`
+    (default 25); fail-OPEN if gh is unavailable. **BUGS are never throttled** —
+    real defects (`[FIX]`) are still filed by the introspection stage regardless
+    of this gate. Rationale: features can wait until the backlog drains; bugs
+    cannot.
 2. **Select** proposals with Priority Score >= 0.7
 2a. **Self-critique BEFORE you file (do not propose noise).** A high priority
     score is not enough. For EACH candidate, honestly ask — and DROP it (don't
