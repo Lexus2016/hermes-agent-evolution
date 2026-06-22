@@ -167,6 +167,89 @@ def _install_evolution_helpers(repo_root: Path) -> list[str]:
     return installed
 
 
+# Labels required by the evolution pipeline.  Kept in one place so every skill
+# stage (issues, introspection, integration, implementation) can rely on them
+# existing.  Creation is idempotent; failures are warnings, not fatal.
+_EVOLUTION_LABELS: list[tuple[str, str, str]] = [
+    ("capability", "5319e7", "Missing ability users needed"),
+    ("introspection", "0e8a16", "Found by session introspection"),
+    ("ux", "fbca04", "Interaction friction"),
+    ("proposal", "0e8a16", "Evolution-generated improvement proposal"),
+    ("research-generated", "1d76db", "Created by the evolution research cycle"),
+    ("needs-work", "d93f0b", "Blocked by code-review (dead code / not integrated)"),
+    ("next-increment", "1d76db", "Roadmap increment merged; more deferred — re-queued"),
+    ("accepted", "0e8a16", "Accepted by evolution — sent to a PR / implemented"),
+    ("rejected", "b60205", "Not accepted by evolution — see closing comment"),
+    ("needs-split", "d4c5f9", "Wanted, but exceeds one cycle — needs decomposition"),
+    ("blocked", "e11d21", "Needs human/infrastructure action — see comment"),
+    ("fix", "1d76db", "Bug or fix"),
+    ("improvement", "a2eeef", "An improvement to existing functionality"),
+    (
+        "implemented-on-main",
+        "0e8a16",
+        "Capability already exists on main — no code change needed",
+    ),
+]
+
+
+def _ensure_evolution_labels(repo_root: Path, dry_run: bool = False) -> list[str]:
+    """Idempotently create the GitHub labels used by the evolution pipeline.
+
+    Several evolution skills call ``gh label create`` with the expectation that
+    the label exists; on a fresh fork the labels are missing and every label
+    operation fails silently (wasting API calls and leaving issues
+    uncategorized — #468). This bootstrap step runs once per registration pass.
+
+    Returns the list of label names that were created or confirmed present.
+    Warnings are printed for any failure, but registration continues.
+    """
+    import subprocess
+
+    created: list[str] = []
+    for name, color, description in _EVOLUTION_LABELS:
+        cmd = [
+            "gh",
+            "label",
+            "create",
+            name,
+            "--repo",
+            "Lexus2016/hermes-agent-evolution",
+            "--color",
+            color,
+            "--description",
+            description,
+        ]
+        if dry_run:
+            print(f"[evolution-cron] dry-run label: {name}")
+            created.append(name)
+            continue
+        try:
+            result = subprocess.run(
+                cmd,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                created.append(name)
+            elif "already exists" in (result.stderr or "").lower():
+                created.append(name)
+            else:
+                print(
+                    f"[evolution-cron] warning: could not create label {name}: "
+                    f"{result.stderr or result.stdout}",
+                    file=sys.stderr,
+                )
+        except Exception as exc:  # pragma: no cover - gh may be missing
+            print(
+                f"[evolution-cron] warning: could not create label {name}: {exc}",
+                file=sys.stderr,
+            )
+    return created
+
+
 def main(argv: list[str]) -> int:
     dry_run = "--dry-run" in argv
     positional = [a for a in argv[1:] if not a.startswith("--")]
@@ -177,6 +260,10 @@ def main(argv: list[str]) -> int:
     # that actually has the dependencies (dotenv, croniter, …). This replaces
     # the process when needed, so nobody has to launch us with the right python.
     _ensure_venv_python(repo_root, argv)
+
+    # Bootstrap the GitHub labels used by every evolution skill.  Missing labels
+    # make issue/PR operations fail silently on fresh forks (#468).
+    label_ensured = [] if dry_run else _ensure_evolution_labels(repo_root)
 
     src_dir = Path(positional[0]) if positional else repo_root / "cron" / "evolution"
     if not src_dir.is_dir():
@@ -221,7 +308,11 @@ def main(argv: list[str]) -> int:
         # executes the copy in HERMES_HOME/scripts; without this refresh the
         # installed script stays frozen at whatever version existed when the
         # job was first registered.
-        if spec.get("no_agent") and str(spec.get("script") or "").strip() and not dry_run:
+        if (
+            spec.get("no_agent")
+            and str(spec.get("script") or "").strip()
+            and not dry_run
+        ):
             _install_script(repo_root, str(spec["script"]).strip())
 
         schedule = str(spec.get("schedule") or "").strip()
@@ -252,7 +343,9 @@ def main(argv: list[str]) -> int:
                 continue
             changes: dict = {}
             want_sched = parse_schedule(schedule).get("display", schedule)
-            cur_sched = (cur.get("schedule") or {}).get("display") or cur.get("schedule_display")
+            cur_sched = (cur.get("schedule") or {}).get("display") or cur.get(
+                "schedule_display"
+            )
             if want_sched != cur_sched:
                 changes["schedule"] = schedule
             if not no_agent:
@@ -325,7 +418,7 @@ def main(argv: list[str]) -> int:
     print(
         f"[evolution-cron] {verb}={len(created)} reconciled={len(updated)} "
         f"skipped(unchanged)={len(skipped)} failed={len(failed)} "
-        f"helper_scripts_installed={len(helper_scripts)}"
+        f"helper_scripts_installed={len(helper_scripts)} labels_ensured={len(label_ensured)}"
     )
     for name, jid in created:
         print(f"  + {name} ({jid})")

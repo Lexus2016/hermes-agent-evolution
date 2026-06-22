@@ -125,10 +125,7 @@ class TestNoAgentJobs:
         src_dir = tmp_path / "cron-src"
         src_dir.mkdir()
         (src_dir / "bad.yaml").write_text(
-            "name: evolution-bad\n"
-            'schedule: "0 9 * * *"\n'
-            "no_agent: true\n"
-            'prompt: "x"\n'
+            'name: evolution-bad\nschedule: "0 9 * * *"\nno_agent: true\nprompt: "x"\n'
         )
         home = tmp_path / "hermes-home"
         home.mkdir()
@@ -221,8 +218,9 @@ class TestReconcileExistingJob:
         monkeypatch.setattr(
             jobs_mod,
             "update_job",
-            lambda job_id, updates: calls.update(job_id=job_id, updates=updates)
-            or {**existing, **updates},
+            lambda job_id, updates: (
+                calls.update(job_id=job_id, updates=updates) or {**existing, **updates}
+            ),
         )
         return calls
 
@@ -348,3 +346,59 @@ class TestInstallEvolutionHelpers:
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
 
         assert mod._install_evolution_helpers(repo) == []
+
+
+class TestEnsureEvolutionLabels:
+    """``_ensure_evolution_labels`` idempotently creates the GitHub labels used
+    by every evolution skill.  It must succeed when labels already exist and
+    surface (but not die on) genuine gh failures."""
+
+    def test_dry_run_lists_all_labels(self, tmp_path):
+        mod = _import_module()
+        ensured = mod._ensure_evolution_labels(tmp_path, dry_run=True)
+        assert set(ensured) == {name for name, _, _ in mod._EVOLUTION_LABELS}
+
+    def test_already_existing_label_is_confirmed(self, tmp_path, monkeypatch):
+        mod = _import_module()
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            class _Result:
+                returncode = 1
+                stderr = f"HTTP 422: {cmd[3]} already exists"
+                stdout = ""
+
+            calls.append(cmd)
+            return _Result()
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        ensured = mod._ensure_evolution_labels(tmp_path, dry_run=False)
+        assert set(ensured) == {name for name, _, _ in mod._EVOLUTION_LABELS}
+        assert len(calls) == len(mod._EVOLUTION_LABELS)
+        # cmd layout: gh label create <name> --repo <repo> --color <c> --description <d>
+        assert all(c[0] == "gh" and c[1] == "label" and c[2] == "create" for c in calls)
+        assert {c[3] for c in calls} == {name for name, _, _ in mod._EVOLUTION_LABELS}
+        assert all(
+            "--repo" in c and "--color" in c and "--description" in c for c in calls
+        )
+
+    def test_real_failure_is_warning_not_fatal(self, tmp_path, monkeypatch, capsys):
+        mod = _import_module()
+        bad_label = None
+
+        def fake_run(cmd, **kwargs):
+            class _Result:
+                returncode = 1
+                stderr = "HTTP 403: Forbidden"
+                stdout = ""
+
+            nonlocal bad_label
+            bad_label = cmd[3]
+            return _Result()
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        ensured = mod._ensure_evolution_labels(tmp_path, dry_run=False)
+        assert ensured == []
+        captured = capsys.readouterr()
+        assert "warning: could not create label" in captured.err
+        assert bad_label in captured.err
