@@ -1,5 +1,5 @@
 name: evolution-analysis
-schedule: "0 21 * * *"  # Daily at 9 PM
+schedule: "0 1,5,9,13,17,21 * * *"  # Every 4h (was daily 21:00). Raises processing throughput vs ~25 issues/day generation. 21:00 slot still follows introspection (20:00). Watchdog STAGES mirrors the FIRST slot (1).
 enabled: true
 mode: PRIVATE
 

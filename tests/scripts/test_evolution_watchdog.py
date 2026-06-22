@@ -39,14 +39,17 @@ class TestExpectedReportDate:
 
 
 class TestStageReports:
-    def _make_reports(self, tmp_path, date="2026-06-10", skip=(), tiny=()):
+    def _make_reports(self, tmp_path, date=None, skip=(), tiny=()):
+        # Each stage's report is dated at ITS OWN expected slot date (slot-aware),
+        # so the helper stays correct regardless of per-stage schedules.
         for stage, (slot, ext) in STAGES.items():
             if stage in skip:
                 continue
             d = tmp_path / stage
             d.mkdir(exist_ok=True)
+            dt = date or expected_report_date(NOW, slot)
             content = "x" * 10 if stage in tiny else "x" * 500
-            (d / f"{date}.{ext}").write_text(content)
+            (d / f"{dt}.{ext}").write_text(content)
 
     def test_all_present_no_alerts(self, tmp_path):
         self._make_reports(tmp_path)
@@ -57,7 +60,8 @@ class TestStageReports:
         alerts = check_stage_reports(tmp_path, NOW)
         assert len(alerts) == 1
         assert "implementation" in alerts[0]
-        assert "2026-06-10" in alerts[0]
+        exp = expected_report_date(NOW, STAGES["implementation"][0])
+        assert exp in alerts[0]
 
     def test_trivially_small_report_alerts(self, tmp_path):
         self._make_reports(tmp_path, tiny=("analysis",))
@@ -80,9 +84,14 @@ class TestStageReports:
 
     def test_missing_report_quiet_when_job_ran_clean(self, tmp_path):
         # implementation report missing, but its cron job ran ok at/after the
-        # 22:00 slot for the expected date (2026-06-10) → idle clean cycle, no alert.
+        # slot for the expected date → idle clean cycle, no alert. Slot-aware.
+        slot = STAGES["implementation"][0]
+        exp = expected_report_date(NOW, slot)
         self._make_reports(tmp_path, skip=("implementation",))
-        jf = self._jobs_file(tmp_path, "evolution-implementation")
+        jf = self._jobs_file(
+            tmp_path, "evolution-implementation",
+            last_run=f"{exp}T{slot:02d}:01:00",
+        )
         assert check_stage_reports(tmp_path, NOW, jf) == []
 
     def test_missing_report_alerts_when_job_errored(self, tmp_path):
@@ -301,11 +310,14 @@ class TestStagesMirrorCronSpecs:
     def test_slot_hour_matches_schedule(self):
         for stage, (slot, _ext) in STAGES.items():
             spec = (self.CRON_DIR / f"{stage}.yaml").read_text()
-            m = re.search(r'^schedule:\s*"(\d+)\s+(\d+)\s', spec, re.M)
-            assert m, f"{stage}.yaml has no parsable daily schedule"
-            assert int(m.group(2)) == slot, (
-                f"watchdog STAGES says '{stage}' runs at {slot:02d}:00, "
-                f"but {stage}.yaml schedules hour {m.group(2)}"
+            # Hour field may be a single hour ("21") or a multi-slot list
+            # ("1,5,9,13,17,21"); STAGES mirrors the FIRST slot.
+            m = re.search(r'^schedule:\s*"(\d+)\s+([\d,]+)\s', spec, re.M)
+            assert m, f"{stage}.yaml has no parsable schedule"
+            first_hour = int(m.group(2).split(",")[0])
+            assert first_hour == slot, (
+                f"watchdog STAGES says '{stage}' first slot is {slot:02d}:00, "
+                f"but {stage}.yaml's first scheduled hour is {first_hour}"
             )
 
 

@@ -1,5 +1,5 @@
 name: evolution-implementation
-schedule: "0 22 * * *"  # Daily at 10 PM
+schedule: "0 2,6,10,14,18,22 * * *"  # Every 4h, +1h after analysis (1,5,9,...). Watchdog STAGES mirrors the FIRST slot (2).
 enabled: true
 mode: PRIVATE
 
