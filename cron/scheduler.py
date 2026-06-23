@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import traceback
 
 # fcntl is Unix-only; on Windows use msvcrt for file locking
 try:
@@ -68,14 +69,14 @@ def _summarize_cron_failure_for_delivery(job: dict, error: str | None) -> str:
         return (
             f"⚠️ Cron '{job_name}' failed: provider {reason}. "
             "Fallback chain was exhausted or unavailable. "
-            "Full details saved in cron output."
+            "Full details saved in cron output / cron/failures."
         )
 
     if "readtimeout" in lower or "timed out" in lower or "timeout" in lower:
         return (
             f"⚠️ Cron '{job_name}' failed: provider timeout. "
             "Fallback chain was exhausted or unavailable. "
-            "Full details saved in cron output."
+            "Full details saved in cron output / cron/failures."
         )
 
     # Match authentication/authorization wording at a word boundary and the
@@ -84,7 +85,7 @@ def _summarize_cron_failure_for_delivery(job: dict, error: str | None) -> str:
     if re.search(r"authenticat|authoriz", lower) or re.search(r"\b(401|403)\b", text):
         return (
             f"⚠️ Cron '{job_name}' failed: provider authentication error. "
-            "Full details saved in cron output."
+            "Full details saved in cron output / cron/failures."
         )
 
     # Strip common exception wrappers and collapse provider payloads. Bound
@@ -206,9 +207,15 @@ _LEGACY_HOME_TARGET_ENV_VARS = {
 
 from cron.jobs import (
     get_due_jobs,
+    load_jobs,
     mark_job_run,
     mark_job_started,
+    save_jobs,
     save_job_output,
+    save_job_failure,
+    list_job_failures,
+    get_latest_failure,
+    _jobs_lock,
     advance_next_run,
 )
 
@@ -287,6 +294,112 @@ _hermes_home: Path | None = None
 def _get_hermes_home() -> Path:
     """Resolve Hermes home dynamically while preserving test monkeypatch hooks."""
     return _hermes_home or get_hermes_home()
+
+
+def _failure_digest_enabled(cfg: dict) -> bool:
+    """Return whether ``cron.failure_digest`` is enabled in config.yaml.
+
+    The digest surfaces recent cron failures to the user on the next
+    interaction. Default disabled (False); opt-in via config.yaml.
+    """
+    try:
+        cron_cfg = cfg.get("cron", {}) if isinstance(cfg, dict) else {}
+        return bool(cron_cfg.get("failure_digest", False))
+    except Exception:
+        return False
+
+
+def _load_cron_config() -> dict:
+    """Load config.yaml, returning an empty dict on any failure."""
+    try:
+        from hermes_cli.config import load_config
+
+        return load_config() or {}
+    except Exception:
+        return {}
+
+
+def build_cron_failure_digest(adapters=None, loop=None) -> Optional[str]:
+    """Build a user-visible digest of recent cron failures.
+
+    Scans all jobs and emits a compact message for any job whose latest
+    failure record reports success=False and is newer than the job's last
+    acknowledged digest timestamp (stored in ``failure_digest_last_at``).
+    Updates that timestamp when a failure is included.
+
+    Returns the digest text, or None if there is nothing new to surface.
+    """
+    cfg = _load_cron_config()
+    if not _failure_digest_enabled(cfg):
+        return None
+
+    import datetime as _dt
+
+    now = _hermes_now()
+    cutoff = now - _dt.timedelta(hours=24)
+    lines: List[str] = []
+    jobs = load_jobs()
+    for job in jobs:
+        if not job.get("enabled", True):
+            continue
+        record = get_latest_failure(job["id"])
+        if not record:
+            continue
+        if record.get("success") is True:
+            continue
+        try:
+            ts = _dt.datetime.fromisoformat(str(record.get("timestamp") or ""))
+        except (TypeError, ValueError):
+            continue
+        if ts < cutoff:
+            continue
+
+        last_ack = job.get("failure_digest_last_at")
+        if last_ack:
+            try:
+                last_ack_dt = _dt.datetime.fromisoformat(str(last_ack))
+                if ts <= last_ack_dt:
+                    continue
+            except (TypeError, ValueError):
+                pass
+
+        job_name = record.get("job_name") or job.get("name") or job["id"]
+        err = (record.get("error") or "unknown error")[:120]
+        lines.append(f"• '{job_name}' failed at {ts.strftime('%Y-%m-%d %H:%M')}: {err}")
+
+    if not lines:
+        return None
+
+    digest = (
+        "⚠️ Cron failure digest (last 24h):\n"
+        + "\n".join(lines)
+        + "\n\nFull details: ~/.hermes/cron/failures/"
+    )
+
+    # Update ack timestamps so we don't repeat the same failures every turn.
+    try:
+        with _jobs_lock():
+            jobs = load_jobs()
+            now_iso = now.isoformat()
+            changed = False
+            for job in jobs:
+                record = get_latest_failure(job["id"])
+                if not record or record.get("success") is True:
+                    continue
+                try:
+                    ts = _dt.datetime.fromisoformat(str(record.get("timestamp") or ""))
+                except (TypeError, ValueError):
+                    continue
+                if ts < cutoff:
+                    continue
+                job["failure_digest_last_at"] = now_iso
+                changed = True
+            if changed:
+                save_jobs(jobs)
+    except Exception:
+        logger.debug("Could not update failure_digest_last_at", exc_info=True)
+
+    return digest
 
 
 def _get_lock_paths() -> tuple[Path, Path]:
@@ -2390,6 +2503,32 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
         output_file = save_job_output(job["id"], output)
         if verbose:
             logger.info("Output saved to: %s", output_file)
+
+        # Persist a failure record whenever a job fails or the agent returns an
+        # empty response. This is the per-job audit trail that makes silent
+        # failures visible; successful runs overwrite the latest record so the
+        # digest only shows current problems.
+        if not success:
+            tb = traceback.format_exc() if sys.exc_info()[0] is not None else None
+            try:
+                save_job_failure(
+                    job,
+                    success=False,
+                    error=error,
+                    output=output,
+                    traceback_text=tb,
+                )
+                logger.warning(
+                    "Job '%s' failure record saved to cron/failures",
+                    job.get("id"),
+                )
+            except Exception as fe:
+                logger.error("Could not save cron failure record: %s", fe)
+        else:
+            try:
+                save_job_failure(job, success=True, output=output)
+            except Exception:
+                pass
 
         # Deliver the final response to the origin/target chat.
         # If the agent responded with [SILENT], skip delivery (but

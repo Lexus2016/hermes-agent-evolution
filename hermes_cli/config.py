@@ -2345,6 +2345,11 @@ DEFAULT_CONFIG = {
         # 1 = serial (pre-v0.9 behaviour).
         # Also overridable via HERMES_CRON_MAX_PARALLEL env var.
         "max_parallel_jobs": None,
+        # Optional user-visible digest that surfaces recent cron failures on the
+        # next interaction. Set ``cron.failure_digest: true`` in config.yaml to
+        # enable; default is false so existing users are not surprised by new
+        # messages. No env var — config.yaml is the canonical UI.
+        "failure_digest": False,
     },
 
     # Kanban multi-agent coordination — controls the dispatcher loop that
@@ -4091,6 +4096,7 @@ def _normalize_custom_provider_entry(
         "api_mode", "transport", "model", "default_model", "models",
         "context_length", "rate_limit_delay",
         "request_timeout_seconds", "stale_timeout_seconds",
+        "circuit_breaker",
         "discover_models", "extra_body",
     }
     for camel, snake in _CAMEL_ALIASES.items():
