@@ -18,7 +18,8 @@ def _read(p) -> dict:
 
 
 class TestRegisterInConfigFile:
-    def test_writes_canonical_schema_to_fresh_config(self, tmp_path):
+    def test_writes_canonical_schema_to_fresh_config(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", "/tmp/hermes-home-test")
         cfg = tmp_path / "config.yaml"
         changed = tqm._register_in_config_file(cfg, BIN)
         assert changed is True
@@ -26,7 +27,13 @@ class TestRegisterInConfigFile:
         # The RC1b regression guard: env must be present AND args == ["serve"].
         assert entry["command"] == BIN
         assert entry["args"] == ["serve"]
-        assert entry["env"] == {"TQMEMORY_MIGRATE_ON_STARTUP": "1"}
+        # Stable project root pins project_id (cwd-independent); migrate flag stays.
+        assert entry["env"] == {
+            "TQMEMORY_MIGRATE_ON_STARTUP": "1",
+            "TQMEMORY_PROJECT_ROOT": "/tmp/hermes-home-test",
+        }
+        # Generous per-server timeout for the first ~600MB embedding-model load.
+        assert entry["timeout"] == 600
         assert entry["enabled"] is True
 
     def test_idempotent_second_call_is_noop(self, tmp_path):
@@ -89,21 +96,32 @@ class TestRegisterInConfigFile:
         assert tqm._register_in_config_file(cfg, BIN) is True
         assert "_config_version" not in _read(cfg)
 
-    def test_repairs_missing_env(self, tmp_path):
+    def test_repairs_missing_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", "/tmp/hermes-home-test")
         cfg = tmp_path / "config.yaml"
         cfg.write_text(yaml.safe_dump({
             "mcp_servers": {"tqmemory": {"command": BIN, "args": ["serve"], "enabled": True}}
         }), encoding="utf-8")
         assert tqm._register_in_config_file(cfg, BIN) is True
         env = _read(cfg)["mcp_servers"]["tqmemory"]["env"]
-        assert env == {"TQMEMORY_MIGRATE_ON_STARTUP": "1"}
+        # Repair back-fills BOTH the migrate flag and the stable project root so
+        # existing client installs heal on `hermes update`.
+        assert env == {
+            "TQMEMORY_MIGRATE_ON_STARTUP": "1",
+            "TQMEMORY_PROJECT_ROOT": "/tmp/hermes-home-test",
+        }
 
-    def test_fully_correct_entry_is_noop(self, tmp_path):
+    def test_fully_correct_entry_is_noop(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", "/tmp/hermes-home-test")
         cfg = tmp_path / "config.yaml"
         cfg.write_text(yaml.safe_dump({
             "mcp_servers": {"tqmemory": {
                 "command": BIN, "args": ["serve"],
-                "env": {"TQMEMORY_MIGRATE_ON_STARTUP": "1"}, "enabled": True,
+                "env": {
+                    "TQMEMORY_MIGRATE_ON_STARTUP": "1",
+                    "TQMEMORY_PROJECT_ROOT": "/tmp/hermes-home-test",
+                },
+                "timeout": 600, "enabled": True,
             }}
         }), encoding="utf-8")
         assert tqm._register_in_config_file(cfg, BIN) is False

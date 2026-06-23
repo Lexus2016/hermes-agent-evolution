@@ -157,7 +157,23 @@ def ensure_turbo_memory_installed(quiet: bool = False) -> Optional[str]:
     existing = resolve_binary()
     if existing:
         # Best-effort upgrade; never fail the caller on a network hiccup.
-        _run([uv, "tool", "upgrade", BINARY], _UPGRADE_TIMEOUT)
+        #
+        # rev-pin trap: if a PRIOR install pinned the receipt to a concrete git
+        # rev (observed on prod: rev=v0.17.0), `uv tool upgrade` re-resolves to
+        # that SAME rev and never jumps to a newer commit — the install stays
+        # silently stale. REPO_SPEC is intentionally unpinned (no @rev) so a
+        # reinstall floats to the branch HEAD. We try the cheap upgrade first
+        # (fast on the common, already-latest case) and only fall back to a
+        # `--reinstall` against the unpinned spec when the upgrade reported no
+        # change ("Nothing to upgrade" / non-zero) — that re-pins the receipt to
+        # the unpinned spec and breaks the rev-pin trap without slowing the
+        # normal path.
+        up = _run([uv, "tool", "upgrade", BINARY], _UPGRADE_TIMEOUT)
+        out = (up.stdout or "") + (up.stderr or "")
+        upgrade_had_effect = up.returncode == 0 and "Nothing to upgrade" not in out
+        if not upgrade_had_effect:
+            # Re-resolve from the unpinned REPO_SPEC to escape a rev-pinned receipt.
+            _run([uv, "tool", "install", "--reinstall", REPO_SPEC], _INSTALL_TIMEOUT)
         return resolve_binary() or existing
 
     _emit(quiet, "🧠 Installing Turbo-Quant Memory MCP (one-time, may take a minute)…")
@@ -177,10 +193,21 @@ def ensure_turbo_memory_installed(quiet: bool = False) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def _build_entry(tqm_path: str) -> dict:
+    # Pin TQMEMORY_PROJECT_ROOT to a STABLE root (HERMES_HOME, fallback ~/.hermes)
+    # so turbo_quant_memory derives a single, cwd-independent project_id. Without
+    # it the project_id tracks the process cwd and memory fragments into multiple
+    # buckets (observed on prod: /root vs /root/.hermes).
+    hermes_home = os.path.expanduser(os.environ.get("HERMES_HOME", "~/.hermes"))
+    env = dict(_SERVER_ENV)
+    env.setdefault("TQMEMORY_PROJECT_ROOT", hermes_home)
     return {
         "command": tqm_path,
         "args": ["serve"],
-        "env": dict(_SERVER_ENV),
+        "env": env,
+        # First semantic_search loads a ~600MB embedding model; re-syncs can be
+        # slow. Give this server a generous per-call timeout (read per-server by
+        # tools/mcp_tool.py) without touching the global MCP default.
+        "timeout": 600,
         "enabled": True,
     }
 
@@ -219,15 +246,21 @@ def _register_in_config_file(config_path: Path, tqm_path: str) -> bool:
     if isinstance(existing, dict):
         # Already registered. Leave a user-disabled entry (enabled: false)
         # untouched so we respect intent. Otherwise repair anything that drifted:
-        # a stale absolute command path OR a missing migrate-on-startup env.
+        # a stale absolute command path, a missing migrate-on-startup env, a
+        # missing stable project root, or a missing per-server timeout. Repairing
+        # the project root on EXISTING installs (not just fresh ones) is what lets
+        # `hermes update` heal client installs whose memory fragmented by cwd.
         if existing.get("enabled") is False:
             return False
+        canonical = _build_entry(tqm_path)
         env = existing.get("env")
         already_correct = (
             existing.get("command") == tqm_path
             and existing.get("args") == ["serve"]
             and isinstance(env, dict)
             and env.get("TQMEMORY_MIGRATE_ON_STARTUP") == "1"
+            and env.get("TQMEMORY_PROJECT_ROOT") == canonical["env"]["TQMEMORY_PROJECT_ROOT"]
+            and existing.get("timeout") == canonical["timeout"]
         )
         if already_correct:
             return False
@@ -236,7 +269,11 @@ def _register_in_config_file(config_path: Path, tqm_path: str) -> bool:
         if not isinstance(env, dict):
             env = {}
         env.setdefault("TQMEMORY_MIGRATE_ON_STARTUP", "1")
+        # Backfill a stable project root so project_id no longer tracks cwd.
+        # setdefault: never clobber an operator-chosen TQMEMORY_PROJECT_ROOT.
+        env.setdefault("TQMEMORY_PROJECT_ROOT", canonical["env"]["TQMEMORY_PROJECT_ROOT"])
         existing["env"] = env
+        existing.setdefault("timeout", canonical["timeout"])
         existing["enabled"] = True
     else:
         servers[SERVER_NAME] = _build_entry(tqm_path)
