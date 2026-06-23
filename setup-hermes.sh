@@ -529,6 +529,25 @@ fi
 # HERMES_NO_TQMEMORY=1 (or, persistently, memory.tqmemory_autoinstall: false).
 if [ "${HERMES_NO_TQMEMORY:-0}" != "1" ]; then
     "$SCRIPT_DIR/venv/bin/python" -m hermes_cli.tqmemory_setup || true
+
+    # Pre-cache the sentence-transformers embedding model so the FIRST
+    # semantic_search doesn't time out pulling ~600MB from HuggingFace at
+    # runtime (slow/rate-limited networks blow past the MCP timeout otherwise).
+    # Best-effort only: any failure here just means the model lazy-loads on
+    # first use. HF_TOKEN is optional (it only raises the HF rate limit).
+    # Respect TQMEMORY_EMBEDDING_MODEL if the operator set a custom model;
+    # otherwise fall back to the package default (paraphrase-multilingual-MiniLM-L12-v2).
+    echo "🧠 Pre-caching embedding model (best-effort)…"
+    "$SCRIPT_DIR/venv/bin/python" - <<'PYEOF' 2>/dev/null || echo "  (embedding preload skipped — will lazy-load on first use)"
+import os
+try:
+    from sentence_transformers import SentenceTransformer
+    model = os.environ.get("TQMEMORY_EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
+    SentenceTransformer(model)
+    print(f"  ✓ embedding model cached ({model})")
+except Exception:
+    pass
+PYEOF
 fi
 
 # Ask if they want to run setup wizard now
