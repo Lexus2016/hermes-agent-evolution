@@ -73,6 +73,7 @@ TICKER_INTERVAL_SECONDS = 60
 _jobs_file_lock = threading.RLock()
 _jobs_lock_state = threading.local()
 OUTPUT_DIR = CRON_DIR / "output"
+FAILURE_DIR = CRON_DIR / "failures"
 ONESHOT_GRACE_SECONDS = 120
 
 
@@ -272,8 +273,10 @@ def ensure_dirs():
     """Ensure cron directories exist with secure permissions."""
     CRON_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    FAILURE_DIR.mkdir(parents=True, exist_ok=True)
     _secure_dir(CRON_DIR)
     _secure_dir(OUTPUT_DIR)
+    _secure_dir(FAILURE_DIR)
 
 
 # =============================================================================
@@ -1481,6 +1484,93 @@ def save_job_output(job_id: str, output: str):
         raise
     
     return output_file
+
+
+def save_job_failure(
+    job: Dict[str, Any],
+    *,
+    success: bool,
+    error: Optional[str] = None,
+    output: str = "",
+    exit_code: Optional[int] = None,
+    traceback_text: Optional[str] = None,
+    max_output_chars: int = 4000,
+) -> Path:
+    """Persist a per-job failure record under ``FAILURE_DIR``.
+
+    Captures the last N characters of the job output plus any traceback so
+    operators can diagnose why a cron job failed without re-running it.
+    Records are keyed by job id and timestamp; the most recent file per job
+    is the canonical "latest failure". Failures are written even when the
+    job later recovers, so the record reflects the *most recent* run status.
+
+    Returns the path of the written record.
+    """
+    ensure_dirs()
+    job_id = str(job.get("id") or "unknown")
+    failure_job_dir = FAILURE_DIR / job_id
+    failure_job_dir.mkdir(parents=True, exist_ok=True)
+    _secure_dir(failure_job_dir)
+
+    now = _hermes_now()
+    # Include sub-seconds in the filename so rapid successive failures don't
+    # collide and overwrite each other.
+    timestamp = now.strftime("%Y-%m-%d_%H-%M-%S") + f"_{now.microsecond:06d}"
+    record_file = failure_job_dir / f"{timestamp}.json"
+
+    trimmed_output = output
+    if len(trimmed_output) > max_output_chars:
+        trimmed_output = "..." + trimmed_output[-max_output_chars:]
+
+    record = {
+        "job_id": job_id,
+        "job_name": str(job.get("name") or job_id),
+        "timestamp": now.isoformat(),
+        "success": bool(success),
+        "exit_code": exit_code,
+        "error": error,
+        "traceback": traceback_text,
+        "last_output": trimmed_output,
+    }
+
+    fd, tmp_path = tempfile.mkstemp(dir=str(failure_job_dir), suffix=".tmp", prefix=".failure_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=2, default=str)
+            f.flush()
+            os.fsync(f.fileno())
+        atomic_replace(tmp_path, record_file)
+        _secure_file(record_file)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+    return record_file
+
+
+def list_job_failures(job_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Return recent failure records for a job, newest first."""
+    failure_job_dir = FAILURE_DIR / job_id
+    if not failure_job_dir.exists():
+        return []
+    records: List[Dict[str, Any]] = []
+    for path in sorted(failure_job_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            records.append(json.loads(path.read_text(encoding="utf-8")))
+        except Exception:
+            continue
+        if limit is not None and len(records) >= limit:
+            break
+    return records
+
+
+def get_latest_failure(job_id: str) -> Optional[Dict[str, Any]]:
+    """Return the most recent failure record for a job, or None."""
+    records = list_job_failures(job_id, limit=1)
+    return records[0] if records else None
 
 
 # =============================================================================

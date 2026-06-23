@@ -2396,6 +2396,23 @@ def _prepend_note_to_message(message, note: str):
     return message
 
 
+def _get_cron_failure_digest_for_user() -> Optional[str]:
+    """Build a user-visible cron failure digest if enabled and failures exist.
+
+    Returns a formatted digest string when ``cron.failure_digest`` is enabled
+    and there are un-acknowledged cron failures within the last 24 hours.
+    Returns ``None`` otherwise.  The underlying implementation updates ack
+    timestamps only when it actually emits a digest, so calling this on every
+    user turn is safe and will not repeat the same failure.
+    """
+    try:
+        from cron.scheduler import build_cron_failure_digest
+
+        return build_cron_failure_digest()
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # File-drop / local attachment detection — extracted as pure helpers for tests.
 # ---------------------------------------------------------------------------
@@ -10984,6 +11001,13 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
             from run_agent import _sanitize_surrogates
             message = _sanitize_surrogates(message)
 
+        # Surface recent cron failures to the operator before this turn.
+        # The digest is opt-in via ``cron.failure_digest`` and acks on delivery,
+        # so the same failure is surfaced only once per user interaction cycle.
+        _cron_failure_digest = _get_cron_failure_digest_for_user()
+        if _cron_failure_digest:
+            _cprint(f"\n{_cron_failure_digest}\n")
+
         # Add user message to history
         self.conversation_history.append({"role": "user", "content": message})
 
@@ -11102,9 +11126,14 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
                     reset_current_session_key = None  # type: ignore[assignment]
                     _approval_session_token = None
                 agent_message = _voice_prefix + message if _voice_prefix else message
+                # If recent cron failures were surfaced, prepend them to the
+                # user message so the model sees them without adding a phantom
+                # turn to conversation_history.
+                if _cron_failure_digest:
+                    agent_message = _prepend_note_to_message(agent_message, _cron_failure_digest)
                 # Prepend pending notes via _prepend_note_to_message, which
                 # handles both plain-string and multimodal content-parts list
-                # messages. Naive ``note + "\n\n" + agent_message`` crashed with
+                # messages. Naive ``note + "\\n\\n" + agent_message`` crashed with
                 # TypeError when an image was attached (agent_message is a list)
                 # and a /model or /reload-skills note was queued for the turn.
                 _msn = getattr(self, '_pending_model_switch_note', None)
