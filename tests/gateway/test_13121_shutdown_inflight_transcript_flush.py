@@ -176,7 +176,7 @@ class TestShutdownTranscriptSurvivesResumeE2E:
         # Model a real agent: turn 1 already flushed, so its message identities
         # are recorded in the dedup set. Only the in-flight turn-2 tail is new.
         agent._last_flushed_db_idx = len(prior_history)
-        agent._flushed_db_message_ids = {id(m) for m in prior_history}
+        agent._flushed_db_messages = list(prior_history)
         agent._flushed_db_message_session_id = session_id
 
         # Sanity: only the 2 first-turn rows are in the DB before shutdown.
@@ -227,7 +227,7 @@ class TestShutdownTranscriptSurvivesResumeE2E:
         agent.platform = "discord"
         agent._session_messages = msgs
         agent._last_flushed_db_idx = 0
-        agent._flushed_db_message_ids = set()
+        agent._flushed_db_messages = []
         agent._flushed_db_message_session_id = None
 
         # First flush (simulating finalize_turn).

@@ -45,6 +45,7 @@ ACP_REGISTRY_MANIFEST = REPO_ROOT / "acp_registry" / "agent.json"
 
 # Auto-extracted from noreply emails + manual overrides
 AUTHOR_MAP = {
+    "poli.koltsova@gmail.com": "wnuuee1",  # upstream sync 2026-06-23 (PR #487)
     "daniel.laforce@argobox.com": "KeyArgo",  # upstream sync 2026-06-21
     "lexus@cdzv.com": "Lexus2016",
     "evolution@hermes.ai": "Lexus2016",  # autonomous evolution agent commits
