@@ -23,15 +23,18 @@ Design:
 - Frozen snapshot pattern: system prompt is stable, tool responses show live state
 """
 
+import hashlib
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from hermes_constants import get_hermes_home
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from utils import atomic_replace
 
@@ -55,6 +58,12 @@ logger = logging.getLogger(__name__)
 def get_memory_dir() -> Path:
     """Return the profile-scoped memories directory."""
     return get_hermes_home() / "memories"
+
+
+def _index_path() -> Path:
+    """Return the per-profile memory index sidecar path."""
+    return get_memory_dir() / "memory_index.json"
+
 
 ENTRY_DELIMITER = "\n§\n"
 
@@ -249,6 +258,152 @@ def _drift_error(path: "Path", bak_path: str) -> Dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------
+# Memory index sidecar — staleness-aware pruning (#447)
+#
+# Each entry gets a small metadata record keyed by ``{target}:{sha256(text)}``.
+# The record tracks when the entry first appeared, when it was last recalled by
+# the agent, and how many times it has been recalled. This is used by the
+# ``prune`` action to score freshness and by contradiction detection to flag
+# review-worthy pairs. Legacy entries with no sidecar record are bootstrapped
+# from the memory file's mtime the next time the file is written or loaded.
+# ---------------------------------------------------------------------------
+
+
+def _entry_hash(target: str, text: str) -> str:
+    """Return a stable sidecar key for a memory entry's display text."""
+    digest = hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
+    return f"{target}:{digest}"
+
+
+def _now_iso() -> str:
+    """Return current UTC time as ISO-8601 string."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _load_index() -> Dict[str, Any]:
+    """Load the memory index sidecar, returning an empty dict if missing/broken."""
+    path = _index_path()
+    if not path.exists():
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        logger.warning("Failed to load memory index; starting fresh.")
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_index(data: Dict[str, Any]) -> None:
+    """Persist the memory index sidecar atomically."""
+    path = _index_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        atomic_replace(tmp, path)
+    except (OSError, IOError) as e:
+        logger.warning("Failed to save memory index: %s", e)
+
+
+_NEGATION_RE = re.compile(
+    r"\b(?:no|not|never|none|no\s+longer|not\s+any|not\s+using|"
+    r"don't|doesn't|didn't|won't|wouldn't|can't|cannot|"
+    r"isn't|wasn't|aren't|shouldn't|mustn't|removed|disabled|stopped)\b",
+    re.IGNORECASE,
+)
+
+
+def _significant_words(text: str) -> set[str]:
+    """Return content words (length > 3) used for contradiction detection."""
+    return {w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) > 3}
+
+
+def _detect_contradictions(entries: List[str]) -> List[Tuple[str, str, str]]:
+    """Return pairs of entries that may contradict each other.
+
+    Heuristic: two entries share at least two significant words and only one
+    contains a negation marker. This is intentionally lightweight; flagged
+    pairs are surfaced for review rather than auto-resolved.
+    """
+    contradictions: List[Tuple[str, str, str]] = []
+    parsed = [parse_provenance(e)[0].strip() for e in entries]
+    for i in range(len(parsed)):
+        words_i = _significant_words(parsed[i])
+        neg_i = bool(_NEGATION_RE.search(parsed[i]))
+        if not words_i:
+            continue
+        for j in range(i + 1, len(parsed)):
+            words_j = _significant_words(parsed[j])
+            neg_j = bool(_NEGATION_RE.search(parsed[j]))
+            shared = words_i & words_j
+            if len(shared) >= 2 and neg_i != neg_j:
+                contradictions.append(
+                    (parsed[i], parsed[j], ", ".join(sorted(shared)[:5]))
+                )
+    return contradictions
+
+
+# Tuning weights for the staleness score. Higher score = more stale.
+_AGE_WEIGHT = 1.0
+_AGE_ADDED_WEIGHT = 0.3
+_TRUST_WEIGHT = 5.0
+_RECALL_WEIGHT = 10.0
+_LENGTH_WEIGHT = 0.2
+_CONTRADICTION_WEIGHT = 8.0
+_MAX_TRUST_RANK = len(TRUST_TIERS) - 1
+
+
+def _staleness_score(entry: str, meta: Dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
+    """Return a staleness score and a dict of supporting metrics for an entry."""
+    now = datetime.now(timezone.utc)
+    text, _src, tier = parse_provenance(entry)
+    added_at = meta.get("added_at")
+    last_recall = meta.get("last_recall")
+    recall_count = meta.get("recall_count", 0)
+    trust_rank = _trust_rank(tier)
+    if trust_rank < 0:
+        trust_rank = 0
+
+    def _parse_dt(value):
+        if not value:
+            return now
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return now
+
+    added_dt = _parse_dt(added_at)
+    recall_dt = _parse_dt(last_recall)
+
+    days_since_recall = max(0.0, (now - recall_dt).total_seconds() / 86400.0)
+    days_since_added = max(0.0, (now - added_dt).total_seconds() / 86400.0)
+
+    # Cap age contributions so very old entries do not drown other signals.
+    age_score = min(days_since_recall, 365) * _AGE_WEIGHT + min(days_since_added, 365) * _AGE_ADDED_WEIGHT
+    trust_score = (_MAX_TRUST_RANK - trust_rank) * _TRUST_WEIGHT
+    recall_score = _RECALL_WEIGHT / (recall_count + 1)
+    length_score = min(len(text) / 200.0, 10.0) * _LENGTH_WEIGHT
+
+    score = age_score + trust_score + recall_score + length_score
+    details = {
+        "days_since_recall": round(days_since_recall, 1),
+        "days_since_added": round(days_since_added, 1),
+        "trust_rank": trust_rank,
+        "recall_count": recall_count,
+        "age_score": round(age_score, 2),
+        "trust_score": trust_score,
+        "recall_score": round(recall_score, 2),
+        "length_score": round(length_score, 2),
+        "total_score": round(score, 2),
+    }
+    return score, details
+
+
 class MemoryStore:
     """
     Bounded curated memory with file persistence. One instance per AIAgent.
@@ -315,6 +470,53 @@ class MemoryStore:
             "memory": self._render_block("memory", sanitized_memory),
             "user": self._render_block("user", sanitized_user),
         }
+
+        # Bootstrap sidecar index for any entries that don't have metadata yet.
+        # Uses the file mtime as a conservative fallback for legacy entries.
+        self._sync_index_for_target("memory", self.memory_entries)
+        self._sync_index_for_target("user", self.user_entries)
+
+    def _sync_index_for_target(self, target: str, entries: List[str]) -> None:
+        """Ensure every entry has an index record; remove records for deleted entries."""
+        index = _load_index()
+        now_iso = _now_iso()
+        present: set[str] = set()
+        for entry in entries:
+            text = parse_provenance(entry)[0].strip()
+            if not text:
+                continue
+            key = _entry_hash(target, text)
+            present.add(key)
+            rec = index.get(key)
+            if not isinstance(rec, dict):
+                rec = {}
+                index[key] = rec
+            rec.setdefault("added_at", now_iso)
+            rec.setdefault("last_recall", rec.get("added_at", now_iso))
+            rec.setdefault("recall_count", 0)
+
+        prefix = f"{target}:"
+        for key in list(index.keys()):
+            if key.startswith(prefix) and key not in present:
+                del index[key]
+        _save_index(index)
+
+    def _bump_recall_for_entries(self, target: str, texts: List[str]) -> None:
+        """Update last_recall/recall_count for entries returned by search."""
+        if not texts:
+            return
+        index = _load_index()
+        now_iso = _now_iso()
+        changed = False
+        for text in texts:
+            key = _entry_hash(target, text.strip())
+            rec = index.get(key)
+            if isinstance(rec, dict):
+                rec["last_recall"] = now_iso
+                rec["recall_count"] = rec.get("recall_count", 0) + 1
+                changed = True
+        if changed:
+            _save_index(index)
 
     @staticmethod
     def _sanitize_entries_for_snapshot(entries: List[str], filename: str) -> List[str]:
@@ -425,6 +627,7 @@ class MemoryStore:
         """Persist entries to the appropriate file. Called after every mutation."""
         get_memory_dir().mkdir(parents=True, exist_ok=True)
         self._write_file(self._path_for(target), self._entries_for(target))
+        self._sync_index_for_target(target, self._entries_for(target))
 
     def _entries_for(self, target: str) -> List[str]:
         if target == "user":
@@ -731,7 +934,98 @@ class MemoryStore:
             if min_rank is not None and _trust_rank(tier) < min_rank:
                 continue
             rows.append({"text": text, "source_class": src, "trust_tier": tier})
+
+        # Staleness-aware pruning (#447): every retrieval counts as a recall so
+        # frequently-used facts stay fresh and rarely-recalled ones score higher.
+        self._bump_recall_for_entries(target, [r["text"] for r in rows])
         return rows
+
+    def prune(
+        self,
+        target: str,
+        mode: str = "scan",
+        max_remove: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Score entries by freshness and either scan or remove the stalest ones.
+
+        ``scan`` (default) reports candidates and contradictions without mutating
+        the store. ``remove`` actually deletes the top-N stale entries. High-
+        confidence facts are kept; contradictions are surfaced for review.
+        """
+        if target not in {"memory", "user"}:
+            return {"success": False, "error": f"Invalid target '{target}'. Use 'memory' or 'user'."}
+
+        entries = list(self._entries_for(target))
+        if not entries:
+            return {
+                "success": True,
+                "mode": mode,
+                "candidates": [],
+                "removed": [],
+                "contradictions": [],
+                "entry_count": 0,
+                "message": "No entries to prune.",
+            }
+
+        index = _load_index()
+        contradictions = _detect_contradictions(entries)
+        contradiction_texts = {a.strip() for a, _, _ in contradictions} | {b.strip() for _, b, _ in contradictions}
+
+        scored: List[Tuple[float, int, str, Dict[str, Any]]] = []
+        for i, entry in enumerate(entries):
+            text = parse_provenance(entry)[0].strip()
+            meta = index.get(_entry_hash(target, text), {})
+            score, details = _staleness_score(entry, meta)
+            if text in contradiction_texts:
+                score += _CONTRADICTION_WEIGHT
+                details["contradiction"] = True
+            scored.append((score, i, text, details))
+
+        # Stalest first.
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        # Default removal budget: up to 20% of entries, never more than asked.
+        remove_limit = max_remove if max_remove is not None else max(1, len(entries) // 5)
+
+        if mode == "scan":
+            candidates = [
+                {"text": text, "score": details["total_score"], "metrics": details}
+                for _score, _i, text, details in scored[:remove_limit]
+            ]
+            return {
+                "success": True,
+                "mode": "scan",
+                "candidates": candidates,
+                "contradictions": [
+                    {"entry_a": a, "entry_b": b, "shared_terms": shared}
+                    for a, b, shared in contradictions
+                ],
+                "entry_count": len(entries),
+            }
+
+        if mode != "remove":
+            return {"success": False, "error": f"Invalid prune mode '{mode}'. Use 'scan' or 'remove'."}
+
+        removed: List[str] = []
+        for _score, _i, text, _details in scored[:remove_limit]:
+            # Only auto-remove entries that have any positive staleness signal.
+            if _score <= 0:
+                continue
+            res = self.remove(target, text)
+            if res.get("success"):
+                removed.append(text)
+
+        return {
+            "success": True,
+            "mode": "remove",
+            "removed": removed,
+            "contradictions": [
+                {"entry_a": a, "entry_b": b, "shared_terms": shared}
+                for a, b, shared in contradictions
+            ],
+            "entry_count": len(self._entries_for(target)),
+        }
+
     def apply_batch(self, target: str, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Apply a sequence of add/replace/remove ops to one target atomically.
 
@@ -1168,6 +1462,7 @@ def memory_tool(
     source_filter: Optional[object] = None,
     min_trust: Optional[str] = None,
     operations: Optional[List[Dict[str, Any]]] = None,
+    mode: str = "scan",
     store: Optional[MemoryStore] = None,
 ) -> str:
     """
@@ -1179,6 +1474,7 @@ def memory_tool(
                    atomically against the final char budget in ONE call.
     ``source_class`` / ``trust_tier`` tag provenance on add/replace (#316).
     ``source_filter`` / ``min_trust`` filter the ``search`` action's results.
+    ``mode`` controls the ``prune`` action: 'scan' reports, 'remove' deletes.
 
     Returns JSON string with results.
     """
@@ -1195,6 +1491,11 @@ def memory_tool(
             {"success": True, "target": target, "results": rows, "result_count": len(rows)},
             ensure_ascii=False,
         )
+
+    # prune is a maintenance action; it never writes through the approval gate.
+    if action == "prune":
+        result = store.prune(target, mode=mode)
+        return json.dumps(result, ensure_ascii=False)
 
     # --- Batch path -------------------------------------------------------
     if operations:
@@ -1245,7 +1546,7 @@ def memory_tool(
 
     else:
         return tool_error(
-            f"Unknown action '{action}'. Use: add, replace, remove, search", success=False
+            f"Unknown action '{action}'. Use: add, replace, remove, search, prune", success=False
         )
 
     return json.dumps(result, ensure_ascii=False)
@@ -1300,7 +1601,9 @@ MEMORY_SCHEMA = {
         "Priority: user preferences & corrections > environment facts > procedures. The best "
         "memory stops the user repeating themselves.\n\n"
         "IF FULL: an add is rejected with the current entries shown. Reissue as ONE batch that "
-        "removes or shortens enough stale entries and adds the new one together.\n\n"
+        "removes or shortens enough stale entries and adds the new one together. "
+        "Use action='prune' in 'scan' mode to see stale candidates and contradictions, "
+        "or 'remove' mode to delete them.\n\n"
         "TARGETS: 'user' = who the user is (name, role, preferences, style). 'memory' = your "
         "notes (environment, conventions, tool quirks, lessons).\n\n"
         "PROVENANCE (optional, on add/replace): tag where a fact came from. source_class = "
@@ -1317,8 +1620,8 @@ MEMORY_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "replace", "remove", "search"],
-                "description": "The action to perform (single op, or 'search' to read entries). Omit when using the 'operations' batch array."
+                "enum": ["add", "replace", "remove", "search", "prune"],
+                "description": "The action to perform (single op, or 'search' to read entries, or 'prune' to scan/remove stale entries). Omit when using the 'operations' batch array."
             },
             "target": {
                 "type": "string",
@@ -1376,6 +1679,11 @@ MEMORY_SCHEMA = {
                 "enum": list(TRUST_TIERS),
                 "description": "Optional for 'search': keep only entries at or above this trust tier.",
             },
+            "mode": {
+                "type": "string",
+                "enum": ["scan", "remove"],
+                "description": "Optional for 'prune': 'scan' reports stale candidates and contradictions without deleting (default); 'remove' deletes the top stale entries.",
+            },
         },
         "required": ["target"],
     },
@@ -1399,6 +1707,7 @@ registry.register(
         source_filter=args.get("source_filter"),
         min_trust=args.get("min_trust"),
         operations=args.get("operations"),
+        mode=args.get("mode", "scan"),
         store=kw.get("store")),
     check_fn=check_memory_requirements,
     emoji="🧠",

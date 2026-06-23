@@ -9,6 +9,11 @@ from tools.memory_tool import (
     memory_tool,
     _scan_memory_content,
     MEMORY_SCHEMA,
+    _index_path,
+    _entry_hash,
+    _load_index,
+    _save_index,
+    _now_iso,
 )
 
 
@@ -768,3 +773,149 @@ class TestLoadTimeSnapshotSanitization:
         # Block marker appears exactly once, not nested
         assert snapshot.count("[BLOCKED:") == 1
         assert "Clean fact" in snapshot
+
+
+# =========================================================================
+# Staleness-aware pruning (#447)
+# =========================================================================
+
+class TestMemoryStorePrune:
+    def test_prune_scan_does_not_delete(self, store):
+        store.add("memory", "Old project was using Flask")
+        store.add("memory", "Project uses FastAPI now")
+
+        result = store.prune("memory", mode="scan")
+
+        assert result["success"] is True
+        assert result["mode"] == "scan"
+        assert len(store.memory_entries) == 2
+        # The two entries share significant words and one has negation -> contradiction
+        assert len(result["contradictions"]) >= 1
+
+    def test_prune_remove_deletes_stale_entries(self, store):
+        # A high-trust user fact should survive; a low-trust stale note should go.
+        store.add(
+            "user",
+            "Name: Alice",
+            source_class="user_input",
+            trust_tier="trusted",
+        )
+        store.add(
+            "user",
+            "Probably likes pineapple pizza",
+            source_class="agent_authored",
+            trust_tier="untrusted",
+        )
+
+        result = store.prune("user", mode="remove", max_remove=1)
+
+        assert result["success"] is True
+        assert result["mode"] == "remove"
+        assert "Name: Alice" in store.user_entries
+        assert "Probably likes pineapple pizza" not in store.user_entries
+        assert len(result["removed"]) == 1
+
+    def test_prune_honors_max_remove(self, store):
+        store.add("memory", "Note one", source_class="agent_authored", trust_tier="untrusted")
+        store.add("memory", "Note two", source_class="agent_authored", trust_tier="untrusted")
+        store.add("memory", "Note three", source_class="agent_authored", trust_tier="untrusted")
+
+        result = store.prune("memory", mode="remove", max_remove=2)
+
+        assert len(result["removed"]) <= 2
+        assert len(store.memory_entries) >= 1
+
+    def test_search_updates_recall_metadata(self, store):
+        store.add("memory", "Reusable pytest fixture pattern")
+        store.search("memory")
+
+        index = _load_index()
+        key = _entry_hash("memory", "Reusable pytest fixture pattern")
+        assert key in index
+        assert index[key]["recall_count"] >= 1
+        assert index[key]["last_recall"] is not None
+
+    def test_index_bootstrapped_on_load(self, tmp_path, monkeypatch):
+        """Legacy entries without an index get a record at load time."""
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+        (tmp_path / "MEMORY.md").write_text(
+            "Legacy fact from before pruning existed.\n", encoding="utf-8"
+        )
+        s = MemoryStore()
+        s.load_from_disk()
+
+        index = _load_index()
+        key = _entry_hash("memory", "Legacy fact from before pruning existed.")
+        assert key in index
+        assert "added_at" in index[key]
+        assert "recall_count" in index[key]
+
+    def test_prune_scan_lists_scores(self, store):
+        store.add("memory", "Stale note", source_class="agent_authored", trust_tier="untrusted")
+        result = store.prune("memory", mode="scan")
+        assert result["candidates"]
+        assert "metrics" in result["candidates"][0]
+        assert "total_score" in result["candidates"][0]["metrics"]
+
+    def test_memory_tool_prune_dispatch(self, store):
+        store.add("memory", "Candidate for pruning", source_class="agent_authored", trust_tier="low")
+        raw = memory_tool(action="prune", target="memory", mode="scan", store=store)
+        parsed = json.loads(raw)
+        assert parsed["success"] is True
+        assert parsed["mode"] == "scan"
+        assert len(store.memory_entries) == 1
+
+    def test_prune_contradiction_flagged_not_auto_removed(self, store):
+        # Two contradictory entries with high trust should be flagged but kept.
+        store.add("memory", "User prefers dark mode", source_class="user_input", trust_tier="trusted")
+        store.add("memory", "User does not prefer dark mode", source_class="user_input", trust_tier="trusted")
+
+        result = store.prune("memory", mode="remove", max_remove=2)
+
+        # High-trust facts should survive auto-removal; contradictions surfaced.
+        assert len(result["removed"]) == 0
+        assert len(result["contradictions"]) >= 1
+        assert len(store.memory_entries) == 2
+
+    def test_prune_empty_store(self, store):
+        result = store.prune("memory", mode="scan")
+        assert result["success"] is True
+        assert result["candidates"] == []
+        assert result["entry_count"] == 0
+
+    def test_prune_invalid_target(self, store):
+        result = store.prune("invalid", mode="scan")
+        assert result["success"] is False
+        assert "Invalid target" in result["error"]
+
+    def test_prune_invalid_mode(self, store):
+        store.add("memory", "A note")
+        result = store.prune("memory", mode="explode")
+        assert result["success"] is False
+        assert "Invalid prune mode" in result["error"]
+
+
+# =========================================================================
+# Staleness-aware pruning (#447) — index lifecycle
+# =========================================================================
+
+class TestMemoryIndexLifecycle:
+    def test_index_removed_when_entry_deleted(self, store):
+        store.add("memory", "Temporary note")
+        key = _entry_hash("memory", "Temporary note")
+        assert key in _load_index()
+        store.remove("memory", "Temporary note")
+        assert key not in _load_index()
+
+    def test_index_preserved_across_instances(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+        s1 = MemoryStore()
+        s1.load_from_disk()
+        s1.add("memory", "Cross-instance fact")
+
+        s2 = MemoryStore()
+        s2.load_from_disk()
+        s2.search("memory")
+
+        key = _entry_hash("memory", "Cross-instance fact")
+        assert _load_index()[key]["recall_count"] >= 1
