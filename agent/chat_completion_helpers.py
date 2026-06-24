@@ -654,6 +654,7 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
             tools=tools_for_api,
             reasoning_config=agent.reasoning_config,
             session_id=getattr(agent, "session_id", None),
+            cache_key=getattr(agent, "cache_key", None),
             max_tokens=agent.max_tokens,
             timeout=agent._resolved_api_call_timeout(),
             request_overrides=agent.request_overrides,
@@ -769,6 +770,7 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
             reasoning_config=agent.reasoning_config,
             request_overrides=agent.request_overrides,
             session_id=getattr(agent, "session_id", None),
+            cache_key=getattr(agent, "cache_key", None),
             provider_profile=_profile,
             ollama_num_ctx=agent._ollama_num_ctx,
             # Context forwarded to profile hooks:
@@ -801,6 +803,7 @@ def build_api_kwargs(agent, api_messages: list) -> dict:
         reasoning_config=agent.reasoning_config,
         request_overrides=agent.request_overrides,
         session_id=getattr(agent, "session_id", None),
+        cache_key=getattr(agent, "cache_key", None),
         model_lower=(agent.model or "").lower(),
         is_openrouter=_is_or,
         is_nous=_is_nous,
