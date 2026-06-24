@@ -166,6 +166,7 @@ class TestPreflightProvider:
         assert "connection refused" in err
 
     def test_anthropic_success(self):
+        pytest.importorskip("anthropic")
         fake_client = MagicMock()
         with patch("anthropic.Anthropic", return_value=fake_client):
             assert (
@@ -179,6 +180,7 @@ class TestPreflightProvider:
         fake_client.messages.create.assert_called_once()
 
     def test_anthropic_failure(self):
+        pytest.importorskip("anthropic")
         fake_client = MagicMock()
         fake_client.messages.create.side_effect = RuntimeError("timeout")
         with patch("anthropic.Anthropic", return_value=fake_client):
