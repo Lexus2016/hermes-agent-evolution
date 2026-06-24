@@ -49,6 +49,7 @@ AUTHOR_MAP = {
     "daniel.laforce@argobox.com": "KeyArgo",  # upstream sync 2026-06-21
     "lexus@cdzv.com": "Lexus2016",
     "evolution@hermes.ai": "Lexus2016",  # autonomous evolution agent commits
+    "evolution@hermes-agent.nousresearch.com": "Lexus2016",  # Hermes Evolution autonomous agent identity (alt email; PR #508, #509)
     "2081789787@qq.com": "pengyuyanITYU",  # upstream sync 2026-06-14 (#43618)
     "andyfieb@gmail.com": "mollusk",  # upstream sync 2026-06-14 (#44493)
     "drmani215@gmail.com": "bionicbutterfly13",  # upstream sync 2026-06-14

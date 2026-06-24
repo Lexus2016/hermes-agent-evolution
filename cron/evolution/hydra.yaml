@@ -92,14 +92,14 @@ prompt: |
   - Which stages were skipped (and why — e.g. "no fresh material")
   - Any errors or blockers
 
-skills:
-  - evolution/research
-  - evolution/issues
-  - evolution/introspection
-  - evolution/analysis
-  - evolution/implementation
-  - evolution/integration
-  - evolution/upstream-sync
+# No `skills:` here on purpose. The Hydra is a pure delegator: it inspects the
+# knowledge pool and DISPATCHES each stage to a subagent via delegate_task (the
+# stage definitions, including each stage's own toolsets, live inline in the
+# prompt above). Each stage's cron skill carries its script-running instructions
+# and runs under a `terminal` toolset. Loading those script-running skills here
+# would be dead wiring — the Hydra has no `terminal` and must never run stage
+# scripts directly. Enforced by scripts/evolution_skill_lint.py
+# (tests/scripts/test_evolution_skill_integrity.py).
 
 toolsets:
   - file
