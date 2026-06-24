@@ -355,6 +355,11 @@ def main(argv: list[str]) -> int:
                     changes["skills"] = skills
                 if list(toolsets) != list(cur.get("enabled_toolsets") or []):
                     changes["enabled_toolsets"] = toolsets
+                # Detect script changes (e.g. Hydra replacing access gate)
+                cur_script = str(cur.get("script") or "").strip()
+                yaml_script = str(spec.get("script") or "").strip()
+                if yaml_script and yaml_script != cur_script:
+                    changes["script"] = yaml_script
             if not changes:
                 skipped.append(name)
             elif dry_run:
@@ -399,10 +404,18 @@ def main(argv: list[str]) -> int:
                 enabled_toolsets=toolsets,
                 deliver=deliver,
             )
-            if gate_script:
-                # Pre-check script: skips the agent (no LLM/web spend) when
-                # GitHub is unreachable. Keeps the LLM agent (skills) for the run.
+            # Does the YAML define its own script? (Hydra gate, etc.)
+            yaml_script = str(spec.get("script") or "").strip() if not no_agent else None
+            if yaml_script and not dry_run:
+                _install_script(repo_root, yaml_script)
+            if gate_script and not yaml_script:
+                # Default access gate: skips the agent (no LLM/web spend) when
+                # GitHub is unreachable. Jobs with their own script (e.g. the
+                # Hydra gate) manage their own pre-checks.
                 create_kwargs["script"] = gate_script
+            elif yaml_script:
+                # Per-job gate script (Hydra, etc.) — installed and attached.
+                create_kwargs["script"] = yaml_script
             job = create_job(**create_kwargs)
             created.append((name, job["id"]))
             existing_names.add(name)

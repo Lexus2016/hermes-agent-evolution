@@ -165,6 +165,7 @@ class InProcessCronScheduler(CronScheduler):
 
     def start(self, stop_event, *, adapters=None, loop=None, interval=60):
         import logging
+        import time as _time
         from cron.scheduler import tick as cron_tick
         from cron.jobs import record_ticker_heartbeat
 
@@ -173,11 +174,28 @@ class InProcessCronScheduler(CronScheduler):
         # Heartbeat once before the first sleep so `hermes cron status` sees a
         # live ticker immediately after startup, not only after the first tick.
         record_ticker_heartbeat()
+
+        # Adaptive backoff: track consecutive failures so we don't hammer
+        # a failing provider every 60s when every tick results in 100% failure
+        # (#evolution — adaptive scheduling backoff for cron personas).
+        _consecutive_failures = 0
+        _base_interval = interval
+        _max_backoff = 1800  # 30-minute cap
+
         while not stop_event.is_set():
             ok = False
             try:
                 cron_tick(verbose=False, adapters=adapters, loop=loop, sync=False)
                 ok = True
+                # Reset backoff on first success.
+                if _consecutive_failures > 0:
+                    logger.info(
+                        "Cron tick succeeded after %d consecutive failures — "
+                        "resetting backoff (interval %.0fs → %.0fs)",
+                        _consecutive_failures, _base_interval * (2 ** min(_consecutive_failures - 1, 5)),
+                        _base_interval,
+                    )
+                    _consecutive_failures = 0
             except BaseException as e:
                 # Catch BaseException (not just Exception) so a SystemExit from
                 # a misbehaving provider SDK / agent retry path does not kill
@@ -186,9 +204,25 @@ class InProcessCronScheduler(CronScheduler):
                 # stop_event (set by the main thread's signal handler), not by
                 # an exception in this daemon thread, so swallowing it and
                 # re-checking stop_event keeps shutdown clean.
+                _consecutive_failures += 1
                 logger.error("Cron tick error: %s", e, exc_info=True)
+
             # Record liveness every iteration; bump the success marker only on a
             # clean tick, so status can tell "alive but failing every tick" from
             # "actually firing jobs" (#32612, #32895).
             record_ticker_heartbeat(success=ok)
-            stop_event.wait(interval)
+
+            # Adaptive backoff: after N consecutive failures, wait longer
+            # before the next tick.  Cap at 30 minutes (max_backoff).
+            if _consecutive_failures > 1:
+                exponent = min(_consecutive_failures - 1, 5)  # max 2^5 = 32x
+                delay = min(_base_interval * (2 ** exponent), _max_backoff)
+                logger.warning(
+                    "Cron: %d consecutive tick failures — backing off %.0fs "
+                    "before next tick (base=%ds)",
+                    _consecutive_failures, delay, _base_interval,
+                )
+                if stop_event.wait(delay):
+                    break
+            else:
+                stop_event.wait(interval)

@@ -1,0 +1,24 @@
+name: evolution-rubric-judge
+# 07:45 daily — after the funnel (07:40). By then the funnel has the settled
+# cycle count data, and this job adds QUALITY metrics on top of the quantity
+# metrics the funnel produces. Off the :00/:30 marks to avoid contention.
+schedule: "45 7 * * *"
+enabled: true
+mode: PRIVATE
+
+# Deterministic quality assessment — NO LLM agent. The script IS the job.
+# Scores each completed cycle's outputs across 6 rubric dimensions (research,
+# issues, introspection, implementation, integration, pipeline health) and
+# writes to evolution/rubric-scorecard.jsonl alongside the funnel's metrics.
+no_agent: true
+script: evolution_rubric_judge.py
+
+# Keep on disk alongside metrics.jsonl; nothing delivered to channels (a
+# quality score is an observation, not an alert — unless it flags CRITICAL).
+deliver: local
+
+prompt: |
+  Deterministic per-cycle rubric quality scores (no LLM). Appends one JSON
+  line to evolution/rubric-scorecard.jsonl scoring the previous cycle's
+  output quality across 6 dimensions using the StrictRubricJudgeGrader.
+  See scripts/evolution_rubric_judge.py.

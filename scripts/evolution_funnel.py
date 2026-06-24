@@ -18,11 +18,14 @@ Pure functions + explicit paths so it is import-safe and unit-testable.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict
+
+logger = logging.getLogger(__name__)
 
 
 def _load_json(path: Path) -> Any | None:
@@ -127,6 +130,32 @@ def load_records(metrics_file: Path) -> list[Dict[str, Any]]:
         if isinstance(obj, dict):
             out.append(obj)
     return out
+
+
+def is_evolution_halted(evolution_dir: Path | None = None) -> bool | None:
+    """Check whether the evolution pipeline is in a halted state.
+
+    Returns True if halt-state.txt exists (pipeline has produced zero
+    automated deliverables for 5+ consecutive cycles and zero selections
+    for 3+ cycles). Returns False if the pipeline is healthy. Returns
+    None on any read error (treat as not-halted — fail-open).
+
+    All expensive LLM stages (research, analysis, implementation) should
+    call this BEFORE spawning an agent to avoid burning API credits on a
+    broken loop (#evolution — halt detection gate).
+    """
+    if evolution_dir is None:
+        evolution_dir = Path(
+            os.environ.get(
+                "EVOLUTION_PROFILE_DIR",
+                str(Path.home() / ".hermes" / "profiles" / "user1" / "evolution"),
+            )
+        )
+    halt_file = evolution_dir / "halt-state.txt"
+    try:
+        return halt_file.exists()
+    except OSError:
+        return None
 
 
 def summarize(records: list[Dict[str, Any]], last: int = 7) -> Dict[str, Any]:
@@ -238,6 +267,57 @@ def main(argv: list[str]) -> int:
 
     record = compute_funnel(evolution_dir, date)
     append_funnel(evolution_dir / "metrics.jsonl", record)
+
+    # ── Halt detection gate (#evolution — zero-deliverables auto-halt) ──
+    # When the pipeline produces zero merged PRs for 5+ consecutive cycles
+    # AND zero issues selected for 3+ consecutive cycles (both signals
+    # agree), emit a halt state. This prevents the pipeline from burning
+    # API credits on a broken loop: cron jobs check for the halt file before
+    # spawning expensive LLM stages.
+    _halt_threshold_merged = 5   # cycles with merged=0
+    _halt_threshold_selected = 3 # cycles with selected=0
+    _halt_file = evolution_dir / "halt-state.txt"
+    try:
+        _all_records = load_records(evolution_dir / "metrics.jsonl")
+        _summary = summarize(_all_records, max(_halt_threshold_merged, _halt_threshold_selected))
+        _merged_zero = _summary.get("merged_zero_streak", 0)
+        # Count consecutive cycles with selected=0 too
+        _selected_zero_streak = 0
+        for r in reversed(_all_records):
+            if int(r.get("selected", 0) or 0) == 0:
+                _selected_zero_streak += 1
+            else:
+                break
+        if _merged_zero >= _halt_threshold_merged and _selected_zero_streak >= _halt_threshold_selected:
+            _halt_file.write_text(
+                f"# Evolution pipeline HALTED\n"
+                f"# Date: {date}\n"
+                f"# merged_zero_streak: {_merged_zero} (threshold: {_halt_threshold_merged})\n"
+                f"# selected_zero_streak: {_selected_zero_streak} (threshold: {_halt_threshold_selected})\n"
+                f"# The pipeline has produced zero automated deliverables for "
+                f"{_merged_zero}+ consecutive cycles. All expensive LLM stages "
+                f"(research, analysis, implementation) will skip until the halt "
+                f"is manually cleared.\n"
+                f"#\n"
+                f"# To resume: delete this file and address the root cause "
+                f"(provider timeout, broken fallback, credential expiry).\n",
+                encoding="utf-8",
+            )
+            print(
+                f"[evolution-funnel] HALT DETECTED: merged=0 x{_merged_zero}, "
+                f"selected=0 x{_selected_zero_streak} — wrote {_halt_file}"
+            )
+        elif _halt_file.exists():
+            # Auto-clear the halt if metrics improved enough to drop below
+            # either threshold.
+            _halt_file.unlink()
+            print(
+                f"[evolution-funnel] HALT CLEARED: merged_zero_streak={_merged_zero}, "
+                f"selected_zero_streak={_selected_zero_streak}",
+            )
+    except Exception as _halt_exc:
+        # Never let halt detection crash the funnel job itself.
+        logger.warning("Halt detection gate failed (non-fatal): %s", _halt_exc)
 
     # Refresh the rolling-summary sidecar so stages WITHOUT a terminal toolset
     # (evolution-research has only web+file) can consume the funnel feedback via

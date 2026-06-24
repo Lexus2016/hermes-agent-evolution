@@ -179,7 +179,11 @@ def _resolve_cron_enabled_toolsets(job: dict, cfg: dict) -> list[str] | None:
     2. Per-platform ``hermes tools`` config for the ``cron`` platform.
        Mirrors gateway behavior (``_get_platform_tools(cfg, platform_key)``)
        so users can gate cron toolsets globally without recreating every job.
-    3. ``None`` on any lookup failure — AIAgent loads the full default set
+    3. ``cron.minimal_toolsets`` (bool, default False). When True, cron agents
+       receive a reduced toolset (#evolution — minimal-toolset profiles for
+       cron personas). This shrinks the tool schema sent on every API call,
+       reducing token overhead and latency for non-interactive cron runs.
+    4. ``None`` on any lookup failure — AIAgent loads the full default set
        (legacy behavior before this change, preserved as the safety net).
 
     _DEFAULT_OFF_TOOLSETS ({moa, homeassistant, rl}) are removed by
@@ -187,9 +191,30 @@ def _resolve_cron_enabled_toolsets(job: dict, cfg: dict) -> list[str] | None:
     get cron WITHOUT ``moa`` by default (issue reported by Norbert —
     surprise $4.63 run).
     """
+    # Minimal toolset for cron personas: only tools useful for automated,
+    # non-interactive research/analysis. Excludes interactive (clarify,
+    # cronjob), visual (browser, vision, image/video gen), and platform-
+    # specific (discord, spotify, homeassistant, computer_use) tools.
+    _CRON_MINIMAL_TOOLSETS = frozenset({
+        "web",            # web_search, web_extract
+        "terminal",       # terminal, process
+        "file",           # read_file, write_file, patch, search_files
+        "code_execution", # execute_code
+        "skills",         # skills_list, skill_view, skill_manage
+        "todo",           # todo
+        "memory",         # memory
+        "session_search", # session_search
+        "delegation",     # delegate_task
+    })
+
     per_job = job.get("enabled_toolsets")
     if per_job:
         return _merge_mcp_into_per_job_toolsets(list(per_job), cfg or {})
+
+    cron_cfg = cfg.get("cron", {}) if isinstance(cfg, dict) else {}
+    if cron_cfg.get("minimal_toolsets"):
+        return sorted(_CRON_MINIMAL_TOOLSETS)
+
     try:
         from hermes_cli.tools_config import _get_platform_tools  # lazy: avoid heavy import at cron module load
         return sorted(_get_platform_tools(cfg or {}, "cron"))
@@ -2150,16 +2175,47 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
         except Exception:
             pass
 
-        # Reasoning config from config.yaml
-        from hermes_constants import parse_reasoning_effort
-        effort = str(_cfg.get("agent", {}).get("reasoning_effort", "")).strip()
-        reasoning_config = parse_reasoning_effort(effort)
+        # Reasoning config from config.yaml.
+        # cron.thinking (str) controls thinking mode for cron sessions.
+        # Default "off" — thinking is DISABLED for cron to reduce provider
+        # timeouts (100% failure rate tracked across 17 sessions, #431/#433).
+        #   "off"           -> thinking disabled (default)
+        #   "inherit"       -> use global agent.reasoning_effort / reasoning_disabled
+        #   "minimal"/"low"/"medium"/"high"/"xhigh" -> explicit effort level
+        #   unrecognized value -> fall back to global agent settings
+        # agent.reasoning_disabled (bool) is also honored as a global escape hatch
+        # when cron.thinking is "inherit" or unrecognized.
+        from hermes_constants import parse_reasoning_effort, VALID_REASONING_EFFORTS
+        agent_cfg = _cfg.get("agent", {}) if isinstance(_cfg.get("agent", {}), dict) else {}
+        cron_cfg = _cfg.get("cron", {}) if isinstance(_cfg.get("cron", {}), dict) else {}
+        cron_thinking = str(cron_cfg.get("thinking", "off")).strip().lower()
+        if cron_thinking == "inherit":
+            # Use global agent settings (current pre-cron.thinking behavior).
+            if agent_cfg.get("reasoning_disabled"):
+                reasoning_config = {"enabled": False}
+            else:
+                effort = str(agent_cfg.get("reasoning_effort", "")).strip()
+                reasoning_config = parse_reasoning_effort(effort)
+        elif cron_thinking == "off" or cron_thinking == "disabled":
+            reasoning_config = {"enabled": False}
+        elif cron_thinking in VALID_REASONING_EFFORTS:
+            reasoning_config = {"enabled": True, "effort": cron_thinking}
+        else:
+            # Unrecognized value — fall back to global agent settings.
+            logger.warning(
+                "Job '%s': unrecognized cron.thinking=%r, falling back to agent settings",
+                job_id, cron_thinking,
+            )
+            if agent_cfg.get("reasoning_disabled"):
+                reasoning_config = {"enabled": False}
+            else:
+                effort = str(agent_cfg.get("reasoning_effort", "")).strip()
+                reasoning_config = parse_reasoning_effort(effort)
 
         # Prefill messages from env or config.yaml. The top-level
         # prefill_messages_file key is canonical; agent.prefill_messages_file is
         # retained as a legacy fallback for older CLI/godmode configs.
         prefill_messages = None
-        agent_cfg = _cfg.get("agent", {}) if isinstance(_cfg.get("agent", {}), dict) else {}
         prefill_file = (
             os.getenv("HERMES_PREFILL_MESSAGES_FILE", "")
             or _cfg.get("prefill_messages_file", "")
