@@ -180,10 +180,40 @@ final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + 
    0.05) so a genuinely-valid issue that keeps losing the nightly contest still
    climbs over time instead of rotting forever.
 
+5a. **Selection-capability calibration — pick only what you can land (goal 3).**
+    BEFORE the final selection, read the sidecar
+    `~/.hermes/profiles/user1/evolution/evolution-health.txt` (one
+    `[evolution-metrics] …` line, refreshed by the funnel job; missing → treat as
+    signal OK, proceed). This is the longitudinal calibration loop: it reports
+    whether what we SELECTED actually merged. It is INTERNAL plumbing — keep it
+    OUT of any delivered report (same rule as the realized-impact signal in 6c).
+    The flag to act on:
+    - `LOW_SELECTION_EFFICIENCY` (merged/selected over the window is poor — the
+      pipeline picks more than it can land) → **THROTTLE the effort budget**: set
+      this cycle's `max_total_effort` to **1.5** (half the default 3.0), i.e.
+      select roughly half as much work. Spend that smaller budget on the issues
+      with the HIGHEST confidence of landing a merge — prefer lower-`effort`,
+      clearly-scoped issues with an unambiguous plan over high-`effort` or fuzzy
+      ones, even when a fuzzy one scores marginally higher. This is
+      self-capability calibration: a 12% selection_efficiency (e.g. 57 selected,
+      7 merged over the window) means the pipeline is OVER-selecting — choosing
+      work it cannot finish — so the merge funnel, not the score, is the binding
+      constraint. Choose as much as you can actually MERGE, not as much as scores
+      "allow".
+    - no flag / signal OK / missing → proceed with the default budget (3.0).
+
+    The anti-starvation slot (6a) is still honored under the throttled budget: it
+    counts toward `max_total_effort` exactly as before. The scoring formula,
+    weights, and the decomposition/split rules are UNCHANGED — this step only sets
+    the SIZE of the budget the selection in step 6 spends, never how issues score.
+
 6. **Select** the top 8 for implementation (include any `needs-work` issues from
    step 2):
    - Min priority: 0.7
-   - Max total effort: 3.0
+   - Max total effort: the calibrated budget from step 5a — **3.0** by default,
+     **1.5** when `LOW_SELECTION_EFFICIENCY` is flagged. Stop adding issues once
+     their summed `effort_score` reaches this budget; under the throttled 1.5
+     budget, fill it with the highest-land-confidence issues first.
 
 6a. **Anti-starvation slot — guarantee no valid issue rots for days.** Scoring
     alone lets a sound-but-modest issue lose every single night. To prevent that,

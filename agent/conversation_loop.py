@@ -716,7 +716,8 @@ def _run_conversation_impl(
                         logger.warning(
                             "loop_guard: ESCALATED INTERRUPT for %s (%d calls) — "
                             "deep mono-tool spiral detected (#432)",
-                            _lg_tool, _lg_count,
+                            _lg_tool,
+                            _lg_count,
                         )
                     if not agent.quiet_mode:
                         agent._safe_print("\n🌀 loop-guard: nudging a strategy change")
@@ -1120,7 +1121,8 @@ def _run_conversation_impl(
                         agent._buffer_status(f"⏳ {_nous_msg}")
                         if agent._try_activate_fallback():
                             active_system_prompt = _sync_failover_system_message(
-                                agent, api_messages, active_system_prompt)
+                                agent, api_messages, active_system_prompt
+                            )
                             retry_count = 0
                             compression_attempts = 0
                             _retry.primary_recovery_attempted = False
@@ -1525,7 +1527,8 @@ def _run_conversation_impl(
                         )
                     if agent._try_activate_fallback():
                         active_system_prompt = _sync_failover_system_message(
-                            agent, api_messages, active_system_prompt)
+                            agent, api_messages, active_system_prompt
+                        )
                         retry_count = 0
                         compression_attempts = 0
                         _retry.primary_recovery_attempted = False
@@ -1626,7 +1629,8 @@ def _run_conversation_impl(
                             )
                         if agent._try_activate_fallback():
                             active_system_prompt = _sync_failover_system_message(
-                                agent, api_messages, active_system_prompt)
+                                agent, api_messages, active_system_prompt
+                            )
                             retry_count = 0
                             compression_attempts = 0
                             _retry.primary_recovery_attempted = False
@@ -1794,7 +1798,8 @@ def _run_conversation_impl(
                         )
                     if agent._try_activate_fallback():
                         active_system_prompt = _sync_failover_system_message(
-                            agent, api_messages, active_system_prompt)
+                            agent, api_messages, active_system_prompt
+                        )
                         retry_count = 0
                         compression_attempts = 0
                         _retry.primary_recovery_attempted = False
@@ -3367,9 +3372,12 @@ def _run_conversation_impl(
                             agent._buffer_status(
                                 "⚠️ Rate limited — switching to fallback provider..."
                             )
-                        if agent._try_activate_fallback(reason=classified.reason):
+                        if agent._try_activate_fallback(
+                            reason=classified.reason, api_error=api_error
+                        ):
                             active_system_prompt = _sync_failover_system_message(
-                                agent, api_messages, active_system_prompt)
+                                agent, api_messages, active_system_prompt
+                            )
                             retry_count = 0
                             compression_attempts = 0
                             _retry.primary_recovery_attempted = False
@@ -3400,9 +3408,12 @@ def _run_conversation_impl(
                         "🔐 Authentication failed and could not be refreshed — "
                         "switching to fallback provider..."
                     )
-                    if agent._try_activate_fallback(reason=classified.reason):
+                    if agent._try_activate_fallback(
+                        reason=classified.reason, api_error=api_error
+                    ):
                         active_system_prompt = _sync_failover_system_message(
-                            agent, api_messages, active_system_prompt)
+                            agent, api_messages, active_system_prompt
+                        )
                         retry_count = 0
                         compression_attempts = 0
                         _retry.primary_recovery_attempted = False
@@ -3563,11 +3574,17 @@ def _run_conversation_impl(
                     new_tokens = estimate_messages_tokens_rough(messages)
                     approx_tokens = new_tokens  # update for downstream logging
 
-                    if len(messages) < original_len or (new_tokens > 0 and new_tokens < original_tokens * 0.95):
+                    if len(messages) < original_len or (
+                        new_tokens > 0 and new_tokens < original_tokens * 0.95
+                    ):
                         if len(messages) < original_len:
-                            agent._buffer_status(f"🗜️ Compressed {original_len} → {len(messages)} messages, retrying...")
+                            agent._buffer_status(
+                                f"🗜️ Compressed {original_len} → {len(messages)} messages, retrying..."
+                            )
                         else:
-                            agent._buffer_status(f"🗜️ Compressed ~{original_tokens:,} → ~{new_tokens:,} tokens, retrying...")
+                            agent._buffer_status(
+                                f"🗜️ Compressed ~{original_tokens:,} → ~{new_tokens:,} tokens, retrying..."
+                            )
                         time.sleep(2)  # Brief pause between compression retries
                         _retry.restart_with_compressed_messages = True
                         break
@@ -3764,20 +3781,36 @@ def _run_conversation_impl(
                     new_tokens = estimate_messages_tokens_rough(messages)
                     approx_tokens = new_tokens  # update for downstream logging
 
-                    if len(messages) < original_len or (new_tokens > 0 and new_tokens < original_tokens * 0.95) or (new_ctx and new_ctx < old_ctx):
+                    if (
+                        len(messages) < original_len
+                        or (new_tokens > 0 and new_tokens < original_tokens * 0.95)
+                        or (new_ctx and new_ctx < old_ctx)
+                    ):
                         if len(messages) < original_len:
-                            agent._buffer_status(f"🗜️ Compressed {original_len} → {len(messages)} messages, retrying...")
+                            agent._buffer_status(
+                                f"🗜️ Compressed {original_len} → {len(messages)} messages, retrying..."
+                            )
                         elif new_tokens > 0 and new_tokens < original_tokens * 0.95:
-                            agent._buffer_status(f"🗜️ Compressed ~{original_tokens:,} → ~{new_tokens:,} tokens, retrying...")
+                            agent._buffer_status(
+                                f"🗜️ Compressed ~{original_tokens:,} → ~{new_tokens:,} tokens, retrying..."
+                            )
                         time.sleep(2)  # Brief pause between compression retries
                         _retry.restart_with_compressed_messages = True
                         break
                     else:
                         # Can't compress further and already at minimum tier
                         agent._flush_status_buffer()
-                        agent._vprint(f"{agent.log_prefix}❌ Context length exceeded and cannot compress further.", force=True)
-                        agent._vprint(f"{agent.log_prefix}   💡 The conversation has accumulated too much content. Try /new to start fresh, or /compress to manually trigger compression.", force=True)
-                        logger.error(f"{agent.log_prefix}Context length exceeded: {new_tokens:,} tokens. Cannot compress further.")
+                        agent._vprint(
+                            f"{agent.log_prefix}❌ Context length exceeded and cannot compress further.",
+                            force=True,
+                        )
+                        agent._vprint(
+                            f"{agent.log_prefix}   💡 The conversation has accumulated too much content. Try /new to start fresh, or /compress to manually trigger compression.",
+                            force=True,
+                        )
+                        logger.error(
+                            f"{agent.log_prefix}Context length exceeded: {new_tokens:,} tokens. Cannot compress further."
+                        )
                         agent._persist_session(messages, conversation_history)
                         return {
                             "messages": messages,
@@ -3914,7 +3947,8 @@ def _run_conversation_impl(
                             )
                     if agent._try_activate_fallback():
                         active_system_prompt = _sync_failover_system_message(
-                            agent, api_messages, active_system_prompt)
+                            agent, api_messages, active_system_prompt
+                        )
                         retry_count = 0
                         compression_attempts = 0
                         _retry.primary_recovery_attempted = False
@@ -4147,7 +4181,8 @@ def _run_conversation_impl(
                         )
                     if agent._try_activate_fallback():
                         active_system_prompt = _sync_failover_system_message(
-                            agent, api_messages, active_system_prompt)
+                            agent, api_messages, active_system_prompt
+                        )
                         retry_count = 0
                         compression_attempts = 0
                         _retry.primary_recovery_attempted = False
@@ -5231,7 +5266,8 @@ def _run_conversation_impl(
                         )
                         if agent._try_activate_fallback():
                             active_system_prompt = _sync_failover_system_message(
-                                agent, api_messages, active_system_prompt)
+                                agent, api_messages, active_system_prompt
+                            )
                             agent._empty_content_retries = 0
                             agent._buffer_status(
                                 f"↻ Switched to fallback: {agent.model} "

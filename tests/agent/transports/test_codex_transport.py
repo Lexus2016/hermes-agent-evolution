@@ -138,6 +138,63 @@ class TestCodexBuildKwargs:
         assert eb.get("prompt_cache_key") == "caller-override"
         assert eb.get("other_field") == 42
 
+    def test_cache_key_overrides_session_id_for_prompt_cache(self, transport):
+        """An explicit ``cache_key`` is used for prompt_cache_key, letting
+        recurring callers (cron) keep a stable cache scope while session_id
+        still rotates per run."""
+        messages = [{"role": "user", "content": "Hi"}]
+        kw = transport.build_kwargs(
+            model="gpt-5.4", messages=messages, tools=[],
+            session_id="cron_abc123_20260624_101500",
+            cache_key="cron_abc123",
+        )
+        assert kw.get("prompt_cache_key") == "cron_abc123"
+
+    def test_cache_key_falls_back_to_session_id(self, transport):
+        """Absent (or empty) ``cache_key`` falls back to session_id, so the
+        interactive path is byte-identical to before the parameter existed."""
+        messages = [{"role": "user", "content": "Hi"}]
+        kw_none = transport.build_kwargs(
+            model="gpt-5.4", messages=messages, tools=[],
+            session_id="interactive-session-1",
+            cache_key=None,
+        )
+        assert kw_none.get("prompt_cache_key") == "interactive-session-1"
+        kw_empty = transport.build_kwargs(
+            model="gpt-5.4", messages=messages, tools=[],
+            session_id="interactive-session-1",
+            cache_key="",
+        )
+        assert kw_empty.get("prompt_cache_key") == "interactive-session-1"
+
+    def test_codex_backend_headers_use_cache_key(self, transport):
+        """Codex backend cache-scope routing headers follow the stable
+        cache_key (they exist for cache hits, not transcript identity)."""
+        messages = [{"role": "user", "content": "Hi"}]
+        kw = transport.build_kwargs(
+            model="gpt-5.4", messages=messages, tools=[],
+            session_id="cron_abc123_20260624_101500",
+            cache_key="cron_abc123",
+            is_codex_backend=True,
+        )
+        headers = kw.get("extra_headers", {})
+        assert headers.get("session_id") == "cron_abc123"
+        assert headers.get("x-client-request-id") == "cron_abc123"
+
+    def test_xai_cache_key_splits_body_and_conv_header(self, transport):
+        """For xAI, prompt_cache_key (cache routing) follows cache_key, but
+        x-grok-conv-id (conversation continuity) must stay on the per-run
+        session_id so distinct fires aren't merged into one conversation."""
+        messages = [{"role": "user", "content": "Hi"}]
+        kw = transport.build_kwargs(
+            model="grok-4.3", messages=messages, tools=[],
+            session_id="cron_abc123_20260624_101500",
+            cache_key="cron_abc123",
+            is_xai_responses=True,
+        )
+        assert kw.get("extra_body", {}).get("prompt_cache_key") == "cron_abc123"
+        assert kw.get("extra_headers", {}).get("x-grok-conv-id") == "cron_abc123_20260624_101500"
+
     def test_max_tokens(self, transport):
         messages = [{"role": "user", "content": "Hi"}]
         kw = transport.build_kwargs(
