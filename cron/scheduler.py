@@ -2190,6 +2190,7 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
             format_runtime_provider_error,
         )
         from hermes_cli.auth import AuthError
+        from cron import evolution_preflight
         try:
             # Do not inject HERMES_INFERENCE_PROVIDER here. resolve_runtime_provider()
             # already prefers persisted config over stale shell/env overrides when
@@ -2227,6 +2228,58 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
         except Exception as exc:
             message = format_runtime_provider_error(exc)
             raise RuntimeError(message) from exc
+
+        # Evolution pipeline pre-flight: ping the resolved provider before we
+        # build an agent. If it fails, return the most recent on-disk digest
+        # so downstream evolution jobs still have stale-but-structured input
+        # instead of failing silently during retries. (#486)
+        stage = evolution_preflight.evolution_job_stage(job)
+        if stage and evolution_preflight._preflight_enabled(_cfg):
+            # ROOT-FIX (#486): resolve_runtime_provider() does NOT populate
+            # runtime["model"] — the model is resolved into the local ``model``
+            # variable above (job.model > HERMES_MODEL > config.yaml model.default)
+            # and passed separately to AIAgent(model=...). Without this sync the
+            # pre-flight ping saw an empty runtime["model"] and always bailed with
+            # "no model configured for pre-flight ping", so cached-digest fallback
+            # could never trigger on prod. Build a shallow copy carrying the
+            # resolved model for the ping rather than mutating ``runtime`` in
+            # place: ``runtime`` is a fresh, request-local dict from
+            # resolve_runtime_provider() today, but copying keeps the ping
+            # side-effect-free regardless. Never clobber a model the runtime may
+            # already carry (e.g. an ACP-resolved one).
+            preflight_runtime = (
+                runtime if runtime.get("model") else {**runtime, "model": model}
+            )
+            err = evolution_preflight.preflight_provider(preflight_runtime, cfg=_cfg)
+            if err:
+                logger.warning(
+                    "Job '%s' (evolution-%s): provider pre-flight failed: %s",
+                    job_id,
+                    stage,
+                    err,
+                )
+                digest = evolution_preflight.load_digest_as_fallback(
+                    stage, _get_hermes_home()
+                )
+                if digest is not None:
+                    now_iso = _hermes_now().strftime("%Y-%m-%d %H:%M:%S")
+                    doc = (
+                        f"# Cron Job: {job_name}\n\n"
+                        f"**Job ID:** {job_id}\n"
+                        f"**Run Time:** {now_iso}\n"
+                        f"**Status:** provider unreachable — stale digest fallback\n\n"
+                        f"{digest}\n"
+                    )
+                    logger.info(
+                        "Job '%s' (evolution-%s): returning stale digest fallback",
+                        job_id,
+                        stage,
+                    )
+                    return True, doc, SILENT_MARKER, None
+                else:
+                    raise RuntimeError(
+                        f"Evolution pre-flight failed for '{stage}': {err}. No cached digest available."
+                    )
 
         fallback_model = _cfg.get("fallback_providers") or _cfg.get("fallback_model") or None
         credential_pool = None
