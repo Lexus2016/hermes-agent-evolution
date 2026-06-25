@@ -256,6 +256,40 @@ class TestReconcileExistingJob:
         assert rc == 0
         assert calls == {}  # no update_job call — nothing changed
 
+    def _write_agent_yaml_no_skills(self, src_dir, schedule):
+        # An agent job whose YAML omits skills:/toolsets: entirely — the
+        # _normalize_skills(None) -> None case that used to crash reconcile.
+        (src_dir / "upstream-sync.yaml").write_text(
+            "name: evolution-upstream-sync\n"
+            f'schedule: "{schedule}"\n'
+            "enabled: true\n"
+            'prompt: "sync upstream"\n'
+        )
+
+    def test_existing_agent_job_without_skills_does_not_crash(self, tmp_path, monkeypatch):
+        """Regression: _normalize_skills(None) returns None; reconcile must not
+        call list(None) — that TypeError silently aborted EVERY re-register (and
+        thus every integration self-update) once the jobs already existed,
+        freezing HERMES_HOME script/skill sync. A YAML that omits skills means
+        'leave the registered skills as-is', never 'clear them'."""
+        mod = _import_module()
+        import cron.jobs as jobs_mod
+
+        src_dir = tmp_path / "cron-src"
+        src_dir.mkdir()
+        # changed schedule (so update_job IS called), but no skills:/toolsets:
+        self._write_agent_yaml_no_skills(src_dir, "0 8 * * 1,3,5")
+        existing = self._existing(mod, jobs_mod, "0 8 * * 0")  # old schedule, HAS skills
+        calls = self._wire(mod, jobs_mod, monkeypatch, tmp_path, existing)
+
+        rc = mod.main(["register_evolution_cron.py", str(src_dir)])
+
+        assert rc == 0  # did NOT crash on list(None)
+        # Only the schedule reconciles; the registered skills/toolsets must be
+        # preserved (not clobbered to []) when the YAML omits them.
+        assert calls["updates"] == {"schedule": "0 8 * * 1,3,5"}
+
+
 
 class TestFindVenvPython:
     """The registrar self-locates the install venv interpreter so it runs with

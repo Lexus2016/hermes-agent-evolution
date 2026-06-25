@@ -351,9 +351,17 @@ def main(argv: list[str]) -> int:
             if not no_agent:
                 if str(prompt) != (cur.get("prompt") or ""):
                     changes["prompt"] = str(prompt)
-                if list(skills) != list(cur.get("skills") or []):
+                # skills/toolsets are None when the YAML omits them — that means
+                # "leave the registered value as-is", NOT "clear it". Only
+                # reconcile when the YAML explicitly specifies a value, and never
+                # call list() on None: that TypeError silently aborted EVERY
+                # re-register (and thus every integration self-update) once the
+                # jobs already existed, freezing HERMES_HOME script/skill sync.
+                if skills is not None and list(skills) != list(cur.get("skills") or []):
                     changes["skills"] = skills
-                if list(toolsets) != list(cur.get("enabled_toolsets") or []):
+                if toolsets is not None and list(toolsets) != list(
+                    cur.get("enabled_toolsets") or []
+                ):
                     changes["enabled_toolsets"] = toolsets
                 # Detect script changes (e.g. Hydra replacing access gate)
                 cur_script = str(cur.get("script") or "").strip()
