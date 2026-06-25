@@ -31,6 +31,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 LEGAL_BUDGETS: Tuple[float, ...] = (1.5, 3.0)
 _EPS = 1e-9
 
+# A repo-relative file path cited in prose: at least one "/" and a file
+# extension, so "i.e." / "1.2" / bare words never match. The token stops at
+# whitespace/punctuation, so "tools/x.py (lines 5-6)" yields "tools/x.py".
+_CITED_PATH_RE = re.compile(
+    r"(?<![\w./-])([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\.[A-Za-z][A-Za-z0-9]{0,5})"
+)
+
 
 def _num(x: Any) -> Optional[float]:
     """Coerce to float, but reject bool (True/False are ints in Python)."""
@@ -88,12 +95,47 @@ def audit_analysis(
     return out
 
 
-def audit_latest(evolution_dir: Path) -> List[str]:
+def audit_rejections(report: Dict[str, Any], repo_root: Optional[Path]) -> List[str]:
+    """Catch FABRICATED ``already-exists`` rejections — the #83 class, where the
+    analysis agent CLOSED an issue claiming the feature already exists and cited a
+    repo path that does not exist (the real #83 cited ``scripts/evolution_watchdog.sh``;
+    the actual script is ``.py``). Only flags when an ``already-exists`` rejection
+    cites one or more concrete paths and NONE of them exist — a single missing
+    path among existing ones is treated as a typo / secondary reference, not
+    fabrication. Needs the repo to verify; silent without it (cannot prove
+    absence) or when there are no rejections."""
+    if not isinstance(report, dict) or repo_root is None:
+        return []
+    repo = Path(repo_root)
+    try:
+        if not repo.is_dir():
+            return []
+    except OSError:
+        return []
+    out: List[str] = []
+    for rej in report.get("rejected") or []:
+        if not isinstance(rej, dict):
+            continue
+        if str(rej.get("reason_code") or "").strip().lower() != "already-exists":
+            continue
+        cited = _CITED_PATH_RE.findall(str(rej.get("reason") or ""))
+        if cited and not any((repo / p).exists() for p in cited):
+            issue = rej.get("issue_number")
+            out.append(
+                f"FABRICATED_REJECTION: issue #{issue} closed as already-exists "
+                f"citing {', '.join(cited[:3])} — none exist in the repo"
+            )
+    return out
+
+
+def audit_latest(evolution_dir: Path, repo_root: Optional[Path] = None) -> List[str]:
     """Audit the most recent dated analysis report under ``<dir>/analysis/``.
 
-    Returns prefixed violation strings, or [] when there is no readable dated
-    report. Only ``YYYY-MM-DD.json`` files are considered — the sibling
-    ``issues_*.json`` / ``prs_*.json`` snapshots are skipped.
+    Runs the budget checks (``audit_analysis``) plus — when ``repo_root`` is given
+    — the fabricated-rejection check (``audit_rejections``). Returns prefixed
+    violation strings, or [] when there is no readable dated report. Only
+    ``YYYY-MM-DD.json`` files are considered — the sibling ``issues_*.json`` /
+    ``prs_*.json`` snapshots are skipped.
     """
     analysis_dir = evolution_dir / "analysis"
     try:
@@ -108,7 +150,8 @@ def audit_latest(evolution_dir: Path) -> List[str]:
         report = json.loads(latest.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
-    return [f"({latest.stem}) {v}" for v in audit_analysis(report)]
+    violations = audit_analysis(report) + audit_rejections(report, repo_root)
+    return [f"({latest.stem}) {v}" for v in violations]
 
 
 def main(argv: List[str]) -> int:
@@ -120,7 +163,9 @@ def main(argv: List[str]) -> int:
             str(Path.home() / ".hermes" / "profiles" / "user1" / "evolution"),
         )
     )
-    violations = audit_latest(evolution_dir)
+    repo_env = os.environ.get("EVOLUTION_REPO_DIR")
+    repo_root = Path(repo_env) if repo_env else None
+    violations = audit_latest(evolution_dir, repo_root)
     for v in violations:
         print(f"[analysis-audit] {v}")
     return 1 if violations else 0
