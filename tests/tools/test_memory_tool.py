@@ -710,6 +710,71 @@ class TestMemoryBatch:
         assert result["success"] is False
         assert "legit fact" not in store.memory_entries
 
+    def test_batch_memory_char_limit_override_allowed(self, store):
+        # With override enabled, a per-call limit larger than the fixture limit
+        # lets an otherwise overflowing batch succeed.
+        store.allow_batch_override = True
+        result = json.loads(
+            memory_tool(
+                target="memory",
+                operations=[{"action": "add", "content": "q" * 600}],
+                memory_char_limit=1000,
+                store=store,
+            )
+        )
+        assert result["success"] is True
+        assert "q" * 600 in store.memory_entries
+        # Success response reports against the override limit.
+        assert "1,000" in result["usage"]
+
+    def test_batch_memory_char_limit_override_ignored_when_disabled(self, store):
+        # Default: override flag is False, so a per-call limit is ignored.
+        assert store.allow_batch_override is False
+        result = json.loads(
+            memory_tool(
+                target="memory",
+                operations=[{"action": "add", "content": "q" * 600}],
+                memory_char_limit=1000,
+                store=store,
+            )
+        )
+        assert result["success"] is False
+        assert "limit" in result["error"].lower()
+        assert "500" in result["usage"]
+
+    def test_batch_override_ignored_for_user_target(self, store):
+        # The override parameter only applies to the 'memory' target.
+        store.allow_batch_override = True
+        result = json.loads(
+            memory_tool(
+                target="user",
+                operations=[{"action": "add", "content": "u" * 350}],
+                memory_char_limit=1000,
+                store=store,
+            )
+        )
+        assert result["success"] is False
+        assert "limit" in result["error"].lower()
+        assert result["max_size"] == 300
+
+    def test_batch_override_does_not_change_system_prompt_snapshot(self, store):
+        # Pre-load snapshot uses the configured limit.
+        store.add("memory", "a" * 450)
+        store.load_from_disk()
+        snapshot_before = store.format_for_system_prompt("memory")
+        store.allow_batch_override = True
+        # Override succeeds but snapshot remains as loaded.
+        result = json.loads(
+            memory_tool(
+                target="memory",
+                operations=[{"action": "add", "content": "b" * 100}],
+                memory_char_limit=1000,
+                store=store,
+            )
+        )
+        assert result["success"] is True
+        assert store.format_for_system_prompt("memory") == snapshot_before
+
 
 # =========================================================================
 # External drift guard (#26045)

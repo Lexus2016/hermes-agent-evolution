@@ -1947,7 +1947,13 @@ DEFAULT_CONFIG = {
         "write_approval": False,
         "memory_char_limit": 2200,   # ~800 tokens at 2.75 chars/token
         "user_char_limit": 1375,     # ~500 tokens at 2.75 chars/token
-        # Memory-poisoning guard (issue #315). DEFAULT-OFF: when enabled is
+        # Allow per-apply_batch memory_char_limit overrides when explicitly
+        # enabled (issue #517). Default False so dynamic limit changes cannot
+        # silently alter the configured budget or invalidate the per-conversation
+        # prompt cache. When True, apply_batch(target="memory",
+        # memory_char_limit=N) uses N instead of the configured limit for that
+        # single call; the system-prompt snapshot still uses the configured limit.
+        "allow_batch_memory_char_limit_override": False,
         # false (default), memory writes behave exactly as before — the
         # existing binary threat-scan block still applies; no warn/strip.
         # When enabled, a scan hit is routed through a block/warn/strip action
