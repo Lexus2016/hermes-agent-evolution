@@ -2097,6 +2097,8 @@ def invoke_tool(
                 source_filter=next_args.get("source_filter"),
                 min_trust=next_args.get("min_trust"),
                 operations=operations,
+                target_size=next_args.get("target_size"),
+                prefer=next_args.get("prefer") or "longest",
                 store=agent._memory_store,
             )
             # Mirror successful built-in memory writes to external providers.
