@@ -464,18 +464,16 @@ class MemoryStore:
         """Return the effective char limit for ``target``.
 
         Per-issue #517, a caller may pass a one-off ``dynamic_limit`` to
-        ``apply_batch``. It is only honoured when ``self.allow_batch_override`` is
-        True; otherwise the configured ``memory_char_limit``/``user_char_limit``
-        is used unconditionally. The system-prompt snapshot always uses the
+        ``apply_batch``. It is only honoured for the ``memory`` target when
+        ``self.allow_batch_override`` is True; the ``user`` target always uses
+        its configured limit. The system-prompt snapshot always uses the
         configured limits, so a dynamic batch override cannot invalidate the
         prefix cache.
         """
         if target == "user":
-            base = self.user_char_limit
-        else:
-            base = self.memory_char_limit
+            return self.user_char_limit
         if dynamic_limit is None or not self.allow_batch_override:
-            return base
+            return self.memory_char_limit
         return int(dynamic_limit)
 
     def _gate_write(self, content: str):
@@ -986,7 +984,7 @@ class MemoryStore:
 
                 if act == "add":
                     if not content:
-                        return self._batch_error(target, f"{pos}: content is required.")
+                        return self._batch_error(target, f"{pos}: content is required.", limit=limit)
                     if content in working:
                         continue  # idempotent -- skip duplicate, don't fail the batch
                     working.append(content)
@@ -994,39 +992,42 @@ class MemoryStore:
                 elif act == "replace":
                     if not old_text:
                         return self._batch_error(
-                            target, f"{pos}: old_text is required."
+                            target, f"{pos}: old_text is required.", limit=limit
                         )
                     if not content:
                         return self._batch_error(
                             target,
                             f"{pos}: content is required (use action='remove' to delete).",
+                            limit=limit,
                         )
                     matches = [j for j, e in enumerate(working) if old_text in e]
                     if not matches:
                         return self._batch_error(
-                            target, f"{pos}: no entry matched '{old_text}'."
+                            target, f"{pos}: no entry matched '{old_text}'.", limit=limit
                         )
                     if len({working[j] for j in matches}) > 1:
                         return self._batch_error(
                             target,
                             f"{pos}: '{old_text}' matched multiple distinct entries -- be more specific.",
+                            limit=limit,
                         )
                     working[matches[0]] = content
 
                 elif act == "remove":
                     if not old_text:
                         return self._batch_error(
-                            target, f"{pos}: old_text is required."
+                            target, f"{pos}: old_text is required.", limit=limit
                         )
                     matches = [j for j, e in enumerate(working) if old_text in e]
                     if not matches:
                         return self._batch_error(
-                            target, f"{pos}: no entry matched '{old_text}'."
+                            target, f"{pos}: no entry matched '{old_text}'.", limit=limit
                         )
                     if len({working[j] for j in matches}) > 1:
                         return self._batch_error(
                             target,
                             f"{pos}: '{old_text}' matched multiple distinct entries -- be more specific.",
+                            limit=limit,
                         )
                     working.pop(matches[0])
 
@@ -1034,6 +1035,7 @@ class MemoryStore:
                     return self._batch_error(
                         target,
                         f"{pos}: unknown action. Use add, replace, or remove.",
+                        limit=limit,
                     )
 
             # Budget check against the FINAL state only.
@@ -1059,20 +1061,20 @@ class MemoryStore:
             self.save_to_disk(target)
 
         return self._success_response(
-            target, f"Applied {len(operations)} operation(s)."
+            target, f"Applied {len(operations)} operation(s).", limit=limit
         )
 
-    def _batch_error(self, target: str, message: str) -> Dict[str, Any]:
+    def _batch_error(self, target: str, message: str, limit: Optional[int] = None) -> Dict[str, Any]:
         """Build a batch-abort error that reports live (uncommitted) state."""
         current = self._char_count(target)
-        limit = self._char_limit(target)
+        effective_limit = limit if limit is not None else self._char_limit(target)
         return {
             "success": False,
             "error": message + " No operations were applied (batch is all-or-nothing).",
             "current_entries": self._entries_for(target),
             "current_size": current,
-            "max_size": limit,
-            "usage": f"{current:,}/{limit:,}",
+            "max_size": effective_limit,
+            "usage": f"{current:,}/{effective_limit:,}",
         }
 
     def format_for_system_prompt(self, target: str) -> Optional[str]:
@@ -1090,11 +1092,11 @@ class MemoryStore:
 
     # -- Internal helpers --
 
-    def _success_response(self, target: str, message: str = None) -> Dict[str, Any]:
+    def _success_response(self, target: str, message: str = None, limit: Optional[int] = None) -> Dict[str, Any]:
         entries = self._entries_for(target)
         current = self._char_count(target)
-        limit = self._char_limit(target)
-        pct = min(100, int((current / limit) * 100)) if limit > 0 else 0
+        effective_limit = limit if limit is not None else self._char_limit(target)
+        pct = min(100, int((current / effective_limit) * 100)) if effective_limit > 0 else 0
 
         # The success response is intentionally TERMINAL: it confirms the write
         # landed and tells the model to stop. We do NOT echo the full entries
@@ -1107,7 +1109,7 @@ class MemoryStore:
             "success": True,
             "done": True,
             "target": target,
-            "usage": f"{pct}% — {current:,}/{limit:,} chars",
+            "usage": f"{pct}% — {current:,}/{effective_limit:,} chars",
             "entry_count": len(entries),
         }
         if message:
