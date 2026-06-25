@@ -1151,6 +1151,29 @@ def try_activate_fallback(
                 agent._rate_limited_providers = _provider_cooldowns
             if _current_provider:
                 _provider_cooldowns[_current_provider] = _until
+            # Structured diagnostic so cron introspection can classify
+            # rate-limit/billing events without parsing free-text logs.
+            # See issue #514.
+            logger.warning(
+                "provider failover: %s/%s rate-limited/billing exhausted, "
+                "cooldown=%ss retry_after=%r fallback_index=%d/%d",
+                _current_provider,
+                _current_model,
+                int(_cooldown),
+                _retry_after_raw,
+                getattr(agent, "_fallback_index", 0),
+                len(getattr(agent, "_fallback_chain", [])),
+                extra={
+                    "event": "provider_rate_limit_failover",
+                    "reason": reason.value if reason else None,
+                    "provider": _current_provider,
+                    "model": _current_model,
+                    "retry_after_raw": _retry_after_raw,
+                    "cooldown_seconds": _cooldown,
+                    "fallback_index": getattr(agent, "_fallback_index", 0),
+                    "fallback_chain_length": len(getattr(agent, "_fallback_chain", [])),
+                },
+            )
     if agent._fallback_index >= len(agent._fallback_chain):
         return False
 
@@ -1295,6 +1318,24 @@ def try_activate_fallback(
         if hasattr(agent, "_transport_cache"):
             agent._transport_cache.clear()
         agent._fallback_activated = True
+
+        # Structured diagnostic so cron introspection can confirm the
+        # fallback provider/model that is now active. See issue #514.
+        logger.warning(
+            "provider failover: switched to %s/%s (%s)",
+            agent.provider,
+            agent.model,
+            agent.api_mode,
+            extra={
+                "event": "provider_fallback_activated",
+                "provider": agent.provider,
+                "model": agent.model,
+                "api_mode": agent.api_mode,
+                "base_url": agent.base_url,
+                "previous_provider": _current_provider,
+                "previous_model": _current_model,
+            },
+        )
 
         # Clear the credential pool when the fallback provider doesn't match
         # the pool's provider.  The pool was seeded for the primary provider;
