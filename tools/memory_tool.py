@@ -48,6 +48,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
 # Where memory files live — resolved dynamically so profile overrides
 # (HERMES_HOME env var changes) are always respected.  The old module-level
 # constant was cached at import time and could go stale if a profile switch
@@ -55,6 +56,7 @@ logger = logging.getLogger(__name__)
 def get_memory_dir() -> Path:
     """Return the profile-scoped memories directory."""
     return get_hermes_home() / "memories"
+
 
 ENTRY_DELIMITER = "\n§\n"
 
@@ -147,7 +149,7 @@ def parse_provenance(stored: str):
     open_at = s.rfind(_PROV_OPEN)
     if open_at == -1:
         return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER
-    inner = s[open_at + len(_PROV_OPEN):-len(_PROV_CLOSE)]
+    inner = s[open_at + len(_PROV_OPEN) : -len(_PROV_CLOSE)]
     # inner looks like "<source_class>|trust:<trust_tier>"
     if "|trust:" not in inner:
         return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER
@@ -187,6 +189,7 @@ def _make_provenance(source_class: str, trust_tier: str):
     optional guard module (the default-off path never touches it).
     """
     from agent.memory_guard import Provenance
+
     return Provenance(source_class=source_class, trust_tier=trust_tier)
 
 
@@ -200,7 +203,9 @@ def _log_guard_event(action: str, target: str, event: Dict[str, Any]) -> None:
     """
     logger.warning(
         "memory guard event: op=%s target=%s %s",
-        action, target, json.dumps(event, ensure_ascii=False),
+        action,
+        target,
+        json.dumps(event, ensure_ascii=False),
     )
 
 
@@ -213,8 +218,7 @@ def _validate_provenance(source_class: str, trust_tier: str) -> Optional[str]:
         )
     if trust_tier not in TRUST_TIERS:
         return (
-            f"Invalid trust_tier '{trust_tier}'. "
-            f"Use one of: {', '.join(TRUST_TIERS)}."
+            f"Invalid trust_tier '{trust_tier}'. Use one of: {', '.join(TRUST_TIERS)}."
         )
     return None
 
@@ -260,8 +264,12 @@ class MemoryStore:
         Tool responses always reflect this live state.
     """
 
-    def __init__(self, memory_char_limit: int = 4000, user_char_limit: int = 2500,
-                 guard: Optional[object] = None):
+    def __init__(
+        self,
+        memory_char_limit: int = 4000,
+        user_char_limit: int = 2500,
+        guard: Optional[object] = None,
+    ):
         self.memory_entries: List[str] = []
         self.user_entries: List[str] = []
         self.memory_char_limit = memory_char_limit
@@ -307,8 +315,12 @@ class MemoryStore:
         # Sanitize entries for the system-prompt snapshot only.  Live state
         # (memory_entries / user_entries) keeps the raw text so the user
         # can see + remove poisoned entries via the memory tool.
-        sanitized_memory = self._sanitize_entries_for_snapshot(self.memory_entries, "MEMORY.md")
-        sanitized_user = self._sanitize_entries_for_snapshot(self.user_entries, "USER.md")
+        sanitized_memory = self._sanitize_entries_for_snapshot(
+            self.memory_entries, "MEMORY.md"
+        )
+        sanitized_user = self._sanitize_entries_for_snapshot(
+            self.user_entries, "USER.md"
+        )
 
         # Capture frozen snapshot for system prompt injection
         self._system_prompt_snapshot = {
@@ -345,7 +357,8 @@ class MemoryStore:
             if findings:
                 logger.warning(
                     "Memory entry from %s blocked at load time: %s",
-                    filename, ", ".join(findings),
+                    filename,
+                    ", ".join(findings),
                 )
                 sanitized.append(
                     f"[BLOCKED: {filename} entry contained threat pattern(s): "
@@ -532,7 +545,9 @@ class MemoryStore:
             # Reject exact duplicates (compare on the stored form, which
             # includes provenance — a re-tag of the same text is not a dup).
             if stored in entries:
-                return self._success_response(target, "Entry already exists (no duplicate added).")
+                return self._success_response(
+                    target, "Entry already exists (no duplicate added)."
+                )
 
             # Calculate what the new total would be
             new_entries = entries + [stored]
@@ -550,6 +565,9 @@ class MemoryStore:
                         f"current_entries below), then retry this add — all in this turn."
                     ),
                     "current_entries": entries,
+                    "current_size": current,
+                    "max_size": limit,
+                    "would_be_size": new_total,
                     "usage": f"{current:,}/{limit:,}",
                 }
 
@@ -579,7 +597,10 @@ class MemoryStore:
         if not old_text:
             return {"success": False, "error": "old_text cannot be empty."}
         if not new_content:
-            return {"success": False, "error": "new_content cannot be empty. Use 'remove' to delete entries."}
+            return {
+                "success": False,
+                "error": "new_content cannot be empty. Use 'remove' to delete entries.",
+            }
 
         prov_error = _validate_provenance(source_class, trust_tier)
         if prov_error:
@@ -604,7 +625,8 @@ class MemoryStore:
 
             entries = self._entries_for(target)
             matches = [
-                (i, e) for i, e in enumerate(entries)
+                (i, e)
+                for i, e in enumerate(entries)
                 if old_text in parse_provenance(e)[0]
             ]
 
@@ -616,7 +638,8 @@ class MemoryStore:
                 unique_texts = {e for _, e in matches}
                 if len(unique_texts) > 1:
                     previews = [
-                        parse_provenance(e)[0][:80] + ("..." if len(parse_provenance(e)[0]) > 80 else "")
+                        parse_provenance(e)[0][:80]
+                        + ("..." if len(parse_provenance(e)[0]) > 80 else "")
                         for _, e in matches
                     ]
                     return {
@@ -645,6 +668,9 @@ class MemoryStore:
                         f"in this turn."
                     ),
                     "current_entries": entries,
+                    "current_size": current,
+                    "max_size": limit,
+                    "would_be_size": new_total,
                     "usage": f"{current:,}/{limit:,}",
                 }
 
@@ -667,7 +693,8 @@ class MemoryStore:
 
             entries = self._entries_for(target)
             matches = [
-                (i, e) for i, e in enumerate(entries)
+                (i, e)
+                for i, e in enumerate(entries)
                 if old_text in parse_provenance(e)[0]
             ]
 
@@ -679,7 +706,8 @@ class MemoryStore:
                 unique_texts = {e for _, e in matches}
                 if len(unique_texts) > 1:
                     previews = [
-                        parse_provenance(e)[0][:80] + ("..." if len(parse_provenance(e)[0]) > 80 else "")
+                        parse_provenance(e)[0][:80]
+                        + ("..." if len(parse_provenance(e)[0]) > 80 else "")
                         for _, e in matches
                     ]
                     return {
@@ -695,6 +723,155 @@ class MemoryStore:
             self.save_to_disk(target)
 
         return self._success_response(target, "Entry removed.")
+
+    def compact(
+        self,
+        target: str,
+        target_size: int = None,
+        prefer: str = "longest",
+    ) -> Dict[str, Any]:
+        """Shorten entries until the store fits ``target_size`` or no more can be trimmed.
+
+        This is the explicit compact/shorten helper requested in #516. It is a
+        destructive operation in the sense that entry text is shortened, but it
+        preserves the *semantic ordering* of entries and never drops an entry
+        entirely. The agent can call it before a write that would otherwise fail.
+
+        * ``target_size`` — goal in characters. Defaults to ``_char_limit`` so
+          the result is guaranteed to fit.
+        * ``prefer`` — which entries to trim first. ``longest`` (default) trims
+          the longest entries first because they yield the biggest reductions.
+          ``oldest`` trims the earliest entries first; in a §-delimited file
+          that is insertion order, so it matches "oldest first".
+
+        Trimming strategy: remove trailing sentences/words, keeping the first
+        sentence/phrase intact. We never truncate mid-word in a way that
+        leaves the leading entry meaningless.
+
+        Returns a structured result including ``bytes_saved``, ``entries_changed``,
+        and the usual ``usage``/``current_size``/``max_size`` fields.
+        """
+        if target not in {"memory", "user"}:
+            return {
+                "success": False,
+                "error": f"Invalid target '{target}'. Use 'memory' or 'user'.",
+            }
+        if prefer not in {"longest", "oldest"}:
+            return {"success": False, "error": "prefer must be 'longest' or 'oldest'."}
+
+        limit = self._char_limit(target)
+        goal = min(target_size if target_size is not None else limit, limit)
+
+        with self._file_lock(self._path_for(target)):
+            bak = self._reload_target(target)
+            if bak:
+                return _drift_error(self._path_for(target), bak)
+
+            entries = self._entries_for(target)
+            start_total = self._char_count(target)
+            if start_total <= goal:
+                return self._success_response(
+                    target,
+                    message=f"Memory already fits ({start_total:,} chars ≤ {goal:,}). No compaction needed.",
+                )
+
+            # Resolve display text (strip provenance trailers) for trimming; we
+            # re-encode provenance on the shortened entry so tags are preserved.
+            parsed = [parse_provenance(e) for e in entries]
+
+            if prefer == "longest":
+                order = sorted(
+                    range(len(entries)), key=lambda i: len(parsed[i][0]), reverse=True
+                )
+            else:
+                order = list(range(len(entries)))
+
+            working_text = [text for text, _, _ in parsed]
+            working_src = [src for _, src, _ in parsed]
+            working_tier = [tier for _, _, tier in parsed]
+
+            overage = start_total - goal
+            changed_indices: set = set()
+            for idx in order:
+                if overage <= 0:
+                    break
+                text = working_text[idx]
+                if not text:
+                    continue
+                # Trim the entry: keep at least one sentence/clause and up to
+                # half of the original text, removing from the end.
+                min_keep = max(20, len(text) // 2)
+                room_to_trim = len(text) - min_keep
+                if room_to_trim <= 0:
+                    continue
+                trim = min(room_to_trim, overage + 1)
+                trimmed = self._shorten_text(text, trim)
+                if trimmed != text:
+                    working_text[idx] = trimmed
+                    changed_indices.add(idx)
+                    overage -= len(text) - len(trimmed)
+
+            new_entries = [
+                encode_provenance(working_text[i], working_src[i], working_tier[i])
+                for i in range(len(entries))
+            ]
+            new_total = len(ENTRY_DELIMITER.join(new_entries)) if new_entries else 0
+            bytes_saved = start_total - new_total
+            self._set_entries(target, new_entries)
+            self.save_to_disk(target)
+
+        resp = self._success_response(
+            target, message=f"Compacted {len(changed_indices)} entr(y/ies)."
+        )
+        resp["bytes_saved"] = bytes_saved
+        resp["entries_changed"] = len(changed_indices)
+        resp["target_size"] = goal
+        resp["current_size"] = new_total
+        resp["max_size"] = limit
+        resp["usage"] = (
+            f"{min(100, int((new_total / limit) * 100)) if limit else 0}% — {new_total:,}/{limit:,} chars"
+        )
+        return resp
+
+    @staticmethod
+    def _shorten_text(text: str, trim_chars: int) -> str:
+        """Remove up to ``trim_chars`` from the end of ``text`` at word/sentence boundaries.
+
+        Tries, in order: sentence boundary, clause boundary (comma/semicolon),
+        word boundary, then hard character truncation. Always returns a
+        non-empty string with the leading portion preserved.
+        """
+        # Work on the raw text; provenance is handled by the caller.
+        target_len = max(1, len(text) - trim_chars)
+        if target_len >= len(text):
+            return text
+
+        # 1. Sentence boundary before target length.
+        for i in range(target_len, len(text)):
+            if text[i] in ".!?":
+                candidate = text[: i + 1].rstrip()
+                if (
+                    len(candidate) <= len(text) - trim_chars
+                    or len(candidate) <= target_len
+                ):
+                    return candidate
+        # 2. Clause boundary.
+        for i in range(target_len, len(text)):
+            if text[i] in ",;:":
+                candidate = text[:i].rstrip()
+                if candidate and (
+                    len(candidate) <= len(text) - trim_chars
+                    or len(candidate) <= target_len
+                ):
+                    return candidate
+        # 3. Word boundary.
+        for i in range(target_len, -1, -1):
+            if text[i].isspace():
+                candidate = text[:i].rstrip()
+                if candidate:
+                    return candidate
+        # 4. Hard truncate (preserve at least one char).
+        return text[: max(1, target_len)].rstrip()
 
     def search(
         self,
@@ -732,7 +909,10 @@ class MemoryStore:
                 continue
             rows.append({"text": text, "source_class": src, "trust_tier": tier})
         return rows
-    def apply_batch(self, target: str, operations: List[Dict[str, Any]]) -> Dict[str, Any]:
+
+    def apply_batch(
+        self, target: str, operations: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """Apply a sequence of add/replace/remove ops to one target atomically.
 
         All operations are validated and applied against the FINAL budget --
@@ -756,7 +936,10 @@ class MemoryStore:
             if act in {"add", "replace"} and new_content:
                 scan_error = _scan_memory_content(new_content)
                 if scan_error:
-                    return {"success": False, "error": f"Operation {i + 1}: {scan_error}"}
+                    return {
+                        "success": False,
+                        "error": f"Operation {i + 1}: {scan_error}",
+                    }
 
         with self._file_lock(self._path_for(target)):
             bak = self._reload_target(target)
@@ -783,7 +966,9 @@ class MemoryStore:
 
                 elif act == "replace":
                     if not old_text:
-                        return self._batch_error(target, f"{pos}: old_text is required.")
+                        return self._batch_error(
+                            target, f"{pos}: old_text is required."
+                        )
                     if not content:
                         return self._batch_error(
                             target,
@@ -791,7 +976,9 @@ class MemoryStore:
                         )
                     matches = [j for j, e in enumerate(working) if old_text in e]
                     if not matches:
-                        return self._batch_error(target, f"{pos}: no entry matched '{old_text}'.")
+                        return self._batch_error(
+                            target, f"{pos}: no entry matched '{old_text}'."
+                        )
                     if len({working[j] for j in matches}) > 1:
                         return self._batch_error(
                             target,
@@ -801,10 +988,14 @@ class MemoryStore:
 
                 elif act == "remove":
                     if not old_text:
-                        return self._batch_error(target, f"{pos}: old_text is required.")
+                        return self._batch_error(
+                            target, f"{pos}: old_text is required."
+                        )
                     matches = [j for j, e in enumerate(working) if old_text in e]
                     if not matches:
-                        return self._batch_error(target, f"{pos}: no entry matched '{old_text}'.")
+                        return self._batch_error(
+                            target, f"{pos}: no entry matched '{old_text}'."
+                        )
                     if len({working[j] for j in matches}) > 1:
                         return self._batch_error(
                             target,
@@ -830,6 +1021,9 @@ class MemoryStore:
                         f"entries in the same batch (see current_entries below), then retry."
                     ),
                     "current_entries": self._entries_for(target),
+                    "current_size": current,
+                    "max_size": limit,
+                    "would_be_size": new_total,
                     "usage": f"{current:,}/{limit:,}",
                 }
 
@@ -837,7 +1031,9 @@ class MemoryStore:
             self._set_entries(target, working)
             self.save_to_disk(target)
 
-        return self._success_response(target, f"Applied {len(operations)} operation(s).")
+        return self._success_response(
+            target, f"Applied {len(operations)} operation(s)."
+        )
 
     def _batch_error(self, target: str, message: str) -> Dict[str, Any]:
         """Build a batch-abort error that reports live (uncommitted) state."""
@@ -847,6 +1043,8 @@ class MemoryStore:
             "success": False,
             "error": message + " No operations were applied (batch is all-or-nothing).",
             "current_entries": self._entries_for(target),
+            "current_size": current,
+            "max_size": limit,
             "usage": f"{current:,}/{limit:,}",
         }
 
@@ -901,9 +1099,13 @@ class MemoryStore:
         pct = min(100, int((current / limit) * 100)) if limit > 0 else 0
 
         if target == "user":
-            header = f"USER PROFILE (who the user is) [{pct}% — {current:,}/{limit:,} chars]"
+            header = (
+                f"USER PROFILE (who the user is) [{pct}% — {current:,}/{limit:,} chars]"
+            )
         else:
-            header = f"MEMORY (your personal notes) [{pct}% — {current:,}/{limit:,} chars]"
+            header = (
+                f"MEMORY (your personal notes) [{pct}% — {current:,}/{limit:,} chars]"
+            )
 
         separator = "═" * 46
         return f"{separator}\n{header}\n{separator}\n{content}"
@@ -1049,10 +1251,14 @@ def load_on_disk_store() -> "MemoryStore":
     return store
 
 
-def _apply_write_gate(action: str, target: str, content: Optional[str],
-                      old_text: Optional[str],
-                      source_class: str = DEFAULT_SOURCE_CLASS,
-                      trust_tier: str = DEFAULT_TRUST_TIER) -> Optional[str]:
+def _apply_write_gate(
+    action: str,
+    target: str,
+    content: Optional[str],
+    old_text: Optional[str],
+    source_class: str = DEFAULT_SOURCE_CLASS,
+    trust_tier: str = DEFAULT_TRUST_TIER,
+) -> Optional[str]:
     """Evaluate the memory write gate. Returns a JSON tool-result string when
     the write should NOT proceed normally (blocked or staged), or None when the
     caller should perform the real write.
@@ -1100,18 +1306,25 @@ def _apply_write_gate(action: str, target: str, content: Optional[str],
         "trust_tier": trust_tier,
     }
     record = wa.stage_write(
-        wa.MEMORY, payload,
+        wa.MEMORY,
+        payload,
         summary=f"{summary}: {detail[:120]}",
         origin=wa.current_origin(),
     )
     return json.dumps(
-        {"success": True, "staged": True, "pending_id": record["id"],
-         "message": decision.message},
+        {
+            "success": True,
+            "staged": True,
+            "pending_id": record["id"],
+            "message": decision.message,
+        },
         ensure_ascii=False,
     )
 
 
-def _apply_batch_write_gate(target: str, operations: List[Dict[str, Any]]) -> Optional[str]:
+def _apply_batch_write_gate(
+    target: str, operations: List[Dict[str, Any]]
+) -> Optional[str]:
     """Evaluate the write gate for a batch of memory operations.
 
     Returns a JSON tool-result string when the batch should NOT proceed
@@ -1132,7 +1345,9 @@ def _apply_batch_write_gate(target: str, operations: List[Dict[str, Any]]) -> Op
         if act == "remove":
             detail_lines.append(f"- remove: {op.get('old_text', '')}")
         elif act == "replace":
-            detail_lines.append(f"- replace: {op.get('old_text', '')} -> {op.get('content', '')}")
+            detail_lines.append(
+                f"- replace: {op.get('old_text', '')} -> {op.get('content', '')}"
+            )
         else:
             detail_lines.append(f"- {act}: {op.get('content', '')}")
     detail = "\n".join(detail_lines)
@@ -1147,13 +1362,18 @@ def _apply_batch_write_gate(target: str, operations: List[Dict[str, Any]]) -> Op
 
     payload = {"action": "batch", "target": target, "operations": operations}
     record = wa.stage_write(
-        wa.MEMORY, payload,
+        wa.MEMORY,
+        payload,
         summary=f"{summary}: {detail[:120]}",
         origin=wa.current_origin(),
     )
     return json.dumps(
-        {"success": True, "staged": True, "pending_id": record["id"],
-         "message": decision.message},
+        {
+            "success": True,
+            "staged": True,
+            "pending_id": record["id"],
+            "message": decision.message,
+        },
         ensure_ascii=False,
     )
 
@@ -1200,6 +1420,8 @@ def memory_tool(
     source_filter: Optional[object] = None,
     min_trust: Optional[str] = None,
     operations: Optional[List[Dict[str, Any]]] = None,
+    target_size: Optional[int] = None,
+    prefer: str = "longest",
     store: Optional[MemoryStore] = None,
 ) -> str:
     """
@@ -1215,23 +1437,47 @@ def memory_tool(
     Returns JSON string with results.
     """
     if store is None:
-        return tool_error("Memory is not available. It may be disabled in config or this environment.", success=False)
+        return tool_error(
+            "Memory is not available. It may be disabled in config or this environment.",
+            success=False,
+        )
 
     if target not in {"memory", "user"}:
-        return tool_error(f"Invalid target '{target}'. Use 'memory' or 'user'.", success=False)
+        return tool_error(
+            f"Invalid target '{target}'. Use 'memory' or 'user'.", success=False
+        )
 
     # search is a read-only retrieval path — no gate, no required content.
     if action == "search":
         rows = store.search(target, source_filter=source_filter, min_trust=min_trust)
         return json.dumps(
-            {"success": True, "target": target, "results": rows, "result_count": len(rows)},
+            {
+                "success": True,
+                "target": target,
+                "results": rows,
+                "result_count": len(rows),
+            },
             ensure_ascii=False,
         )
+
+    if action == "compact":
+        prefer_param = prefer if prefer is not None else "longest"
+        try:
+            target_size_int = int(target_size) if target_size is not None else None
+        except (TypeError, ValueError):
+            return tool_error(
+                "target_size must be an integer number of characters.", success=False
+            )
+        result = store.compact(target, target_size=target_size_int, prefer=prefer_param)
+        return json.dumps(result, ensure_ascii=False)
 
     # --- Batch path -------------------------------------------------------
     if operations:
         if not isinstance(operations, list):
-            return tool_error("operations must be a list of {action, content?, old_text?} objects.", success=False)
+            return tool_error(
+                "operations must be a list of {action, content?, old_text?} objects.",
+                success=False,
+            )
         gate_result = _apply_batch_write_gate(target, operations)
         if gate_result is not None:
             return gate_result
@@ -1258,14 +1504,20 @@ def memory_tool(
     # Approval gate: when on, stages the write (background/gateway) or prompts
     # inline (interactive CLI); when off (default) passes straight through.
     gate_result = _apply_write_gate(
-        action, target, content, old_text,
-        source_class=source_class, trust_tier=trust_tier,
+        action,
+        target,
+        content,
+        old_text,
+        source_class=source_class,
+        trust_tier=trust_tier,
     )
     if gate_result is not None:
         return gate_result
 
     if action == "add":
-        result = store.add(target, content, source_class=source_class, trust_tier=trust_tier)
+        result = store.add(
+            target, content, source_class=source_class, trust_tier=trust_tier
+        )
 
     elif action == "replace":
         result = store.replace(
@@ -1277,7 +1529,8 @@ def memory_tool(
 
     else:
         return tool_error(
-            f"Unknown action '{action}'. Use: add, replace, remove, search", success=False
+            f"Unknown action '{action}'. Use: add, replace, remove, search",
+            success=False,
         )
 
     return json.dumps(result, ensure_ascii=False)
@@ -1288,7 +1541,9 @@ def check_memory_requirements() -> bool:
     return True
 
 
-def apply_memory_pending(payload: Dict[str, Any], store: "MemoryStore") -> Dict[str, Any]:
+def apply_memory_pending(
+    payload: Dict[str, Any], store: "MemoryStore"
+) -> Dict[str, Any]:
     """Replay a staged memory write directly against the store, bypassing the
     write gate. Called by the /memory approve handler.
 
@@ -1303,7 +1558,9 @@ def apply_memory_pending(payload: Dict[str, Any], store: "MemoryStore") -> Dict[
     if action == "batch":
         return store.apply_batch(target, payload.get("operations") or [])
     if action == "add":
-        return store.add(target, content, source_class=source_class, trust_tier=trust_tier)
+        return store.add(
+            target, content, source_class=source_class, trust_tier=trust_tier
+        )
     if action == "replace":
         return store.replace(
             target, old_text, content, source_class=source_class, trust_tier=trust_tier
@@ -1311,6 +1568,8 @@ def apply_memory_pending(payload: Dict[str, Any], store: "MemoryStore") -> Dict[
     if action == "remove":
         return store.remove(target, old_text)
     return {"success": False, "error": f"Unknown staged action '{action}'."}
+
+
 # OpenAI Function-Calling Schema
 # =============================================================================
 
@@ -1332,7 +1591,8 @@ MEMORY_SCHEMA = {
         "Priority: user preferences & corrections > environment facts > procedures. The best "
         "memory stops the user repeating themselves.\n\n"
         "IF FULL: an add is rejected with the current entries shown. Reissue as ONE batch that "
-        "removes or shortens enough stale entries and adds the new one together.\n\n"
+        "removes or shortens enough stale entries and adds the new one together. Or call "
+        "action='compact' first to shorten entries so the batch fits.\n\n"
         "TARGETS: 'user' = who the user is (name, role, preferences, style). 'memory' = your "
         "notes (environment, conventions, tool quirks, lessons).\n\n"
         "PROVENANCE (optional, on add/replace): tag where a fact came from. source_class = "
@@ -1349,21 +1609,21 @@ MEMORY_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "replace", "remove", "search"],
-                "description": "The action to perform (single op, or 'search' to read entries). Omit when using the 'operations' batch array."
+                "enum": ["add", "replace", "remove", "search", "compact"],
+                "description": "The action to perform (single op, or 'search' to read entries, or 'compact' to shorten entries to fit). Omit when using the 'operations' batch array.",
             },
             "target": {
                 "type": "string",
                 "enum": ["memory", "user"],
-                "description": "Which memory store: 'memory' for personal notes, 'user' for user profile."
+                "description": "Which memory store: 'memory' for personal notes, 'user' for user profile.",
             },
             "content": {
                 "type": "string",
-                "description": "The entry content. Required for 'add' and 'replace' (single-op shape)."
+                "description": "The entry content. Required for 'add' and 'replace' (single-op shape).",
             },
             "old_text": {
                 "type": "string",
-                "description": "REQUIRED for 'replace' and 'remove' (single-op shape): a short unique substring identifying the existing entry to modify. Omit only for 'add'."
+                "description": "REQUIRED for 'replace' and 'remove' (single-op shape): a short unique substring identifying the existing entry to modify. Omit only for 'add'.",
             },
             "operations": {
                 "type": "array",
@@ -1375,12 +1635,30 @@ MEMORY_SCHEMA = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "action": {"type": "string", "enum": ["add", "replace", "remove"]},
-                        "content": {"type": "string", "description": "Entry content for add/replace."},
-                        "old_text": {"type": "string", "description": "Substring identifying the entry for replace/remove."},
+                        "action": {
+                            "type": "string",
+                            "enum": ["add", "replace", "remove"],
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Entry content for add/replace.",
+                        },
+                        "old_text": {
+                            "type": "string",
+                            "description": "Substring identifying the entry for replace/remove.",
+                        },
                     },
                     "required": ["action"],
                 },
+            },
+            "target_size": {
+                "type": "integer",
+                "description": "Optional for 'compact': target character count (defaults to the store limit).",
+            },
+            "prefer": {
+                "type": "string",
+                "enum": ["longest", "oldest"],
+                "description": "Optional for 'compact': which entries to trim first (default: longest).",
             },
             "source_class": {
                 "type": "string",
@@ -1431,11 +1709,10 @@ registry.register(
         source_filter=args.get("source_filter"),
         min_trust=args.get("min_trust"),
         operations=args.get("operations"),
-        store=kw.get("store")),
+        target_size=args.get("target_size"),
+        prefer=args.get("prefer"),
+        store=kw.get("store"),
+    ),
     check_fn=check_memory_requirements,
     emoji="🧠",
 )
-
-
-
-

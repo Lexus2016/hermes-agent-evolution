@@ -44,11 +44,19 @@ def test_memory_schema_is_well_formed():
     assert params["required"] == ["target"]
     # Nested ``enum`` on property values is fine — only top-level is forbidden.
     # 'search' was added by #316 (provenance retrieval filter).
-    assert params["properties"]["action"]["enum"] == ["add", "replace", "remove", "search"]
+    assert params["properties"]["action"]["enum"] == [
+        "add",
+        "replace",
+        "remove",
+        "search",
+        "compact",
+    ]
     assert params["properties"]["target"]["enum"] == ["memory", "user"]
     # Batch shape is exposed and its items reuse the same actions.
     assert params["properties"]["operations"]["type"] == "array"
-    assert params["properties"]["operations"]["items"]["properties"]["action"]["enum"] == ["add", "replace", "remove"]
+    assert params["properties"]["operations"]["items"]["properties"]["action"][
+        "enum"
+    ] == ["add", "replace", "remove"]
 
 
 def test_memory_schema_is_json_serializable():
