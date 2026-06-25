@@ -91,6 +91,15 @@ def compute_health(records: List[Dict[str, Any]], last: int = 30) -> Dict[str, A
                 "(poor self-capability calibration)"
             )
 
+    # Deterministic effort budget for the NEXT selection cycle. The analysis
+    # stage copies this verbatim instead of deriving "1.5 vs 3.0" from the flag
+    # itself — a prompt-level decision that drifted to arbitrary middles like 2.0
+    # (observed 2026-06-24, under-throttling while the watchdog kept firing). The
+    # ONLY two legal values are the throttled budget and the default; the script
+    # owns the choice, the agent owns nothing but the copy.
+    low_selection = any(f.startswith("LOW_SELECTION_EFFICIENCY") for f in flags)
+    effort_budget = 1.5 if low_selection else 3.0
+
     return {
         "cycles_total": len(window),
         "cycles_active": len(active),
@@ -102,6 +111,7 @@ def compute_health(records: List[Dict[str, Any]], last: int = 30) -> Dict[str, A
         "selection_efficiency": round(selection_efficiency, 3) if selection_efficiency is not None else None,
         "reject_rate": round(reject_rate, 3) if reject_rate is not None else None,
         "merged_trend": _trend([_int(r, "merged") for r in active]),
+        "effort_budget": effort_budget,
         "flags": flags,
     }
 
@@ -112,12 +122,16 @@ def _pct(x: Optional[float]) -> str:
 
 def format_health(h: Dict[str, Any]) -> str:
     tail = " | ".join(h["flags"]) if h["flags"] else "healthy"
+    # NOTE: effort_budget rides in the BODY, never the tail. evolution_watchdog
+    # keys on `.endswith("| healthy")` / `| <FLAG>`, so the flags must stay the
+    # last segment after the final `|`.
     return (
         f"[evolution-metrics] {h['cycles_active']}/{h['cycles_total']} active cycles: "
         f"success={_pct(h['cycle_success_rate'])} "
         f"selection_efficiency={_pct(h['selection_efficiency'])} "
         f"reject_rate={_pct(h['reject_rate'])} merged_trend={h['merged_trend']} "
-        f"(created={h['issues_created']} selected={h['selected']} merged={h['merged']}) | {tail}"
+        f"(created={h['issues_created']} selected={h['selected']} merged={h['merged']}) "
+        f"effort_budget={h['effort_budget']:.1f} | {tail}"
     )
 
 

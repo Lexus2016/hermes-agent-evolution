@@ -69,3 +69,34 @@ class TestComputeHealth:
     def test_window_last_n(self):
         recs = [_rec(f"d{i}", selected=1, merged=1) for i in range(40)]
         assert compute_health(recs, last=10)["cycles_total"] == 10
+
+    def test_effort_budget_throttles_only_when_flagged(self):
+        # Healthy window → default budget 3.0 (no throttle).
+        healthy = [_rec(f"d{i}", selected=4, merged=3, rejected=1) for i in range(5)]
+        assert compute_health(healthy)["effort_budget"] == 3.0
+        # LOW_SELECTION_EFFICIENCY flagged → throttled budget 1.5, never a middle.
+        starved = [_rec(f"d{i}", selected=10, merged=0) for i in range(4)]
+        h = compute_health(starved)
+        assert any("LOW_SELECTION_EFFICIENCY" in f for f in h["flags"])
+        assert h["effort_budget"] == 1.5
+
+    def test_effort_budget_default_when_insufficient_signal(self):
+        # < 3 active cycles → no flags → default budget; never throttle blindly.
+        few = [_rec("d1", selected=10, merged=0), _rec("d2", selected=10, merged=0)]
+        assert compute_health(few)["effort_budget"] == 3.0
+
+    def test_format_health_carries_budget_without_breaking_watchdog_tail(self):
+        # The budget token must sit in the body, NOT the tail: evolution_watchdog
+        # keys on `.endswith("| healthy")` and treats everything after the last
+        # `|` as the flags. A budget in the tail would silence/garble the alert.
+        healthy = format_health(
+            compute_health([_rec(f"d{i}", selected=4, merged=3, rejected=1) for i in range(5)])
+        )
+        assert "effort_budget=3.0" in healthy
+        assert healthy.endswith("| healthy")
+        flagged = format_health(
+            compute_health([_rec(f"d{i}", selected=10, merged=0) for i in range(4)])
+        )
+        assert "effort_budget=1.5" in flagged
+        assert not flagged.endswith("| healthy")
+        assert "LOW_SELECTION_EFFICIENCY" in flagged
