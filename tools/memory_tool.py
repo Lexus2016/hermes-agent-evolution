@@ -269,11 +269,15 @@ class MemoryStore:
         memory_char_limit: int = 4000,
         user_char_limit: int = 2500,
         guard: Optional[object] = None,
+        allow_batch_override: bool = False,
     ):
         self.memory_entries: List[str] = []
         self.user_entries: List[str] = []
         self.memory_char_limit = memory_char_limit
         self.user_char_limit = user_char_limit
+        # Explicit opt-in for per-call dynamic limit overrides. Default False so
+        # dynamic changes cannot silently alter the configured budget (issue #517).
+        self.allow_batch_override = allow_batch_override
         # Frozen snapshot for system prompt -- set once at load_from_disk()
         self._system_prompt_snapshot: Dict[str, str] = {"memory": "", "user": ""}
         # Optional memory-poisoning guard (issue #315). DEFAULT None: when unset,
@@ -456,10 +460,21 @@ class MemoryStore:
             return 0
         return len(ENTRY_DELIMITER.join(entries))
 
-    def _char_limit(self, target: str) -> int:
+    def _char_limit(self, target: str, dynamic_limit: Optional[int] = None) -> int:
+        """Return the effective char limit for ``target``.
+
+        Per-issue #517, a caller may pass a one-off ``dynamic_limit`` to
+        ``apply_batch``. It is only honoured for the ``memory`` target when
+        ``self.allow_batch_override`` is True; the ``user`` target always uses
+        its configured limit. The system-prompt snapshot always uses the
+        configured limits, so a dynamic batch override cannot invalidate the
+        prefix cache.
+        """
         if target == "user":
             return self.user_char_limit
-        return self.memory_char_limit
+        if dynamic_limit is None or not self.allow_batch_override:
+            return self.memory_char_limit
+        return int(dynamic_limit)
 
     def _gate_write(self, content: str):
         """Decide whether ``content`` may be written, reusing the threat scanner.
@@ -911,7 +926,10 @@ class MemoryStore:
         return rows
 
     def apply_batch(
-        self, target: str, operations: List[Dict[str, Any]]
+        self,
+        target: str,
+        operations: List[Dict[str, Any]],
+        memory_char_limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Apply a sequence of add/replace/remove ops to one target atomically.
 
@@ -924,6 +942,13 @@ class MemoryStore:
         Semantics: all-or-nothing. If any op is malformed, doesn't match, or
         the net result would exceed the char limit, NOTHING is written and an
         error is returned describing the first failure plus the live state.
+
+        ``memory_char_limit`` is an optional per-call override for the 'memory'
+        target only. It is ignored unless ``self.allow_batch_override`` is True,
+        which keeps the configured budget the default and prevents dynamic
+        overrides from silently changing behavior (issue #517). The frozen
+        system-prompt snapshot always uses the configured limit, so a one-off
+        override cannot invalidate the per-conversation prompt cache.
         """
         if not operations:
             return {"success": False, "error": "operations list is empty."}
@@ -948,7 +973,7 @@ class MemoryStore:
 
             # Work on a copy; only commit if the whole batch validates.
             working: List[str] = list(self._entries_for(target))
-            limit = self._char_limit(target)
+            limit = self._char_limit(target, dynamic_limit=memory_char_limit)
 
             for i, op in enumerate(operations):
                 op = op or {}
@@ -959,7 +984,7 @@ class MemoryStore:
 
                 if act == "add":
                     if not content:
-                        return self._batch_error(target, f"{pos}: content is required.")
+                        return self._batch_error(target, f"{pos}: content is required.", limit=limit)
                     if content in working:
                         continue  # idempotent -- skip duplicate, don't fail the batch
                     working.append(content)
@@ -967,39 +992,42 @@ class MemoryStore:
                 elif act == "replace":
                     if not old_text:
                         return self._batch_error(
-                            target, f"{pos}: old_text is required."
+                            target, f"{pos}: old_text is required.", limit=limit
                         )
                     if not content:
                         return self._batch_error(
                             target,
                             f"{pos}: content is required (use action='remove' to delete).",
+                            limit=limit,
                         )
                     matches = [j for j, e in enumerate(working) if old_text in e]
                     if not matches:
                         return self._batch_error(
-                            target, f"{pos}: no entry matched '{old_text}'."
+                            target, f"{pos}: no entry matched '{old_text}'.", limit=limit
                         )
                     if len({working[j] for j in matches}) > 1:
                         return self._batch_error(
                             target,
                             f"{pos}: '{old_text}' matched multiple distinct entries -- be more specific.",
+                            limit=limit,
                         )
                     working[matches[0]] = content
 
                 elif act == "remove":
                     if not old_text:
                         return self._batch_error(
-                            target, f"{pos}: old_text is required."
+                            target, f"{pos}: old_text is required.", limit=limit
                         )
                     matches = [j for j, e in enumerate(working) if old_text in e]
                     if not matches:
                         return self._batch_error(
-                            target, f"{pos}: no entry matched '{old_text}'."
+                            target, f"{pos}: no entry matched '{old_text}'.", limit=limit
                         )
                     if len({working[j] for j in matches}) > 1:
                         return self._batch_error(
                             target,
                             f"{pos}: '{old_text}' matched multiple distinct entries -- be more specific.",
+                            limit=limit,
                         )
                     working.pop(matches[0])
 
@@ -1007,6 +1035,7 @@ class MemoryStore:
                     return self._batch_error(
                         target,
                         f"{pos}: unknown action. Use add, replace, or remove.",
+                        limit=limit,
                     )
 
             # Budget check against the FINAL state only.
@@ -1032,20 +1061,20 @@ class MemoryStore:
             self.save_to_disk(target)
 
         return self._success_response(
-            target, f"Applied {len(operations)} operation(s)."
+            target, f"Applied {len(operations)} operation(s).", limit=limit
         )
 
-    def _batch_error(self, target: str, message: str) -> Dict[str, Any]:
+    def _batch_error(self, target: str, message: str, limit: Optional[int] = None) -> Dict[str, Any]:
         """Build a batch-abort error that reports live (uncommitted) state."""
         current = self._char_count(target)
-        limit = self._char_limit(target)
+        effective_limit = limit if limit is not None else self._char_limit(target)
         return {
             "success": False,
             "error": message + " No operations were applied (batch is all-or-nothing).",
             "current_entries": self._entries_for(target),
             "current_size": current,
-            "max_size": limit,
-            "usage": f"{current:,}/{limit:,}",
+            "max_size": effective_limit,
+            "usage": f"{current:,}/{effective_limit:,}",
         }
 
     def format_for_system_prompt(self, target: str) -> Optional[str]:
@@ -1063,11 +1092,11 @@ class MemoryStore:
 
     # -- Internal helpers --
 
-    def _success_response(self, target: str, message: str = None) -> Dict[str, Any]:
+    def _success_response(self, target: str, message: str = None, limit: Optional[int] = None) -> Dict[str, Any]:
         entries = self._entries_for(target)
         current = self._char_count(target)
-        limit = self._char_limit(target)
-        pct = min(100, int((current / limit) * 100)) if limit > 0 else 0
+        effective_limit = limit if limit is not None else self._char_limit(target)
+        pct = min(100, int((current / effective_limit) * 100)) if effective_limit > 0 else 0
 
         # The success response is intentionally TERMINAL: it confirms the write
         # landed and tells the model to stop. We do NOT echo the full entries
@@ -1080,7 +1109,7 @@ class MemoryStore:
             "success": True,
             "done": True,
             "target": target,
-            "usage": f"{pct}% — {current:,}/{limit:,} chars",
+            "usage": f"{pct}% — {current:,}/{effective_limit:,} chars",
             "entry_count": len(entries),
         }
         if message:
@@ -1234,18 +1263,23 @@ def load_on_disk_store() -> "MemoryStore":
     """
     memory_char_limit = 2200
     user_char_limit = 1375
+    allow_batch_override = False
     try:
         from hermes_cli.config import load_config
 
         mem_cfg = (load_config() or {}).get("memory", {}) or {}
         memory_char_limit = int(mem_cfg.get("memory_char_limit", memory_char_limit))
         user_char_limit = int(mem_cfg.get("user_char_limit", user_char_limit))
+        allow_batch_override = bool(
+            mem_cfg.get("allow_batch_memory_char_limit_override", False)
+        )
     except Exception:
-        pass  # config optional — fall back to defaults rather than break /memory
+        pass  # config optional - fall back to defaults rather than break /memory
 
     store = MemoryStore(
         memory_char_limit=memory_char_limit,
         user_char_limit=user_char_limit,
+        allow_batch_override=allow_batch_override,
     )
     store.load_from_disk()
     return store
@@ -1422,6 +1456,7 @@ def memory_tool(
     operations: Optional[List[Dict[str, Any]]] = None,
     target_size: Optional[int] = None,
     prefer: str = "longest",
+    memory_char_limit: Optional[int] = None,
     store: Optional[MemoryStore] = None,
 ) -> str:
     """
@@ -1433,6 +1468,8 @@ def memory_tool(
                    atomically against the final char budget in ONE call.
     ``source_class`` / ``trust_tier`` tag provenance on add/replace (#316).
     ``source_filter`` / ``min_trust`` filter the ``search`` action's results.
+    ``memory_char_limit`` is an optional per-batch override for target='memory'
+    that is only honoured when ``store.allow_batch_override`` is True (issue #517).
 
     Returns JSON string with results.
     """
@@ -1481,7 +1518,7 @@ def memory_tool(
         gate_result = _apply_batch_write_gate(target, operations)
         if gate_result is not None:
             return gate_result
-        result = store.apply_batch(target, operations)
+        result = store.apply_batch(target, operations, memory_char_limit=memory_char_limit)
         return json.dumps(result, ensure_ascii=False)
 
     # --- Single-op path ---------------------------------------------------
@@ -1686,6 +1723,15 @@ MEMORY_SCHEMA = {
                 "enum": list(TRUST_TIERS),
                 "description": "Optional for 'search': keep only entries at or above this trust tier.",
             },
+            "memory_char_limit": {
+                "type": "integer",
+                "description": (
+                    "Optional per-batch override for the 'memory' target char limit, "
+                    "only honoured when config 'memory.allow_batch_memory_char_limit_override' "
+                    "is True. Ignored for 'user' target. The system-prompt snapshot always "
+                    "uses the configured limit (issue #517)."
+                ),
+            },
         },
         "required": ["target"],
     },
@@ -1711,6 +1757,7 @@ registry.register(
         operations=args.get("operations"),
         target_size=args.get("target_size"),
         prefer=args.get("prefer"),
+        memory_char_limit=args.get("memory_char_limit"),
         store=kw.get("store"),
     ),
     check_fn=check_memory_requirements,
