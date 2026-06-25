@@ -194,21 +194,26 @@ gh pr list --repo "$REPO" --state open --limit 50 \
 4. **Merge** (squash). `--admin` is required because branch protection mandates
    review; the owner token authorizes it.
 
-   **FIRST — branch-integrity check (you review a PR, then merge whatever its
-   branch HEAD is NOW; those can differ).** Another agent or a shared checkout
-   can push commits onto the branch between your review (2a) and this merge, and
-   `gh pr merge` lands the branch HEAD — so an un-reviewed commit rides in under
-   your approval. Before merging, confirm the commit set you reviewed is still
-   the whole PR:
+   **Merge via the deterministic gate — it enforces the self-merge policy AND
+   closes the review→merge race.** `gh pr merge` lands the branch HEAD, so a
+   commit pushed onto the branch between your 2a review and this merge would ride
+   in unreviewed; and a raw merge cannot refuse an oversized or infrastructure-
+   touching autonomous change. `scripts/evolution_merge_gate.py` does both
+   deterministically: it re-checks the PR against the policy (a diff-size cap;
+   never self-merge a PR that touches CI workflows, dependency lockfiles/manifests,
+   secrets, or the pipeline's own approval / merge-gate / cron-registrar
+   machinery), then merges ATOMICALLY by passing the reviewed head SHA — so a push
+   that landed since 2a returns 409 and aborts instead of merging unreviewed code.
 ```bash
-gh pr view <N> --repo "$REPO" --json commits --jq '.commits[].oid'
+python3 scripts/evolution_merge_gate.py --pr <N> --repo "$REPO" --merge --method squash
 ```
-   If a commit appeared that was NOT in your 2a review → do NOT merge blind:
-   re-run the code review (2a) + dead-code grep against the FULL current diff. If
-   it passes, merge; if not, send back. Only then:
-```bash
-gh pr merge <N> --repo "$REPO" --squash --admin
-```
+   Non-zero exit = BLOCKED (policy violation, or the head moved since review). Do
+   NOT merge blind. If the head moved, re-run the 2a code review + dead-code grep
+   against the FULL current diff and retry; if the policy blocked it (oversized /
+   infra / dependency change), leave it for human review and record why in the
+   report. Only fall back to `gh pr merge <N> --repo "$REPO" --squash --admin` for
+   a PR the gate has already cleared but could not merge for an unrelated gh
+   reason.
 
 4a. **Continue or close — keep multi-phase `roadmap` issues moving (don't let them
     stall at slice 1).** A PR that carries `Closes #NN` auto-closes its issue on
