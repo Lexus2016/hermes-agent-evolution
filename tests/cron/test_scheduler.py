@@ -3488,3 +3488,64 @@ class TestHomeTargetEnvVarRegistry:
         from cron.scheduler import _HOME_TARGET_ENV_VARS
 
         assert _HOME_TARGET_ENV_VARS.get("whatsapp") == "WHATSAPP_HOME_CHANNEL"
+
+
+class TestCronTimeoutFailureSummary:
+    """Regression: cron jobs must write a structured failure summary when the
+    provider layer times out, including provider, model, failure_category, and
+    retry count."""
+
+    def test_timeout_failure_record_includes_category_and_model(self, tmp_path, monkeypatch):
+        from cron.scheduler import run_one_job
+        from cron.jobs import get_latest_failure
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        # Minimal Hermes home layout required by save_job_failure
+        (tmp_path / "cron").mkdir()
+        (tmp_path / "cron" / "output").mkdir(parents=True)
+        (tmp_path / "cron" / "failures").mkdir(parents=True)
+
+        job = {
+            "id": "test-timeout-summary",
+            "name": "Timeout summary test",
+            "model": "openrouter:openai/gpt-4o",
+            "prompt": "ping",
+            "deliver": "",
+        }
+
+        # Patch run_job to simulate a provider timeout after retries.
+        def _fake_run_job(_job):
+            return (
+                False,
+                "Agent output before death",
+                "",
+                "ReadError: request timed out after 60s (retries 3 exhausted)",
+            )
+
+        import cron.scheduler as sched_mod
+        monkeypatch.setattr(sched_mod, "run_job", _fake_run_job)
+        monkeypatch.setattr(sched_mod, "mark_job_started", lambda _jid: None)
+        monkeypatch.setattr(sched_mod, "save_job_output", lambda _jid, _output: None)
+        monkeypatch.setattr(sched_mod, "_deliver_result", lambda _job, _content, **kw: None)
+
+        run_one_job(job, verbose=False)
+
+        record = get_latest_failure("test-timeout-summary")
+        assert record is not None
+        assert record["success"] is False
+        assert record["failure_category"] == "timeout"
+        assert record["provider"] == "openrouter"
+        assert record["model"] == "openai/gpt-4o"
+        assert record["retry_count"] == 3
+        assert "timed out" in record["error"].lower()
+
+    def test_delivery_summary_includes_failure_category(self):
+        from cron.scheduler import _summarize_cron_failure_for_delivery
+
+        job = {"id": "j1", "name": "Job one"}
+        msg = _summarize_cron_failure_for_delivery(
+            job, "ReadError: request timed out after 60s", "timeout"
+        )
+        assert "provider timeout" in msg
+        assert "[timeout]" in msg
+        assert "Job one" in msg

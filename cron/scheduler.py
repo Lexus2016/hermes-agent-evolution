@@ -48,7 +48,9 @@ from hermes_time import now as _hermes_now
 logger = logging.getLogger(__name__)
 
 
-def _summarize_cron_failure_for_delivery(job: dict, error: str | None) -> str:
+def _summarize_cron_failure_for_delivery(
+    job: dict, error: str | None, failure_category: str | None = None
+) -> str:
     """Return a compact one-line failure message for chat delivery.
 
     Full details stay in the cron output directory and the logs. Chat should
@@ -58,6 +60,7 @@ def _summarize_cron_failure_for_delivery(job: dict, error: str | None) -> str:
     job_name = job.get("name") or job.get("id") or "cron job"
     text = (error or "unknown error").strip()
     lower = text.lower()
+    category_tag = f" [{failure_category}]" if failure_category else ""
 
     # Provider/API failures are the common noisy path. Keep these short.
     if "429" in text or "rate limit" in lower or "usage limit" in lower:
@@ -67,14 +70,14 @@ def _summarize_cron_failure_for_delivery(job: dict, error: str | None) -> str:
         elif "quota" in lower:
             reason = "quota limit"
         return (
-            f"⚠️ Cron '{job_name}' failed: provider {reason}. "
+            f"⚠️ Cron '{job_name}' failed: provider {reason}{category_tag}. "
             "Fallback chain was exhausted or unavailable. "
             "Full details saved in cron output / cron/failures."
         )
 
     if "readtimeout" in lower or "timed out" in lower or "timeout" in lower:
         return (
-            f"⚠️ Cron '{job_name}' failed: provider timeout. "
+            f"⚠️ Cron '{job_name}' failed: provider timeout{category_tag}. "
             "Fallback chain was exhausted or unavailable. "
             "Full details saved in cron output / cron/failures."
         )
@@ -2661,6 +2664,40 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
         mark_job_started(job["id"])
         success, output, final_response, error = run_job(job)
 
+        # Classify provider-layer failures so the cron failure record and any
+        # delivery summary can include a stable failure_category (e.g. timeout).
+        failure_category: Optional[str] = None
+        if not success and error:
+            try:
+                from agent.error_classifier import classify_api_error
+                classified = classify_api_error(RuntimeError(error))
+                if classified is not None:
+                    failure_category = classified.reason.value
+            except Exception:
+                failure_category = None
+
+        # Best-effort retry count from the agent's final error text when the
+        # retry loop surfaced it (e.g. "max retries (3) exceeded").
+        retry_count: Optional[int] = None
+        if not success and error:
+            match = re.search(r"(?:retry|retries)\s*\(?\s*(\d+)\s*\)?", error, re.IGNORECASE)
+            if match:
+                retry_count = int(match.group(1))
+
+        # Determine the provider/model that ran the job from the job record or
+        # the active process model env. Cron jobs store a per-job model override;
+        # resolving provider from model follows the ordinary HERMES_MODEL path.
+        cron_provider: Optional[str] = None
+        cron_model: Optional[str] = None
+        if not success:
+            cron_model = job.get("model") or os.getenv("HERMES_MODEL") or None
+            if cron_model:
+                try:
+                    from hermes_cli.models import parse_model_input
+                    cron_provider, cron_model = parse_model_input(cron_model, "")
+                except Exception:
+                    cron_provider = None
+
         output_file = save_job_output(job["id"], output)
         if verbose:
             logger.info("Output saved to: %s", output_file)
@@ -2678,6 +2715,10 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
                     error=error,
                     output=output,
                     traceback_text=tb,
+                    provider=cron_provider,
+                    model=cron_model,
+                    failure_category=failure_category,
+                    retry_count=retry_count,
                 )
                 logger.warning(
                     "Job '%s' failure record saved to cron/failures",
@@ -2697,7 +2738,7 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
         deliver_content = (
             strip_reasoning_for_delivery(final_response)
             if success
-            else _summarize_cron_failure_for_delivery(job, error)
+            else _summarize_cron_failure_for_delivery(job, error, failure_category)
         )
         # Treat whitespace-only final responses the same as empty
         # responses: do not deliver a blank message, and let the

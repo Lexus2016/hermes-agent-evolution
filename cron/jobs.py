@@ -1509,6 +1509,10 @@ def save_job_failure(
     output: str = "",
     exit_code: Optional[int] = None,
     traceback_text: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    failure_category: Optional[str] = None,
+    retry_count: Optional[int] = None,
     max_output_chars: int = 4000,
 ) -> Path:
     """Persist a per-job failure record under ``FAILURE_DIR``.
@@ -1518,6 +1522,10 @@ def save_job_failure(
     Records are keyed by job id and timestamp; the most recent file per job
     is the canonical "latest failure". Failures are written even when the
     job later recovers, so the record reflects the *most recent* run status.
+
+    When ``failure_category`` is provided (e.g. ``timeout``) it is included
+    in the record so cron failures can be aggregated and alerted on by
+    failure class.
 
     Returns the path of the written record.
     """
@@ -1543,6 +1551,10 @@ def save_job_failure(
         "timestamp": now.isoformat(),
         "success": bool(success),
         "exit_code": exit_code,
+        "provider": provider,
+        "model": model,
+        "failure_category": failure_category,
+        "retry_count": retry_count,
         "error": error,
         "traceback": traceback_text,
         "last_output": trimmed_output,
