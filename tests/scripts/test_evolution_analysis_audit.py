@@ -7,7 +7,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_analysis_audit import audit_analysis, audit_latest  # noqa: E402
+from evolution_analysis_audit import (  # noqa: E402
+    audit_analysis,
+    audit_latest,
+    audit_rejections,
+)
 
 
 def _report(max_total_effort=None, total_effort_selected=None, top_level=False):
@@ -100,3 +104,131 @@ class TestAuditLatest:
         (tmp_path / "analysis").mkdir(parents=True)
         (tmp_path / "analysis" / "2026-06-24.json").write_text("{not json", encoding="utf-8")
         assert audit_latest(tmp_path) == []
+
+    def test_audit_latest_runs_rejection_check_with_repo(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._write(
+            tmp_path,
+            "2026-06-24.json",
+            {
+                "scoring_model": {"selection_constraints": {"max_total_effort": 3.0}},
+                "total_effort_selected": 2.0,
+                "rejected": [
+                    {
+                        "issue_number": 83,
+                        "reason_code": "already-exists",
+                        "reason": "already done in scripts/ghost.sh",
+                        "closed": True,
+                    }
+                ],
+            },
+        )
+        out = audit_latest(tmp_path, repo)
+        assert any("FABRICATED_REJECTION" in x and "#83" in x for x in out)
+
+    def test_audit_latest_without_repo_skips_rejection_check(self, tmp_path):
+        self._write(
+            tmp_path,
+            "2026-06-24.json",
+            {
+                "scoring_model": {"selection_constraints": {"max_total_effort": 3.0}},
+                "total_effort_selected": 2.0,
+                "rejected": [
+                    {
+                        "issue_number": 83,
+                        "reason_code": "already-exists",
+                        "reason": "already done in scripts/ghost.sh",
+                        "closed": True,
+                    }
+                ],
+            },
+        )
+        assert audit_latest(tmp_path) == []  # no repo_root → no fabrication check
+
+
+class TestAuditRejections:
+    def _rep(self, rejected):
+        return {"date": "2026-06-24", "rejected": rejected}
+
+    def test_already_exists_with_real_path_is_clean(self, tmp_path):
+        (tmp_path / "agent").mkdir()
+        (tmp_path / "agent" / "real.py").write_text("x")
+        rej = [
+            {
+                "issue_number": 1,
+                "reason_code": "already-exists",
+                "reason": "already implemented in agent/real.py",
+                "closed": True,
+            }
+        ]
+        assert audit_rejections(self._rep(rej), tmp_path) == []
+
+    def test_fabricated_path_flagged(self, tmp_path):
+        # The real #83: cited scripts/evolution_watchdog.sh (the actual one is .py).
+        rej = [
+            {
+                "issue_number": 83,
+                "reason_code": "already-exists",
+                "reason": "already done in scripts/evolution_watchdog.sh and skills/x/SKILL.md",
+                "closed": True,
+            }
+        ]
+        v = audit_rejections(self._rep(rej), tmp_path)
+        assert any("FABRICATED_REJECTION" in x and "#83" in x for x in v)
+
+    def test_mixed_real_and_missing_is_not_flagged(self, tmp_path):
+        (tmp_path / "agent").mkdir()
+        (tmp_path / "agent" / "real.py").write_text("x")
+        rej = [
+            {
+                "issue_number": 5,
+                "reason_code": "already-exists",
+                "reason": "see agent/real.py and agent/typoed_missing.py",
+                "closed": True,
+            }
+        ]
+        assert audit_rejections(self._rep(rej), tmp_path) == []
+
+    def test_other_reason_codes_ignored(self, tmp_path):
+        rej = [
+            {
+                "issue_number": 7,
+                "reason_code": "harmful",
+                "reason": "mentions nonexistent/path.py but is not an already-exists claim",
+                "closed": True,
+            }
+        ]
+        assert audit_rejections(self._rep(rej), tmp_path) == []
+
+    def test_no_concrete_path_is_not_flagged(self, tmp_path):
+        rej = [
+            {
+                "issue_number": 9,
+                "reason_code": "already-exists",
+                "reason": "this capability already exists in the codebase",
+                "closed": True,
+            }
+        ]
+        assert audit_rejections(self._rep(rej), tmp_path) == []
+
+    def test_path_with_line_numbers_extracts_cleanly(self, tmp_path):
+        rej = [
+            {
+                "issue_number": 11,
+                "reason_code": "already-exists",
+                "reason": "implemented in tools/missing_tool.py (lines 53-54, 682+)",
+                "closed": True,
+            }
+        ]
+        v = audit_rejections(self._rep(rej), tmp_path)
+        assert any("tools/missing_tool.py" in x for x in v)
+
+    def test_no_repo_root_is_silent(self):
+        rej = [{"issue_number": 1, "reason_code": "already-exists", "reason": "x/y.py"}]
+        assert audit_rejections(self._rep(rej), None) == []
+
+    def test_empty_or_missing_rejections_clean(self, tmp_path):
+        assert audit_rejections({"rejected": []}, tmp_path) == []
+        assert audit_rejections({}, tmp_path) == []
+
