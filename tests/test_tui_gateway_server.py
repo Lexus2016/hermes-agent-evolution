@@ -5273,13 +5273,20 @@ def test_session_create_no_race_keeps_worker_alive(monkeypatch):
         built = session["agent_ready"].wait(timeout=10.0)
         assert built, "agent build did not complete within timeout"
 
-        # Build finished without a close race — nothing should have been
-        # cleaned up by the orphan check.
+        # Build finished without a close race — this build thread must not have
+        # cleaned up ITS OWN worker/notify. Scope the assertions to this session's
+        # key: the approval hooks are patched globally, so concurrent daemon build
+        # threads from sibling session.create tests in the same shard append THEIR
+        # keys to these lists (this test clearing _sessions even nudges a late
+        # sibling's build thread into its own replaced-cleanup). Comparing to ``[]``
+        # made the test fail on that sibling noise; the own-key check stays immune
+        # while still catching this thread over-cleaning its own session.
+        my_key = session["session_key"]
         assert (
-            closed_workers == []
+            my_key not in closed_workers
         ), f"build thread closed its own worker despite no race: {closed_workers}"
         assert (
-            unregistered_keys == []
+            my_key not in unregistered_keys
         ), f"build thread unregistered its own notify despite no race: {unregistered_keys}"
 
         # Session should have the live worker installed.
