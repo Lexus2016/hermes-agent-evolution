@@ -4070,3 +4070,47 @@ class TestAuxiliaryMaxTokensParam:
         ):
             assert auxiliary_max_tokens_param(4096, model="") == {"max_tokens": 4096}
             assert auxiliary_max_tokens_param(4096, model=None) == {"max_tokens": 4096}
+
+
+class TestAuxHealthPing:
+    """Regression: aux_health_ping must probe the auxiliary provider layer at
+    session start and return the resolved provider:model or None on failure."""
+
+    def test_health_ping_returns_provider_model_on_success(self):
+        from agent.auxiliary_client import aux_health_ping
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = MagicMock()
+
+        with (
+            patch("agent.auxiliary_client._resolve_task_provider_model",
+                  return_value=("openrouter", "openai/gpt-4o-mini", None, None, None)),
+            patch("agent.auxiliary_client._get_cached_client",
+                  return_value=(mock_client, "openai/gpt-4o-mini")),
+            patch("agent.auxiliary_client._build_call_kwargs",
+                  return_value={"messages": [{"role": "user", "content": "."}]}),
+        ):
+            result = aux_health_ping("session_start")
+
+        assert result == "openrouter:openai/gpt-4o-mini"
+        mock_client.chat.completions.create.assert_called_once()
+
+    def test_health_ping_returns_none_when_no_client(self):
+        from agent.auxiliary_client import aux_health_ping
+
+        with (
+            patch("agent.auxiliary_client._resolve_task_provider_model",
+                  return_value=("openrouter", "openai/gpt-4o-mini", None, None, None)),
+            patch("agent.auxiliary_client._get_cached_client",
+                  return_value=(None, None)),
+        ):
+            assert aux_health_ping("session_start") is None
+
+    def test_health_ping_returns_none_on_exception(self):
+        from agent.auxiliary_client import aux_health_ping
+
+        with (
+            patch("agent.auxiliary_client._resolve_task_provider_model",
+                  side_effect=RuntimeError("config missing")),
+        ):
+            assert aux_health_ping("session_start") is None

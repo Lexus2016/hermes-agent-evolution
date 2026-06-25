@@ -5031,6 +5031,50 @@ def _get_task_timeout(task: str, default: float = _DEFAULT_AUX_TIMEOUT) -> float
     return default
 
 
+def aux_health_ping(task: str = "session_start") -> Optional[str]:
+    """Best-effort health ping for the auxiliary provider layer.
+
+    Resolves the configured provider/model for ``task`` and issues a tiny,
+    cheap chat completion. Returns the resolved ``provider:model`` string on
+    success, or ``None`` if the provider is unreachable. This lets the gateway
+    surface an auxiliary provider problem at session start instead of waiting
+    for the first compression / memory / title-generation call.
+
+    The ping is intentionally small (timeout 10s, max_tokens 1, single user
+    message) and catches only catastrophic misconfiguration or total
+    provider outage. It never raises into the caller.
+    """
+    try:
+        resolved_provider, resolved_model, resolved_base_url, resolved_api_key, resolved_api_mode = _resolve_task_provider_model(
+            task=task)
+        client, final_model = _get_cached_client(
+            resolved_provider,
+            resolved_model or "",
+            base_url=resolved_base_url or "",
+            api_key=resolved_api_key or "",
+            api_mode=resolved_api_mode or "",
+        )
+        if client is None:
+            logger.warning("Auxiliary health ping (%s): no provider configured", task)
+            return None
+
+        kwargs = _build_call_kwargs(
+            resolved_provider,
+            final_model or resolved_model or "",
+            messages=[{"role": "user", "content": "."}],
+            max_tokens=1,
+            timeout=min(_get_task_timeout(task, default=30.0), 10.0),
+        )
+        # Codex / responses adapters need ``messages`` only.
+        client.chat.completions.create(**kwargs)
+        resolved = f"{resolved_provider}:{final_model or resolved_model or 'default'}"
+        logger.info("Auxiliary health ping (%s): ok via %s", task, resolved)
+        return resolved
+    except Exception as e:
+        logger.warning("Auxiliary health ping (%s) failed: %s", task, e)
+        return None
+
+
 def _get_task_extra_body(task: str) -> Dict[str, Any]:
     """Read auxiliary.<task>.extra_body and return a shallow copy when valid."""
     task_config = _get_auxiliary_task_config(task)

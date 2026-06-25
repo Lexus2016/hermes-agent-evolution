@@ -1072,6 +1072,15 @@ class SessionStore:
             except Exception as e:
                 print(f"[gateway] Warning: Failed to create SQLite session: {e}")
 
+        # Best-effort health ping of the auxiliary provider layer so model-
+        # sidecar problems (compression, memory, title-gen) surface at session
+        # start instead of silently failing later. (#522)
+        try:
+            from agent.auxiliary_client import aux_health_ping
+            aux_health_ping("session_start")
+        except Exception as e:
+            logger.debug("Session health ping failed: %s", e)
+
         return entry
 
     def update_session(
