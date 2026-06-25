@@ -1179,6 +1179,9 @@ def init_agent(
                     memory_char_limit=mem_config.get("memory_char_limit", 4000),
                     user_char_limit=mem_config.get("user_char_limit", 1375),
                     guard=_mem_guard,
+                    allow_batch_override=bool(
+                        mem_config.get("allow_batch_memory_char_limit_override", False)
+                    ),
                 )
                 agent._memory_store.load_from_disk()
         except Exception:
