@@ -334,6 +334,21 @@ def check_realized_impact(evolution_dir: Path) -> List[str]:
     return [f"realized-impact degraded: {line}"]
 
 
+def check_analysis_integrity(evolution_dir: Path) -> List[str]:
+    """Alert when the latest analysis cycle's self-reported selection budget is
+    illegal or overspent — the deterministic teeth behind PR #519's prompt-level
+    effort-budget contract (the analysis agent once wrote max_total_effort=2.0,
+    neither the 1.5 throttle nor the 3.0 default, and over-selected). Silent when
+    clean, when there is no dated analysis report yet, or when the audit module is
+    unavailable (the scheduler installs evolution_*.py alongside this script, so
+    the sibling import resolves at runtime; the guard keeps unit imports safe)."""
+    try:
+        from evolution_analysis_audit import audit_latest
+    except ImportError:
+        return []
+    return [f"analysis selection integrity: {v}" for v in audit_latest(evolution_dir)]
+
+
 def main() -> int:
     hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
     evolution_dir = Path(
@@ -363,6 +378,7 @@ def main() -> int:
     alerts += check_upstream_lag()
     alerts += check_health(evolution_dir)
     alerts += check_realized_impact(evolution_dir)
+    alerts += check_analysis_integrity(evolution_dir)
 
     if alerts:
         print("🐶 Evolution watchdog — pipeline anomalies detected:")
