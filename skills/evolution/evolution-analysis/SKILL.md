@@ -187,20 +187,22 @@ final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + 
     signal OK, proceed). This is the longitudinal calibration loop: it reports
     whether what we SELECTED actually merged. It is INTERNAL plumbing — keep it
     OUT of any delivered report (same rule as the realized-impact signal in 6c).
-    The flag to act on:
-    - `LOW_SELECTION_EFFICIENCY` (merged/selected over the window is poor — the
-      pipeline picks more than it can land) → **THROTTLE the effort budget**: set
-      this cycle's `max_total_effort` to **1.5** (half the default 3.0), i.e.
-      select roughly half as much work. Spend that smaller budget on the issues
-      with the HIGHEST confidence of landing a merge — prefer lower-`effort`,
-      clearly-scoped issues with an unambiguous plan over high-`effort` or fuzzy
-      ones, even when a fuzzy one scores marginally higher. This is
-      self-capability calibration: a 12% selection_efficiency (e.g. 57 selected,
-      7 merged over the window) means the pipeline is OVER-selecting — choosing
-      work it cannot finish — so the merge funnel, not the score, is the binding
-      constraint. Choose as much as you can actually MERGE, not as much as scores
-      "allow".
-    - no flag / signal OK / missing → proceed with the default budget (3.0).
+
+    The line carries an explicit, pre-computed `effort_budget=X` token. **`X` is
+    the metric script's decision, not yours** — it is `1.5` when the window trips
+    `LOW_SELECTION_EFFICIENCY`, else `3.0`; those are the ONLY two legal values.
+    Set this cycle's `max_total_effort` to **exactly `X`, copied verbatim** — never
+    derive your own number, never land on a middle value like `2.0`. If the sidecar
+    is missing or has no `effort_budget=` token, default to `3.0`.
+
+    When `X` is `1.5` the pipeline is OVER-selecting — a 12% selection_efficiency
+    (e.g. 57 selected, 7 merged over the window) means it picks more work than it
+    can finish — so spend that smaller budget on the issues with the HIGHEST
+    confidence of landing a merge: prefer lower-`effort`, clearly-scoped issues with
+    an unambiguous plan over high-`effort` or fuzzy ones, even when a fuzzy one
+    scores marginally higher. The merge funnel, not the score, is the binding
+    constraint: choose as much as you can actually MERGE, not as much as scores
+    "allow".
 
     The anti-starvation slot (6a) is still honored under the throttled budget: it
     counts toward `max_total_effort` exactly as before. The scoring formula,
@@ -210,10 +212,10 @@ final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + 
 6. **Select** the top 8 for implementation (include any `needs-work` issues from
    step 2):
    - Min priority: 0.7
-   - Max total effort: the calibrated budget from step 5a — **3.0** by default,
-     **1.5** when `LOW_SELECTION_EFFICIENCY` is flagged. Stop adding issues once
-     their summed `effort_score` reaches this budget; under the throttled 1.5
-     budget, fill it with the highest-land-confidence issues first.
+   - Max total effort: the `effort_budget` value copied verbatim from the sidecar
+     in step 5a — **3.0** by default, **1.5** when throttled; never a middle value.
+     Stop adding issues once their summed `effort_score` reaches this budget; under
+     the throttled 1.5 budget, fill it with the highest-land-confidence issues first.
 
 6a. **Anti-starvation slot — guarantee no valid issue rots for days.** Scoring
     alone lets a sound-but-modest issue lose every single night. To prevent that,
