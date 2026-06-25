@@ -1150,10 +1150,10 @@ class AIAgent:
           1. ``providers.<id>.models.<model>.timeout_seconds`` (per-model override)
           2. ``providers.<id>.request_timeout_seconds`` (provider-wide)
           3. ``HERMES_API_TIMEOUT`` env var (legacy escape hatch)
-          4. 1800.0s default
+          4. 60.0s default
 
         Used by OpenAI-wire chat completions (streaming and non-streaming) so
-        the per-provider config knob wins over the 1800s default.  Without this
+        the per-provider config knob wins over the 60s default.  Without this
         helper, the hardcoded ``HERMES_API_TIMEOUT`` fallback would always be
         passed as a per-call ``timeout=`` kwarg, overriding the client-level
         timeout the AIAgent.__init__ path configured.
@@ -1161,7 +1161,7 @@ class AIAgent:
         cfg = get_provider_request_timeout(self.provider, self.model)
         if cfg is not None:
             return cfg
-        return env_float("HERMES_API_TIMEOUT", 1800.0)
+        return env_float("HERMES_API_TIMEOUT", 60.0)
 
     def _resolved_api_call_stale_timeout_base(self) -> tuple[float, bool]:
         """Resolve the base non-stream stale timeout and whether it is implicit.

@@ -207,9 +207,30 @@ def test_resolved_api_call_timeout_priority(monkeypatch, tmp_path):
     )
     assert agent2._resolved_api_call_timeout() == 999.0
 
-    # Case C: no config, no env → 1800.0 default
+    # Case C: no config, no env → 60.0 default
     monkeypatch.delenv("HERMES_API_TIMEOUT", raising=False)
-    assert agent2._resolved_api_call_timeout() == 1800.0
+    assert agent2._resolved_api_call_timeout() == 60.0
+
+
+def test_resolved_api_call_timeout_default_is_60s(monkeypatch, tmp_path):
+    """When no config or env var is set, the implicit default is 60s."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    monkeypatch.delenv("HERMES_API_TIMEOUT", raising=False)
+    _write_config(tmp_path, "")
+
+    from run_agent import AIAgent
+    agent = AIAgent(
+        model="gpt-4o",
+        provider="openrouter",
+        api_key="sk-dummy",
+        base_url="https://openrouter.ai/api/v1",
+        quiet_mode=True,
+        skip_context_files=True,
+        skip_memory=True,
+        platform="cli",
+    )
+    assert agent._resolved_api_call_timeout() == 60.0
 
 
 def test_resolved_api_call_stale_timeout_priority(monkeypatch, tmp_path):
