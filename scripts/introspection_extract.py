@@ -148,12 +148,20 @@ def _message_row_to_dict(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
     return obj if obj.get("role") else None
 
 
-def _iter_state_db(db_path: Path) -> Iterable[tuple[str, List[Dict[str, Any]]]]:
+def _iter_state_db(
+    db_path: Path, *, min_timestamp: Optional[float] = None
+) -> Iterable[tuple[str, List[Dict[str, Any]]]]:
     """Yield (session_id, messages) from a SQLite state.db messages table.
 
     Messages are grouped by session_id and ordered by id (insertion order) so
     tool_call_id -> tool name resolution works exactly as it does for JSONL.
-    Malformed rows / missing columns are skipped without crashing the scan."""
+    Malformed rows / missing columns are skipped without crashing the scan.
+
+    If ``min_timestamp`` is given, only sessions that contain at least one
+    message with ``timestamp >= min_timestamp`` are yielded. This keeps the
+    ``window_days`` bound for DB-derived sessions, mirroring the file-source
+    freshness gate (#543).
+    """
     try:
         conn = sqlite3.connect(str(db_path))
     except sqlite3.Error:
@@ -161,19 +169,45 @@ def _iter_state_db(db_path: Path) -> Iterable[tuple[str, List[Dict[str, Any]]]]:
     try:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
+
         # Probe schema; the expected columns are id, session_id, role, content,
         # tool_call_id, tool_calls, tool_name, timestamp.  Any subset is fine.
         try:
             cur.execute(
                 "SELECT session_id, id, role, content, tool_call_id, tool_calls, "
-                "tool_name FROM messages ORDER BY session_id, id"
+                "tool_name, timestamp FROM messages ORDER BY session_id, id"
             )
         except sqlite3.Error:
-            return
+            # timestamp column may be missing in very old schemas; retry without it
+            try:
+                cur.execute(
+                    "SELECT session_id, id, role, content, tool_call_id, tool_calls, "
+                    "tool_name FROM messages ORDER BY session_id, id"
+                )
+            except sqlite3.Error:
+                return
+
+        # Freshness pre-filter: only sessions with any message >= cutoff.
+        fresh_sessions: Optional[set[str]] = None
+        if min_timestamp is not None:
+            try:
+                cur2 = conn.cursor()
+                cur2.execute(
+                    "SELECT DISTINCT session_id FROM messages WHERE timestamp >= ?",
+                    (min_timestamp,),
+                )
+                fresh_sessions = {row["session_id"] for row in cur2}
+            except sqlite3.Error:
+                # timestamp column absent or other schema issue — fall through and
+                # scan everything rather than silently dropping data.
+                fresh_sessions = None
+
         current_session: Optional[str] = None
         current_messages: List[Dict[str, Any]] = []
         for row in cur:
             sid = row["session_id"]
+            if fresh_sessions is not None and sid not in fresh_sessions:
+                continue
             msg = _message_row_to_dict(row)
             if msg is None:
                 continue
@@ -371,11 +405,12 @@ def build_digest(
             _aggregate(scan_request_dump(obj))
 
         # 3. SQLite SessionDB messages table (#399) — canonical store for real
-        #    sessions.  No per-session freshness check: the DB itself lives in
-        #    sessions_dir, and build_digest is already bounded by window_days.
-        db_path = sessions_dir / "state.db"
-        if db_path.is_file():
-            for _sid, msgs in _iter_state_db(db_path):
+        #    sessions.  Resolve the correct profile-aware path (#543); the old
+        #    hard-coded ``sessions_dir / "state.db"`` only existed in legacy
+        #    installs and missed modern Hermes real sessions.
+        db_path = _resolve_state_db_path(sessions_dir)
+        if db_path:
+            for _sid, msgs in _iter_state_db(db_path, min_timestamp=cutoff):
                 if not msgs:
                     continue
                 scanned += 1
@@ -393,6 +428,50 @@ def build_digest(
             "models_used": dict(models.most_common()),
         },
     }
+
+
+def _resolve_state_db_path(sessions_dir: Path) -> Optional[Path]:
+    """Find the canonical SessionDB ``state.db`` for the active Hermes profile.
+
+    Legacy installs kept ``state.db`` inside ``~/.hermes/sessions/``. The
+    canonical location used by the rest of the agent (SessionDB, gateway,
+    session_search_tool, tui_gateway, ACP) is ``~/.hermes/state.db`` for the
+    default profile, or ``~/.hermes/profiles/<name>/state.db`` for a named
+    profile (#543). The evolution-introspection extractor was still scanning
+    ``sessions/state.db`` and therefore missed almost all real sessions.
+
+    Resolution order:
+      1. Sibling of ``sessions_dir`` — the canonical modern path.  This is
+         the same directory that contains the ``sessions/`` folder, so if
+         ``sessions_dir`` is ``~/.hermes/sessions`` the sibling is
+         ``~/.hermes/state.db``.
+      2. Inside ``sessions_dir`` itself — legacy fallback, kept so older
+         installs keep working.
+      3. The HERMES_HOME root or current profile dir if we can determine it.
+
+    Returns ``None`` when no candidate exists, letting build_digest fall back to
+    JSONL/request_dump sources only.
+    """
+    candidates: List[Path] = []
+
+    # 1. Canonical sibling: sessions_dir/../state.db
+    if sessions_dir.parent.exists():
+        candidates.append(sessions_dir.parent / "state.db")
+
+    # 2. Legacy in-sessions path.
+    candidates.append(sessions_dir / "state.db")
+
+    # 3. Profile-aware resolution when HERMES_HOME points at a named profile.
+    #    sessions_dir is normally <HERMES_HOME>/sessions, so HERMES_HOME itself
+    #    is the profile root and its state.db is the right one.
+    hermes_home = os.environ.get("HERMES_HOME", "").strip()
+    if hermes_home:
+        candidates.append(Path(hermes_home) / "state.db")
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _sessions_dir() -> Path:
