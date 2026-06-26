@@ -236,6 +236,37 @@ def test_transient_correction_fork_cannot_write_durable():
     assert "skill_manage" in allowed
 
 
+def test_blocked_whitelist_denies_durable_write_at_dispatch():
+    """End-to-end enforcement proof: the dispatch gate itself denies the write.
+
+    With the transient-correction whitelist installed on the thread,
+    ``get_pre_tool_call_block_message`` — the SAME gate the review fork's tool
+    dispatch consults — returns a block for ``memory`` and ``skill_manage``,
+    while a read-only skills tool is still allowed. So the LLM fork genuinely
+    cannot persist a one-off correction durably; it is denied at dispatch, not
+    merely discouraged by a prompt.
+    """
+    from agent.background_review import _review_tool_whitelist
+    from hermes_cli.plugins import (
+        set_thread_tool_whitelist,
+        clear_thread_tool_whitelist,
+        get_pre_tool_call_block_message,
+    )
+
+    set_thread_tool_whitelist(_review_tool_whitelist(block_durable_writes=True))
+    try:
+        assert get_pre_tool_call_block_message(
+            "memory", {"action": "add", "content": "x"}
+        ), "memory write must be denied at the dispatch gate"
+        assert get_pre_tool_call_block_message(
+            "skill_manage", {"action": "write_file"}
+        ), "skill write must be denied at the dispatch gate"
+        # Read-only inspection remains allowed (gate returns None == not blocked).
+        assert get_pre_tool_call_block_message("skill_view", {}) is None
+    finally:
+        clear_thread_tool_whitelist()
+
+
 def test_spawn_threads_block_flag_into_review(monkeypatch):
     """The ``block_durable_writes`` flag reaches ``_run_review_in_thread``.
 
