@@ -106,13 +106,17 @@ def test_detect_interrupt():
 
 
 def test_detect_deny():
+    # A GENUINE user denial carries ``user_denied: True`` (stamped by the
+    # approval flow). That marker — not the bare ``status: "blocked"`` — is what
+    # the detector keys on.
     messages = [
         {"role": "user", "content": "clean up"},
         {"role": "assistant", "content": "", "tool_calls": [
             {"id": "c1", "function": {"name": "terminal", "arguments": "{}"}}]},
         {"role": "tool", "tool_call_id": "c1", "content": json.dumps(
             {"output": "", "exit_code": -1,
-             "error": "Command denied: rm -rf /tmp/x", "status": "blocked"})},
+             "error": "Command denied: rm -rf /tmp/x", "status": "blocked",
+             "user_denied": True})},
     ]
     rec = detect_correction(
         messages, interrupted=False, interrupt_message=None,
@@ -120,6 +124,44 @@ def test_detect_deny():
     )
     assert rec is not None
     assert rec.kind == "DENY"
+
+
+def test_automatic_dangerous_block_not_detected_as_deny():
+    # X2: an AUTOMATIC dangerous-command block (no user involved) sets
+    # ``status: "blocked"`` but NO ``user_denied`` marker. It must NOT mint a
+    # false "user correction".
+    messages = [
+        {"role": "user", "content": "clean up"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c1", "function": {"name": "terminal", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": json.dumps(
+            {"output": "", "exit_code": -1,
+             "error": "Command denied: recursive delete", "status": "blocked"})},
+    ]
+    rec = detect_correction(
+        messages, interrupted=False, interrupt_message=None,
+        turn_exit_reason="text_response(stop)", session_id="s1",
+    )
+    assert rec is None
+
+
+def test_automatic_workdir_validation_block_not_detected_as_deny():
+    # X2: the workdir shell-injection validator also emits ``status: "blocked"``
+    # with no user involvement -> not a correction.
+    messages = [
+        {"role": "user", "content": "build it"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "c1", "function": {"name": "terminal", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": json.dumps(
+            {"output": "", "exit_code": -1,
+             "error": "Blocked: workdir contains disallowed character ';'.",
+             "status": "blocked"})},
+    ]
+    rec = detect_correction(
+        messages, interrupted=False, interrupt_message=None,
+        turn_exit_reason="text_response(stop)", session_id="s1",
+    )
+    assert rec is None
 
 
 def test_detect_steer():
@@ -172,7 +214,8 @@ def test_same_correction_same_signature_across_sessions():
              {"role": "assistant", "content": "", "tool_calls": [
                  {"id": "c1", "function": {"name": "terminal", "arguments": "{}"}}]},
              {"role": "tool", "tool_call_id": "c1", "content": json.dumps(
-                 {"error": "Command denied: rm -rf build", "status": "blocked"})}],
+                 {"error": "Command denied: rm -rf build", "status": "blocked",
+                  "user_denied": True})}],
             interrupted=False, interrupt_message=None,
             turn_exit_reason="t", session_id=sess,
         )

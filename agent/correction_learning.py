@@ -15,8 +15,10 @@ What this module is (Phase 1, deliberately minimal):
    regex, no LLM):
      * ``INTERRUPT`` — the user stopped the agent mid-turn AND supplied a
        redirect message (``agent._interrupt_message``).
-     * ``DENY`` — a tool result carried ``status: "blocked"`` (the user
-       vetoed an action).
+     * ``DENY`` — a tool result carried the explicit ``user_denied`` marker
+       (a real user vetoed the action at the approval prompt). Automatic
+       safety/validation blocks (which also set ``status: "blocked"`` but
+       carry no user denial) are deliberately excluded.
      * ``STEER`` — an out-of-band user message was injected mid-turn
        (``STEER_MARKER_OPEN`` in a tool result).
 
@@ -140,20 +142,31 @@ def _tool_text(m: Dict) -> str:
 
 
 def _detect_deny(messages: List[Dict]) -> Optional[Dict[str, Any]]:
-    """Return {target, error} for the LAST denied tool result, else None."""
+    """Return {target, error} for the LAST genuine USER-denied tool result.
+
+    A DENY correction must reflect a real user veto — NOT an automatic safety
+    or validation block. Many automatic blocks (the dangerous-command guard at
+    ``tools/terminal_tool.py`` and the workdir shell-injection validator) also
+    emit ``status: "blocked"`` with no user involvement, so keying on
+    ``status`` alone would mint false corrections from recurring automatic
+    blocks (defect X2).
+
+    The discriminator is the explicit ``user_denied`` marker that the approval
+    flow stamps onto the tool result ONLY when a user actively denied the action
+    at the approval prompt (``tools/approval.py`` -> ``tools/terminal_tool.py``).
+    Timeouts and automatic blocks never carry it. Parse defensively; non-JSON
+    tool output is ignored.
+    """
     found = None
     for m in _iter_tool_messages(messages):
         text = _tool_text(m)
         if not text:
             continue
-        # The terminal/approval blocked result is a JSON object with
-        # status == "blocked". Parse defensively; non-JSON tool output is
-        # ignored.
         try:
             data = json.loads(text)
         except (json.JSONDecodeError, TypeError):
             continue
-        if isinstance(data, dict) and data.get("status") == "blocked":
+        if isinstance(data, dict) and data.get("user_denied") is True:
             found = {
                 "target": m.get("name"),
                 "error": str(data.get("error", "")),

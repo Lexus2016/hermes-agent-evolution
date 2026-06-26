@@ -1674,6 +1674,12 @@ def check_all_command_guards(command: str, env_type: str,
                     "description": combined_desc,
                     "outcome": outcome,
                     "user_consent": False,
+                    # Explicit, unambiguous marker that a real USER actively
+                    # denied this command (not a timeout, not an automatic
+                    # safety/validation block). Correction-learning keys on this
+                    # to avoid minting false "user corrections" from automatic
+                    # blocks. True only on an explicit deny, never on timeout.
+                    "user_denied": outcome == "denied",
                 }
 
             # User approved — persist based on scope (same logic as CLI)
@@ -1750,6 +1756,8 @@ def check_all_command_guards(command: str, env_type: str,
             "description": combined_desc,
             "outcome": "denied",
             "user_consent": False,
+            # Explicit user-denial marker (see the gateway path above).
+            "user_denied": True,
         }
 
     # Persist approval for each warning individually

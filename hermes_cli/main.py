@@ -12152,6 +12152,33 @@ def main():
     secrets_parser.set_defaults(func=_dispatch_secrets)
 
     # =========================================================================
+    # corrections command (learn-from-corrections Phase 1: list / unlearn)
+    # =========================================================================
+    corrections_parser = subparsers.add_parser(
+        "corrections",
+        help="Inspect and reverse durable learned user-corrections",
+        description=(
+            "List the durable corrections the agent has learned from your "
+            "interrupts / denials / steers, or reverse one with "
+            "`unlearn <provenance_id>` (removes it from memory so it stops "
+            "re-injecting, drops its provenance, and resets recurrence)."
+        ),
+    )
+
+    # Lazy import — only pays for itself when this subcommand is actually used.
+    from hermes_cli import corrections_cli as _corrections_cli
+
+    _corrections_cli.register_cli(corrections_parser)
+
+    def _dispatch_corrections(args):  # noqa: ANN001
+        if getattr(args, "corrections_command", None):
+            return args.func(args)
+        corrections_parser.print_help()
+        return 0
+
+    corrections_parser.set_defaults(func=_dispatch_corrections)
+
+    # =========================================================================
     # migrate command
     # =========================================================================
     from hermes_cli.migrate import cmd_migrate, cmd_migrate_xai

@@ -2333,15 +2333,20 @@ def terminal_tool(
                     f"Command denied: {desc}. "
                     "Use the approval prompt to allow it, or rephrase the command."
                 )
-                return json.dumps(
-                    {
-                        "output": "",
-                        "exit_code": -1,
-                        "error": approval.get("message", fallback_msg),
-                        "status": "blocked",
-                    },
-                    ensure_ascii=False,
-                )
+                blocked_result = {
+                    "output": "",
+                    "exit_code": -1,
+                    "error": approval.get("message", fallback_msg),
+                    "status": "blocked",
+                }
+                # Propagate the explicit user-denial marker ONLY when a real
+                # user actively denied this command at the approval prompt. An
+                # automatic safety/validation block (hardline, sudo guard, smart
+                # deny, cron, timeout) leaves this unset, so correction-learning
+                # never mistakes an automatic block for a user correction.
+                if approval.get("user_denied"):
+                    blocked_result["user_denied"] = True
+                return json.dumps(blocked_result, ensure_ascii=False)
             # Track whether approval was explicitly granted by the user
             if approval.get("user_approved"):
                 desc = approval.get("description", "flagged as dangerous")

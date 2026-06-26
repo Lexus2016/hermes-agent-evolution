@@ -479,10 +479,24 @@ def finalize_turn(
     #     run the review EVEN WHEN interrupted/denied, the case the legacy
     #     guard dropped. The detected correction is passed as a hint so the
     #     reviewer captures THAT specific correction.
-    _healthy_review = (
+    _healthy_review = bool(
         final_response
         and not interrupted
         and (_should_review_memory or _should_review_skills)
+    )
+    # X1 enforcement gate. Strip the review fork's durable-write capability when
+    # this review exists ONLY because of a NOT-yet-promotable (transient)
+    # correction — i.e. the legacy nudge path would NOT have fired on its own
+    # (``not _healthy_review``) and the recurrence guard has not promoted it
+    # (``not durable``). In that case the deterministic CorrectionLearner must be
+    # the single durable gate; the LLM fork gets no durable memory/skill writer.
+    # When a nudge independently fired (``_healthy_review``) the pre-existing
+    # behavior is preserved untouched, and a promoted (durable) correction keeps
+    # write capability since it is already confirmed.
+    _block_durable_writes = bool(
+        _correction_hint is not None
+        and not _correction_hint.get("durable")
+        and not _healthy_review
     )
     if _healthy_review or _correction_hint is not None:
         try:
@@ -491,6 +505,7 @@ def finalize_turn(
                 review_memory=_should_review_memory or _correction_hint is not None,
                 review_skills=_should_review_skills,
                 correction_hint=_correction_hint,
+                block_durable_writes=_block_durable_writes,
             )
         except Exception:
             pass  # Background review is best-effort

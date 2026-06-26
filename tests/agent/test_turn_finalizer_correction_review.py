@@ -98,11 +98,13 @@ class _StubAgent:
         pass
 
     def _spawn_background_review(self, *, messages_snapshot, review_memory,
-                                review_skills, correction_hint=None):
+                                review_skills, correction_hint=None,
+                                block_durable_writes=False):
         self.spawned.append({
             "review_memory": review_memory,
             "review_skills": review_skills,
             "correction_hint": correction_hint,
+            "block_durable_writes": block_durable_writes,
         })
 
 
@@ -114,12 +116,17 @@ def _normal_messages():
 
 
 def _deny_messages():
+    # A GENUINE user denial: the approval flow stamps ``user_denied: True`` into
+    # the tool result (see tools/approval.py + tools/terminal_tool.py). The
+    # detector keys on THAT marker, not the bare ``status: "blocked"`` that
+    # automatic safety blocks also produce.
     return [
         {"role": "user", "content": "clean up"},
         {"role": "assistant", "content": "", "tool_calls": [
             {"id": "c1", "function": {"name": "terminal", "arguments": "{}"}}]},
         {"role": "tool", "tool_call_id": "c1", "content": json.dumps(
-            {"error": "Command denied: rm -rf build", "status": "blocked"})},
+            {"error": "Command denied: rm -rf build", "status": "blocked",
+             "user_denied": True})},
     ]
 
 
@@ -232,3 +239,54 @@ def test_correction_hint_tier_durable_when_recorder_promotes():
     hint = agent.spawned[0]["correction_hint"]
     assert hint["tier"] == "durable"
     assert hint["durable"] is True
+
+
+# ---------------------------------------------------------------------------
+# X1 ENFORCEMENT — the durable-write capability of the review fork is GATED,
+# not merely advised. A transient (first-sighting) correction that is the SOLE
+# reason the review spawned must hand the fork ``block_durable_writes=True`` so
+# the fork's runtime tool whitelist strips the durable memory/skill writers.
+# ---------------------------------------------------------------------------
+
+
+def test_transient_correction_blocks_durable_writes():
+    # Pure correction path (no nudge), recorder says transient -> the spawned
+    # fork MUST be configured to block durable writes. This is what makes the
+    # deterministic recurrence guard the single durable gate for the correction
+    # path: the LLM fork cannot persist a one-off on its first sighting.
+    agent = _StubAgent()
+
+    def _recorder(hint):
+        return {"tier": "transient", "durable": False}
+
+    agent._record_turn_correction = _recorder
+    _run(agent, messages=_deny_messages(), interrupted=False,
+         should_review_memory=False)
+    assert len(agent.spawned) == 1
+    assert agent.spawned[0]["block_durable_writes"] is True
+
+
+def test_durable_correction_does_not_block_writes():
+    # A promotable (recurred / explicit-remember) correction is confirmed; its
+    # durable write already happened via the deterministic path. The fork keeps
+    # write capability (it may embed the confirmed preference into a skill).
+    agent = _StubAgent()
+
+    def _recorder(hint):
+        return {"tier": "durable", "durable": True}
+
+    agent._record_turn_correction = _recorder
+    _run(agent, messages=_deny_messages(), interrupted=False,
+         should_review_memory=False)
+    assert agent.spawned[0]["block_durable_writes"] is False
+
+
+def test_nudge_review_unchanged_does_not_block_writes():
+    # Pre-existing NUDGE-driven (non-correction) review behavior is out of
+    # scope: a healthy nudge review keeps full durable-write capability.
+    agent = _StubAgent()
+    _run(agent, messages=_normal_messages(), interrupted=False,
+         should_review_memory=True)
+    assert len(agent.spawned) == 1
+    assert agent.spawned[0]["correction_hint"] is None
+    assert agent.spawned[0]["block_durable_writes"] is False

@@ -43,12 +43,15 @@ class FakeMemorySink:
 
 
 def _deny_messages():
+    # Genuine USER denial — carries the ``user_denied`` marker the detector
+    # keys on (an automatic safety block sets ``status: "blocked"`` without it).
     return [
         {"role": "user", "content": "clean up"},
         {"role": "assistant", "content": "", "tool_calls": [
             {"id": "c1", "function": {"name": "terminal", "arguments": "{}"}}]},
         {"role": "tool", "tool_call_id": "c1", "content": json.dumps(
-            {"error": "Command denied: rm -rf build", "status": "blocked"})},
+            {"error": "Command denied: rm -rf build", "status": "blocked",
+             "user_denied": True})},
     ]
 
 
@@ -86,7 +89,14 @@ def test_acceptance_transfer_promotion_across_two_sessions(tmp_path):
 
 
 def test_acceptance_negative_control_one_off(tmp_path):
-    """A one-off correction (seen once, no remember) never injects."""
+    """A one-off correction (seen once, no remember) never injects DETERMINISTICALLY.
+
+    Scope note: this exercises ONLY the deterministic ``CorrectionLearner`` —
+    which was never the leak path. The actual one-off leak risk is the LLM
+    review fork; that is gated by ``test_transient_correction_fork_cannot_write_durable``
+    below (the fork's runtime tool whitelist strips the durable writers), not by
+    this test.
+    """
     sink = FakeMemorySink()
     store = tmp_path / "corrections"
     rec = detect_correction(
@@ -186,8 +196,10 @@ def test_finalize_records_correction_into_tracker(tmp_path, monkeypatch):
 
 
 def test_review_preamble_transient_does_not_instruct_durable_persist():
-    # One-off-leak guard at the prompt layer: a TRANSIENT correction must NOT
-    # tell the LLM reviewer to embed it durably / re-inject it next session.
+    # DEFENSE-IN-DEPTH at the prompt layer (NOT the enforcement): a TRANSIENT
+    # correction's preamble must not tell the LLM reviewer to embed it durably.
+    # The real guard is the tool whitelist (see the enforcement test below);
+    # this preamble is belt-and-suspenders, not the gate.
     from agent.background_review import _format_correction_focus
 
     transient = _format_correction_focus({
@@ -200,6 +212,57 @@ def test_review_preamble_transient_does_not_instruct_durable_persist():
     assert "re-enter future sessions" not in low
 
 
+def test_transient_correction_fork_cannot_write_durable():
+    """X1 ENFORCEMENT (not advice): the review fork built for a transient
+    correction has NO durable memory/skill WRITE tool in its runtime whitelist.
+
+    ``_review_tool_whitelist`` is exactly what ``_run_review_in_thread`` installs
+    via ``set_thread_tool_whitelist``; ``get_pre_tool_call_block_message`` denies
+    any call to a tool absent from it. So excluding ``memory`` and
+    ``skill_manage`` here means the LLM fork is structurally unable to persist a
+    one-off correction durably — only the deterministic ``CorrectionLearner``
+    promotion path can. This replaces the prior advisory-only guard.
+    """
+    from agent.background_review import _review_tool_whitelist
+
+    blocked = _review_tool_whitelist(block_durable_writes=True)
+    assert "memory" not in blocked, "memory write tool must be stripped"
+    assert "skill_manage" not in blocked, "skill write tool must be stripped"
+
+    allowed = _review_tool_whitelist(block_durable_writes=False)
+    # Sanity: the unblocked (durable / nudge) path still exposes the writers,
+    # so we are proving a real difference, not an always-empty whitelist.
+    assert "memory" in allowed
+    assert "skill_manage" in allowed
+
+
+def test_spawn_threads_block_flag_into_review(monkeypatch):
+    """The ``block_durable_writes`` flag reaches ``_run_review_in_thread``.
+
+    Proves the spawn wiring carries the gate end-to-end (finalize_turn ->
+    _spawn_background_review -> spawn_background_review_thread -> the thread
+    target), so the whitelist above is actually applied to the spawned fork.
+    """
+    import agent.background_review as br
+
+    captured = {}
+
+    def _fake_run(agent, messages_snapshot, prompt, block_durable_writes=False):
+        captured["block"] = block_durable_writes
+
+    monkeypatch.setattr(br, "_run_review_in_thread", _fake_run)
+    target, _prompt = br.spawn_background_review_thread(
+        agent=object(),
+        messages_snapshot=[],
+        review_memory=True,
+        correction_hint={"kind": "DENY", "context": "x", "tier": "transient",
+                         "durable": False},
+        block_durable_writes=True,
+    )
+    target()
+    assert captured["block"] is True
+
+
 def test_review_preamble_durable_instructs_persist():
     from agent.background_review import _format_correction_focus
 
@@ -209,6 +272,40 @@ def test_review_preamble_durable_instructs_persist():
     })
     low = durable.lower()
     assert "future sessions" in low or "embed" in low or "persist" in low
+
+
+def test_unlearn_cli_surface_reverses_durable(tmp_path):
+    """The `hermes corrections unlearn` surface actually reverses a durable item.
+
+    Proves "reversible" is not paper-only: the CLI helper removes the durable
+    line from the (fake) memory store, drops the ledger entry, and resets
+    recurrence — and reports unknown ids as a non-zero exit.
+    """
+    from hermes_cli.corrections_cli import run_unlearn, run_list
+    from agent.correction_learning import CorrectionLearner, CorrectionRecord
+
+    sink = FakeMemorySink()
+    store = tmp_path / "corrections"
+    out = CorrectionLearner(store_dir=store, memory_sink=sink).record(
+        CorrectionRecord(
+            kind="STEER", signature="sig-cli", context="use ruff not flake8",
+            session_id="s1", ts="t",
+        ),
+        remember=True,
+    )
+    pid = out["provenance_id"]
+    assert "ruff" in sink.injected_text()
+
+    # list surface runs without error while an item exists
+    assert run_list(store_dir=store) == 0
+
+    # unlearn removes it from the durable store (stops injection)
+    assert run_unlearn(pid, store_dir=store, memory_sink=sink) == 0
+    assert "ruff" not in sink.injected_text()
+    assert CorrectionLearner(store_dir=store, memory_sink=sink).list_durable() == []
+
+    # unknown id is a clean non-zero exit, not an exception
+    assert run_unlearn("does-not-exist", store_dir=store, memory_sink=sink) == 1
 
 
 def test_finalize_no_correction_does_not_record(tmp_path):

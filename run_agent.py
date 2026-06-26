@@ -1503,6 +1503,7 @@ class AIAgent:
         review_memory: bool = False,
         review_skills: bool = False,
         correction_hint: Optional[Dict[str, Any]] = None,
+        block_durable_writes: bool = False,
     ) -> None:
         """Spawn the background memory/skill review thread.
 
@@ -1526,6 +1527,7 @@ class AIAgent:
             review_memory=review_memory,
             review_skills=review_skills,
             correction_hint=correction_hint,
+            block_durable_writes=block_durable_writes,
         )
         t = threading.Thread(target=target, daemon=True, name="bg-review")
         t.start()
