@@ -270,12 +270,27 @@ def check_upstream_lag(
     that nothing landed. This check reads the real distance to ``upstream/main``
     so the owner is pinged within a day instead of noticing weeks later.
 
-    Silent (returns []) when the repo can't be located or ``upstream/main`` is
-    unavailable — best-effort, never a false alarm from a missing remote.
+    Silent (returns []) when the repo can't be located, when the checkout is a
+    SHALLOW clone or otherwise has no shared history with ``upstream/main`` (the
+    behind-count is meaningless there — see ``_upstream_lag_unmeasurable``), or
+    when ``upstream/main`` is unavailable — best-effort, never a false alarm.
     """
     repo = repo_dir or _resolve_repo_dir()
     if repo is None:
         return []
+
+    # Installer checkouts are shallow (`git clone --depth 1` in scripts/install.sh
+    # / install.ps1). Across the shallow boundary HEAD shares no ancestry with
+    # upstream/main, so `rev-list --count HEAD..upstream/main` counts ~ALL upstream
+    # history (~13k) instead of the true distance — a phantom "fork is ~13000
+    # commits behind" alarm fired DAILY on every onboarded client (upgrade.sh
+    # registers this watchdog). Shallow is the INTENDED client default, and
+    # upstream-lag is the fork maintainer's concern: the evolution server is a full
+    # clone and still gets the real count. So skip silently here — mirrors the
+    # shallow guards already in hermes_cli/banner.py and hermes_cli/main.py.
+    if _upstream_lag_unmeasurable(runner, repo):
+        return []
+
     try:
         rc, out = runner(
             ["git", "-C", str(repo), "rev-list", "--count", "HEAD..upstream/main"]
@@ -295,6 +310,45 @@ def check_upstream_lag(
             f"of merging — resolve the backlog (see the open [UPSTREAM] issue)."
         ]
     return []
+
+
+def _upstream_lag_unmeasurable(
+    runner: Callable[[List[str]], Tuple[int, str]], repo: Path
+) -> bool:
+    """True when ``HEAD..upstream/main`` can't yield a meaningful behind-count.
+
+    Two independent signals, either of which makes the numeric count a phantom:
+      1. shallow repo — ``git rev-parse --is-shallow-repository`` == "true"
+         (the `git clone --depth 1` installer default);
+      2. no shared history — ``git merge-base HEAD upstream/main`` exits non-zero
+         with EMPTY stdout (HEAD and upstream share no common ancestor, e.g. a
+         grafted clone, even when the shallow flag is unset).
+
+    Best-effort and FAIL-OPEN: any spawn error or inconclusive result returns
+    False, so a normal full clone proceeds to the real rev-list count exactly as
+    before — this can never make the check worse than today.
+    """
+    try:
+        rc, out = runner(
+            ["git", "-C", str(repo), "rev-parse", "--is-shallow-repository"]
+        )
+        if rc == 0 and out.strip() == "true":
+            return True
+    except Exception:  # noqa: BLE001 — inconclusive probe: don't block the real check
+        return False
+
+    try:
+        rc, out = runner(["git", "-C", str(repo), "merge-base", "HEAD", "upstream/main"])
+    except Exception:  # noqa: BLE001
+        return False
+    # No common ancestor: git exits non-zero with NOTHING on stdout. A non-zero
+    # exit WITH output (e.g. "fatal: bad revision 'upstream/main'" when the remote
+    # is merely missing) is the unrelated missing-remote case — leave that to the
+    # rev-list step, which already fails silently, so we don't turn a missing
+    # remote into a spurious shallow skip.
+    if rc != 0 and not out.strip():
+        return True
+    return False
 
 
 def check_health(evolution_dir: Path) -> List[str]:

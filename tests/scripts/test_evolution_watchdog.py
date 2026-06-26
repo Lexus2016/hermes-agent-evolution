@@ -286,6 +286,59 @@ class TestUpstreamLag:
 
         assert check_upstream_lag(runner=fake_run) == []
 
+    def test_shallow_clone_silent_no_phantom_count(self):
+        # The installer's `git clone --depth 1` default: a shallow repo. The
+        # behind-count would balloon to ~all of upstream history (the 2026-06
+        # phantom "~13000 commits behind" alarm on every onboarded client).
+        # The shallow probe must short-circuit BEFORE rev-list is consulted, and
+        # the result must be SILENT (no alert) — shallow is the intended default.
+        def fake_run(cmd):
+            if "rev-parse" in cmd and "--is-shallow-repository" in cmd:
+                return (0, "true\n")
+            if "rev-list" in cmd:
+                raise AssertionError(
+                    "rev-list must NOT run on a shallow clone — its count is phantom"
+                )
+            return (0, "")
+
+        assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []
+
+    def test_unresolved_merge_base_silent(self):
+        # Non-shallow, but HEAD and upstream/main share no common ancestor
+        # (grafted/no-shared-history): `merge-base` exits non-zero with EMPTY
+        # stdout. The count is just as meaningless, so skip silently too. A
+        # missing-remote case (non-zero exit WITH text) is deliberately NOT
+        # treated as unmeasurable here — that falls through to rev-list.
+        def fake_run(cmd):
+            if "rev-parse" in cmd and "--is-shallow-repository" in cmd:
+                return (0, "false\n")
+            if "merge-base" in cmd:
+                return (1, "")  # no common ancestor: non-zero, empty stdout
+            if "rev-list" in cmd:
+                raise AssertionError(
+                    "rev-list must NOT run when HEAD has no shared history with upstream"
+                )
+            return (0, "")
+
+        assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []
+
+    def test_full_clone_behind_over_threshold_still_alerts(self):
+        # Regression guard: a normal FULL clone (not shallow, shared ancestry)
+        # that is genuinely behind must still alert — the evolution server is a
+        # full clone and the real upstream-lag monitoring must survive this fix.
+        def fake_run(cmd):
+            if "rev-parse" in cmd and "--is-shallow-repository" in cmd:
+                return (0, "false\n")
+            if "merge-base" in cmd:
+                return (0, "abc123def456\n")  # shared ancestor exists
+            if "rev-list" in cmd:
+                return (0, "391\n")
+            return (0, "")
+
+        alerts = check_upstream_lag(runner=fake_run, repo_dir=self.REPO)
+        assert any("behind upstream/main" in a for a in alerts)
+        assert any("391" in a for a in alerts)
+
 
 class TestStagesMirrorCronSpecs:
     """STAGES duplicates cron/evolution/*.yaml; lock the two together.
