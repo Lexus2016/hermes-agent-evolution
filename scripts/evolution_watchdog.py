@@ -67,6 +67,17 @@ WEEKLY_JOBS = {"evolution-upstream-sync"}
 # The watchdog itself must not alert about its own first run.
 SELF_NAMES = {"evolution-watchdog"}
 
+# Edge-triggering for the steady-state HEALTH alerts ------------------------
+# Re-reminder cadence: a health condition that persists UNCHANGED for at least
+# this many days is re-announced once (a "still unresolved" nudge) so a real
+# fault can never be silenced forever by suppression. The clock resets on every
+# actual emission (first sighting, transition, or a prior re-reminder).
+EDGE_COOLDOWN_DAYS = 7
+# State file lives beside the health sidecars (same evolution_dir resolution the
+# health checks already use), so a single EVOLUTION_PROFILE_DIR override moves
+# both. Small JSON: {"signature": str, "last_emitted_at": ISO8601}.
+ALERT_STATE_FILENAME = "watchdog-alert-state.json"
+
 
 def expected_report_date(now: datetime, slot_hour: int, grace_hours: int = GRACE_HOURS) -> str:
     """Date (YYYY-MM-DD) whose report should exist for a daily slot.
@@ -407,6 +418,155 @@ def check_analysis_integrity(evolution_dir: Path) -> List[str]:
     ]
 
 
+# ---------------------------------------------------------------------------
+# Edge-triggering for the steady-state HEALTH alerts.
+#
+# WHY: the pipeline-health checks (check_health / check_realized_impact /
+# check_analysis_integrity) re-emit the SAME alert on EVERY cron run while a
+# known, already-throttled condition persists (e.g. selection_efficiency=11%,
+# self-corrected by PR #519's deterministic effort_budget). Re-screaming a
+# steady condition daily is pure fatigue — it adds no information.
+#
+# WHAT we do: alert on TRANSITIONS, not on steady state. We emit when
+#   • a NEW flag/condition appears that wasn't present last run,
+#   • a condition WORSENS (a new/harsher flag, or an embedded counter such as
+#     `MERGED_ZERO x3 -> x5` grows — both change the flag tail = the signature),
+#   • a condition CLEARS (recovery — announced once),
+#   • a condition has persisted UNCHANGED for >= EDGE_COOLDOWN_DAYS days
+#     (a single "still unresolved" nudge so it is never silently forgotten).
+# We SUPPRESS only the verbatim repeat of an already-reported, non-worsening
+# condition within the cooldown window.
+#
+# NO-MASK SAFETY PROPERTY: suppression keys on a *condition signature* (the
+# sorted flag tails), so any new fault, any worsening, and any new distinct
+# flag changes the signature and emits immediately. Suppression can ONLY hide a
+# byte-for-byte-equivalent condition we already reported. Operational alerts
+# (stage reports, jobs, gh, upstream-lag from #561) never pass through here.
+#
+# FAIL-OPEN CONTRACT: every state read/write is best-effort. A missing,
+# unreadable, or corrupt state file means "unknown previous state" → we emit
+# exactly as the watchdog does today. A write failure is swallowed (never
+# crashes the run, never suppresses the current alert). Edge-triggering can
+# therefore only ever REDUCE noise, never mask a fault.
+#
+# KNOWN BOUND (acceptable by design): the signature is the set of flag tails,
+# so a *worsening WITHIN a single binary flag* (e.g. selection_efficiency
+# 11% → 1%, both below the one LOW_SELECTION_EFFICIENCY threshold the sidecars
+# expose) does not change the signature and is suppressed until either a new
+# flag joins or the EDGE_COOLDOWN_DAYS re-reminder fires. The sidecars have no
+# WARN/CRITICAL sub-tiers to cross, so there is no finer "worse threshold" to
+# key on today; if one is added, extend the tail to include it. The cooldown
+# nudge is the backstop that guarantees no condition is silent forever.
+# ---------------------------------------------------------------------------
+
+
+def health_signature(health_alerts: List[str]) -> str:
+    """Stable, count-aware condition key for a set of health alerts.
+
+    Keys on the FLAG TAIL of each alert (the text after the final ``|``), not
+    the full descriptive line: the metrics body carries run-to-run counts
+    (``cycles_active``, ``selected=…``) that drift even when the condition is
+    unchanged — including the body would make every run look "new" and nothing
+    would ever be suppressed. Embedded severity counters that live in the tail
+    (``MERGED_ZERO x5``) DO change the signature, so a worsening still trips it.
+
+    Order-independent (alerts are sorted) and returns ``""`` for no condition
+    (healthy), which is the recovery sentinel.
+    """
+    tails: List[str] = []
+    for alert in health_alerts:
+        # The flag tail is everything after the last "| " separator that the
+        # sidecars use to terminate the metrics body. When there is no such
+        # separator (e.g. analysis-integrity alerts), the whole string IS the
+        # condition.
+        tail = alert.rsplit("| ", 1)[-1].strip() if "| " in alert else alert.strip()
+        tails.append(tail)
+    return "\n".join(sorted(tails))
+
+
+def load_alert_state(state_path: Path) -> dict | None:
+    """Read the persisted alert state. FAIL-OPEN: any miss/IO/parse error or a
+    structurally invalid payload returns None (== unknown previous state)."""
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or "signature" not in data:
+        return None
+    return data
+
+
+def save_alert_state(state_path: Path, signature: str, last_emitted_at: datetime) -> None:
+    """Persist the current signature + last-emitted timestamp. FAIL-OPEN: a
+    write failure is swallowed — it must never crash the run nor (by raising)
+    suppress an alert the caller already decided to emit."""
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(
+            json.dumps(
+                {"signature": signature, "last_emitted_at": last_emitted_at.isoformat()}
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        return
+
+
+def apply_edge_trigger(
+    health_alerts: List[str],
+    state_path: Path,
+    now: datetime,
+    cooldown_days: int = EDGE_COOLDOWN_DAYS,
+) -> List[str]:
+    """Decide which HEALTH alerts to actually emit this run, and persist state.
+
+    Returns the alerts to print (possibly a single recovery/reminder line in
+    place of the raw alerts). See the design block above for the full rules.
+    """
+    sig = health_signature(health_alerts)
+    prev = load_alert_state(state_path)
+    prev_sig = prev.get("signature") if prev else None
+    prev_ts = _parse_iso(prev.get("last_emitted_at")) if prev else None
+
+    # --- Transition: the condition changed (or we have no prior state) -------
+    if sig != prev_sig:
+        if sig == "":
+            # Cleared. Announce recovery exactly once IF we actually had a prior
+            # non-empty condition on record. (prev_sig is None on a fresh/corrupt
+            # state with nothing wrong → nothing to recover, stay silent.)
+            if prev_sig:
+                save_alert_state(state_path, "", now)
+                return [
+                    "pipeline health RECOVERED: previously-flagged condition has "
+                    "cleared (no health flags this run)"
+                ]
+            # Fail-open with no condition: record the healthy baseline, emit nothing.
+            save_alert_state(state_path, "", now)
+            return []
+        # New / worsening / changed condition (or fail-open unknown prior) → emit.
+        save_alert_state(state_path, sig, now)
+        return health_alerts
+
+    # --- Steady state: signature identical to what we last saw ---------------
+    if sig == "":
+        # Still healthy — nothing to say, keep the baseline fresh.
+        save_alert_state(state_path, "", now)
+        return []
+
+    # Identical non-empty condition. Suppress unless the cooldown elapsed.
+    if prev_ts is not None and now - prev_ts >= timedelta(days=cooldown_days):
+        # Long-cooldown re-reminder: never let a real fault go silent forever.
+        save_alert_state(state_path, sig, now)  # reset the clock
+        days = (now - prev_ts).days
+        return [
+            f"still unresolved after {days}d (no change since last alert) — {a}"
+            for a in health_alerts
+        ]
+    # Verbatim repeat within cooldown → suppress. Do NOT refresh the timestamp,
+    # so the re-reminder fires relative to the LAST real emission.
+    return []
+
+
 def main() -> int:
     hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
     evolution_dir = Path(
@@ -429,14 +589,29 @@ def main() -> int:
     except ImportError:
         now = datetime.now()
 
-    alerts: List[str] = []
-    alerts += check_stage_reports(evolution_dir, now, jobs_file)
-    alerts += check_jobs(jobs_file, now)
-    alerts += check_gh()
-    alerts += check_upstream_lag()
-    alerts += check_health(evolution_dir)
-    alerts += check_realized_impact(evolution_dir)
-    alerts += check_analysis_integrity(evolution_dir)
+    # Operational alerts: acute infra/scheduler/sync failures. These are ALWAYS
+    # emitted every run — they are not steady-state pipeline-health conditions
+    # and must never be edge-suppressed (a broken gh or a stuck upstream-sync is
+    # actionable every single day until fixed). The #561 upstream-lag guard is
+    # untouched: its own shallow/no-shared-history checks decide if it speaks.
+    operational: List[str] = []
+    operational += check_stage_reports(evolution_dir, now, jobs_file)
+    operational += check_jobs(jobs_file, now)
+    operational += check_gh()
+    operational += check_upstream_lag()
+
+    # Pipeline-HEALTH alerts: steady-state calibration/quality conditions that
+    # self-correct over time (effort_budget throttle) and re-fire identically
+    # every run. Only THESE pass through the edge-trigger (transitions, not
+    # steady state) — see the design block above. Fail-open: on any state error
+    # the layer emits exactly as the watchdog does today.
+    health: List[str] = []
+    health += check_health(evolution_dir)
+    health += check_realized_impact(evolution_dir)
+    health += check_analysis_integrity(evolution_dir)
+    health = apply_edge_trigger(health, evolution_dir / ALERT_STATE_FILENAME, now)
+
+    alerts: List[str] = operational + health
 
     if alerts:
         print("🐶 Evolution watchdog — pipeline anomalies detected:")
