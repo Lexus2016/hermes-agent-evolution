@@ -434,23 +434,14 @@ class CorrectionLearner:
         provenance_id = uuid.uuid4().hex[:12]
         content = self._durable_text(rec)
 
-        # Write to the durable re-injection path. Best-effort: if the sink
-        # write fails we still record provenance so unlearn stays coherent,
-        # but mark it so the caller can see it didn't inject.
-        injected = False
-        if self.memory_sink is not None:
-            try:
-                result = self.memory_sink.add(
-                    DURABLE_MEMORY_TARGET, content
-                )
-                injected = bool(
-                    result.get("success", True)
-                    if isinstance(result, dict) else result
-                )
-            except Exception as e:
-                logger.warning("durable memory write failed: %s", e)
-
-        ledger = self._read_json(self._learned_path, [])
+        # Atomicity ordering. The ledger write and the durable memory write are
+        # NOT transactional, so a failure between them must fail SAFE. Write the
+        # LEDGER entry FIRST, then the memory line: a crash after the ledger
+        # write but before/within the memory write leaves a ledger entry with no
+        # memory line — visible (``injected: False``), cleanable, and crucially
+        # still UNLEARNABLE. The reverse order (memory-first) would orphan a
+        # MEMORY.md line with no ledger entry: it would re-inject into every
+        # future session with no provenance id to ``unlearn`` it.
         entry = {
             "provenance_id": provenance_id,
             "origin_kind": rec.kind,
@@ -464,10 +455,42 @@ class CorrectionLearner:
             "sightings": sightings,
             "ts": rec.ts,
             "promoted_ts": _now_iso(),
-            "injected": injected,
+            "injected": False,
         }
+        ledger = self._read_json(self._learned_path, [])
         ledger.append(entry)
         self._write_json(self._learned_path, ledger)
+
+        # Now write to the durable re-injection path. Best-effort: if the sink
+        # write fails the ledger entry remains (so unlearn stays coherent),
+        # simply marked ``injected: False``.
+        injected = False
+        if self.memory_sink is not None:
+            try:
+                result = self.memory_sink.add(
+                    DURABLE_MEMORY_TARGET, content
+                )
+                injected = bool(
+                    result.get("success", True)
+                    if isinstance(result, dict) else result
+                )
+            except Exception as e:
+                logger.warning("durable memory write failed: %s", e)
+
+        # Reflect the injection outcome back into the ledger. Re-read first so a
+        # concurrent writer is not clobbered, then patch this entry in place.
+        # Guarded: a failure here must not undo a successful memory injection.
+        if injected:
+            try:
+                ledger = self._read_json(self._learned_path, [])
+                for e in ledger:
+                    if e.get("provenance_id") == provenance_id:
+                        e["injected"] = True
+                        break
+                self._write_json(self._learned_path, ledger)
+            except Exception as e:
+                logger.warning("ledger injected-flag update failed: %s", e)
+
         return provenance_id
 
     # -- ledger queries -----------------------------------------------------

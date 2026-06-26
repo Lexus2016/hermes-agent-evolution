@@ -370,19 +370,34 @@ def run_codex_app_server_turn(
         except Exception:
             logger.debug("external memory sync raised", exc_info=True)
 
-    # Background review fork — same cadence + signature as the default
-    # path (line ~15449). Only fires when a trigger actually tripped AND
-    # we have a real final response.
-    if (
-        turn.final_text
-        and not turn.interrupted
-        and (should_review_memory or should_review_skills)
-    ):
+    # Background review fork — routed through the SHARED correction-review
+    # decision (agent/correction_review.py) so this runtime detects + RECORDS
+    # user corrections (INTERRUPT / DENY / STEER) and spawns the fork on the
+    # SAME rules as the default finalizer, with no drift. Previously this path
+    # carried an unmodified nudge-only gate and silently never learned from a
+    # correction. Detection + recording always runs when a correction is
+    # present; the fork spawns only on a nudge or a DURABLE correction, and an
+    # unpromoted correction strips the fork's durable writers (X1).
+    from agent.correction_review import decide_correction_review
+
+    review_decision = decide_correction_review(
+        agent,
+        final_text=turn.final_text,
+        interrupted=turn.interrupted,
+        messages=messages,
+        interrupt_message=getattr(agent, "_interrupt_message", None),
+        turn_exit_reason=None,
+        should_review_memory=should_review_memory,
+        should_review_skills=should_review_skills,
+    )
+    if review_decision["spawn"]:
         try:
             agent._spawn_background_review(
                 messages_snapshot=list(messages),
-                review_memory=should_review_memory,
-                review_skills=should_review_skills,
+                review_memory=review_decision["review_memory"],
+                review_skills=review_decision["review_skills"],
+                correction_hint=review_decision["correction_hint"],
+                block_durable_writes=review_decision["block_durable_writes"],
             )
         except Exception:
             logger.debug("background review spawn raised", exc_info=True)

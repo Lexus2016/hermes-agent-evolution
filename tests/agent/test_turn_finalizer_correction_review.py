@@ -1,15 +1,23 @@
-"""Lean Phase 1 — the ``not interrupted`` guard fix in ``finalize_turn``.
+"""Lean Phase 1 — correction-driven review in ``finalize_turn``.
 
-Today ``finalize_turn`` only spawns the background review when
-``final_response and not interrupted and (review_memory or review_skills)``
-(agent/turn_finalizer.py:427). That SKIPS the loudest corrections: an
-interrupted or denied turn never reaches the reviewer.
+The legacy gate only spawned the background review when
+``final_response and not interrupted and (review_memory or review_skills)``.
+That SKIPPED the loudest corrections: an interrupted or denied turn never
+reached the learner.
 
-Phase 1: a turn that IS a structured correction (INTERRUPT / DENY / STEER)
-still triggers the review, even when ``interrupted`` is true or no nudge
-counter fired, and the spawn is passed a hint of the correction kind so the
-reviewer captures THAT. Non-correction interrupted turns and normal turns
-keep their exact prior behavior.
+Phase 1 (current contract, routed through ``agent/correction_review.py``):
+
+* A structured correction (INTERRUPT / DENY / STEER) is DETECTED + RECORDED
+  deterministically on EVERY turn — even interrupted/denied — via the
+  ``_record_turn_correction`` hook (the CorrectionLearner). This always runs.
+* The expensive LLM review fork is spawned ONLY when a nudge counter fired
+  (the legacy healthy-completion path) OR the correction was promoted to
+  DURABLE. A pure-transient correction with no nudge is recorded but does NOT
+  spawn the fork (it would be write-blocked anyway — wasted aux-model spend).
+* X1 (universal): whenever the fork DOES spawn while an unpromoted correction
+  is present, it runs with ``block_durable_writes=True`` so the deterministic
+  recurrence guard stays the single durable gate.
+* Non-correction normal/nudge turns keep their exact prior behavior.
 """
 
 from __future__ import annotations
@@ -108,6 +116,30 @@ class _StubAgent:
         })
 
 
+def _transient_recorder(agent):
+    """Attach a recorder that captures hints and reports transient."""
+    recorded = []
+
+    def _rec(hint):
+        recorded.append(hint)
+        return {"tier": "transient", "durable": False}
+
+    agent._record_turn_correction = _rec
+    return recorded
+
+
+def _durable_recorder(agent):
+    """Attach a recorder that captures hints and promotes to durable."""
+    recorded = []
+
+    def _rec(hint):
+        recorded.append(hint)
+        return {"tier": "durable", "durable": True}
+
+    agent._record_turn_correction = _rec
+    return recorded
+
+
 def _normal_messages():
     return [
         {"role": "user", "content": "do a thing"},
@@ -152,22 +184,55 @@ def _run(agent, *, messages, interrupted, final_response="ok",
 
 
 # ---------------------------------------------------------------------------
-# Corrections now trigger the review (the fix).
+# Corrections are DETECTED + RECORDED deterministically (always). The fork is
+# the EXPENSIVE step and is reserved for a nudge or a DURABLE promotion.
 # ---------------------------------------------------------------------------
 
 
-def test_denied_turn_triggers_review_with_hint():
+def test_denied_correction_recorded_but_no_fork_without_nudge():
+    # A genuine denial with no nudge and no promotion: the deterministic
+    # recorder captures it, but the LLM fork is NOT spawned (it would be
+    # write-blocked anyway — wasted aux-model spend). This is the DEFECT 4
+    # optimization AND proves the loud denial is still captured.
     agent = _StubAgent()
+    recorded = _transient_recorder(agent)
     _run(agent, messages=_deny_messages(), interrupted=False,
          should_review_memory=False)
+    assert len(recorded) == 1
+    assert recorded[0]["kind"] == "DENY"
+    assert agent.spawned == []  # no fork for a pure-transient correction
+
+
+def test_interrupted_correction_recorded_but_no_fork_without_nudge():
+    # The loudest correction (user interrupted + redirected) is captured even
+    # though the legacy ``not interrupted`` gate dropped it — recorded
+    # deterministically, no fork without a nudge.
+    agent = _StubAgent()
+    recorded = _transient_recorder(agent)
+    _run(agent, messages=_normal_messages(), interrupted=True,
+         final_response="", interrupt_message="no, use TypeScript instead",
+         turn_exit_reason="interrupted_by_user")
+    assert len(recorded) == 1
+    assert recorded[0]["kind"] == "INTERRUPT"
+    assert agent.spawned == []
+
+
+def test_denied_correction_with_nudge_spawns_fork_with_hint():
+    # When a nudge co-occurs, the fork spawns and carries the correction hint.
+    agent = _StubAgent()
+    _transient_recorder(agent)
+    _run(agent, messages=_deny_messages(), interrupted=False,
+         should_review_memory=True)
     assert len(agent.spawned) == 1
     hint = agent.spawned[0]["correction_hint"]
     assert hint is not None
     assert hint["kind"] == "DENY"
 
 
-def test_interrupted_correction_triggers_review_with_hint():
+def test_durable_correction_spawns_fork_with_hint():
+    # A promoted (durable) correction spawns the fork even with no nudge.
     agent = _StubAgent()
+    _durable_recorder(agent)
     _run(agent, messages=_normal_messages(), interrupted=True,
          final_response="", interrupt_message="no, use TypeScript instead",
          turn_exit_reason="interrupted_by_user")
@@ -211,17 +276,14 @@ def test_plain_interrupt_without_redirect_does_not_review():
 
 
 def test_correction_hint_carries_tier_from_recorder():
-    # The one-off-leak guard: the recorder's tier decision is threaded into
-    # the hint so the review prompt can stay transient-aware (it must not push
-    # the LLM to durably persist a first-sighting one-off). Here the recorder
-    # reports transient -> the hint must say transient.
+    # The one-off-leak guard: the recorder's tier decision is threaded into the
+    # hint so the review prompt can stay transient-aware. A co-occurring nudge
+    # makes the fork spawn so the hint is observable; the recorder reports
+    # transient -> the hint must say transient.
     agent = _StubAgent()
-
-    def _recorder(hint):
-        return {"tier": "transient", "durable": False}
-
-    agent._record_turn_correction = _recorder
-    _run(agent, messages=_deny_messages(), interrupted=False)
+    _transient_recorder(agent)
+    _run(agent, messages=_deny_messages(), interrupted=False,
+         should_review_memory=True)
     assert len(agent.spawned) == 1
     hint = agent.spawned[0]["correction_hint"]
     assert hint["tier"] == "transient"
@@ -230,11 +292,7 @@ def test_correction_hint_carries_tier_from_recorder():
 
 def test_correction_hint_tier_durable_when_recorder_promotes():
     agent = _StubAgent()
-
-    def _recorder(hint):
-        return {"tier": "durable", "durable": True}
-
-    agent._record_turn_correction = _recorder
+    _durable_recorder(agent)
     _run(agent, messages=_deny_messages(), interrupted=False)
     hint = agent.spawned[0]["correction_hint"]
     assert hint["tier"] == "durable"
@@ -242,28 +300,38 @@ def test_correction_hint_tier_durable_when_recorder_promotes():
 
 
 # ---------------------------------------------------------------------------
-# X1 ENFORCEMENT — the durable-write capability of the review fork is GATED,
-# not merely advised. A transient (first-sighting) correction that is the SOLE
-# reason the review spawned must hand the fork ``block_durable_writes=True`` so
-# the fork's runtime tool whitelist strips the durable memory/skill writers.
+# X1 ENFORCEMENT + no-waste spawn rule.
+#   * A transient correction NEVER persists durable via the fork: when the fork
+#     spawns at all (because a nudge co-occurred) it is handed
+#     ``block_durable_writes=True`` (universal — DEFECT 3).
+#   * A pure-transient correction with no nudge does NOT spawn the fork at all
+#     (DEFECT 4 — no wasted aux-model call).
+#   * A durable correction keeps write capability.
 # ---------------------------------------------------------------------------
 
 
-def test_transient_correction_blocks_durable_writes():
-    # Pure correction path (no nudge), recorder says transient -> the spawned
-    # fork MUST be configured to block durable writes. This is what makes the
-    # deterministic recurrence guard the single durable gate for the correction
-    # path: the LLM fork cannot persist a one-off on its first sighting.
+def test_transient_correction_with_nudge_blocks_durable_writes():
+    # DEFECT 3 (universal X1): a transient correction co-occurring with a nudge
+    # MUST hand the spawned fork block_durable_writes=True. The nudge's own
+    # durable write is deferred to the next nudge interval so a one-off can
+    # never ride a nudge into a durable write.
     agent = _StubAgent()
-
-    def _recorder(hint):
-        return {"tier": "transient", "durable": False}
-
-    agent._record_turn_correction = _recorder
+    _transient_recorder(agent)
     _run(agent, messages=_deny_messages(), interrupted=False,
-         should_review_memory=False)
+         should_review_memory=True)
     assert len(agent.spawned) == 1
     assert agent.spawned[0]["block_durable_writes"] is True
+
+
+def test_pure_transient_correction_no_nudge_does_not_spawn_fork():
+    # DEFECT 4: pure-transient correction, no nudge -> NO fork spawned at all.
+    # The deterministic CorrectionLearner already recorded it; the fork would be
+    # write-blocked, so spawning it would burn an aux-model call for nothing.
+    agent = _StubAgent()
+    _transient_recorder(agent)
+    _run(agent, messages=_deny_messages(), interrupted=False,
+         should_review_memory=False)
+    assert agent.spawned == []
 
 
 def test_durable_correction_does_not_block_writes():
@@ -271,13 +339,10 @@ def test_durable_correction_does_not_block_writes():
     # durable write already happened via the deterministic path. The fork keeps
     # write capability (it may embed the confirmed preference into a skill).
     agent = _StubAgent()
-
-    def _recorder(hint):
-        return {"tier": "durable", "durable": True}
-
-    agent._record_turn_correction = _recorder
+    _durable_recorder(agent)
     _run(agent, messages=_deny_messages(), interrupted=False,
          should_review_memory=False)
+    assert len(agent.spawned) == 1
     assert agent.spawned[0]["block_durable_writes"] is False
 
 
