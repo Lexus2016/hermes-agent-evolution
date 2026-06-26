@@ -397,3 +397,224 @@ class TestCheckHealth:
     def test_missing_sidecar_is_silent(self, tmp_path):
         from evolution_watchdog import check_health
         assert check_health(tmp_path) == []
+
+
+class TestEdgeTrigger:
+    """Edge-triggering for the steady-state HEALTH alerts.
+
+    Suppresses the *verbatim repeat* of an already-reported, non-worsening
+    health condition (alert fatigue), while ALWAYS emitting a new fault, a
+    worsening of an existing one, a recovery, and a long-cooldown nudge.
+    State persists in a small JSON beside the sidecars; all reads/writes are
+    fail-open (missing/corrupt → behave like today and emit).
+    """
+
+    # A representative steady health condition (the 11% selection-efficiency
+    # case that re-screamed daily). Body counts drift run to run; only the
+    # flag tail after the final '|' is the actual condition.
+    COND_A = [
+        "pipeline health degraded: [evolution-metrics] 4/4 active cycles: "
+        "success=22% selection_efficiency=11% reject_rate=0% merged_trend=flat "
+        "(created=2 selected=9 merged=1) effort_budget=1.5 | "
+        "LOW_SELECTION_EFFICIENCY: picks more than it can land "
+        "(poor self-capability calibration)"
+    ]
+    # Same condition, NEXT run: body counts moved but the flag tail is identical.
+    COND_A_DRIFTED = [
+        "pipeline health degraded: [evolution-metrics] 5/5 active cycles: "
+        "success=20% selection_efficiency=12% reject_rate=0% merged_trend=flat "
+        "(created=3 selected=8 merged=1) effort_budget=1.5 | "
+        "LOW_SELECTION_EFFICIENCY: picks more than it can land "
+        "(poor self-capability calibration)"
+    ]
+    # A genuinely WORSE state: a second, harsher flag now also present.
+    COND_A_WORSE = COND_A + [
+        "pipeline health degraded: [evolution-metrics] 4/4 active cycles: "
+        "success=10% selection_efficiency=11% reject_rate=0% merged_trend=declining "
+        "(created=2 selected=9 merged=0) effort_budget=1.5 | "
+        "LOW_SUCCESS: <1/3 of active cycles land a merge"
+    ]
+    # A NEW, distinct condition from a different sidecar.
+    COND_B = [
+        "realized-impact degraded: [evolution-realized] | "
+        "REALIZED_IMPACT_LOW: last 3 merged changes delivered no real value"
+    ]
+
+    def _state(self, tmp_path):
+        return tmp_path / "watchdog-alert-state.json"
+
+    def test_steady_identical_condition_emits_then_suppresses(self, tmp_path):
+        from evolution_watchdog import apply_edge_trigger
+
+        sp = self._state(tmp_path)
+        t0 = datetime(2026, 6, 20, 7, 47)
+        # Run 1: first time we see the condition → emit.
+        out1 = apply_edge_trigger(self.COND_A, sp, t0)
+        assert out1 == self.COND_A
+
+        # Run 2 next day, identical condition (and the noisy body drifted) →
+        # SUPPRESSED (within cooldown): no new information.
+        t1 = t0 + timedelta(days=1)
+        out2 = apply_edge_trigger(self.COND_A_DRIFTED, sp, t1)
+        assert out2 == []
+
+    def test_new_flag_appearing_is_never_masked(self, tmp_path):
+        from evolution_watchdog import apply_edge_trigger
+
+        sp = self._state(tmp_path)
+        t0 = datetime(2026, 6, 20, 7, 47)
+        apply_edge_trigger(self.COND_A, sp, t0)  # establish baseline
+        # Run 2: a brand-new distinct flag appears → MUST emit (no mask).
+        t1 = t0 + timedelta(days=1)
+        out = apply_edge_trigger(self.COND_B, sp, t1)
+        assert out == self.COND_B
+
+    def test_worsening_condition_is_never_masked(self, tmp_path):
+        from evolution_watchdog import apply_edge_trigger
+
+        sp = self._state(tmp_path)
+        t0 = datetime(2026, 6, 20, 7, 47)
+        apply_edge_trigger(self.COND_A, sp, t0)
+        # Run 2: original flag PLUS a new harsher flag (escalation) → emit.
+        t1 = t0 + timedelta(days=1)
+        out = apply_edge_trigger(self.COND_A_WORSE, sp, t1)
+        assert out == self.COND_A_WORSE
+
+    def test_merged_zero_streak_growth_is_worsening(self, tmp_path):
+        # A counter embedded in the flag tail growing (x3 -> x5) is a worsening
+        # of the SAME condition and must still alert — the tail changes.
+        from evolution_watchdog import apply_edge_trigger
+
+        sp = self._state(tmp_path)
+        t0 = datetime(2026, 6, 20, 7, 47)
+        a3 = ["pipeline health degraded: ... | MERGED_ZERO x3: integration stuck"]
+        a5 = ["pipeline health degraded: ... | MERGED_ZERO x5: integration stuck"]
+        assert apply_edge_trigger(a3, sp, t0) == a3
+        out = apply_edge_trigger(a5, sp, t0 + timedelta(days=1))
+        assert out == a5
+
+    def test_condition_clears_emits_recovery(self, tmp_path):
+        from evolution_watchdog import apply_edge_trigger
+
+        sp = self._state(tmp_path)
+        t0 = datetime(2026, 6, 20, 7, 47)
+        apply_edge_trigger(self.COND_A, sp, t0)
+        # Run 2: no health alerts at all → recovery, worth a single notice.
+        t1 = t0 + timedelta(days=1)
+        out = apply_edge_trigger([], sp, t1)
+        assert len(out) == 1
+        assert "recover" in out[0].lower() or "clear" in out[0].lower()
+
+        # Run 3: still healthy → silent (recovery already announced once).
+        out3 = apply_edge_trigger([], sp, t1 + timedelta(days=1))
+        assert out3 == []
+
+    def test_recovery_then_recurrence_is_never_masked(self, tmp_path):
+        # No-mask regression: after a condition CLEARS (recovery persisted as
+        # the healthy baseline), the SAME fault reappearing soon after is a NEW
+        # transition and must alert again — it must not be suppressed as if the
+        # old (pre-recovery) state were still current.
+        from evolution_watchdog import apply_edge_trigger
+
+        sp = self._state(tmp_path)
+        t0 = datetime(2026, 6, 20, 7, 47)
+        assert apply_edge_trigger(self.COND_A, sp, t0) == self.COND_A          # fault
+        assert len(apply_edge_trigger([], sp, t0 + timedelta(days=1))) == 1     # recovery
+        # Recurrence the very next day (well within the 7d cooldown):
+        out = apply_edge_trigger(self.COND_A, sp, t0 + timedelta(days=2))
+        assert out == self.COND_A, "a fault recurring after recovery must re-alert"
+
+    def test_persisting_past_cooldown_emits_reminder(self, tmp_path):
+        from evolution_watchdog import EDGE_COOLDOWN_DAYS, apply_edge_trigger
+
+        sp = self._state(tmp_path)
+        t0 = datetime(2026, 6, 20, 7, 47)
+        assert apply_edge_trigger(self.COND_A, sp, t0) == self.COND_A
+        # Within cooldown → suppressed.
+        assert apply_edge_trigger(self.COND_A, sp, t0 + timedelta(days=1)) == []
+        # Past the cooldown, unchanged → a single "still unresolved" nudge.
+        later = t0 + timedelta(days=EDGE_COOLDOWN_DAYS + 1)
+        out = apply_edge_trigger(self.COND_A, sp, later)
+        assert out, "a long-persisting condition must re-remind, never go silent forever"
+        assert any("LOW_SELECTION_EFFICIENCY" in a for a in out)
+        # Cooldown clock resets after the reminder → next day suppressed again.
+        assert apply_edge_trigger(self.COND_A, sp, later + timedelta(days=1)) == []
+
+    def test_missing_state_file_fails_open_emits(self, tmp_path):
+        from evolution_watchdog import apply_edge_trigger
+
+        sp = self._state(tmp_path)  # does not exist yet
+        assert not sp.exists()
+        out = apply_edge_trigger(self.COND_A, sp, datetime(2026, 6, 20, 7, 47))
+        assert out == self.COND_A  # behaves like today: emit
+
+    def test_corrupt_state_file_fails_open_emits(self, tmp_path):
+        from evolution_watchdog import apply_edge_trigger
+
+        sp = self._state(tmp_path)
+        sp.write_text("{not valid json", encoding="utf-8")
+        out = apply_edge_trigger(self.COND_A, sp, datetime(2026, 6, 20, 7, 47))
+        assert out == self.COND_A  # corrupt == unknown previous state → emit
+
+    def test_unwritable_state_dir_fails_open_emits(self, tmp_path):
+        # Persistence failure must NEVER crash or swallow the alert.
+        from evolution_watchdog import apply_edge_trigger
+
+        sp = tmp_path / "no-such-dir" / "watchdog-alert-state.json"
+        out = apply_edge_trigger(self.COND_A, sp, datetime(2026, 6, 20, 7, 47))
+        assert out == self.COND_A
+
+    def test_signature_ignores_drifting_body_counts(self, tmp_path):
+        # The condition signature keys on the flag tail, not the noisy metrics
+        # body — otherwise every run looks "new" and nothing is ever suppressed.
+        from evolution_watchdog import health_signature
+
+        assert health_signature(self.COND_A) == health_signature(self.COND_A_DRIFTED)
+        assert health_signature(self.COND_A) != health_signature(self.COND_A_WORSE)
+        assert health_signature([]) == ""
+
+    def test_signature_is_order_independent(self, tmp_path):
+        from evolution_watchdog import health_signature
+
+        ab = self.COND_A + self.COND_B
+        ba = self.COND_B + self.COND_A
+        assert health_signature(ab) == health_signature(ba)
+
+
+class TestMainEdgeTriggerWiring:
+    """main() must route ONLY health alerts through the edge-trigger and leave
+    operational alerts (upstream-lag, stage reports, jobs, gh) untouched."""
+
+    def test_upstream_lag_and_infra_alerts_bypass_edge_trigger(self, tmp_path, monkeypatch, capsys):
+        import evolution_watchdog as w
+
+        # Infra/operational alerts present every run; health alerts steady.
+        monkeypatch.setattr(w, "check_stage_reports", lambda *a, **k: [])
+        monkeypatch.setattr(w, "check_jobs", lambda *a, **k: [])
+        monkeypatch.setattr(w, "check_gh", lambda *a, **k: ["gh auth status FAILED"])
+        monkeypatch.setattr(
+            w, "check_upstream_lag", lambda *a, **k: ["upstream sync stuck: fork is 301 behind"]
+        )
+        monkeypatch.setattr(
+            w, "check_health", lambda *a, **k: [
+                "pipeline health degraded: x | LOW_SELECTION_EFFICIENCY: y"
+            ]
+        )
+        monkeypatch.setattr(w, "check_realized_impact", lambda *a, **k: [])
+        monkeypatch.setattr(w, "check_analysis_integrity", lambda *a, **k: [])
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
+
+        # Run 1: everything emits.
+        w.main()
+        out1 = capsys.readouterr().out
+        assert "upstream sync stuck" in out1
+        assert "gh auth status FAILED" in out1
+        assert "LOW_SELECTION_EFFICIENCY" in out1
+
+        # Run 2: health is suppressed (steady), but upstream-lag + gh STILL fire.
+        w.main()
+        out2 = capsys.readouterr().out
+        assert "upstream sync stuck" in out2, "operational upstream-lag must never be edge-suppressed"
+        assert "gh auth status FAILED" in out2, "operational gh failure must never be edge-suppressed"
+        assert "LOW_SELECTION_EFFICIENCY" not in out2, "steady health condition should be suppressed"
