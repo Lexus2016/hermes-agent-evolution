@@ -12,8 +12,10 @@ from evolution_watchdog import (  # noqa: E402
     STAGES,
     check_gh,
     check_jobs,
+    check_runtime_divergence,
     check_stage_reports,
     check_upstream_lag,
+    ensure_upstream_issue,
     expected_report_date,
 )
 
@@ -618,3 +620,285 @@ class TestMainEdgeTriggerWiring:
         assert "upstream sync stuck" in out2, "operational upstream-lag must never be edge-suppressed"
         assert "gh auth status FAILED" in out2, "operational gh failure must never be edge-suppressed"
         assert "LOW_SELECTION_EFFICIENCY" not in out2, "steady health condition should be suppressed"
+
+
+class TestRuntimeDivergence:
+    """Feature 1 — silent-freeze detection for the local runtime checkout.
+
+    The runtime checkout self-updates with `git pull --ff-only`. When the
+    evolution pipeline (or a contributor) leaves LOCAL commits on the tracking
+    branch that later squash-merge upstream under a different SHA, the local
+    HEAD diverges and the nightly ff-only pull silently no-ops — freezing
+    self-update with no signal. This check makes that freeze LOUD.
+    """
+
+    REPO = Path("/repo")  # bypass _resolve_repo_dir via explicit repo_dir
+
+    def _run(self, *, ahead, behind, is_ancestor):
+        """Build a fake git runner.
+
+        ahead        = `rev-list --count origin/main..HEAD`  (local commits)
+        behind       = `rev-list --count HEAD..origin/main`  (upstream-ahead)
+        is_ancestor  = `merge-base --is-ancestor HEAD origin/main` rc==0 ?
+        """
+
+        def fake_run(cmd):
+            joined = " ".join(cmd)
+            if "merge-base" in cmd and "--is-ancestor" in cmd:
+                return (0 if is_ancestor else 1, "")
+            if "rev-list" in cmd and "origin/main..HEAD" in joined:
+                return (0, f"{ahead}\n")
+            if "rev-list" in cmd and "HEAD..origin/main" in joined:
+                return (0, f"{behind}\n")
+            raise AssertionError(f"unexpected git command: {cmd}")
+
+        return fake_run
+
+    def test_diverged_alerts(self):
+        # 2 local commits AND HEAD is not an ancestor of origin/main → frozen.
+        run = self._run(ahead=2, behind=5, is_ancestor=False)
+        alerts = check_runtime_divergence(runner=run, repo_dir=self.REPO)
+        assert len(alerts) == 1
+        assert "diverged" in alerts[0].lower()
+        assert "2 local commit" in alerts[0]
+        assert "frozen" in alerts[0].lower() or "self-update" in alerts[0].lower()
+
+    def test_healthy_head_equals_origin_silent(self):
+        # HEAD == origin/main: 0 ahead, 0 behind, HEAD is its own ancestor.
+        run = self._run(ahead=0, behind=0, is_ancestor=True)
+        assert check_runtime_divergence(runner=run, repo_dir=self.REPO) == []
+
+    def test_fast_forwardable_only_is_not_diverged(self):
+        # Behind but NOT diverged: 0 local commits, HEAD ancestor of origin/main.
+        # A plain ff-only pull WOULD advance here, so this is not a freeze.
+        # Conservative choice: behind-by-a-few is NOT alerted (avoid false
+        # positives on a healthy box that simply updates later the same day).
+        run = self._run(ahead=0, behind=3, is_ancestor=True)
+        assert check_runtime_divergence(runner=run, repo_dir=self.REPO) == []
+
+    def test_local_commits_but_still_ancestor_is_not_diverged(self):
+        # Defensive: if rev-list reports local commits but merge-base still says
+        # HEAD is an ancestor of origin/main (ff-able), it is NOT frozen — the
+        # is-ancestor signal is authoritative for "can ff-only advance".
+        run = self._run(ahead=1, behind=0, is_ancestor=True)
+        assert check_runtime_divergence(runner=run, repo_dir=self.REPO) == []
+
+    def test_git_failure_fails_open_silent(self):
+        def fake_run(cmd):
+            if "merge-base" in cmd:
+                return (128, "fatal: not a git repository")
+            return (128, "fatal")
+
+        assert check_runtime_divergence(runner=fake_run, repo_dir=self.REPO) == []
+
+    def test_spawn_error_fails_open_silent(self):
+        def fake_run(cmd):
+            raise FileNotFoundError("git")
+
+        assert check_runtime_divergence(runner=fake_run, repo_dir=self.REPO) == []
+
+    def test_garbage_count_fails_open_silent(self):
+        def fake_run(cmd):
+            if "merge-base" in cmd and "--is-ancestor" in cmd:
+                return (1, "")
+            if "rev-list" in cmd:
+                return (0, "not-a-number")
+            raise AssertionError("unexpected")
+
+        assert check_runtime_divergence(runner=fake_run, repo_dir=self.REPO) == []
+
+    def test_no_repo_silent(self, monkeypatch):
+        import evolution_watchdog as w
+
+        monkeypatch.setattr(w, "_resolve_repo_dir", lambda: None)
+
+        def fake_run(cmd):
+            raise AssertionError("runner must not run when repo is unresolved")
+
+        assert check_runtime_divergence(runner=fake_run) == []
+
+    def test_diverged_routed_through_edge_trigger_in_main(self, tmp_path, monkeypatch, capsys):
+        # The divergence alert is steady-state (persists until the owner
+        # reconciles), so it must route through the edge-trigger: emit once,
+        # suppress the identical repeat next run.
+        import evolution_watchdog as w
+
+        monkeypatch.setattr(w, "check_stage_reports", lambda *a, **k: [])
+        monkeypatch.setattr(w, "check_jobs", lambda *a, **k: [])
+        monkeypatch.setattr(w, "check_gh", lambda *a, **k: [])
+        monkeypatch.setattr(w, "check_upstream_lag", lambda *a, **k: [])
+        monkeypatch.setattr(w, "check_health", lambda *a, **k: [])
+        monkeypatch.setattr(w, "check_realized_impact", lambda *a, **k: [])
+        monkeypatch.setattr(w, "check_analysis_integrity", lambda *a, **k: [])
+        monkeypatch.setattr(
+            w, "check_runtime_divergence",
+            lambda *a, **k: [
+                "runtime checkout diverged from origin/main by 2 local "
+                "commit(s) — nightly self-update is frozen (can't fast-forward)"
+            ],
+        )
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
+
+        w.main()
+        out1 = capsys.readouterr().out
+        assert "diverged from origin/main" in out1
+
+        # Run 2: identical divergence → edge-suppressed (no fresh information).
+        w.main()
+        out2 = capsys.readouterr().out
+        assert "diverged from origin/main" not in out2, (
+            "steady divergence must be edge-suppressed on identical repeat run"
+        )
+
+
+class TestEnsureUpstreamIssue:
+    """Feature 2 — idempotent GitHub [UPSTREAM] tracking issue on real escalation.
+
+    All gh interaction goes through the injected ``runner`` seam; the tests
+    NEVER hit GitHub. Idempotency key = an existing OPEN issue whose title
+    starts with the ``[UPSTREAM]`` prefix.
+    """
+
+    def _runner(self, *, existing_issues, created_sink, fail_search=False):
+        """Fake gh runner.
+
+        existing_issues: list returned by `gh issue list ... --json number,title`
+        created_sink:    list mutated when `gh issue create` is invoked
+        """
+
+        def fake_run(cmd):
+            joined = " ".join(cmd)
+            if "issue" in cmd and "list" in cmd:
+                if fail_search:
+                    return (1, "gh: could not search")
+                return (0, json.dumps(existing_issues))
+            if "issue" in cmd and "create" in cmd:
+                created_sink.append(joined)
+                return (0, "https://github.com/x/y/issues/999\n")
+            raise AssertionError(f"unexpected gh command: {cmd}")
+
+        return fake_run
+
+    def test_creates_issue_when_none_exists(self):
+        created = []
+        run = self._runner(existing_issues=[], created_sink=created)
+        out = ensure_upstream_issue(behind=391, ahead=4, runner=run, gh_enabled=True)
+        assert len(created) == 1, "must create exactly one [UPSTREAM] issue"
+        assert "[UPSTREAM]" in created[0]
+        assert "391" in created[0]
+        # Returns a short confirmation string (or None) — must not crash.
+        assert out is None or isinstance(out, str)
+
+    def test_does_not_duplicate_when_open_issue_exists(self):
+        created = []
+        run = self._runner(
+            existing_issues=[{"number": 562, "title": "[UPSTREAM] Catch-up needed"}],
+            created_sink=created,
+        )
+        ensure_upstream_issue(behind=391, ahead=4, runner=run, gh_enabled=True)
+        assert created == [], "an existing open [UPSTREAM] issue must block creation"
+
+    def test_ignores_non_upstream_open_issues(self):
+        # An unrelated open issue must NOT count as the tracking issue.
+        created = []
+        run = self._runner(
+            existing_issues=[{"number": 10, "title": "fix flaky test"}],
+            created_sink=created,
+        )
+        ensure_upstream_issue(behind=391, ahead=4, runner=run, gh_enabled=True)
+        assert len(created) == 1, "non-[UPSTREAM] issues are not the idempotency key"
+
+    def test_gh_disabled_is_noop(self):
+        created = []
+
+        def run(cmd):
+            raise AssertionError("runner must not be called when gh disabled")
+
+        out = ensure_upstream_issue(behind=391, ahead=4, runner=run, gh_enabled=False)
+        assert created == []
+        assert out is None
+
+    def test_search_failure_fails_open_no_create(self):
+        # If the search itself fails we must NOT blindly create (could spam);
+        # fail-open = do nothing, never crash.
+        created = []
+        run = self._runner(existing_issues=[], created_sink=created, fail_search=True)
+        out = ensure_upstream_issue(behind=391, ahead=4, runner=run, gh_enabled=True)
+        assert created == []
+        assert out is None
+
+    def test_spawn_error_fails_open(self):
+        def run(cmd):
+            raise FileNotFoundError("gh")
+
+        # gh missing entirely → never crash.
+        out = ensure_upstream_issue(behind=391, ahead=4, runner=run, gh_enabled=True)
+        assert out is None
+
+
+class TestUpstreamLagFilesIssue:
+    """check_upstream_lag still emits text AND now ensures the tracking issue
+    exists, idempotently, via the mockable gh seam — only on REAL escalation."""
+
+    REPO = Path("/repo")
+
+    def _git_runner(self, behind):
+        def fake_run(cmd):
+            if "rev-parse" in cmd and "--is-shallow-repository" in cmd:
+                return (0, "false\n")
+            if "merge-base" in cmd and "--is-ancestor" not in cmd:
+                return (0, "abc123\n")  # shared ancestor exists
+            if "rev-list" in cmd:
+                joined = " ".join(cmd)
+                if "HEAD..upstream/main" in joined:
+                    return (0, f"{behind}\n")
+                return (0, "0\n")
+            raise AssertionError(f"unexpected git command: {cmd}")
+
+        return fake_run
+
+    def test_real_escalation_ensures_issue(self, monkeypatch):
+        import evolution_watchdog as w
+
+        calls = {}
+
+        def fake_ensure(behind, ahead, **kw):
+            calls["behind"] = behind
+            return None
+
+        monkeypatch.setattr(w, "ensure_upstream_issue", fake_ensure)
+        alerts = check_upstream_lag(runner=self._git_runner(391), repo_dir=self.REPO)
+        assert any("behind upstream/main" in a for a in alerts), "text alert preserved"
+        assert calls.get("behind") == 391, "real escalation must ensure the tracking issue"
+
+    def test_within_threshold_does_not_file_issue(self, monkeypatch):
+        import evolution_watchdog as w
+
+        called = {"n": 0}
+        monkeypatch.setattr(
+            w, "ensure_upstream_issue",
+            lambda *a, **k: called.__setitem__("n", called["n"] + 1),
+        )
+        assert check_upstream_lag(runner=self._git_runner(9), repo_dir=self.REPO) == []
+        assert called["n"] == 0, "no escalation → no issue churn"
+
+    def test_shallow_clone_does_not_file_issue(self, monkeypatch):
+        # #561 regression: shallow clones stay silent AND never file an issue.
+        import evolution_watchdog as w
+
+        called = {"n": 0}
+        monkeypatch.setattr(
+            w, "ensure_upstream_issue",
+            lambda *a, **k: called.__setitem__("n", called["n"] + 1),
+        )
+
+        def fake_run(cmd):
+            if "rev-parse" in cmd and "--is-shallow-repository" in cmd:
+                return (0, "true\n")
+            if "rev-list" in cmd:
+                raise AssertionError("rev-list must not run on shallow clone")
+            return (0, "")
+
+        assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []
+        assert called["n"] == 0, "shallow path must never file an issue"

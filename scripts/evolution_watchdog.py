@@ -62,6 +62,17 @@ MIN_GH_RATE_REMAINING = 200
 # fork silently accumulates a backlog for days (2026-06-19 → 301 behind).
 UPSTREAM_BEHIND_ALERT = 80
 
+# Title prefix of the GitHub tracking issue the daily upstream-sync escalates to
+# when it can no longer auto-merge. The watchdog re-files this idempotently on a
+# real escalation so the owner never has to open it by hand (issue #562 was
+# opened manually). An OPEN issue carrying this prefix is the idempotency key —
+# its presence blocks creation of a duplicate.
+UPSTREAM_ISSUE_PREFIX = "[UPSTREAM]"
+# Toggle the gh issue-filing side effect. Default on; flip to "0" to fall back to
+# text-only (e.g. CI, or a box where gh isn't authed). Filing is ALWAYS fail-open
+# regardless of this flag — a missing/unauthed gh never crashes the watchdog.
+UPSTREAM_ISSUE_ENABLED = os.environ.get("WATCHDOG_FILE_UPSTREAM_ISSUE", "1") != "0"
+
 # Jobs that are weekly, not daily (looser staleness threshold).
 WEEKLY_JOBS = {"evolution-upstream-sync"}
 # The watchdog itself must not alert about its own first run.
@@ -315,12 +326,115 @@ def check_upstream_lag(
     except (ValueError, IndexError):
         return []
     if behind > UPSTREAM_BEHIND_ALERT:
+        # Real escalation on a measurable (full) clone: ensure the tracking issue
+        # exists so the owner doesn't have to open it by hand. Idempotent and
+        # fail-open — never raises, never crashes the watchdog. (#561's shallow /
+        # no-shared-history cases returned above and never reach here.)
+        ahead = _count_ahead_of_upstream(runner, repo)
+        ensure_upstream_issue(behind=behind, ahead=ahead, gh_enabled=UPSTREAM_ISSUE_ENABLED)
         return [
             f"upstream sync stuck: fork is {behind} commits behind upstream/main "
             f"(threshold {UPSTREAM_BEHIND_ALERT}). The daily sync escalates instead "
             f"of merging — resolve the backlog (see the open [UPSTREAM] issue)."
         ]
     return []
+
+
+def _count_ahead_of_upstream(
+    runner: Callable[[List[str]], Tuple[int, str]], repo: Path
+) -> int:
+    """Commits the fork has that upstream/main does not (best-effort, 0 on error)."""
+    try:
+        rc, out = runner(
+            ["git", "-C", str(repo), "rev-list", "--count", "upstream/main..HEAD"]
+        )
+    except Exception:  # noqa: BLE001
+        return 0
+    if rc != 0:
+        return 0
+    try:
+        return int(out.strip().split()[0])
+    except (ValueError, IndexError):
+        return 0
+
+
+def ensure_upstream_issue(
+    behind: int,
+    ahead: int,
+    runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
+    gh_enabled: bool = True,
+) -> str | None:
+    """Idempotently ensure a GitHub ``[UPSTREAM]`` tracking issue exists.
+
+    Called only on a REAL upstream escalation (full clone, behind > threshold —
+    the #561 shallow case never reaches here). The owner had to open issue #562
+    by hand; this closes that gap.
+
+    Idempotency key: an OPEN issue whose title starts with ``UPSTREAM_ISSUE_PREFIX``.
+    If one exists we do NOT create a duplicate (de-duped / edge-triggered on the
+    issue's own existence — no daily spam). If none exists we create one with the
+    real behind/ahead counts.
+
+    ALL gh interaction goes through the injectable ``runner`` seam, so this is
+    unit-testable without network. FAIL-OPEN throughout: gh missing/unauthed, a
+    failed search, or any spawn error → return None and do nothing (the text
+    alert from ``check_upstream_lag`` still informs the owner). Returns a short
+    human confirmation string when it actually created an issue, else None.
+    """
+    if not gh_enabled:
+        return None
+
+    # 1) Look for an existing open [UPSTREAM] issue (the idempotency key).
+    try:
+        rc, out = runner(
+            [
+                "gh",
+                "issue",
+                "list",
+                "--search",
+                f"{UPSTREAM_ISSUE_PREFIX} in:title",
+                "--state",
+                "open",
+                "--json",
+                "number,title",
+            ]
+        )
+    except Exception:  # noqa: BLE001 — gh missing/spawn failure: fail-open
+        return None
+    if rc != 0:
+        # Search failed: do NOT blind-create (would risk duplicates/spam).
+        return None
+    try:
+        issues = json.loads(out) if out.strip() else []
+    except ValueError:
+        return None
+    for issue in issues if isinstance(issues, list) else []:
+        title = str(issue.get("title", "")) if isinstance(issue, dict) else ""
+        if title.startswith(UPSTREAM_ISSUE_PREFIX):
+            return None  # already tracked — never duplicate
+
+    # 2) None exists → create one with the real counts.
+    title = (
+        f"{UPSTREAM_ISSUE_PREFIX} Catch-up needed: ~{behind} commits behind "
+        f"upstream/main (owner review)"
+    )
+    body = (
+        f"The autonomous upstream-sync can no longer auto-merge: the fork is "
+        f"~{behind} commit(s) behind `upstream/main` and ~{ahead} commit(s) "
+        f"ahead, past the auto-merge ceiling.\n\n"
+        f"This issue was filed automatically by the evolution watchdog so the "
+        f"backlog is visible. Resolve by reconciling the fork to `upstream/main` "
+        f"(owner review of conflicting changes), then close this issue.\n"
+    )
+    try:
+        rc, _out = runner(
+            ["gh", "issue", "create", "--title", title, "--body", body]
+        )
+    except Exception:  # noqa: BLE001 — fail-open on create spawn failure
+        return None
+    if rc != 0:
+        return None
+    return f"filed {UPSTREAM_ISSUE_PREFIX} tracking issue ({behind} behind)"
 
 
 def _upstream_lag_unmeasurable(
@@ -360,6 +474,97 @@ def _upstream_lag_unmeasurable(
     if rc != 0 and not out.strip():
         return True
     return False
+
+
+def check_runtime_divergence(
+    runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
+    repo_dir: Path | None = None,
+) -> List[str]:
+    """Alert when the local runtime checkout has diverged from ``origin/main``.
+
+    THE SILENT FREEZE (root cause of the stalled nightly self-update): the
+    runtime checkout self-updates with ``git pull --ff-only``. When the evolution
+    pipeline (or a contributor) leaves LOCAL commits on the tracking branch that
+    later squash-merge upstream under a DIFFERENT SHA, local HEAD diverges from
+    ``origin/main``; ff-only can no longer fast-forward, so the nightly update
+    silently no-ops and the box freezes on an old revision with NO signal.
+
+    We DETECT + ALERT only — never auto-reset/auto-heal (that risks losing the
+    local commits). The fix is making the freeze loud via the owner's channel.
+
+    DIVERGED (the high-confidence signal we alert on):
+      * ``rev-list --count origin/main..HEAD`` > 0  (local commits not on origin)
+      * AND ``merge-base --is-ancestor HEAD origin/main`` is FALSE (HEAD is not
+        reachable from origin/main → a plain ff-only pull CANNOT advance).
+    The is-ancestor probe is authoritative: if HEAD is still an ancestor of
+    origin/main, ff-only would advance, so it is NOT a freeze even if rev-list
+    reports stray local commits.
+
+    STALE (behind but ff-able) is deliberately NOT alerted here: a healthy box
+    that simply hasn't pulled yet today is behind-but-fast-forwardable, and
+    alerting on it would storm every morning. The upstream-lag check already
+    covers the genuine "sync is stuck" case for the fork maintainer.
+
+    FAIL-OPEN: repo unresolved, any git/spawn error, or unparseable output →
+    return [] (behaves exactly as today, never a false alarm).
+    """
+    repo = repo_dir or _resolve_repo_dir()
+    if repo is None:
+        return []
+
+    try:
+        rc_anc, _out = runner(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "merge-base",
+                "--is-ancestor",
+                "HEAD",
+                "origin/main",
+            ]
+        )
+    except Exception:  # noqa: BLE001 — spawn failure: fail-open
+        return []
+    # rc 0 == HEAD IS an ancestor of origin/main → ff-able → not frozen.
+    # rc 1 == not an ancestor → potential divergence. Any other rc (e.g. 128 for
+    # a bad repo/ref) is inconclusive → fail-open silent.
+    if rc_anc == 0:
+        return []
+    if rc_anc != 1:
+        return []
+
+    try:
+        rc_ahead, out_ahead = runner(
+            ["git", "-C", str(repo), "rev-list", "--count", "origin/main..HEAD"]
+        )
+    except Exception:  # noqa: BLE001
+        return []
+    if rc_ahead != 0:
+        return []
+    try:
+        local_commits = int(out_ahead.strip().split()[0])
+    except (ValueError, IndexError):
+        return []
+    if local_commits <= 0:
+        return []
+
+    behind = 0
+    try:
+        rc_behind, out_behind = runner(
+            ["git", "-C", str(repo), "rev-list", "--count", "HEAD..origin/main"]
+        )
+        if rc_behind == 0:
+            behind = int(out_behind.strip().split()[0])
+    except (Exception, ValueError, IndexError):  # noqa: BLE001 — count is cosmetic
+        behind = 0
+
+    plural = "s" if local_commits != 1 else ""
+    return [
+        f"runtime checkout diverged from origin/main by {local_commits} local "
+        f"commit{plural} (origin is {behind} ahead) — nightly self-update is "
+        f"frozen (can't fast-forward); reconcile to origin/main."
+    ]
 
 
 def check_health(evolution_dir: Path) -> List[str]:
@@ -605,7 +810,15 @@ def main() -> int:
     # every run. Only THESE pass through the edge-trigger (transitions, not
     # steady state) — see the design block above. Fail-open: on any state error
     # the layer emits exactly as the watchdog does today.
+    #
+    # check_runtime_divergence rides this edge-trigger path too: a diverged
+    # runtime checkout is a steady condition that persists UNCHANGED until the
+    # owner reconciles it, so re-screaming it every run is pure fatigue. The
+    # signature keys on the alert text (no '|' tail), so it emits on first
+    # sighting, on any change (commit count moves), and on the cooldown nudge —
+    # but suppresses the verbatim daily repeat. No-mask + fail-open preserved.
     health: List[str] = []
+    health += check_runtime_divergence()
     health += check_health(evolution_dir)
     health += check_realized_impact(evolution_dir)
     health += check_analysis_integrity(evolution_dir)
