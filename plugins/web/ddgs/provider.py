@@ -77,19 +77,51 @@ class DDGSWebSearchProvider(WebSearchProvider):
                     if i >= safe_limit:
                         break
                     url = str(hit.get("href") or hit.get("url") or "")
-                    web_results.append(
-                        {
-                            "title": str(hit.get("title", "")),
-                            "url": url,
-                            "description": str(hit.get("body", "")),
-                            "position": i + 1,
-                        }
-                    )
+                    web_results.append({
+                        "title": str(hit.get("title", "")),
+                        "url": url,
+                        "description": str(hit.get("body", "")),
+                        "position": i + 1,
+                    })
         except Exception as exc:  # noqa: BLE001 — ddgs raises its own exceptions
             logger.warning("DDGS search error: %s", exc)
+            # Issue #467 — DDGS frequently returns empty / blocks automated
+            # queries. Surface a structured provider-dead error so the agent
+            # knows to switch provider instead of spiraling on "no results".
+            error_text = str(exc).lower()
+            if (
+                "no results" in error_text
+                or "ratelimit" in error_text
+                or "timeout" in error_text
+            ):
+                return {
+                    "success": False,
+                    "error": (
+                        f"DuckDuckGo search provider is not returning results: {exc}. "
+                        "Configure an alternative search_backend (e.g. brave-free, searxng) "
+                        "via `hermes tools` or config.yaml."
+                    ),
+                }
             return {"success": False, "error": f"DuckDuckGo search failed: {exc}"}
 
-        logger.info("DDGS search '%s': %d results (limit %d)", query, len(web_results), limit)
+        # Empty result set is also a provider failure symptom (#467) — not a
+        # successful "zero results" outcome worth looping on.
+        if not web_results:
+            logger.warning(
+                "DDGS search '%s' returned no results (provider likely blocked)", query
+            )
+            return {
+                "success": False,
+                "error": (
+                    "DuckDuckGo returned no results. The provider is likely blocking "
+                    "automated queries. Configure an alternative search_backend "
+                    "(e.g. brave-free, searxng) via `hermes tools` or config.yaml."
+                ),
+            }
+
+        logger.info(
+            "DDGS search '%s': %d results (limit %d)", query, len(web_results), limit
+        )
         return {"success": True, "data": {"web": web_results}}
 
     def get_setup_schema(self) -> Dict[str, Any]:
