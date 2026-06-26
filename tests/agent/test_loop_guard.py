@@ -78,7 +78,9 @@ class TestFailureTrigger:
         assert maybe_nudge(msgs) is not None
 
     def test_mcp_unreachable_failures(self):
-        msgs = _run("mcp_tqmemory_health", 3, result="server unreachable: ClosedResourceError")
+        msgs = _run(
+            "mcp_tqmemory_health", 3, result="server unreachable: ClosedResourceError"
+        )
         n = maybe_nudge(msgs)
         # mcp_tqmemory_health is not in mutating/idempotent sets, so 'unknown'
         # category uses the safer (lower) default -> mutating thresholds.
@@ -97,7 +99,11 @@ class TestNonRetryableTrigger:
         assert n is not None and "non-retryable" in n and "permission" in n
 
     def test_two_timeouts_stop_hard(self):
-        n = maybe_nudge(_run("terminal", 2, result="failure-class=timeout — The operation timed out"))
+        n = maybe_nudge(
+            _run(
+                "terminal", 2, result="failure-class=timeout — The operation timed out"
+            )
+        )
         assert n is not None and "non-retryable" in n and "timeout" in n
 
     def test_single_deterministic_failure_is_quiet(self):
