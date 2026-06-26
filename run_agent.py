@@ -1502,6 +1502,7 @@ class AIAgent:
         messages_snapshot: List[Dict],
         review_memory: bool = False,
         review_skills: bool = False,
+        correction_hint: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Spawn the background memory/skill review thread.
 
@@ -1510,6 +1511,12 @@ class AIAgent:
         returns the thread target.  ``threading.Thread`` is constructed
         here so existing tests that patch ``run_agent.threading.Thread``
         keep working.
+
+        ``correction_hint`` (Phase 1, learn-from-corrections): when the turn
+        was a structured user correction (INTERRUPT / DENY / STEER), a small
+        ``{kind, signature, context, target}`` dict steers the review prompt
+        to capture THAT correction rather than relying on the generic
+        nudge-driven pass.
         """
         from agent.background_review import spawn_background_review_thread
 
@@ -1518,9 +1525,56 @@ class AIAgent:
             messages_snapshot,
             review_memory=review_memory,
             review_skills=review_skills,
+            correction_hint=correction_hint,
         )
         t = threading.Thread(target=target, daemon=True, name="bg-review")
         t.start()
+
+    def _record_turn_correction(
+        self, correction_hint: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Feed a detected structured correction into the recurrence tracker.
+
+        Phase 1 (learn-from-corrections): builds a ``CorrectionRecord`` from
+        the detected hint and records it through ``CorrectionLearner``. The
+        correction is TRANSIENT by default; it promotes to DURABLE (a write to
+        the per-profile memory store, which re-injects next session) only on
+        cross-session recurrence or an explicit "remember this". The agent's
+        live ``_memory_store`` is the durable sink so a promotion lands exactly
+        where ``load_from_disk`` reads it at the next session start.
+
+        Returns the learner outcome dict (``{tier, durable, ...}``) so the
+        caller can make the background-review prompt tier-aware — a transient
+        first-sighting must not be durably persisted by the LLM reviewer.
+        Returns ``None`` when memory is disabled or on any error.
+
+        Fail-open and best-effort: a broken store, missing memory subsystem, or
+        any error must never disturb the user's turn. Skipped entirely when
+        memory is not enabled (nowhere durable to promote to).
+        """
+        try:
+            store = getattr(self, "_memory_store", None)
+            if store is None or not getattr(self, "_memory_enabled", False):
+                return None
+            from agent.correction_learning import (
+                CorrectionLearner,
+                CorrectionRecord,
+            )
+            from datetime import datetime, timezone
+
+            rec = CorrectionRecord(
+                kind=str(correction_hint.get("kind", "")),
+                signature=str(correction_hint.get("signature", "")),
+                context=str(correction_hint.get("context", "")),
+                session_id=self.session_id or "",
+                ts=datetime.now(timezone.utc).isoformat(),
+                target=correction_hint.get("target"),
+            )
+            if not rec.signature:
+                return None
+            return CorrectionLearner(memory_sink=store).record(rec)
+        except Exception:
+            return None  # best-effort; never disturb the turn
 
     def _build_memory_write_metadata(
         self,

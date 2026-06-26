@@ -422,14 +422,75 @@ def finalize_turn(
         messages=messages,
     )
 
+    # Detect a structured user correction on this turn (INTERRUPT / DENY /
+    # STEER) — deterministically, from runtime markers, before deciding
+    # whether to review. A correction is the highest-signal feedback the
+    # agent gets, and the loudest ones land on interrupted/denied turns that
+    # the legacy gate below skipped. See ``agent/correction_learning.py``.
+    _correction_hint = None
+    try:
+        from agent.correction_learning import detect_correction
+
+        _correction = detect_correction(
+            messages,
+            interrupted=interrupted,
+            interrupt_message=getattr(agent, "_interrupt_message", None),
+            turn_exit_reason=_turn_exit_reason,
+            session_id=agent.session_id or "",
+        )
+        if _correction is not None:
+            _correction_hint = {
+                "kind": _correction.kind,
+                "signature": _correction.signature,
+                "context": _correction.context,
+                "target": _correction.target,
+                # Default to transient until the recurrence guard says
+                # otherwise. This is the safe default: the LLM reviewer is
+                # never told to durably persist a correction we have not
+                # confirmed is durable.
+                "tier": "transient",
+                "durable": False,
+            }
+            # Feed the recurrence tracker (signature -> distinct sessions).
+            # Transient by default; promotes to durable only on cross-session
+            # recurrence or an explicit remember. Fail-open via the agent hook.
+            # The returned tier is threaded back into the hint so the review
+            # prompt stays tier-aware (one-off-leak guard).
+            _recorder = getattr(agent, "_record_turn_correction", None)
+            if callable(_recorder):
+                try:
+                    _outcome = _recorder(_correction_hint)
+                    if isinstance(_outcome, dict):
+                        _correction_hint["tier"] = _outcome.get("tier", "transient")
+                        _correction_hint["durable"] = bool(_outcome.get("durable"))
+                except Exception:
+                    pass
+    except Exception:
+        # Detection is best-effort; never let it break turn finalization.
+        _correction_hint = None
+
     # Background memory/skill review — runs AFTER the response is delivered
     # so it never competes with the user's task for model attention.
-    if final_response and not interrupted and (_should_review_memory or _should_review_skills):
+    #
+    # Two triggers:
+    #   * Healthy completion (legacy): a nudge counter fired AND the turn
+    #     completed normally (``final_response and not interrupted``).
+    #   * Correction (Phase 1 fix): the turn IS a structured correction —
+    #     run the review EVEN WHEN interrupted/denied, the case the legacy
+    #     guard dropped. The detected correction is passed as a hint so the
+    #     reviewer captures THAT specific correction.
+    _healthy_review = (
+        final_response
+        and not interrupted
+        and (_should_review_memory or _should_review_skills)
+    )
+    if _healthy_review or _correction_hint is not None:
         try:
             agent._spawn_background_review(
                 messages_snapshot=list(messages),
-                review_memory=_should_review_memory,
+                review_memory=_should_review_memory or _correction_hint is not None,
                 review_skills=_should_review_skills,
+                correction_hint=_correction_hint,
             )
         except Exception:
             pass  # Background review is best-effort
