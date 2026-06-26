@@ -29,7 +29,25 @@ _EVOLUTION_STAGES = {
     "research": ".md",
     "funnel": ".md",
     "integration": ".md",
+    "upstream-sync": ".md",
 }
+
+
+def _is_upstream_sync_job(job: Dict[str, Any]) -> bool:
+    """Detect the hyphenated evolution upstream-sync cron job.
+
+    The generic ``evolution_job_stage`` matches on substring, so ``upstream``
+    would also match ``upstream-sync``; this helper is reserved for cases that
+    need to distinguish the sync stage explicitly.
+    """
+    name = str(job.get("name") or job.get("id") or "").lower()
+    return "upstream-sync" in name
+
+
+# Stages that support digest fallback in the scheduler. Excludes ``upstream-sync``
+# because syncing the fork with upstream is inherently an online operation: a
+# stale digest is useless and would mask the outage.
+_STAGES_WITH_DIGEST_FALLBACK = set(_EVOLUTION_STAGES) - {"upstream-sync"}
 
 
 def evolution_job_stage(job: Dict[str, Any]) -> Optional[str]:
@@ -37,13 +55,19 @@ def evolution_job_stage(job: Dict[str, Any]) -> Optional[str]:
     evolution pipeline job.
 
     Matches job names like ``evolution-introspection`` or tags that include
-    ``evolution`` plus a known stage name.
+    ``evolution`` plus a known stage name. The ``upstream-sync`` stage uses a
+    hyphenated name and is therefore handled explicitly after the prefix check.
     """
     name = str(job.get("name") or job.get("id") or "").lower()
     tags = job.get("tags")
     tags_lower = {str(t).lower() for t in tags} if isinstance(tags, list) else set()
 
-    if not name.startswith("evolution-") and not name.startswith("evolution") and "evolution" not in tags_lower:
+    is_evolution = (
+        name.startswith("evolution-")
+        or name.startswith("evolution")
+        or "evolution" in tags_lower
+    )
+    if not is_evolution:
         return None
 
     for stage in _EVOLUTION_STAGES:
