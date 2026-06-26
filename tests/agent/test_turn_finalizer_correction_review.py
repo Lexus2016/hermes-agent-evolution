@@ -100,7 +100,13 @@ class _StubAgent:
         return None
 
     def clear_interrupt(self):
-        pass
+        # Mirror production AIAgent.clear_interrupt (run_agent.py): null the
+        # interrupt message + request flag. A no-op stub here would MASK the
+        # capture-before-clear bug — finalize_turn calls clear_interrupt()
+        # ~46 lines BEFORE the correction detector reads _interrupt_message,
+        # so a stub that never nulls it lets the dead INTERRUPT branch "pass".
+        self._interrupt_message = None
+        self._interrupt_requested = False
 
     def _sync_external_memory_for_turn(self, **k):
         pass
@@ -239,6 +245,32 @@ def test_durable_correction_spawns_fork_with_hint():
     assert len(agent.spawned) == 1
     hint = agent.spawned[0]["correction_hint"]
     assert hint["kind"] == "INTERRUPT"
+
+
+def test_interrupt_message_captured_before_clear_through_real_ordering():
+    # DEFECT 1 regression — capture-before-clear, proven through the REAL
+    # finalize_turn ordering with the production-mirroring stub.
+    #
+    # finalize_turn calls agent.clear_interrupt() (which nulls _interrupt_message,
+    # exactly as production AIAgent.clear_interrupt does) ~46 lines BEFORE the
+    # correction detector reads the interrupt message. If finalize_turn does not
+    # capture the message into a LOCAL before that clear, the INTERRUPT branch is
+    # dead on the default runtime. This test pins both halves of the fix:
+    #   * clear_interrupt actually ran  -> the live attribute is None afterwards
+    #   * the INTERRUPT correction was STILL detected, carrying the exact message
+    #     -> the captured local (not the already-nulled attribute) fed detection.
+    agent = _StubAgent()
+    recorded = _transient_recorder(agent)
+    _run(agent, messages=_normal_messages(), interrupted=True,
+         final_response="", interrupt_message="stop, use the staging DB",
+         turn_exit_reason="interrupted_by_user")
+    # Production-mirroring stub nulled the live attribute -> proves clear ran.
+    assert agent._interrupt_message is None
+    # Yet the correction was detected with the real redirect text -> proves the
+    # message was captured BEFORE the clear and threaded into detection.
+    assert len(recorded) == 1
+    assert recorded[0]["kind"] == "INTERRUPT"
+    assert recorded[0]["context"] == "stop, use the staging DB"
 
 
 # ---------------------------------------------------------------------------

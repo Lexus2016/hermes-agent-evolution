@@ -13,9 +13,12 @@ Design under test (``agent/correction_learning.py``):
 
 - ``CorrectionLearner`` — owns a fail-open JSON store under a per-profile
   directory. ``record(...)`` applies the generalization guard:
-  a correction is TRANSIENT by default and becomes DURABLE only on
-  EVIDENCE — the same signature recurs across >=2 distinct sessions, OR
-  an explicit ``remember=True`` ("remember this"). Durable items are
+  a correction is TRANSIENT by default and becomes DURABLE on cross-session
+  EVIDENCE — the same signature recurs across >=2 distinct sessions. The
+  ``record(remember=True)`` fast-path also promotes durably and is exercised
+  here at the unit level, but NOTE it is not wired to any production caller in
+  Phase 1 (explicit "remember this" is deferred); recurrence is the sole
+  production durable trigger. Durable items are
   written through a memory-store sink (the real re-injection path) and a
   provenance ledger entry is recorded. ``unlearn(provenance_id)`` removes
   a durable item (symmetric, reversible).

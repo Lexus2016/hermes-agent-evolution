@@ -17,7 +17,8 @@ The decision has three moving parts, all derived deterministically:
 
 * SPAWN the LLM review fork ONLY when a nudge independently fired
   (``_healthy_review`` — the legacy healthy-completion path) OR the correction
-  was promoted to DURABLE (recurrence / explicit remember). A pure-transient
+  was promoted to DURABLE (cross-session recurrence — the sole Phase-1 durable
+  trigger; explicit-remember wiring is deferred). A pure-transient
   correction with no nudge is already recorded deterministically and the fork
   would be write-blocked anyway, so spawning it would burn an aux-model call for
   nothing (defect: wasted aux-model spend on pure-transient corrections).
@@ -73,8 +74,9 @@ def detect_and_record_correction(
             "durable": False,
         }
         # Feed the recurrence tracker (signature -> distinct sessions). Transient
-        # by default; promotes to durable only on cross-session recurrence or an
-        # explicit remember. Fail-open via the agent hook. The returned tier is
+        # by default; promotes to durable only on cross-session recurrence (the
+        # sole Phase-1 durable trigger; explicit-remember is deferred and not
+        # wired). Fail-open via the agent hook. The returned tier is
         # threaded back into the hint so the review prompt stays tier-aware.
         recorder = getattr(agent, "_record_turn_correction", None)
         if callable(recorder):

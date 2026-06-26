@@ -372,12 +372,23 @@ def run_codex_app_server_turn(
 
     # Background review fork — routed through the SHARED correction-review
     # decision (agent/correction_review.py) so this runtime detects + RECORDS
-    # user corrections (INTERRUPT / DENY / STEER) and spawns the fork on the
-    # SAME rules as the default finalizer, with no drift. Previously this path
-    # carried an unmodified nudge-only gate and silently never learned from a
-    # correction. Detection + recording always runs when a correction is
-    # present; the fork spawns only on a nudge or a DURABLE correction, and an
-    # unpromoted correction strips the fork's durable writers (X1).
+    # user corrections on the SAME rules as the default finalizer, with no
+    # drift. Previously this path carried an unmodified nudge-only gate and
+    # silently never learned from a correction. Detection + recording always
+    # runs when a correction is present; the fork spawns only on a nudge or a
+    # DURABLE correction, and an unpromoted correction strips the fork's durable
+    # writers (X1).
+    #
+    # RUNTIME-SCOPE HONESTY (codex INTERRUPT): DENY and STEER are derived from
+    # tool-result messages and work on the codex runtime. INTERRUPT does NOT:
+    # the codex runtime never propagates a user interrupt into its session
+    # (``AIAgent.request_interrupt`` has no production callers and codex's own
+    # ``interrupted`` flag is only a deadline-timeout), so ``_interrupt_message``
+    # is never set by a real user redirect here. The capture-before-clear fix in
+    # the default finalizer does NOT revive codex INTERRUPT — that is a
+    # PRE-EXISTING codex interrupt-propagation gap, deferred and out of scope for
+    # this feature. We still pass the attribute through for parity so the branch
+    # lights up automatically once that platform gap is closed.
     from agent.correction_review import decide_correction_review
 
     review_decision = decide_correction_review(

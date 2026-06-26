@@ -396,9 +396,17 @@ def finalize_turn(
         result["pending_steer"] = _leftover_steer
     agent._response_was_previewed = False
 
+    # Capture the interrupt redirect message into a LOCAL *before*
+    # clear_interrupt() nulls it (run_agent.py sets _interrupt_message = None).
+    # The structured-correction detector below (decide_correction_review) runs
+    # ~46 lines AFTER this clear, so reading the live attribute there would
+    # always see None and the INTERRUPT correction branch would be DEAD on the
+    # default runtime. Capture-before-clear keeps that branch live.
+    _captured_interrupt = getattr(agent, "_interrupt_message", None)
+
     # Include interrupt message if one triggered the interrupt
-    if interrupted and agent._interrupt_message:
-        result["interrupt_message"] = agent._interrupt_message
+    if interrupted and _captured_interrupt:
+        result["interrupt_message"] = _captured_interrupt
 
     # Clear interrupt state after handling
     agent.clear_interrupt()
@@ -447,7 +455,7 @@ def finalize_turn(
         final_text=final_response,
         interrupted=interrupted,
         messages=messages,
-        interrupt_message=getattr(agent, "_interrupt_message", None),
+        interrupt_message=_captured_interrupt,
         turn_exit_reason=_turn_exit_reason,
         should_review_memory=_should_review_memory,
         should_review_skills=_should_review_skills,

@@ -14,7 +14,11 @@ What this module is (Phase 1, deliberately minimal):
    on a completed turn. Three kinds, all from runtime markers (no fuzzy text
    regex, no LLM):
      * ``INTERRUPT`` — the user stopped the agent mid-turn AND supplied a
-       redirect message (``agent._interrupt_message``).
+       redirect message (``agent._interrupt_message``). Runtime scope: this is
+       live on the default runtime (the finalizer captures the message before
+       clearing it); on the codex runtime INTERRUPT stays inert because that
+       runtime does not propagate user interrupts into its session (a
+       pre-existing platform gap, deferred). DENY/STEER work on both runtimes.
      * ``DENY`` — a tool result carried the explicit ``user_denied`` marker
        (a real user vetoed the action at the approval prompt). Automatic
        safety/validation blocks (which also set ``status: "blocked"`` but
@@ -23,12 +27,23 @@ What this module is (Phase 1, deliberately minimal):
        (``STEER_MARKER_OPEN`` in a tool result).
 
 2. ``CorrectionLearner`` — the GENERALIZATION GUARD. A correction captured
-   from these signals is TRANSIENT by default. It is promoted to DURABLE
-   (written to the persistent memory store that re-injects into future
-   sessions) ONLY on EVIDENCE:
+   from these signals is TRANSIENT by default. In Phase 1 it is promoted to
+   DURABLE (written to the persistent memory store that re-injects into future
+   sessions) on a SINGLE production trigger:
      (a) the same correction *signature* recurs across >= 2 DISTINCT
-         sessions, OR
-     (b) an explicit user "remember this" (``remember=True``).
+         sessions (cross-session recurrence).
+   Cross-session recurrence is therefore the SOLE production durable trigger in
+   Phase 1.
+
+   ``record(remember=True)`` also forces a durable promotion, but that path is
+   NOT WIRED to any production signal in Phase 1: no caller threads an explicit
+   user "remember this" through it — ``run_agent.py`` calls ``record(rec)`` with
+   ``remember`` defaulting False, and ``correction_review`` never derives a
+   remember flag. The fuzzy "remember this" detector that would feed it is
+   DEFERRED to a later phase. The ``remember`` parameter is retained ONLY as the
+   tested seam that future path will use; treat explicit-remember as
+   not-yet-reachable in production.
+
    Transient items live in a lightweight local JSON store and never change
    behavior. The recurrence tracker (signature -> distinct sessions) is the
    load-bearing safety piece: it is the difference between "the agent learned
@@ -323,6 +338,12 @@ class CorrectionLearner:
         Returns ``{"tier", "durable", "provenance_id", "sightings", "reason"}``.
         Fail-open: any persistence error degrades to a transient result rather
         than raising.
+
+        ``remember``: force a durable promotion. NOTE — in Phase 1 this is NOT
+        wired to any production caller (nothing sets it True; ``run_agent.py``
+        calls ``record(rec)``). Cross-session recurrence is the sole production
+        durable trigger; explicit-remember wiring is deferred to a later phase.
+        The parameter is kept as the tested seam that path will use.
         """
         try:
             return self._record_inner(rec, remember=remember)
@@ -367,8 +388,11 @@ class CorrectionLearner:
                     "reason": "already_durable",
                 }
 
-        # 2b. Decide tier. Durable on explicit remember OR cross-session
-        #     recurrence. Otherwise transient.
+        # 2b. Decide tier. Cross-session recurrence is the sole PRODUCTION
+        #     durable trigger in Phase 1. The ``remember`` fast-path also
+        #     promotes durably but is not wired to any production caller yet
+        #     (deferred — see class/module docstring); it stays here only as the
+        #     tested seam. Otherwise transient.
         if remember:
             reason = "explicit_remember"
             durable = True

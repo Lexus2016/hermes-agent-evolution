@@ -1541,7 +1541,9 @@ class AIAgent:
         the detected hint and records it through ``CorrectionLearner``. The
         correction is TRANSIENT by default; it promotes to DURABLE (a write to
         the per-profile memory store, which re-injects next session) only on
-        cross-session recurrence or an explicit "remember this". The agent's
+        cross-session recurrence. (An explicit "remember this" durable trigger
+        is DEFERRED to a later phase — not wired in Phase 1; ``record`` is called
+        with ``remember`` defaulting False.) The agent's
         live ``_memory_store`` is the durable sink so a promotion lands exactly
         where ``load_from_disk`` reads it at the next session start.
 

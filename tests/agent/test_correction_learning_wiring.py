@@ -167,7 +167,11 @@ def test_finalize_records_correction_into_tracker(tmp_path, monkeypatch):
         def _file_mutation_verifier_enabled(self): return False
         def _turn_completion_explainer_enabled(self): return False
         def _drain_pending_steer(self): return None
-        def clear_interrupt(self): pass
+        def clear_interrupt(self):
+            # Mirror production AIAgent.clear_interrupt — never a no-op, so the
+            # capture-before-clear ordering in finalize_turn stays under test.
+            self._interrupt_message = None
+            self._interrupt_requested = False
         def _sync_external_memory_for_turn(self, **k): pass
         def _spawn_background_review(self, **k): pass
 
@@ -388,7 +392,11 @@ def test_finalize_no_correction_does_not_record(tmp_path):
         def _file_mutation_verifier_enabled(self): return False
         def _turn_completion_explainer_enabled(self): return False
         def _drain_pending_steer(self): return None
-        def clear_interrupt(self): pass
+        def clear_interrupt(self):
+            # Mirror production AIAgent.clear_interrupt — never a no-op, so the
+            # capture-before-clear ordering in finalize_turn stays under test.
+            self._interrupt_message = None
+            self._interrupt_requested = False
         def _sync_external_memory_for_turn(self, **k): pass
         def _spawn_background_review(self, **k): pass
         def _record_turn_correction(self, correction_hint):
