@@ -149,24 +149,59 @@ def _looks_like_failure(content: Any) -> bool:
     return bool(_EXIT_CODE_RE.search(content))
 
 
-def _tool_result_arg_hash(content: Any) -> Optional[str]:
-    """Return a canonical JSON key of the tool-call arguments embedded in a
-    tool result, or None if no arguments can be parsed. Used to detect
-    identical-query repetition for tools like web_search where the same
-    arguments produce the same empty result and drive a spiral (#467).
+def _tool_call_arg_hash(tool_calls: List[Dict[str, Any]]) -> Optional[str]:
+    """Canonical key of the INPUT arguments of an assistant turn's tool call(s).
+
+    Used to detect identical-query repetition for spiral-prone idempotent tools
+    like web_search / web_extract (#467): the same query produces the same
+    non-progressing result and drives a loop.
+
+    Identity is read from ``tool_calls[].function.arguments`` — the ACTUAL call
+    inputs — NOT from the tool result. Tool results do not carry the input args,
+    and web_search / web_extract outputs are XML-wrapped in
+    ``<untrusted_tool_result>`` so they can never be parsed back into arguments;
+    reading identity from the result left this short-circuit permanently inert.
+
+    ``arguments`` may be a JSON string (the OpenAI wire format) or an already
+    parsed dict; both normalize to the same canonical key, and key ordering is
+    irrelevant. An unparseable string is hashed verbatim (still a stable
+    identity). Returns None when NO arguments can be recovered from any call, so
+    a turn with missing args never yields a false identity match (fail-safe: no
+    spurious short-circuit).
     """
-    if not isinstance(content, str) or not content:
+    keys: List[str] = []
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function")
+        if not isinstance(fn, dict):
+            continue
+        raw = fn.get("arguments")
+        if raw is None:
+            continue
+        parsed: Any
+        if isinstance(raw, str):
+            s = raw.strip()
+            if not s:
+                continue
+            try:
+                parsed = json.loads(s)
+            except Exception:
+                keys.append(s)  # unparseable args: hash the raw string verbatim
+                continue
+        else:
+            parsed = raw
+        try:
+            keys.append(
+                json.dumps(
+                    parsed, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+                )
+            )
+        except (TypeError, ValueError):
+            keys.append(repr(parsed))
+    if not keys:
         return None
-    try:
-        parsed = json.loads(content)
-    except Exception:
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    args = parsed.get("parameters") or parsed.get("args") or parsed.get("arguments")
-    if not isinstance(args, dict):
-        return None
-    return json.dumps(args, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return "|".join(keys)
 
 
 def _recent_tool_runs(
@@ -176,8 +211,9 @@ def _recent_tool_runs(
     (single_tool_name, result_failed, failure_class, arg_hash)
     for the trailing run of assistant turns that each called EXACTLY ONE tool.
     ``failure_class`` is the tool_diagnostics category of the failing result (or
-    None when the turn did not fail). ``arg_hash`` is a canonical JSON of the
-    parsed arguments when they can be recovered from the tool result.
+    None when the turn did not fail). ``arg_hash`` is a canonical key of the
+    assistant tool-call INPUT arguments for the turn (``function.arguments``),
+    when they can be recovered.
 
     Stops at the first assistant turn that is not a single-tool call (a text
     reply, or a multi-tool turn) — that breaks the "stuck on one tool" run.
@@ -199,10 +235,12 @@ def _recent_tool_runs(
             tool = names[0]
             if runs and tool != runs[0][0]:
                 break  # tool changed — the same-tool run ends here
+            # Identity for #467 same-query detection comes from the call INPUT
+            # args of THIS assistant turn, not the result that follows it.
+            arg_hash = _tool_call_arg_hash(tcs)
             # Results for this turn are the "tool" messages that follow it.
             failed = False
             category: Optional[str] = None
-            arg_hash: Optional[str] = None
             for j in range(i + 1, len(messages)):
                 tm = messages[j]
                 if tm.get("role") != "tool":
@@ -211,7 +249,6 @@ def _recent_tool_runs(
                 if _looks_like_failure(content):
                     failed = True
                     category = _failure_category(content) or category
-                arg_hash = _tool_result_arg_hash(content) or arg_hash
             runs.append((tool, failed, category, arg_hash))
             i -= 1
         elif msg.get("role") == "tool":
