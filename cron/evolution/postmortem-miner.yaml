@@ -1,0 +1,25 @@
+name: evolution-postmortem-miner
+# 06:00 daily — early morning, well before the funnel (07:40) and analysis
+# cycle. Runs in an otherwise empty slot so postmortem rules are fresh for
+# the entire day's evolution pipeline. Off the :00 mark to avoid cron
+# stampede; jitter stays < 06:01.
+schedule: "0 6 * * *"
+enabled: true
+mode: PRIVATE
+
+# Deterministic closed-PR mining — NO LLM agent. The script periodically
+# scans recently closed PRs from the evolution fork, classifies close
+# reasons, and emits durable guard-rail rules that feed into the analysis
+# stage.  See issue #578.
+no_agent: true
+script: evolution_postmortem_miner.py
+
+# Keep on disk for the analysis stage to consume; nothing delivered to
+# channels (postmortem rules are input data, not alerts).
+deliver: local
+
+prompt: |
+  Deterministic closed-PR postmortem miner (no LLM). Scans recently closed
+  PRs via `gh pr list --state closed`, classifies close reasons, and emits
+  durable rules to postmortem-rules.json for the analysis stage.
+  See scripts/evolution_postmortem_miner.py (issue #578).
