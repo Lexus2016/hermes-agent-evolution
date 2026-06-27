@@ -135,6 +135,23 @@ class DDGSWebSearchProvider(WebSearchProvider):
                 }
         except Exception as exc:  # noqa: BLE001 — ddgs raises its own exceptions
             logger.warning("DDGS search error: %s", exc)
+            # Issue #467 — DDGS frequently returns empty / blocks automated
+            # queries. Surface a structured provider-dead error so the agent
+            # knows to switch provider instead of spiraling on "no results".
+            error_text = str(exc).lower()
+            if (
+                "no results" in error_text
+                or "ratelimit" in error_text
+                or "timeout" in error_text
+            ):
+                return {
+                    "success": False,
+                    "error": (
+                        f"DuckDuckGo search provider is not returning results: {exc}. "
+                        "Configure an alternative search_backend (e.g. brave-free, searxng) "
+                        "via `hermes tools` or config.yaml."
+                    ),
+                }
             return {"success": False, "error": f"DuckDuckGo search failed: {exc}"}
         finally:
             # Return immediately without joining the worker. On timeout the
@@ -143,7 +160,30 @@ class DDGSWebSearchProvider(WebSearchProvider):
             # on its own; it writes nothing shared, so leaking it is safe.
             pool.shutdown(wait=False, cancel_futures=True)
 
-        logger.info("DDGS search '%s': %d results (limit %d)", query, len(web_results), limit)
+        # Empty result set can mean the provider is rate-limiting / blocking
+        # automated queries (#467). If a fallback chain is configured we surface
+        # a failure so the dispatcher tries the next backend; otherwise we keep
+        # success=True because a healthy provider returning no hits is a valid
+        # outcome (and the regression test expects success=True for an empty
+        # mocked primary).
+        if not web_results:
+            logger.warning(
+                "DDGS search '%s' returned no results (provider likely blocked)", query
+            )
+            from tools import web_tools
+
+            if web_tools._search_backend_fallback_chain():
+                return {
+                    "success": False,
+                    "error": (
+                        "DuckDuckGo returned no results. The provider is likely blocking "
+                        "automated queries. Falling back to next search_backend fallback in config.yaml."
+                    ),
+                }
+
+        logger.info(
+            "DDGS search '%s': %d results (limit %d)", query, len(web_results), limit
+        )
         return {"success": True, "data": {"web": web_results}}
 
     def get_setup_schema(self) -> Dict[str, Any]:

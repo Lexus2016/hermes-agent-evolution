@@ -7,6 +7,7 @@ Covers:
 - _is_backend_available("ddgs") / _get_backend() integration
 - web_extract returns a search-only error when ddgs is active
 """
+
 from __future__ import annotations
 
 import json
@@ -37,14 +38,16 @@ def _install_fake_ddgs(monkeypatch, *, text_results=None, text_raises=None, text
             pass
         def __enter__(self):
             return self
+
         def __exit__(self, *_a):
             return False
+
         def text(self, query, max_results=5):
             if text_sleep is not None:
                 _time.sleep(text_sleep)
             if text_raises is not None:
                 raise text_raises
-            for hit in (text_results or []):
+            for hit in text_results or []:
                 yield hit
 
     fake.DDGS = _FakeDDGS
@@ -63,6 +66,7 @@ class TestDDGSProviderIsConfigured:
         # Drop any cached ``plugins.web.ddgs.provider`` so is_configured re-imports ddgs fresh
         monkeypatch.delitem(sys.modules, "plugins.web.ddgs.provider", raising=False)
         from plugins.web.ddgs.provider import DDGSWebSearchProvider
+
         assert DDGSWebSearchProvider().is_available() is True
 
     def test_not_configured_when_package_missing(self, monkeypatch):
@@ -70,6 +74,7 @@ class TestDDGSProviderIsConfigured:
         monkeypatch.delitem(sys.modules, "plugins.web.ddgs.provider", raising=False)
         # Block the import so ``import ddgs`` raises ImportError even if the package is actually installed
         import builtins
+
         orig_import = builtins.__import__
 
         def blocked_import(name, *args, **kwargs):
@@ -79,25 +84,31 @@ class TestDDGSProviderIsConfigured:
 
         monkeypatch.setattr(builtins, "__import__", blocked_import)
         from plugins.web.ddgs.provider import DDGSWebSearchProvider
+
         assert DDGSWebSearchProvider().is_available() is False
 
     def test_provider_name(self):
         from plugins.web.ddgs.provider import DDGSWebSearchProvider
+
         assert DDGSWebSearchProvider().name == "ddgs"
 
     def test_implements_web_search_provider(self):
         from agent.web_search_provider import WebSearchProvider
         from plugins.web.ddgs.provider import DDGSWebSearchProvider
+
         assert issubclass(DDGSWebSearchProvider, WebSearchProvider)
 
 
 class TestDDGSProviderSearch:
     def test_happy_path_normalizes_results(self, monkeypatch):
-        _install_fake_ddgs(monkeypatch, text_results=[
-            {"title": "A", "href": "https://a.example.com", "body": "desc A"},
-            {"title": "B", "href": "https://b.example.com", "body": "desc B"},
-            {"title": "C", "href": "https://c.example.com", "body": "desc C"},
-        ])
+        _install_fake_ddgs(
+            monkeypatch,
+            text_results=[
+                {"title": "A", "href": "https://a.example.com", "body": "desc A"},
+                {"title": "B", "href": "https://b.example.com", "body": "desc B"},
+                {"title": "C", "href": "https://c.example.com", "body": "desc C"},
+            ],
+        )
         from plugins.web.ddgs.provider import DDGSWebSearchProvider
 
         result = DDGSWebSearchProvider().search("q", limit=5)
@@ -105,13 +116,21 @@ class TestDDGSProviderSearch:
         assert result["success"] is True
         web = result["data"]["web"]
         assert len(web) == 3
-        assert web[0] == {"title": "A", "url": "https://a.example.com", "description": "desc A", "position": 1}
+        assert web[0] == {
+            "title": "A",
+            "url": "https://a.example.com",
+            "description": "desc A",
+            "position": 1,
+        }
         assert web[2]["position"] == 3
 
     def test_accepts_url_key_as_fallback_for_href(self, monkeypatch):
-        _install_fake_ddgs(monkeypatch, text_results=[
-            {"title": "A", "url": "https://a.example.com", "body": "desc A"},
-        ])
+        _install_fake_ddgs(
+            monkeypatch,
+            text_results=[
+                {"title": "A", "url": "https://a.example.com", "body": "desc A"},
+            ],
+        )
         from plugins.web.ddgs.provider import DDGSWebSearchProvider
 
         result = DDGSWebSearchProvider().search("q", limit=5)
@@ -120,10 +139,13 @@ class TestDDGSProviderSearch:
         assert result["data"]["web"][0]["url"] == "https://a.example.com"
 
     def test_limit_is_respected(self, monkeypatch):
-        _install_fake_ddgs(monkeypatch, text_results=[
-            {"title": f"R{i}", "href": f"https://r{i}.example.com", "body": ""}
-            for i in range(10)
-        ])
+        _install_fake_ddgs(
+            monkeypatch,
+            text_results=[
+                {"title": f"R{i}", "href": f"https://r{i}.example.com", "body": ""}
+                for i in range(10)
+            ],
+        )
         from plugins.web.ddgs.provider import DDGSWebSearchProvider
 
         result = DDGSWebSearchProvider().search("q", limit=3)
@@ -135,6 +157,7 @@ class TestDDGSProviderSearch:
         monkeypatch.delitem(sys.modules, "ddgs", raising=False)
         monkeypatch.delitem(sys.modules, "plugins.web.ddgs.provider", raising=False)
         import builtins
+
         orig_import = builtins.__import__
 
         def blocked_import(name, *args, **kwargs):
@@ -157,13 +180,43 @@ class TestDDGSProviderSearch:
         assert result["success"] is False
         assert "rate limited" in result["error"] or "failed" in result["error"].lower()
 
-    def test_empty_results(self, monkeypatch):
+    def test_empty_results_return_provider_dead_error(self, monkeypatch):
+        """Issue #467: an empty DDGS result is treated as a provider failure only
+        when a fallback chain is configured, so the agent tries the next
+        backend instead of looping on "no results". Without a fallback chain
+        the empty result stays a successful response.
+        """
         _install_fake_ddgs(monkeypatch, text_results=[])
+        from plugins.web.ddgs.provider import DDGSWebSearchProvider
+        from tools import web_tools
+
+        # With no fallback chain: success=True (regression coverage).
+        monkeypatch.setattr(web_tools, "_load_web_config", lambda: {})
+        result = DDGSWebSearchProvider().search("nothing", limit=5)
+        assert result["success"] is True
+
+        # With a fallback chain: success=False so dispatcher switches provider.
+        monkeypatch.setattr(
+            web_tools,
+            "_load_web_config",
+            lambda: {"search_backend_fallback_chain": "brave-free"},
+        )
+        result = DDGSWebSearchProvider().search("nothing", limit=5)
+        assert result["success"] is False
+        assert "no results" in result["error"].lower()
+        assert "fallback" in result["error"].lower()
+
+    def test_no_results_exception_return_provider_dead_error(self, monkeypatch):
+        """Issue #467: DDGS raising a no-results exception is surfaced as
+        provider-dead guidance, not a generic failure worth retrying.
+        """
+        _install_fake_ddgs(monkeypatch, text_raises=RuntimeError("No results found"))
         from plugins.web.ddgs.provider import DDGSWebSearchProvider
 
         result = DDGSWebSearchProvider().search("nothing", limit=5)
-        assert result["success"] is True
-        assert result["data"]["web"] == []
+        assert result["success"] is False
+        assert "duckduckgo" in result["error"].lower()
+        assert "alternative" in result["error"].lower()
 
     def test_hung_search_times_out_and_returns_failure(self, monkeypatch):
         """#36776: a ddgs call that never returns must be bounded by the
@@ -223,16 +276,19 @@ class TestDDGSProviderSearch:
 class TestDDGSBackendWiring:
     def test_is_backend_available_true_when_package_importable(self, monkeypatch):
         from tools import web_tools
+
         monkeypatch.setattr(web_tools, "_ddgs_package_importable", lambda: True)
         assert web_tools._is_backend_available("ddgs") is True
 
     def test_is_backend_available_false_when_package_missing(self, monkeypatch):
         from tools import web_tools
+
         monkeypatch.setattr(web_tools, "_ddgs_package_importable", lambda: False)
         assert web_tools._is_backend_available("ddgs") is False
 
     def test_configured_backend_accepted(self, monkeypatch):
         from tools import web_tools
+
         monkeypatch.setattr(web_tools, "_load_web_config", lambda: {"backend": "ddgs"})
         monkeypatch.setattr(web_tools, "_ddgs_package_importable", lambda: True)
         assert web_tools._get_backend() == "ddgs"
@@ -240,9 +296,16 @@ class TestDDGSBackendWiring:
     def test_ddgs_trails_paid_providers_in_auto_detect(self, monkeypatch):
         """Exa (priority) should win over ddgs in auto-detect."""
         from tools import web_tools
+
         monkeypatch.setattr(web_tools, "_load_web_config", lambda: {})
-        for key in ("FIRECRAWL_API_KEY", "FIRECRAWL_API_URL", "PARALLEL_API_KEY",
-                    "TAVILY_API_KEY", "SEARXNG_URL", "BRAVE_SEARCH_API_KEY"):
+        for key in (
+            "FIRECRAWL_API_KEY",
+            "FIRECRAWL_API_URL",
+            "PARALLEL_API_KEY",
+            "TAVILY_API_KEY",
+            "SEARXNG_URL",
+            "BRAVE_SEARCH_API_KEY",
+        ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("EXA_API_KEY", "exa-key")
         monkeypatch.setattr(web_tools, "_is_tool_gateway_ready", lambda: False)
@@ -251,9 +314,17 @@ class TestDDGSBackendWiring:
 
     def test_auto_detect_picks_ddgs_as_last_resort(self, monkeypatch):
         from tools import web_tools
+
         monkeypatch.setattr(web_tools, "_load_web_config", lambda: {})
-        for key in ("FIRECRAWL_API_KEY", "FIRECRAWL_API_URL", "PARALLEL_API_KEY",
-                    "TAVILY_API_KEY", "EXA_API_KEY", "SEARXNG_URL", "BRAVE_SEARCH_API_KEY"):
+        for key in (
+            "FIRECRAWL_API_KEY",
+            "FIRECRAWL_API_URL",
+            "PARALLEL_API_KEY",
+            "TAVILY_API_KEY",
+            "EXA_API_KEY",
+            "SEARXNG_URL",
+            "BRAVE_SEARCH_API_KEY",
+        ):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setattr(web_tools, "_is_tool_gateway_ready", lambda: False)
         monkeypatch.setattr(web_tools, "_ddgs_package_importable", lambda: True)
@@ -261,6 +332,7 @@ class TestDDGSBackendWiring:
 
     def test_check_web_api_key_true_when_ddgs_configured(self, monkeypatch):
         from tools import web_tools
+
         monkeypatch.setattr(web_tools, "_load_web_config", lambda: {"backend": "ddgs"})
         monkeypatch.setattr(web_tools, "_ddgs_package_importable", lambda: True)
         assert web_tools.check_web_api_key() is True
@@ -279,6 +351,7 @@ class TestDDGSSearchOnlyErrors:
         self._register_providers()
         yield
         from agent.web_search_registry import _reset_for_tests
+
         _reset_for_tests()
 
     def test_web_extract_returns_search_only_error(self, monkeypatch):
@@ -288,11 +361,14 @@ class TestDDGSSearchOnlyErrors:
         monkeypatch.setattr(web_tools, "_load_web_config", lambda: {"backend": "ddgs"})
         monkeypatch.setattr(web_tools, "_ddgs_package_importable", lambda: True)
         monkeypatch.setattr(web_tools, "_is_tool_gateway_ready", lambda: False)
+
         async def _allow_ssrf(_url: str) -> bool:
             return True
 
         monkeypatch.setattr(web_tools, "async_is_safe_url", _allow_ssrf)
-        monkeypatch.setattr("tools.interrupt.is_interrupted", lambda: False, raising=False)
+        monkeypatch.setattr(
+            "tools.interrupt.is_interrupted", lambda: False, raising=False
+        )
 
         result_str = asyncio.get_event_loop().run_until_complete(
             web_tools.web_extract_tool(["https://example.com"])
@@ -300,4 +376,6 @@ class TestDDGSSearchOnlyErrors:
         result = json.loads(result_str)
         assert result["success"] is False
         assert "search-only" in result["error"].lower()
-        assert "duckduckgo" in result["error"].lower() or "ddgs" in result["error"].lower()
+        assert (
+            "duckduckgo" in result["error"].lower() or "ddgs" in result["error"].lower()
+        )
