@@ -34,6 +34,7 @@ required (the caller tracks "already nudged this run" to avoid spamming).
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -57,6 +58,8 @@ _FAILURE_MARKERS = (
     "exit status",
     "is not recognized",
     "could not be found",
+    "no results",
+    "no results found",
 )
 
 _EXIT_CODE_RE = re.compile(r"exit code[:\s]+([1-9]\d*)", re.IGNORECASE)
@@ -69,49 +72,52 @@ _EXIT_CODE_RE = re.compile(r"exit code[:\s]+([1-9]\d*)", re.IGNORECASE)
 _NON_RETRYABLE = frozenset({"timeout", "permission", "missing_command", "limit"})
 _NONRETRY_THRESHOLD = 2
 
+# Idempotent tools that are especially prone to content-free repetition and that
+# the issue evidence shows spiraling with no progress even when individual calls
+# return "success". Count these as non-progress after a shorter run so the model
+# is nudged toward a different query / tool / strategy.
+_SHORT_CIRCUIT_IDEMPOTENT = frozenset({"search_files", "web_search", "web_extract"})
+_SHORT_CIRCUIT_REPEAT_THRESHOLD = 4
+
 # Mutating tools get LOWER thresholds than idempotent tools because a fixation
 # on mutating operations (writing files, running commands) is more costly and
 # indicates a deeper strategy problem (#432).
-_IDEMPOTENT_TOOLS = frozenset(
-    {
-        "read_file",
-        "search_files",
-        "web_search",
-        "web_extract",
-        "session_search",
-        "browser_snapshot",
-        "browser_console",
-        "browser_get_images",
-        "mcp_filesystem_read_file",
-        "mcp_filesystem_read_text_file",
-        "mcp_filesystem_read_multiple_files",
-        "mcp_filesystem_list_directory",
-        "mcp_filesystem_list_directory_with_sizes",
-        "mcp_filesystem_directory_tree",
-        "mcp_filesystem_get_file_info",
-        "mcp_filesystem_search_files",
-    }
-)
-_MUTATING_TOOLS = frozenset(
-    {
-        "terminal",
-        "execute_code",
-        "write_file",
-        "patch",
-        "todo",
-        "memory",
-        "skill_manage",
-        "browser_click",
-        "browser_type",
-        "browser_press",
-        "browser_scroll",
-        "browser_navigate",
-        "send_message",
-        "cronjob",
-        "delegate_task",
-        "process",
-    }
-)
+_IDEMPOTENT_TOOLS = frozenset({
+    "read_file",
+    "search_files",
+    "web_search",
+    "web_extract",
+    "session_search",
+    "browser_snapshot",
+    "browser_console",
+    "browser_get_images",
+    "mcp_filesystem_read_file",
+    "mcp_filesystem_read_text_file",
+    "mcp_filesystem_read_multiple_files",
+    "mcp_filesystem_list_directory",
+    "mcp_filesystem_list_directory_with_sizes",
+    "mcp_filesystem_directory_tree",
+    "mcp_filesystem_get_file_info",
+    "mcp_filesystem_search_files",
+})
+_MUTATING_TOOLS = frozenset({
+    "terminal",
+    "execute_code",
+    "write_file",
+    "patch",
+    "todo",
+    "memory",
+    "skill_manage",
+    "browser_click",
+    "browser_type",
+    "browser_press",
+    "browser_scroll",
+    "browser_navigate",
+    "send_message",
+    "cronjob",
+    "delegate_task",
+    "process",
+})
 # Default thresholds: lower for mutating tools, higher for idempotent (#432).
 # Mutating:  repeat at 4, fail at 2, escalate at 8
 # Idempotent: repeat at 8, fail at 4, escalate at 15
@@ -143,17 +149,77 @@ def _looks_like_failure(content: Any) -> bool:
     return bool(_EXIT_CODE_RE.search(content))
 
 
-def _recent_tool_runs(messages: List[Dict[str, Any]]) -> List[Tuple[str, bool, Optional[str]]]:
-    """Most-recent-first list of (single_tool_name, result_failed, failure_class)
+def _tool_call_arg_hash(tool_calls: List[Dict[str, Any]]) -> Optional[str]:
+    """Canonical key of the INPUT arguments of an assistant turn's tool call(s).
+
+    Used to detect identical-query repetition for spiral-prone idempotent tools
+    like web_search / web_extract (#467): the same query produces the same
+    non-progressing result and drives a loop.
+
+    Identity is read from ``tool_calls[].function.arguments`` — the ACTUAL call
+    inputs — NOT from the tool result. Tool results do not carry the input args,
+    and web_search / web_extract outputs are XML-wrapped in
+    ``<untrusted_tool_result>`` so they can never be parsed back into arguments;
+    reading identity from the result left this short-circuit permanently inert.
+
+    ``arguments`` may be a JSON string (the OpenAI wire format) or an already
+    parsed dict; both normalize to the same canonical key, and key ordering is
+    irrelevant. An unparseable string is hashed verbatim (still a stable
+    identity). Returns None when NO arguments can be recovered from any call, so
+    a turn with missing args never yields a false identity match (fail-safe: no
+    spurious short-circuit).
+    """
+    keys: List[str] = []
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function")
+        if not isinstance(fn, dict):
+            continue
+        raw = fn.get("arguments")
+        if raw is None:
+            continue
+        parsed: Any
+        if isinstance(raw, str):
+            s = raw.strip()
+            if not s:
+                continue
+            try:
+                parsed = json.loads(s)
+            except Exception:
+                keys.append(s)  # unparseable args: hash the raw string verbatim
+                continue
+        else:
+            parsed = raw
+        try:
+            keys.append(
+                json.dumps(
+                    parsed, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+                )
+            )
+        except (TypeError, ValueError):
+            keys.append(repr(parsed))
+    if not keys:
+        return None
+    return "|".join(keys)
+
+
+def _recent_tool_runs(
+    messages: List[Dict[str, Any]],
+) -> List[Tuple[str, bool, Optional[str], Optional[str]]]:
+    """Most-recent-first list of
+    (single_tool_name, result_failed, failure_class, arg_hash)
     for the trailing run of assistant turns that each called EXACTLY ONE tool.
     ``failure_class`` is the tool_diagnostics category of the failing result (or
-    None when the turn did not fail).
+    None when the turn did not fail). ``arg_hash`` is a canonical key of the
+    assistant tool-call INPUT arguments for the turn (``function.arguments``),
+    when they can be recovered.
 
     Stops at the first assistant turn that is not a single-tool call (a text
     reply, or a multi-tool turn) — that breaks the "stuck on one tool" run.
     Multi-tool turns are normal varied work, not a single-tool spiral.
     """
-    runs: List[Tuple[str, bool, Optional[str]]] = []
+    runs: List[Tuple[str, bool, Optional[str], Optional[str]]] = []
     i = len(messages) - 1
     # Collect tool results by id as we walk back so we can mark failures.
     while i >= 0:
@@ -161,9 +227,7 @@ def _recent_tool_runs(messages: List[Dict[str, Any]]) -> List[Tuple[str, bool, O
         if msg.get("role") == "assistant" and msg.get("tool_calls"):
             tcs = [tc for tc in msg["tool_calls"] if isinstance(tc, dict)]
             names = [
-                tc.get("function", {}).get("name")
-                for tc in tcs
-                if tc.get("function")
+                tc.get("function", {}).get("name") for tc in tcs if tc.get("function")
             ]
             names = [n for n in names if n]
             if len(set(names)) != 1:
@@ -171,6 +235,9 @@ def _recent_tool_runs(messages: List[Dict[str, Any]]) -> List[Tuple[str, bool, O
             tool = names[0]
             if runs and tool != runs[0][0]:
                 break  # tool changed — the same-tool run ends here
+            # Identity for #467 same-query detection comes from the call INPUT
+            # args of THIS assistant turn, not the result that follows it.
+            arg_hash = _tool_call_arg_hash(tcs)
             # Results for this turn are the "tool" messages that follow it.
             failed = False
             category: Optional[str] = None
@@ -178,10 +245,11 @@ def _recent_tool_runs(messages: List[Dict[str, Any]]) -> List[Tuple[str, bool, O
                 tm = messages[j]
                 if tm.get("role") != "tool":
                     break
-                if _looks_like_failure(tm.get("content")):
+                content = tm.get("content")
+                if _looks_like_failure(content):
                     failed = True
-                    category = _failure_category(tm.get("content")) or category
-            runs.append((tool, failed, category))
+                    category = _failure_category(content) or category
+            runs.append((tool, failed, category, arg_hash))
             i -= 1
         elif msg.get("role") == "tool":
             i -= 1  # skip result messages; handled with their assistant turn
@@ -223,11 +291,13 @@ def maybe_nudge(
 ) -> Optional[str]:
     """Return a nudge string if the trailing single-tool run is stuck, else None.
 
-    Three trigger levels (each is lower for mutating tools than idempotent):
+    Trigger levels (each is lower for mutating tools than idempotent):
       1. Non-retryable failure class repeated twice (highest priority, #231)
       2. Generic failures >= fail_threshold
       3. Same tool called >= repeat_threshold times in a row
       4. Escalated interrupt at higher counts (#432)
+      5. Same *arguments* repeated for short-circuit idempotent tools
+         (search_files / web_search / web_extract) >= 4 times (#467)
 
     Returns None when the agent is making varied progress (not stuck).
     """
@@ -243,17 +313,29 @@ def maybe_nudge(
     is_unknown = cat == "unknown"
     if repeat_threshold is None:
         repeat_threshold = (
-            _MUTATING_REPEAT_THRESHOLD if (is_mutating or is_unknown)
+            _MUTATING_REPEAT_THRESHOLD
+            if (is_mutating or is_unknown)
             else _IDEMPOTENT_REPEAT_THRESHOLD
         )
     if fail_threshold is None:
         fail_threshold = (
-            _MUTATING_FAIL_THRESHOLD if (is_mutating or is_unknown)
+            _MUTATING_FAIL_THRESHOLD
+            if (is_mutating or is_unknown)
             else _IDEMPOTENT_FAIL_THRESHOLD
         )
     escalate_threshold = (
-        _MUTATING_ESCALATE_THRESHOLD if (is_mutating or is_unknown)
+        _MUTATING_ESCALATE_THRESHOLD
+        if (is_mutating or is_unknown)
         else _IDEMPOTENT_ESCALATE_THRESHOLD
+    )
+    short_circuit_threshold = (
+        _MUTATING_REPEAT_THRESHOLD
+        if (is_mutating or is_unknown)
+        else (
+            _SHORT_CIRCUIT_REPEAT_THRESHOLD
+            if tool in _SHORT_CIRCUIT_IDEMPOTENT
+            else repeat_threshold
+        )
     )
 
     # All entries in `runs` share the same tool (run breaks on tool change),
@@ -264,7 +346,7 @@ def maybe_nudge(
     consec_nonretry = 0
     nonretry_class: Optional[str] = None
     counting_nonretry = True
-    for _t, failed, category in same:
+    for _t, failed, category, _arg_hash in same:
         if failed:
             consec_fail += 1
         else:
@@ -311,6 +393,23 @@ def maybe_nudge(
             f"— report it concisely instead of retrying. Do not call `{tool}` "
             f"again the same way."
         )
+
+    # Same-argument repetition for known spiral-prone idempotent tools (#467).
+    # This catches web_search returning "no results" / search_files returning
+    # nothing, where each individual call technically "succeeded" but repeating
+    # the exact same query is still a loop.
+    if tool in _SHORT_CIRCUIT_IDEMPOTENT and count >= short_circuit_threshold:
+        arg_hashes = [r[3] for r in same if r[3] is not None]
+        if arg_hashes and len(set(arg_hashes)) == 1:
+            score = _tool_spiral_score(tool, count, short_circuit_threshold)
+            score_line = f"\n{score}" if score else ""
+            return (
+                f"[loop-guard] You have called `{tool}` {count} times with the "
+                f"SAME arguments and the result is not making progress.{score_line} "
+                f"Do NOT repeat `{tool}` with those identical arguments. Rephrase "
+                f"the query, broaden or narrow it, switch to a different information "
+                f"source, or state the blocker if no relevant results are available."
+            )
 
     if count >= repeat_threshold:
         # Build diversity score for the nudge.

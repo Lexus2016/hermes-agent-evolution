@@ -6,6 +6,8 @@ use higher thresholds. Tests use ``terminal`` (mutating, threshold=4) and
 ``read_file`` (idempotent, threshold=8) to exercise both paths.
 """
 
+import json
+
 from agent.loop_guard import current_run_signature, maybe_nudge
 
 
@@ -78,7 +80,9 @@ class TestFailureTrigger:
         assert maybe_nudge(msgs) is not None
 
     def test_mcp_unreachable_failures(self):
-        msgs = _run("mcp_tqmemory_health", 3, result="server unreachable: ClosedResourceError")
+        msgs = _run(
+            "mcp_tqmemory_health", 3, result="server unreachable: ClosedResourceError"
+        )
         n = maybe_nudge(msgs)
         # mcp_tqmemory_health is not in mutating/idempotent sets, so 'unknown'
         # category uses the safer (lower) default -> mutating thresholds.
@@ -97,7 +101,11 @@ class TestNonRetryableTrigger:
         assert n is not None and "non-retryable" in n and "permission" in n
 
     def test_two_timeouts_stop_hard(self):
-        n = maybe_nudge(_run("terminal", 2, result="failure-class=timeout — The operation timed out"))
+        n = maybe_nudge(
+            _run(
+                "terminal", 2, result="failure-class=timeout — The operation timed out"
+            )
+        )
         assert n is not None and "non-retryable" in n and "timeout" in n
 
     def test_single_deterministic_failure_is_quiet(self):
@@ -186,3 +194,85 @@ class TestRunBoundaries:
             ],
         })
         assert maybe_nudge(msgs) is None  # varied multi-tool work, not a spiral
+
+
+class TestSameQueryShortCircuit:
+    """#467 — a spiral-prone idempotent tool (web_search / web_extract /
+    search_files) called repeatedly with the SAME input arguments (the query)
+    is a loop even though each call technically 'succeeds'.
+
+    The identity of a call MUST be derived from the assistant tool-call INPUT
+    arguments (``tool_calls[].function.arguments``), NOT from the tool result:
+    results do not carry the input args, and web_search / web_extract outputs
+    are XML-wrapped in ``<untrusted_tool_result>`` so they never parse back into
+    arguments. Reading identity from the result left this short-circuit inert.
+    """
+
+    def _web_run(self, queries, *, tool="web_search", result="3 relevant hits"):
+        """One assistant turn per query (single web-tool call), each with a
+        NON-failing result. ``queries`` items may be JSON-string OR dict args."""
+        msgs = [{"role": "user", "content": "research the topic"}]
+        for i, q in enumerate(queries):
+            cid = f"c{i}"
+            args = q if isinstance(q, str) else json.dumps(q)
+            msgs.append(_asst(tool, args=args, call_id=cid))
+            msgs.append(_result(result, call_id=cid))
+        return msgs
+
+    def test_same_query_fires_short_circuit(self):
+        # 4 identical queries: >= short-circuit threshold (4) and < idempotent
+        # repeat threshold (8), so ONLY the #467 same-query path can fire here.
+        msgs = self._web_run(['{"query": "best cat food"}'] * 4)
+        n = maybe_nudge(msgs)
+        assert n is not None
+        assert "SAME arguments" in n and "web_search" in n and "loop-guard" in n
+
+    def test_same_query_dict_args_fires(self):
+        # function.arguments may already be a parsed dict, not a JSON string.
+        # Build messages directly so a real dict reaches the call args and the
+        # dict branch of the identity hash is exercised (not the string path).
+        msgs = [{"role": "user", "content": "research the topic"}]
+        for i in range(4):
+            cid = f"c{i}"
+            msgs.append(_asst("web_search", args={"query": "best cat food"}, call_id=cid))
+            msgs.append(_result("3 relevant hits", call_id=cid))
+        n = maybe_nudge(msgs)
+        assert n is not None and "SAME arguments" in n
+
+    def test_same_query_arg_key_order_insensitive(self):
+        # Canonical identity: differently-ordered keys are the SAME query.
+        msgs = self._web_run([
+            '{"query": "cats", "limit": 5}',
+            '{"limit": 5, "query": "cats"}',
+            '{"query": "cats", "limit": 5}',
+            '{"limit": 5, "query": "cats"}',
+        ])
+        n = maybe_nudge(msgs)
+        assert n is not None and "SAME arguments" in n
+
+    def test_web_extract_same_query_fires(self):
+        msgs = self._web_run(['{"url": "https://x.test"}'] * 4, tool="web_extract")
+        n = maybe_nudge(msgs)
+        assert n is not None and "SAME arguments" in n and "web_extract" in n
+
+    def test_different_queries_no_short_circuit(self):
+        # 4 DIFFERENT queries: no same-query short-circuit, and below the
+        # idempotent repeat threshold (8) -> no nudge at all. No false positive.
+        msgs = self._web_run([
+            '{"query": "cat food"}',
+            '{"query": "dog food"}',
+            '{"query": "fish tanks"}',
+            '{"query": "bird cages"}',
+        ])
+        assert maybe_nudge(msgs) is None
+
+    def test_different_queries_still_spiral_at_repeat_threshold(self):
+        # 8 DIFFERENT web_search queries: the same-query short-circuit must NOT
+        # fire (varied args), but the GENERIC mono-tool spiral detection still
+        # triggers at the idempotent repeat threshold (8). Proves the fix leaves
+        # spiral detection intact and does not over-trigger on varied queries.
+        msgs = self._web_run([f'{{"query": "topic {i}"}}' for i in range(8)])
+        n = maybe_nudge(msgs)
+        assert n is not None
+        assert "SAME arguments" not in n  # not the #467 short-circuit
+        assert "web_search" in n  # the generic spiral nudge still fires
