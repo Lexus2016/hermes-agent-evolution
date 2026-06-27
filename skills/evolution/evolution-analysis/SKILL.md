@@ -238,10 +238,25 @@ final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + 
     capability) must NOT be selected for monolithic implementation — that is how
     big work fails at the merge gate, so the agent learns to avoid hard tasks
     (the opposite of "best at any level"). Instead, **decompose it first**: open
-    linked child issues (label `needs-decomposition` on the parent, reference the
-    parent in each child), each a shippable slice with `effort ≤ 0.6`, then let
-    those children compete normally. Select children, not the monolith. This is
-    how the agent takes on complexity without choking on it.
+    linked child issues, label the parent `needs-split` (the canonical
+    decomposition label), reference the parent in each child, and make each
+    child a shippable slice with `effort ≤ 0.6`, then let those children compete
+    normally. Select children, not the monolith. This is how the agent takes on
+    complexity without choking on it.
+
+    After creating child issues, update the parent issue with the decomposition so
+    the owner can see the plan at a glance:
+    ```bash
+    gh label create needs-split --color d4c5f9 \
+      --description "Wanted, but exceeds one cycle — needs decomposition" 2>/dev/null || true
+    gh issue edit <parent#> --repo Lexus2016/hermes-agent-evolution \
+      --add-label needs-split 2>/dev/null || true
+    gh issue comment <parent#> --repo Lexus2016/hermes-agent-evolution \
+      --body "Decomposed into child issues:\n- #<child1>\n- #<child2>"
+    ```
+    A `needs-split` parent without child issues is NOT ready for implementation
+    and will be skipped by the implementation gate (see evolution-implementation
+    step 1c).
 
 6c. **Realized-impact feedback — don't evolve blind (goal 3).** Read the sidecar
     `~/.hermes/profiles/user1/evolution/realized-impact.txt` (one

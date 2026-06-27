@@ -26,6 +26,21 @@ Implement selected issues, create versions, and self-update.
     with `"skipped": "stale analysis input (<date>) — upstream stage failed"`
     and STOP. Acting on outdated decisions is worse than skipping a cycle.
 
+1c. **Mandatory decomposition gate — NEVER select an issue for implementation
+    if it is flagged `needs-split` and has no decomposed child issues.** After
+    loading the selection and before branching, hydrate each selected issue's
+    labels and comments. If an issue carries the `needs-split` label, query
+    GitHub for child issues (open or closed) that reference this issue by number
+    in their title or body, or carry a parent-link label. If none exist, SKIP it,
+    keep the issue OPEN with the `needs-split` label, and log the reason. This
+    makes the analysis stage's decomposition rule blocking rather than advisory.
+
+    ```bash
+    # Example child-issue check (heuristic: title/body references #N or a parent label)
+    gh issue list --repo Lexus2016/hermes-agent-evolution --state all \
+      --search "#<N>" --json number,title,labels
+    ```
+
 1a0. **`next-increment` issues — CONTINUE a multi-phase roadmap feature.** If a
     selected issue is labelled `next-increment`, a PRIOR increment already MERGED
     and integration left a continuation brief in the comments listing what REMAINS
@@ -219,6 +234,11 @@ gh pr create --base main --head evolution/issue-123-feature-name \
 #   gh pr create --base main --head evolution/issue-123-feature-name \
 #     --title "feat: <feature name> — increment 1 of #123" \
 #     --body $'First coherent slice of #123.\n\nDeferred (next increment):\n- step 2 ...\n- step 3 ...'
+
+# Decomposition gate — when a selected issue was skipped because it is flagged
+# `needs-split` and has no child issues, do NOT create a branch/PR. Leave the
+# issue open with the `needs-split` label and record the skip in the
+# implementation report under `skipped` with reason `needs-decomposition`.
 ```
 
 Once the PR is open, flip the issue to `accepted` so the owner sees — straight
@@ -263,6 +283,44 @@ it pulls a new release from `origin/main` (our fork) AFTER the PR has passed
 CI and been merged into `main`, with built-in backup + auto-rollback. The skill does NOT
 call `git pull` and does NOT restart the gateway itself — otherwise the agent
 would update itself in the middle of its own work.
+
+## Output
+
+After each run, append a Markdown report to
+`~/.hermes/profiles/user1/evolution/implementation/YYYY-MM-DD.md` with the
+following structure:
+
+```markdown
+# Evolution Implementation Report — 2026-06-27
+
+## Summary
+- Selected issues: 3
+- Implemented: 1
+- Skipped: 1
+- Rejected: 1
+
+## Implemented
+- #580: Pre-PR local test runner for the targeted change
+  - PR: #575
+  - Branch: `evolution/issue-580-test-shard`
+  - Files: `scripts/evolution_test_shard.py`, `tests/scripts/test_evolution_test_shard.py`
+  - Checks: lint ✓, format ✓, targeted tests ✓
+
+## Skipped
+- #579: Mandatory small-slice decomposition before implementation selection
+  - Reason: `needs-decomposition` — not a code change, requires skill-policy
+    revision. Defer to a dedicated skill-editing cycle with owner review.
+
+## Rejected
+- #578: Closed-PR postmortem miner
+  - Reason: `out-of-scope` — no closed-PR mining infrastructure exists in the
+    current repo; would require GitHub API pagination and persistent storage that
+    outstrips a single-cycle change.
+```
+
+The report is append-only (one file per calendar day) so multiple runs in the same
+day accumulate rather than overwrite. Use `## Run HH:MM` sub-headings if a report
+already exists.
 
 ## Safety — enforced by the gate, not by self-assessment
 
