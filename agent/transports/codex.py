@@ -5,45 +5,10 @@ This transport owns format conversion and normalization — NOT client lifecycle
 streaming, or the _run_codex_stream() call path.
 """
 
-import hashlib
-import json
 from typing import Any, Dict, List, Optional
 
 from agent.transports.base import ProviderTransport
 from agent.transports.types import NormalizedResponse, ToolCall
-
-
-def _content_cache_key(instructions: str, tools: Optional[List[Dict[str, Any]]]) -> Optional[str]:
-    """Content-address the prompt cache key from the static request prefix.
-
-    Returns ``pck_<sha256[:24]>`` of (instructions + sorted tool schemas), or
-    None when there is nothing static to key on. The cache key is a routing
-    hint only — never a correctness boundary — so two requests sharing a system
-    prompt and tool set intentionally resolve to the same warm prefix bucket.
-
-    The fix this exists for: recurring cron jobs build session_id as
-    ``cron_<id>_<timestamp>``, so using session_id as the cache key made every
-    fire cache-cold. The static prefix (identity + tools) is identical across
-    fires, so hashing it gives a stable key that stays warm within the
-    provider's cache TTL. Sorting tools by name keeps the hash insertion-order
-    independent.
-    """
-    if not instructions and not tools:
-        return None
-    tools_part = ""
-    if tools:
-        sorted_tools = sorted(
-            (t for t in tools if isinstance(t, dict)),
-            key=lambda t: str(t.get("name") or t.get("type") or ""),
-        )
-        tools_part = json.dumps(
-            sorted_tools, sort_keys=True, ensure_ascii=False, separators=(",", ":")
-        )
-    # \x00 separator so instructions ending in the tool JSON can't collide with
-    # a request whose instructions contain that JSON and whose tools are empty.
-    content = f"{instructions or ''}\x00{tools_part}"
-    digest = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:24]
-    return f"pck_{digest}"
 
 
 class ResponsesApiTransport(ProviderTransport):
@@ -256,25 +221,26 @@ class ResponsesApiTransport(ProviderTransport):
             kwargs["parallel_tool_calls"] = True
 
         session_id = params.get("session_id")
-        # Prompt-cache scope key. Resolution order (each a routing hint, never a
-        # correctness boundary — a stale key only costs a cache miss):
-        #   1. An explicit ``cache_key`` passed by the caller. The fork's cron
-        #      path threads ``cache_key="cron_<id>"`` (stable per job) all the
-        #      way from cron/scheduler.py through Agent → chat_completion_helpers,
-        #      so honour it first — recurring jobs that opt in keep one warm
-        #      bucket per job regardless of how the static prefix is hashed.
-        #   2. Upstream's content-addressed key from the static prefix
-        #      (instructions + tools). Recurring cron jobs carry a per-fire
-        #      timestamp in session_id (cron_<id>_<ts>) that made every run
-        #      cache-cold; hashing the (identical across fires) static prefix
-        #      keeps the bucket warm even for callers that pass no cache_key.
-        #   3. session_id, left untouched for transcript isolation and the
-        #      cache-scope routing headers below.
-        cache_key = (
-            params.get("cache_key")
-            or _content_cache_key(instructions, response_tools)
-            or session_id
-        )
+        # Prompt-cache scope key. The fork resolves cron cache-coldness by
+        # threading an explicit, stable ``cache_key="cron_<id>"`` from
+        # cron/scheduler.py through Agent → chat_completion_helpers, so recurring
+        # jobs keep one warm bucket per job while session_id stays per-fire for
+        # transcript isolation. Interactive callers pass no cache_key and fall
+        # back to session_id (byte-identical to before the parameter existed).
+        # This is a routing hint, never a correctness boundary — a stale key
+        # only costs a cache miss.
+        #
+        # NOTE (upstream sync #562): upstream independently solved the same cron
+        # cache-coldness by content-addressing the static prefix (instructions +
+        # tools) instead of an explicit key. That approach changes the
+        # *interactive* fallback (session_id → content hash) and the
+        # codex-backend routing-header value, which the fork's transport tests
+        # deliberately guard against (test_codex_backend_headers_use_cache_key,
+        # test_cache_key_falls_back_to_session_id). The fork's explicit-key
+        # design is kept; upstream's content-addressing was intentionally not
+        # layered in.
+        cache_key = params.get("cache_key") or session_id
+
         # xAI Responses takes prompt_cache_key in extra_body (set further
         # down); GitHub Models opts out of cache-key routing entirely.
         if not is_github_responses and not is_xai_responses and cache_key:
