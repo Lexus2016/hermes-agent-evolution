@@ -73,14 +73,14 @@ class ResponsesApiTransport(ProviderTransport):
             reasoning_config: dict | None — {effort, enabled}
             session_id: str | None — transcript/session id; drives the xAI
                 x-grok-conv-id header and the Codex cache-scope headers, and is
-                the final fallback prompt_cache_key when no explicit cache_key
-                is passed and there is no static prefix to content-address
+                the fallback prompt_cache_key when no explicit cache_key is passed
             cache_key: str | None — explicit prompt-cache scope key. When given
-                it takes precedence over the content-addressed key, letting
-                recurring callers (e.g. cron, which passes "cron_<id>") keep a
-                stable cache key across fires while session_id stays per-run for
-                transcript isolation. Absent → content-address the static prefix
-                → session_id
+                it takes precedence over session_id, letting recurring callers
+                (e.g. cron, which passes "cron_<id>") keep a stable cache key
+                across fires while session_id stays per-run for transcript
+                isolation. Absent → session_id (interactive path is
+                byte-identical to before the parameter existed)
+
             max_tokens: int | None — max_output_tokens
             timeout: float | None — per-request timeout forwarded to the SDK
             request_overrides: dict | None — extra kwargs merged in

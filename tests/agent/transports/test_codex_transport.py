@@ -130,6 +130,14 @@ class TestCodexBuildKwargs:
         assert eb.get("prompt_cache_key") == "caller-override"
         assert eb.get("other_field") == 42
 
+    def test_session_id_sets_cache_key(self, transport):
+        messages = [{"role": "user", "content": "Hi"}]
+        kw = transport.build_kwargs(
+            model="gpt-5.4", messages=messages, tools=[],
+            session_id="test-session-123",
+        )
+        assert kw.get("prompt_cache_key") == "test-session-123"
+
     def test_cache_key_overrides_session_id_for_prompt_cache(self, transport):
         """An explicit ``cache_key`` is used for prompt_cache_key, letting
         recurring callers (cron) keep a stable cache scope while session_id
