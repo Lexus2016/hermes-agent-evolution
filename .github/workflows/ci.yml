@@ -105,12 +105,6 @@ jobs:
     if: needs.detect.outputs.docker_meta == 'true'
     uses: ./.github/workflows/docker-lint.yml
 
-  docker:
-    name: Build&Test Docker image
-    needs: detect
-    if: needs.detect.outputs.python == 'true' || needs.detect.outputs.frontend == 'true' || needs.detect.outputs.docker_meta == 'true'
-    uses: ./.github/workflows/docker.yml
-
   supply-chain:
     name: Supply-chain scan
     needs: detect
@@ -146,8 +140,10 @@ jobs:
       - docker-lint
       - supply-chain
       - osv-scanner
-      # we don't require docker to pass rn because it's so slow lol
-      # - docker
+      # docker is NOT orchestrated here: this fork keeps docker.yml as a
+      # STANDALONE workflow (on: push/pull_request/release, PR-gated publish),
+      # not a reusable workflow_call job. Upstream's reusable ``docker:`` job
+      # was intentionally dropped during the #562 catch-up to match the fork.
     if: always()
     runs-on: ubuntu-latest
     steps:
