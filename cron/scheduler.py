@@ -2176,6 +2176,93 @@ def strip_reasoning_for_delivery(text: str) -> str:
     ).strip()
 
 
+# Tool-call task id that the top-level cron agent's file/terminal tools collapse
+# to (see tools/terminal_tool._resolve_container_task_id). The split-brain lives
+# on this shared env: its live cwd is file-tool priority #1 and shadows
+# $TERMINAL_CWD (#3) for a workdir job.
+_CRON_FILE_TOOL_TASK_ID = "default"
+
+
+def _seed_workdir_file_tools(workdir: str):
+    """Redirect the FILE-EDIT tools at *workdir* too — not just the terminal.
+
+    ``_run_job_impl`` already points ``TERMINAL_CWD`` at the job's workdir, which
+    the terminal/git tools read live. The file-edit tools (write_file/patch/...)
+    resolve relative paths through ``tools/file_tools._resolve_base_dir``, whose
+    top priority (#1) is the task's *live* terminal-env cwd. In a long-lived
+    gateway/daemon the shared ``"default"`` env still points at the runtime
+    checkout, so it shadows ``TERMINAL_CWD`` (#3): git honours the workdir while
+    ``write_file`` lands in the runtime mirror and dirties it (split-brain).
+
+    The fix is surgical: when such a live env exists, point ITS cwd at the
+    workdir. That single object is what both ``_resolve_base_dir`` (#1) and the
+    shell-backed ``ShellFileOperations`` read, so both file-tool paths follow the
+    workdir. When no live env exists yet the file tools already fall through to
+    ``$TERMINAL_CWD`` (#3) — but a terminal command run *during* the job lazily
+    creates the shared env seeded from ``$TERMINAL_CWD`` = workdir; left alone it
+    would persist and leak the workdir into a later (workdir-less) job (the same
+    way ``TERMINAL_CWD`` already leaks to such an env's git today). The returned
+    token records which case applied so :func:`_restore_workdir_file_tools` can
+    undo exactly what happened.
+
+    Returns an opaque restore token, or ``None`` if the terminal layer is
+    unavailable (fail-open: the job still runs with ``TERMINAL_CWD`` set).
+    """
+    try:
+        from tools import terminal_tool as _tt
+    except Exception:
+        return None
+    key = _CRON_FILE_TOOL_TASK_ID
+    with _tt._env_lock:
+        env = _tt._active_environments.get(key)
+        if env is not None and hasattr(env, "cwd"):
+            prior_cwd = env.cwd
+            env.cwd = workdir
+            return ("existing", env, prior_cwd)
+    return ("absent", None, None)
+
+
+def _restore_workdir_file_tools(token) -> None:
+    """Undo :func:`_seed_workdir_file_tools`.
+
+    ``existing``: restore the env's exact pre-job cwd (including ``None``) under
+    the env lock, mirroring the ``TERMINAL_CWD`` save/restore — the shared
+    ``"default"`` env returns to precisely its prior state, no leak.
+
+    ``absent``: neutralise any ``"default"`` env that was lazily created during
+    the job so its workdir cwd does not leak into a later, possibly
+    workdir-less, job. Non-destructive: only the ``cwd`` attribute is cleared
+    (no ``os.chdir``, no env teardown — the subprocess/container stays alive)
+    and the file-ops cache is dropped so a rebuilt ``ShellFileOperations``
+    re-reads the now-restored cwd. With a cleared cwd the file tools fall back
+    through ``$TERMINAL_CWD`` (restored) to the process cwd, exactly as a
+    workdir-less job expects.
+    """
+    if not token:
+        return
+    kind, env, prior_cwd = token
+    try:
+        from tools import terminal_tool as _tt
+
+        if kind == "existing":
+            with _tt._env_lock:
+                env.cwd = prior_cwd
+            return
+        key = _CRON_FILE_TOOL_TASK_ID
+        with _tt._env_lock:
+            lazy_env = _tt._active_environments.get(key)
+            if lazy_env is not None and hasattr(lazy_env, "cwd"):
+                lazy_env.cwd = None
+        try:
+            from tools.file_tools import clear_file_ops_cache
+
+            clear_file_ops_cache(key)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     """Execute a single cron job."""
     job_id = job["id"]
@@ -2458,9 +2545,17 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
         )
         _job_workdir = None
     _prior_terminal_cwd = os.environ.get("TERMINAL_CWD", "_UNSET_")
+    _workdir_file_redirect = None
     if _job_workdir:
         os.environ["TERMINAL_CWD"] = _job_workdir
         logger.info("Job '%s': using workdir %s", job_id, _job_workdir)
+        # TERMINAL_CWD above only redirects the terminal/git tools. Also point
+        # the file-edit tools at the workdir so relative writes land there
+        # instead of dirtying the runtime checkout (split-brain — see
+        # _seed_workdir_file_tools). Scoped + restored in finally, exactly like
+        # TERMINAL_CWD; tick() serializes workdir jobs so the shared in-process
+        # env state is safe to mutate for the duration of this job.
+        _workdir_file_redirect = _seed_workdir_file_tools(_job_workdir)
 
     try:
         # Re-read .env and config.yaml fresh every run so provider/key
@@ -3037,6 +3132,9 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
                 os.environ.pop("TERMINAL_CWD", None)
             else:
                 os.environ["TERMINAL_CWD"] = _prior_terminal_cwd
+            # Undo the file-edit-tool workdir redirect (cwd override + live env
+            # cwd), restoring the shared "default" env to its pre-job state.
+            _restore_workdir_file_tools(_workdir_file_redirect)
         # Clean up ContextVar session/delivery state for this job.
         clear_session_vars(_ctx_tokens)
         for _var_name in _cron_delivery_vars:
