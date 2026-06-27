@@ -72,11 +72,15 @@ class ResponsesApiTransport(ProviderTransport):
             instructions: str — system prompt (extracted from messages[0] if not given)
             reasoning_config: dict | None — {effort, enabled}
             session_id: str | None — transcript/session id; drives the xAI
-                conversation header and is the default prompt-cache scope
-            cache_key: str | None — explicit prompt-cache scope key; defaults
-                to session_id when absent. Lets recurring callers (e.g. cron)
-                keep a stable cache key across fires while session_id stays
-                per-run for transcript isolation
+                x-grok-conv-id header and the Codex cache-scope headers, and is
+                the fallback prompt_cache_key when no explicit cache_key is passed
+            cache_key: str | None — explicit prompt-cache scope key. When given
+                it takes precedence over session_id, letting recurring callers
+                (e.g. cron, which passes "cron_<id>") keep a stable cache key
+                across fires while session_id stays per-run for transcript
+                isolation. Absent → session_id (interactive path is
+                byte-identical to before the parameter existed)
+
             max_tokens: int | None — max_output_tokens
             timeout: float | None — per-request timeout forwarded to the SDK
             request_overrides: dict | None — extra kwargs merged in
@@ -217,13 +221,26 @@ class ResponsesApiTransport(ProviderTransport):
             kwargs["parallel_tool_calls"] = True
 
         session_id = params.get("session_id")
-        # Prompt-cache scope key. Defaults to session_id so interactive
-        # behavior is byte-identical, but callers whose session_id changes on
-        # every invocation (recurring cron jobs use cron_<id>_<timestamp>) can
-        # pass a stable ``cache_key`` so repeated runs reuse the warm static
-        # prefix instead of paying a cold cache on each fire. This is a routing
-        # hint, never a correctness boundary — a stale key only costs a miss.
+        # Prompt-cache scope key. The fork resolves cron cache-coldness by
+        # threading an explicit, stable ``cache_key="cron_<id>"`` from
+        # cron/scheduler.py through Agent → chat_completion_helpers, so recurring
+        # jobs keep one warm bucket per job while session_id stays per-fire for
+        # transcript isolation. Interactive callers pass no cache_key and fall
+        # back to session_id (byte-identical to before the parameter existed).
+        # This is a routing hint, never a correctness boundary — a stale key
+        # only costs a cache miss.
+        #
+        # NOTE (upstream sync #562): upstream independently solved the same cron
+        # cache-coldness by content-addressing the static prefix (instructions +
+        # tools) instead of an explicit key. That approach changes the
+        # *interactive* fallback (session_id → content hash) and the
+        # codex-backend routing-header value, which the fork's transport tests
+        # deliberately guard against (test_codex_backend_headers_use_cache_key,
+        # test_cache_key_falls_back_to_session_id). The fork's explicit-key
+        # design is kept; upstream's content-addressing was intentionally not
+        # layered in.
         cache_key = params.get("cache_key") or session_id
+
         # xAI Responses takes prompt_cache_key in extra_body (set further
         # down); GitHub Models opts out of cache-key routing entirely.
         if not is_github_responses and not is_xai_responses and cache_key:
