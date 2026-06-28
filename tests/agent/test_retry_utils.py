@@ -30,10 +30,10 @@ def test_extract_retry_after_seconds_http_date_past():
     assert extract_retry_after_seconds(past) == 0.0
 
 
-def test_extract_retry_after_seconds_caps_at_300():
-    parsed = extract_retry_after_seconds("600")
+def test_extract_retry_after_seconds_caps_at_600():
+    parsed = extract_retry_after_seconds("900")
     assert parsed is not None
-    assert parsed == 300.0
+    assert parsed == 600.0
 
 
 def test_extract_retry_after_seconds_invalid_returns_none():

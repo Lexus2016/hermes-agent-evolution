@@ -501,6 +501,75 @@ def _scan_mcp_description(server_name: str, tool_name: str, description: str) ->
     return findings
 
 
+def _scan_mcp_tool(
+    server_name: str, tool_name: str, description: str
+) -> Dict[str, Any]:
+    """Scan an MCP tool name and description and return a structured risk report.
+
+    Severity is the maximum severity across the name and description findings.
+    Findings are prefixed with the field they came from via the 'field' key.
+    """
+    severity_order = {"clean": 0, "low": 1, "medium": 2, "high": 3}
+
+    def _scan_text(text: str, field: str) -> Dict[str, Any]:
+        findings: List[Dict[str, str]] = []
+        if not text:
+            return {
+                "server": server_name,
+                "tool": tool_name,
+                "field": field,
+                "clean": True,
+                "severity": "clean",
+                "findings": findings,
+            }
+        for pattern, reason in _MCP_INJECTION_PATTERNS:
+            if pattern.search(text):
+                findings.append({
+                    "category": reason,
+                    "severity": "high",
+                    "reason": reason,
+                })
+        if findings:
+            logger.warning(
+                "MCP server '%s' tool '%s': suspicious %s content — %s. Text: %.200s",
+                server_name,
+                tool_name,
+                field,
+                "; ".join(f["reason"] for f in findings),
+                text,
+            )
+        max_severity = max(
+            (f["severity"] for f in findings),
+            key=lambda s: severity_order.get(s, 0),
+            default="clean",
+        )
+        return {
+            "server": server_name,
+            "tool": tool_name,
+            "field": field,
+            "clean": not findings,
+            "severity": max_severity,
+            "findings": findings,
+        }
+
+    name_report = _scan_text(tool_name, field="name")
+    desc_report = _scan_text(description, field="description")
+    merged_findings = list(name_report["findings"]) + list(desc_report["findings"])
+    max_severity = max(
+        (f["severity"] for f in merged_findings),
+        key=lambda s: severity_order.get(s, 0),
+        default="clean",
+    )
+    return {
+        "server": server_name,
+        "tool": tool_name,
+        "clean": not merged_findings,
+        "severity": max_severity,
+        "findings": merged_findings,
+        "reports": {"name": name_report, "description": desc_report},
+    }
+
+
 def _prepend_path(env: dict, directory: str) -> dict:
     """Prepend *directory* to env PATH if it is not already present."""
     updated = dict(env or {})
@@ -2537,6 +2606,7 @@ class MCPServerTask:
 _servers: Dict[str, MCPServerTask] = {}
 _server_connecting: set[str] = set()
 _server_connect_errors: Dict[str, str] = {}
+_server_risk_flags: Dict[str, bool] = {}
 
 # Circuit breaker: consecutive error counts per server.  After
 # _CIRCUIT_BREAKER_THRESHOLD consecutive failures, the handler returns
@@ -4088,8 +4158,37 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
             logger.debug("MCP server '%s': skipping tool '%s' (filtered by config)", name, mcp_tool.name)
             continue
 
-        # Scan tool description for prompt injection patterns
-        _scan_mcp_description(name, mcp_tool.name, mcp_tool.description or "")
+        # Scan tool name and description for prompt-injection patterns.
+        report = _scan_mcp_tool(name, mcp_tool.name, mcp_tool.description or "")
+        warn_only = config.get("security", {}).get("warn_only", False)
+        if report["severity"] == "high":
+            if warn_only:
+                logger.warning(
+                    "MCP server '%s': tool '%s' has HIGH-SEVERITY risk findings "
+                    "(%s) but security.warn_only is true — registering anyway",
+                    name,
+                    mcp_tool.name,
+                    "; ".join(
+                        f"{f['category']}: {f['reason']}" for f in report["findings"]
+                    ),
+                )
+                _server_risk_flags[name] = True
+            else:
+                logger.warning(
+                    "MCP server '%s': BLOCKED tool '%s' due to high-severity "
+                    "risk findings: %s",
+                    name,
+                    mcp_tool.name,
+                    "; ".join(
+                        f"{f['category']}: {f['reason']}" for f in report["findings"]
+                    ),
+                )
+                _server_risk_flags[name] = True
+                continue
+        else:
+            # No high-severity findings for this tool; keep any previously
+            # recorded flag for the server if another tool already triggered it.
+            _server_risk_flags.setdefault(name, False)
 
         schema = _convert_mcp_schema(name, mcp_tool)
         tool_name_prefixed = schema["name"]
@@ -4173,6 +4272,7 @@ async def _discover_and_register_server(name: str, config: dict) -> List[str]:
         _server_connecting.discard(name)
         _server_connect_errors.pop(name, None)
         _servers[name] = server
+        _server_risk_flags.pop(name, None)
 
     registered_names = _register_server_tools(name, server, config)
     server._registered_tool_names = list(registered_names)
@@ -4362,6 +4462,11 @@ def is_mcp_tool_parallel_safe(tool_name: str) -> bool:
     with _lock:
         server_name = _mcp_tool_server_names.get(tool_name)
         return bool(server_name and server_name in _parallel_safe_servers)
+
+
+def _is_high_risk_mcp_server(name: str) -> bool:
+    """Return whether the named MCP server had any high-severity blocked tool."""
+    return _server_risk_flags.get(name, False)
 
 
 def get_mcp_status() -> List[dict]:

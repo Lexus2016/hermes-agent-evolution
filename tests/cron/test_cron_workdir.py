@@ -653,9 +653,11 @@ class TestRunJobWorkdirFileTools:
         prior_env = tt._active_environments.get("default", _sentinel)
         prior_override = tt._task_env_overrides.get("default", _sentinel)
         prior_fileops = ft._file_ops_cache.get("default", _sentinel)
+        prior_last_known = ft._last_known_cwd.get("default", _sentinel)
         tt._active_environments.pop("default", None)
         tt._task_env_overrides.pop("default", None)
         ft._file_ops_cache.pop("default", None)
+        ft._last_known_cwd.pop("default", None)
         try:
             observed: dict = {}
             TestRunJobTerminalCwd._install_stubs(monkeypatch, observed)
@@ -702,6 +704,7 @@ class TestRunJobWorkdirFileTools:
                 (tt._active_environments, "default", prior_env),
                 (tt._task_env_overrides, "default", prior_override),
                 (ft._file_ops_cache, "default", prior_fileops),
+                (ft._last_known_cwd, "default", prior_last_known),
             ):
                 if val is _sentinel:
                     store.pop(key, None)
