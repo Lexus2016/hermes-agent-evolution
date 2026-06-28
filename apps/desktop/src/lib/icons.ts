@@ -56,7 +56,6 @@ import {
   IconLock as Lock,
   IconLogin as LogIn,
   IconMail as Mail,
-  IconMaximize as Maximize,
   IconMessageCircle as MessageCircle,
   IconMessageQuestion as MessageQuestion,
   IconMessage2 as MessageSquareText,
@@ -106,9 +105,7 @@ import {
   IconX as X,
   IconX as XIcon,
   IconBolt as Zap,
-  IconBoltFilled as ZapFilled,
-  IconZoomIn as ZoomIn,
-  IconZoomOut as ZoomOut
+  IconBoltFilled as ZapFilled
 } from '@tabler/icons-react'
 
 export {
@@ -169,7 +166,6 @@ export {
   Lock,
   LogIn,
   Mail,
-  Maximize,
   MessageCircle,
   MessageQuestion,
   MessageSquareText,
@@ -219,9 +215,7 @@ export {
   X,
   XIcon,
   Zap,
-  ZapFilled,
-  ZoomIn,
-  ZoomOut
+  ZapFilled
 }
 
 export type { Icon as IconComponent } from '@tabler/icons-react'

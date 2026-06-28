@@ -5613,6 +5613,7 @@ def _run_conversation_impl(
                     # terminal. Keep a debug breadcrumb in agent.log for tracing.
                     logger.debug("verification stop-loop nudge issued (attempt %d)",
                                  agent._verification_stop_nudges)
+                    agent._emit_status("↻ Verification required before finishing")
                     continue
 
                 messages.append(final_msg)
