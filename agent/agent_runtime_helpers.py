@@ -1278,7 +1278,52 @@ def dump_api_request_debug(
                 except Exception as e:
                     _ra().logger.debug("Could not extract error response details: %s", e)
 
+            # Structured failure category from the shared classifier (#236): so a
+            # RuntimeError and a BadRequestError from the same model no longer look
+            # identical at the dump level, and introspection (#238) can group
+            # provider failures by recovery class instead of raw exception type.
+            # Pure classification — never touches dispatch/failover.
+            try:
+                from agent.error_classifier import classify_api_error
+
+                classified = classify_api_error(
+                    error,
+                    provider=getattr(agent, "provider", "") or "",
+                    model=getattr(agent, "model", "") or "",
+                )
+                error_info["failure_category"] = classified.reason.value
+                error_info["retryable"] = classified.retryable
+            except Exception as e:
+                _ra().logger.debug("Could not classify error for debug dump: %s", e)
+
             dump_payload["error"] = error_info
+
+            # ── Suppress duplicate dumps of identical failing payloads ─────
+            # Re-dumping the same ~1 MB request on every retry against a
+            # dead endpoint wastes disk I/O and can leak identical secrets
+            # repeatedly.  Cache the last dump per (session, failure category,
+            # request body hash) tuple and skip if the same dump was written
+            # within 60 seconds.
+            import hashlib
+            _body_for_hash = json.dumps(body, sort_keys=True, default=str)
+            _body_hash = hashlib.sha256(_body_for_hash.encode("utf-8")).hexdigest()[:32]
+            _failure_category = error_info.get("failure_category", "unknown")
+            _dump_cache_key = (agent.session_id, _failure_category, _body_hash)
+            _dump_cache = getattr(agent, "_request_dump_cache", None)
+            if _dump_cache is None:
+                _dump_cache = {}
+                agent._request_dump_cache = _dump_cache
+            _now = time.time()
+            _last_dump_time = _dump_cache.get(_dump_cache_key)
+            if _last_dump_time is not None and (_now - _last_dump_time) < 60:
+                _ra().logger.info(
+                    "Suppressing duplicate request dump for session %s (%s, %s) within 60s",
+                    agent.session_id,
+                    _failure_category,
+                    _body_hash,
+                )
+                return None
+            _dump_cache[_dump_cache_key] = _now
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         dump_file = agent.logs_dir / f"request_dump_{agent.session_id}_{timestamp}.json"
