@@ -852,3 +852,18 @@ class TestProbeApiModelsUserAgent:
         assert ua and ua.startswith("hermes-cli/")
         # No Authorization was set, but UA must still be present.
         assert req.get_header("Authorization") is None
+
+
+class TestValidateCuratedFallback:
+    def test_curated_model_not_in_live_api_is_accepted(self):
+        # "glm-5.2" is in _PROVIDER_MODELS for "zai" but we mock the live API to return other models
+        live_models = ["glm-5.1", "glm-5", "glm-4.7"]
+        result = _validate("glm-5.2", provider="zai", api_models=live_models)
+        assert result["accepted"] is True
+        assert result["persist"] is True
+        assert result["recognized"] is True
+        # Unified with upstream's curated-catalog acceptance path (#46850); the
+        # fork's earlier "recognized by Hermes" wording (#185) was superseded so
+        # the two parallel implementations no longer shadow each other.
+        assert "not found in the live /v1/models listing" in result["message"]
+        assert "curated catalog" in result["message"]

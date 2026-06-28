@@ -1,0 +1,25 @@
+# CODEOWNERS — critical-path review gate for autonomous self-evolution.
+#
+# When branch protection on `main` has "Require review from Code Owners"
+# enabled, any PR touching these paths needs @Lexus2016 approval before merge.
+# This stops the evolution agent (or a prompt-injected proposal) from
+# autonomously changing the self-update machinery, the scheduler, secrets
+# handling, or CI — the parts that, if compromised, would break the safety
+# gate itself. Everything else can flow through CI-gated automerge.
+
+# Self-update + install machinery
+/scripts/install_auto_update.sh    @Lexus2016
+/scripts/setup_evolution_bot.sh    @Lexus2016
+/scripts/register_evolution_cron.py @Lexus2016
+/upgrade.sh                        @Lexus2016
+/setup-hermes.sh                   @Lexus2016
+
+# Scheduler / cron core
+/cron/jobs.py                      @Lexus2016
+/cron/scheduler.py                 @Lexus2016
+
+# CI and repo automation (the gate itself)
+/.github/                          @Lexus2016
+
+# The evolution skills that decide what gets implemented/merged
+/skills/evolution/                 @Lexus2016

@@ -11,7 +11,8 @@ Pure module-level utilities extracted from ``run_agent.py``:
   ``_append_subdir_hint_to_multimodal`` — envelope helpers for the
   ``{"_multimodal": True, "content": [...], "text_summary": ...}`` dict
   shape returned by tools like ``computer_use``.
-* ``_extract_file_mutation_targets`` / ``_extract_error_preview`` —
+* ``_extract_file_mutation_targets`` / ``_extract_landed_file_mutation_paths`` /
+  ``_extract_error_preview`` —
   per-turn file-mutation verifier inputs.
 * ``_trajectory_normalize_msg`` — strip image blobs from a message for
   trajectory saving.
@@ -269,6 +270,35 @@ def _extract_file_mutation_targets(tool_name: str, args: Dict[str, Any]) -> List
     return []
 
 
+def _extract_landed_file_mutation_paths(
+    tool_name: str,
+    args: Dict[str, Any],
+    result: Any,
+) -> List[str]:
+    """Return the concrete file paths a successful mutation reports."""
+    targets = _extract_file_mutation_targets(tool_name, args)
+    if tool_name not in _FILE_MUTATING_TOOLS or not isinstance(result, str):
+        return targets
+    try:
+        data = json.loads(result.strip())
+    except Exception:
+        return targets
+    if not isinstance(data, dict):
+        return targets
+
+    files = data.get("files_modified")
+    if isinstance(files, list):
+        landed = [str(p) for p in files if p]
+        if landed:
+            return landed
+
+    resolved = data.get("resolved_path")
+    if resolved:
+        return [str(resolved)]
+
+    return targets
+
+
 def _extract_error_preview(result: Any, max_len: int = 180) -> str:
     """Pull a one-line error summary out of a tool result for footer display."""
     text = _multimodal_text_summary(result) if result is not None else ""
@@ -334,6 +364,17 @@ def make_tool_result_message(name: str, content: Any, tool_call_id: str) -> dict
     list structure stays valid for vision-capable adapters.
     """
     wrapped = _maybe_wrap_untrusted(name, content)
+    # Normalize failures into an actionable diagnostic hint (#130/#175): if the
+    # result looks like an error, append a one-line failure-class + recovery hint
+    # so the model adapts instead of retrying blindly. Trusted annotation, added
+    # AFTER any untrusted-content wrapper. Classify on the original content.
+    if isinstance(wrapped, str):
+        try:
+            from agent.tool_diagnostics import diagnostic_suffix
+
+            wrapped = wrapped + diagnostic_suffix(content)
+        except Exception:
+            pass
     return {
         "role": "tool",
         "name": name,
@@ -411,6 +452,7 @@ __all__ = [
     "_multimodal_text_summary",
     "_append_subdir_hint_to_multimodal",
     "_extract_file_mutation_targets",
+    "_extract_landed_file_mutation_paths",
     "_extract_error_preview",
     "_trajectory_normalize_msg",
     "make_tool_result_message",

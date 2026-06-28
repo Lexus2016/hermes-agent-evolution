@@ -31,6 +31,8 @@ def _bootstrap(monkeypatch, tmp_path):
     """Minimal GatewayRunner setup shared by all tests in this module."""
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    fake_dotenv.dotenv_values = lambda *a, **k: {}
+    fake_dotenv.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
 
     config = GatewayConfig()
@@ -65,6 +67,9 @@ def _bootstrap(monkeypatch, tmp_path):
     )
     runner.session_store.load_transcript.return_value = []
     runner.session_store.append_to_transcript = MagicMock()
+    # Mock has_platform_message_id to return False so the dedupe guard
+    # (#47237) in gateway/run.py does not skip the append_to_transcript call.
+    runner.session_store.has_platform_message_id.return_value = False
     runner.session_store.update_session = MagicMock()
 
     monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)

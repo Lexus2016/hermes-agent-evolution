@@ -8,9 +8,13 @@ Compatibility wrappers remain for direct Python callers and legacy tests.
 import json
 import logging
 import re
+import shutil
+import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from hermes_constants import display_hermes_home
 
@@ -21,16 +25,161 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cron.jobs import (
     AmbiguousJobReference,
+    claim_job_for_fire,
     create_job,
+    get_job,
     list_jobs,
+    mark_job_run,
     parse_schedule,
     pause_job,
     remove_job,
     resolve_job_ref,
     resume_job,
-    trigger_job,
     update_job,
 )
+
+
+def _notify_provider_jobs_changed_safe() -> None:
+    """Tell the active cron scheduler provider the job set changed (no-op for
+    the built-in). Best-effort — never lets a provider error break the tool."""
+    try:
+        from cron.scheduler import _notify_provider_jobs_changed
+        _notify_provider_jobs_changed()
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Cron availability preflight + per-task retry rate limiter
+# ---------------------------------------------------------------------------
+#
+# Issue #214: cronjob tool failures recur without surfacing underlying cause.
+# We add:
+#   1. A preflight probe that checks whether cron is usable (crontab binary
+#      and, on Linux, a running cron daemon) before mutating state.
+#   2. A per-task retry limiter so repeated failures back off with a clear
+#      "too many attempts" message instead of looping noisily.
+#   3. Richer error payloads that include the underlying CLI output.
+
+_MAX_CONSECUTIVE_CRON_FAILURES = 3
+_CRON_RETRY_WINDOW_SECONDS = 300.0  # failures older than this are forgotten
+_cron_failure_tracker: Dict[str, List[float]] = {}
+_cron_failure_tracker_lock = threading.Lock()
+
+
+def _record_cron_failure(task_id: Optional[str]) -> int:
+    """Record a cron failure for *task_id* and return the current streak."""
+    if not task_id:
+        return 1
+    now = time.monotonic()
+    with _cron_failure_tracker_lock:
+        window = [
+            ts
+            for ts in _cron_failure_tracker.get(task_id, [])
+            if now - ts < _CRON_RETRY_WINDOW_SECONDS
+        ]
+        window.append(now)
+        _cron_failure_tracker[task_id] = window
+        return len(window)
+
+
+def _reset_cron_failure(task_id: Optional[str]) -> None:
+    """Reset the failure streak for *task_id* after a successful operation."""
+    if not task_id:
+        return
+    with _cron_failure_tracker_lock:
+        _cron_failure_tracker.pop(task_id, None)
+
+
+def _cron_preflight_check() -> Optional[str]:
+    """Probe basic cron availability and return a user-facing error string.
+
+    Returns ``None`` when cron appears usable, otherwise a short diagnostic
+    message explaining what is missing.  The check is best-effort: on systems
+    where ``crontab`` is intentionally absent or where Hermes is using the
+    internal JSON scheduler only, we still verify that the cron directory is
+    writable so job persistence does not fail silently.
+    """
+    from cron.jobs import CRON_DIR, ensure_dirs
+
+    try:
+        ensure_dirs()
+        probe = CRON_DIR / ".preflight_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except Exception as exc:
+        return (
+            f"Cron directory is not writable ({CRON_DIR}): {exc}. "
+            "Check permissions for the user running Hermes."
+        )
+
+    crontab = shutil.which("crontab")
+    if crontab is None:
+        return (
+            "The 'crontab' command is not available on PATH. "
+            "Install a cron implementation (e.g. cronie, vixie-cron) "
+            "or verify that Hermes is running in an environment with cron support."
+        )
+
+    try:
+        result = subprocess.run(
+            [crontab, "-l"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:
+        return f"Cron preflight probe failed: crontab -l could not run: {exc}"
+
+    if result.returncode != 0:
+        # ``crontab -l`` exits 1 when the user has no crontab — that is normal.
+        # Anything else (e.g. permission denied, service missing) is a real problem.
+        stderr = (result.stderr or "").strip()
+        if "no crontab" not in stderr.lower() and "no such file" not in stderr.lower():
+            return (
+                f"Cron preflight probe failed: crontab -l exited {result.returncode}."
+                + (f"\nstderr: {stderr}" if stderr else "")
+            )
+
+    # Best-effort daemon presence check on common Unix paths.
+    daemon_paths = [Path("/usr/sbin/cron"), Path("/usr/sbin/crond")]
+    if sys.platform != "win32" and not any(p.exists() for p in daemon_paths):
+        # Not a hard failure: some container/embedded environments have no
+        # separate daemon binary, but Hermes still uses the internal scheduler.
+        logger.debug("No separate cron daemon binary found; relying on internal scheduler")
+
+    return None
+
+
+def _format_cron_error(
+    exc: Exception,
+    operation: str,
+    cli_output: Optional[str] = None,
+) -> str:
+    """Return a rich error string for cron failures.
+
+    Includes the operation name, the exception message, and any captured CLI
+    output so the user can see the root cause without re-running manually.
+    """
+    parts = [f"Cron operation '{operation}' failed: {exc}"]
+    if cli_output:
+        parts.append(f"Underlying output:\n{cli_output}")
+    return "\n".join(parts)
+
+
+def _validate_cron_action(action: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Normalize and validate the cron action parameter.
+
+    Returns ``(normalized_action, error)``; ``error`` is ``None`` when valid.
+    """
+    normalized = (action or "").strip().lower()
+    if not normalized:
+        return "", "action is required"
+    allowed = {"create", "list", "update", "pause", "resume", "remove", "run", "run_now", "trigger"}
+    if normalized not in allowed:
+        return normalized, f"Unknown cron action '{action}'. Allowed: {', '.join(sorted(allowed - {'run_now', 'trigger'}))}"
+    return normalized, None
 
 
 # ---------------------------------------------------------------------------
@@ -103,15 +252,22 @@ _CRON_EXFIL_COMMAND_PATTERNS = [
     (rf'curl\s+[^\n]*(?:-H|--header)\s+["\']Authorization:\s*(?:Bearer|token)\s+{_CRON_SECRET_VAR_RE}["\']', "exfil_curl_auth_header"),
 ]
 
-_CRON_INVISIBLE_CHARS = {
-    '\u200b', '\u200c', '\u200d', '\u2060', '\ufeff',
-    '\u202a', '\u202b', '\u202c', '\u202d', '\u202e',
-}
+# Single source of truth, shared with the install-time scanner
+# (threat_patterns.INVISIBLE_CHARS / skills_guard). Keeping a separate, narrower
+# copy here let an obfuscated injection directive slip past this runtime cron
+# tripwire while being caught at install time (or vice versa): U+2062-U+2064
+# (invisible math operators) and U+2066-U+2069 (directional isolates) are real
+# attack tools and were missing from the cron-local set. Importing the canonical
+# set keeps the cron tripwire and the install scanner from drifting apart.
+from tools.threat_patterns import INVISIBLE_CHARS as _CRON_INVISIBLE_CHARS
 
 # U+200D Zero-Width Joiner is also a legitimate, required part of many
 # Unicode emoji sequences (for example 👨‍👩‍👧, 🏳️‍🌈, ❤️‍🩹, 🧑‍💻).
-# We should still block ZWJ when it is hiding between plain text characters,
-# but not when it is clearly part of an emoji grapheme cluster.
+# It is also used in some multilingual scripts (e.g. Arabic, Devanagari,
+# Cyrillic formatting) to control ligature/joining behavior.
+# We should still block ZWJ when it is hiding between plain text characters
+# (Latin, digits, punctuation), but not when it is clearly part of an emoji
+# grapheme cluster or between letters from a script that legitimately uses ZWJ.
 _EMOJI_NEIGHBOUR_CP_RANGES = (
     (0x1F000, 0x1FFFF),
     (0x2600, 0x27BF),
@@ -124,6 +280,126 @@ _VARIATION_SELECTOR_CP = 0xFE0F
 
 def _is_emoji_cp(cp: int) -> bool:
     return any(lo <= cp <= hi for lo, hi in _EMOJI_NEIGHBOUR_CP_RANGES)
+
+
+def _is_script_using_zwj(cp: int) -> bool:
+    """Return True for codepoints from scripts that legitimately use ZWJ."""
+    # Arabic (U+0600–U+06FF, U+0750–U+077F, U+08A0–U+08FF, U+FB50–U+FDFF, U+FE70–U+FEFF)
+    if 0x0600 <= cp <= 0x06FF:
+        return True
+    if 0x0750 <= cp <= 0x077F:
+        return True
+    if 0x08A0 <= cp <= 0x08FF:
+        return True
+    if 0xFB50 <= cp <= 0xFDFF:
+        return True
+    if 0xFE70 <= cp <= 0xFEFF:
+        return True
+    # Devanagari (U+0900–U+097F)
+    if 0x0900 <= cp <= 0x097F:
+        return True
+    # Bengali (U+0980–U+09FF)
+    if 0x0980 <= cp <= 0x09FF:
+        return True
+    # Gurmukhi (U+0A00–U+0A7F)
+    if 0x0A00 <= cp <= 0x0A7F:
+        return True
+    # Gujarati (U+0A80–U+0AFF)
+    if 0x0A80 <= cp <= 0x0AFF:
+        return True
+    # Oriya (U+0B00–U+0B7F)
+    if 0x0B00 <= cp <= 0x0B7F:
+        return True
+    # Tamil (U+0B80–U+0BFF)
+    if 0x0B80 <= cp <= 0x0BFF:
+        return True
+    # Telugu (U+0C00–U+0C7F)
+    if 0x0C00 <= cp <= 0x0C7F:
+        return True
+    # Kannada (U+0C80–U+0CFF)
+    if 0x0C80 <= cp <= 0x0CFF:
+        return True
+    # Malayalam (U+0D00–U+0D7F)
+    if 0x0D00 <= cp <= 0x0D7F:
+        return True
+    # Sinhala (U+0D80–U+0DFF)
+    if 0x0D80 <= cp <= 0x0DFF:
+        return True
+    # Hebrew (U+0590–U+05FF)
+    if 0x0590 <= cp <= 0x05FF:
+        return True
+    # Syriac (U+0700–U+074F)
+    if 0x0700 <= cp <= 0x074F:
+        return True
+    # Thaana (U+0780–U+07BF)
+    if 0x0780 <= cp <= 0x07BF:
+        return True
+    # Myanmar (U+1000–U+109F)
+    if 0x1000 <= cp <= 0x109F:
+        return True
+    # Khmer (U+1780–U+17FF)
+    if 0x1780 <= cp <= 0x17FF:
+        return True
+    # Tibetan (U+0F00–U+0FFF)
+    if 0x0F00 <= cp <= 0x0FFF:
+        return True
+    # Georgian (U+10A0–U+10FF, U+2D00–U+2D2F)
+    if 0x10A0 <= cp <= 0x10FF:
+        return True
+    if 0x2D00 <= cp <= 0x2D2F:
+        return True
+    # Ethiopic (U+1200–U+137F)
+    if 0x1200 <= cp <= 0x137F:
+        return True
+    # Cherokee (U+13A0–U+13FF)
+    if 0x13A0 <= cp <= 0x13FF:
+        return True
+    # Canadian Aboriginal (U+1400–U+167F)
+    if 0x1400 <= cp <= 0x167F:
+        return True
+    # Mongolian (U+1800–U+18AF)
+    if 0x1800 <= cp <= 0x18AF:
+        return True
+    # Limbu (U+1900–U+194F)
+    if 0x1900 <= cp <= 0x194F:
+        return True
+    # Tai Le (U+1950–U+197F)
+    if 0x1950 <= cp <= 0x197F:
+        return True
+    # New Tai Lue (U+1980–U+19DF)
+    if 0x1980 <= cp <= 0x19DF:
+        return True
+    # Buginese (U+1A00–U+1A1F)
+    if 0x1A00 <= cp <= 0x1A1F:
+        return True
+    # Tai Tham (U+1A20–U+1AAF)
+    if 0x1A20 <= cp <= 0x1AAF:
+        return True
+    # Balinese (U+1B00–U+1B7F)
+    if 0x1B00 <= cp <= 0x1B7F:
+        return True
+    # Sundanese (U+1B80–U+1BBF)
+    if 0x1B80 <= cp <= 0x1BBF:
+        return True
+    # Batak (U+1BC0–U+1BFF)
+    if 0x1BC0 <= cp <= 0x1BFF:
+        return True
+    # Lepcha (U+1C00–U+1C4F)
+    if 0x1C00 <= cp <= 0x1C4F:
+        return True
+    # Ol Chiki (U+1C50–U+1C7F)
+    if 0x1C50 <= cp <= 0x1C7F:
+        return True
+    # Cyrillic (U+0400–U+04FF, U+0500–U+052F, U+2DE0–U+2DFF, U+A640–U+A69F)
+    if 0x0400 <= cp <= 0x04FF:
+        return True
+    if 0x0500 <= cp <= 0x052F:
+        return True
+    if 0x2DE0 <= cp <= 0x2DFF:
+        return True
+    if 0xA640 <= cp <= 0xA69F:
+        return True
+    return False
 
 
 def _zwj_has_emoji_neighbour(text: str, idx: int) -> bool:
@@ -141,12 +417,26 @@ def _zwj_has_emoji_neighbour(text: str, idx: int) -> bool:
     )
 
 
+def _zwj_has_script_neighbour(text: str, idx: int) -> bool:
+    """Return True when the ZWJ at text[idx] sits between letters from
+    scripts that legitimately use ZWJ for joining/ligature control."""
+    left = idx - 1
+    while left >= 0 and ord(text[left]) == _VARIATION_SELECTOR_CP:
+        left -= 1
+    right = idx + 1
+    while right < len(text) and ord(text[right]) == _VARIATION_SELECTOR_CP:
+        right += 1
+    if left < 0 or right >= len(text):
+        return False
+    return _is_script_using_zwj(ord(text[left])) and _is_script_using_zwj(ord(text[right]))
+
+
 def _strip_legitimate_emoji_zwj(prompt: str) -> str:
     if '\u200d' not in prompt:
         return prompt
     cleaned: list[str] = []
     for idx, ch in enumerate(prompt):
-        if ch == '\u200d' and _zwj_has_emoji_neighbour(prompt, idx):
+        if ch == '\u200d' and (_zwj_has_emoji_neighbour(prompt, idx) or _zwj_has_script_neighbour(prompt, idx)):
             continue
         cleaned.append(ch)
     return ''.join(cleaned)
@@ -183,7 +473,8 @@ def _check_invisible_unicode(prompt: str) -> str:
 
 def _strip_invisible_unicode(prompt: str) -> tuple[str, list[str]]:
     """Strip invisible-unicode characters from *prompt*, preserving the ZWJ
-    that lives inside legitimate emoji sequences.
+    that lives inside legitimate emoji sequences OR between letters from
+    scripts that legitimately use ZWJ (Arabic, Devanagari, Cyrillic, etc.).
 
     Returns ``(cleaned_prompt, removed_codepoints)`` where ``removed_codepoints``
     is the sorted list of ``U+XXXX`` labels that were stripped (empty when the
@@ -194,15 +485,12 @@ def _strip_invisible_unicode(prompt: str) -> tuple[str, list[str]]:
     """
     if not prompt:
         return prompt, []
-    # Keep emoji-ZWJ: temporarily remove the legitimate joiners, scan/strip the
-    # rest, then the legitimate joiners survive because we operate on the
-    # original string and only drop chars that are NOT part of an emoji cluster.
     removed: set[str] = set()
     cleaned: list[str] = []
     for idx, ch in enumerate(prompt):
         if ch in _CRON_INVISIBLE_CHARS:
-            if ch == '\u200d' and _zwj_has_emoji_neighbour(prompt, idx):
-                cleaned.append(ch)  # legitimate emoji joiner — keep
+            if ch == '\u200d' and (_zwj_has_emoji_neighbour(prompt, idx) or _zwj_has_script_neighbour(prompt, idx)):
+                cleaned.append(ch)  # legitimate ZWJ — keep
                 continue
             removed.add(f"U+{ord(ch):04X}")
             continue
@@ -282,8 +570,51 @@ def _origin_from_env() -> Optional[Dict[str, str]]:
             "chat_id": origin_chat_id,
             "chat_name": get_session_env("HERMES_SESSION_CHAT_NAME") or None,
             "thread_id": thread_id,
+            # Captured so an opt-in delivery mirror (cron.mirror_delivery /
+            # attach_to_session) can resolve the exact participant's session in
+            # per-user-isolated group chats — parity with interactive
+            # send_message, which passes HERMES_SESSION_USER_ID to
+            # gateway.mirror.mirror_to_session. Harmless for DMs/shared sessions.
+            "user_id": get_session_env("HERMES_SESSION_USER_ID") or None,
         }
     return None
+
+
+def _local_delivery_notice(job: Dict[str, Any], user_deliver: Optional[str]) -> Optional[str]:
+    """Return an informational notice when a created job won't deliver anywhere.
+
+    TUI/CLI sessions cannot be captured as a cron ``origin`` (no
+    ``HERMES_SESSION_PLATFORM``/``CHAT_ID`` is set for them), so a
+    ``deliver="origin"`` request — or an omitted ``deliver`` that defaults to
+    origin-or-local — produces a job that runs and saves output to
+    ``last_output`` but is never delivered back into the session. This is by
+    design (there is no live-delivery channel for local sessions), but silently
+    dropping the user's "tell me when it runs" intent is the trap reported in
+    #51568. Surface it at create time so the agent can relay it instead of
+    promising a delivery that never happens.
+
+    Returns ``None`` when the user explicitly asked for ``local`` (no surprise),
+    or when the job resolves to a real delivery target.
+    """
+    # An explicit local request is exactly what the user asked for — no notice.
+    if (user_deliver or "").strip().lower() == "local":
+        return None
+    try:
+        from cron.scheduler import _resolve_delivery_targets
+
+        if _resolve_delivery_targets(job):
+            return None  # Will actually deliver somewhere — nothing to flag.
+    except Exception:
+        # If resolution can't be evaluated, fall back to the origin signal.
+        if job.get("origin"):
+            return None
+    return (
+        "This is a local-only cron job: its output is saved (view it with "
+        "cronjob(action='list')) but will NOT be delivered back into this "
+        "session — CLI/TUI sessions have no live-delivery channel. To be "
+        "notified when it runs, recreate or update the job with deliver set to "
+        "a gateway-connected platform, e.g. deliver='telegram' or deliver='all'."
+    )
 
 
 def _repeat_display(job: Dict[str, Any]) -> str:
@@ -462,6 +793,51 @@ def _format_job(job: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _execute_job_now(job: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute a cron job immediately, outside the scheduler tick.
+
+    Atomically claims the job first via ``claim_job_for_fire`` — the same
+    at-most-once CAS the scheduler/external-provider fire path uses — so a
+    concurrently-running gateway ticker cannot also fire it (the claim both
+    blocks a duplicate fire and advances ``next_run_at`` for recurring jobs).
+    If the claim is lost (another fire is in flight), this is a no-op.
+
+    The actual firing is delegated to ``run_one_job`` — the single shared
+    execute→save→deliver→mark body the ticker and external providers use — so
+    failure delivery, ``[SILENT]`` handling, and live-adapter delivery stay
+    identical across paths and can't drift.
+
+    Returns {"claimed": bool, "success": bool, "error": str|None}.
+    """
+    job_id = job["id"]
+    try:
+        from cron.scheduler import run_one_job
+
+        # At-most-once claim: bail without running if a tick/other fire owns it.
+        if not claim_job_for_fire(job_id):
+            return {"claimed": False, "success": False,
+                    "error": "Job is already being fired by the scheduler; not run again."}
+
+        # run_one_job records last_run_at/last_status via mark_job_run (which
+        # also clears the fire claim) and returns True iff it processed the job.
+        processed = run_one_job(job)
+        refreshed = get_job(job_id) or {}
+        ok = refreshed.get("last_status") == "ok"
+        return {
+            "claimed": True,
+            "success": bool(processed and ok),
+            "error": refreshed.get("last_error"),
+        }
+
+    except Exception as e:
+        logger.error("Failed to execute cron job %s immediately: %s", job_id, e)
+        try:
+            mark_job_run(job_id, False, str(e))
+        except Exception:
+            pass
+        return {"claimed": True, "success": False, "error": str(e)}
+
+
 def cronjob(
     action: str,
     job_id: Optional[str] = None,
@@ -482,14 +858,31 @@ def cronjob(
     enabled_toolsets: Optional[List[str]] = None,
     workdir: Optional[str] = None,
     no_agent: Optional[bool] = None,
+    attach_to_session: Optional[bool] = None,
     task_id: str = None,
 ) -> str:
     """Unified cron job management tool."""
-    del task_id  # unused but kept for handler signature compatibility
+
+    normalized, action_error = _validate_cron_action(action)
+    if action_error:
+        return tool_error(action_error, success=False)
+
+    # Retry-rate limiter: noisy failure loops are capped per task.
+    failure_streak = _record_cron_failure(task_id)
+    if failure_streak > _MAX_CONSECUTIVE_CRON_FAILURES:
+        return tool_error(
+            f"Cron tool has failed {failure_streak} consecutive times for this task "
+            "(too many attempts). Please inspect the earlier errors or run "
+            "cronjob(action='list') before retrying.",
+            success=False,
+        )
+
+    # Preflight: ensure cron is available before invoking backend operations.
+    preflight_error = _cron_preflight_check()
+    if preflight_error:
+        return tool_error(preflight_error, success=False)
 
     try:
-        normalized = (action or "").strip().lower()
-
         if normalized == "create":
             if not schedule:
                 return tool_error("schedule is required for create", success=False)
@@ -548,7 +941,14 @@ def cronjob(
                 enabled_toolsets=enabled_toolsets or None,
                 workdir=_normalize_optional_job_value(workdir),
                 no_agent=_no_agent,
+                attach_to_session=attach_to_session,
             )
+            _reset_cron_failure(task_id)
+            _notify_provider_jobs_changed_safe()
+            _create_message = f"Cron job '{job['name']}' created."
+            _local_notice = _local_delivery_notice(job, _normalize_deliver_param(deliver))
+            if _local_notice:
+                _create_message = f"{_create_message} {_local_notice}"
             return json.dumps(
                 {
                     "success": True,
@@ -561,13 +961,14 @@ def cronjob(
                     "deliver": job.get("deliver", "local"),
                     "next_run_at": job["next_run_at"],
                     "job": _format_job(job),
-                    "message": f"Cron job '{job['name']}' created.",
+                    "message": _create_message,
                 },
                 indent=2,
             )
 
         if normalized == "list":
             jobs = [_format_job(job) for job in list_jobs(include_disabled=include_disabled)]
+            _reset_cron_failure(task_id)
             return json.dumps({"success": True, "count": len(jobs), "jobs": jobs}, indent=2)
 
         if not job_id:
@@ -604,6 +1005,8 @@ def cronjob(
             removed = remove_job(job_id)
             if not removed:
                 return tool_error(f"Failed to remove job '{job_id}'", success=False)
+            _reset_cron_failure(task_id)
+            _notify_provider_jobs_changed_safe()
             return json.dumps(
                 {
                     "success": True,
@@ -619,15 +1022,35 @@ def cronjob(
 
         if normalized == "pause":
             updated = pause_job(job_id, reason=reason)
+            _reset_cron_failure(task_id)
+            _notify_provider_jobs_changed_safe()
             return json.dumps({"success": True, "job": _format_job(updated)}, indent=2)
 
         if normalized == "resume":
             updated = resume_job(job_id)
+            _reset_cron_failure(task_id)
+            _notify_provider_jobs_changed_safe()
             return json.dumps({"success": True, "job": _format_job(updated)}, indent=2)
 
         if normalized in {"run", "run_now", "trigger"}:
-            updated = trigger_job(job_id)
-            return json.dumps({"success": True, "job": _format_job(updated)}, indent=2)
+            _reset_cron_failure(task_id)
+            # Execute the job immediately rather than only scheduling it for the
+            # next scheduler tick — a manual `run` should actually run, even when
+            # no gateway/ticker is active (the #41037 case). The claim inside
+            # _execute_job_now advances next_run_at and blocks a concurrent tick
+            # from double-firing.
+            exec_result = _execute_job_now(job)
+            # Re-read so the response reflects the post-run last_run_at/last_status.
+            result = _format_job(get_job(job_id) or {"id": job_id})
+            result["executed"] = exec_result.get("claimed", False)
+            result["execution_success"] = exec_result.get("success", False)
+            if not exec_result.get("claimed", False):
+                result["execution_skipped"] = (
+                    "Already being fired by the scheduler; not run again."
+                )
+            elif exec_result.get("error"):
+                result["execution_error"] = exec_result["error"]
+            return json.dumps({"success": True, "job": result}, indent=2)
 
         if normalized == "update":
             updates: Dict[str, Any] = {}
@@ -677,6 +1100,8 @@ def cronjob(
                 updates["context_from"] = refs or None
             if enabled_toolsets is not None:
                 updates["enabled_toolsets"] = enabled_toolsets or None
+            if attach_to_session is not None:
+                updates["attach_to_session"] = bool(attach_to_session)
             if workdir is not None:
                 # Empty string clears the field (restores old behaviour);
                 # otherwise pass raw — update_job() validates / normalizes.
@@ -711,12 +1136,16 @@ def cronjob(
             if not updates:
                 return tool_error("No updates provided.", success=False)
             updated = update_job(job_id, updates)
+            _reset_cron_failure(task_id)
+            _notify_provider_jobs_changed_safe()
             return json.dumps({"success": True, "job": _format_job(updated)}, indent=2)
 
         return tool_error(f"Unknown cron action '{action}'", success=False)
 
     except Exception as e:
-        return tool_error(str(e), success=False)
+        _record_cron_failure(task_id)
+        cli_output = getattr(e, "output", None)
+        return tool_error(_format_cron_error(e, normalized or action or "unknown", cli_output=cli_output), success=False)
 
 
 
@@ -833,6 +1262,10 @@ Important safety rule: cron-run sessions should not recursively schedule more cr
             "workdir": {
                 "type": "string",
                 "description": "Optional absolute path to run the job from. When set, AGENTS.md / CLAUDE.md / .cursorrules from that directory are injected into the system prompt, and the terminal/file/code_exec tools use it as their working directory — useful for running a job inside a specific project repo. Must be an absolute path that exists. When unset (default), preserves the original behaviour: no project context files, tools use the scheduler's cwd. On update, pass an empty string to clear. Jobs with workdir run sequentially (not parallel) to keep per-job directories isolated."
+            },
+            "attach_to_session": {
+                "type": "boolean",
+                "description": "When True, this job becomes CONTINUABLE: the user can reply to its delivery and the agent has the brief in context instead of asking 'what is that?'. On thread-capable platforms (Telegram topics, Discord/Slack threads) a dedicated thread is opened for the job and its replies; on DM-only platforms (WhatsApp/Signal) the brief is mirrored into the origin DM session. Use this for conversational recurring jobs the user will reply to — daily briefings, reminders that kick off follow-up work. Leave unset for fire-and-forget alerts/watchdogs. Overrides the global cron.mirror_delivery config for this one job. Only the origin chat is touched (never fan-out targets); no effect when deliver='local'."
             },
         },
         "required": ["action"]

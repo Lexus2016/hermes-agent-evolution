@@ -4,6 +4,20 @@ Instructions for AI coding assistants and developers working on the hermes-agent
 
 **Never give up on the right solution.**
 
+## Fork & PR Targeting (read before opening any PR)
+
+This repository is the fork **`Lexus2016/hermes-agent-evolution`**. `NousResearch/hermes-agent` is the read-only `upstream`. **All branches, pull requests, and merges stay on the `Lexus2016` fork — never open a PR against `NousResearch`.**
+
+- The default `gh` repo for a clone must be pinned to the fork:
+  `gh repo set-default Lexus2016/hermes-agent-evolution` (persisted as
+  `remote.origin.gh-resolved` in `.git/config`). Re-run it in every fresh clone —
+  without it, `gh` resolves the default repo to the `NousResearch` upstream.
+- `gh pr create` defaults a fork's base to the upstream parent, so do **not**
+  rely on the interactive default. Target the fork explicitly:
+  `gh pr create --repo Lexus2016/hermes-agent-evolution --base main`, or create
+  it unambiguously via `gh api repos/Lexus2016/hermes-agent-evolution/pulls`
+  (`-f head=<branch> -f base=main`).
+
 ## What Hermes Is
 
 Hermes is a personal AI agent that runs the same agent core across a CLI, a
@@ -954,9 +968,10 @@ Enable/disable per platform via `hermes tools` (the curses UI) or the
 ## Delegation (`delegate_task`)
 
 `tools/delegate_tool.py` spawns a subagent with an isolated
-context + terminal session. Synchronous: the parent waits for the
-child's summary before continuing its own loop — if the parent is
-interrupted, the child is cancelled.
+context + terminal session. By default the parent waits for the
+child's summary before continuing its own loop. With `background=true`,
+Hermes returns a delegation id immediately and the result re-enters the
+conversation later through the async-delegation completion queue.
 
 Two shapes:
 
@@ -978,9 +993,9 @@ Key config knobs (under `delegation:` in `config.yaml`):
 `orchestrator_enabled`, `subagent_auto_approve`, `inherit_mcp_toolsets`,
 `max_iterations`.
 
-Synchronicity rule: delegate_task is **not** durable. For long-running
-work that must outlive the current turn, use `cronjob` or
-`terminal(background=True, notify_on_complete=True)` instead.
+Durability rule: background `delegate_task` is detached from the current
+turn but still process-local. For work that must survive process restart, use
+`cronjob` or `terminal(background=True, notify_on_complete=True)` instead.
 
 ---
 
@@ -1174,7 +1189,7 @@ automatically scope to the active profile.
    a unique credential (bot token, API key), call `acquire_scoped_lock()` from
    `gateway.status` in the `connect()`/`start()` method and `release_scoped_lock()` in
    `disconnect()`/`stop()`. This prevents two profiles from using the same credential.
-   See `gateway/platforms/telegram.py` for the canonical pattern.
+   See `plugins/platforms/irc/adapter.py` for the canonical pattern.
 
 6. **Profile operations are HOME-anchored, not HERMES_HOME-anchored** — `_get_profiles_root()`
    returns `Path.home() / ".hermes" / "profiles"`, NOT `get_hermes_home() / "profiles"`.

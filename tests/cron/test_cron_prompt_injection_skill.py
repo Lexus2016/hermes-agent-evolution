@@ -450,3 +450,38 @@ class TestScriptOutputNotStrictScanned:
         }
         with pytest.raises(scheduler.CronPromptInjectionBlocked):
             scheduler._build_job_prompt(job)
+
+
+
+class TestInvisibleUnicodeMultilingualZWJ:
+    """U+200D Zero-Width Joiner in multilingual scripts must not trigger a
+    hard block. Only ZWJ between plain Latin/digits/punctuation should
+    remain blocked (injection-hiding)."""
+
+    def test_cyrillic_zwj_allowed(self, cron_env):
+        _, scheduler = cron_env
+        # Cyrillic text with ZWJ -- legitimate multilingual formatting
+        prompt = "\u041f\u0440\u0438\u0432\u0435\u0442\u200d\u043c\u0438\u0440"
+        result = scheduler._scan_assembled_cron_prompt(
+            prompt, {"id": "abc123", "name": "cyrillic"},
+        )
+        assert result == prompt
+
+    def test_arabic_zwj_allowed(self, cron_env):
+        _, scheduler = cron_env
+        # Arabic with ZWJ -- legitimate joining behavior
+        prompt = "\u0627\u0644\u0633\u0644\u0627\u0645\u200d\u0639\u0644\u064a\u0643\u0645"
+        result = scheduler._scan_assembled_cron_prompt(
+            prompt, {"id": "abc123", "name": "arabic"},
+        )
+        assert result == prompt
+
+    def test_latin_zwj_between_plain_text_blocked(self, cron_env):
+        _, scheduler = cron_env
+        # ZWJ hiding between plain Latin chars -- should still block
+        with pytest.raises(scheduler.CronPromptInjectionBlocked) as exc_info:
+            scheduler._scan_assembled_cron_prompt(
+                "hello\u200dworld",
+                {"id": "abc123", "name": "latin-zwj"},
+            )
+        assert "invisible unicode" in str(exc_info.value)

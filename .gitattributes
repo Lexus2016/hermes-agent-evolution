@@ -1,6 +1,15 @@
 # Auto-generated files — collapse diffs and exclude from language stats
 web/package-lock.json linguist-generated=true
 
+# Published model catalog — an upstream-maintained artifact (a model list we no
+# longer customize + an `updated_at` timestamp). Its timestamp collides on EVERY
+# `git merge upstream/main`, which would otherwise add a conflict in an
+# hermes_cli-adjacent published file and force the autonomous upstream-sync to
+# escalate — the #1 cause of recurring upstream drift. Always take upstream's
+# copy on merge. Requires the `theirs` merge driver, which evolution-upstream-sync
+# configures: `git config merge.theirs.driver 'cp -f "%B" "%A"'`.
+website/static/api/model-catalog.json merge=theirs
+
 # Enforce LF for scripts that run inside Linux containers.
 # Without this, Windows checkout converts to CRLF and breaks `exec` in the
 # container entrypoint with "no such file or directory".

@@ -152,11 +152,24 @@ class HonchoSessionManager:
             )
             self._async_thread.start()
 
+        # Circuit-breaker state for Honcho dialectic queries.  Consecutive
+        # hard failures (transport/5xx/SDK-level errors) trip the breaker
+        # so a backend outage stops burning API credits on every turn.
+        self._consecutive_dialectic_failures: int = 0
+        self._dialectic_failure_window_start: float = 0.0
+        self._dialectic_tripped_at: float | None = None
+        # Count only recent consecutive failures; a single success resets.
+        self._CIRCUIT_BREAKER_THRESHOLD: int = 5
+        self._CIRCUIT_BREAKER_COOLDOWN_SECONDS: float = 120.0
+
     @property
     def honcho(self) -> Honcho:
-        """Get the Honcho client, initializing if needed."""
-        if self._honcho is None:
-            self._honcho = get_honcho_client()
+        """Get the Honcho client, refreshing a near-expiry OAuth token in place.
+
+        Routes every access through ``get_honcho_client`` (which returns the same
+        cached singleton) so a long session can't outlive its 1h access token.
+        """
+        self._honcho = get_honcho_client()
         return self._honcho
 
     def _get_or_create_peer(self, peer_id: str) -> Any:
@@ -622,6 +635,11 @@ class HonchoSessionManager:
         if not session:
             return ""
 
+        # Circuit-breaker gate. When open, skip the backend call entirely so
+        # a failing Honcho backend can't burn credits every turn.
+        if not self.dialectic_query_available():
+            return ""
+
         target_peer_id = self._resolve_peer_id(session, peer)
         if target_peer_id is None:
             return ""
@@ -655,10 +673,74 @@ class HonchoSessionManager:
             # Apply Hermes-side char cap before caching
             if result and self._dialectic_max_chars and len(result) > self._dialectic_max_chars:
                 result = result[:self._dialectic_max_chars].rsplit(" ", 1)[0] + " …"
+
+            # A non-empty result resets the failure window.  Empty but
+            # exception-free results may indicate a sparse profile, not a
+            # backend outage, so do NOT increment the breaker counter here.
+            if result and result.strip():
+                self._reset_dialectic_failure_window()
             return result
         except Exception as e:
-            logger.warning("Honcho dialectic query failed: %s", e)
+            self._record_dialectic_failure()
+            # Full traceback once per failure window for observability.
+            logger.exception(
+                "Honcho dialectic query failed for session '%s' (failure %d/%d): %s",
+                session_key,
+                self._consecutive_dialectic_failures,
+                self._CIRCUIT_BREAKER_THRESHOLD,
+                e,
+            )
             return ""
+
+    def _reset_dialectic_failure_window(self) -> None:
+        """Clear dialectic failure tracking after a healthy result."""
+        self._consecutive_dialectic_failures = 0
+        self._dialectic_failure_window_start = 0.0
+        self._dialectic_tripped_at = None
+
+    def _record_dialectic_failure(self) -> None:
+        """Increment consecutive failure count and trip the breaker if needed."""
+        import time
+
+        now = time.monotonic()
+        if self._consecutive_dialectic_failures == 0:
+            self._dialectic_failure_window_start = now
+        self._consecutive_dialectic_failures += 1
+        if self._consecutive_dialectic_failures >= self._CIRCUIT_BREAKER_THRESHOLD:
+            # Refresh trip timestamp on every failure once the breaker is open
+            # so half-open probes that fail stay blocked.
+            self._dialectic_tripped_at = now
+            logger.error(
+                "Honcho dialectic circuit breaker tripped after %d consecutive failures; "
+                "cooling down for %.0f seconds",
+                self._consecutive_dialectic_failures,
+                self._CIRCUIT_BREAKER_COOLDOWN_SECONDS,
+            )
+
+    def dialectic_query_available(self) -> bool:
+        """Return False while the dialectic circuit breaker is open.
+
+        A tripped breaker stays open for ``_CIRCUIT_BREAKER_COOLDOWN_SECONDS``.
+        After that it moves to half-open: the next call is allowed to probe
+        the backend, and the breaker either resets on success or re-trips
+        immediately on another failure.
+        """
+        import time
+
+        if self._dialectic_tripped_at is None:
+            return True
+        now = time.monotonic()
+        elapsed = now - self._dialectic_tripped_at
+        if elapsed >= self._CIRCUIT_BREAKER_COOLDOWN_SECONDS:
+            # Half-open: allow exactly one probe through.  The call site
+            # will record success/failure and reset or re-trip.
+            return True
+        logger.warning(
+            "Honcho dialectic circuit breaker OPEN (%.1f/%.0fs remaining); skipping query",
+            self._CIRCUIT_BREAKER_COOLDOWN_SECONDS - elapsed,
+            self._CIRCUIT_BREAKER_COOLDOWN_SECONDS,
+        )
+        return False
 
     def prefetch_context(self, session_key: str, user_message: str | None = None) -> None:
         """

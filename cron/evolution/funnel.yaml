@@ -1,0 +1,24 @@
+name: evolution-funnel
+# 07:40 daily — before the watchdog (07:47). By morning the previous cycle
+# (research 09:00 … integration 23:00) is complete, so the funnel measures a
+# settled cycle. The script computes the cycle date itself (yesterday before
+# 08:00). Off the :00/:30 marks; jitter stays < 08:00.
+schedule: "40 7 * * *"
+enabled: true
+mode: PRIVATE
+
+# Deterministic metric — NO LLM agent. The script IS the job. It appends one
+# JSON line per cycle to evolution/metrics.jsonl (funnel: proposed -> selected
+# -> merged, plus reject reasons). Issue #84.
+no_agent: true
+script: evolution_funnel.py
+
+# Keep on disk for the owner + evolution-introspection to read the trend;
+# nothing is delivered to channels (a metric line is not an alert).
+deliver: local
+
+prompt: |
+  Deterministic per-cycle funnel metrics (no LLM). Appends one JSON line to
+  evolution/metrics.jsonl summarizing the previous cycle's
+  proposed->selected->merged funnel and reject-reason breakdown.
+  See scripts/evolution_funnel.py (issue 84).

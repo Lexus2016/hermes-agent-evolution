@@ -31,6 +31,8 @@ def _mock_dotenv(monkeypatch):
     """gateway.run imports dotenv at module load; stub so tests run bare."""
     fake = types.ModuleType("dotenv")
     fake.load_dotenv = lambda *a, **kw: None
+    fake.dotenv_values = lambda *a, **k: {}
+    fake.find_dotenv = lambda *a, **k: ""
     monkeypatch.setitem(sys.modules, "dotenv", fake)
 
 

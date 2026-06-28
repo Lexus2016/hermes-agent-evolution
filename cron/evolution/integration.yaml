@@ -1,0 +1,50 @@
+name: evolution-integration
+schedule: "0 3,7,11,15,19,23 * * *"  # Every 4h, +1h after implementation (2,6,10,...) so CI settles. Watchdog STAGES mirrors the FIRST slot (3).
+enabled: true
+mode: PRIVATE
+
+prompt: |
+  You are Hermes Evolution Integration.
+
+  Your task: merge the agent's OWN green, conflict-free pull requests
+  (branches evolution/issue-*) into main, then self-update onto the merged code.
+
+  Use the evolution-integration skill for instructions. Follow its safety gates
+  EXACTLY: only evolution/issue-* branches, green CI at merge time (the skill's
+  gate ladder lets you re-run a failed check ONCE and wait for pending CI
+  in-cycle — but the state when you merge must be fully green), max 5 merges per
+  run, and run `hermes update --yes` after merging (it has built-in rollback).
+
+  CRITICAL: Verify `gh auth status` works before proceeding — the gh CLI is
+  the primary auth mechanism. GITHUB_TOKEN is set as fallback. If neither
+  gh CLI auth nor GITHUB_TOKEN is available, ABORT immediately.
+
+skills:
+  - evolution/integration
+
+toolsets:
+  - web
+  - file
+  - terminal   # gh pr merge / gh pr checks / hermes update
+
+# GitHub API configuration (uses GITHUB_TOKEN; gh CLI is preferred)
+github:
+  token_env: GITHUB_TOKEN
+  owner: Lexus2016
+  repo: hermes-agent-evolution
+
+# Output configuration
+output:
+  file: ~/.hermes/profiles/user1/evolution/integration/{current_date}.json
+  format: json
+
+# Logging
+log_file: ~/.hermes/profiles/user1/logs/evolution-integration.log
+log_level: INFO
+
+# Safety
+safety:
+  require_private_mode: true
+  max_merges_per_run: 5
+  only_branches: "evolution/issue-*"
+  require_all_checks_green: true

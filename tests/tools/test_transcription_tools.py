@@ -858,8 +858,12 @@ class TestTranscribeAudioDispatch:
         mock_openai.assert_called_once()
 
     def test_no_provider_returns_error(self, sample_ogg):
-        with patch("tools.transcription_tools._load_stt_config", return_value={}), \
-             patch("tools.transcription_tools._get_provider", return_value="none"):
+        with (
+            patch("tools.transcription_tools._load_stt_config", return_value={}),
+            patch("tools.transcription_tools._get_provider", return_value="none"),
+            patch("tools.transcription_tools._HAS_FASTER_WHISPER", False),
+            patch("tools.transcription_tools._has_local_command", return_value=False),
+        ):
             from tools.transcription_tools import transcribe_audio
             result = transcribe_audio(sample_ogg)
 

@@ -26,6 +26,7 @@ from agent.usage_pricing import (
     CanonicalUsage,
     estimate_usage_cost,
     format_duration_compact,
+    format_token_count_compact,
     has_known_pricing,
 )
 
@@ -115,6 +116,7 @@ class InsightsEngine:
         # Gather raw data
         sessions = self._get_sessions(cutoff, source)
         tool_usage = self._get_tool_usage(cutoff, source)
+        per_session_tool_usage = self._get_per_session_tool_usage(cutoff, source)
         skill_usage = self._get_skill_usage(cutoff, source)
         message_stats = self._get_message_stats(cutoff, source)
 
@@ -127,6 +129,14 @@ class InsightsEngine:
                 "models": [],
                 "platforms": [],
                 "tools": [],
+                "tool_costs": [],
+                "subagents": {
+                    "subagent_sessions": 0,
+                    "total_cost": 0.0,
+                    "total_tokens": 0,
+                    "by_model": [],
+                },
+                "cost_attribution": self.COST_ATTRIBUTION_METHOD,
                 "skills": {
                     "summary": {
                         "total_skill_loads": 0,
@@ -145,6 +155,10 @@ class InsightsEngine:
         models = self._compute_model_breakdown(sessions)
         platforms = self._compute_platform_breakdown(sessions)
         tools = self._compute_tool_breakdown(tool_usage)
+        tool_costs = self._compute_tool_cost_attribution(
+            sessions, per_session_tool_usage
+        )
+        subagents = self._compute_subagent_cost_attribution(sessions)
         skills = self._compute_skill_breakdown(skill_usage)
         activity = self._compute_activity_patterns(sessions)
         top_sessions = self._compute_top_sessions(sessions)
@@ -158,9 +172,113 @@ class InsightsEngine:
             "models": models,
             "platforms": platforms,
             "tools": tools,
+            "tool_costs": tool_costs,
+            "subagents": subagents,
+            "cost_attribution": self.COST_ATTRIBUTION_METHOD,
             "skills": skills,
             "activity": activity,
             "top_sessions": top_sessions,
+        }
+
+    def cost_breakdown(
+        self, days: int = 30, source: str = None, limit: int = 20
+    ) -> Dict[str, Any]:
+        """Per-session spend plus per-tool and per-subagent cost attribution.
+
+        Powers ``hermes sessions cost``. Reuses the same data-gathering and
+        attribution helpers as :meth:`generate` so the figures stay consistent
+        with ``/insights``.
+
+        Args:
+            days: Look-back window in days.
+            source: Optional platform filter.
+            limit: Max number of per-session rows to return (highest spend
+                first); ``0`` or negative returns all rows.
+
+        Returns:
+            Dict with ``sessions`` (per-session spend rows), ``tool_costs``,
+            ``subagents``, ``totals``, and the ``cost_attribution`` method tag.
+        """
+        cutoff = time.time() - (days * 86400)
+        sessions = self._get_sessions(cutoff, source)
+
+        if not sessions:
+            return {
+                "days": days,
+                "source_filter": source,
+                "empty": True,
+                "cost_attribution": self.COST_ATTRIBUTION_METHOD,
+                "sessions": [],
+                "tool_costs": [],
+                "subagents": {
+                    "subagent_sessions": 0,
+                    "total_cost": 0.0,
+                    "total_tokens": 0,
+                    "by_model": [],
+                },
+                "totals": {
+                    "estimated_cost": 0.0,
+                    "actual_cost": 0.0,
+                    "total_sessions": 0,
+                },
+            }
+
+        per_session_tool_usage = self._get_per_session_tool_usage(cutoff, source)
+
+        session_rows: List[Dict[str, Any]] = []
+        total_estimated = 0.0
+        total_actual = 0.0
+        for s in sessions:
+            estimated, status = _estimate_cost(s)
+            actual = s.get("actual_cost_usd") or 0.0
+            total_estimated += estimated
+            total_actual += actual
+            model = s.get("model") or "unknown"
+            display_model = model.split("/")[-1] if "/" in model else model
+            tokens = (
+                (s.get("input_tokens") or 0)
+                + (s.get("output_tokens") or 0)
+                + (s.get("cache_read_tokens") or 0)
+                + (s.get("cache_write_tokens") or 0)
+            )
+            session_rows.append({
+                "session_id": s["id"],
+                "source": s.get("source") or "unknown",
+                "model": display_model,
+                "is_subagent": (s.get("source") or "") == "subagent",
+                "parent_session_id": s.get("parent_session_id"),
+                "input_tokens": s.get("input_tokens") or 0,
+                "output_tokens": s.get("output_tokens") or 0,
+                "total_tokens": tokens,
+                "tool_calls": s.get("tool_call_count") or 0,
+                "estimated_cost": estimated,
+                "actual_cost": actual,
+                "cost_status": status,
+                "started_at": s.get("started_at"),
+            })
+
+        session_rows.sort(
+            key=lambda r: (r["estimated_cost"], r["total_tokens"]), reverse=True
+        )
+        if limit and limit > 0:
+            session_rows = session_rows[:limit]
+
+        return {
+            "days": days,
+            "source_filter": source,
+            "empty": False,
+            "generated_at": time.time(),
+            "cost_attribution": self.COST_ATTRIBUTION_METHOD,
+            "sessions": session_rows,
+            "tool_costs": self._compute_tool_cost_attribution(
+                sessions, per_session_tool_usage
+            ),
+            "subagents": self._compute_subagent_cost_attribution(sessions),
+            "totals": {
+                "estimated_cost": total_estimated,
+                "actual_cost": total_actual,
+                "total_sessions": len(sessions),
+            },
         }
 
     # =========================================================================
@@ -168,7 +286,7 @@ class InsightsEngine:
     # =========================================================================
 
     # Columns we actually need (skip system_prompt, model_config blobs)
-    _SESSION_COLS = ("id, source, model, started_at, ended_at, "
+    _SESSION_COLS = ("id, source, model, parent_session_id, started_at, ended_at, "
                      "message_count, tool_call_count, input_tokens, output_tokens, "
                      "cache_read_tokens, cache_write_tokens, billing_provider, "
                      "billing_base_url, billing_mode, estimated_cost_usd, "
@@ -286,6 +404,111 @@ class InsightsEngine:
             {"tool_name": name, "count": count}
             for name, count in tool_counts.most_common()
         ]
+
+    def _get_per_session_tool_usage(
+        self, cutoff: float, source: str = None
+    ) -> Dict[str, Dict[str, Dict[str, int]]]:
+        """Per-session, per-tool call counts and payload-char weights.
+
+        Returns ``{session_id: {tool_name: {"calls": int, "chars": int}}}``.
+
+        ``chars`` is the length of each tool's response payload (the ``content``
+        of its ``role='tool'`` rows). Token usage in agentic loops is dominated
+        by tool outputs re-injected into the prompt, and character length tracks
+        token count closely (~4 chars/token), so payload size is a materially
+        better proxy than a flat call count for splitting a session's spend
+        across the tools it invoked. Where a tool's response content is absent
+        (older gateway rows, or CLI rows where ``tool_name`` is NULL and we fall
+        back to the ``tool_calls`` JSON), the attribution degrades gracefully to
+        call count.
+
+        Mirrors the two-source merge in :meth:`_get_tool_usage` (tool_name on
+        'tool' rows + tool_calls JSON on 'assistant' rows).
+        """
+        # Source 1: explicit tool_name on tool response messages — count and
+        # measure the response payload size per tool.
+        if source:
+            cursor = self._conn.execute(
+                """SELECT m.session_id, m.tool_name,
+                          COUNT(*) as calls,
+                          COALESCE(SUM(LENGTH(m.content)), 0) as chars
+                   FROM messages m
+                   JOIN sessions s ON s.id = m.session_id
+                   WHERE s.started_at >= ? AND s.source = ?
+                     AND m.role = 'tool' AND m.tool_name IS NOT NULL
+                   GROUP BY m.session_id, m.tool_name""",
+                (cutoff, source),
+            )
+        else:
+            cursor = self._conn.execute(
+                """SELECT m.session_id, m.tool_name,
+                          COUNT(*) as calls,
+                          COALESCE(SUM(LENGTH(m.content)), 0) as chars
+                   FROM messages m
+                   JOIN sessions s ON s.id = m.session_id
+                   WHERE s.started_at >= ?
+                     AND m.role = 'tool' AND m.tool_name IS NOT NULL
+                   GROUP BY m.session_id, m.tool_name""",
+                (cutoff,),
+            )
+        named: Dict[str, Dict[str, Dict[str, int]]] = defaultdict(dict)
+        for row in cursor.fetchall():
+            named[row["session_id"]][row["tool_name"]] = {
+                "calls": row["calls"],
+                "chars": row["chars"] or 0,
+            }
+
+        # Source 2: extract from tool_calls JSON on assistant messages
+        # (covers CLI sessions where tool_name is NULL on tool responses).
+        # Only call counts are available here.
+        if source:
+            cursor2 = self._conn.execute(
+                """SELECT m.session_id, m.tool_calls
+                   FROM messages m
+                   JOIN sessions s ON s.id = m.session_id
+                   WHERE s.started_at >= ? AND s.source = ?
+                     AND m.role = 'assistant' AND m.tool_calls IS NOT NULL""",
+                (cutoff, source),
+            )
+        else:
+            cursor2 = self._conn.execute(
+                """SELECT m.session_id, m.tool_calls
+                   FROM messages m
+                   JOIN sessions s ON s.id = m.session_id
+                   WHERE s.started_at >= ?
+                     AND m.role = 'assistant' AND m.tool_calls IS NOT NULL""",
+                (cutoff,),
+            )
+        from_json: Dict[str, Counter] = defaultdict(Counter)
+        for row in cursor2.fetchall():
+            try:
+                calls = row["tool_calls"]
+                if isinstance(calls, str):
+                    calls = json.loads(calls)
+                if not isinstance(calls, list):
+                    continue
+            except (json.JSONDecodeError, TypeError):
+                continue
+            for call in calls:
+                func = call.get("function", {}) if isinstance(call, dict) else {}
+                name = func.get("name")
+                if name:
+                    from_json[row["session_id"]][name] += 1
+
+        # Merge per session, mirroring _get_tool_usage's max() de-dup so a tool
+        # that appears in both sources is not double-counted.
+        per_session: Dict[str, Dict[str, Dict[str, int]]] = {}
+        for sid in set(named) | set(from_json):
+            named_tools = named.get(sid, {})
+            json_counts = from_json.get(sid, Counter())
+            merged: Dict[str, Dict[str, int]] = {}
+            for tool in set(named_tools) | set(json_counts):
+                named_calls = named_tools.get(tool, {}).get("calls", 0)
+                chars = named_tools.get(tool, {}).get("chars", 0)
+                calls = max(named_calls, json_counts.get(tool, 0))
+                merged[tool] = {"calls": calls, "chars": chars}
+            per_session[sid] = merged
+        return per_session
 
     def _get_skill_usage(self, cutoff: float, source: str = None) -> List[Dict]:
         """Extract per-skill usage from assistant tool calls."""
@@ -553,6 +776,119 @@ class InsightsEngine:
                 "percentage": pct,
             })
         return result
+
+    # =========================================================================
+    # Cost attribution (per-tool, per-subagent)
+    # =========================================================================
+
+    # Per-message token columns are not recorded (the schema only carries
+    # session-level token totals), so an exact per-tool cost is not derivable.
+    # We attribute each session's estimated spend across the tools it invoked,
+    # weighted by each tool's response-payload size (character length, a close
+    # proxy for the tokens that payload contributes when re-injected into the
+    # prompt) and falling back to call count when payload size is unavailable.
+    # Surfaced as ``cost_attribution`` in the report so consumers know the
+    # number is allocated, not measured.
+    COST_ATTRIBUTION_METHOD = "proportional_by_response_chars_fallback_call_count"
+
+    def _compute_tool_cost_attribution(
+        self,
+        sessions: List[Dict],
+        per_session_tool_usage: Dict[str, Dict[str, Dict[str, int]]],
+    ) -> List[Dict]:
+        """Attribute session spend across tools, weighted by payload size.
+
+        Each session's estimated cost is split across the tools it invoked in
+        proportion to a per-tool weight. The weight is the tool's summed
+        response-payload character length; if a session recorded no payload
+        chars at all (e.g. content was stripped, or only ``tool_calls`` JSON is
+        available), that session falls back to weighting by call count so no
+        spend is dropped.
+
+        Returns a ranked list of ``{tool, calls, chars, cost, percentage}``.
+        """
+        tool_cost: Dict[str, float] = defaultdict(float)
+        tool_calls: Dict[str, int] = defaultdict(int)
+        tool_chars: Dict[str, int] = defaultdict(int)
+        for s in sessions:
+            usage = per_session_tool_usage.get(s["id"])
+            if not usage:
+                continue
+            session_chars = sum(u.get("chars", 0) for u in usage.values())
+            session_calls = sum(u.get("calls", 0) for u in usage.values())
+            estimated, _status = _estimate_cost(s)
+            # Prefer payload-char weighting; fall back to call count when the
+            # session recorded no response payload sizes.
+            use_chars = session_chars > 0
+            denom = session_chars if use_chars else session_calls
+            for tool, u in usage.items():
+                calls = u.get("calls", 0)
+                chars = u.get("chars", 0)
+                tool_calls[tool] += calls
+                tool_chars[tool] += chars
+                if estimated and denom > 0:
+                    weight = chars if use_chars else calls
+                    tool_cost[tool] += estimated * (weight / denom)
+
+        total_cost = sum(tool_cost.values())
+        result = [
+            {
+                "tool": tool,
+                "calls": tool_calls[tool],
+                "chars": tool_chars[tool],
+                "cost": tool_cost.get(tool, 0.0),
+                "percentage": (tool_cost.get(tool, 0.0) / total_cost * 100)
+                if total_cost
+                else 0.0,
+            }
+            for tool in tool_calls
+        ]
+        result.sort(key=lambda x: (x["cost"], x["calls"]), reverse=True)
+        return result
+
+    def _compute_subagent_cost_attribution(self, sessions: List[Dict]) -> Dict[str, Any]:
+        """Attribute spend to subagent (delegate) sessions.
+
+        Delegate subagents are persisted as their own session rows with
+        ``source = 'subagent'`` and a ``parent_session_id`` pointing back to the
+        spawning session (see ``tools/delegate_tool.py``). Their token totals,
+        model, and billing route live on their own row, so their cost is the
+        exact per-row estimate — grouped here by model and rolled up to a total.
+        """
+        subagents = [s for s in sessions if (s.get("source") or "") == "subagent"]
+        by_model: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+            "sessions": 0, "input_tokens": 0, "output_tokens": 0,
+            "total_tokens": 0, "tool_calls": 0, "cost": 0.0,
+        })
+        total_cost = 0.0
+        total_tokens = 0
+        for s in subagents:
+            model = s.get("model") or "unknown"
+            display_model = model.split("/")[-1] if "/" in model else model
+            d = by_model[display_model]
+            d["sessions"] += 1
+            inp = s.get("input_tokens") or 0
+            out = s.get("output_tokens") or 0
+            cache_read = s.get("cache_read_tokens") or 0
+            cache_write = s.get("cache_write_tokens") or 0
+            tokens = inp + out + cache_read + cache_write
+            d["input_tokens"] += inp
+            d["output_tokens"] += out
+            d["total_tokens"] += tokens
+            d["tool_calls"] += s.get("tool_call_count") or 0
+            estimated, _status = _estimate_cost(s)
+            d["cost"] += estimated
+            total_cost += estimated
+            total_tokens += tokens
+
+        models = [{"model": model, **data} for model, data in by_model.items()]
+        models.sort(key=lambda x: (x["cost"], x["total_tokens"]), reverse=True)
+        return {
+            "subagent_sessions": len(subagents),
+            "total_cost": total_cost,
+            "total_tokens": total_tokens,
+            "by_model": models,
+        }
 
     def _compute_skill_breakdown(self, skill_usage: List[Dict]) -> Dict[str, Any]:
         """Process per-skill usage into summary + ranked list."""
@@ -850,6 +1186,109 @@ class InsightsEngine:
             lines.append("  " + "─" * 56)
             for ts in report["top_sessions"]:
                 lines.append(f"  {ts['label']:<20} {ts['value']:<18} ({ts['date']}, {ts['session_id']})")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    def format_cost_terminal(self, report: Dict) -> str:
+        """Format a :meth:`cost_breakdown` report for terminal display.
+
+        Powers ``hermes sessions cost``: per-session spend plus per-tool and
+        per-subagent cost attribution.
+        """
+        days = report.get("days", 30)
+        src = report.get("source_filter")
+        if report.get("empty"):
+            src_note = f" (source: {src})" if src else ""
+            return f"  No sessions found in the last {days} days{src_note}."
+
+        lines: List[str] = []
+        period = f"Last {days} days" + (f" ({src})" if src else "")
+        lines.append("")
+        lines.append(f"  💰 Hermes Cost Attribution — {period}")
+        lines.append("  " + "═" * 64)
+
+        totals = report.get("totals", {})
+        lines.append(
+            f"  Sessions: {totals.get('total_sessions', 0):,}   "
+            f"Estimated: ~${totals.get('estimated_cost', 0.0):.4f}   "
+            f"Actual: ${totals.get('actual_cost', 0.0):.4f}"
+        )
+        lines.append(
+            f"  Cost attribution method: {report.get('cost_attribution', 'n/a')} "
+            "(per-tool figures are allocated, not measured)"
+        )
+        lines.append("")
+
+        # Per-session spend
+        session_rows = report.get("sessions", [])
+        if session_rows:
+            lines.append("  📄 Per-Session Spend (top by estimated cost)")
+            lines.append("  " + "─" * 64)
+            lines.append(
+                f"  {'Session':<18} {'Source':<9} {'Model':<20} "
+                f"{'Tokens':>8} {'Est. cost':>10}"
+            )
+            for r in session_rows:
+                sid = (r["session_id"] or "")[:16]
+                marker = "↳" if r.get("is_subagent") else " "
+                lines.append(
+                    f"  {marker}{sid:<17} {r['source'][:8]:<9} "
+                    f"{r['model'][:20]:<20} "
+                    f"{format_token_count_compact(r['total_tokens']):>8} "
+                    f"~${r['estimated_cost']:>8.4f}"
+                )
+            lines.append("")
+
+        # Per-tool cost attribution
+        tool_costs = report.get("tool_costs", [])
+        if tool_costs:
+            lines.append("  🔧 Per-Tool Cost (allocated by response-payload size)")
+            lines.append("  " + "─" * 64)
+            lines.append(
+                f"  {'Tool':<28} {'Calls':>8} {'Est. cost':>12} {'%':>7}"
+            )
+            for t in tool_costs[:15]:
+                lines.append(
+                    f"  {t['tool'][:28]:<28} {t['calls']:>8,} "
+                    f"~${t['cost']:>10.4f} {t['percentage']:>6.1f}%"
+                )
+            if len(tool_costs) > 15:
+                lines.append(f"  ... and {len(tool_costs) - 15} more tools")
+            lines.append("")
+
+        # Per-subagent cost attribution
+        subagents = report.get("subagents", {})
+        if subagents.get("subagent_sessions"):
+            lines.append("  🤖 Subagent (Delegate) Cost")
+            lines.append("  " + "─" * 64)
+            lines.append(
+                "  Subagents run as separate billed sessions; their spend is "
+                "already counted"
+            )
+            lines.append(
+                "  in the per-session rows and the grand total above (no double "
+                "counting)."
+            )
+            lines.append(
+                f"  Subagent sessions: {subagents['subagent_sessions']:,}   "
+                f"Total: ~${subagents.get('total_cost', 0.0):.4f}   "
+                f"Tokens: {format_token_count_compact(subagents.get('total_tokens', 0))}"
+            )
+            by_model = subagents.get("by_model", [])
+            if by_model:
+                lines.append(
+                    f"  {'Model':<28} {'Sessions':>9} {'Tokens':>8} {'Est. cost':>12}"
+                )
+                for m in by_model:
+                    lines.append(
+                        f"  {m['model'][:28]:<28} {m['sessions']:>9} "
+                        f"{format_token_count_compact(m['total_tokens']):>8} "
+                        f"~${m['cost']:>10.4f}"
+                    )
+            lines.append("")
+        else:
+            lines.append("  🤖 No subagent (delegate) sessions in this window.")
             lines.append("")
 
         return "\n".join(lines)

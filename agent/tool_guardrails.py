@@ -11,10 +11,13 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from utils import safe_json_loads
 from agent.tool_result_classification import file_mutation_result_landed
+
+if TYPE_CHECKING:  # avoid a circular import; policy_interceptors imports this module
+    from agent.policy_interceptors import PolicyInterceptorRegistry
 
 
 IDEMPOTENT_TOOL_NAMES = frozenset(
@@ -222,10 +225,21 @@ def classify_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str
 
 
 class ToolCallGuardrailController:
-    """Per-turn controller for repeated failed/non-progressing tool calls."""
+    """Per-turn controller for repeated failed/non-progressing tool calls.
 
-    def __init__(self, config: ToolCallGuardrailConfig | None = None):
+    Optionally evaluates a pluggable :class:`PolicyInterceptorRegistry` (passed
+    as ``policy_registry``) *before* the loop/limit checks. Policy denials are
+    hard constraints independent of ``hard_stop_enabled`` — that flag only
+    governs the loop-limit circuit breaker, not user-authored policies.
+    """
+
+    def __init__(
+        self,
+        config: ToolCallGuardrailConfig | None = None,
+        policy_registry: "PolicyInterceptorRegistry | None" = None,
+    ):
         self.config = config or ToolCallGuardrailConfig()
+        self.policy_registry = policy_registry
         self.reset_for_turn()
 
     def reset_for_turn(self) -> None:
@@ -233,12 +247,22 @@ class ToolCallGuardrailController:
         self._same_tool_failure_counts: dict[str, int] = {}
         self._no_progress: dict[ToolCallSignature, tuple[str, int]] = {}
         self._halt_decision: ToolGuardrailDecision | None = None
+        if self.policy_registry is not None:
+            self.policy_registry.reset_for_turn()
 
     @property
     def halt_decision(self) -> ToolGuardrailDecision | None:
         return self._halt_decision
 
     def before_call(self, tool_name: str, args: Mapping[str, Any] | None) -> ToolGuardrailDecision:
+        # Policy interceptors run first and apply regardless of hard_stop_enabled:
+        # a denied policy is a deterministic user rule, not a loop limit.
+        if self.policy_registry is not None and self.policy_registry.enabled:
+            policy_decision = self.policy_registry.evaluate(tool_name, args)
+            if not policy_decision.allows_execution:
+                self._halt_decision = policy_decision
+                return policy_decision
+
         signature = ToolCallSignature.from_call(tool_name, _coerce_args(args))
         if not self.config.hard_stop_enabled:
             return ToolGuardrailDecision(tool_name=tool_name, signature=signature)
@@ -294,6 +318,11 @@ class ToolCallGuardrailController:
         signature = ToolCallSignature.from_call(tool_name, args)
         if failed is None:
             failed, _ = classify_tool_failure(tool_name, result)
+
+        # Feed the per-turn observation ledger so ordering-aware policy
+        # interceptors (e.g. read-before-write) can see prior calls.
+        if self.policy_registry is not None and self.policy_registry.enabled:
+            self.policy_registry.record_observation(tool_name, args, failed=failed)
 
         if failed:
             exact_count = self._exact_failure_counts.get(signature, 0) + 1

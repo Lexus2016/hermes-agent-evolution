@@ -28,11 +28,14 @@ from typing import Any, Dict, List, Optional
 
 from agent.prompt_builder import (
     DEFAULT_AGENT_IDENTITY,
+    ATTENTION_RESET_GUIDANCE,
+    DELIBERATE_WORK_GUIDANCE,
     GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
     HERMES_AGENT_HELP_GUIDANCE,
     KANBAN_GUIDANCE,
     MEMORY_GUIDANCE,
     OPENAI_MODEL_EXECUTION_GUIDANCE,
+    PARALLEL_TOOL_CALL_GUIDANCE,
     PLATFORM_HINTS,
     SESSION_SEARCH_GUIDANCE,
     SKILLS_GUIDANCE,
@@ -40,6 +43,8 @@ from agent.prompt_builder import (
     TASK_COMPLETION_GUIDANCE,
     TOOL_USE_ENFORCEMENT_GUIDANCE,
     TOOL_USE_ENFORCEMENT_MODELS,
+    TQMEMORY_GUIDANCE,
+    drain_truncation_warnings,
 )
 from agent.runtime_cwd import resolve_context_cwd
 
@@ -57,6 +62,55 @@ def _ra():
     """
     import run_agent
     return run_agent
+
+
+def _resolve_platform_hint(agent: Any, platform_key: str, default_hint: str) -> str:
+    """Apply a per-platform prompt-hint override to the default hint.
+
+    Reads ``agent._platform_hint_overrides`` (populated from
+    ``config.yaml`` ``platform_hints`` by ``agent_init``) and resolves the
+    effective hint for *platform_key*:
+
+      * ``replace`` — substitute the default hint entirely.
+      * ``append``  — keep the default and append the extra text.
+      * a bare string value — treated as ``append`` (convenience shorthand).
+
+    Precedence: ``replace`` wins over ``append`` if both are present.
+    Override text is added on top of (not instead of) the SOUL/context/
+    memory tiers — it only affects the platform-hint segment, so other
+    platforms are unaffected and general system instructions still apply.
+
+    Defensive: any malformed entry falls back to the unmodified default so
+    a bad config value can never break prompt assembly or leak across
+    platforms.
+    """
+    if not platform_key:
+        return default_hint
+    overrides = getattr(agent, "_platform_hint_overrides", None)
+    if not isinstance(overrides, dict) or not overrides:
+        return default_hint
+    spec = overrides.get(platform_key)
+    if spec is None:
+        return default_hint
+
+    # Shorthand: a bare string is treated as append text.
+    if isinstance(spec, str):
+        extra = spec.strip()
+        return f"{default_hint}\n\n{extra}".strip() if extra else default_hint
+
+    if not isinstance(spec, dict):
+        return default_hint
+
+    replace_text = spec.get("replace")
+    if isinstance(replace_text, str) and replace_text.strip():
+        base = replace_text.strip()
+    else:
+        base = default_hint
+
+    append_text = spec.get("append")
+    if isinstance(append_text, str) and append_text.strip():
+        return f"{base}\n\n{append_text.strip()}".strip()
+    return base
 
 
 def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) -> Dict[str, str]:
@@ -82,6 +136,17 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # we resolve through ``_ra()`` to honor those patches.
     _r = _ra()
 
+    # Resolve the model's context window once so context-file caps can scale
+    # to it (dynamic cap — see prompt_builder._dynamic_context_file_max_chars).
+    # None falls back to the historical flat default. This value is stable for
+    # the life of the conversation, so it does not threaten prompt caching.
+    _ctx_len: Optional[int] = None
+    _cc = getattr(agent, "context_compressor", None)
+    if _cc is not None:
+        _cc_len = getattr(_cc, "context_length", None)
+        if isinstance(_cc_len, int) and _cc_len > 0:
+            _ctx_len = _cc_len
+
     # ── Stable tier ────────────────────────────────────────────────
     stable_parts: List[str] = []
 
@@ -90,7 +155,7 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # cwd project instructions disabled.
     _soul_loaded = False
     if agent.load_soul_identity or not agent.skip_context_files:
-        _soul_content = _r.load_soul_md()
+        _soul_content = _r.load_soul_md(_ctx_len)
         if _soul_content:
             stable_parts.append(_soul_content)
             _soul_loaded = True
@@ -110,6 +175,26 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # users who want a leaner prompt can turn it off.
     if getattr(agent, "_task_completion_guidance", True) and agent.valid_tool_names:
         stable_parts.append(TASK_COMPLETION_GUIDANCE)
+
+    # Universal anti-fixation guidance (issue #45): a reset the model performs
+    # itself to break tunnel vision. Always on — cheap, static text, helps every
+    # model avoid repeating failed approaches.
+    stable_parts.append(ATTENTION_RESET_GUIDANCE)
+
+    # Deliberate work + self-review on the USER'S tasks: judge necessity before
+    # acting, audit and rate your own work after. Always on — static text, scoped
+    # to non-trivial work, so it raises quality without slowing simple replies.
+    stable_parts.append(DELIBERATE_WORK_GUIDANCE)
+    # Universal parallel-tool-call guidance.  Tells the model to batch
+    # independent tool calls into one assistant turn rather than emitting one
+    # call per turn — the runtime already runs independent calls concurrently
+    # (read-only tools always; non-overlapping path-scoped file ops), so the
+    # only thing missing was steering the model to produce the batch.  Cuts
+    # round-trips and the resent-context cost that compounds over a long
+    # conversation.  Gated by config.yaml ``agent.parallel_tool_call_guidance``
+    # (default True) and only injected when tools are actually loaded.
+    if getattr(agent, "_parallel_tool_call_guidance", True) and agent.valid_tool_names:
+        stable_parts.append(PARALLEL_TOOL_CALL_GUIDANCE)
 
     # Tool-aware behavioral guidance: only inject when the tools are loaded
     tool_guidance = []
@@ -132,16 +217,27 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     if tool_guidance:
         stable_parts.append(" ".join(tool_guidance))
 
+    # Turbo-Quant Memory (tqmemory) — a headline feature of this fork. Injected
+    # only when its MCP tools are actually connected (they appear as
+    # ``mcp_tqmemory_*``), so the prompt never claims a capability the session
+    # lacks. Separate block (not merged into the space-joined tool_guidance)
+    # because the text is multi-paragraph with its own heading. Complements, and
+    # does not replace, the built-in MEMORY_GUIDANCE above.
+    if any(str(n).startswith("mcp_tqmemory_") for n in agent.valid_tool_names):
+        stable_parts.append(TQMEMORY_GUIDANCE)
+
     # Steering only lands inside tool results, so it's only reachable when the
     # agent has tools. Static text → byte-stable prompt (no cache hit).
     if agent.valid_tool_names:
         stable_parts.append(STEER_CHANNEL_NOTE)
 
-    # Computer-use (macOS) — goes in as its own block rather than being
-    # merged into tool_guidance because the content is multi-paragraph.
+    # Computer-use — goes in as its own block rather than being merged into
+    # tool_guidance because the content is multi-paragraph. The guidance is
+    # rendered for the host platform so Windows/Linux hosts don't see
+    # macOS-only wording (Mac, Space, cmd+s).
     if "computer_use" in agent.valid_tool_names:
-        from agent.prompt_builder import COMPUTER_USE_GUIDANCE
-        stable_parts.append(COMPUTER_USE_GUIDANCE)
+        from agent.prompt_builder import computer_use_guidance
+        stable_parts.append(computer_use_guidance())
 
     nous_subscription_prompt = _r.build_nous_subscription_prompt(agent.valid_tool_names)
     if nous_subscription_prompt:
@@ -268,6 +364,14 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
             _probe_line = get_environment_probe_line()
             if _probe_line:
                 stable_parts.append(_probe_line)
+            # Extra PEP 668 install hint when the host is externally-managed
+            try:
+                from tools.python_install import get_install_hint
+                _install_hint = get_install_hint()
+                if _install_hint:
+                    stable_parts.append(_install_hint)
+            except Exception:
+                pass
         except Exception:
             # Probe failure must never block prompt build.
             pass
@@ -307,17 +411,24 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         )
 
     platform_key = (agent.platform or "").lower().strip()
+    # Resolve the built-in/plugin default hint for this platform, then apply
+    # any per-platform override from config (platform_hints.<platform>).
+    _default_hint = ""
     if platform_key in PLATFORM_HINTS:
-        stable_parts.append(PLATFORM_HINTS[platform_key])
+        _default_hint = PLATFORM_HINTS[platform_key]
     elif platform_key:
         # Check plugin registry for platform-specific LLM guidance
         try:
             from gateway.platform_registry import platform_registry
             _entry = platform_registry.get(platform_key)
             if _entry and _entry.platform_hint:
-                stable_parts.append(_entry.platform_hint)
+                _default_hint = _entry.platform_hint
         except Exception:
             pass
+
+    _effective_hint = _resolve_platform_hint(agent, platform_key, _default_hint)
+    if _effective_hint:
+        stable_parts.append(_effective_hint)
 
     # ── Context tier (cwd-dependent, may change between sessions) ─
     context_parts: List[str] = []
@@ -333,7 +444,8 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         # dir — the user's real cwd there, but the install dir for the gateway
         # daemon, which is why the gateway sets TERMINAL_CWD.
         context_files_prompt = _r.build_context_files_prompt(
-            cwd=resolve_context_cwd(), skip_soul=_soul_loaded)
+            cwd=resolve_context_cwd(), skip_soul=_soul_loaded,
+            context_length=_ctx_len)
         if context_files_prompt:
             context_parts.append(context_files_prompt)
 
@@ -400,7 +512,14 @@ def build_system_prompt(agent: Any, system_message: Optional[str] = None) -> str
     warm across turns.
     """
     parts = build_system_prompt_parts(agent, system_message=system_message)
-    return "\n\n".join(p for p in (parts["stable"], parts["context"], parts["volatile"]) if p)
+    joined = "\n\n".join(p for p in (parts["stable"], parts["context"], parts["volatile"]) if p)
+
+    # Surface context-file truncation warnings through the normal agent status
+    # channel so gateway/CLI users see them in chat instead of only in logs.
+    for warning in drain_truncation_warnings():
+        agent._emit_status(warning)
+
+    return joined
 
 
 def invalidate_system_prompt(agent: Any) -> None:

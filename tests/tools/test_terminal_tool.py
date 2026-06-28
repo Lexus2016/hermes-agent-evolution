@@ -1,5 +1,6 @@
 """Regression tests for sudo detection and sudo password handling."""
 
+import json
 import tools.terminal_tool as terminal_tool
 
 
@@ -243,3 +244,118 @@ def test_get_env_config_still_rejects_bad_docker_json_for_docker_backend(monkeyp
         assert "TERMINAL_DOCKER_VOLUMES" in str(exc)
     else:
         raise AssertionError("Docker backend must validate TERMINAL_DOCKER_VOLUMES")
+
+
+def test_nano_without_pty_rejected(monkeypatch):
+    """Interactive editors without PTY should be rejected immediately."""
+    monkeypatch.setenv("TERMINAL_ENV", "local")
+    result = terminal_tool.terminal_tool("nano config.txt")
+    data = json.loads(result)
+    assert data["exit_code"] == -1
+    assert "pty=true" in data["error"]
+
+
+def test_vim_without_pty_rejected(monkeypatch):
+    """vim without PTY should be rejected."""
+    monkeypatch.setenv("TERMINAL_ENV", "local")
+    result = terminal_tool.terminal_tool("vim config.txt")
+    data = json.loads(result)
+    assert data["exit_code"] == -1
+
+
+def test_editor_with_pty_allowed():
+    """Interactive editors with PTY should be allowed (regex doesn't fire when pty=True)."""
+    from tools.terminal_tool import _INTERACTIVE_EDITOR_RE
+    assert _INTERACTIVE_EDITOR_RE.search("nano config.txt")
+    assert _INTERACTIVE_EDITOR_RE.search("vim config.txt")
+
+
+def test_editor_name_as_argument_substring_not_rejected():
+    """An editor NAME inside an argument (a branch name, a message) must NOT
+    trigger the guard — only an editor in COMMAND position does. Regression:
+    `git push origin evolution/issue-215-execute-code-diagnostics` matched
+    `\\bcode\\b` and was wrongly rejected, silently blocking the pipeline's pushes."""
+    from tools.terminal_tool import _INTERACTIVE_EDITOR_RE
+
+    assert not _INTERACTIVE_EDITOR_RE.search(
+        "git push origin evolution/issue-215-execute-code-diagnostics"
+    )
+    assert not _INTERACTIVE_EDITOR_RE.search(
+        "gh pr create --head evolution/issue-215-execute-code-diagnostics --title x"
+    )
+    # genuine command-position editor invocations are still caught
+    assert _INTERACTIVE_EDITOR_RE.search("echo done && vim notes.txt")
+    assert _INTERACTIVE_EDITOR_RE.search("code .")
+    assert _INTERACTIVE_EDITOR_RE.search("sudo nano /etc/hosts")
+
+
+def test_non_editor_command_unchanged():
+    """Non-editor commands should not be affected by the editor guard."""
+    from tools.terminal_tool import _INTERACTIVE_EDITOR_RE, _strip_quotes
+    assert not _INTERACTIVE_EDITOR_RE.search(_strip_quotes("ls -la"))
+    assert not _INTERACTIVE_EDITOR_RE.search(_strip_quotes("cat file.txt"))
+    assert not _INTERACTIVE_EDITOR_RE.search(_strip_quotes("git commit -m 'nano fix'"))
+
+
+def test_editor_in_quotes_not_flagged():
+    """Editor names inside quoted strings should not trigger the guard."""
+    from tools.terminal_tool import _INTERACTIVE_EDITOR_RE, _strip_quotes
+    cmd = 'git commit -m "use nano for editing"'
+    stripped = _strip_quotes(cmd)
+    assert not _INTERACTIVE_EDITOR_RE.search(stripped)
+
+
+def test_sudo_wrong_password_failure_detects_rejection_output():
+    output = (
+        "sudo: Authentication failed, try again.\n\n"
+        "sudo: maximum 3 incorrect authentication attempts\n"
+    )
+    assert terminal_tool._sudo_wrong_password_failure(output) is True
+
+
+def test_sudo_wrong_password_failure_ignores_tty_required_message():
+    output = "sudo: a terminal is required to authenticate"
+    assert terminal_tool._sudo_wrong_password_failure(output) is False
+
+
+def test_invalidate_cached_sudo_on_auth_failure_clears_session_cache(monkeypatch):
+    monkeypatch.delenv("SUDO_PASSWORD", raising=False)
+    terminal_tool._set_cached_sudo_password("wrong-pass")
+
+    cleared = terminal_tool._invalidate_cached_sudo_on_auth_failure(
+        "sudo apt install fprintd",
+        "sudo: Authentication failed, try again.",
+    )
+
+    assert cleared is True
+    assert terminal_tool._get_cached_sudo_password() == ""
+
+
+def test_invalidate_cached_sudo_on_auth_failure_keeps_env_password(monkeypatch):
+    monkeypatch.setenv("SUDO_PASSWORD", "from-env")
+    terminal_tool._set_cached_sudo_password("wrong-pass")
+
+    cleared = terminal_tool._invalidate_cached_sudo_on_auth_failure(
+        "sudo true",
+        "sudo: Authentication failed, try again.",
+    )
+
+    assert cleared is False
+    assert terminal_tool._get_cached_sudo_password() == "wrong-pass"
+
+
+def test_transform_sudo_command_pipes_one_password_line_per_invocation(monkeypatch):
+    monkeypatch.setenv("SUDO_PASSWORD", "testpass")
+    monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
+
+    transformed, sudo_stdin = terminal_tool._transform_sudo_command(
+        "sudo true && sudo whoami"
+    )
+
+    assert transformed == "sudo -S -p '' true && sudo -S -p '' whoami"
+    assert sudo_stdin == "testpass\ntestpass\n"
+
+
+def test_count_real_sudo_invocations_ignores_mentions(monkeypatch):
+    assert terminal_tool._count_real_sudo_invocations("grep sudo README.md") == 0
+    assert terminal_tool._count_real_sudo_invocations("sudo a; sudo b") == 2

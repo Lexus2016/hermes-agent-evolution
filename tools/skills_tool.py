@@ -8,6 +8,9 @@ and optional supporting files like references, templates, and examples.
 
 Inspired by Anthropic's Claude Skills system with progressive disclosure architecture:
 - Metadata (name ≤64 chars, description ≤1024 chars) - shown in skills_list
+- Schema (inputs / outputs / examples / required env) - loaded via
+  skill_view(name, schema_only=True) — a cheap middle tier between the
+  name+description listing and the full body (issue #303)
 - Full Instructions - loaded via skill_view when needed
 - Linked Files (references, templates) - loaded on demand
 
@@ -30,6 +33,14 @@ SKILL.md Format (YAML Frontmatter, agentskills.io compatible):
     name: skill-name              # Required, max 64 chars
     description: Brief description # Required, max 1024 chars
     version: 1.0.0                # Optional
+    inputs:                       # Optional — schema tier (issue #303)
+      - name: dataset_path        #   What the skill consumes. Free-form;
+        description: Path to data  #   surfaced verbatim by schema_only loads.
+    outputs:                      # Optional — what the skill produces
+      - name: report
+        description: Markdown summary
+    examples:                     # Optional — short usage examples (str or dict)
+      - "skill_view('my-skill')"
     license: MIT                  # Optional (agentskills.io)
     platforms: [macos]            # Optional — restrict to specific OS platforms
                                   #   Valid: macos, linux, windows
@@ -42,16 +53,30 @@ SKILL.md Format (YAML Frontmatter, agentskills.io compatible):
     metadata:                     # Optional, arbitrary key-value (agentskills.io)
       hermes:
         tags: [fine-tuning, llm]
-        related_skills: [peft, lora]
+        related_skills: [peft, lora]   # folded into graph.composes-with
+        graph:                         # Optional — Skills-as-Graph (AIP) edges
+          requires: [base-skill]       #   hard prerequisites (loaded transitively)
+          conflicts-with: [other]      #   cannot be co-loaded with these
+          composes-with: [partner]     #   canonical composition partners
+          deprecates: [old-skill]      #   supersedes these (governance)
     ---
 
     # Skill Title
 
     Full instructions and content here...
 
+Skill graph (issue #246): the four typed edges under metadata.hermes.graph form
+a dependency/composition/governance graph over skills. ``requires`` is a hard
+prerequisite (a missing or cyclic ``requires`` is a validation error); the other
+three are advisory/governance edges (a missing target is a warning only, since it
+may reference a skill in another profile or plugin). The legacy ``related_skills``
+list is folded into ``composes-with`` for backward compatibility. Query it via the
+``skill_relationships`` tool or ``agent.skill_graph.SkillGraph``.
+
 Available tools:
 - skills_list: List skills with metadata (progressive disclosure tier 1)
 - skill_view: Load full skill content (progressive disclosure tier 2-3)
+- skill_relationships: Inspect the skill graph — edges, requires-closure, blast radius
 
 Usage:
     from tools.skills_tool import skills_list, skill_view, check_skills_requirements
@@ -79,7 +104,10 @@ from typing import Dict, Any, List, Optional, Set, Tuple
 from tools.registry import registry, tool_error
 from hermes_cli.config import cfg_get
 from utils import env_var_enabled
-from agent.skill_utils import EXCLUDED_SKILL_DIRS as _EXCLUDED_SKILL_DIRS
+from agent.skill_utils import (
+    EXCLUDED_SKILL_DIRS as _EXCLUDED_SKILL_DIRS,
+    is_skill_support_path as _is_skill_support_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -545,6 +573,60 @@ def _parse_tags(tags_value) -> List[str]:
     return [t.strip().strip("\"'") for t in tags_value.split(",") if t.strip()]
 
 
+def _normalize_schema_examples(value: Any) -> List[Any]:
+    """Coerce a raw frontmatter ``examples`` value into a clean list.
+
+    Accepts a single example (str/dict) or a list of them. Blank strings and
+    non-str/dict members are dropped so a malformed entry can't bloat the
+    schema tier. Order is preserved.
+    """
+    if not value:
+        return []
+    items = value if isinstance(value, list) else [value]
+    examples: List[Any] = []
+    for item in items:
+        if isinstance(item, dict):
+            examples.append(item)
+        elif isinstance(item, str) and item.strip():
+            examples.append(item.strip())
+    return examples
+
+
+def extract_skill_schema(frontmatter: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract the structured invocation schema declared in skill frontmatter.
+
+    This is the middle progressive-disclosure tier (issue #303, child of #229):
+    ``skills_list`` exposes name+description (tier 1) and ``skill_view`` loads the
+    full SKILL.md body (tier 3). The schema is the cheap-to-load contract — what
+    the skill takes (``inputs``), what it produces (``outputs``), the credentials
+    it needs (``required_environment_variables``, surfaced here read-only), and a
+    few usage ``examples`` — without paying for the whole instruction body.
+
+    Fields are read verbatim from frontmatter (the YAML loader already gives us
+    lists/dicts). Absent fields are simply omitted, so a skill that declares no
+    schema yields an empty dict. The required-env list reuses the same
+    normalization as ``skill_view`` so the two never disagree.
+    """
+    schema: Dict[str, Any] = {}
+
+    inputs = frontmatter.get("inputs")
+    if inputs:
+        schema["inputs"] = inputs
+
+    outputs = frontmatter.get("outputs")
+    if outputs:
+        schema["outputs"] = outputs
+
+    examples = _normalize_schema_examples(frontmatter.get("examples"))
+    if examples:
+        schema["examples"] = examples
+
+    required_env_vars = _get_required_environment_variables(frontmatter)
+    if required_env_vars:
+        schema["required_environment_variables"] = required_env_vars
+
+    return schema
+
 
 def _get_disabled_skill_names() -> Set[str]:
     """Load disabled skill names from config.
@@ -583,11 +665,15 @@ def _is_skill_disabled(name: str, platform: str = None) -> bool:
         config = load_config()
         skills_cfg = config.get("skills", {})
         resolved_platform = platform or os.getenv("HERMES_PLATFORM") or _get_session_platform()
+        global_disabled = skills_cfg.get("disabled", [])
         if resolved_platform:
             platform_disabled = cfg_get(skills_cfg, "platform_disabled", resolved_platform)
             if platform_disabled is not None:
-                return name in platform_disabled
-        return name in skills_cfg.get("disabled", [])
+                # A globally-disabled skill stays disabled on every platform;
+                # the platform list adds to it rather than replacing it. Keep
+                # in sync with agent.skill_utils.get_disabled_skill_names.
+                return name in platform_disabled or name in global_disabled
+        return name in global_disabled
     except Exception:
         return False
 
@@ -745,6 +831,137 @@ def skills_list(category: str = None, task_id: str = None) -> str:
         return tool_error(str(e), success=False)
 
 
+def skills_search(query: str, limit: int = 5) -> str:
+    """Rank skills by relevance to the current task/state (state-grounded retrieval).
+
+    First increment of #247 ("Online skill acquisition via state-grounded dynamic
+    retrieval"). Unlike ``skills_list`` (a static, alphabetical dump of every
+    skill), this surfaces the few skills most relevant to *what the agent is doing
+    right now*, given a free-form description of the current task or state.
+
+    Args:
+        query: Free-form text describing the current task or state.
+        limit: Maximum number of results to return (default 5).
+
+    Returns:
+        JSON string with the best-first ranked skills (name, description,
+        category, score, matched_terms).
+    """
+    try:
+        from tools.skill_retrieval import rank_skills
+
+        if not isinstance(query, str) or not query.strip():
+            return tool_error("query must be a non-empty string", success=False)
+
+        try:
+            limit_int = int(limit)
+        except (TypeError, ValueError):
+            limit_int = 5
+        if limit_int <= 0:
+            limit_int = 5
+
+        ranked = rank_skills(query, limit=limit_int)
+        results = [
+            {
+                "name": r.name,
+                "description": r.description,
+                "category": r.category,
+                "score": r.score,
+                "matched_terms": r.matched_terms,
+            }
+            for r in ranked
+        ]
+        return json.dumps(
+            {
+                "success": True,
+                "query": query,
+                "skills": results,
+                "count": len(results),
+                "hint": "Use skill_view(name) to load full content for a relevant skill",
+            },
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        return tool_error(str(e), success=False)
+
+
+# ── Skill graph (AIP) ──────────────────────────────────────────────────────
+
+
+def _build_skill_graph():
+    """Build a :class:`SkillGraph` over every scanned skills directory.
+
+    Uses the same directory set the registry scans (local ``~/.hermes/skills``
+    first, then configured external dirs) so graph queries see exactly the
+    skills the agent could load.
+    """
+    from agent.skill_graph import SkillGraph
+    from agent.skill_utils import get_external_skills_dirs
+
+    dirs = []
+    if SKILLS_DIR.exists():
+        dirs.append(SKILLS_DIR)
+    dirs.extend(get_external_skills_dirs())
+    return SkillGraph.from_skills_dirs(dirs)
+
+
+def skill_relationships(name: str = None) -> str:
+    """Report the dependency/composition/governance graph around skill(s).
+
+    With *name*: returns that skill's declared edges, the capabilities it
+    ``provides``, its transitive ``requires`` closure (the minimal set to load
+    it), and its blast radius (dependents / conflicts / composition partners).
+    Without *name*: validates the whole graph (missing edge targets, ``requires``
+    cycles, conflicts, capability conflicts), returns the dependency-first
+    topological order, and the resolved capability surface (``what can I do?`` —
+    capability -> providing skills).
+
+    Returns a JSON string.  This is the agent-facing surface of the
+    Skills-as-Graph layer (issue #246; capability/governance increment #297+#299).
+    """
+    try:
+        graph = _build_skill_graph()
+        validation = graph.validate()
+
+        if name:
+            if name not in graph:
+                suggestions = _suggest_skill_names(name, graph.names())
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"Skill '{name}' not found in the skill graph.",
+                        "suggestions": suggestions,
+                    },
+                    ensure_ascii=False,
+                )
+            node = graph.node(name)
+            return json.dumps(
+                {
+                    "success": True,
+                    "skill": name,
+                    "edges": graph.edges_of(name),
+                    "provides": node.provided() if node else [],
+                    "closure": graph.closure(name),
+                    "blast_radius": graph.blast(name),
+                    "graph_ok": validation.ok,
+                },
+                ensure_ascii=False,
+            )
+
+        return json.dumps(
+            {
+                "success": True,
+                "skill_count": len(graph),
+                "validation": validation.as_dict(),
+                "topological_order": graph.topological_order(),
+                "capability_surface": graph.capability_surface(),
+            },
+            ensure_ascii=False,
+        )
+    except Exception as e:
+        return tool_error(str(e), success=False)
+
+
 # ── Plugin skill serving ──────────────────────────────────────────────────
 
 
@@ -852,11 +1069,41 @@ def _serve_plugin_skill(
     )
 
 
+def _suggest_skill_names(name: str, all_names: List[str], n: int = 3) -> List[str]:
+    """Closest skill-name matches for a missing/renamed skill (#232).
+
+    A renamed or mistyped skill's requested name is near its real name, so a
+    ranked "did you mean?" beats an arbitrary alphabetical slice. Each candidate
+    is scored by the best of: full-name similarity, leaf-name similarity, and a
+    strong bonus when the requested leaf is a substring of the candidate's leaf
+    (the common rename/abbreviation case). Returns up to ``n`` above threshold."""
+    import difflib
+
+    if not name or not all_names:
+        return []
+    q = name.lower()
+    q_leaf = q.rsplit("/", 1)[-1]
+    scored: List[Tuple[float, str]] = []
+    for cand in all_names:
+        c = cand.lower()
+        c_leaf = c.rsplit("/", 1)[-1]
+        score = max(
+            difflib.SequenceMatcher(None, q, c).ratio(),
+            difflib.SequenceMatcher(None, q_leaf, c_leaf).ratio(),
+        )
+        if q_leaf and q_leaf in c_leaf:
+            score = max(score, 0.9)  # requested leaf is a substring — strong signal
+        scored.append((score, cand))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return [cand for sc, cand in scored if sc >= 0.5][:n]
+
+
 def skill_view(
     name: str,
     file_path: str = None,
     task_id: str = None,
     preprocess: bool = True,
+    schema_only: bool = False,
 ) -> str:
     """
     View the content of a skill or a specific file within a skill directory.
@@ -869,6 +1116,16 @@ def skill_view(
         preprocess: Apply configured SKILL.md template and inline shell rendering
             to main skill content. Internal slash/preload callers disable this
             because they render the skill message themselves.
+        schema_only: Progressive-disclosure middle tier (issue #303). When True,
+            resolve the skill (all security/platform/disabled gates still run) and
+            return only its name, description, and structured ``schema`` (inputs /
+            outputs / examples / required env), WITHOUT loading the full SKILL.md
+            body, preprocessing it, or triggering env-capture side effects. This is
+            the cheap "what does this skill take and produce?" load that sits
+            between ``skills_list`` (name+description) and a full ``skill_view``.
+            Ignored when ``file_path`` is given (a linked-file read is already
+            scoped). Plugin-provided skills currently fall through to the full
+            load.
 
     Returns:
         JSON string with skill content or error message
@@ -1016,9 +1273,15 @@ def skill_view(
             # Strategy 1: direct path (e.g., "mlops/axolotl" or bare "axolotl"
             # at the top of the dir).
             direct_path = search_dir / name
-            if direct_path.is_dir() and (direct_path / "SKILL.md").exists():
+            if (
+                not _is_skill_support_path(direct_path)
+                and direct_path.is_dir()
+                and (direct_path / "SKILL.md").exists()
+            ):
                 _record(direct_path, direct_path / "SKILL.md")
-            elif direct_path.with_suffix(".md").exists():
+            elif direct_path.with_suffix(".md").exists() and not _is_skill_support_path(
+                direct_path.with_suffix(".md")
+            ):
                 _record(None, direct_path.with_suffix(".md"))
 
             # Strategy 1b: categorized form for plugin namespace fall-through
@@ -1026,9 +1289,17 @@ def skill_view(
             # tries the on-disk path "myplugin/explore").
             if local_category_name:
                 categorized_path = search_dir / local_category_name
-                if categorized_path.is_dir() and (categorized_path / "SKILL.md").exists():
+                if (
+                    not _is_skill_support_path(categorized_path)
+                    and categorized_path.is_dir()
+                    and (categorized_path / "SKILL.md").exists()
+                ):
                     _record(categorized_path, categorized_path / "SKILL.md")
-                elif categorized_path.with_suffix(".md").exists():
+                elif categorized_path.with_suffix(
+                    ".md"
+                ).exists() and not _is_skill_support_path(
+                    categorized_path.with_suffix(".md")
+                ):
                     _record(None, categorized_path.with_suffix(".md"))
 
             # Strategy 2: recursive by directory name (catches nested skills
@@ -1049,8 +1320,13 @@ def skill_view(
                     _record(found_skill_md.parent, found_skill_md)
 
             # Strategy 3: legacy flat <name>.md files anywhere under the dir.
+            # Exclude skill support docs: references/templates/assets/scripts
+            # are loaded through skill_view(skill, file_path=...) and must not
+            # shadow or collide with real skills that share the same basename.
             for found_md in search_dir.rglob(f"{name}.md"):
-                if found_md.name != "SKILL.md":
+                if found_md.name != "SKILL.md" and not _is_skill_support_path(
+                    found_md
+                ):
                     _record(None, found_md)
 
         if len(candidates) > 1:
@@ -1081,16 +1357,21 @@ def skill_view(
             skill_dir, skill_md = candidates[0]
 
         if not skill_md or not skill_md.exists():
-            available = [s["name"] for s in _sort_skills(_find_all_skills())[:20]]
-            return json.dumps(
-                {
-                    "success": False,
-                    "error": f"Skill '{name}' not found.",
-                    "available_skills": available,
-                    "hint": "Use skills_list to see all available skills",
-                },
-                ensure_ascii=False,
-            )
+            all_names = [s["name"] for s in _sort_skills(_find_all_skills())]
+            did_you_mean = _suggest_skill_names(name, all_names)
+            resp = {
+                "success": False,
+                "error": f"Skill '{name}' not found.",
+                "available_skills": all_names[:20],
+                "hint": "Use skills_list to see all available skills",
+            }
+            if did_you_mean:
+                resp["did_you_mean"] = did_you_mean
+                resp["hint"] = (
+                    f"Closest matches: {', '.join(did_you_mean)}. "
+                    "Skill may have been renamed — use skills_list to confirm."
+                )
+            return json.dumps(resp, ensure_ascii=False)
 
         # Read the file once — reused for platform check and main content below
         try:
@@ -1158,6 +1439,27 @@ def skill_view(
                     "error": (
                         f"Skill '{resolved_name}' is disabled. "
                         "Enable it with `hermes skills` or inspect the files directly on disk."
+                    ),
+                },
+                ensure_ascii=False,
+            )
+
+        # Progressive-disclosure middle tier (issue #303): return just the
+        # structured schema (inputs/outputs/examples/required-env) without the
+        # full body, preprocessing, or env-capture side effects. A file_path
+        # read is already a scoped load, so schema_only does not apply there.
+        if schema_only and not file_path:
+            schema_name = parsed_frontmatter.get("name", resolved_name)
+            return json.dumps(
+                {
+                    "success": True,
+                    "name": schema_name,
+                    "description": parsed_frontmatter.get("description", ""),
+                    "schema": extract_skill_schema(parsed_frontmatter),
+                    "schema_only": True,
+                    "hint": (
+                        "Schema only. Call skill_view(name) without schema_only "
+                        "to load the full instructions."
                     ),
                 },
                 ensure_ascii=False,
@@ -1449,6 +1751,14 @@ def skill_view(
             else SkillReadinessStatus.AVAILABLE.value,
         }
 
+        # Surface the structured schema (inputs/outputs/examples/required-env)
+        # alongside the full content too — same tier-2 contract a schema_only
+        # load returns, so callers see one consistent ``schema`` shape. Omitted
+        # when the skill declares no schema, keeping the response lean.
+        skill_schema = extract_skill_schema(frontmatter)
+        if skill_schema:
+            result["schema"] = skill_schema
+
         setup_help = next((e["help"] for e in required_env_vars if e.get("help")), None)
         if setup_help:
             result["setup_help"] = setup_help
@@ -1562,6 +1872,10 @@ SKILL_VIEW_SCHEMA = {
                 "type": "string",
                 "description": "OPTIONAL: Path to a linked file within the skill (e.g., 'references/api.md', 'templates/config.yaml', 'scripts/validate.py'). Omit to get the main SKILL.md content.",
             },
+            "schema_only": {
+                "type": "boolean",
+                "description": "OPTIONAL: When true, return only the skill's name, description, and structured schema (inputs/outputs/examples/required env) WITHOUT loading the full SKILL.md body — a cheap 'what does this skill take and produce?' preview between skills_list and a full load. Ignored if file_path is set.",
+            },
         },
         "required": ["name"],
     },
@@ -1581,8 +1895,12 @@ def _skill_view_with_bump(args, **kw):
     """Invoke skill_view, then bump view_count on success. Best-effort: a
     telemetry failure never breaks the tool call."""
     name = args.get("name", "")
+    schema_only = bool(args.get("schema_only"))
     result = skill_view(
-        name, file_path=args.get("file_path"), task_id=kw.get("task_id")
+        name,
+        file_path=args.get("file_path"),
+        task_id=kw.get("task_id"),
+        schema_only=schema_only,
     )
     try:
         parsed = json.loads(result)
@@ -1593,10 +1911,13 @@ def _skill_view_with_bump(args, **kw):
             if resolved:
                 from tools.skill_usage import bump_use, bump_view
                 bump_view(str(resolved))
-                # A skill_view tool call is the agent actively loading the skill
-                # to act on it — that counts as use, not just a browse/view.
-                # Curator's stale timer keys off last_used_at (see agent/curator.py).
-                bump_use(str(resolved))
+                # A full skill_view tool call is the agent actively loading the
+                # skill to act on it — that counts as use, not just a browse.
+                # A schema_only load is a cheap preview (tier 2), so it bumps
+                # view but NOT use — it must not reset the Curator stale timer,
+                # which keys off last_used_at (see agent/curator.py).
+                if not schema_only:
+                    bump_use(str(resolved))
     except Exception:
         pass
     return result
@@ -1609,4 +1930,63 @@ registry.register(
     handler=_skill_view_with_bump,
     check_fn=check_skills_requirements,
     emoji="📚",
+)
+
+SKILLS_SEARCH_SCHEMA = {
+    "name": "skills_search",
+    "description": (
+        "Rank available skills by relevance to the CURRENT task or state, "
+        "best-first. Prefer this over skills_list when you know what you are "
+        "trying to do — pass a short description of the task/state as the query "
+        "and get back only the few most relevant skills (with match terms and a "
+        "relevance score), then skill_view the one you want."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Free-form text describing the current task or state to match skills against.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of ranked skills to return (default 5).",
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+SKILL_RELATIONSHIPS_SCHEMA = {
+    "name": "skill_relationships",
+    "description": "Inspect the skill dependency/composition graph (AIP). With a skill name: returns its declared edges (requires / conflicts-with / composes-with / deprecates), its transitive 'requires' closure (the minimal set to load it), and its blast radius (dependents, conflicts, composition partners). Without a name: validates the whole graph (missing targets, requires-cycles, conflicts) and returns the dependency-first load order.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "OPTIONAL: skill name to inspect. Omit to validate and order the whole graph.",
+            }
+        },
+        "required": [],
+    },
+}
+
+registry.register(
+    name="skills_search",
+    toolset="skills",
+    schema=SKILLS_SEARCH_SCHEMA,
+    handler=lambda args, **kw: skills_search(
+        query=args.get("query", ""), limit=args.get("limit", 5)
+    ),
+    check_fn=check_skills_requirements,
+    emoji="🔎",
+)
+registry.register(
+    name="skill_relationships",
+    toolset="skills",
+    schema=SKILL_RELATIONSHIPS_SCHEMA,
+    handler=lambda args, **kw: skill_relationships(name=args.get("name")),
+    check_fn=check_skills_requirements,
+    emoji="🕸️",
 )

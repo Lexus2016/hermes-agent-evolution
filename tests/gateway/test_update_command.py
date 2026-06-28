@@ -42,6 +42,28 @@ def _make_runner():
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _no_real_update_spawn():
+    """Hard guard: never spawn the real ``hermes update --gateway``.
+
+    The platform-allowlist tests (``TestUpdateCommandPlatformGate``'s
+    ``test_allows_*``) drive the real handler all the way to the spawn.
+    Without this guard they launch a REAL detached (setsid)
+    ``hermes update --gateway`` against the repo checkout the tests run
+    from: the orphaned updater then runs ``git fetch origin main;
+    git checkout main`` mid-test-run, deleting every file that is new
+    relative to main. On CI (detached merge-ref HEAD) the tree never
+    switches back, which deterministically broke any PR adding new test
+    files (issue #85).
+
+    Module-level autouse so every present and future test in this file is
+    covered. Tests that assert on spawn behaviour still patch
+    ``subprocess.Popen`` themselves; their inner patch nests inside this one.
+    """
+    with patch("subprocess.Popen") as popen_guard:
+        yield popen_guard
+
+
 class TestHandleUpdateCommand:
     """Tests for GatewayRunner._handle_update_command."""
 

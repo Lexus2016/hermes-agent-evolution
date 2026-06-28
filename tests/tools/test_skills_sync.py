@@ -1,7 +1,9 @@
 """Tests for tools/skills_sync.py — manifest-based skill seeding and updating."""
 
-import shutil
 import json
+import shutil
+
+import pytest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -178,6 +180,97 @@ class TestComputeRelativeDest:
         skill_dir = Path("/repo/skills/simple")
         dest = _compute_relative_dest(skill_dir, bundled)
         assert dest.name == "simple"
+
+
+class TestRmtreeWritableScopeGuard:
+    """``_rmtree_writable`` must refuse to remove anything outside
+    ``HERMES_HOME/skills/``.
+
+    The previous implementation called ``shutil.rmtree(path)`` on whatever
+    argument the caller passed. If any of the five call sites in
+    ``tools/skills_sync.py`` ever computes a path outside the skills
+    root — through a bad join, a missing default, a malicious
+    bundled-manifest entry, or a stale path in scope after an
+    exception — the result is a silent ``shutil.rmtree(~/.hermes/)``
+    that destroys the user's ``.env``, ``MEMORY.md``, ``kanban.db``,
+    custom skills, scripts, and the rest of the install in one go
+    (#48200).
+
+    The scope guard turns that into a loud ``ValueError`` so the
+    failure is observable, reproducible, and recoverable rather than
+    a data-loss incident.
+    """
+
+    def test_refuses_root_path(self, tmp_path):
+        """``Path('/')`` is the entire filesystem — must always be rejected."""
+        from tools.skills_sync import _rmtree_writable, SKILLS_DIR
+
+        skills = tmp_path / "skills"
+        skills.mkdir()
+        with patch("tools.skills_sync.SKILLS_DIR", skills):
+            with pytest.raises(ValueError, match="refusing to rmtree"):
+                _rmtree_writable(Path("/"))
+
+    def test_refuses_hermes_home_itself(self, tmp_path):
+        """``~/.hermes/`` itself is what the #48200 wipe destroyed."""
+        from tools.skills_sync import _rmtree_writable
+
+        hermes = tmp_path / "home"
+        hermes.mkdir()
+        (hermes / "skills").mkdir()
+        with patch("tools.skills_sync.SKILLS_DIR", hermes / "skills"):
+            with pytest.raises(ValueError, match="refusing to rmtree"):
+                _rmtree_writable(hermes)
+
+    def test_refuses_sibling_directory(self, tmp_path):
+        """A directory that is a sibling of SKILLS_DIR (e.g. a wrong
+        ``bundled_dir`` computation) must be rejected, not silently rmtree'd.
+        """
+        from tools.skills_sync import _rmtree_writable
+
+        hermes = tmp_path / "home"
+        hermes.mkdir()
+        skills = hermes / "skills"
+        skills.mkdir()
+        not_skills = hermes / "kanban.db"  # any non-skills path
+        not_skills.mkdir()
+        with patch("tools.skills_sync.SKILLS_DIR", skills):
+            with pytest.raises(ValueError, match="refusing to rmtree"):
+                _rmtree_writable(not_skills)
+
+    def test_refuses_skills_root_itself(self, tmp_path):
+        """The skills root directory itself must be refused.
+
+        No caller in skills_sync.py ever passes SKILLS_DIR directly — every
+        site passes a skill subdirectory or its ``.bak`` sibling. Removing
+        the root would wipe every installed skill, and a ``dest`` that
+        collapses to the root is exactly the degenerate path #48200 guards
+        against. Require a strict-child relationship.
+        """
+        from tools.skills_sync import _rmtree_writable
+
+        skills = tmp_path / "skills"
+        (skills / "keep").mkdir(parents=True)
+        with patch("tools.skills_sync.SKILLS_DIR", skills):
+            with pytest.raises(ValueError, match="refusing to rmtree"):
+                _rmtree_writable(skills)
+        assert (skills / "keep").exists()  # nothing was wiped
+
+    def test_allows_subdirectory_of_skills(self, tmp_path):
+        """Any directory strictly under SKILLS_DIR is allowed."""
+        from tools.skills_sync import _rmtree_writable
+
+        skills = tmp_path / "skills"
+        skills.mkdir()
+        sub = skills / "category" / "old-skill"
+        sub.mkdir(parents=True)
+        (sub / "SKILL.md").write_text("# old")
+
+        with patch("tools.skills_sync.SKILLS_DIR", skills):
+            _rmtree_writable(sub)
+
+        assert skills.exists()
+        assert not sub.exists()
 
 
 class TestSyncSkills:
@@ -619,7 +712,8 @@ class TestSyncSkills:
             result = sync_skills(quiet=True)
         assert result == {
             "copied": [], "updated": [], "skipped": 0,
-            "user_modified": [], "cleaned": [], "suppressed": [], "total_bundled": 0,
+            "user_modified": [], "relocated": [], "cleaned": [], "suppressed": [],
+            "total_bundled": 0,
             "optional_provenance_backfilled": [],
         }
 
@@ -1068,6 +1162,104 @@ class TestOptOutToggleAndRemove:
             assert "EDITED" in (skills_dir / "beta" / "SKILL.md").read_text()
             # non-bundled local skill never considered
             assert (skills_dir / "mine" / "SKILL.md").exists()
+
+
+class TestRelocatedBundledSkill:
+    """A bundled skill MOVED to a new category path must follow the move on
+    the client instead of being treated as user-deleted.
+
+    The old behaviour stranded the old copy forever AND never seeded the new
+    location: the manifest still held the (unchanged) skill name, the new
+    dest did not exist, so the sync read it as "user deleted — respected".
+    Result on every pre-move install: stale copies accumulate at old paths,
+    the skill loader reports name collisions, and cron jobs bound to the
+    bare skill name silently skip.
+    """
+
+    def _patched(self, bundled, skills_dir, manifest_file, tmp_path):
+        from contextlib import ExitStack
+        stack = ExitStack()
+        stack.enter_context(patch("tools.skills_sync._get_bundled_dir", return_value=bundled))
+        stack.enter_context(patch("tools.skills_sync._get_optional_dir", return_value=bundled.parent / "optional-skills"))
+        stack.enter_context(patch("tools.skills_sync.SKILLS_DIR", skills_dir))
+        stack.enter_context(patch("tools.skills_sync.MANIFEST_FILE", manifest_file))
+        stack.enter_context(patch("tools.skills_sync.HERMES_HOME", tmp_path / "home"))
+        return stack
+
+    def _seed_then_move(self, tmp_path, bundled_rel_old="guard", bundled_rel_new="security/guard"):
+        """Sync a skill from its old bundled path, then move it in bundled."""
+        import shutil as _sh
+        bundled = tmp_path / "bundled"
+        old_src = bundled / bundled_rel_old
+        old_src.mkdir(parents=True)
+        (old_src / "SKILL.md").write_text("# Guard v1\n")
+        skills_dir = tmp_path / "user_skills"
+        manifest_file = skills_dir / ".bundled_manifest"
+        (tmp_path / "home").mkdir(exist_ok=True)
+        with self._patched(bundled, skills_dir, manifest_file, tmp_path):
+            sync_skills(quiet=True)
+        assert (skills_dir / bundled_rel_old / "SKILL.md").exists()
+        new_src = bundled / bundled_rel_new
+        new_src.parent.mkdir(parents=True, exist_ok=True)
+        _sh.move(str(old_src), str(new_src))
+        return bundled, skills_dir, manifest_file
+
+    def test_unmodified_copy_follows_the_move(self, tmp_path):
+        bundled, skills_dir, manifest_file = self._seed_then_move(tmp_path)
+
+        with self._patched(bundled, skills_dir, manifest_file, tmp_path):
+            result = sync_skills(quiet=True)
+
+        # New location seeded, old copy gone — no name collision left behind.
+        assert (skills_dir / "security" / "guard" / "SKILL.md").exists()
+        assert not (skills_dir / "guard").exists()
+        assert "guard" in result.get("relocated", [])
+
+    def test_modified_copy_is_kept_and_new_location_not_seeded(self, tmp_path):
+        bundled, skills_dir, manifest_file = self._seed_then_move(tmp_path)
+        # User customized the old copy after the original sync.
+        (skills_dir / "guard" / "SKILL.md").write_text("# Guard EDITED\n")
+
+        with self._patched(bundled, skills_dir, manifest_file, tmp_path):
+            result = sync_skills(quiet=True)
+
+        # The user's copy survives at the old path; the new location is NOT
+        # seeded (that would create exactly the collision we're preventing).
+        assert (skills_dir / "guard" / "SKILL.md").read_text() == "# Guard EDITED\n"
+        assert not (skills_dir / "security" / "guard").exists()
+        assert "guard" not in result.get("relocated", [])
+
+    def test_multiple_stale_unmodified_copies_all_cleaned(self, tmp_path):
+        import shutil as _sh
+        bundled, skills_dir, manifest_file = self._seed_then_move(tmp_path)
+        # Simulate a SECOND historical location left behind by an earlier
+        # move (identical, unmodified content).
+        (skills_dir / "autonomous").mkdir()
+        _sh.copytree(skills_dir / "guard", skills_dir / "autonomous" / "guard")
+
+        with self._patched(bundled, skills_dir, manifest_file, tmp_path):
+            result = sync_skills(quiet=True)
+
+        assert (skills_dir / "security" / "guard" / "SKILL.md").exists()
+        assert not (skills_dir / "guard").exists()
+        assert not (skills_dir / "autonomous" / "guard").exists()
+        assert "guard" in result.get("relocated", [])
+
+    def test_user_deleted_skill_still_respected_after_move(self, tmp_path):
+        import shutil as _sh
+        bundled, skills_dir, manifest_file = self._seed_then_move(tmp_path)
+        # User deliberately deleted their copy before the bundled move synced.
+        _sh.rmtree(skills_dir / "guard")
+
+        with self._patched(bundled, skills_dir, manifest_file, tmp_path):
+            result = sync_skills(quiet=True)
+
+        # Deletion is still respected: nothing reappears anywhere.
+        assert not (skills_dir / "guard").exists()
+        assert not (skills_dir / "security" / "guard").exists()
+        assert "guard" not in result.get("relocated", [])
+
+
 
 
 class TestUpdateBackupRecovery:

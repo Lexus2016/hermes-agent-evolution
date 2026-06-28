@@ -1,75 +1,70 @@
-## What does this PR do?
+## Pull Request Template
 
-<!-- Describe the change clearly. What problem does it solve? Why is this approach the right one? -->
+<!-- 
+Thank you for contributing to Hermes Evolution! 
+Please fill out this template to help reviewers understand your changes.
+-->
 
+## 📝 Description
+<!-- Describe your changes in detail -->
 
+## 🎯 Type of Change
+<!-- Mark the relevant option with an "x" -->
 
-## Related Issue
+- [ ] 🐛 Bug fix (non-breaking change which fixes an issue)
+- [ ] ✨ New feature (non-breaking change which adds functionality)
+- [ ] 💥 Breaking change (fix or feature that would cause existing functionality to change)
+- [ ] 📚 Documentation update
+- [ ] 🎨 Code style update (formatting, local variables)
+- [ ] ♻️ Code refactoring (no functional changes)
+- [ ] 🧪 Test additions or updates
+- [ ] 🔄 Evolution improvement (automated or manual)
 
-<!-- Link the issue this PR addresses. If no issue exists, consider creating one first. -->
+## ✅ Checklist
+<!-- Put an "x" in the boxes that apply -->
 
-Fixes #
+- [ ] My code follows the style guidelines of this project
+- [ ] I have performed a self-review of my code
+- [ ] I have commented my code, particularly in hard-to-understand areas
+- [ ] I have made corresponding changes to the documentation
+- [ ] My changes generate no new warnings
+- [ ] I have added tests that prove my fix is effective or that my feature works
+- [ ] New and existing tests pass locally with my changes
+- [ ] Any dependent changes have been merged and published
 
-## Type of Change
+## 🔗 Related Issues/PRs
+<!-- Link to related issues or pull requests -->
 
-<!-- Check the one that applies. -->
+Closes # (issue)
+Related to # (issue)
 
-- [ ] 🐛 Bug fix (non-breaking change that fixes an issue)
-- [ ] ✨ New feature (non-breaking change that adds functionality)
-- [ ] 🔒 Security fix
-- [ ] 📝 Documentation update
-- [ ] ✅ Tests (adding or improving test coverage)
-- [ ] ♻️ Refactor (no behavior change)
-- [ ] 🎯 New skill (bundled or hub)
+## 🧪 Testing
+<!-- Describe how you tested your changes -->
 
-## Changes Made
+### Test Environment
+- **Python Version**:
+- **OS**:
+- **Hermes Evolution Version**:
 
-<!-- List the specific changes. Include file paths for code changes. -->
+### Test Results
+```
+paste test output here
+```
 
-- 
+## 📊 Impact Analysis
+<!-- Describe the impact of your changes -->
 
-## How to Test
+- **User Impact**: <!-- How will this affect users? -->
+- **Performance Impact**: <!-- Does this change performance? -->
+- **Breaking Changes**: <!-- Are there breaking changes? -->
+- **Migration Required**: <!-- Do users need to migrate? -->
 
-<!-- Steps to verify this change works. For bugs: reproduction steps + proof that the fix works. -->
+## 📚 Additional Notes
+<!-- Any additional information for reviewers -->
 
-1. 
-2. 
-3. 
-
-## Checklist
-
-<!-- Complete these before requesting review. -->
-
-### Code
-
-- [ ] I've read the [Contributing Guide](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md)
-- [ ] My commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) (`fix(scope):`, `feat(scope):`, etc.)
-- [ ] I searched for [existing PRs](https://github.com/NousResearch/hermes-agent/pulls) to make sure this isn't a duplicate
-- [ ] My PR contains **only** changes related to this fix/feature (no unrelated commits)
-- [ ] I've run `pytest tests/ -q` and all tests pass
-- [ ] I've added tests for my changes (required for bug fixes, strongly encouraged for features)
-- [ ] I've tested on my platform: <!-- e.g. Ubuntu 24.04, macOS 15.2, Windows 11 -->
-
-### Documentation & Housekeeping
-
-<!-- Check all that apply. It's OK to check "N/A" if a category doesn't apply to your change. -->
-
-- [ ] I've updated relevant documentation (README, `docs/`, docstrings) — or N/A
-- [ ] I've updated `cli-config.yaml.example` if I added/changed config keys — or N/A
-- [ ] I've updated `CONTRIBUTING.md` or `AGENTS.md` if I changed architecture or workflows — or N/A
-- [ ] I've considered cross-platform impact (Windows, macOS) per the [compatibility guide](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md#cross-platform-compatibility) — or N/A
-- [ ] I've updated tool descriptions/schemas if I changed tool behavior — or N/A
-
-## For New Skills
-
-<!-- Only fill this out if you're adding a skill. Delete this section otherwise. -->
-
-- [ ] This skill is **broadly useful** to most users (if bundled) — see [Contributing Guide](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md#should-the-skill-be-bundled)
-- [ ] SKILL.md follows the [standard format](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md#skillmd-format) (frontmatter, trigger conditions, steps, pitfalls)
-- [ ] No external dependencies that aren't already available (prefer stdlib, curl, existing Hermes tools)
-- [ ] I've tested the skill end-to-end: `hermes --toolsets skills -q "Use the X skill to do Y"`
-
-## Screenshots / Logs
-
-<!-- If applicable, add screenshots or log output showing the fix/feature in action. -->
-
+<!-- 
+For evolution-related changes:
+- Is this from automated evolution research?
+- Does this require evolution mode?
+- Should this trigger self-update?
+-->

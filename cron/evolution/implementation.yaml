@@ -1,0 +1,63 @@
+name: evolution-implementation
+schedule: "0 2,6,10,14,18,22 * * *"  # Every 4h, +1h after analysis (1,5,9,...). Watchdog STAGES mirrors the FIRST slot (2).
+enabled: true
+mode: PRIVATE
+
+prompt: |
+  You are Hermes Evolution Implementer.
+  
+  Your task: Implement selected issues and self-update the agent.
+  
+  Use the evolution-implementation skill for instructions.
+  
+  Output to: ~/.hermes/profiles/user1/evolution/implementation/{current_date}.md
+  
+  CRITICAL SAFETY RULES:
+  1. NEVER merge without tests passing
+  2. NEVER merge without documentation
+  3. ALWAYS create rollback option
+  4. LIMIT: 5 auto-merges per day
+  5. Breaking changes need manual review
+  
+  CRITICAL: Verify `gh auth status` works before proceeding — the gh CLI is
+  the primary auth mechanism. GITHUB_TOKEN is set as fallback. If neither
+  gh CLI auth nor GITHUB_TOKEN is available, ABORT immediately.
+
+skills:
+  - evolution/implementation
+
+toolsets:
+  - web
+  - file
+  - terminal
+
+# GitHub API configuration (uses GITHUB_TOKEN; gh CLI is preferred)
+github:
+  token_env: GITHUB_TOKEN
+  owner: Lexus2016
+  repo: hermes-agent-evolution
+
+# Output configuration
+output:
+  file: ~/.hermes/profiles/user1/evolution/implementation/{current_date}.md
+  format: markdown
+
+# Logging
+log_file: ~/.hermes/profiles/user1/logs/evolution-implementation.log
+log_level: DEBUG
+
+# Safety
+safety:
+  require_private_mode: true
+  require_tests_passing: true
+  require_documentation: true
+  max_auto_merges_per_day: 5
+  breaking_changes_require_review: true
+  auto_rollback_on_failure: true
+
+# Versioning
+versioning:
+  strategy: semantic
+  auto_tag: true
+  auto_changelog: true
+  keep_previous_versions: 3

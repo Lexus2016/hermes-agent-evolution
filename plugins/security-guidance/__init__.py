@@ -38,6 +38,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import patterns as _patterns
+from . import secrets as _secrets
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,7 @@ def _scan_args(tool_name: str, args: Any) -> List[Tuple[str, str]]:
     findings: List[Tuple[str, str]] = []
     for path, content in _extract_path_and_content(tool_name, args):
         findings.extend(_scan_content(path, content))
+        findings.extend(_secrets.scan_secrets(path, content))
     return findings
 
 

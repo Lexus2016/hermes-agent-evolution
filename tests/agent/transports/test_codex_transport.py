@@ -83,14 +83,6 @@ class TestCodexBuildKwargs:
         )
         assert "reasoning" not in kw or kw.get("include") == []
 
-    def test_session_id_sets_cache_key(self, transport):
-        messages = [{"role": "user", "content": "Hi"}]
-        kw = transport.build_kwargs(
-            model="gpt-5.4", messages=messages, tools=[],
-            session_id="test-session-123",
-        )
-        assert kw.get("prompt_cache_key") == "test-session-123"
-
     def test_github_responses_no_cache_key(self, transport):
         messages = [{"role": "user", "content": "Hi"}]
         kw = transport.build_kwargs(
@@ -138,6 +130,71 @@ class TestCodexBuildKwargs:
         assert eb.get("prompt_cache_key") == "caller-override"
         assert eb.get("other_field") == 42
 
+    def test_session_id_sets_cache_key(self, transport):
+        messages = [{"role": "user", "content": "Hi"}]
+        kw = transport.build_kwargs(
+            model="gpt-5.4", messages=messages, tools=[],
+            session_id="test-session-123",
+        )
+        assert kw.get("prompt_cache_key") == "test-session-123"
+
+    def test_cache_key_overrides_session_id_for_prompt_cache(self, transport):
+        """An explicit ``cache_key`` is used for prompt_cache_key, letting
+        recurring callers (cron) keep a stable cache scope while session_id
+        still rotates per run."""
+        messages = [{"role": "user", "content": "Hi"}]
+        kw = transport.build_kwargs(
+            model="gpt-5.4", messages=messages, tools=[],
+            session_id="cron_abc123_20260624_101500",
+            cache_key="cron_abc123",
+        )
+        assert kw.get("prompt_cache_key") == "cron_abc123"
+
+    def test_cache_key_falls_back_to_session_id(self, transport):
+        """Absent (or empty) ``cache_key`` falls back to session_id, so the
+        interactive path is byte-identical to before the parameter existed."""
+        messages = [{"role": "user", "content": "Hi"}]
+        kw_none = transport.build_kwargs(
+            model="gpt-5.4", messages=messages, tools=[],
+            session_id="interactive-session-1",
+            cache_key=None,
+        )
+        assert kw_none.get("prompt_cache_key") == "interactive-session-1"
+        kw_empty = transport.build_kwargs(
+            model="gpt-5.4", messages=messages, tools=[],
+            session_id="interactive-session-1",
+            cache_key="",
+        )
+        assert kw_empty.get("prompt_cache_key") == "interactive-session-1"
+
+    def test_codex_backend_headers_use_cache_key(self, transport):
+        """Codex backend cache-scope routing headers follow the stable
+        cache_key (they exist for cache hits, not transcript identity)."""
+        messages = [{"role": "user", "content": "Hi"}]
+        kw = transport.build_kwargs(
+            model="gpt-5.4", messages=messages, tools=[],
+            session_id="cron_abc123_20260624_101500",
+            cache_key="cron_abc123",
+            is_codex_backend=True,
+        )
+        headers = kw.get("extra_headers", {})
+        assert headers.get("session_id") == "cron_abc123"
+        assert headers.get("x-client-request-id") == "cron_abc123"
+
+    def test_xai_cache_key_splits_body_and_conv_header(self, transport):
+        """For xAI, prompt_cache_key (cache routing) follows cache_key, but
+        x-grok-conv-id (conversation continuity) must stay on the per-run
+        session_id so distinct fires aren't merged into one conversation."""
+        messages = [{"role": "user", "content": "Hi"}]
+        kw = transport.build_kwargs(
+            model="grok-4.3", messages=messages, tools=[],
+            session_id="cron_abc123_20260624_101500",
+            cache_key="cron_abc123",
+            is_xai_responses=True,
+        )
+        assert kw.get("extra_body", {}).get("prompt_cache_key") == "cron_abc123"
+        assert kw.get("extra_headers", {}).get("x-grok-conv-id") == "cron_abc123_20260624_101500"
+
     def test_max_tokens(self, transport):
         messages = [{"role": "user", "content": "Hi"}]
         kw = transport.build_kwargs(
@@ -155,7 +212,9 @@ class TestCodexBuildKwargs:
         )
         assert "max_output_tokens" not in kw
 
-    def test_codex_backend_does_not_set_extra_headers(self, transport):
+    def test_codex_backend_sets_cache_routing_headers(self, transport):
+        """Codex backend sends session_id / x-client-request-id as HTTP
+        headers (via extra_headers) for cache-scope routing."""
         messages = [{"role": "user", "content": "Hi"}]
 
         kw = transport.build_kwargs(
@@ -166,9 +225,23 @@ class TestCodexBuildKwargs:
             is_codex_backend=True,
         )
 
+        headers = kw.get("extra_headers", {})
+        assert headers.get("session_id") == "conv-codex-1"
+        assert headers.get("x-client-request-id") == "conv-codex-1"
+
+    def test_codex_backend_no_headers_without_session_id(self, transport):
+        messages = [{"role": "user", "content": "Hi"}]
+
+        kw = transport.build_kwargs(
+            model="gpt-5.4",
+            messages=messages,
+            tools=[],
+            is_codex_backend=True,
+        )
+
         assert "extra_headers" not in kw
 
-    def test_codex_backend_strips_caller_extra_headers(self, transport):
+    def test_codex_backend_preserves_caller_extra_headers(self, transport):
         messages = [{"role": "user", "content": "Hi"}]
 
         kw = transport.build_kwargs(
@@ -180,7 +253,10 @@ class TestCodexBuildKwargs:
             request_overrides={"extra_headers": {"x-test": "1"}},
         )
 
-        assert "extra_headers" not in kw
+        headers = kw.get("extra_headers", {})
+        assert headers.get("x-test") == "1"
+        assert headers.get("session_id") == "conv-codex-1"
+        assert headers.get("x-client-request-id") == "conv-codex-1"
 
     def test_non_codex_responses_preserves_caller_extra_headers(self, transport):
         messages = [{"role": "user", "content": "Hi"}]
@@ -243,6 +319,102 @@ class TestCodexBuildKwargs:
         # tests/run_agent/test_codex_xai_oauth_recovery.py for the
         # full history.
         assert "reasoning.encrypted_content" in kw.get("include", [])
+
+    def test_xai_injects_native_web_search_when_client_web_search_present(self, transport):
+        """xAI path swaps a client-side ``web_search`` function for xAI's
+        native server-side ``web_search`` built-in so grok server-side search
+        runs to completion (otherwise the turn stalls as
+        reasoning-with-no-answer -> false 'incomplete' -> 3 retries -> fail).
+        Non-conflicting client tools are preserved.
+        """
+        messages = [{"role": "user", "content": "Find current prices."}]
+        kw = transport.build_kwargs(
+            model="grok-composer-2.5-fast", messages=messages,
+            tools=[
+                {"type": "function", "function": {
+                    "name": "read_file", "description": "Read a file.",
+                    "parameters": {"type": "object",
+                                   "properties": {"path": {"type": "string"}}}}},
+                {"type": "function", "function": {
+                    "name": "web_search", "description": "Search the web.",
+                    "parameters": {"type": "object",
+                                   "properties": {"query": {"type": "string"}}}}},
+            ],
+            is_xai_responses=True,
+        )
+        tool_types = [t.get("type") for t in kw.get("tools", [])]
+        assert "web_search" in tool_types, kw.get("tools")
+        # Non-conflicting client-side tools are preserved.
+        names = [t.get("name") for t in kw.get("tools", []) if t.get("type") == "function"]
+        assert "read_file" in names
+
+    def test_xai_does_not_inject_native_web_search_without_client_web_search(self, transport):
+        """The native ``web_search`` built-in is a 1:1 swap for an
+        already-requested client ``web_search`` — NOT an additive grant.  A
+        turn whose toolset has no ``web_search`` (user never enabled the web
+        toolset) must not get Grok server-side search force-injected, which
+        would silently bypass Hermes's web-provider config and tool-trace
+        plumbing for every xai-oauth turn.
+        """
+        messages = [{"role": "user", "content": "Read this file."}]
+        kw = transport.build_kwargs(
+            model="grok-composer-2.5-fast", messages=messages,
+            tools=[{"type": "function", "function": {
+                "name": "read_file", "description": "Read a file.",
+                "parameters": {"type": "object",
+                               "properties": {"path": {"type": "string"}}}}}],
+            is_xai_responses=True,
+        )
+        tools = kw.get("tools", [])
+        assert not any(t.get("type") == "web_search" for t in tools), tools
+        names = [t.get("name") for t in tools if t.get("type") == "function"]
+        assert "read_file" in names
+
+    def test_xai_drops_clientside_web_search_to_avoid_duplicate(self, transport):
+        """When the client registers its own 'web_search' function, the xAI
+        path must drop it and rely on the native built-in — otherwise xAI
+        returns HTTP 400 'Duplicate tool names: web_search'."""
+        messages = [{"role": "user", "content": "Search the web."}]
+        kw = transport.build_kwargs(
+            model="grok-composer-2.5-fast", messages=messages,
+            tools=[{"type": "function", "function": {
+                "name": "web_search", "description": "Search the web.",
+                "parameters": {"type": "object",
+                               "properties": {"query": {"type": "string"}}}}}],
+            is_xai_responses=True,
+        )
+        tools = kw.get("tools", [])
+        # Exactly one tool named/typed web_search, and it is the native built-in.
+        web_search_entries = [
+            t for t in tools
+            if t.get("name") == "web_search" or t.get("type") == "web_search"
+        ]
+        assert len(web_search_entries) == 1
+        assert web_search_entries[0] == {"type": "web_search"}
+        # No client-side function form of web_search survives.
+        assert not any(
+            t.get("type") == "function" and t.get("name") == "web_search"
+            for t in tools
+        )
+
+    def test_non_xai_path_does_not_inject_native_web_search(self, transport):
+        """Native web_search injection is scoped to xAI — Codex/GitHub paths
+        keep the client-side web_search function untouched."""
+        messages = [{"role": "user", "content": "Search."}]
+        kw = transport.build_kwargs(
+            model="gpt-5.4", messages=messages,
+            tools=[{"type": "function", "function": {
+                "name": "web_search", "description": "Search the web.",
+                "parameters": {"type": "object",
+                               "properties": {"query": {"type": "string"}}}}}],
+            is_xai_responses=False,
+        )
+        tools = kw.get("tools", [])
+        assert not any(t.get("type") == "web_search" for t in tools)
+        assert any(
+            t.get("type") == "function" and t.get("name") == "web_search"
+            for t in tools
+        )
 
     def test_xai_reasoning_disabled_no_reasoning_key(self, transport):
         messages = [{"role": "user", "content": "Hi"}]

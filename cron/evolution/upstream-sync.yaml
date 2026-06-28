@@ -1,0 +1,68 @@
+name: evolution-upstream-sync
+schedule: "0 8 * * *"  # daily 8 AM (before research 09:00) — hold full parity; each run merges ~1 day of upstream commits (small, usually conflict-free), so security fixes land within a day
+enabled: true
+mode: PRIVATE
+
+prompt: |
+  You are Hermes Evolution Upstream Sync Manager.
+
+  Your task: keep the fork at FULL PARITY with upstream Hermes Agent by merging
+  upstream/main into our fork (our evolution work is the base; we want everything
+  upstream has, nothing skipped, nothing of ours lost).
+
+  Use the evolution-upstream-sync skill for instructions (full-merge model:
+  git merge upstream/main → authorship-driven conflict resolution → marker guard →
+  verify → PR; escalate large/entangled merges to the owner instead of
+  blind-resolving).
+
+  Output to: ~/.hermes/profiles/user1/evolution/upstream/{current_date}.md
+
+  CRITICAL: This job ONLY runs in PRIVATE mode.
+  If GITHUB_PRIVATE_TOKEN is not set, ABORT immediately.
+
+skills:
+  - evolution/upstream-sync
+
+toolsets:
+  - web
+  - file
+  - terminal
+
+# GitHub configuration
+github:
+  upstream: https://github.com/nousresearch/hermes-agent.git
+  origin: https://github.com/Lexus2016/hermes-agent-evolution.git
+  token_env: GITHUB_PRIVATE_TOKEN
+
+# Output configuration
+output:
+  file: ~/.hermes/profiles/user1/evolution/upstream/{current_date}.md
+  format: markdown
+
+# Logging
+log_file: ~/.hermes/profiles/user1/logs/evolution-upstream-sync.log
+log_level: DEBUG
+
+# Safety
+safety:
+  require_private_mode: true
+  test_after_merge: true
+  auto_rollback_on_failure: true
+  # Full-parity model: merge ALL of upstream (no per-run commit cap, no selective
+  # skip). The guard is the ESCALATION threshold — if a run's merge is large
+  # (long catch-up) or conflict-heavy (>10 files, or any in core agent/persistence/
+  # cli), the agent must open a draft PR and hand off to the owner instead of
+  # blind-resolving judgement-heavy conflicts. Routine daily runs (≤ ~80 commits,
+  # ≤10 mechanical conflicts) resolve autonomously.
+  escalate_if_commits_over: 80
+  escalate_if_conflicts_over: 10
+
+# Sync strategy — full merge, never selective cherry-pick
+strategy:
+  mode: full_merge                      # git merge upstream/main (NOT cherry-pick)
+  conflict_resolution: authorship_first # keep OURS, follow upstream incl. reverts
+  security_fixes: auto_merge
+  bug_fixes: auto_merge
+  upstream_domain: take_theirs          # desktop/ui-tui/web/unused-platforms — always current
+  large_or_entangled: manual_review_required
+  merge_into_main: pr_with_green_ci_only

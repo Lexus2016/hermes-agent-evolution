@@ -1,0 +1,75 @@
+name: evolution-hydra
+# Every 30 minutes — the Hydra's many heads constantly check for fresh
+# material in the knowledge pool. The pre-check script (evolution_hydra_gate.py)
+# suppresses the LLM when there's nothing new, so this costs zero tokens on
+# the vast majority of ticks.
+schedule: "*/30 * * * *"
+enabled: true
+mode: PRIVATE
+
+# Pre-check gate: inspects the knowledge pool for fresh material. Skips the
+# LLM entirely when all stages are settled — zero tokens spent on idle ticks.
+script: evolution_hydra_gate.py
+
+prompt: |
+  You are the Hydra — the evolution pipeline orchestrator. Inspect the shared
+  knowledge pool and dispatch subagents via delegate_task. Keep responses compact.
+
+  Let EVOLUTION = ~/.hermes/profiles/user1/evolution and KNOWLEDGE = ~/.hermes/knowledge.
+
+  ## How you work
+  1. READ KNOWLEDGE and EVOLUTION/{stage}/.
+  2. DECIDE which stages have fresh upstream output newer than their consumer.
+  3. DISPATCH up to 3 subagents per tick, upstream stages first.
+  4. APPEND a brief record to KNOWLEDGE/hydra-dispatch-{date}.jsonl.
+
+  ## Stage definitions (delegate_task goal only)
+  research – scan for new AI agent frameworks/papers/trends.
+    Toolsets: web, file. Goal: write EVOLUTION/research/{date}.md.
+
+  issues – create GitHub issues from research.
+    Toolsets: web, file, terminal. Goal: write EVOLUTION/issues/{date}.json.
+
+  introspection – find blocked patterns in recent Hermes sessions.
+    Toolsets: file, terminal. Goal: write EVOLUTION/introspection/{date}.json.
+
+  analysis – triage open issues/PRs and select candidates.
+    Toolsets: web, file, terminal. Goal: write EVOLUTION/analysis/{date}.json.
+
+  implementation – implement selected issues as PRs.
+    Toolsets: web, file, terminal. Goal: write EVOLUTION/implementation/{date}.md.
+
+  integration – merge green, conflict-free evolution PRs.
+    Toolsets: web, file, terminal. Goal: write EVOLUTION/integration/{date}.json.
+
+  upstream-sync – keep the fork at parity with upstream Hermes Agent.
+    Toolsets: web, file, terminal. Goal: write EVOLUTION/upstream/{date}.md.
+
+  ## Safety rules
+  - Never dispatch the same stage twice for the same date.
+  - Up to 3 subagents per tick; prioritize research/issues/introspection.
+  - Do NOT dispatch deterministic stages (funnel, rubric-judge, watchdog).
+  - If a subagent reports "blocked — no GitHub auth", do not retry it.
+
+  ## Output
+  Brief summary of dispatched stages, skipped stages (with reason), and blockers.
+
+# No `skills:` here on purpose. The Hydra is a pure delegator: it inspects the
+# knowledge pool and DISPATCHES each stage to a subagent via delegate_task (the
+# stage definitions, including each stage's own toolsets, live inline in the
+# prompt above). Each stage's cron skill carries its script-running instructions
+# and runs under a `terminal` toolset. Loading those script-running skills here
+# would be dead wiring — the Hydra has no `terminal` and must never run stage
+# scripts directly. Enforced by scripts/evolution_skill_lint.py
+# (tests/scripts/test_evolution_skill_integrity.py).
+
+toolsets:
+  - file
+  - delegation
+
+# Keep on disk; the Hydra is internal pipeline orchestration, not user-facing.
+deliver: local
+
+# Limits
+limits:
+  max_ticks_per_hour: 2  # The gate already throttles, but cap it just in case

@@ -14,6 +14,16 @@ import pytest
 if "dotenv" not in sys.modules:
     fake_dotenv = types.ModuleType("dotenv")
     fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    # This module-level fake is installed before any fixture can tear it down,
+    # so it LEAKS into the rest of the worker process. If we win the race
+    # against the real python-dotenv import, the leaked stub must expose the
+    # whole public API other modules import — otherwise a downstream
+    # `from dotenv import dotenv_values` raises
+    # "cannot import name 'dotenv_values' from 'dotenv' (unknown location)",
+    # which is exactly how this shard-order-dependent flake broke unrelated
+    # gateway tests (test_42039) and deadlocked evolution PRs #125/#126.
+    fake_dotenv.dotenv_values = lambda *args, **kwargs: {}
+    fake_dotenv.find_dotenv = lambda *args, **kwargs: ""
     sys.modules["dotenv"] = fake_dotenv
 
 from hermes_cli.auth import resolve_provider

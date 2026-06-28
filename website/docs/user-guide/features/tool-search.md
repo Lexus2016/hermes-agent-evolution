@@ -78,6 +78,7 @@ tools:
     threshold_pct: 10   # percentage of context — only used in auto mode
     search_default_limit: 5
     max_search_limit: 20
+    defer_core_toolsets: []   # native toolsets to also bring under disclosure
 ```
 
 | Key | Default | Meaning |
@@ -86,6 +87,30 @@ tools:
 | `threshold_pct` | `10` | Percentage of context length at which `auto` mode kicks in. Range 0–100. |
 | `search_default_limit` | `5` | Hits returned when the model calls `tool_search` without a `limit`. |
 | `max_search_limit` | `20` | Hard upper bound the model can request via `limit`. Range 1–50. |
+| `defer_core_toolsets` | `[]` | Native (core) toolset names to also make eligible for deferral. Empty by default — core tools never defer. See below. |
+
+### Deferring native tool sets
+
+By default only MCP and non-core plugin tools defer; the built-in core set
+is always loaded directly. If a session carries a large native toolset it
+rarely uses on a given turn — for example `browser` (~10 `browser_*` tools)
+in a session that mostly edits code — you can opt that toolset in to
+progressive disclosure:
+
+```yaml
+tools:
+  tool_search:
+    enabled: auto
+    defer_core_toolsets: [browser]
+```
+
+Each named toolset's core tools then behave like any other deferrable tool:
+they leave the model-visible array and are reached through
+`tool_search` → `tool_describe` → `tool_call`, with hooks, guardrails, and
+approvals firing against the real tool name exactly as before. Tools in
+toolsets you do **not** list stay loaded directly. Accepts a YAML list or a
+comma-separated string; naming a toolset that has no core members is a
+no-op.
 
 You can also flip the legacy boolean shape:
 
