@@ -1,0 +1,24 @@
+name: evolution-ci-diagnosis
+# Polls open evolution PRs for CI failures and either auto-fixes trivial ones
+# or creates focused child issues for complex failures.
+# Runs every 30 minutes; bounded at 48 runs/day by the scheduler.
+schedule: "*/30 * * * *"
+enabled: true
+mode: PRIVATE
+
+# Deterministic monitoring script — no LLM agent. Uses supported GitHub REST
+# APIs (pulls, check-runs, annotations) so it does not depend on unsupported
+# gh CLI JSON fields. See issue #577.
+no_agent: true
+script: evolution_ci_diagnosis.py
+
+# Keep the JSON report on disk for the funnel/watchdog to consume.
+deliver: local
+
+prompt: |
+  Deterministic CI failure auto-diagnosis for evolution PRs (no LLM).
+  Scans open PRs via the GitHub REST API, detects failed check runs, fetches
+  annotations (with gh run log fallback), classifies failures as trivial or
+  complex, and creates focused child issues for complex failures.
+  See scripts/evolution_ci_diagnosis.py (issue #577).
+  Requires GITHUB_TOKEN in the environment.
