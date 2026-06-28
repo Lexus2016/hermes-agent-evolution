@@ -504,6 +504,81 @@ class TestFormBodyRedaction:
         assert "first=1" in redact_sensitive_text(text)
 
 
+class TestLowercaseDottedConfigKeys:
+    """Issue #16413 — config-file passwords in lowercase/dotted/colon keys
+    must be redacted. The uppercase _ENV_ASSIGN_RE missed these, leaking
+    `spring.datasource.password=...` and `password: ...` from `cat`'d config
+    files. Carve-outs: prose, code (#4367), and web URLs are left untouched.
+    """
+
+    def test_spring_dotted_password_assignment(self):
+        text = "spring.datasource.password=Sup3rS3cret!"
+        result = redact_sensitive_text(text)
+        assert "Sup3rS3cret!" not in result
+        assert "spring.datasource.password=" in result
+
+    def test_dotted_api_key_split_keyword(self):
+        # 'api.key' splits the keyword across a dot — must still match.
+        text = "app.api.key=ak_live_998877"
+        result = redact_sensitive_text(text)
+        assert "ak_live_998877" not in result
+        assert "app.api.key=" in result
+
+    def test_bare_lowercase_password_at_line_start(self):
+        text = "password=mysecretvalue123"
+        result = redact_sensitive_text(text)
+        assert "mysecretvalue123" not in result
+
+    def test_quoted_lowercase_value(self):
+        text = "password='mysecretvalue123'"
+        result = redact_sensitive_text(text)
+        assert "mysecretvalue123" not in result
+
+    def test_yaml_unquoted_password(self):
+        text = "password: Sup3rS3cret!"
+        result = redact_sensitive_text(text)
+        assert "Sup3rS3cret!" not in result
+        assert "password:" in result
+
+    def test_yaml_indented_dotted(self):
+        text = "spring:\n  datasource:\n    password: hunter2pass"
+        result = redact_sensitive_text(text)
+        assert "hunter2pass" not in result
+
+    def test_properties_file_dump(self):
+        text = (
+            "server.port=8080\n"
+            "spring.datasource.username=admin\n"
+            "spring.datasource.password=Sup3rS3cret!\n"
+            "logging.level.root=INFO"
+        )
+        result = redact_sensitive_text(text)
+        assert "Sup3rS3cret!" not in result
+        assert "server.port=8080" in result  # non-secret keys preserved
+        assert "username=admin" in result
+
+    # --- carve-outs: must NOT redact ---
+
+    def test_prose_mid_sentence_password_unchanged(self):
+        # Not line-anchored, not dotted → conversational text, leave alone.
+        text = "I have password=foo and other things"
+        assert redact_sensitive_text(text) == text
+
+    def test_lowercase_code_assignment_unchanged(self):
+        # #4367 regression — spaces around '=' in code.
+        text = "const secret = await fetchSecret();"
+        assert redact_sensitive_text(text) == text
+
+    def test_url_query_param_passes_through(self):
+        # Web URLs are intentionally hands-off (documented design).
+        text = "https://example.com/api?password=opaqueval123&format=json"
+        assert redact_sensitive_text(text) == text
+
+    def test_prose_keyword_in_value_unchanged(self):
+        text = "note: secret meeting at noon"
+        assert redact_sensitive_text(text) == text
+
+
 class TestXaiToken:
     KEY = "xai-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstu"
 
@@ -528,3 +603,79 @@ class TestXaiToken:
     def test_prefix_visible_in_masked_output(self):
         result = redact_sensitive_text(self.KEY, force=True)
         assert result.startswith("xai-AB")
+
+
+class TestDbConnstrCodeOutput:
+    """Regression tests for issue #33801 — _DB_CONNSTR_RE corrupting code output.
+
+    Two distinct flaws, both confined to displayed tool OUTPUT (read_file /
+    terminal / execute_code), never the on-disk content:
+
+    1. The password group ``[^@]+`` was greedy across newlines, so on a
+       multi-line block it scanned past the DSN line to the next stray ``@``
+       (e.g. a Python ``@decorator``), replacing everything in between with
+       ``***`` — dropping lines and concatenating the next one.
+    2. An f-string DSN template (``f"postgresql://{user}:{pass}@{host}"``) is
+       not a live credential, but was redacted anyway. Under ``code_file=True``
+       a pure ``{...}`` brace password is now preserved.
+    """
+
+    MULTILINE = (
+        '            return f"postgresql://{auth}@{self.pg_host}:'
+        '{self.pg_port}/{self.pg_database}"\n'
+        "\n"
+        '    @model_validator(mode="after")\n'
+        '    def _validate_critical_settings(self) -> "Settings":'
+    )
+
+    def test_multiline_block_not_corrupted(self):
+        """The newline bound stops the greedy match from swallowing the
+        decorator line. Original exact repro from the issue thread."""
+        result = redact_sensitive_text(self.MULTILINE, code_file=True, force=True)
+        assert result == self.MULTILINE
+        # No line dropped, no concatenation onto the f-string line.
+        assert "@model_validator" in result
+        assert "_validate_critical_settings" in result
+        assert result.count("\n") == self.MULTILINE.count("\n")
+
+    def test_multiline_block_no_corruption_without_code_file(self):
+        """Even without code_file, the newline bound alone prevents the
+        catastrophic line-dropping. The single-line template's {pass} group
+        is still masked here (code_file=False), but lines stay intact."""
+        result = redact_sensitive_text(self.MULTILINE, force=True)
+        assert "@model_validator" in result
+        assert "_validate_critical_settings" in result
+        assert result.count("\n") == self.MULTILINE.count("\n")
+
+    def test_fstring_template_preserved_with_code_file(self):
+        """A single-line DSN f-string template is preserved under code_file."""
+        text = 'return f"postgresql://{user}:{password}@{host}:{port}/{db}"'
+        assert redact_sensitive_text(text, code_file=True, force=True) == text
+
+    def test_fstring_template_self_attr_preserved(self):
+        text = 'dsn = f"postgresql://{u}:{self.db_pass}@{h}:{p}/{d}"'
+        assert redact_sensitive_text(text, code_file=True, force=True) == text
+
+    def test_literal_connstr_still_redacted_with_code_file(self):
+        """A real password in a literal DSN is still masked under code_file."""
+        text = "postgresql://admin:realpassword@db.internal:5432/app"
+        result = redact_sensitive_text(text, code_file=True, force=True)
+        assert "realpassword" not in result
+        assert "***" in result
+
+    def test_literal_connstr_redacted_all_schemes(self):
+        for scheme, secret in [
+            ("postgres", "pgsecret1234"),
+            ("mysql", "mysqlsecret99"),
+            ("redis", "redissecret77"),
+            ("mongodb+srv", "mongosecret55"),
+            ("amqp", "amqpsecret33"),
+        ]:
+            text = f"{scheme}://user:{secret}@host:1234/db"
+            result = redact_sensitive_text(text, code_file=True, force=True)
+            assert secret not in result, scheme
+
+    def test_literal_connstr_in_log_line_redacted(self):
+        text = "connected via postgres://user:s3cr3tpw@host:5432/db ok"
+        result = redact_sensitive_text(text, force=True)
+        assert "s3cr3tpw" not in result
