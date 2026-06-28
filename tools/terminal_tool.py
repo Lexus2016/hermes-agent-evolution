@@ -2632,10 +2632,12 @@ def terminal_tool(
                     execute_kwargs = {
                         "timeout": effective_timeout,
                         "cwd": command_cwd,
-                        "pty": pty,
                     }
                     if env_type == "ssh" or env_type == "local":
-                        execute_kwargs["session_id"] = session_id
+                        if session_id is not None:
+                            execute_kwargs["session_id"] = session_id
+                        if pty:
+                            execute_kwargs["pty"] = pty
 
                     result = env.execute(command, **execute_kwargs)
                 except Exception as e:
