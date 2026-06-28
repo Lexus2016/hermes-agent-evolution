@@ -75,7 +75,7 @@ def extract_retry_after_seconds(
 
     Supports both integer seconds (RFC 7231 §7.1.3) and HTTP-date strings
     (RFC 7231 §7.1.1.2).  Returns None for malformed/empty values.
-    Caps the result at 600 seconds (10 minutes) so a far-future Retry-After
+    Caps the result at 300 seconds (5 minutes) so a far-future Retry-After
     header cannot stall the agent indefinitely.
     """
     if not retry_after or not isinstance(retry_after, str):
@@ -86,7 +86,7 @@ def extract_retry_after_seconds(
 
     # Try integer seconds first.
     try:
-        return min(float(retry_after), 600.0)
+        return min(float(retry_after), 300.0)
     except (TypeError, ValueError):
         pass
 
@@ -95,7 +95,7 @@ def extract_retry_after_seconds(
         parsed = email.utils.parsedate_to_datetime(retry_after)
         retry_time = calendar.timegm(parsed.utctimetuple())
         now = now if now is not None else time.time()
-        return max(0.0, min(retry_time - now, 600.0))
+        return max(0.0, min(retry_time - now, 300.0))
     except Exception:
         return None
 
