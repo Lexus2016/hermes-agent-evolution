@@ -145,11 +145,27 @@ git checkout -b evolution/issue-123-feature-name
 - Add documentation
 
 ### Validate LOCALLY — the PR must be green BEFORE you open it
+
 Do NOT commit+push blind and let CI find problems — that produces red PRs that
 just clutter the backlog and can never be merged. Run the SAME checks CI runs,
 fix everything, and only proceed when they all pass locally:
+
+**Step 1: Pre-PR targeted test shard (#580).** Identify the test files most
+likely to be affected by your change and run them FIRST — this is a fast,
+noisy-signal gate that catches obvious regressions before the full suite:
+
 ```bash
-# Lint + format (CI runs `ruff` as a blocking check):
+# Get changed files (modulo untracked/new files you created):
+changed=$(git diff --name-only HEAD -- '*.py' | paste -sd,)
+python scripts/evolution_pre_pr_test_runner.py --changed-files "$changed"
+```
+
+If this gate FAILS (exit ≠ 0), read the log under
+`~/.hermes/profiles/user1/evolution/pre-pr-test-results/`, fix the failures,
+re-run until green, THEN proceed to step 2. Do NOT open a PR against a red gate.
+
+**Step 2: Lint + format (CI runs `ruff` as a blocking check):**
+```bash
 ruff check . && ruff format --check .
 # Test suite (run at least the tests touching your change; full suite if quick):
 python -m pytest tests/ -x -q
