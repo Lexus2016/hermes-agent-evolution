@@ -47,6 +47,13 @@ from typing import Optional, Dict, Any, List
 
 from utils import env_var_enabled
 
+from tools.terminal_failure_classifier import (
+    FailureCategory,
+    TerminalFailureClassification,
+    classify_terminal_failure,
+    streak_recommendation,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -958,6 +965,31 @@ Do NOT use vim/nano/interactive tools without pty=true — they hang without a p
 # Global state for environment lifecycle management
 _active_environments: Dict[str, Any] = {}
 _last_activity: Dict[str, float] = {}
+
+# Per-session streak counters for terminal invocations without observable state
+# change.  Used by the failure classifier to detect retry spirals and force a
+# tool switch or plan-check.  The agent may also read/write this directly.
+_terminal_streak_counts: Dict[str, int] = {}
+
+
+def _increment_terminal_streak(task_id: Optional[str]) -> int:
+    """Increment and return the terminal streak for the given task/session."""
+    key = task_id or "default"
+    _terminal_streak_counts[key] = _terminal_streak_counts.get(key, 0) + 1
+    return _terminal_streak_counts[key]
+
+
+def _reset_terminal_streak(task_id: Optional[str]) -> None:
+    """Reset the terminal streak for the given task/session."""
+    key = task_id or "default"
+    _terminal_streak_counts[key] = 0
+
+
+def get_terminal_streak(task_id: Optional[str] = None) -> int:
+    """Return the current terminal streak for the given task/session."""
+    return _terminal_streak_counts.get(task_id or "default", 0)
+
+
 _env_lock = threading.Lock()
 _creation_locks: Dict[str, threading.Lock] = {}  # Per-task locks for sandbox creation
 _creation_locks_lock = threading.Lock()  # Protects _creation_locks dict itself
@@ -1837,6 +1869,20 @@ _SHELL_LEVEL_BACKGROUND_RE = re.compile(
 _INLINE_BACKGROUND_AMP_RE = re.compile(r"\s&\s")
 _TRAILING_BACKGROUND_AMP_RE = re.compile(r"\s&\s*(?:#.*)?$")
 
+# Match an interactive editor only when it is the COMMAND being run — at the
+# start of the command line or right after a shell separator (``;`` ``&`` ``|``
+# ``&&`` ``||`` ``$(``), optionally behind ``sudo``/``env VAR=…``. A bare ``\b``
+# match falsely fired on editor NAMES appearing as substrings in arguments — e.g.
+# ``git push origin evolution/issue-215-execute-code-diagnostics`` matched
+# ``\bcode\b`` and was wrongly rejected as "interactive editor", silently blocking
+# the evolution pipeline's pushes. Mirrors the background-command detector above.
+_INTERACTIVE_EDITOR_RE = re.compile(
+    r"(?:^|[;&|]\s*|&&\s*|\|\|\s*|\$\(\s*)"
+    r"(?:sudo\s+)?(?:env\s+\S+=\S+\s+)*"
+    r"(?:nano|vi|vim|emacs|micro|joe|jed|kate|gedit|subl|code)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 
 def _strip_quotes(command: str) -> str:
     """Remove single- and double-quoted content so regex checks don't match inside strings.
@@ -2096,6 +2142,26 @@ def terminal_tool(
                     "error": guidance,
                     "status": "error",
                 }, ensure_ascii=False)
+
+        # Guardrail: interactive editors without PTY will hang.
+        if (
+            not background
+            and not pty
+            and _INTERACTIVE_EDITOR_RE.search(_strip_quotes(command))
+        ):
+            return json.dumps(
+                {
+                    "output": "",
+                    "exit_code": -1,
+                    "error": (
+                        "Interactive editors (nano, vim, emacs, etc.) require pty=true "
+                        "or must be run in background mode. For file edits, prefer "
+                        "patch() or write_file() instead of terminal()."
+                    ),
+                    "status": "error",
+                },
+                ensure_ascii=False,
+            )
 
         # Start cleanup thread
         _start_cleanup_thread()
@@ -2550,13 +2616,13 @@ def terminal_tool(
                     "error": f"Failed to start background process: {str(e)}"
                 }, ensure_ascii=False)
         else:
-            # Run foreground command with retry logic
-            max_retries = 3
+            # Execute the command with retry on transient docker/ssh transport failures
             retry_count = 0
-            result = None
-            command_cwd = None
-            
+            max_retries = 3
+            streak = _increment_terminal_streak(task_id)
+
             while retry_count <= max_retries:
+                classification = None
                 try:
                     command_cwd = _resolve_command_cwd(
                         workdir=workdir,
@@ -2566,37 +2632,144 @@ def terminal_tool(
                     execute_kwargs = {
                         "timeout": effective_timeout,
                         "cwd": command_cwd,
+                        "pty": pty,
                     }
+                    if env_type == "ssh" or env_type == "local":
+                        execute_kwargs["session_id"] = session_id
+
                     result = env.execute(command, **execute_kwargs)
                 except Exception as e:
-                    error_str = str(e).lower()
-                    if "timeout" in error_str:
-                        return json.dumps({
+                    # Classify execution errors to decide whether to retry.
+                    classification = classify_terminal_failure(
+                        command,
+                        exit_code=-1,
+                        stdout="",
+                        stderr=str(e),
+                        consecutive_count=streak,
+                    )
+
+                    # Timeout-like execution errors surface as exit code 124.
+                    if classification.category == FailureCategory.timeout:
+                        result_dict = {
                             "output": "",
                             "exit_code": 124,
-                            "error": f"Command timed out after {effective_timeout} seconds"
-                        }, ensure_ascii=False)
-                    
-                    # Retry on transient errors
-                    if retry_count < max_retries:
+                            "error": f"Command timed out after {effective_timeout} seconds",
+                            "failure_class": classification.category.value,
+                            "suggestion": classification.hint,
+                            "should_retry": classification.should_retry,
+                            "terminal_streak": streak,
+                        }
+                        rec = streak_recommendation(streak)
+                        if rec:
+                            result_dict["recommendation"] = rec
+                        return json.dumps(result_dict, ensure_ascii=False)
+
+                    if classification.should_retry and retry_count < max_retries:
                         retry_count += 1
-                        wait_time = 2 ** retry_count
-                        logger.warning("Execution error, retrying in %ds (attempt %d/%d) - Command: %s - Error: %s: %s - Task: %s, Backend: %s",
-                                       wait_time, retry_count, max_retries, _safe_command_preview(command), type(e).__name__, e, effective_task_id, env_type)
+                        wait_time = 2**retry_count
+                        logger.warning(
+                            "Execution error, retrying in %ds (attempt %d/%d) - Command: %s - Error: %s: %s - Task: %s, Backend: %s",
+                            wait_time,
+                            retry_count,
+                            max_retries,
+                            _safe_command_preview(command),
+                            type(e).__name__,
+                            e,
+                            effective_task_id,
+                            env_type,
+                        )
                         time.sleep(wait_time)
                         continue
-                    
-                    logger.error("Execution failed after %d retries - Command: %s - Error: %s: %s - Task: %s, Backend: %s",
-                                 max_retries, _safe_command_preview(command), type(e).__name__, e, effective_task_id, env_type)
-                    return json.dumps({
+
+                    logger.error(
+                        "Execution failed after %d retries - Command: %s - Error: %s: %s - Task: %s, Backend: %s",
+                        max_retries,
+                        _safe_command_preview(command),
+                        type(e).__name__,
+                        e,
+                        effective_task_id,
+                        env_type,
+                    )
+                    result_dict = {
                         "output": "",
                         "exit_code": -1,
-                        "error": f"Command execution failed: {type(e).__name__}: {str(e)}"
-                    }, ensure_ascii=False)
-                
+                        "error": f"Command execution failed: {type(e).__name__}: {str(e)}",
+                        "failure_class": classification.category.value,
+                        "suggestion": classification.hint,
+                        "should_retry": False,
+                        "terminal_streak": streak,
+                    }
+                    rec = streak_recommendation(streak)
+                    if rec:
+                        result_dict["recommendation"] = rec
+                    return json.dumps(result_dict, ensure_ascii=False)
+
                 # Got a result
+                output = result.get("output", "")
+                returncode = result.get("returncode", 0)
+
+                # Classify non-zero exits and decide whether to retry.
+                if returncode != 0:
+                    classification = classify_terminal_failure(
+                        command,
+                        exit_code=returncode,
+                        stdout=output,
+                        stderr="",
+                        consecutive_count=streak,
+                    )
+
+                    # Treat command-specific informational exits as non-failures.
+                    exit_note = _interpret_exit_code(command, returncode)
+                    if classification.category == FailureCategory.unknown and exit_note:
+                        classification = TerminalFailureClassification(
+                            category=FailureCategory.unknown,
+                            hint=exit_note,
+                            should_retry=False,
+                        )
+
+                    if classification.should_retry and retry_count < max_retries:
+                        retry_count += 1
+                        wait_time = 2**retry_count
+                        logger.warning(
+                            "Non-zero exit %d, retrying in %ds (attempt %d/%d) - Command: %s - Task: %s, Backend: %s",
+                            returncode,
+                            wait_time,
+                            retry_count,
+                            max_retries,
+                            _safe_command_preview(command),
+                            effective_task_id,
+                            env_type,
+                        )
+                        time.sleep(wait_time)
+                        # Re-execute on the next loop iteration with the same env.
+                        continue
+
+                    # Non-retryable failure: enrich the result so the agent can switch.
+                    if classification.category not in {
+                        FailureCategory.unknown,
+                    }:
+                        result_dict = {
+                            "output": output,
+                            "exit_code": returncode,
+                            "error": None,
+                            "failure_class": classification.category.value,
+                            "suggestion": classification.hint,
+                            "should_retry": False,
+                            "terminal_streak": streak,
+                        }
+                        if approval_note:
+                            result_dict["approval"] = approval_note
+                        if exit_note:
+                            result_dict["exit_code_meaning"] = exit_note
+                        rec = streak_recommendation(streak)
+                        if rec:
+                            result_dict["recommendation"] = rec
+                        return json.dumps(result_dict, ensure_ascii=False)
+
+                # Successful (or informational) result: reset streak and process output.
+                _reset_terminal_streak(task_id)
                 break
-            
+
             # Extract output
             output = result.get("output", "")
             returncode = result.get("returncode", 0)
