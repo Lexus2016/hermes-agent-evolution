@@ -170,6 +170,25 @@ class TestAuthHeaders:
         text = "the authorization model is fully open"
         assert redact_sensitive_text(text) == text
 
+    def test_token_flush_against_double_quote_preserves_quote(self):
+        # Regression for #43083: a token sitting flush against a closing
+        # double quote must NOT pull that quote into the mask. Greedy \S+
+        # used to eat it, turning value corruption into syntax corruption
+        # (unterminated quote → shell EOF).
+        text = 'curl -H "Authorization: Bearer sk-abcdef1234567890"'
+        result = redact_sensitive_text(text)
+        assert "sk-abcdef1234567890" not in result
+        assert result.count('"') == 2, result  # both quotes survive
+        assert result.endswith('"'), result
+
+    def test_token_flush_against_single_quote_preserves_quote(self):
+        # Regression for #43083: same as above with single quotes (Python
+        # f-string context). The closing ' must survive the mask.
+        text = "auth = f'Authorization: Bearer {placeholder}'"
+        result = redact_sensitive_text(text)
+        assert result.count("'") == 2, result
+        assert result.endswith("'"), result
+
 
 class TestApiKeyHeaders:
     def test_x_api_key_header_masked(self):
@@ -471,6 +490,79 @@ class TestWebUrlsNotRedacted:
         text = "postgres://admin:dbpass@db.internal:5432/app"
         result = redact_sensitive_text(text)
         assert "dbpass" not in result
+
+
+class TestBareTokenUserinfoRedaction:
+    """Regression tests for #6396 — a bare credential in URL userinfo
+    (``scheme://TOKEN@host``, no ``user:pass`` colon) is redacted. This is the
+    git-remote-with-embedded-password shape. The colon form ``user:pass@`` and
+    query-string tokens are deliberately left to pass through (#34029) so
+    magic-link / OAuth round-trip skills keep working — see
+    TestWebUrlsNotRedacted for those invariants.
+    """
+
+    def test_git_remote_bare_password_redacted(self):
+        """Exact bug scenario: password in a git remote URL."""
+        text = (
+            "git remote set-url origin "
+            "https://MYPASSWORDWASDISLAYEDHERE@github.com/unclehowell/FCUK.git"
+        )
+        result = redact_sensitive_text(text)
+        assert "MYPASSWORDWASDISLAYEDHERE" not in result
+        assert "@github.com" in result
+        assert "unclehowell/FCUK.git" in result
+
+    def test_ssh_bare_token_redacted(self):
+        text = "ssh://longtoken1234567@gitlab.com/project.git"
+        result = redact_sensitive_text(text)
+        assert "longtoken1234567" not in result
+        assert "@gitlab.com" in result
+
+    def test_ftp_bare_token_redacted(self):
+        text = "ftp://ftptoken123456@ftp.example.com/files"
+        result = redact_sensitive_text(text)
+        assert "ftptoken123456" not in result
+
+    def test_bare_token_with_query_redacts_token_only(self):
+        text = "https://abcdef1234567@host.com/path?foo=bar"
+        result = redact_sensitive_text(text)
+        assert "abcdef1234567" not in result
+        assert "?foo=bar" in result
+
+    def test_user_pass_form_still_passes_through(self):
+        """The ``user:pass@`` colon form must NOT be redacted (#34029)."""
+        text = "URL: https://user:supersecretpw@host.example.com/path"
+        assert redact_sensitive_text(text) == text
+
+    def test_short_username_not_redacted(self):
+        """Short userinfo (git, admin, deploy) below the 8-char floor passes."""
+        for text in (
+            "https://git@github.com/user/repo.git",
+            "https://admin@example.com/x",
+            "https://deploy@host.com/y",
+        ):
+            assert redact_sensitive_text(text) == text
+
+    def test_email_in_path_not_redacted(self):
+        """An ``@`` in a path/query is not userinfo — the token class stops at
+        ``/``, so emails after the first slash are never treated as a credential."""
+        for text in (
+            "https://example.com/search?q=user@example.com",
+            "https://example.com/users/john@doe.com/profile",
+        ):
+            assert redact_sensitive_text(text) == text
+
+    def test_plain_url_unchanged(self):
+        text = "https://github.com/user/repo.git"
+        assert redact_sensitive_text(text) == text
+
+    def test_long_bare_token_preserves_head_tail(self):
+        token = "abcdef" + "x" * 20 + "wxyz"
+        text = f"https://{token}@github.com/u/r.git"
+        result = redact_sensitive_text(text)
+        assert token not in result
+        assert "abcdef" in result  # head preserved
+        assert "wxyz" in result    # tail preserved
 
 
 class TestFormBodyRedaction:

@@ -847,6 +847,8 @@ def _get_file_ops(task_id: str = "default") -> ShellFileOperations:
         _creation_locks,
         _creation_locks_lock,
         _resolve_container_task_id,
+        _is_unusable_container_cwd,
+        _CONTAINER_BACKENDS,
     )
     import time
 
@@ -1036,7 +1038,7 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 500, task_id: str = 
                         "file_size": result_dict["file_size"],
                     }, ensure_ascii=False)
                 if result_dict["content"]:
-                    result_dict["content"] = redact_sensitive_text(result_dict["content"], code_file=True)
+                    result_dict["content"] = redact_sensitive_text(result_dict["content"], file_read=True)
                 return json.dumps(result_dict, ensure_ascii=False)
 
         # ── Binary file guard ─────────────────────────────────────────
@@ -1152,7 +1154,7 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 500, task_id: str = 
 
         # ── Redact secrets (after guard check to skip oversized content) ──
         if result.content:
-            result.content = redact_sensitive_text(result.content, code_file=True)
+            result.content = redact_sensitive_text(result.content, file_read=True)
             result_dict["content"] = result.content
 
         # Large-file hint: if the file is big and the caller didn't ask
@@ -1712,7 +1714,7 @@ def search_tool(pattern: str, target: str = "content", path: str = ".",
         if hasattr(result, 'matches'):
             for m in result.matches:
                 if hasattr(m, 'content') and m.content:
-                    m.content = redact_sensitive_text(m.content, code_file=True)
+                    m.content = redact_sensitive_text(m.content, file_read=True)
         result_dict = result.to_dict(densify=True)
 
         if count >= 3:

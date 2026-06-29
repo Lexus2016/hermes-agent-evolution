@@ -1221,12 +1221,27 @@ def _normalize_approval_mode(mode) -> str:
     YAML 1.1 treats bare words like `off` as booleans, so a config entry like
     `approvals:\n  mode: off` is parsed as False unless quoted. Treat that as the
     intended string mode instead of falling back to manual approvals.
+
+    Unknown string values (e.g. 'auto') are rejected with a warning rather than
+    being silently accepted and falling through every mode check downstream.
+    Always returns one of 'manual', 'smart', or 'off'.
     """
+    _VALID_MODES = ("manual", "smart", "off")
     if isinstance(mode, bool):
         return "off" if mode is False else "manual"
     if isinstance(mode, str):
         normalized = mode.strip().lower()
-        return normalized or "manual"
+        if not normalized:
+            return "manual"
+        if normalized in _VALID_MODES:
+            return normalized
+        logger.warning(
+            "Unknown approvals.mode %r — defaulting to 'manual'. "
+            "Valid values: %s",
+            mode,
+            ", ".join(_VALID_MODES),
+        )
+        return "manual"
     return "manual"
 
 
@@ -1426,11 +1441,13 @@ def check_dangerous_command(
         command: The shell command to check.
         env_type: Terminal backend type ('local', 'ssh', 'docker', etc.).
         approval_callback: Optional CLI callback for interactive prompts.
+        has_host_access: True when a Docker sandbox bind-mounts host paths,
+            so its commands can reach the host and must not skip approval.
 
     Returns:
         {"approved": True/False, "message": str or None, ...}
     """
-    if env_type in {"docker", "singularity", "modal", "daytona"}:
+    if _should_skip_container_guards(env_type, has_host_access=has_host_access):
         return {"approved": True, "message": None}
 
     # Hardline floor: commands with no recovery path (rm -rf /, mkfs, dd
@@ -1689,9 +1706,14 @@ def check_all_command_guards(
     presents them as a single combined approval request. This prevents
     a gateway force=True replay from bypassing one check when only the
     other was shown to the user.
+
+    ``has_host_access`` is True when a Docker sandbox bind-mounts host paths;
+    such a session is no longer isolated, so it goes through the normal flow
+    instead of the container fast-path.
     """
-    # Skip containers for both checks
-    if env_type in {"docker", "singularity", "modal", "daytona"}:
+    # Skip isolated container backends for both checks. Docker stops skipping
+    # once host paths are bind-mounted into the sandbox.
+    if _should_skip_container_guards(env_type, has_host_access=has_host_access):
         return {"approved": True, "message": None}
 
     # Hardline floor: unconditional block for catastrophic commands
@@ -2045,7 +2067,8 @@ def check_all_command_guards(
     }
 
 
-def check_execute_code_guard(code: str, env_type: str) -> dict:
+def check_execute_code_guard(code: str, env_type: str,
+                             has_host_access: bool = False) -> dict:
     """Approve an execute_code script before its child process is spawned.
 
     execute_code runs arbitrary local Python — the script can call
@@ -2071,8 +2094,12 @@ def check_execute_code_guard(code: str, env_type: str) -> dict:
     )
 
     # Isolated backends already sandbox the child — matches the container skip
-    # in check_all_command_guards / check_dangerous_command.
-    if env_type in {"docker", "singularity", "modal", "daytona", "vercel_sandbox"}:
+    # in check_all_command_guards / check_dangerous_command. Docker stops
+    # skipping once host paths are bind-mounted into the sandbox; vercel_sandbox
+    # has no host-bind concept so it stays always-skipped.
+    if env_type == "vercel_sandbox":
+        return {"approved": True, "message": None}
+    if _should_skip_container_guards(env_type, has_host_access=has_host_access):
         return {"approved": True, "message": None}
 
     # --yolo or approvals.mode=off: bypass (session- or process-scoped).
