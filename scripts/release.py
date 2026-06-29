@@ -45,6 +45,7 @@ ACP_REGISTRY_MANIFEST = REPO_ROOT / "acp_registry" / "agent.json"
 
 # Auto-extracted from noreply emails + manual overrides
 AUTHOR_MAP = {
+    "bradhallett@users.noreply.github.com": "bradhallett",  # upstream sync 2026-06-29 (noreply alt; #634)
     "telos@apex-z.com": "telos-oc",  # upstream sync 2026-06-29 (full-parity #634)
     "mailtowbd@gmail.com": "marco0158",  # upstream sync 2026-06-29 (full-parity #634)
     "ha-agent@homelab.4410.us": "homelab-ha-agent",  # upstream sync 2026-06-29 (full-parity #634)
