@@ -48,6 +48,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from hermes_constants import get_hermes_home
+
 
 def _tool_result_failed(content: Any) -> bool:
     """Structural failure classifier for a tool result (issue #347).
@@ -370,16 +372,30 @@ def build_digest(
             scanned += 1
             _aggregate(scan_request_dump(obj))
 
-        # 3. SQLite SessionDB messages table (#399) — canonical store for real
-        #    sessions.  No per-session freshness check: the DB itself lives in
-        #    sessions_dir, and build_digest is already bounded by window_days.
-        db_path = sessions_dir / "state.db"
-        if db_path.is_file():
-            for _sid, msgs in _iter_state_db(db_path):
-                if not msgs:
-                    continue
-                scanned += 1
-                _aggregate(_state_db_session_signals(msgs))
+        # 3. SQLite SessionDB messages table (#399 / #623) — canonical store
+        #    for real sessions.  Some installs keep state.db at
+        #    HERMES_HOME/state.db rather than under sessions_dir, so probe both
+        #    locations and de-duplicate by resolved path.
+        seen_db_paths: set[str] = set()
+        for db_path in (
+            sessions_dir / "state.db",
+            Path(os.environ.get("HERMES_HOME", str(get_hermes_home()))) / "state.db",
+            get_hermes_home() / "state.db",
+        ):
+            try:
+                resolved = db_path.resolve()
+            except OSError:
+                continue
+            key = str(resolved)
+            if key in seen_db_paths:
+                continue
+            seen_db_paths.add(key)
+            if db_path.is_file():
+                for _sid, msgs in _iter_state_db(db_path):
+                    if not msgs:
+                        continue
+                    scanned += 1
+                    _aggregate(_state_db_session_signals(msgs))
 
     return {
         "window_days": window_days,
@@ -396,9 +412,7 @@ def build_digest(
 
 
 def _sessions_dir() -> Path:
-    return (
-        Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "sessions"
-    )
+    return get_hermes_home() / "sessions"
 
 
 def main(argv: List[str]) -> int:

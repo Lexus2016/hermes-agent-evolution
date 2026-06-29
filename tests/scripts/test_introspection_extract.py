@@ -463,6 +463,27 @@ class TestStateDB:
         assert d["sessions_scanned"] == 2
         assert d["signals"]["tool_failures"] == {"terminal": 1, "read_file": 1}
 
+    def test_state_db_at_hermes_home_root(self, tmp_path, monkeypatch):
+        """#623 — state.db can live at HERMES_HOME root, not under sessions_dir."""
+        home = tmp_path / "home"
+        home.mkdir()
+        sessions_dir = home / "sessions"
+        sessions_dir.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        _state_db(
+            home,
+            [
+                {"session_id": "root-db", **_db_asst("terminal", "c1")},
+                {
+                    "session_id": "root-db",
+                    **_db_tool("c1", _term("bash: foo: not found", exit_code=127)),
+                },
+            ],
+        )
+        d = build_digest(sessions_dir, window_days=7)
+        assert d["sessions_scanned"] == 1
+        assert d["signals"]["tool_failures"] == {"terminal": 1}
+
     def test_state_db_orders_by_id_for_tool_name_resolution(self, tmp_path):
         # Rows inserted with explicit ids in the wrong conversation order.
         # Ordering by id inside the session must reconstruct the correct order
