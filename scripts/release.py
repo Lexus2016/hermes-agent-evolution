@@ -45,6 +45,12 @@ ACP_REGISTRY_MANIFEST = REPO_ROOT / "acp_registry" / "agent.json"
 
 # Auto-extracted from noreply emails + manual overrides
 AUTHOR_MAP = {
+    "bradhallett@users.noreply.github.com": "bradhallett",  # upstream sync 2026-06-29 (noreply alt; #634)
+    "telos@apex-z.com": "telos-oc",  # upstream sync 2026-06-29 (full-parity #634)
+    "mailtowbd@gmail.com": "marco0158",  # upstream sync 2026-06-29 (full-parity #634)
+    "ha-agent@homelab.4410.us": "homelab-ha-agent",  # upstream sync 2026-06-29 (full-parity #634)
+    "christianpersico98@gmail.com": "chrispersico",  # upstream sync 2026-06-29 (full-parity #634)
+    "prathamesh290504@gmail.com": "PRATHAMESH75",  # upstream sync 2026-06-29 (full-parity #634)
     "DavidMetcalfe@users.noreply.github.com": "DavidMetcalfe",  # upstream sync 2026-06-27 (#562 catch-up)
     "SJWATTS89@OUTLOOK.COM": "lEWFkRAD",  # upstream sync 2026-06-27 (#562 catch-up)
     "poli.koltsova@gmail.com": "wnuuee1",  # upstream sync 2026-06-23 (PR #487)
@@ -980,6 +986,7 @@ AUTHOR_MAP = {
     "oluwadareab12@gmail.com": "oluwadareab12",
     "simon@simonmarcus.org": "simon-marcus",
     "xowiekk@gmail.com": "Xowiek",
+    "gutslabsxyz@gmail.com": "Gutslabs",
     "1243352777@qq.com": "zons-zhaozhy",
     "e.silacandmr@gmail.com": "Es1la",
     "51599529+stephen0110@users.noreply.github.com": "stephen0110",
@@ -1714,6 +1721,7 @@ AUTHOR_MAP = {
     "infinitycrew39@gmail.com": "infinitycrew39",  # PR #47945 salvage (scope langfuse trace state by turn/request ids; #48292)
     "eurekaxun@163.com": "huangxun375-stack",  # PR #37251 / #48894 structured OpenViking sync
     "218421507+Sahil-SS9@users.noreply.github.com": "Sahil-SS9",  # PR #48466/#44919/#44909/#42209 salvage (cron/checkpoint/kanban/skill)
+    "mango001@126.com": "max-chen",  # PR #51194 salvage (single-pass list_profiles alias map + skill-count cache; #54751)
     # v0.17.0 additions
     "2081789787@qq.com": "pengyuyanITYU",  # PR #43618 (harden local file tree paths)
     "adalsteinni@gmail.com": "AIalliAI",  # PR #44159 (desktop hover-reveal inset)

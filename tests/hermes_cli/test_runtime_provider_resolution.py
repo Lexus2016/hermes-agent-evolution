@@ -76,6 +76,68 @@ def test_resolve_runtime_provider_anthropic_pool_respects_config_base_url(monkey
     assert resolved["base_url"] == "https://proxy.example.com/anthropic"
 
 
+def test_resolve_runtime_provider_anthropic_ignores_stale_aggregator_base_url(monkeypatch):
+    """A leftover OpenRouter base_url under provider: anthropic must not hijack
+    Anthropic OAuth traffic — fall back to the official Anthropic host."""
+
+    class _Entry:
+        access_token = "pool-token"
+        source = "manual"
+        base_url = "https://api.anthropic.com"
+
+    class _Pool:
+        def has_credentials(self):
+            return True
+
+        def select(self):
+            return _Entry()
+
+    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "anthropic")
+    monkeypatch.setattr(rp, "load_pool", lambda provider: _Pool())
+
+    for stale in (
+        "https://openrouter.ai/api/v1",
+        "https://api.openai.com/v1",
+    ):
+        monkeypatch.setattr(
+            rp,
+            "_get_model_config",
+            lambda stale=stale: {"provider": "anthropic", "base_url": stale},
+        )
+        resolved = rp.resolve_runtime_provider(requested="anthropic")
+        assert resolved["provider"] == "anthropic"
+        assert resolved["api_mode"] == "anthropic_messages"
+        assert resolved["base_url"] == "https://api.anthropic.com", stale
+
+
+def test_resolve_runtime_provider_anthropic_keeps_azure_base_url(monkeypatch):
+    """Azure Foundry Anthropic endpoints are not anthropic.com hosts but are a
+    legitimate override — they must survive the stale-URL guard."""
+
+    class _Entry:
+        access_token = "pool-token"
+        source = "manual"
+        base_url = "https://api.anthropic.com"
+
+    class _Pool:
+        def has_credentials(self):
+            return True
+
+        def select(self):
+            return _Entry()
+
+    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "anthropic")
+    monkeypatch.setattr(rp, "load_pool", lambda provider: _Pool())
+    monkeypatch.setattr(
+        rp,
+        "_get_model_config",
+        lambda: {"provider": "anthropic", "base_url": "https://myhost.azure.com/anthropic"},
+    )
+
+    resolved = rp.resolve_runtime_provider(requested="anthropic")
+    assert resolved["base_url"] == "https://myhost.azure.com/anthropic"
+
+
 def test_resolve_runtime_provider_anthropic_explicit_override_skips_pool(monkeypatch):
     def _unexpected_pool(provider):
         raise AssertionError(f"load_pool should not be called for {provider}")
@@ -352,6 +414,32 @@ def test_resolve_runtime_provider_lmstudio_saved_base_url_wins_over_env(monkeypa
     # Saved config base_url wins over env var (standard contract).
     assert resolved["base_url"] == "http://192.168.1.10:1234/v1"
     assert resolved["api_key"] == "dummy-lm-api-key"
+
+
+def test_resolve_runtime_provider_lmstudio_normalizes_native_api_saved_base_url(monkeypatch):
+    monkeypatch.delenv("LM_API_KEY", raising=False)
+    monkeypatch.delenv("LM_BASE_URL", raising=False)
+    monkeypatch.setattr(rp, "resolve_provider", lambda *a, **k: "lmstudio")
+    monkeypatch.setattr(
+        rp,
+        "_get_model_config",
+        lambda: {
+            "provider": "lmstudio",
+            "base_url": "http://192.168.1.10:1234/api/v1",
+            "default": "qwen/qwen3-coder-30b",
+        },
+    )
+    monkeypatch.setattr(
+        rp,
+        "load_pool",
+        lambda provider: type("Pool", (), {"has_credentials": lambda self: False})(),
+    )
+
+    resolved = rp.resolve_runtime_provider(requested="lmstudio")
+
+    assert resolved["provider"] == "lmstudio"
+    assert resolved["api_mode"] == "chat_completions"
+    assert resolved["base_url"] == "http://192.168.1.10:1234/v1"
 
 
 def test_resolve_runtime_provider_openrouter_explicit(monkeypatch):

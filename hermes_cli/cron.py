@@ -170,12 +170,49 @@ def cron_tick():
     tick(verbose=True)
 
 
+def _active_cron_provider_name() -> str:
+    """Name of the resolved cron scheduler provider ('builtin', 'chronos', ...).
+
+    Best-effort + offline; returns 'builtin' on any failure.
+    """
+    try:
+        from cron.scheduler_provider import resolve_cron_scheduler
+
+        return resolve_cron_scheduler().name or "builtin"
+    except Exception:
+        return "builtin"
+
+
 def cron_status():
     """Show cron execution status."""
     from cron.jobs import list_jobs
     from hermes_cli.gateway import find_gateway_pids
 
     print()
+
+    provider = _active_cron_provider_name()
+    if provider != "builtin":
+        # An external provider (e.g. Chronos) does NOT run the in-process 60s
+        # ticker — it arms one external one-shot per job and is fired by a
+        # NAS-mediated webhook, so between fires there is intentionally NO
+        # ticker thread and NO heartbeat file. Reporting the ticker-heartbeat
+        # staleness here would always say "stalled / not firing" on a perfectly
+        # healthy Chronos instance. Report the provider instead and skip the
+        # ticker-liveness heuristics entirely.
+        print(color(
+            f"✓ Cron provider: {provider} — jobs fire via the managed scheduler, "
+            "not the in-process ticker.",
+            Colors.GREEN,
+        ))
+        print(color(
+            "  (No ticker heartbeat is expected for an external provider; "
+            "due jobs are delivered by an authenticated webhook.)",
+            Colors.DIM,
+        ))
+        print()
+        _print_active_jobs_summary(list_jobs(include_disabled=False))
+        print()
+        return
 
     pids = find_gateway_pids()
     if pids:
@@ -231,7 +268,14 @@ def cron_status():
 
     print()
 
-    jobs = list_jobs(include_disabled=False)
+    _print_active_jobs_summary(list_jobs(include_disabled=False))
+
+    print()
+
+
+def _print_active_jobs_summary(jobs) -> None:
+    """Print the '<N> active job(s)' + next-run line shared by every status
+    path (built-in ticker AND external provider)."""
     if jobs:
         next_runs = [j.get("next_run_at") for j in jobs if j.get("next_run_at")]
         print(f"  {len(jobs)} active job(s)")
@@ -239,8 +283,6 @@ def cron_status():
             print(f"  Next run: {min(next_runs)}")
     else:
         print("  No active jobs")
-
-    print()
 
 
 def cron_create(args):

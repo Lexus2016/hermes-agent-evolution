@@ -5,10 +5,45 @@ This transport owns format conversion and normalization — NOT client lifecycle
 streaming, or the _run_codex_stream() call path.
 """
 
+import hashlib
+import json
 from typing import Any, Dict, List, Optional
 
 from agent.transports.base import ProviderTransport
 from agent.transports.types import NormalizedResponse, ToolCall
+
+
+def _content_cache_key(instructions: str, tools: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+    """Content-address the prompt cache key from the static request prefix.
+
+    Returns ``pck_<sha256[:24]>`` of (instructions + sorted tool schemas), or
+    None when there is nothing static to key on. The cache key is a routing
+    hint only — never a correctness boundary — so two requests sharing a system
+    prompt and tool set intentionally resolve to the same warm prefix bucket.
+
+    The fix this exists for: recurring cron jobs build session_id as
+    ``cron_<id>_<timestamp>``, so using session_id as the cache key made every
+    fire cache-cold. The static prefix (identity + tools) is identical across
+    fires, so hashing it gives a stable key that stays warm within the
+    provider's cache TTL. Sorting tools by name keeps the hash insertion-order
+    independent.
+    """
+    if not instructions and not tools:
+        return None
+    tools_part = ""
+    if tools:
+        sorted_tools = sorted(
+            (t for t in tools if isinstance(t, dict)),
+            key=lambda t: str(t.get("name") or t.get("type") or ""),
+        )
+        tools_part = json.dumps(
+            sorted_tools, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        )
+    # \x00 separator so instructions ending in the tool JSON can't collide with
+    # a request whose instructions contain that JSON and whose tools are empty.
+    content = f"{instructions or ''}\x00{tools_part}"
+    digest = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()[:24]
+    return f"pck_{digest}"
 
 
 class ResponsesApiTransport(ProviderTransport):

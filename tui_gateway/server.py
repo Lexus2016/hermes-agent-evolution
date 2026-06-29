@@ -278,6 +278,8 @@ class _SlashWorker:
             argv += ["--model", model]
 
         self._closed = False
+        from hermes_cli._subprocess_compat import windows_hide_flags
+
         self.proc = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE,
@@ -289,6 +291,7 @@ class _SlashWorker:
             # slash_worker runs the Hermes agent → needs provider credentials.
             # Tier-1 secrets (gateway/GitHub/infra) are still stripped (#29157).
             env=hermes_subprocess_env(inherit_credentials=True),
+            creationflags=windows_hide_flags(),
         )
         threading.Thread(target=self._drain_stdout, daemon=True).start()
         threading.Thread(target=self._drain_stderr, daemon=True).start()
@@ -2198,7 +2201,11 @@ def _append_model_switch_marker(session: dict | None, *, model: str, provider: s
         f"{model}{provider_part}. From this point forward, use this runtime "
         "metadata when answering questions about what model/provider is active.]"
     )
-    entry = {"role": "system", "content": marker}
+    # Persist as a user message, not a system message.  The gateway appends
+    # this marker after prior conversation turns, and strict OpenAI-compatible
+    # providers (vLLM, Qwen) reject system messages that are not at the
+    # beginning of the API message list (#48338).
+    entry = {"role": "user", "content": marker}
 
     lock = session.get("history_lock")
     if lock is not None:
@@ -2213,14 +2220,14 @@ def _append_model_switch_marker(session: dict | None, *, model: str, provider: s
         agent = session.get("agent")
         db = getattr(agent, "_session_db", None) if agent is not None else None
         if db is not None:
-            db.append_message(session_id=session_key, role="system", content=marker)
+            db.append_message(session_id=session_key, role="user", content=marker)
             return
 
         _ensure_session_db_row(session)
         with _session_db(session) as scoped_db:
             if scoped_db is not None:
                 scoped_db.append_message(
-                    session_id=session_key, role="system", content=marker
+                    session_id=session_key, role="user", content=marker
                 )
     except Exception:
         logger.debug("failed to persist model switch marker", exc_info=True)
@@ -8304,8 +8311,54 @@ def _notification_poller_loop(
         process_registry.completion_queue.put(evt)
 
 
+def _wire_agent_terminal_output() -> None:
+    """Idempotently route background-process output (and tab-close requests) to
+    the desktop, keyed by process id. Read-only agent terminal tabs stream
+    `agent.terminal.output` chunks live instead of polling the output tail, and
+    `process_registry.request_close_terminal` emits `terminal.close` so the agent
+    can drop a tab without killing the process. Events are routed to the window
+    that owns the process (its gateway session); `_emit`/`write_json` is
+    `_stdout_lock`-guarded, so calling it from the registry's reader threads is
+    safe."""
+    from tools.process_registry import process_registry
+
+    has_output_sink = getattr(process_registry, "on_output", None) is not None
+    has_close_sink = getattr(process_registry, "on_close", None) is not None
+    if has_output_sink and has_close_sink:
+        return
+
+    def _owner_sid_for_process(session) -> str:
+        session_key = str(getattr(session, "session_key", "") or "")
+        if not session_key:
+            return ""
+        with _sessions_lock:
+            for sid, tui_session in _sessions.items():
+                if str(tui_session.get("session_key") or "") == session_key:
+                    return sid
+        return ""
+
+    def _emit_agent_terminal_output(session, chunk):
+        _emit(
+            "agent.terminal.output",
+            _owner_sid_for_process(session),
+            {"process_id": session.id, "chunk": chunk},
+        )
+
+    def _emit_agent_terminal_close(session, process_id):
+        # session may be None (process already finished/pruned) — the tab can
+        # still linger and be closed; route to the owning window when we can.
+        sid = _owner_sid_for_process(session) if session is not None else ""
+        _emit("terminal.close", sid, {"process_id": process_id})
+
+    if not has_output_sink:
+        process_registry.on_output = _emit_agent_terminal_output
+    if not has_close_sink:
+        process_registry.on_close = _emit_agent_terminal_close
+
+
 def _start_notification_poller(sid: str, session: dict) -> threading.Event:
     """Start the background notification poller for a TUI session."""
+    _wire_agent_terminal_output()
     stop = threading.Event()
     t = threading.Thread(
         target=_notification_poller_loop,
@@ -9119,8 +9172,13 @@ def _(rid, params: dict) -> dict:
             "-f", str(first_page), "-l", str(last_page),
             str(pdf_path), str(out_prefix),
         ]
+        from hermes_cli._subprocess_compat import windows_hide_flags
+
         try:
-            res = subprocess.run(argv, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+            res = subprocess.run(
+                argv, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL,
+                creationflags=windows_hide_flags(),
+            )
         except subprocess.TimeoutExpired:
             return _err(rid, 5028, "pdftoppm timed out (>120s)")
         if res.returncode != 0:
@@ -11664,6 +11722,9 @@ def _list_repo_files(root: str) -> list[str]:
             return cached[1]
 
     files: list[str] = []
+    from hermes_cli._subprocess_compat import windows_hide_flags
+
+    _creationflags = windows_hide_flags()
     try:
         top_result = subprocess.run(
             ["git", "-C", root, "rev-parse", "--show-toplevel"],
@@ -11671,6 +11732,7 @@ def _list_repo_files(root: str) -> list[str]:
             timeout=2.0,
             check=False,
             stdin=subprocess.DEVNULL,
+            creationflags=_creationflags,
         )
         if top_result.returncode == 0:
             top = top_result.stdout.decode("utf-8", "replace").strip()
@@ -11689,6 +11751,7 @@ def _list_repo_files(root: str) -> list[str]:
                 timeout=2.0,
                 check=False,
                 stdin=subprocess.DEVNULL,
+                creationflags=_creationflags,
             )
             if list_result.returncode == 0:
                 for p in list_result.stdout.decode("utf-8", "replace").split("\0"):

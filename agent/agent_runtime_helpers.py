@@ -1326,7 +1326,11 @@ def dump_api_request_debug(
             _dump_cache[_dump_cache_key] = _now
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        dump_file = agent.logs_dir / f"request_dump_{agent.session_id}_{timestamp}.json"
+        # Sanitize the session ID into a traversal-free path segment — it can
+        # originate from untrusted input (X-Hermes-Session-Id header), and an
+        # unsanitized "../"-shaped ID would write the dump outside logs_dir.
+        safe_sid = _ra()._safe_session_filename_component(agent.session_id)
+        dump_file = agent.logs_dir / f"request_dump_{safe_sid}_{timestamp}.json"
 
         # Redact secrets before persisting/printing. This dump captures the
         # full request body (system prompt, tool defs, context-embedded
