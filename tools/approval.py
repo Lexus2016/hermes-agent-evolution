@@ -76,7 +76,6 @@ def _fire_approval_hook(hook_name: str, **kwargs) -> None:
         logger.debug("Approval hook %s dispatch failed: %s", hook_name, exc)
 
 
-
 def set_current_session_key(session_key: str) -> contextvars.Token[str]:
     """Bind the active approval session key to the current context."""
     return _approval_session_key.set(session_key or "")
@@ -120,6 +119,7 @@ def get_current_session_key(default: str = "default") -> str:
     if session_key:
         return session_key
     from gateway.session_context import get_session_env
+
     return get_session_env("HERMES_SESSION_KEY", default)
 
 
@@ -153,6 +153,7 @@ def _is_gateway_approval_context() -> bool:
         return True
     return bool(_get_session_platform())
 
+
 # Sensitive write targets that should trigger approval even when referenced
 # via shell expansions like $HOME or $HERMES_HOME, or by the resolved absolute
 # active profile home path such as /home/hermes/.hermes/config.yaml. The
@@ -161,12 +162,12 @@ def _is_gateway_approval_context() -> bool:
 # these static patterns stay free of any import-time path snapshot (which would
 # go stale when HERMES_HOME is set after this module is imported, e.g. under the
 # hermetic test conftest or any deferred-profile-resolution path).
-_SSH_SENSITIVE_PATH = r'(?:~|\$home|\$\{home\})/\.ssh(?:/|$)'
+_SSH_SENSITIVE_PATH = r"(?:~|\$home|\$\{home\})/\.ssh(?:/|$)"
 _HERMES_ENV_PATH = (
-    r'(?:~\/\.hermes/|'
-    r'(?:\$home|\$\{home\})/\.hermes/|'
-    r'(?:\$hermes_home|\$\{hermes_home\})/)'
-    r'\.env\b'
+    r"(?:~\/\.hermes/|"
+    r"(?:\$home|\$\{home\})/\.hermes/|"
+    r"(?:\$hermes_home|\$\{hermes_home\})/)"
+    r"\.env\b"
 )
 # ~/.hermes/config.yaml IS the security policy: approvals.mode, yolo, and the
 # permanent-approval allowlist live here, and the config cache is mtime-keyed
@@ -177,47 +178,45 @@ _HERMES_ENV_PATH = (
 # theater. Mirrors _HERMES_ENV_PATH; matches the HERMES_HOME override form as
 # well as ~/.hermes/.
 _HERMES_CONFIG_PATH = (
-    r'(?:~\/\.hermes/|'
-    r'(?:\$home|\$\{home\})/\.hermes/|'
-    r'(?:\$hermes_home|\$\{hermes_home\})/)'
-    r'config\.yaml\b'
+    r"(?:~\/\.hermes/|"
+    r"(?:\$home|\$\{home\})/\.hermes/|"
+    r"(?:\$hermes_home|\$\{hermes_home\})/)"
+    r"config\.yaml\b"
 )
 _PROJECT_ENV_PATH = r'(?:(?:/|\.{1,2}/)?(?:[^\s/"\'`]+/)*\.env(?:\.[^/\s"\'`]+)*)'
 _PROJECT_CONFIG_PATH = r'(?:(?:/|\.{1,2}/)?(?:[^\s/"\'`]+/)*config\.yaml)'
 _SHELL_RC_FILES = (
-    r'(?:~|\$home|\$\{home\})/\.'
-    r'(?:bashrc|zshrc|profile|bash_profile|zprofile)\b'
+    r"(?:~|\$home|\$\{home\})/\."
+    r"(?:bashrc|zshrc|profile|bash_profile|zprofile)\b"
 )
 _CREDENTIAL_FILES = (
-    r'(?:~|\$home|\$\{home\})/\.'
-    r'(?:netrc|pgpass|npmrc|pypirc)\b'
+    r"(?:~|\$home|\$\{home\})/\."
+    r"(?:netrc|pgpass|npmrc|pypirc)\b"
 )
 # macOS: /etc, /var, /tmp, /home are symlinks to /private/{etc,var,tmp,home}.
 # A command written to target /private/etc/sudoers works identically to
 # /etc/sudoers on macOS but bypasses a plain "/etc/" pattern check. Match
 # both forms. Inspired by Claude Code 2.1.113's "dangerous path protection".
-_MACOS_PRIVATE_SYSTEM_PATH = r'/private/(?:etc|var|tmp|home)/'
+_MACOS_PRIVATE_SYSTEM_PATH = r"/private/(?:etc|var|tmp|home)/"
 # System-config paths that should trigger approval for any write/edit,
 # collapsing /etc, its macOS /private/etc mirror, and /etc/sudoers.d/ into
 # one shared fragment so new DANGEROUS_PATTERNS stay consistent.
-_SYSTEM_CONFIG_PATH = (
-    rf'(?:/etc/|{_MACOS_PRIVATE_SYSTEM_PATH})'
-)
+_SYSTEM_CONFIG_PATH = rf"(?:/etc/|{_MACOS_PRIVATE_SYSTEM_PATH})"
 _SENSITIVE_WRITE_TARGET = (
-    rf'(?:{_SYSTEM_CONFIG_PATH}|/dev/sd|'
-    rf'{_SSH_SENSITIVE_PATH}|'
-    rf'{_HERMES_ENV_PATH}|'
-    rf'{_HERMES_CONFIG_PATH}|'
-    rf'{_SHELL_RC_FILES}|'
-    rf'{_CREDENTIAL_FILES})'
+    rf"(?:{_SYSTEM_CONFIG_PATH}|/dev/sd|"
+    rf"{_SSH_SENSITIVE_PATH}|"
+    rf"{_HERMES_ENV_PATH}|"
+    rf"{_HERMES_CONFIG_PATH}|"
+    rf"{_SHELL_RC_FILES}|"
+    rf"{_CREDENTIAL_FILES})"
 )
 _USER_SENSITIVE_WRITE_TARGET = (
-    rf'(?:{_SSH_SENSITIVE_PATH}|'
-    rf'{_SHELL_RC_FILES}|'
-    rf'{_CREDENTIAL_FILES})'
+    rf"(?:{_SSH_SENSITIVE_PATH}|"
+    rf"{_SHELL_RC_FILES}|"
+    rf"{_CREDENTIAL_FILES})"
 )
-_PROJECT_SENSITIVE_WRITE_TARGET = rf'(?:{_PROJECT_ENV_PATH}|{_PROJECT_CONFIG_PATH})'
-_COMMAND_TAIL = r'(?:\s*(?:&&|\|\||;).*)?$'
+_PROJECT_SENSITIVE_WRITE_TARGET = rf"(?:{_PROJECT_ENV_PATH}|{_PROJECT_CONFIG_PATH})"
+_COMMAND_TAIL = r"(?:\s*(?:&&|\|\||;).*)?$"
 
 # =========================================================================
 # Hardline (unconditional) blocklist
@@ -252,36 +251,48 @@ _COMMAND_TAIL = r'(?:\s*(?:&&|\|\||;).*)?$'
 # after subshell openers ( `$(` or backtick ), optionally consuming
 # leading wrapper commands (sudo, env VAR=VAL, exec, nohup, setsid).
 _CMDPOS = (
-    r'(?:^|[;&|\n`]|\$\()'         # start position
-    r'\s*'                          # optional whitespace
-    r'(?:sudo\s+(?:-[^\s]+\s+)*)?'  # optional sudo with flags
-    r'(?:env\s+(?:\w+=\S*\s+)*)?'   # optional env with VAR=VAL pairs
-    r'(?:(?:exec|nohup|setsid|time)\s+)*'  # optional wrapper commands
-    r'\s*'
+    r"(?:^|[;&|\n`]|\$\()"  # start position
+    r"\s*"  # optional whitespace
+    r"(?:sudo\s+(?:-[^\s]+\s+)*)?"  # optional sudo with flags
+    r"(?:env\s+(?:\w+=\S*\s+)*)?"  # optional env with VAR=VAL pairs
+    r"(?:(?:exec|nohup|setsid|time)\s+)*"  # optional wrapper commands
+    r"\s*"
 )
 
 HARDLINE_PATTERNS = [
     # rm recursive targeting the root filesystem or protected roots
-    (r'\brm\s+(-[^\s]*\s+)*(/|/\*|/ \*)(\s|$)', "recursive delete of root filesystem"),
-    (r'\brm\s+(-[^\s]*\s+)*(/home|/home/\*|/root|/root/\*|/etc|/etc/\*|/usr|/usr/\*|/var|/var/\*|/bin|/bin/\*|/sbin|/sbin/\*|/boot|/boot/\*|/lib|/lib/\*)(\s|$)', "recursive delete of system directory"),
-    (r'\brm\s+(-[^\s]*\s+)*(~|\$HOME)(/?|/\*)?(\s|$)', "recursive delete of home directory"),
+    (r"\brm\s+(-[^\s]*\s+)*(/|/\*|/ \*)(\s|$)", "recursive delete of root filesystem"),
+    (
+        r"\brm\s+(-[^\s]*\s+)*(/home|/home/\*|/root|/root/\*|/etc|/etc/\*|/usr|/usr/\*|/var|/var/\*|/bin|/bin/\*|/sbin|/sbin/\*|/boot|/boot/\*|/lib|/lib/\*)(\s|$)",
+        "recursive delete of system directory",
+    ),
+    (
+        r"\brm\s+(-[^\s]*\s+)*(~|\$HOME)(/?|/\*)?(\s|$)",
+        "recursive delete of home directory",
+    ),
     # Filesystem format
-    (r'\bmkfs(\.[a-z0-9]+)?\b', "format filesystem (mkfs)"),
+    (r"\bmkfs(\.[a-z0-9]+)?\b", "format filesystem (mkfs)"),
     # Raw block device overwrites (dd + redirection)
-    (r'\bdd\b[^\n]*\bof=/dev/(sd|nvme|hd|mmcblk|vd|xvd)[a-z0-9]*', "dd to raw block device"),
-    (r'>\s*/dev/(sd|nvme|hd|mmcblk|vd|xvd)[a-z0-9]*\b', "redirect to raw block device"),
+    (
+        r"\bdd\b[^\n]*\bof=/dev/(sd|nvme|hd|mmcblk|vd|xvd)[a-z0-9]*",
+        "dd to raw block device",
+    ),
+    (r">\s*/dev/(sd|nvme|hd|mmcblk|vd|xvd)[a-z0-9]*\b", "redirect to raw block device"),
     # Fork bomb (classic shell form)
-    (r':\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:', "fork bomb"),
+    (r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:", "fork bomb"),
     # Kill every process on the system
-    (r'\bkill\s+(-[^\s]+\s+)*-1\b', "kill all processes"),
+    (r"\bkill\s+(-[^\s]+\s+)*-1\b", "kill all processes"),
     # System shutdown / reboot — anchor to command position (start of line,
     # after a command separator, or after sudo/env wrappers) so we don't
     # false-positive on "echo reboot" or "grep 'shutdown' logs".
     # _CMDPOS matches start-of-command positions.
-    (_CMDPOS + r'(shutdown|reboot|halt|poweroff)\b', "system shutdown/reboot"),
-    (_CMDPOS + r'init\s+[06]\b', "init 0/6 (shutdown/reboot)"),
-    (_CMDPOS + r'systemctl\s+(poweroff|reboot|halt|kexec)\b', "systemctl poweroff/reboot"),
-    (_CMDPOS + r'telinit\s+[06]\b', "telinit 0/6 (shutdown/reboot)"),
+    (_CMDPOS + r"(shutdown|reboot|halt|poweroff)\b", "system shutdown/reboot"),
+    (_CMDPOS + r"init\s+[06]\b", "init 0/6 (shutdown/reboot)"),
+    (
+        _CMDPOS + r"systemctl\s+(poweroff|reboot|halt|kexec)\b",
+        "systemctl poweroff/reboot",
+    ),
+    (_CMDPOS + r"telinit\s+[06]\b", "telinit 0/6 (shutdown/reboot)"),
 ]
 
 # Pre-compiled variant used by the hot-path matcher. Building these at module
@@ -307,9 +318,7 @@ HARDLINE_PATTERNS_COMPILED = [
 # Treat this as an unconditional block — there is never a legitimate
 # reason for the agent to pipe passwords to sudo -S when no password
 # has been configured.
-_SUDO_STDIN_RE = re.compile(
-    r'(?:^|[;&|`\n]|&&|\|\||\$\()\s*sudo\s+-S\b',
-    re.IGNORECASE)
+_SUDO_STDIN_RE = re.compile(r"(?:^|[;&|`\n]|&&|\|\||\$\()\s*sudo\s+-S\b", re.IGNORECASE)
 
 
 def _check_sudo_stdin_guard(command: str) -> tuple:
@@ -379,83 +388,146 @@ def _sudo_stdin_block_result(description: str) -> dict:
 # =========================================================================
 
 DANGEROUS_PATTERNS = [
-    (r'\brm\s+(-[^\s]*\s+)*/', "delete in root path"),
-    (r'\brm\s+-[^\s]*r', "recursive delete"),
-    (r'\brm\s+--recursive\b', "recursive delete (long flag)"),
-    (r'\bchmod\s+(-[^\s]*\s+)*(777|666|o\+[rwx]*w|a\+[rwx]*w)\b', "world/other-writable permissions"),
-    (r'\bchmod\s+--recursive\b.*(777|666|o\+[rwx]*w|a\+[rwx]*w)', "recursive world/other-writable (long flag)"),
-    (r'\bchown\s+(-[^\s]*)?R\s+root', "recursive chown to root"),
-    (r'\bchown\s+--recursive\b.*root', "recursive chown to root (long flag)"),
-    (r'\bmkfs\b', "format filesystem"),
-    (r'\bdd\s+.*if=', "disk copy"),
-    (r'>\s*/dev/sd', "write to block device"),
-    (r'\bDROP\s+(TABLE|DATABASE)\b', "SQL DROP"),
+    (r"\brm\s+(-[^\s]*\s+)*/", "delete in root path"),
+    (r"\brm\s+-[^\s]*r", "recursive delete"),
+    (r"\brm\s+--recursive\b", "recursive delete (long flag)"),
+    (
+        r"\bchmod\s+(-[^\s]*\s+)*(777|666|o\+[rwx]*w|a\+[rwx]*w)\b",
+        "world/other-writable permissions",
+    ),
+    (
+        r"\bchmod\s+--recursive\b.*(777|666|o\+[rwx]*w|a\+[rwx]*w)",
+        "recursive world/other-writable (long flag)",
+    ),
+    (r"\bchown\s+(-[^\s]*)?R\s+root", "recursive chown to root"),
+    (r"\bchown\s+--recursive\b.*root", "recursive chown to root (long flag)"),
+    (r"\bmkfs\b", "format filesystem"),
+    (r"\bdd\s+.*if=", "disk copy"),
+    (r">\s*/dev/sd", "write to block device"),
+    (r"\bDROP\s+(TABLE|DATABASE)\b", "SQL DROP"),
     # Use [^\n]* instead of .* so DOTALL mode does not cause a WHERE clause on the
     # *next* line to satisfy the negative lookahead, silently allowing DELETE without WHERE.
-    (r'\bDELETE\s+FROM\b(?![^\n]*\bWHERE\b)', "SQL DELETE without WHERE"),
-    (r'\bTRUNCATE\s+(TABLE)?\s*\w', "SQL TRUNCATE"),
-    (rf'>\s*{_SYSTEM_CONFIG_PATH}', "overwrite system config"),
-    (r'\bsystemctl\s+(-[^\s]+\s+)*(stop|restart|disable|mask)\b', "stop/restart system service"),
-    (r'\bkill\s+-9\s+-1\b', "kill all processes"),
-    (r'\bpkill\s+-9\b', "force kill processes"),
+    (r"\bDELETE\s+FROM\b(?![^\n]*\bWHERE\b)", "SQL DELETE without WHERE"),
+    (r"\bTRUNCATE\s+(TABLE)?\s*\w", "SQL TRUNCATE"),
+    (rf">\s*{_SYSTEM_CONFIG_PATH}", "overwrite system config"),
+    (
+        r"\bsystemctl\s+(-[^\s]+\s+)*(stop|restart|disable|mask)\b",
+        "stop/restart system service",
+    ),
+    (r"\bkill\s+-9\s+-1\b", "kill all processes"),
+    (r"\bpkill\s+-9\b", "force kill processes"),
     # killall with SIGKILL (parallel to pkill -9). Catches -9 / -KILL /
     # -s KILL / -SIGKILL forms, and also `killall -r <regex>` broad sweeps
     # that can wipe out unrelated processes by accident.
     # Inspired by Claude Code 2.1.113 expanded deny rules.
-    (r'\bkillall\s+(-[^\s]*\s+)*-(9|KILL|SIGKILL)\b', "force kill processes (killall -KILL)"),
-    (r'\bkillall\s+(-[^\s]*\s+)*-s\s+(KILL|SIGKILL|9)\b', "force kill processes (killall -s KILL)"),
-    (r'\bkillall\s+(-[^\s]*\s+)*-r\b', "kill processes by regex (killall -r)"),
-    (r':\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:', "fork bomb"),
+    (
+        r"\bkillall\s+(-[^\s]*\s+)*-(9|KILL|SIGKILL)\b",
+        "force kill processes (killall -KILL)",
+    ),
+    (
+        r"\bkillall\s+(-[^\s]*\s+)*-s\s+(KILL|SIGKILL|9)\b",
+        "force kill processes (killall -s KILL)",
+    ),
+    (r"\bkillall\s+(-[^\s]*\s+)*-r\b", "kill processes by regex (killall -r)"),
+    (r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:", "fork bomb"),
     # Any shell invocation via -c or combined flags like -lc, -ic, etc.
-    (r'\b(bash|sh|zsh|ksh)\s+-[^\s]*c(\s+|$)', "shell command via -c/-lc flag"),
-    (r'\b(python[23]?|perl|ruby|node)\s+-[ec]\s+', "script execution via -e/-c flag"),
-    (r'\b(curl|wget)\b.*\|\s*(?:[/\w]*/)?(?:ba)?sh(?:\s|$|-c)', "pipe remote content to shell"),
-    (r'\b(bash|sh|zsh|ksh)\s+<\s*<?\s*\(\s*(curl|wget)\b', "execute remote script via process substitution"),
+    (r"\b(bash|sh|zsh|ksh)\s+-[^\s]*c(\s+|$)", "shell command via -c/-lc flag"),
+    (r"\b(python[23]?|perl|ruby|node)\s+-[ec]\s+", "script execution via -e/-c flag"),
+    (
+        r"\b(curl|wget)\b.*\|\s*(?:[/\w]*/)?(?:ba)?sh(?:\s|$|-c)",
+        "pipe remote content to shell",
+    ),
+    (
+        r"\b(bash|sh|zsh|ksh)\s+<\s*<?\s*\(\s*(curl|wget)\b",
+        "execute remote script via process substitution",
+    ),
     (rf'\btee\b.*["\']?{_SENSITIVE_WRITE_TARGET}', "overwrite system file via tee"),
-    (rf'>>?\s*["\']?{_SENSITIVE_WRITE_TARGET}', "overwrite system file via redirection"),
-    (rf'\btee\b.*["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_COMMAND_TAIL}', "overwrite project env/config via tee"),
-    (rf'>>?\s*["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_COMMAND_TAIL}', "overwrite project env/config via redirection"),
-    (r'\bxargs\s+.*\brm\b', "xargs with rm"),
+    (
+        rf'>>?\s*["\']?{_SENSITIVE_WRITE_TARGET}',
+        "overwrite system file via redirection",
+    ),
+    (
+        rf'\btee\b.*["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_COMMAND_TAIL}',
+        "overwrite project env/config via tee",
+    ),
+    (
+        rf'>>?\s*["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_COMMAND_TAIL}',
+        "overwrite project env/config via redirection",
+    ),
+    (r"\bxargs\s+.*\brm\b", "xargs with rm"),
     # find -exec rm / -execdir rm — the -execdir variant (same semantics,
     # runs in the directory of each match) was previously missed. Claude
     # Code 2.1.113 tightened their equivalent find rule to stop auto-
     # approving -exec / -delete flags.
-    (r'\bfind\b.*-exec(?:dir)?\s+(/\S*/)?rm\b', "find -exec/-execdir rm"),
-    (r'\bfind\b.*-delete\b', "find -delete"),
+    (r"\bfind\b.*-exec(?:dir)?\s+(/\S*/)?rm\b", "find -exec/-execdir rm"),
+    (r"\bfind\b.*-delete\b", "find -delete"),
     # Gateway lifecycle protection: prevent the agent from killing its own
     # gateway process.  These commands trigger a gateway restart/stop that
     # terminates all running agents mid-work.
-    (r'\bhermes\s+gateway\s+(stop|restart)\b', "stop/restart hermes gateway (kills running agents)"),
-    (r'\bhermes\s+update\b', "hermes update (restarts gateway, kills running agents)"),
+    (
+        r"\bhermes\s+gateway\s+(stop|restart)\b",
+        "stop/restart hermes gateway (kills running agents)",
+    ),
+    (r"\bhermes\s+update\b", "hermes update (restarts gateway, kills running agents)"),
     # Docker container lifecycle — any user with docker.sock mounted (a common
     # Docker Compose pattern) gives the agent the ability to restart/stop/kill
     # containers without approval.  These are agent-initiated lifecycle operations
     # that should always require user consent, just like `hermes gateway restart`
     # already does for the gateway process.
-    (r'\bdocker\s+compose\s+(restart|stop|kill|down)\b', "docker compose restart/stop/kill/down (container lifecycle)"),
-    (r'\bdocker\s+(restart|stop|kill)\b', "docker restart/stop/kill (container lifecycle)"),
+    (
+        r"\bdocker\s+compose\s+(restart|stop|kill|down)\b",
+        "docker compose restart/stop/kill/down (container lifecycle)",
+    ),
+    (
+        r"\bdocker\s+(restart|stop|kill)\b",
+        "docker restart/stop/kill (container lifecycle)",
+    ),
     # Gateway protection: never start gateway outside systemd management
-    (r'gateway\s+run\b.*(&\s*$|&\s*;|\bdisown\b|\bsetsid\b)', "start gateway outside systemd (use 'systemctl --user restart hermes-gateway')"),
-    (r'\bnohup\b.*gateway\s+run\b', "start gateway outside systemd (use 'systemctl --user restart hermes-gateway')"),
+    (
+        r"gateway\s+run\b.*(&\s*$|&\s*;|\bdisown\b|\bsetsid\b)",
+        "start gateway outside systemd (use 'systemctl --user restart hermes-gateway')",
+    ),
+    (
+        r"\bnohup\b.*gateway\s+run\b",
+        "start gateway outside systemd (use 'systemctl --user restart hermes-gateway')",
+    ),
     # Self-termination protection: prevent agent from killing its own process
-    (r'\b(pkill|killall)\b.*\b(hermes|gateway|cli\.py)\b', "kill hermes/gateway process (self-termination)"),
+    (
+        r"\b(pkill|killall)\b.*\b(hermes|gateway|cli\.py)\b",
+        "kill hermes/gateway process (self-termination)",
+    ),
     # Self-termination via kill + command substitution (pgrep/pidof).
     # The name-based pattern above catches `pkill hermes` but not
     # `kill -9 $(pgrep -f hermes)` because the substitution is opaque
     # to regex at detection time. Catch the structural pattern instead.
     # `pidof` is the BSD/Linux alternative to `pgrep` and is equally
     # opaque, so include it in the same alternation.
-    (r'\bkill\b.*\$\(\s*(pgrep|pidof)\b', "kill process via pgrep/pidof expansion (self-termination)"),
-    (r'\bkill\b.*`\s*(pgrep|pidof)\b', "kill process via backtick pgrep/pidof expansion (self-termination)"),
+    (
+        r"\bkill\b.*\$\(\s*(pgrep|pidof)\b",
+        "kill process via pgrep/pidof expansion (self-termination)",
+    ),
+    (
+        r"\bkill\b.*`\s*(pgrep|pidof)\b",
+        "kill process via backtick pgrep/pidof expansion (self-termination)",
+    ),
     # launchctl-driven gateway stop/restart on macOS. The agent can bypass
     # the `hermes gateway stop|restart` pattern above by driving launchd
     # directly against the service label (commonly `ai.hermes.gateway`).
     # Catch the operations that stop, restart, or unload it.
-    (r'\blaunchctl\s+(stop|kickstart|bootout|unload|kill|disable|remove)\b.*\b(hermes|ai\.hermes)\b', "stop/restart hermes launchd service (kills running agents)"),
+    (
+        r"\blaunchctl\s+(stop|kickstart|bootout|unload|kill|disable|remove)\b.*\b(hermes|ai\.hermes)\b",
+        "stop/restart hermes launchd service (kills running agents)",
+    ),
     # File copy/move/edit into sensitive system paths (/etc/ and macOS
     # /private/etc/ mirror).
-    (rf'\b(cp|mv|install)\b.*\s{_SYSTEM_CONFIG_PATH}', "copy/move file into system config path"),
-    (rf'\b(cp|mv|install)\b.*\s["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_COMMAND_TAIL}', "overwrite project env/config file"),
+    (
+        rf"\b(cp|mv|install)\b.*\s{_SYSTEM_CONFIG_PATH}",
+        "copy/move file into system config path",
+    ),
+    (
+        rf'\b(cp|mv|install)\b.*\s["\']?{_PROJECT_SENSITIVE_WRITE_TARGET}["\']?{_COMMAND_TAIL}',
+        "overwrite project env/config file",
+    ),
     # cp/mv/install OVERWRITING a sensitive credential/SSH/shell-rc/Hermes file.
     # The tee/redirection patterns above already gate _SENSITIVE_WRITE_TARGET
     # (~/.ssh/*, ~/.netrc/.pgpass/.npmrc/.pypirc, shell rc files,
@@ -469,22 +541,43 @@ DANGEROUS_PATTERNS = [
     # but reading OUT of a sensitive path (`cp ~/.ssh/config /tmp/x`) stays safe.
     # The trailing `[^\s"\']*` consumes the rest of the destination filename
     # (e.g. `authorized_keys` after the `~/.ssh/` fragment).
-    (rf'\b(cp|mv|install)\b.*\s["\']?{_SENSITIVE_WRITE_TARGET}[^\s"\']*["\']?{_COMMAND_TAIL}', "copy/move file into sensitive credential/SSH/shell-rc path"),
+    (
+        rf'\b(cp|mv|install)\b.*\s["\']?{_SENSITIVE_WRITE_TARGET}[^\s"\']*["\']?{_COMMAND_TAIL}',
+        "copy/move file into sensitive credential/SSH/shell-rc path",
+    ),
     # In-place edits mutate the target file directly, bypassing redirection,
     # tee, and copy/move/install coverage. Gate the same user-controlled
     # startup/credential files so `sed -i ... ~/.bashrc` and `perl -i ...
     # ~/.ssh/authorized_keys` cannot silently plant login commands or keys.
-    (rf'\bsed\s+-[^\s]*i.*(?:{_USER_SENSITIVE_WRITE_TARGET})[^\s"\']*', "in-place edit of sensitive credential/SSH/shell-rc path"),
-    (rf'\bsed\s+--in-place\b.*(?:{_USER_SENSITIVE_WRITE_TARGET})[^\s"\']*', "in-place edit of sensitive credential/SSH/shell-rc path (long flag)"),
-    (rf'\b(?:perl|ruby)\b.*(?:^|\s)-[^\s]*i\b.*(?:{_USER_SENSITIVE_WRITE_TARGET})[^\s"\']*', "in-place edit of sensitive credential/SSH/shell-rc path (perl/ruby)"),
-    (rf'\bsed\s+-[^\s]*i.*\s{_SYSTEM_CONFIG_PATH}', "in-place edit of system config"),
-    (rf'\bsed\s+--in-place\b.*\s{_SYSTEM_CONFIG_PATH}', "in-place edit of system config (long flag)"),
+    (
+        rf'\bsed\s+-[^\s]*i.*(?:{_USER_SENSITIVE_WRITE_TARGET})[^\s"\']*',
+        "in-place edit of sensitive credential/SSH/shell-rc path",
+    ),
+    (
+        rf'\bsed\s+--in-place\b.*(?:{_USER_SENSITIVE_WRITE_TARGET})[^\s"\']*',
+        "in-place edit of sensitive credential/SSH/shell-rc path (long flag)",
+    ),
+    (
+        rf'\b(?:perl|ruby)\b.*(?:^|\s)-[^\s]*i\b.*(?:{_USER_SENSITIVE_WRITE_TARGET})[^\s"\']*',
+        "in-place edit of sensitive credential/SSH/shell-rc path (perl/ruby)",
+    ),
+    (rf"\bsed\s+-[^\s]*i.*\s{_SYSTEM_CONFIG_PATH}", "in-place edit of system config"),
+    (
+        rf"\bsed\s+--in-place\b.*\s{_SYSTEM_CONFIG_PATH}",
+        "in-place edit of system config (long flag)",
+    ),
     # In-place edit of a Hermes-managed security file (~/.hermes/config.yaml or
     # .env). sed -i bypasses the redirection/tee patterns above because it
     # mutates the file directly. Pairs the file_tools write_file/patch deny so
     # the terminal side is not an open door. See #14639.
-    (rf'\bsed\s+-[^\s]*i.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH})', "in-place edit of Hermes config/env"),
-    (rf'\bsed\s+--in-place\b.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH})', "in-place edit of Hermes config/env (long flag)"),
+    (
+        rf"\bsed\s+-[^\s]*i.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH})",
+        "in-place edit of Hermes config/env",
+    ),
+    (
+        rf"\bsed\s+--in-place\b.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH})",
+        "in-place edit of Hermes config/env (long flag)",
+    ),
     # perl -i and ruby -i perform the same in-place mutation as sed -i but are
     # not caught by the -e/-c script-execution pattern above (which targets code
     # evaluation, not file mutation). Pairs the sed -i coverage from #14639.
@@ -493,21 +586,24 @@ DANGEROUS_PATTERNS = [
     # backup suffix (`perl -i.bak`). Match any flag token containing `i`
     # anywhere in the args, not just the first token — `perl -e '...'` (code
     # eval, no -i) does not trip because it has no `-...i` flag token.
-    (rf'\b(?:perl|ruby)\b.*(?:^|\s)-[^\s]*i\b.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH})', "in-place edit of Hermes config/env (perl/ruby)"),
+    (
+        rf"\b(?:perl|ruby)\b.*(?:^|\s)-[^\s]*i\b.*(?:{_HERMES_CONFIG_PATH}|{_HERMES_ENV_PATH})",
+        "in-place edit of Hermes config/env (perl/ruby)",
+    ),
     # Script execution via heredoc — bypasses the -e/-c flag patterns above.
     # `python3 << 'EOF'` feeds arbitrary code via stdin without -c/-e flags.
-    (r'\b(python[23]?|perl|ruby|node)\s+<<', "script execution via heredoc"),
+    (r"\b(python[23]?|perl|ruby|node)\s+<<", "script execution via heredoc"),
     # Git destructive operations that can lose uncommitted work or rewrite
     # shared history. Not captured by rm/chmod/etc patterns.
-    (r'\bgit\s+reset\s+--hard\b', "git reset --hard (destroys uncommitted changes)"),
-    (r'\bgit\s+push\b.*--force\b', "git force push (rewrites remote history)"),
-    (r'\bgit\s+push\b.*-f\b', "git force push short flag (rewrites remote history)"),
-    (r'\bgit\s+clean\s+-[^\s]*f', "git clean with force (deletes untracked files)"),
-    (r'\bgit\s+branch\s+-D\b', "git branch force delete"),
+    (r"\bgit\s+reset\s+--hard\b", "git reset --hard (destroys uncommitted changes)"),
+    (r"\bgit\s+push\b.*--force\b", "git force push (rewrites remote history)"),
+    (r"\bgit\s+push\b.*-f\b", "git force push short flag (rewrites remote history)"),
+    (r"\bgit\s+clean\s+-[^\s]*f", "git clean with force (deletes untracked files)"),
+    (r"\bgit\s+branch\s+-D\b", "git branch force delete"),
     # Script execution after chmod +x — catches the two-step pattern where
     # a script is first made executable then immediately run. The script
     # content may contain dangerous commands that individual patterns miss.
-    (r'\bchmod\s+\+x\b.*[;&|]+\s*\./', "chmod +x followed by immediate execution"),
+    (r"\bchmod\s+\+x\b.*[;&|]+\s*\./", "chmod +x followed by immediate execution"),
     # Sudo with stdin / askpass / shell / list-privs flags. An LLM-driven
     # agent has no TTY, so sudo invocations that succeed without human
     # interaction are those reading the password from stdin (-S/--stdin)
@@ -521,12 +617,16 @@ DANGEROUS_PATTERNS = [
     # are gated below. Lazy `[^;|&\n]*?` allows flag arguments (e.g.
     # `sudo -u root -S whoami`) without spanning command separators. See
     # #17873 category 4.
-    (r'\bsudo\b[^;|&\n]*?\s+(?:-s\b|--stdin\b|-a\b|--askpass\b)',
-     "sudo with privilege flag (stdin/askpass/shell/list)"),
+    (
+        r"\bsudo\b[^;|&\n]*?\s+(?:-s\b|--stdin\b|-a\b|--askpass\b)",
+        "sudo with privilege flag (stdin/askpass/shell/list)",
+    ),
     # Combined short-flag form: -nS, -ns, -sa, -las — sudo flags packed
     # into a single -X token. Catches the same threat class.
-    (r'\bsudo\b[^;|&\n]*?\s+-[a-z]*[sa][a-z]*\b',
-     "sudo with combined-flag privilege escalation"),
+    (
+        r"\bsudo\b[^;|&\n]*?\s+-[a-z]*[sa][a-z]*\b",
+        "sudo with combined-flag privilege escalation",
+    ),
 ]
 
 
@@ -539,15 +639,21 @@ DANGEROUS_PATTERNS_COMPILED = [
 
 def _legacy_pattern_key(pattern: str) -> str:
     """Reproduce the old regex-derived approval key for backwards compatibility."""
-    return pattern.split(r'\b')[1] if r'\b' in pattern else pattern[:20]
+    return pattern.split(r"\b")[1] if r"\b" in pattern else pattern[:20]
 
 
 _PATTERN_KEY_ALIASES: dict[str, set[str]] = {}
 for _pattern, _description in DANGEROUS_PATTERNS:
     _legacy_key = _legacy_pattern_key(_pattern)
     _canonical_key = _description
-    _PATTERN_KEY_ALIASES.setdefault(_canonical_key, set()).update({_canonical_key, _legacy_key})
-    _PATTERN_KEY_ALIASES.setdefault(_legacy_key, set()).update({_legacy_key, _canonical_key})
+    _PATTERN_KEY_ALIASES.setdefault(_canonical_key, set()).update({
+        _canonical_key,
+        _legacy_key,
+    })
+    _PATTERN_KEY_ALIASES.setdefault(_legacy_key, set()).update({
+        _legacy_key,
+        _canonical_key,
+    })
 
 
 def _approval_key_aliases(pattern_key: str) -> set[str]:
@@ -564,6 +670,7 @@ def _approval_key_aliases(pattern_key: str) -> set[str]:
 # Detection
 # =========================================================================
 
+
 def _normalize_command_for_detection(command: str) -> str:
     """Normalize a command string before dangerous-pattern matching.
 
@@ -576,9 +683,9 @@ def _normalize_command_for_detection(command: str) -> str:
     # Strip all ANSI escape sequences (CSI, OSC, DCS, 8-bit C1, etc.)
     command = strip_ansi(command)
     # Strip null bytes
-    command = command.replace('\x00', '')
+    command = command.replace("\x00", "")
     # Normalize Unicode (fullwidth Latin, halfwidth Katakana, etc.)
-    command = unicodedata.normalize('NFKC', command)
+    command = unicodedata.normalize("NFKC", command)
     # Fold absolute home / active-profile-home prefixes into their canonical
     # ~/ and ~/.hermes/ forms so static user-sensitive patterns catch
     # /home/alice/.bashrc and C:\Users\alice\.bashrc the same way they catch
@@ -597,9 +704,9 @@ def _normalize_command_for_detection(command: str) -> str:
     command = _rewrite_resolved_hermes_home(command)
     command = _rewrite_resolved_user_home(command)
     # Strip shell backslash-escapes: r\m → rm. Prevents \-injection bypass.
-    command = re.sub(r'\\([^\n])', r'\1', command)
+    command = re.sub(r"\\([^\n])", r"\1", command)
     # Strip empty-string literals that split tokens: r''m → rm, r"\"m → rm.
-    command = re.sub(r"''|\"\"", '', command)
+    command = re.sub(r"''|\"\"", "", command)
     return command
 
 
@@ -701,6 +808,7 @@ def _rewrite_resolved_hermes_home(command: str) -> str:
     """
     try:
         from hermes_constants import get_hermes_home
+
         home = get_hermes_home().expanduser()
         candidates = [
             str(home),
@@ -746,15 +854,16 @@ _permanent_approved: set = set()
 
 class _ApprovalEntry:
     """One pending dangerous-command approval inside a gateway session."""
+
     __slots__ = ("event", "data", "result")
 
     def __init__(self, data: dict):
         self.event = threading.Event()
-        self.data = data          # command, description, pattern_keys, …
+        self.data = data  # command, description, pattern_keys, …
         self.result: Optional[str] = None  # "once"|"session"|"always"|"deny"
 
 
-_gateway_queues: dict[str, list] = {}        # session_key → [_ApprovalEntry, …]
+_gateway_queues: dict[str, list] = {}  # session_key → [_ApprovalEntry, …]
 _gateway_notify_cbs: dict[str, object] = {}  # session_key → callable(approval_data)
 
 
@@ -783,8 +892,9 @@ def unregister_gateway_notify(session_key: str) -> None:
         entry.event.set()
 
 
-def resolve_gateway_approval(session_key: str, choice: str,
-                             resolve_all: bool = False) -> int:
+def resolve_gateway_approval(
+    session_key: str, choice: str, resolve_all: bool = False
+) -> int:
     """Called by the gateway's /approve or /deny handler to unblock
     waiting agent thread(s).
 
@@ -938,10 +1048,10 @@ def _command_matches_permanent_allowlist(command: str) -> bool:
     return False
 
 
-
 # =========================================================================
 # Config persistence for permanent allowlist
 # =========================================================================
+
 
 def load_permanent_allowlist() -> set:
     """Load permanently allowed command patterns from config.
@@ -951,6 +1061,7 @@ def load_permanent_allowlist() -> set:
     """
     try:
         from hermes_cli.config import load_config
+
         config = load_config()
         patterns = set(config.get("command_allowlist", []) or [])
         if patterns:
@@ -965,6 +1076,7 @@ def save_permanent_allowlist(patterns: set):
     """Save permanently allowed command patterns to config."""
     try:
         from hermes_cli.config import load_config, save_config
+
         config = load_config()
         config["command_allowlist"] = list(patterns)
         save_config(config)
@@ -976,10 +1088,14 @@ def save_permanent_allowlist(patterns: set):
 # Approval prompting + orchestration
 # =========================================================================
 
-def prompt_dangerous_approval(command: str, description: str,
-                              timeout_seconds: int | None = None,
-                              allow_permanent: bool = True,
-                              approval_callback=None) -> str:
+
+def prompt_dangerous_approval(
+    command: str,
+    description: str,
+    timeout_seconds: int | None = None,
+    allow_permanent: bool = True,
+    approval_callback=None,
+) -> str:
     """Prompt the user to approve a dangerous command (CLI only).
 
     Args:
@@ -997,8 +1113,9 @@ def prompt_dangerous_approval(command: str, description: str,
 
     if approval_callback is not None:
         try:
-            return approval_callback(command, description,
-                                     allow_permanent=allow_permanent)
+            return approval_callback(
+                command, description, allow_permanent=allow_permanent
+            )
         except Exception as e:
             logger.error("Approval callback failed: %s", e, exc_info=True)
             return "deny"
@@ -1016,12 +1133,14 @@ def prompt_dangerous_approval(command: str, description: str,
     # established pattern).
     try:
         from prompt_toolkit.application.current import get_app_or_none
+
         if get_app_or_none() is not None:
             logger.warning(
                 "Dangerous-command approval requested on a thread with no "
                 "approval callback while prompt_toolkit is active; denying "
                 "to avoid stdin deadlock. command=%r description=%r",
-                command, description,
+                command,
+                description,
             )
             return "deny"
     except Exception:
@@ -1035,6 +1154,7 @@ def prompt_dangerous_approval(command: str, description: str,
         # Resolve the active UI language once per prompt so we don't re-read
         # config/YAML inside the retry loop below.
         from agent.i18n import t
+
         while True:
             print()
             print(f"  {t('approval.dangerous_header', description=description)}")
@@ -1051,7 +1171,11 @@ def prompt_dangerous_approval(command: str, description: str,
 
             def get_input():
                 try:
-                    prompt = t("approval.prompt_long") if allow_permanent else t("approval.prompt_short")
+                    prompt = (
+                        t("approval.prompt_long")
+                        if allow_permanent
+                        else t("approval.prompt_short")
+                    )
                     result["choice"] = input(prompt).strip().lower()
                 except (EOFError, OSError):
                     result["choice"] = ""
@@ -1065,13 +1189,13 @@ def prompt_dangerous_approval(command: str, description: str,
                 return "deny"
 
             choice = result["choice"]
-            if choice in {'o', 'once'}:
+            if choice in {"o", "once"}:
                 print(t("approval.allowed_once"))
                 return "once"
-            elif choice in {'s', 'session'}:
+            elif choice in {"s", "session"}:
                 print(t("approval.allowed_session"))
                 return "session"
-            elif choice in {'a', 'always'}:
+            elif choice in {"a", "always"}:
                 if not allow_permanent:
                     print(t("approval.allowed_session"))
                     return "session"
@@ -1110,6 +1234,7 @@ def _get_approval_config() -> dict:
     """Read the approvals config block. Returns a dict with 'mode', 'timeout', etc."""
     try:
         from hermes_cli.config import load_config
+
         config = load_config()
         return config.get("approvals", {}) or {}
     except Exception as e:
@@ -1132,11 +1257,32 @@ def _get_approval_timeout() -> int:
 
 
 def _get_cron_approval_mode() -> str:
-    """Read the cron approval mode from config. Returns 'deny' or 'approve'."""
+    """Read the cron approval mode.
+
+    Resolution order:
+      1. Per-job ``HERMES_CRON_APPROVAL_MODE`` contextvar/env override (#611).
+      2. Global ``approvals.cron_mode`` config.
+
+    Returns 'deny' or 'approve'.
+    """
+    from gateway.session_context import get_session_env
+
+    override = get_session_env("HERMES_CRON_APPROVAL_MODE", "").strip().lower()
+    if override in {"approve", "off", "allow", "yes"}:
+        return "approve"
+    # Empty/unset override falls through to the global config.
+    if override and override not in {"", "auto", "default"}:
+        # Anything else explicit (including "deny") is treated as deny.
+        return "deny"
     try:
         from hermes_cli.config import load_config
+
         config = load_config()
-        mode = str(cfg_get(config, "approvals", "cron_mode", default="deny")).lower().strip()
+        mode = (
+            str(cfg_get(config, "approvals", "cron_mode", default="deny"))
+            .lower()
+            .strip()
+        )
         if mode in {"approve", "off", "allow", "yes"}:
             return "approve"
         return "deny"
@@ -1268,8 +1414,9 @@ def _smart_approve(command: str, description: str) -> str:
         return "escalate"
 
 
-def check_dangerous_command(command: str, env_type: str,
-                            approval_callback=None) -> dict:
+def check_dangerous_command(
+    command: str, env_type: str, approval_callback=None
+) -> dict:
     """Check if a command is dangerous and handle approval.
 
     This is the main entry point called by terminal_tool before executing
@@ -1332,16 +1479,20 @@ def check_dangerous_command(command: str, env_type: str,
         logger.warning(
             "AUTO-APPROVED dangerous command in non-interactive non-gateway context "
             "(pattern: %s): %s — set HERMES_INTERACTIVE or HERMES_GATEWAY_SESSION to require approval.",
-            description, command[:200],
+            description,
+            command[:200],
         )
         return {"approved": True, "message": None}
 
     if is_gateway or env_var_enabled("HERMES_EXEC_ASK"):
-        submit_pending(session_key, {
-            "command": command,
-            "pattern_key": pattern_key,
-            "description": description,
-        })
+        submit_pending(
+            session_key,
+            {
+                "command": command,
+                "pattern_key": pattern_key,
+                "description": description,
+            },
+        )
         return {
             "approved": False,
             "pattern_key": pattern_key,
@@ -1354,8 +1505,9 @@ def check_dangerous_command(command: str, env_type: str,
             ),
         }
 
-    choice = prompt_dangerous_approval(command, description,
-                                       approval_callback=approval_callback)
+    choice = prompt_dangerous_approval(
+        command, description, approval_callback=approval_callback
+    )
 
     if choice == "deny":
         return {
@@ -1379,6 +1531,7 @@ def check_dangerous_command(command: str, env_type: str,
 # Combined pre-exec guard (tirith + dangerous command detection)
 # =========================================================================
 
+
 def _format_tirith_description(tirith_result: dict) -> str:
     """Build a human-readable description from tirith findings.
 
@@ -1396,7 +1549,9 @@ def _format_tirith_description(tirith_result: dict) -> str:
         title = f.get("title", "")
         desc = f.get("description", "")
         if title and desc:
-            parts.append(f"[{severity}] {title}: {desc}" if severity else f"{title}: {desc}")
+            parts.append(
+                f"[{severity}] {title}: {desc}" if severity else f"{title}: {desc}"
+            )
         elif title:
             parts.append(f"[{severity}] {title}" if severity else title)
     if not parts:
@@ -1406,8 +1561,9 @@ def _format_tirith_description(tirith_result: dict) -> str:
     return "Security scan — " + "; ".join(parts)
 
 
-def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict,
-                            *, surface: str = "gateway") -> dict:
+def _await_gateway_decision(
+    session_key: str, notify_cb, approval_data: dict, *, surface: str = "gateway"
+) -> dict:
     """Enqueue *approval_data*, notify the user, and block the calling agent
     thread until the request is resolved or the gateway approval timeout
     elapses — firing pre/post approval hooks and cleaning up the queue entry.
@@ -1524,8 +1680,9 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict,
     return {"resolved": resolved, "choice": choice}
 
 
-def check_all_command_guards(command: str, env_type: str,
-                             approval_callback=None) -> dict:
+def check_all_command_guards(
+    command: str, env_type: str, approval_callback=None
+) -> dict:
     """Run all pre-exec security checks and return a single approval decision.
 
     Gathers findings from tirith and dangerous-command detection, then
@@ -1553,8 +1710,9 @@ def check_all_command_guards(command: str, env_type: str,
     # check so even yolo/smart approval/mode=off cannot bypass it.
     is_sudo_guess, sudo_guess_desc = _check_sudo_stdin_guard(command)
     if is_sudo_guess:
-        logger.warning("Sudo stdin guard block: %s (command: %s)",
-                       sudo_guess_desc, command[:200])
+        logger.warning(
+            "Sudo stdin guard block: %s (command: %s)", sudo_guess_desc, command[:200]
+        )
         return _sudo_stdin_block_result(sudo_guess_desc)
 
     # --yolo or approvals.mode=off: bypass all approval prompts.
@@ -1598,6 +1756,7 @@ def check_all_command_guards(command: str, env_type: str,
     tirith_result = {"action": "allow", "findings": [], "summary": ""}
     try:
         from tools.tirith_security import check_command_security
+
         tirith_result = check_command_security(command)
     except ImportError:
         # Tirith module not installed.  When tirith_fail_open is True (the
@@ -1609,6 +1768,7 @@ def check_all_command_guards(command: str, env_type: str,
         _tirith_fail_open = True  # safe default if config is unreadable
         try:
             from hermes_cli.config import load_config as _load_cfg
+
             _sec = (_load_cfg() or {}).get("security", {}) or {}
             _tirith_enabled = _sec.get("tirith_enabled", True)
             if _tirith_enabled:
@@ -1676,17 +1836,23 @@ def check_all_command_guards(command: str, env_type: str,
             # Auto-approve and grant session-level approval for these patterns
             for key, _, _ in warnings:
                 approve_session(session_key, key)
-            logger.debug("Smart approval: auto-approved '%s' (%s)",
-                         command[:60], combined_desc_for_llm)
-            return {"approved": True, "message": None,
-                    "smart_approved": True,
-                    "description": combined_desc_for_llm}
+            logger.debug(
+                "Smart approval: auto-approved '%s' (%s)",
+                command[:60],
+                combined_desc_for_llm,
+            )
+            return {
+                "approved": True,
+                "message": None,
+                "smart_approved": True,
+                "description": combined_desc_for_llm,
+            }
         elif verdict == "deny":
             combined_desc_for_llm = "; ".join(desc for _, desc, _ in warnings)
             return {
                 "approved": False,
                 "message": f"BLOCKED by smart approval: {combined_desc_for_llm}. "
-                           "The command was assessed as genuinely dangerous. Do NOT retry.",
+                "The command was assessed as genuinely dangerous. Do NOT retry.",
                 "smart_denied": True,
             }
         # verdict == "escalate" → fall through to manual prompt
@@ -1783,17 +1949,24 @@ def check_all_command_guards(command: str, env_type: str,
                 # choice == "once": no persistence — command allowed this
                 # single time only, matching the CLI's behavior.
 
-            return {"approved": True, "message": None,
-                    "user_approved": True, "description": combined_desc}
+            return {
+                "approved": True,
+                "message": None,
+                "user_approved": True,
+                "description": combined_desc,
+            }
 
         # Fallback: no gateway callback registered (e.g. cron, batch).
         # Return approval_required for backward compat.
-        submit_pending(session_key, {
-            "command": command,
-            "pattern_key": primary_key,
-            "pattern_keys": all_keys,
-            "description": combined_desc,
-        })
+        submit_pending(
+            session_key,
+            {
+                "command": command,
+                "pattern_key": primary_key,
+                "pattern_keys": all_keys,
+                "description": combined_desc,
+            },
+        )
         return {
             "approved": False,
             "pattern_key": primary_key,
@@ -1817,9 +1990,12 @@ def check_all_command_guards(command: str, env_type: str,
         session_key=session_key,
         surface="cli",
     )
-    choice = prompt_dangerous_approval(command, combined_desc,
-                                       allow_permanent=not has_tirith,
-                                       approval_callback=approval_callback)
+    choice = prompt_dangerous_approval(
+        command,
+        combined_desc,
+        allow_permanent=not has_tirith,
+        approval_callback=approval_callback,
+    )
     _fire_approval_hook(
         "post_approval_response",
         command=command,
@@ -1861,8 +2037,12 @@ def check_all_command_guards(command: str, env_type: str,
             approve_permanent(key)
             save_permanent_allowlist(_permanent_approved)
 
-    return {"approved": True, "message": None,
-            "user_approved": True, "description": combined_desc}
+    return {
+        "approved": True,
+        "message": None,
+        "user_approved": True,
+        "description": combined_desc,
+    }
 
 
 def check_execute_code_guard(code: str, env_type: str) -> dict:
@@ -1948,16 +2128,23 @@ def check_execute_code_guard(code: str, env_type: str) -> dict:
     if approval_mode == "smart":
         verdict = _smart_approve(command, description)
         if verdict == "approve":
-            logger.debug("Smart approval: auto-approved execute_code for session %s",
-                         session_key)
-            return {"approved": True, "message": None,
-                    "smart_approved": True, "description": description}
+            logger.debug(
+                "Smart approval: auto-approved execute_code for session %s", session_key
+            )
+            return {
+                "approved": True,
+                "message": None,
+                "smart_approved": True,
+                "description": description,
+            }
         if verdict == "deny":
             return {
                 "approved": False,
-                "message": ("BLOCKED by smart approval: execute_code script "
-                            "execution was assessed as genuinely dangerous. "
-                            "Do NOT retry."),
+                "message": (
+                    "BLOCKED by smart approval: execute_code script "
+                    "execution was assessed as genuinely dangerous. "
+                    "Do NOT retry."
+                ),
                 "smart_denied": True,
                 "pattern_key": pattern_key,
                 "description": description,
@@ -1973,12 +2160,15 @@ def check_execute_code_guard(code: str, env_type: str) -> dict:
     if notify_cb is None:
         # No gateway callback registered (e.g. ask-mode without a notifier):
         # surface a pending approval for backward compatibility.
-        submit_pending(session_key, {
-            "command": command,
-            "pattern_key": pattern_key,
-            "pattern_keys": [pattern_key],
-            "description": description,
-        })
+        submit_pending(
+            session_key,
+            {
+                "command": command,
+                "pattern_key": pattern_key,
+                "pattern_keys": [pattern_key],
+                "description": description,
+            },
+        )
         return {
             "approved": False,
             "pattern_key": pattern_key,
@@ -2004,8 +2194,10 @@ def check_execute_code_guard(code: str, env_type: str) -> dict:
     if decision.get("notify_failed"):
         return {
             "approved": False,
-            "message": ("BLOCKED: Failed to send execute_code approval request "
-                        "to user. Do NOT retry."),
+            "message": (
+                "BLOCKED: Failed to send execute_code approval request "
+                "to user. Do NOT retry."
+            ),
             "pattern_key": pattern_key,
             "description": description,
             "outcome": "notify_failed",
@@ -2041,13 +2233,18 @@ def check_execute_code_guard(code: str, env_type: str) -> dict:
         save_permanent_allowlist(_permanent_approved)
     # choice == "once": no persistence — approval lasts this single call only.
 
-    return {"approved": True, "message": None,
-            "user_approved": True, "description": description}
+    return {
+        "approved": True,
+        "message": None,
+        "user_approved": True,
+        "description": description,
+    }
 
 
 # =========================================================================
 # MCP elicitation entry point
 # =========================================================================
+
 
 def request_elicitation_consent(
     message: str,
@@ -2095,11 +2292,16 @@ def request_elicitation_consent(
         }
         try:
             decision = _await_gateway_decision(
-                session_key, notify_cb, approval_data, surface=surface,
+                session_key,
+                notify_cb,
+                approval_data,
+                surface=surface,
             )
         except Exception as exc:
             logger.error(
-                "Elicitation gateway dispatch failed: %s", exc, exc_info=True,
+                "Elicitation gateway dispatch failed: %s",
+                exc,
+                exc_info=True,
             )
             return "decline"
 
@@ -2123,7 +2325,9 @@ def request_elicitation_consent(
         )
     except Exception as exc:
         logger.error(
-            "Elicitation CLI prompt failed: %s", exc, exc_info=True,
+            "Elicitation CLI prompt failed: %s",
+            exc,
+            exc_info=True,
         )
         return "decline"
 
