@@ -170,6 +170,19 @@ def cron_tick():
     tick(verbose=True)
 
 
+def _active_cron_provider_name() -> str:
+    """Name of the resolved cron scheduler provider ('builtin', 'chronos', ...).
+
+    Best-effort + offline; returns 'builtin' on any failure.
+    """
+    try:
+        from cron.scheduler_provider import resolve_cron_scheduler
+
+        return resolve_cron_scheduler().name or "builtin"
+    except Exception:
+        return "builtin"
+
+
 def cron_status():
     """Show cron execution status."""
     from cron.jobs import list_jobs

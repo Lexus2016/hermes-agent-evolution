@@ -33,6 +33,7 @@ import threading
 import time
 import urllib.error
 import urllib.parse
+import uvicorn
 import zipfile
 
 from hermes_cli._subprocess_compat import windows_detach_flags, windows_hide_flags

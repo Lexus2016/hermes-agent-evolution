@@ -248,6 +248,12 @@ def _sanitize_url_for_logs(value: object) -> str:
     we opt INTO the URL redactors that the global pass leaves off, reusing
     the shared ``redact.py`` helpers rather than a second regex.
     """
+    from agent.redact import (
+        redact_sensitive_text,
+        _redact_url_query_params,
+        _redact_url_userinfo,
+    )
+
     text = redact_sensitive_text(value)
     if not text:
         return text

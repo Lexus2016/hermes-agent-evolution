@@ -1429,8 +1429,23 @@ def _smart_approve(command: str, description: str) -> str:
         return "escalate"
 
 
+def _should_skip_container_guards(env_type: str, has_host_access: bool = False) -> bool:
+    """Return True when the backend is isolated enough to skip dangerous-command prompts.
+
+    Isolated container backends sandbox the agent away from the host, so their
+    commands can't damage real files/services and we skip the approval layer.
+    Docker is the exception once host paths are bind-mounted into the container:
+    at that point a command like ``rm -rf /workspace`` reaches host files, so it
+    must go through the normal approval flow.
+    """
+    if env_type == "docker":
+        return not has_host_access
+    return env_type in ("singularity", "modal", "daytona")
+
+
 def check_dangerous_command(
-    command: str, env_type: str, approval_callback=None
+    command: str, env_type: str, approval_callback=None,
+    has_host_access: bool = False
 ) -> dict:
     """Check if a command is dangerous and handle approval.
 
@@ -1698,7 +1713,8 @@ def _await_gateway_decision(
 
 
 def check_all_command_guards(
-    command: str, env_type: str, approval_callback=None
+    command: str, env_type: str, approval_callback=None,
+    has_host_access: bool = False
 ) -> dict:
     """Run all pre-exec security checks and return a single approval decision.
 
