@@ -1,5 +1,5 @@
 name: evolution-upstream-sync
-schedule: "0 8 * * *"  # daily 8 AM (before research 09:00) — hold full parity; each run merges ~1 day of upstream commits (small, usually conflict-free), so security fixes land within a day
+schedule: "7 */6 * * *"  # every 6h — upstream now lands >80 commits/day, so a once-daily batch exceeds escalate_if_commits_over (80) and the run escalates instead of merging, letting the fork drift. 4x/day keeps each batch ~40-50 commits: small, usually conflict-free, auto-merged within the guard. Restores the original "one small sync window" assumption without weakening the escalation ceiling.
 enabled: true
 mode: PRIVATE
 
