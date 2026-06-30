@@ -285,11 +285,30 @@ def test_diagnose_prs_no_failed_checks_marks_success(hermes_home, monkeypatch):
 
 
 def test_missing_github_token_exits(hermes_home, monkeypatch):
+    # Abort only when NO token is resolvable: env unset AND gh CLI unavailable.
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr(diag, "_resolve_github_token", lambda: "")
     client = FakeClient([])
     with pytest.raises(SystemExit) as exc_info:
         diag.diagnose_prs(client=client)
     assert exc_info.value.code == 1
+
+
+def test_gh_cli_token_fallback_when_env_stripped(hermes_home, monkeypatch):
+    # The no_agent cron env sanitizer strips GITHUB_TOKEN from the subprocess
+    # environment; the gh CLI credential (`gh auth token`) must keep the job
+    # authenticated rather than aborting.
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr(
+        diag.subprocess,
+        "run",
+        lambda *a, **k: diag.subprocess.CompletedProcess(
+            a[0] if a else ["gh"], 0, "ghp_fallback\n", ""
+        ),
+    )
+    assert diag._resolve_github_token() == "ghp_fallback"
+    # With a gh-provided token, diagnose_prs must run instead of exiting.
+    diag.diagnose_prs(client=FakeClient([]))
 
 
 def test_main_cli_runs_with_dry_run(monkeypatch):

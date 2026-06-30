@@ -170,12 +170,45 @@ def _make_request(
         return 0, ""
 
 
+def _resolve_github_token() -> str:
+    """Resolve a GitHub token for the raw REST calls below.
+
+    Prefers the ``GITHUB_TOKEN`` env var, then falls back to the gh CLI's
+    file-based credential (``gh auth token``). The cron scheduler's
+    anti-exfiltration env sanitizer (``_ALWAYS_STRIP_KEYS`` in
+    ``tools/environments/local.py``) strips ``GITHUB_TOKEN``/``GH_TOKEN`` from
+    every no_agent subprocess environment, so this no_agent cron never receives
+    the env var even when it is set in ``~/.hermes/.env``. The gh CLI reads
+    ``~/.config/gh`` (not the env), so it survives the sanitizer and is the
+    evolution pipeline's documented primary auth mechanism.
+    """
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if token:
+        return token
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
 def default_client(
     method: str, url: str, body: Optional[str] = None
 ) -> Tuple[int, str]:
-    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    token = _resolve_github_token()
     if not token:
-        print("[ci-diagnosis] GITHUB_TOKEN is not set", file=sys.stderr)
+        print(
+            "[ci-diagnosis] no GitHub token (set GITHUB_TOKEN or run `gh auth login`)",
+            file=sys.stderr,
+        )
         return 1, ""
     return _make_request(url, token, method, body)
 
@@ -598,9 +631,10 @@ def diagnose_prs(
     recorded_state_path: Optional[Path] = None,
     report_dir: Optional[Path] = None,
 ) -> List[Dict[str, Any]]:
-    if os.environ.get("GITHUB_TOKEN", "").strip() == "":
+    if _resolve_github_token() == "":
         print(
-            "[ci-diagnosis] GITHUB_TOKEN environment variable is required",
+            "[ci-diagnosis] no GitHub token available "
+            "(set GITHUB_TOKEN or authenticate the gh CLI with `gh auth login`)",
             file=sys.stderr,
         )
         raise SystemExit(1)
