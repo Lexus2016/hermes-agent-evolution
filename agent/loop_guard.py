@@ -79,12 +79,38 @@ _NONRETRY_THRESHOLD = 2
 _SHORT_CIRCUIT_IDEMPOTENT = frozenset({"search_files", "web_search", "web_extract"})
 _SHORT_CIRCUIT_REPEAT_THRESHOLD = 4
 
-# Code-exploration tools whose mono-tool spiral is a STRATEGY problem, not a
-# failure (#625): 16-17 consecutive read_file calls / 14 consecutive
-# search_files calls, one file/query at a time, each succeeding — the agent
+# Exploration-only idempotent tools that often spiral because the agent is trying
+# to build a mental model one file/query at a time. A separate, longer
+# threshold lets us suggest the bird's-eye repo_map tool before the generic
+# repeat path fires, without conflating repo_map itself as a spiral tool.
+_EXPLORATION_TOOLS = frozenset({"read_file", "search_files"})
+_EXPLORATION_REPO_MAP_NUDGE_THRESHOLD = 4
+
+# Mutating tools get LOWER thresholds than idempotent tools because a fixation
+# on mutating operations (writing files, running commands) is more costly and
+# indicates a deeper strategy problem (#432).
 # just never reached for a cheaper bulk-overview alternative. Named here (not
 # folded into the generic nudge text) so the suggestion only appears for the
 # tools it actually applies to.
+# Per-tool short hint appended to the early repo_map nudge (#625) for
+# read_file / search_files. Kept brief and repo_map-only so the early
+# intervention is actionable and not cluttered.
+_EXPLORATION_REPO_MAP_HINT = {
+    "read_file": (
+        " Use `repo_map` on the project root for a structured overview of "
+        "functions/classes/methods with file:line locations (Python codebases "
+        "only)."
+    ),
+    "search_files": (
+        " Use `repo_map` on the project root for a structured overview of "
+        "functions/classes/methods with file:line locations (Python codebases "
+        "only)."
+    ),
+}
+
+# Longer hint appended to the generic idempotent repeat/escalate nudge for
+# read_file / search_files, once the agent has already passed the early
+# repo_map suggestion and is still spiraling.
 _EXPLORATION_ALTERNATIVE_HINT = {
     "read_file": (
         " For broad codebase exploration, `repo_map` gives a structured "
@@ -453,6 +479,33 @@ def maybe_nudge(
                 f"the query, broaden or narrow it, switch to a different information "
                 f"source, or state the blocker if no relevant results are available."
             )
+
+    # Early, one-time nudge for exploration-only spirals (#625): when the
+    # agent has made exactly _EXPLORATION_REPO_MAP_NUDGE_THRESHOLD consecutive
+    # read_file / search_files calls without resolving the task, suggest
+    # repo_map as a cheaper alternative. Each call may have succeeded, but the
+    # strategy of building a mental model one file/query at a time is wasteful.
+    # We fire only at the threshold (not on every subsequent call) so the
+    # normal idempotent repeat/escalate paths still apply if the suggestion is
+    # ignored.
+    if (
+        tool in _EXPLORATION_TOOLS
+        and count == _EXPLORATION_REPO_MAP_NUDGE_THRESHOLD
+        and count < repeat_threshold
+    ):
+        score = _tool_spiral_score(tool, count, _EXPLORATION_REPO_MAP_NUDGE_THRESHOLD)
+        score_line = f"\n{score}" if score else ""
+        hint = _EXPLORATION_REPO_MAP_HINT.get(tool, "")
+        return (
+            f"[loop-guard] You have called `{tool}` {count} times in a row "
+            f"without resolving the task.{score_line} For broad codebase "
+            f"exploration, `repo_map` gives a structured overview (functions/"
+            f"classes/methods with file:line) in a single call — far cheaper "
+            f"than many `{tool}` calls (Python codebases only). Read the goal, "
+            f"check what progress these calls made, then either switch to "
+            f"`repo_map` or batch the remaining targeted reads/searches and "
+            f"move on.{hint}"
+        )
 
     if count >= repeat_threshold:
         # Build diversity score for the nudge.
