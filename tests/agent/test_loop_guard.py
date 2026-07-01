@@ -8,7 +8,12 @@ use higher thresholds. Tests use ``terminal`` (mutating, threshold=4) and
 
 import json
 
-from agent.loop_guard import current_run_signature, maybe_nudge
+from agent.loop_guard import (
+    CRON_LOOP_GUARD_HARD_STOP_THRESHOLD,
+    current_run_signature,
+    maybe_nudge,
+    should_cron_hard_stop,
+)
 
 
 def _asst(tool, args="{}", call_id="c"):
@@ -276,3 +281,25 @@ class TestSameQueryShortCircuit:
         assert n is not None
         assert "SAME arguments" not in n  # not the #467 short-circuit
         assert "web_search" in n  # the generic spiral nudge still fires
+
+
+class TestShouldCronHardStop:
+    """#624: unattended cron turns get real enforcement, not just advisory
+    text — interactive surfaces (a human is present) are never affected."""
+
+    def test_below_threshold_never_stops(self):
+        assert should_cron_hard_stop("cron", CRON_LOOP_GUARD_HARD_STOP_THRESHOLD - 1) is False
+
+    def test_at_threshold_stops(self):
+        assert should_cron_hard_stop("cron", CRON_LOOP_GUARD_HARD_STOP_THRESHOLD) is True
+
+    def test_above_threshold_stops(self):
+        assert should_cron_hard_stop("cron", CRON_LOOP_GUARD_HARD_STOP_THRESHOLD + 5) is True
+
+    def test_zero_warnings_never_stops(self):
+        assert should_cron_hard_stop("cron", 0) is False
+
+    def test_non_cron_platforms_never_stop_regardless_of_count(self):
+        huge_count = CRON_LOOP_GUARD_HARD_STOP_THRESHOLD + 100
+        for platform in ("cli", "telegram", "discord", "gateway", None, ""):
+            assert should_cron_hard_stop(platform, huge_count) is False, platform
