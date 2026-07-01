@@ -3375,17 +3375,37 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
         # Minimum-action guard (#607): a cron session that finishes
         # successfully but never invoked a single tool (or delegate_task,
         # itself a tool call) never actually attempted the scheduled
-        # deliverable — no file read, no search run, no issue created. Only
-        # check when `messages` is actually present: a caller-provided
-        # result without it (e.g. a minimal test stub) can't be classified
-        # either way, so default to the existing `cron_complete` behavior
-        # rather than guess.
-        _cron_messages = result.get("messages")
-        if isinstance(_cron_messages, list):
-            _cron_noop = not any(
-                isinstance(_m, dict) and _m.get("role") == "tool"
-                for _m in _cron_messages
-            )
+        # deliverable — no file read, no search run, no issue created.
+        # Read from the DURABLE session DB (include_inactive=True) rather
+        # than result["messages"]: the latter is the in-memory list handed
+        # to the API, which in-place context compaction (#38763) can rewrite
+        # mid-session, replacing early tool-call turns with a summary and
+        # erasing the "did it call a tool" signal for an otherwise-productive
+        # long session. The DB's soft-delete mechanic keeps compacted-away
+        # rows queryable, so this stays accurate regardless of compaction.
+        # Only checked when a session DB is actually wired up; without one
+        # there's no durable record to check, so default to the existing
+        # `cron_complete` behavior rather than guess.
+        #
+        # Known limitation: a job whose prompt genuinely never requires a
+        # tool (a pure text/summary reply) will also be flagged — this is a
+        # session-shape heuristic, not intent detection. The label is purely
+        # observational (no retry/failure side effects), so a false positive
+        # here costs a misleading status, not a broken job.
+        if _session_db:
+            try:
+                _db_messages = _session_db.get_messages(
+                    _cron_session_id, include_inactive=True
+                )
+                _cron_noop = not any(
+                    isinstance(_m, dict) and _m.get("role") == "tool"
+                    for _m in _db_messages
+                )
+            except Exception as _exc:
+                logger.debug(
+                    "Job '%s': failed to check tool-call activity for cron_noop "
+                    "detection: %s", job_id, _exc,
+                )
             if _cron_noop:
                 logger.warning(
                     "Job '%s': completed with ZERO tool calls — the model "
