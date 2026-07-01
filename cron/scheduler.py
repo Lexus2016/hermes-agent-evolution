@@ -2660,6 +2660,12 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
 
     origin = _resolve_origin(job)
     _cron_session_id = f"cron_{job_id}_{_hermes_now().strftime('%Y%m%d_%H%M%S')}"
+    # Set once the agent run completes successfully with zero tool calls
+    # (#607) so the finally block below can mark the session `cron_noop`
+    # instead of `cron_complete` — a text-only turn that never touched a
+    # tool/delegate_task means the scheduled deliverable was never attempted,
+    # and `cron_complete` was masking that as a normal, healthy run.
+    _cron_noop = False
 
     # Ensure the session row exists before the agent starts so that
     # end_session() in the finally block always has a row to update.
@@ -2669,6 +2675,7 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
             _session_db.ensure_session(_cron_session_id, _origin_platform)
         except (Exception, KeyboardInterrupt) as _exc:
             logger.debug("Job '%s': failed to ensure session row: %s", job_id, _exc)
+
 
     logger.info("Running job '%s' (ID: %s)", job_name, job_id)
     logger.info("Prompt: %s", prompt[:100])
@@ -3365,6 +3372,28 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
 {logged_response}
 """
 
+        # Minimum-action guard (#607): a cron session that finishes
+        # successfully but never invoked a single tool (or delegate_task,
+        # itself a tool call) never actually attempted the scheduled
+        # deliverable — no file read, no search run, no issue created. Only
+        # check when `messages` is actually present: a caller-provided
+        # result without it (e.g. a minimal test stub) can't be classified
+        # either way, so default to the existing `cron_complete` behavior
+        # rather than guess.
+        _cron_messages = result.get("messages")
+        if isinstance(_cron_messages, list):
+            _cron_noop = not any(
+                isinstance(_m, dict) and _m.get("role") == "tool"
+                for _m in _cron_messages
+            )
+            if _cron_noop:
+                logger.warning(
+                    "Job '%s': completed with ZERO tool calls — the model "
+                    "produced only text, so the scheduled deliverable was "
+                    "never attempted. Session will be marked cron_noop.",
+                    job_name,
+                )
+
         logger.info("Job '%s' completed successfully", job_name)
         return True, output, final_response, None
 
@@ -3424,7 +3453,9 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
                     "Job '%s': failed to set cron session title: %s", job_id, e
                 )
             try:
-                _session_db.end_session(_cron_session_id, "cron_complete")
+                _session_db.end_session(
+                    _cron_session_id, "cron_noop" if _cron_noop else "cron_complete"
+                )
             except (Exception, KeyboardInterrupt) as e:
                 logger.debug("Job '%s': failed to end session: %s", job_id, e)
             try:
