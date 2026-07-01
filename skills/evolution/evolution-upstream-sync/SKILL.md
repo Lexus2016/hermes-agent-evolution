@@ -1,7 +1,7 @@
 ---
 name: evolution-upstream-sync
-description: Keep the fork at full parity with upstream Hermes Agent via incremental merges
-version: 2.0.0
+description: Keep the fork current with upstream Hermes Agent by merging its published RELEASE tags (not bleeding-edge main)
+version: 3.0.0
 author: Hermes Evolution
 category: evolution
 mode: PRIVATE
@@ -13,35 +13,44 @@ mode: PRIVATE
 
 ## Task
 
-Keep this fork at **full parity** with the original Hermes Agent (upstream): our
-fork is the base — our evolution work — and we roll **all** upstream changes into
-it. We want everything upstream has, present and future (desktop `apps/desktop`,
-TUI `ui-tui`, gateway, web, plugins, every platform). Nothing is skipped; nothing
-of ours is lost.
+Keep this fork current with the original Hermes Agent (upstream) by merging its
+**published RELEASE tags** — our fork is the base (our evolution work) and we roll
+each stabilized upstream release into it. We want everything a release contains
+(desktop `apps/desktop`, TUI `ui-tui`, gateway, web, plugins, every platform).
+Nothing in a release is skipped; nothing of ours is lost.
 
-> **Model change (v2.0.0):** the old model selectively cherry-picked a "relevant"
-> subset and *banned* `git merge upstream/main`. That is OBSOLETE. As of the
-> 2026-06-14 full-parity sync (PR #211) the fork carries upstream's entire
-> history (`git merge-base --is-ancestor upstream/main main` is true) plus our
-> evolution commits on top. We now **merge upstream wholesale, incrementally**.
-> There is no `.evolution/upstream-sync-state.json` cursor, no `deferred[]`, no
-> `skipped_scopes`, no per-run commit cap.
+> **Model change (v3.0.0 — 2026-07-01):** we track upstream **releases**, NOT
+> `upstream/main`. Upstream lands ~300 commits/day; chasing every commit made the
+> daily wholesale `git merge upstream/main` exceed the escalation ceiling and
+> stall — the fork drifted hundreds of commits behind and every run escalated
+> instead of merging. Upstream cuts a tagged release ~weekly/biweekly (the
+> `v2026.M.D` tags = GitHub releases); we merge to the LATEST such tag. This is a
+> bounded, stabilized batch instead of an unwinnable daily churn chase. The old
+> `git merge upstream/main` model (v2.0.0) is OBSOLETE. Security/critical fixes
+> upstream ships as patch releases (e.g. `v2026.5.29.2`) are picked up the same
+> way; anything more urgent than the next release goes through the curated
+> critical-backport lane (see issue tracker), never an unattended main merge.
 
 ## Process
 
-### 0. Baseline — confirm current parity
+### 0. Baseline — find the latest upstream RELEASE and measure the gap
 
 ```bash
 gh auth setup-git                      # route git auth through gh (no GH_TOKEN export)
-git fetch upstream main --quiet && git fetch origin --quiet
+git fetch upstream --tags --quiet && git fetch origin --quiet
 git checkout main && git pull --ff-only origin main
-BEHIND=$(git rev-list --count main..upstream/main)   # new upstream commits since last sync
-AHEAD=$(git rev-list --count upstream/main..main)    # our evolution work
-echo "behind upstream: $BEHIND | our commits ahead: $AHEAD"
+# The latest PUBLISHED upstream release (the v2026.M.D tags ARE the GitHub releases).
+LR=$(gh release view --repo nousresearch/hermes-agent --json tagName --jq .tagName)
+git fetch upstream "refs/tags/$LR:refs/tags/$LR" --quiet 2>/dev/null || true
+BEHIND=$(git rev-list --count "main..$LR")   # release commits not yet in the fork
+AHEAD=$(git rev-list --count "$LR..main")    # our evolution work + newer merges
+echo "latest release: $LR | behind release: $BEHIND | our commits ahead: $AHEAD"
 ```
 
-If `BEHIND == 0` → already at parity, nothing to do; write a one-line report and stop.
-The normal steady state is `BEHIND` = a handful (one day of upstream commits).
+If `BEHIND == 0` → the fork already contains the latest release; nothing to do,
+write a one-line report and stop. This is the NORMAL steady state on most days (a
+release lands only ~weekly/biweekly). Do **NOT** merge `upstream/main`: being
+behind bleeding-edge main is expected under release-tracking and is not a backlog.
 
 ### 1. Size the merge — decide autonomous vs escalate
 
@@ -50,21 +59,23 @@ The normal steady state is `BEHIND` = a handful (one day of upstream commits).
 # artifacts to (e.g. website/static/api/model-catalog.json, whose `updated_at`
 # timestamp collides every single sync). Without this the driver name is unknown
 # and git falls back to a normal conflict — which, on an hermes_cli-adjacent
-# file, would force escalation every day. Idempotent:
+# file, would force escalation. Idempotent:
 git config merge.theirs.driver 'cp -f "%B" "%A"'
-git merge --no-ff --no-commit upstream/main || true   # stage the merge, surface conflicts
+git merge --no-ff --no-commit "$LR" || true   # stage the RELEASE merge, surface conflicts
 CONFLICTS=$(git diff --name-only --diff-filter=U | wc -l)
 echo "conflicted files: $CONFLICTS"
 git diff --name-only --diff-filter=U
 ```
 
-- **`BEHIND` small (≤ ~80) AND `CONFLICTS` ≤ 10, none in core persistence/agent
-  runtime** → resolve autonomously (step 2) and open a normal PR.
-- **`BEHIND` large (a long catch-up) OR `CONFLICTS` > 10 OR any conflict in
-  `run_agent.py` / `agent/` / `cron/scheduler.py` / `hermes_cli/` persistence** →
-  this needs owner judgement. `git merge --abort`, then open a **draft** PR / file
-  an issue describing the backlog + conflict surface and STOP. Do NOT blind-resolve
-  a judgement-heavy merge autonomously — that is how features get silently dropped.
+- **`CONFLICTS` ≤ 10, none in core persistence/agent runtime** → resolve
+  autonomously (step 2) and open a normal PR. A single release is a bounded batch,
+  so `BEHIND` is naturally small; the `escalate_if_commits_over` guard still applies.
+- **`BEHIND` unusually large (a multi-release catch-up) OR `CONFLICTS` > 10 OR any
+  conflict in `run_agent.py` / `agent/` / `cron/scheduler.py` / `hermes_cli/`
+  persistence** → this needs owner judgement. `git merge --abort`, then open a
+  **draft** PR / file an issue describing the release + conflict surface and STOP.
+  Do NOT blind-resolve a judgement-heavy merge autonomously — that is how features
+  get silently dropped.
 
 ### 2. Resolve conflicts — authorship-driven, keep OURS, follow upstream
 
@@ -149,12 +160,12 @@ skills sync). CI's 6-shard suite is the full gate.
 ### 5. Commit + PR (never a direct merge into `main`)
 
 ```bash
-git checkout -b sync/upstream-YYYY-MM-DD
-git commit -m "Merge upstream/main into fork — sync (<BEHIND> commits)"   # the staged merge
-git push origin sync/upstream-YYYY-MM-DD
-gh pr create --base main --head sync/upstream-YYYY-MM-DD \
-  --title "[UPSTREAM] Sync upstream/main — full parity (<BEHIND> commits)" \
-  --body "git merge upstream/main. Conflicts resolved authorship-first (keep ours, follow upstream incl. reverts). See sync report."
+git checkout -b sync/upstream-release-$LR
+git commit -m "Merge upstream release $LR into fork — sync (<BEHIND> commits)"   # the staged merge
+git push origin sync/upstream-release-$LR
+gh pr create --base main --head sync/upstream-release-$LR \
+  --title "[UPSTREAM] Sync upstream release $LR (<BEHIND> commits)" \
+  --body "git merge $LR (latest upstream release). Conflicts resolved authorship-first (keep ours, follow upstream incl. reverts). See sync report."
 ```
 
 - Merge into `main` only after **green CI** (`tests.yml` 6 shards + `lint.yml` +
@@ -172,12 +183,12 @@ gh pr create --base main --head sync/upstream-YYYY-MM-DD \
 
 ### 6. Inherit the upstream version marker (in the sync PR)
 
-After parity, stamp the banner from the newest upstream release tag that is now an
-ancestor of `main`:
+After merging, stamp the banner from the release we just merged (it is now the
+newest upstream release tag reachable from `main`):
 
 ```bash
-TAG=$(git describe --tags --abbrev=0 --match 'v20*' upstream/main 2>/dev/null)
-DATE=$(echo "$TAG" | sed 's/^v//')        # e.g. 2026.6.14
+TAG=$LR                                    # the release tag we just merged
+DATE=$(echo "$TAG" | sed 's/^v//')        # e.g. 2026.6.19
 ```
 If `TAG` advanced, update `hermes_cli/__init__.py` `__release_date__ = "<DATE>"`
 (the banner renders `Hermes Agent v<__version__> (<__release_date__>)`). Commit on
@@ -185,10 +196,14 @@ the `sync/*` branch so it rides the same PR + CI.
 
 ## Sync frequency
 
-Daily (`0 8 * * *`, before research at 09:00). Because we hold full parity, each
-run merges only ~one day of upstream commits — small and almost always
-conflict-free. Security/critical upstream fixes are therefore picked up within a
-day, automatically, without any selection step.
+Checked daily (`0 8 * * *`, before research at 09:00), but a run only MERGES when
+upstream has published a new release since the last sync — most days it finds
+`BEHIND == 0` and stops silently. Because a release is a bounded, upstream-
+stabilized batch, each real merge is small and almost always conflict-free.
+Upstream ships security/critical fixes as patch releases (e.g. `v2026.5.29.2`),
+so those are picked up on the next daily check; anything more urgent than the next
+release is handled by the curated critical-backport lane, never an unattended
+`upstream/main` merge.
 
 ## Rollback
 

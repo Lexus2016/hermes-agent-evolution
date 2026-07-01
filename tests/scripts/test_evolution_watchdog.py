@@ -239,26 +239,80 @@ class TestGhCheck:
 class TestUpstreamLag:
     REPO = Path("/repo")  # bypass _resolve_repo_dir via explicit repo_dir
 
-    def test_behind_over_threshold_alerts(self):
+    SLUG = "nousresearch/hermes-agent"
+    RELEASED = "2026-06-19T12:00:00Z"
+
+    def _clock(self, hours_after_release):
+        from datetime import datetime, timedelta, timezone
+
+        base = datetime(2026, 6, 19, 12, 0, 0, tzinfo=timezone.utc)
+        return lambda: base + timedelta(hours=hours_after_release)
+
+    def _release_runner(
+        self,
+        *,
+        tag="v2026.6.19",
+        is_ancestor_rc=1,
+        behind=150,
+        ahead=1666,
+        release_rc=0,
+        release_out=None,
+    ):
+        """Full-clone runner simulating the release-lag probe end to end."""
+
         def fake_run(cmd):
-            assert "rev-list" in cmd
-            return (0, "301\n")
+            joined = " ".join(cmd)
+            if "rev-parse" in cmd and "--is-shallow-repository" in cmd:
+                return (0, "false\n")
+            if "merge-base" in cmd and "--is-ancestor" not in cmd:
+                return (0, "sharedbase\n")  # shared ancestry: measurable
+            if "remote" in cmd and "get-url" in cmd:
+                return (0, f"https://github.com/{self.SLUG}.git\n")
+            if "release" in cmd and "view" in cmd:
+                if release_out is not None:
+                    return (release_rc, release_out)
+                return (
+                    release_rc,
+                    json.dumps({"tagName": tag, "publishedAt": self.RELEASED}),
+                )
+            if "merge-base" in cmd and "--is-ancestor" in cmd:
+                return (is_ancestor_rc, "")
+            if "rev-list" in cmd and f"HEAD..{tag}" in joined:
+                return (0, f"{behind}\n")
+            if "rev-list" in cmd and f"{tag}..HEAD" in joined:
+                return (0, f"{ahead}\n")
+            raise AssertionError(f"unexpected command: {cmd}")
 
-        alerts = check_upstream_lag(runner=fake_run, repo_dir=self.REPO)
-        assert any("behind upstream" in a for a in alerts)
-        assert any("301" in a for a in alerts)
+        return fake_run
 
-    def test_within_threshold_silent(self):
-        def fake_run(cmd):
-            return (0, "9\n")
+    def test_missing_release_past_grace_alerts(self):
+        # A published release NOT merged (is_ancestor rc=1), released well past
+        # the grace window → the release-sync is stuck → alert naming the tag.
+        run = self._release_runner(tag="v2026.6.19", is_ancestor_rc=1, behind=150)
+        alerts = check_upstream_lag(
+            runner=run, repo_dir=self.REPO, clock=self._clock(72)
+        )
+        assert any("v2026.6.19" in a and "not merged" in a for a in alerts)
+        assert any("150" in a for a in alerts)
 
-        assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []
+    def test_latest_release_merged_silent(self):
+        # The fork already contains the latest release (is_ancestor rc=0) — the
+        # steady state under release-tracking. Fully silent even though the fork
+        # is hundreds of commits behind bleeding-edge upstream/main.
+        run = self._release_runner(is_ancestor_rc=0)
+        assert (
+            check_upstream_lag(runner=run, repo_dir=self.REPO, clock=self._clock(999))
+            == []
+        )
 
-    def test_at_threshold_silent(self):
-        def fake_run(cmd):
-            return (0, "80\n")  # exactly the threshold is not "over"
-
-        assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []
+    def test_fresh_release_within_grace_silent(self):
+        # A release published minutes ago (sync simply hasn't run yet) must NOT
+        # be reported as stuck — the grace window suppresses it.
+        run = self._release_runner(is_ancestor_rc=1)
+        assert (
+            check_upstream_lag(runner=run, repo_dir=self.REPO, clock=self._clock(2))
+            == []
+        )
 
     def test_git_failure_silent(self):
         def fake_run(cmd):
@@ -324,21 +378,32 @@ class TestUpstreamLag:
 
         assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []
 
-    def test_full_clone_behind_over_threshold_still_alerts(self):
-        # Regression guard: a normal FULL clone (not shallow, shared ancestry)
-        # that is genuinely behind must still alert — the evolution server is a
-        # full clone and the real upstream-lag monitoring must survive this fix.
-        def fake_run(cmd):
-            if "rev-parse" in cmd and "--is-shallow-repository" in cmd:
-                return (0, "false\n")
-            if "merge-base" in cmd:
-                return (0, "abc123def456\n")  # shared ancestor exists
-            if "rev-list" in cmd:
-                return (0, "391\n")
-            return (0, "")
+    def test_unknown_tag_ref_silent(self):
+        # merge-base --is-ancestor returns 128 (tag not fetched locally) →
+        # unmeasurable → stay silent, never false-alarm.
+        run = self._release_runner(is_ancestor_rc=128)
+        assert (
+            check_upstream_lag(runner=run, repo_dir=self.REPO, clock=self._clock(72))
+            == []
+        )
 
-        alerts = check_upstream_lag(runner=fake_run, repo_dir=self.REPO)
-        assert any("behind upstream/main" in a for a in alerts)
+    def test_gh_release_unavailable_silent(self):
+        # gh release view fails (unauthed / offline) → fail-open silent.
+        run = self._release_runner(release_rc=1, release_out="gh: not found")
+        assert (
+            check_upstream_lag(runner=run, repo_dir=self.REPO, clock=self._clock(72))
+            == []
+        )
+
+    def test_full_clone_missing_release_still_alerts(self):
+        # Regression guard: a normal FULL clone (not shallow, shared ancestry)
+        # genuinely missing a published release must still alert — the evolution
+        # server is a full clone and real monitoring must survive the model change.
+        run = self._release_runner(tag="v2026.6.19", is_ancestor_rc=1, behind=391)
+        alerts = check_upstream_lag(
+            runner=run, repo_dir=self.REPO, clock=self._clock(72)
+        )
+        assert any("not merged" in a for a in alerts)
         assert any("391" in a for a in alerts)
 
 
@@ -838,22 +903,37 @@ class TestEnsureUpstreamIssue:
 
 
 class TestUpstreamLagFilesIssue:
-    """check_upstream_lag still emits text AND now ensures the tracking issue
-    exists, idempotently, via the mockable gh seam — only on REAL escalation."""
+    """check_upstream_lag emits text AND ensures the [UPSTREAM] tracking issue
+    exists, idempotently, via the mockable gh seam — only on a REAL escalation
+    (a published upstream release unmerged past the grace window)."""
 
     REPO = Path("/repo")
+    SLUG = "nousresearch/hermes-agent"
+    RELEASED = "2026-06-19T12:00:00Z"
 
-    def _git_runner(self, behind):
+    def _clock(self, hours_after_release):
+        from datetime import datetime, timedelta, timezone
+
+        base = datetime(2026, 6, 19, 12, 0, 0, tzinfo=timezone.utc)
+        return lambda: base + timedelta(hours=hours_after_release)
+
+    def _release_runner(self, *, tag="v2026.6.19", is_ancestor_rc=1, behind=391):
         def fake_run(cmd):
+            joined = " ".join(cmd)
             if "rev-parse" in cmd and "--is-shallow-repository" in cmd:
                 return (0, "false\n")
             if "merge-base" in cmd and "--is-ancestor" not in cmd:
-                return (0, "abc123\n")  # shared ancestor exists
-            if "rev-list" in cmd:
-                joined = " ".join(cmd)
-                if "HEAD..upstream/main" in joined:
-                    return (0, f"{behind}\n")
-                return (0, "0\n")
+                return (0, "sharedbase\n")
+            if "remote" in cmd and "get-url" in cmd:
+                return (0, f"https://github.com/{self.SLUG}.git\n")
+            if "release" in cmd and "view" in cmd:
+                return (0, json.dumps({"tagName": tag, "publishedAt": self.RELEASED}))
+            if "merge-base" in cmd and "--is-ancestor" in cmd:
+                return (is_ancestor_rc, "")
+            if "rev-list" in cmd and f"HEAD..{tag}" in joined:
+                return (0, f"{behind}\n")
+            if "rev-list" in cmd and f"{tag}..HEAD" in joined:
+                return (0, "1666\n")
             raise AssertionError(f"unexpected git command: {cmd}")
 
         return fake_run
@@ -863,16 +943,22 @@ class TestUpstreamLagFilesIssue:
 
         calls = {}
 
-        def fake_ensure(behind, ahead, **kw):
+        def fake_ensure(behind, ahead, tag="", **kw):
             calls["behind"] = behind
+            calls["tag"] = tag
             return None
 
         monkeypatch.setattr(w, "ensure_upstream_issue", fake_ensure)
-        alerts = check_upstream_lag(runner=self._git_runner(391), repo_dir=self.REPO)
-        assert any("behind upstream/main" in a for a in alerts), "text alert preserved"
+        alerts = check_upstream_lag(
+            runner=self._release_runner(behind=391),
+            repo_dir=self.REPO,
+            clock=self._clock(72),
+        )
+        assert any("not merged" in a for a in alerts), "text alert preserved"
         assert calls.get("behind") == 391, "real escalation must ensure the tracking issue"
+        assert calls.get("tag") == "v2026.6.19", "issue names the missing release tag"
 
-    def test_within_threshold_does_not_file_issue(self, monkeypatch):
+    def test_merged_release_does_not_file_issue(self, monkeypatch):
         import evolution_watchdog as w
 
         called = {"n": 0}
@@ -880,8 +966,33 @@ class TestUpstreamLagFilesIssue:
             w, "ensure_upstream_issue",
             lambda *a, **k: called.__setitem__("n", called["n"] + 1),
         )
-        assert check_upstream_lag(runner=self._git_runner(9), repo_dir=self.REPO) == []
-        assert called["n"] == 0, "no escalation → no issue churn"
+        assert (
+            check_upstream_lag(
+                runner=self._release_runner(is_ancestor_rc=0),
+                repo_dir=self.REPO,
+                clock=self._clock(999),
+            )
+            == []
+        )
+        assert called["n"] == 0, "latest release already merged → no issue churn"
+
+    def test_within_grace_does_not_file_issue(self, monkeypatch):
+        import evolution_watchdog as w
+
+        called = {"n": 0}
+        monkeypatch.setattr(
+            w, "ensure_upstream_issue",
+            lambda *a, **k: called.__setitem__("n", called["n"] + 1),
+        )
+        assert (
+            check_upstream_lag(
+                runner=self._release_runner(is_ancestor_rc=1),
+                repo_dir=self.REPO,
+                clock=self._clock(2),
+            )
+            == []
+        )
+        assert called["n"] == 0, "fresh release inside grace → no issue churn"
 
     def test_shallow_clone_does_not_file_issue(self, monkeypatch):
         # #561 regression: shallow clones stay silent AND never file an issue.
@@ -896,8 +1007,8 @@ class TestUpstreamLagFilesIssue:
         def fake_run(cmd):
             if "rev-parse" in cmd and "--is-shallow-repository" in cmd:
                 return (0, "true\n")
-            if "rev-list" in cmd:
-                raise AssertionError("rev-list must not run on shallow clone")
+            if "release" in cmd or "rev-list" in cmd:
+                raise AssertionError("release/rev-list must not run on shallow clone")
             return (0, "")
 
         assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []

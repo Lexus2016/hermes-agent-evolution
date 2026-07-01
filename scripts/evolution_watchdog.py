@@ -56,15 +56,19 @@ DAILY_STALE_HOURS = 26
 WEEKLY_STALE_HOURS = 8 * 24
 STUCK_RUNNING_HOURS = 12
 MIN_GH_RATE_REMAINING = 200
-# Alert when the fork falls this far behind upstream — the autonomous
-# upstream-sync's own auto-merge ceiling. Past it the daily sync escalates
-# (files an [UPSTREAM] issue) instead of merging, and without this check the
-# fork silently accumulates a backlog for days (2026-06-19 → 301 behind).
-UPSTREAM_BEHIND_ALERT = 80
+# RELEASE-tracking model (2026-07-01): the fork mirrors upstream's PUBLISHED
+# releases, not bleeding-edge ``upstream/main``. Upstream lands ~300 commits/day —
+# chasing every one is an unwinnable tax for a heavily-customized fork, and every
+# daily wholesale ``git merge upstream/main`` exceeded the escalation ceiling and
+# stalled. So the fork tracks upstream RELEASE tags (~weekly/biweekly) and THIS
+# check alerts only when a published upstream release has not been merged within a
+# grace window. Raw "behind upstream/main" (unreleased churn) is expected now and
+# is NOT an anomaly — alerting on it was a permanent false alarm under this model.
+UPSTREAM_RELEASE_GRACE_HOURS = 36  # one+ daily release-sync cycle to absorb a new tag
 
-# Title prefix of the GitHub tracking issue the daily upstream-sync escalates to
-# when it can no longer auto-merge. The watchdog re-files this idempotently on a
-# real escalation so the owner never has to open it by hand (issue #562 was
+# Title prefix of the GitHub tracking issue the release-sync escalates to when it
+# can no longer land a release cleanly. The watchdog re-files this idempotently on
+# a real escalation so the owner never has to open it by hand (issue #562 was
 # opened manually). An OPEN issue carrying this prefix is the idempotency key —
 # its presence blocks creation of a duplicate.
 UPSTREAM_ISSUE_PREFIX = "[UPSTREAM]"
@@ -280,74 +284,188 @@ def _resolve_repo_dir() -> Path | None:
     return None
 
 
+def _utcnow() -> datetime:
+    """Injectable clock seam (tz-aware UTC). Overridden in tests for the grace."""
+    from datetime import timezone
+
+    return datetime.now(timezone.utc)
+
+
 def check_upstream_lag(
     runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
     repo_dir: Path | None = None,
+    clock: Callable[[], datetime] = _utcnow,
 ) -> List[str]:
-    """Alert when the fork is too far behind upstream (sync stuck).
+    """Alert when the fork is missing the latest PUBLISHED upstream release.
 
-    The daily upstream-sync can run "ok" every day yet never MERGE — once a
-    core conflict appears it escalates (files an [UPSTREAM] issue) and the fork
-    falls further behind each day. ``check_jobs`` only sees the job ran, not
-    that nothing landed. This check reads the real distance to ``upstream/main``
-    so the owner is pinged within a day instead of noticing weeks later.
+    RELEASE-tracking model (2026-07-01): the fork mirrors upstream's tagged
+    releases, not bleeding-edge ``upstream/main`` (which lands ~300 commits/day —
+    an unwinnable chase for a heavily-customized fork). So this check no longer
+    alarms on raw "behind upstream/main" (that is expected, unreleased churn).
+    Instead it pings the owner when a published upstream release has NOT been
+    merged into the fork within ``UPSTREAM_RELEASE_GRACE_HOURS`` — i.e. the
+    release-sync is genuinely stuck, not merely a fresh tag awaiting the next run.
 
-    Silent (returns []) when the repo can't be located, when the checkout is a
-    SHALLOW clone or otherwise has no shared history with ``upstream/main`` (the
-    behind-count is meaningless there — see ``_upstream_lag_unmeasurable``), or
-    when ``upstream/main`` is unavailable — best-effort, never a false alarm.
+    Silent (returns []) when the repo can't be located, on a SHALLOW clone or one
+    with no shared history with upstream (the #561 client guard — the release
+    logic NEVER runs there), or on ANY gh/git/parse failure — fail-open, never a
+    false alarm.
     """
     repo = repo_dir or _resolve_repo_dir()
     if repo is None:
         return []
 
     # Installer checkouts are shallow (`git clone --depth 1` in scripts/install.sh
-    # / install.ps1). Across the shallow boundary HEAD shares no ancestry with
-    # upstream/main, so `rev-list --count HEAD..upstream/main` counts ~ALL upstream
-    # history (~13k) instead of the true distance — a phantom "fork is ~13000
-    # commits behind" alarm fired DAILY on every onboarded client (upgrade.sh
-    # registers this watchdog). Shallow is the INTENDED client default, and
-    # upstream-lag is the fork maintainer's concern: the evolution server is a full
-    # clone and still gets the real count. So skip silently here — mirrors the
-    # shallow guards already in hermes_cli/banner.py and hermes_cli/main.py.
+    # / install.ps1) and share no ancestry with upstream — the behind-count is a
+    # phantom there (the 2026-06 "~13000 behind" alarm on every onboarded client).
+    # Shallow is the INTENDED client default; release-tracking is the fork
+    # maintainer's concern (the evolution server is a full clone). Skip silently
+    # BEFORE any release logic — mirrors the guards in hermes_cli/banner.py &
+    # main.py. This guard is what keeps every onboarded client silent.
     if _upstream_lag_unmeasurable(runner, repo):
         return []
 
     try:
-        rc, out = runner(
-            ["git", "-C", str(repo), "rev-list", "--count", "HEAD..upstream/main"]
-        )
-    except Exception:  # noqa: BLE001 — any git/spawn failure: skip silently
+        return _release_lag_alerts(runner, repo, clock)
+    except Exception:  # noqa: BLE001 — the release probe must never crash the watchdog
         return []
-    if rc != 0:
+
+
+def _release_lag_alerts(
+    runner: Callable[[List[str]], Tuple[int, str]],
+    repo: Path,
+    clock: Callable[[], datetime],
+) -> List[str]:
+    """Core release-lag logic (wrapped by check_upstream_lag's fail-open guard)."""
+    slug = _upstream_slug(runner, repo)
+    if not slug:
         return []
+    latest = _latest_upstream_release(runner, slug)
+    if latest is None:
+        return []
+    tag, published = latest
+
+    # Is the release already contained in the fork? `merge-base --is-ancestor`
+    # exits 0 = ancestor (merged), 1 = not an ancestor (missing), 128/other = bad
+    # ref (tag not fetched locally yet) → unmeasurable, stay silent.
     try:
-        behind = int(out.strip().split()[0])
-    except (ValueError, IndexError):
+        rc, _out = runner(
+            ["git", "-C", str(repo), "merge-base", "--is-ancestor", tag, "HEAD"]
+        )
+    except Exception:  # noqa: BLE001
         return []
-    if behind > UPSTREAM_BEHIND_ALERT:
-        # Real escalation on a measurable (full) clone: ensure the tracking issue
-        # exists so the owner doesn't have to open it by hand. Idempotent and
-        # fail-open — never raises, never crashes the watchdog. (#561's shallow /
-        # no-shared-history cases returned above and never reach here.)
-        ahead = _count_ahead_of_upstream(runner, repo)
-        ensure_upstream_issue(behind=behind, ahead=ahead, gh_enabled=UPSTREAM_ISSUE_ENABLED)
-        return [
-            f"upstream sync stuck: fork is {behind} commits behind upstream/main "
-            f"(threshold {UPSTREAM_BEHIND_ALERT}). The daily sync escalates instead "
-            f"of merging — resolve the backlog (see the open [UPSTREAM] issue)."
-        ]
-    return []
+    if rc == 0:
+        return []  # latest release contained → fully current under release-tracking
+    if rc != 1:
+        return []  # bad/unknown ref → cannot measure, never false-alarm
+
+    # Release genuinely not merged. Give the daily release-sync a grace window
+    # before escalating, so a tag published minutes ago (sync simply hasn't run
+    # yet) is not reported as "stuck".
+    if not _release_older_than(published, clock, UPSTREAM_RELEASE_GRACE_HOURS):
+        return []
+
+    behind = _behind_release(runner, repo, tag)
+    ahead = _count_ahead_of_release(runner, repo, tag)
+    ensure_upstream_issue(
+        behind=behind, ahead=ahead, tag=tag, gh_enabled=UPSTREAM_ISSUE_ENABLED
+    )
+    return [
+        f"upstream release {tag} not merged: the fork is missing the latest "
+        f"published upstream release ({behind} commit(s) behind {tag}, released "
+        f">{UPSTREAM_RELEASE_GRACE_HOURS}h ago). The release-sync has not landed "
+        f"it — resolve the sync (see the open [UPSTREAM] issue)."
+    ]
 
 
-def _count_ahead_of_upstream(
+def _upstream_slug(
     runner: Callable[[List[str]], Tuple[int, str]], repo: Path
-) -> int:
-    """Commits the fork has that upstream/main does not (best-effort, 0 on error)."""
+) -> str | None:
+    """``owner/name`` of the ``upstream`` remote, or None (fail-open)."""
+    try:
+        rc, out = runner(["git", "-C", str(repo), "remote", "get-url", "upstream"])
+    except Exception:  # noqa: BLE001
+        return None
+    if rc != 0:
+        return None
+    url = out.strip()
+    if url.endswith(".git"):
+        url = url[:-4]
+    # scp-form (git@host:owner/name) vs URL-form (https://host/owner/name)
+    path = url.split(":", 1)[1] if ":" in url and "//" not in url else url
+    parts = [p for p in path.replace(":", "/").strip("/").split("/") if p]
+    if len(parts) < 2:
+        return None
+    return f"{parts[-2]}/{parts[-1]}"
+
+
+def _latest_upstream_release(
+    runner: Callable[[List[str]], Tuple[int, str]], slug: str
+) -> Tuple[str, str] | None:
+    """(tagName, publishedAt) of upstream's latest GitHub release, or None."""
     try:
         rc, out = runner(
-            ["git", "-C", str(repo), "rev-list", "--count", "upstream/main..HEAD"]
+            ["gh", "release", "view", "--repo", slug, "--json", "tagName,publishedAt"]
         )
+    except Exception:  # noqa: BLE001 — gh missing/unauthed: fail-open
+        return None
+    if rc != 0 or not out.strip():
+        return None
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    tag = str(data.get("tagName") or "").strip()
+    if not tag:
+        return None
+    return tag, str(data.get("publishedAt") or "").strip()
+
+
+def _release_older_than(
+    published_iso: str, clock: Callable[[], datetime], hours: int
+) -> bool:
+    """True when the release was published at least ``hours`` ago.
+
+    Missing/unparseable timestamp → True (do not suppress a genuinely-unmerged
+    release; this path is server-only, so there is no client-spam risk).
+    """
+    if not published_iso:
+        return True
+    from datetime import timezone
+
+    try:
+        pub = datetime.fromisoformat(published_iso.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if pub.tzinfo is None:
+        pub = pub.replace(tzinfo=timezone.utc)
+    now = clock()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return (now - pub) >= timedelta(hours=hours)
+
+
+def _behind_release(
+    runner: Callable[[List[str]], Tuple[int, str]], repo: Path, tag: str
+) -> int:
+    """Commits in the release tag not yet in the fork (best-effort, 0 on error)."""
+    return _rev_list_count(runner, repo, f"HEAD..{tag}")
+
+
+def _count_ahead_of_release(
+    runner: Callable[[List[str]], Tuple[int, str]], repo: Path, tag: str
+) -> int:
+    """Commits the fork has that the release tag does not (best-effort, 0)."""
+    return _rev_list_count(runner, repo, f"{tag}..HEAD")
+
+
+def _rev_list_count(
+    runner: Callable[[List[str]], Tuple[int, str]], repo: Path, rng: str
+) -> int:
+    try:
+        rc, out = runner(["git", "-C", str(repo), "rev-list", "--count", rng])
     except Exception:  # noqa: BLE001
         return 0
     if rc != 0:
@@ -361,19 +479,20 @@ def _count_ahead_of_upstream(
 def ensure_upstream_issue(
     behind: int,
     ahead: int,
+    tag: str = "",
     runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
     gh_enabled: bool = True,
 ) -> str | None:
     """Idempotently ensure a GitHub ``[UPSTREAM]`` tracking issue exists.
 
-    Called only on a REAL upstream escalation (full clone, behind > threshold —
-    the #561 shallow case never reaches here). The owner had to open issue #562
-    by hand; this closes that gap.
+    Called only on a REAL escalation (full clone, a published upstream release
+    unmerged past the grace window — the #561 shallow case never reaches here).
+    The owner had to open issue #562 by hand; this closes that gap.
 
     Idempotency key: an OPEN issue whose title starts with ``UPSTREAM_ISSUE_PREFIX``.
     If one exists we do NOT create a duplicate (de-duped / edge-triggered on the
-    issue's own existence — no daily spam). If none exists we create one with the
-    real behind/ahead counts.
+    issue's own existence — no daily spam). If none exists we create one naming the
+    missing release tag and the real behind/ahead counts.
 
     ALL gh interaction goes through the injectable ``runner`` seam, so this is
     unit-testable without network. FAIL-OPEN throughout: gh missing/unauthed, a
@@ -413,18 +532,19 @@ def ensure_upstream_issue(
         if title.startswith(UPSTREAM_ISSUE_PREFIX):
             return None  # already tracked — never duplicate
 
-    # 2) None exists → create one with the real counts.
+    # 2) None exists → create one naming the missing release + real counts.
+    rel = f"release `{tag}`" if tag else "the latest upstream release"
     title = (
-        f"{UPSTREAM_ISSUE_PREFIX} Catch-up needed: ~{behind} commits behind "
-        f"upstream/main (owner review)"
+        f"{UPSTREAM_ISSUE_PREFIX} Release not merged: fork ~{behind} commit(s) "
+        f"behind {('`' + tag + '`') if tag else 'the latest upstream release'} "
+        f"(owner review)"
     )
     body = (
-        f"The autonomous upstream-sync can no longer auto-merge: the fork is "
-        f"~{behind} commit(s) behind `upstream/main` and ~{ahead} commit(s) "
-        f"ahead, past the auto-merge ceiling.\n\n"
+        f"The autonomous release-sync could not land {rel}: the fork is ~{behind} "
+        f"commit(s) behind it and ~{ahead} commit(s) ahead.\n\n"
         f"This issue was filed automatically by the evolution watchdog so the "
-        f"backlog is visible. Resolve by reconciling the fork to `upstream/main` "
-        f"(owner review of conflicting changes), then close this issue.\n"
+        f"missing release is visible. Resolve by merging the release tag into the "
+        f"fork (owner review of any conflicts), then close this issue.\n"
     )
     try:
         rc, _out = runner(
