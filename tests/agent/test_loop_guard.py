@@ -211,6 +211,12 @@ class TestExplorationAlternativeHint:
         assert "ESCALATED INTERRUPT" in n
         assert "repo_map" in n and "delegate_task" in n
 
+    def test_search_files_escalated_nudge_suggests_alternatives(self):
+        n = maybe_nudge(self._varied_args_run("search_files", 15))
+        assert n is not None
+        assert "ESCALATED INTERRUPT" in n
+        assert "repo_map" in n and "delegate_task" in n
+
     def test_unrelated_tool_nudge_has_no_exploration_hint(self):
         n = maybe_nudge(_run("terminal", 4))
         assert n is not None
@@ -219,6 +225,16 @@ class TestExplorationAlternativeHint:
     def test_write_file_nudge_has_no_exploration_hint(self):
         n = maybe_nudge(_run("write_file", 4))
         assert n is not None
+        assert "repo_map" not in n and "delegate_task" not in n
+
+    def test_same_query_short_circuit_has_no_exploration_hint(self):
+        # #467 same-query short-circuit is a DIFFERENT problem (repeating the
+        # identical query) with its own, already-relevant advice — the
+        # exploration hint must not bleed into this path.
+        msgs = _run("search_files", 4)  # identical args -> short-circuit, not repeat_threshold
+        n = maybe_nudge(msgs)
+        assert n is not None
+        assert "SAME arguments" in n  # confirms the short-circuit path fired
         assert "repo_map" not in n and "delegate_task" not in n
 
 
