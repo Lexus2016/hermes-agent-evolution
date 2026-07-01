@@ -1024,6 +1024,21 @@ DEFAULT_CONFIG = {
         # abandoned prompt — lower it if a single session must free up the
         # guard sooner.
         "clarify_timeout": 3600,
+        # Tool-result failure-class diagnostics (agent/tool_diagnostics.py):
+        # a one-line "[diagnostic] failure-class=... — <hint>" annotation
+        # appended to a tool result the classifier thinks looks like a
+        # failure. Default OFF — the classifier is a plain text heuristic
+        # (regex over the result content, not an actual success/failure
+        # signal), so it repeatedly false-positives on successful results
+        # that merely mention words like "timeout" or "error" (e.g. reading
+        # source code that discusses them), polluting context with
+        # non-actionable noise (#606). loop_guard's own failure-class
+        # tracking calls tool_diagnostics.classify() directly and is
+        # unaffected by this flag. Set true to restore the inline hint for
+        # debugging.
+        "diagnostics": {
+            "inline": False,
+        },
         # Periodic "still working" notification interval (seconds).
         # Sends a status message every N seconds so the user knows the
         # agent hasn't died during long tasks.  0 = disable notifications.

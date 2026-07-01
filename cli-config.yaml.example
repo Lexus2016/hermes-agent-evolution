@@ -646,6 +646,15 @@ agent:
   # force it on or off; the HERMES_VERIFY_ON_STOP env var (1/0) takes precedence.
   # verify_on_stop: auto
 
+  # Tool-result failure-class diagnostics: a one-line
+  # "[diagnostic] failure-class=... — <hint>" annotation appended to a tool
+  # result that looks like a failure. Default off — the classifier is a
+  # text heuristic (not a real success/failure signal) and can false-positive
+  # on successful results that merely mention words like "timeout" or
+  # "error"; the HERMES_DIAGNOSTICS_INLINE env var (1/0) takes precedence.
+  # diagnostics:
+  #   inline: false
+
   # Enable verbose logging
   verbose: false
   

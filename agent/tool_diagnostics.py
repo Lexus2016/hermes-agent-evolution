@@ -14,6 +14,7 @@ timeout / missing_command / runtime_error.
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Optional, Tuple
 
@@ -97,10 +98,48 @@ def classify(content: Any) -> Optional[Tuple[str, str]]:
     return None
 
 
-def diagnostic_suffix(content: Any) -> str:
+def inline_diagnostics_enabled(config: Optional[dict] = None) -> bool:
+    """Return whether ``diagnostic_suffix`` may inject its hint into the
+    tool result text the model sees.
+
+    Precedence: an explicit ``HERMES_DIAGNOSTICS_INLINE`` env var wins, then
+    ``agent.diagnostics.inline`` in config. Default is ``False`` (#606):
+    ``classify()`` is a plain regex heuristic over result text, not a real
+    success/failure signal, so it repeatedly misfires on successful results
+    that merely mention words like "timeout" or "error" — e.g. reading
+    source code that discusses them — inflating context with non-actionable
+    noise (209 occurrences across 95 sessions in one week of real usage).
+    ``loop_guard`` calls ``classify()`` directly for its own tracking and is
+    unaffected by this flag either way.
+    """
+    env = os.environ.get("HERMES_DIAGNOSTICS_INLINE")
+    if env is not None:
+        return env.strip().lower() not in {"0", "false", "no", "off"}
+    if config is None:
+        try:
+            # Read-only, cache-hit fast path (~130us, no deepcopy) — this
+            # runs on every tool result, a hot loop in long sessions.
+            from hermes_cli.config import load_config_readonly
+
+            config = load_config_readonly()
+        except Exception:
+            config = {}
+    try:
+        from hermes_cli.config import cfg_get
+
+        return bool(cfg_get(config, "agent", "diagnostics", "inline", default=False))
+    except Exception:
+        return False
+
+
+def diagnostic_suffix(content: Any, config: Optional[dict] = None) -> str:
     """Return a one-line diagnostic annotation to append to a failing tool
-    result, or '' if the result is not a recognized failure. Trusted text
-    (our annotation), kept outside any untrusted-content wrapper by the caller."""
+    result, or '' if the result is not a recognized failure or inline
+    diagnostics are disabled (the default — see ``inline_diagnostics_enabled``).
+    Trusted text (our annotation), kept outside any untrusted-content wrapper
+    by the caller."""
+    if not inline_diagnostics_enabled(config):
+        return ""
     hit = classify(content)
     if not hit:
         return ""
