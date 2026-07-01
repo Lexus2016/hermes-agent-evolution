@@ -34,19 +34,43 @@ class TestClassify:
 
 
 class TestDiagnosticSuffix:
+    """Inline injection defaults OFF (#606) — classify() is a text heuristic,
+    not a real success/failure signal, and false-positives on successful
+    results that merely mention words like "timeout" or "error"."""
+
     def test_empty_for_success(self):
         assert diagnostic_suffix("done, all good") == ""
 
-    def test_suffix_for_failure(self):
-        s = diagnostic_suffix("permission denied")
+    def test_disabled_by_default_even_for_a_real_failure(self, monkeypatch):
+        monkeypatch.delenv("HERMES_DIAGNOSTICS_INLINE", raising=False)
+        assert diagnostic_suffix("permission denied", config={}) == ""
+
+    def test_suffix_for_failure_when_explicitly_enabled_via_config(self, monkeypatch):
+        monkeypatch.delenv("HERMES_DIAGNOSTICS_INLINE", raising=False)
+        config = {"agent": {"diagnostics": {"inline": True}}}
+        s = diagnostic_suffix("permission denied", config=config)
         assert s.startswith("\n\n[diagnostic] failure-class=") and "permission" in s
+
+    def test_suffix_for_failure_when_explicitly_enabled_via_env(self, monkeypatch):
+        monkeypatch.setenv("HERMES_DIAGNOSTICS_INLINE", "1")
+        s = diagnostic_suffix("permission denied", config={})
+        assert s.startswith("\n\n[diagnostic] failure-class=") and "permission" in s
+
+    def test_env_var_disables_even_if_config_enables(self, monkeypatch):
+        monkeypatch.setenv("HERMES_DIAGNOSTICS_INLINE", "0")
+        config = {"agent": {"diagnostics": {"inline": True}}}
+        assert diagnostic_suffix("permission denied", config=config) == ""
 
 
 class TestWiredIntoToolResult:
-    def test_failure_result_gets_hint(self):
+    def test_failure_result_unchanged_by_default(self, monkeypatch):
+        monkeypatch.delenv("HERMES_DIAGNOSTICS_INLINE", raising=False)
         msg = make_tool_result_message("terminal", "bash: x: command not found", "c1")
-        assert "[diagnostic] failure-class=missing_command" in msg["content"]
+        assert "[diagnostic]" not in msg["content"]
 
-    def test_success_result_unchanged(self):
+    def test_success_result_unchanged(self, monkeypatch):
+        monkeypatch.delenv("HERMES_DIAGNOSTICS_INLINE", raising=False)
         msg = make_tool_result_message("read_file", "file contents, all fine", "c2")
         assert "[diagnostic]" not in msg["content"]
+
+
