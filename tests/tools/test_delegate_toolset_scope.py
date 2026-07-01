@@ -63,3 +63,25 @@ class TestToolsetIntersection:
         scoped = [t for t in requested if t in parent_toolsets]
 
         assert scoped == []
+
+    def test_denied_toolsets_names_what_the_parent_lacks(self):
+        """#648: the toolsets dropped by the intersection (not by
+        _strip_blocked_tools) must be identifiable so they can be surfaced to
+        the subagent — silently disappearing is what causes the delegated
+        task to fail without the parent understanding why."""
+        parent_toolsets = {"terminal", "file"}
+        requested = ["terminal", "file", "web", "browser"]
+
+        scoped = [t for t in requested if t in parent_toolsets]
+        denied = [t for t in requested if t not in parent_toolsets]
+
+        assert sorted(scoped) == ["file", "terminal"]
+        assert sorted(denied) == ["browser", "web"]
+
+    def test_no_denied_toolsets_when_all_requested_are_available(self):
+        parent_toolsets = {"terminal", "file", "web"}
+        requested = ["terminal", "web"]
+
+        denied = [t for t in requested if t not in parent_toolsets]
+
+        assert denied == []

@@ -967,6 +967,7 @@ def _build_child_system_prompt(
     role: str = "leaf",
     max_spawn_depth: int = 2,
     child_depth: int = 1,
+    denied_toolsets: Optional[List[str]] = None,
 ) -> str:
     """Build a focused system prompt for a child agent.
 
@@ -975,6 +976,16 @@ def _build_child_system_prompt(
     inspiration/openclaw/src/agents/subagent-system-prompt.ts:63-95).
     The depth note is literal truth (grounded in the passed config) so
     the LLM doesn't confabulate nesting capabilities that don't exist.
+
+    ``denied_toolsets`` (#648): toolsets the delegating call explicitly
+    asked for that were silently dropped because the PARENT session
+    doesn't have them enabled — a subagent must never gain tools its
+    parent lacks. Without this note the subagent discovers the gap only
+    by trying and failing, wasting a full delegation cycle before the
+    parent even learns why. Named here, in the prompt, rather than
+    fixed by relaxing the parent-toolset intersection: that intersection
+    is a security boundary (no privilege escalation via delegation), not
+    a bug.
     """
     parts = [
         "You are a focused subagent working on a specific delegated task.",
@@ -988,6 +999,18 @@ def _build_child_system_prompt(
             "\nWORKSPACE PATH:\n"
             f"{workspace_path}\n"
             "Use this exact path for local repository/workdir operations unless the task explicitly says otherwise."
+        )
+    if denied_toolsets:
+        parts.append(
+            "\nTOOLSET LIMITATION: the following toolset(s) were requested for "
+            f"you but are NOT available — {', '.join(denied_toolsets)} — because "
+            "your PARENT session doesn't have them enabled (a subagent can never "
+            "gain tools its parent lacks). Do not assume you have these tools or "
+            "waste calls discovering this yourself. If the task cannot be "
+            "completed without them, say so plainly in your summary and "
+            "recommend the operator either enable the missing toolset(s) on the "
+            "parent session before delegating, or complete this specific part "
+            "of the work without delegation."
         )
     parts.append(
         "\nComplete this task using the tools available to you. "
@@ -1412,6 +1435,10 @@ def _build_child_agent(
         # toolset names (e.g. web, terminal) are recognised during intersection.
         expanded_parent = _expand_parent_toolsets(parent_toolsets)
         child_toolsets = [t for t in toolsets if t in expanded_parent]
+        # Toolsets explicitly requested but dropped ONLY because the parent
+        # doesn't have them (#648) — surfaced to the subagent below so it
+        # doesn't have to discover the gap by trying and failing.
+        denied_toolsets = [t for t in toolsets if t not in expanded_parent]
         if _get_inherit_mcp_toolsets():
             child_toolsets = _preserve_parent_mcp_toolsets(
                 child_toolsets, parent_toolsets
@@ -1419,10 +1446,13 @@ def _build_child_agent(
         child_toolsets = _strip_blocked_tools(child_toolsets)
     elif parent_agent and parent_enabled is not None:
         child_toolsets = _strip_blocked_tools(parent_enabled)
+        denied_toolsets = []
     elif parent_toolsets:
         child_toolsets = _strip_blocked_tools(sorted(parent_toolsets))
+        denied_toolsets = []
     else:
         child_toolsets = _strip_blocked_tools(DEFAULT_TOOLSETS)
+        denied_toolsets = []
 
     # Orchestrators retain the 'delegation' toolset that _strip_blocked_tools
     # removed.  The re-add is unconditional on parent-toolset membership because
@@ -1439,6 +1469,7 @@ def _build_child_agent(
         role=effective_role,
         max_spawn_depth=max_spawn,
         child_depth=child_depth,
+        denied_toolsets=denied_toolsets,
     )
     # Extract parent's API key so subagents inherit auth (e.g. Nous Portal).
     parent_api_key = getattr(parent_agent, "api_key", None)
