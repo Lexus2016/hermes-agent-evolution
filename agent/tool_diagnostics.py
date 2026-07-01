@@ -117,9 +117,11 @@ def inline_diagnostics_enabled(config: Optional[dict] = None) -> bool:
         return env.strip().lower() not in {"0", "false", "no", "off"}
     if config is None:
         try:
-            from hermes_cli.config import load_config
+            # Read-only, cache-hit fast path (~130us, no deepcopy) — this
+            # runs on every tool result, a hot loop in long sessions.
+            from hermes_cli.config import load_config_readonly
 
-            config = load_config()
+            config = load_config_readonly()
         except Exception:
             config = {}
     try:
