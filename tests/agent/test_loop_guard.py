@@ -172,6 +172,57 @@ class TestEscalatedInterrupt:
         assert n is not None and "spiral-intensity" in n
 
 
+class TestExplorationAlternativeHint:
+    """#625: 16-17 consecutive read_file / 14 consecutive search_files calls
+    in real sessions, never reaching for repo_map or delegate_task. The
+    mono-tool spiral nudge for these two tools specifically should surface
+    those alternatives — other tools' nudges must stay unchanged."""
+
+    @staticmethod
+    def _varied_args_run(tool, n, *, result="ok"):
+        """n consecutive single-tool turns with DIFFERENT arguments each —
+        avoids the #467 same-query short-circuit so the generic mono-tool
+        repeat_threshold path is what actually fires."""
+        msgs = [{"role": "user", "content": "explore the codebase"}]
+        for i in range(n):
+            cid = f"c{i}"
+            msgs.append(_asst(tool, args=json.dumps({"path": f"file_{i}.py"}), call_id=cid))
+            msgs.append(_result(result, call_id=cid))
+        return msgs
+
+    def test_read_file_regular_nudge_suggests_alternatives(self):
+        # read_file is idempotent (repeat_threshold=8); 8 calls -> regular nudge.
+        n = maybe_nudge(_run("read_file", 8))
+        assert n is not None
+        assert "repo_map" in n and "delegate_task" in n
+
+    def test_search_files_regular_nudge_suggests_alternatives(self):
+        # search_files is short-circuit-prone on SAME args (#467); use varied
+        # args so the generic repeat_threshold path fires instead, matching
+        # #625's actual pattern (different queries, not a repeated one).
+        n = maybe_nudge(self._varied_args_run("search_files", 8))
+        assert n is not None
+        assert "repo_map" in n and "delegate_task" in n
+
+    def test_read_file_escalated_nudge_suggests_alternatives(self):
+        # idempotent escalate_threshold=15.
+        n = maybe_nudge(_run("read_file", 15))
+        assert n is not None
+        assert "ESCALATED INTERRUPT" in n
+        assert "repo_map" in n and "delegate_task" in n
+
+    def test_unrelated_tool_nudge_has_no_exploration_hint(self):
+        n = maybe_nudge(_run("terminal", 4))
+        assert n is not None
+        assert "repo_map" not in n and "delegate_task" not in n
+
+    def test_write_file_nudge_has_no_exploration_hint(self):
+        n = maybe_nudge(_run("write_file", 4))
+        assert n is not None
+        assert "repo_map" not in n and "delegate_task" not in n
+
+
+
 class TestRunBoundaries:
     def test_tool_change_breaks_the_run(self):
         # 5x terminal then 1x read_file at the tail -> only the read_file run (len 1)

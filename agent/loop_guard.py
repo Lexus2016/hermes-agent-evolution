@@ -79,6 +79,31 @@ _NONRETRY_THRESHOLD = 2
 _SHORT_CIRCUIT_IDEMPOTENT = frozenset({"search_files", "web_search", "web_extract"})
 _SHORT_CIRCUIT_REPEAT_THRESHOLD = 4
 
+# Code-exploration tools whose mono-tool spiral is a STRATEGY problem, not a
+# failure (#625): 16-17 consecutive read_file calls / 14 consecutive
+# search_files calls, one file/query at a time, each succeeding — the agent
+# just never reached for a cheaper bulk-overview alternative. Named here (not
+# folded into the generic nudge text) so the suggestion only appears for the
+# tools it actually applies to.
+_EXPLORATION_ALTERNATIVE_HINT = {
+    "read_file": (
+        " For broad codebase exploration, `repo_map` gives a structured "
+        "overview (functions/classes/methods with file:line) in a single "
+        "call — far cheaper than reading files one at a time (Python "
+        "codebases only). For a large batch of files you already know you "
+        "need, `delegate_task` a subagent to read them and report back, "
+        "keeping this context lean."
+    ),
+    "search_files": (
+        " For broad codebase exploration, `repo_map` gives a structured "
+        "overview (functions/classes/methods with file:line) in a single "
+        "call — far cheaper than many narrow searches (Python codebases "
+        "only). For a batch of searches you already know you need, "
+        "`delegate_task` a subagent to run them and report back, keeping "
+        "this context lean."
+    ),
+}
+
 # Mutating tools get LOWER thresholds than idempotent tools because a fixation
 # on mutating operations (writing files, running commands) is more costly and
 # indicates a deeper strategy problem (#432).
@@ -415,6 +440,7 @@ def maybe_nudge(
         # Build diversity score for the nudge.
         score = _tool_spiral_score(tool, count, repeat_threshold)
         score_line = f"\n{score}" if score else ""
+        exploration_hint = _EXPLORATION_ALTERNATIVE_HINT.get(tool, "")
 
         if count >= escalate_threshold:
             return (
@@ -426,6 +452,7 @@ def maybe_nudge(
                 f"progress exists, state the actual blocker explicitly and "
                 f"propose a fundamentally different strategy — do NOT call "
                 f"`{tool}` again until you have provided this summary."
+                f"{exploration_hint}"
             )
 
         return (
@@ -435,6 +462,7 @@ def maybe_nudge(
             f"plan/success criterion, then either change strategy, move to the "
             f"next step, or report the blocker. Avoid another near-identical "
             f"`{tool}` call."
+            f"{exploration_hint}"
         )
 
     return None
