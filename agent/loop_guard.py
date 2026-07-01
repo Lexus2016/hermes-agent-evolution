@@ -128,6 +128,24 @@ _IDEMPOTENT_FAIL_THRESHOLD = 4
 _MUTATING_ESCALATE_THRESHOLD = 8
 _IDEMPOTENT_ESCALATE_THRESHOLD = 15
 
+# Unattended cron sessions get real enforcement, not just advisory text (#624):
+# advisory nudges are routinely ignored by the model with no human present to
+# course-correct (observed: 9 warnings ignored, 65 consecutive terminal calls).
+# After this many nudges for the SAME stuck run, the cron turn ends as a
+# failure instead of nudging again. Interactive surfaces are unaffected — this
+# constant is only consulted when ``agent.platform == "cron"``.
+CRON_LOOP_GUARD_HARD_STOP_THRESHOLD = 2
+
+
+def should_cron_hard_stop(platform: Optional[str], warning_count: int) -> bool:
+    """True when an unattended cron turn should end as a failure instead of
+    nudging again (#624): only ever True for ``platform == "cron"`` once the
+    same stuck run has already been nudged
+    ``CRON_LOOP_GUARD_HARD_STOP_THRESHOLD`` times. Interactive surfaces
+    (CLI/gateway/messaging) always return False — a human is present there to
+    course-correct, so the guard stays purely advisory."""
+    return platform == "cron" and warning_count >= CRON_LOOP_GUARD_HARD_STOP_THRESHOLD
+
 
 def _failure_category(content: Any) -> Optional[str]:
     """The tool_diagnostics failure class of a result, or None if not a failure.

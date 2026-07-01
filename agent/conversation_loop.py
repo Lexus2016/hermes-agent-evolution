@@ -716,6 +716,15 @@ def _run_conversation_impl(
         # spiral and re-check the goal (#173/#174/#175/#176/#143). Advisory only:
         # it appends a user message, never blocks a tool call. Nudges once per
         # stuck run (tracked by the trailing tool name) to avoid spamming.
+        #
+        # Cron exception (#624): advisory nudges are routinely ignored by the
+        # model (observed: 9 warnings, 65 consecutive terminal calls, zero
+        # course-correction) with no human present to intervene. In unattended
+        # cron sessions specifically, once the SAME stuck run has already been
+        # nudged CRON_LOOP_GUARD_HARD_STOP_THRESHOLD times, stop wasting the
+        # rest of the budget: end the turn as a failure instead of nudging
+        # again. Interactive surfaces (CLI/gateway/messaging) keep the purely
+        # advisory behavior — a human is present to course-correct there.
         try:
             from agent import loop_guard as _loop_guard
 
@@ -732,6 +741,7 @@ def _run_conversation_impl(
             # re-nudges keep pressure on a persistent loop.
             if _lg_tool is None:
                 agent._loop_guard_nudged = None  # run ended — re-arm
+                agent._loop_guard_warning_count = 0
             elif (
                 _lg_prev is None
                 or _lg_prev[0] != _lg_tool
@@ -739,7 +749,13 @@ def _run_conversation_impl(
             ):
                 _lg_nudge = _loop_guard.maybe_nudge(messages)
                 if _lg_nudge:
-                    messages.append({"role": "user", "content": _lg_nudge})
+                    _lg_prior_warnings = getattr(agent, "_loop_guard_warning_count", 0)
+                    _lg_warnings = (
+                        1
+                        if (_lg_prev is None or _lg_prev[0] != _lg_tool)
+                        else _lg_prior_warnings + 1
+                    )
+                    agent._loop_guard_warning_count = _lg_warnings
                     agent._loop_guard_nudged = (_lg_tool, _lg_count)
                     if "ESCALATED INTERRUPT" in _lg_nudge:
                         logger.warning(
@@ -748,6 +764,28 @@ def _run_conversation_impl(
                             _lg_tool,
                             _lg_count,
                         )
+                    if _loop_guard.should_cron_hard_stop(
+                        getattr(agent, "platform", None), _lg_warnings
+                    ):
+                        logger.warning(
+                            "loop_guard: cron hard stop — `%s` stuck run nudged "
+                            "%d times unattended, ending turn as a failure "
+                            "instead of burning the rest of the budget (#624)",
+                            _lg_tool,
+                            _lg_warnings,
+                        )
+                        final_response = (
+                            f"[loop-guard] Unattended cron session stuck on `{_lg_tool}` "
+                            f"— {_lg_warnings} advisory warnings were ignored across "
+                            f"{_lg_count} consecutive calls with no course-correction. "
+                            f"Stopping now rather than exhausting the run's budget."
+                        )
+                        failed = True
+                        _turn_exit_reason = "loop_guard_cron_hard_stop"
+                        messages.append(
+                            {"role": "assistant", "content": final_response}
+                        )
+                        break
                     if not agent.quiet_mode:
                         agent._safe_print("\n🌀 loop-guard: nudging a strategy change")
         except Exception as _lg_err:  # never let the guard break the loop
