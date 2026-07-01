@@ -311,23 +311,27 @@ def check_upstream_lag(
     logic NEVER runs there), or on ANY gh/git/parse failure — fail-open, never a
     false alarm.
     """
-    repo = repo_dir or _resolve_repo_dir()
-    if repo is None:
-        return []
-
-    # Installer checkouts are shallow (`git clone --depth 1` in scripts/install.sh
-    # / install.ps1) and share no ancestry with upstream — the behind-count is a
-    # phantom there (the 2026-06 "~13000 behind" alarm on every onboarded client).
-    # Shallow is the INTENDED client default; release-tracking is the fork
-    # maintainer's concern (the evolution server is a full clone). Skip silently
-    # BEFORE any release logic — mirrors the guards in hermes_cli/banner.py &
-    # main.py. This guard is what keeps every onboarded client silent.
-    if _upstream_lag_unmeasurable(runner, repo):
-        return []
-
+    # Fail-open in FULL: a client must NEVER crash on this check, so repo
+    # resolution and the shallow guard live inside the net too (a broken/absent
+    # git must not raise into a client's cron).
     try:
+        repo = repo_dir or _resolve_repo_dir()
+        if repo is None:
+            return []
+
+        # Installer checkouts are shallow (`git clone --depth 1` in
+        # scripts/install.sh / install.ps1) and share no ancestry with upstream —
+        # the behind-count is a phantom there (the 2026-06 "~13000 behind" alarm on
+        # every onboarded client). Shallow is the INTENDED client default;
+        # release-tracking is the fork maintainer's concern (the evolution server
+        # is a full clone). Skip silently BEFORE any release logic — mirrors the
+        # guards in hermes_cli/banner.py & main.py. This is what keeps every
+        # onboarded client silent.
+        if _upstream_lag_unmeasurable(runner, repo):
+            return []
+
         return _release_lag_alerts(runner, repo, clock)
-    except Exception:  # noqa: BLE001 — the release probe must never crash the watchdog
+    except Exception:  # noqa: BLE001 — this check must never crash the watchdog
         return []
 
 
@@ -368,7 +372,11 @@ def _release_lag_alerts(
     behind = _behind_release(runner, repo, tag)
     ahead = _count_ahead_of_release(runner, repo, tag)
     ensure_upstream_issue(
-        behind=behind, ahead=ahead, tag=tag, gh_enabled=UPSTREAM_ISSUE_ENABLED
+        behind=behind,
+        ahead=ahead,
+        tag=tag,
+        runner=runner,
+        gh_enabled=UPSTREAM_ISSUE_ENABLED,
     )
     return [
         f"upstream release {tag} not merged: the fork is missing the latest "
@@ -428,17 +436,18 @@ def _release_older_than(
 ) -> bool:
     """True when the release was published at least ``hours`` ago.
 
-    Missing/unparseable timestamp → True (do not suppress a genuinely-unmerged
-    release; this path is server-only, so there is no client-spam risk).
+    Fail-open SILENT: a missing timestamp (draft/odd state) or an unparseable one
+    (e.g. gh changes its format) returns False, so the watchdog never nags on data
+    it cannot interpret. The next sync still merges the release regardless.
     """
     if not published_iso:
-        return True
+        return False
     from datetime import timezone
 
     try:
         pub = datetime.fromisoformat(published_iso.replace("Z", "+00:00"))
     except ValueError:
-        return True
+        return False
     if pub.tzinfo is None:
         pub = pub.replace(tzinfo=timezone.utc)
     now = clock()
