@@ -734,27 +734,33 @@ def _run_conversation_impl(
             _lg_prev = getattr(
                 agent, "_loop_guard_nudged", None
             )  # (tool, count) | None
-            # Re-nudge when the stuck run is NEW (tool changed/ended) OR it has
+            # The cron warning counter tracks a SEPARATE "which tool is the
+            # trailing run currently on" identity from `_loop_guard_nudged`
+            # (which only updates when a nudge actually fires). Without this,
+            # a resolved spiral's warning count silently survives an
+            # intervening run of a DIFFERENT (or no) tool and wrongly carries
+            # over once the same tool name starts a brand-new, unrelated
+            # spiral later in the session — inflating its warning count and
+            # cron-hard-stopping on what should be only its first nudge.
+            # Reset whenever the trailing run's tool identity changes at all,
+            # not just when it goes fully quiet.
+            if _lg_tool != getattr(agent, "_loop_guard_tracked_tool", None):
+                agent._loop_guard_tracked_tool = _lg_tool
+                agent._loop_guard_nudged = None
+                agent._loop_guard_warning_count = 0
+                _lg_prev = None
+            # Re-nudge when the stuck run is NEW (no nudge yet) OR it has
             # grown by >=3 calls since the last nudge. Without the growth check a
             # single nudge fired once and then went silent for the next dozen
             # identical calls — the spiral ran on to 15+ unguided (#231). Escalating
             # re-nudges keep pressure on a persistent loop.
-            if _lg_tool is None:
-                agent._loop_guard_nudged = None  # run ended — re-arm
-                agent._loop_guard_warning_count = 0
-            elif (
-                _lg_prev is None
-                or _lg_prev[0] != _lg_tool
-                or _lg_count - _lg_prev[1] >= 3
+            if _lg_tool is not None and (
+                _lg_prev is None or _lg_count - _lg_prev[1] >= 3
             ):
                 _lg_nudge = _loop_guard.maybe_nudge(messages)
                 if _lg_nudge:
-                    _lg_prior_warnings = getattr(agent, "_loop_guard_warning_count", 0)
-                    _lg_warnings = (
-                        1
-                        if (_lg_prev is None or _lg_prev[0] != _lg_tool)
-                        else _lg_prior_warnings + 1
-                    )
+                    messages.append({"role": "user", "content": _lg_nudge})
+                    _lg_warnings = getattr(agent, "_loop_guard_warning_count", 0) + 1
                     agent._loop_guard_warning_count = _lg_warnings
                     agent._loop_guard_nudged = (_lg_tool, _lg_count)
                     if "ESCALATED INTERRUPT" in _lg_nudge:
