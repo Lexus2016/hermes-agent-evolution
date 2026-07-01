@@ -6,6 +6,8 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from evolution_watchdog import (  # noqa: E402
@@ -21,6 +23,25 @@ from evolution_watchdog import (  # noqa: E402
 
 
 NOW = datetime(2026, 6, 11, 7, 45)  # 07:45 — after yesterday's full chain
+
+
+@pytest.fixture(autouse=True)
+def _forbid_real_gh_issue_filing(monkeypatch):
+    """Safety net: NO test in this module may file a REAL GitHub issue.
+
+    ``check_upstream_lag`` reaches ``ensure_upstream_issue`` through the module
+    global, so stubbing it here neutralizes the real-``gh`` path even if a test's
+    mock runner or the default ``WATCHDOG_FILE_UPSTREAM_ISSUE`` would otherwise let
+    it through. This actually bit once: before the injectable runner was forwarded,
+    the alert-path tests (behind=150 / behind=391) filed real issues #654/#655 via
+    an authed local ``gh``. Tests that exercise ``ensure_upstream_issue`` itself
+    call the directly-imported symbol with their own mocked runner, so they are
+    unaffected by this module-global stub; and TestUpstreamLagFilesIssue re-patches
+    the global with its own spy, which last-write-wins over this default.
+    """
+    import evolution_watchdog as w
+
+    monkeypatch.setattr(w, "ensure_upstream_issue", lambda *a, **k: None)
 
 
 class TestExpectedReportDate:
