@@ -2659,11 +2659,13 @@ def terminal_tool(
                         "timeout": effective_timeout,
                         "cwd": command_cwd,
                     }
-                    if env_type == "ssh" or env_type == "local":
-                        if session_id is not None:
-                            execute_kwargs["session_id"] = session_id
-                        if pty:
-                            execute_kwargs["pty"] = pty
+                    # NOTE: session_id/pty are deliberately NOT forwarded here.
+                    # BaseEnvironment.execute() (inherited as-is by Local/SSH)
+                    # has no such parameters, so passing them raised
+                    # `TypeError: ...execute() got an unexpected keyword
+                    # argument 'session_id'` on every foreground call once a
+                    # session_id was supplied (#647). Neither parameter is
+                    # read by any environment's execute() body today.
 
                     result = env.execute(command, **execute_kwargs)
                 except Exception as e:
