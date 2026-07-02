@@ -185,6 +185,33 @@ python -m pytest tests/ -x -q
   ```
 - Only when local checks are green do you continue to commit + push + PR.
 
+**Step 3: Landability gate — fit the autonomous self-merge cap.** Integration
+merges unattended ONLY when the PR's total changed lines (additions +
+deletions, summed over ALL files — tests and docs count) is ≤ 200
+(`DEFAULT_MAX_LINES` in `scripts/evolution_merge_gate.py`; env-overridable via
+`EVOLUTION_MERGE_MAX_LINES`). A green PR above the cap is NOT a success — the
+merge gate skips it as `DIFF_TOO_LARGE` and it waits for a human indefinitely
+(evidence: PR #666 — 461 lines, fully green, blocked; that cycle merged
+nothing). Measure BEFORE committing to a PR:
+
+```bash
+base=$(git merge-base HEAD origin/main)
+git diff --shortstat "$base"   # insertions + deletions ≈ what the gate counts
+```
+
+- **Fits (≤ 200)** → proceed to commit + PR.
+- **Exceeds** → FIRST commit and push the full branch (protect + preserve the
+  work — see the commit-first rule below), THEN craft the PR as the smallest
+  coherent shippable slice that fits the cap, moving the rest into the PR
+  body's `Deferred (next increment):` block (partial-slice flow below). If NO
+  coherent ≤ 200-line slice can be carved out, still open the PR (the gate
+  will hold it for human review — completed green work must never be thrown
+  away), label the issue `needs-split` with a proposed decomposition (same
+  mechanism as the larger-than-estimated deferral above), and record it in the
+  report as an autonomous-landing MISS, not a success. The lesson to carry
+  into the next cycle: an oversized "complete" PR stalls the funnel; a small
+  merged slice compounds.
+
 ### ⛔ Protect your work — COMMIT before any cleanup
 NEVER run `git checkout -- <tracked file>`, `git restore`, `git reset --hard`, or
 `git stash` to "clean up reformat noise" on changes you have NOT yet committed —
