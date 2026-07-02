@@ -200,7 +200,12 @@ final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + 
     can finish — so spend that smaller budget on the issues with the HIGHEST
     confidence of landing a merge: prefer lower-`effort`, clearly-scoped issues with
     an unambiguous plan over high-`effort` or fuzzy ones, even when a fuzzy one
-    scores marginally higher. The merge funnel, not the score, is the binding
+    scores marginally higher. Land-confidence includes SIZE: the integration merge
+    gate only self-merges PRs of ≤ 200 total changed lines
+    (`scripts/evolution_merge_gate.py`), so an issue whose smallest coherent
+    increment cannot fit that cap will NOT land autonomously no matter how green
+    its CI — prefer issues implementable as a ≤ 200-line diff and route the rest
+    through the decomposition gate (6b). The merge funnel, not the score, is the binding
     constraint: choose as much as you can actually MERGE, not as much as scores
     "allow".
 
@@ -235,7 +240,9 @@ final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + 
 
 6b. **Decomposition gate — long-horizon tasks of ANY level (goal 1).** A
     high-effort issue (`effort > 0.6`: new runtime/subsystem rework, multi-file
-    capability) must NOT be selected for monolithic implementation — that is how
+    capability) — or ANY issue whose smallest coherent increment would clearly
+    exceed the 200-changed-line self-merge cap (see 5a) — must NOT be selected
+    for monolithic implementation — that is how
     big work fails at the merge gate, so the agent learns to avoid hard tasks
     (the opposite of "best at any level"). Instead, **decompose it first**: open
     linked child issues, label the parent `needs-split` (the canonical
