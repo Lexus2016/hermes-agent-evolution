@@ -169,7 +169,11 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────
   ci-timings:
     name: CI timing report
-    needs: [all-checks-pass, docker]
+    # No `docker` in needs: this fork keeps docker.yml standalone (see the
+    # all-checks-pass comment above) — upstream's [all-checks-pass, docker]
+    # would reference a job that doesn't exist here and GitHub rejects the
+    # whole workflow at parse time.
+    needs: [all-checks-pass]
     if: always()
     runs-on: ubuntu-latest
     steps:
