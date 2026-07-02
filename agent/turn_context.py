@@ -29,11 +29,14 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from agent.conversation_compression import conversation_history_after_compression
+from agent.git_task_scope import build_git_task_scope, format_task_scope
 from agent.iteration_budget import IterationBudget
 from agent.model_metadata import (
     estimate_messages_tokens_rough,
     estimate_request_tokens_rough,
 )
+
+from hermes_cli.config import cfg_get, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -442,6 +445,7 @@ def build_turn_context(
             model=agent.model,
             platform=getattr(agent, "platform", None) or "",
             sender_id=getattr(agent, "_user_id", None) or "",
+            cwd=getattr(agent, "cwd", None) or "",
         )
         _ctx_parts: list[str] = []
         for r in _pre_results:
@@ -453,6 +457,35 @@ def build_turn_context(
             plugin_user_context = "\n\n".join(_ctx_parts)
     except Exception as exc:
         logger.warning("pre_llm_call hook failed: %s", exc)
+
+    # Git-aware task scoping (issue #651): when the session is in a coding posture,
+    # build a lightweight read-only git scope for the current task and append it to
+    # the plugin user context.  This is not part of the cached system prompt; it is
+    # ephemeral and API-call-time only, so the cache prefix stays byte-stable.
+    _git_scope_text = ""
+    try:
+        _runtime_mode = getattr(agent, "_runtime_mode", None)
+        _is_coding = bool(_runtime_mode and _runtime_mode.is_coding)
+        _cfg_coding_context = "auto"
+        try:
+            _cfg_coding_context = str(
+                cfg_get(load_config(), "agent", "coding_context", default="auto") or "auto"
+            ).strip().lower()
+        except Exception:
+            pass
+        if _is_coding or _cfg_coding_context in {"on", "focus", "true", "yes", "1"}:
+            _cwd = getattr(agent, "cwd", None) or None
+            _scope = build_git_task_scope(cwd=_cwd, target_paths=None)
+            if _scope:
+                _git_scope_text = format_task_scope(_scope)
+    except Exception as exc:
+        logger.debug("git_task_scope injection failed: %s", exc)
+
+    if _git_scope_text:
+        if plugin_user_context:
+            plugin_user_context = plugin_user_context + "\n\n" + _git_scope_text
+        else:
+            plugin_user_context = _git_scope_text
 
     # Per-turn file-mutation verifier state.
     agent._turn_failed_file_mutations = {}
