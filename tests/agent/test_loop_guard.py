@@ -191,9 +191,28 @@ class TestExplorationAlternativeHint:
         msgs = [{"role": "user", "content": "explore the codebase"}]
         for i in range(n):
             cid = f"c{i}"
-            msgs.append(_asst(tool, args=json.dumps({"path": f"file_{i}.py"}), call_id=cid))
+            msgs.append(
+                _asst(tool, args=json.dumps({"path": f"file_{i}.py"}), call_id=cid)
+            )
             msgs.append(_result(result, call_id=cid))
         return msgs
+
+    def test_read_file_regular_nudge_suggests_repo_map_first(self):
+        # read_file is idempotent (repeat_threshold=8); 8 calls -> regular nudge.
+        n = maybe_nudge(_run("read_file", 8))
+        assert n is not None
+        assert "repo_map" in n and "delegate_task" in n
+        # #625 follow-up: the hint should explicitly advise repo_map FIRST.
+        assert "call `repo_map` FIRST" in n
+
+    def test_search_files_regular_nudge_suggests_repo_map_first(self):
+        # search_files is short-circuit-prone on SAME args (#467); use varied
+        # args so the generic repeat_threshold path fires instead, matching
+        # #625's actual pattern (different queries, not a repeated one).
+        n = maybe_nudge(self._varied_args_run("search_files", 8))
+        assert n is not None
+        assert "repo_map" in n and "delegate_task" in n
+        assert "call `repo_map` FIRST" in n
 
     def test_read_file_regular_nudge_suggests_alternatives(self):
         # read_file is idempotent (repeat_threshold=8); 8 calls -> regular nudge.
@@ -236,12 +255,13 @@ class TestExplorationAlternativeHint:
         # #467 same-query short-circuit is a DIFFERENT problem (repeating the
         # identical query) with its own, already-relevant advice — the
         # exploration hint must not bleed into this path.
-        msgs = _run("search_files", 4)  # identical args -> short-circuit, not repeat_threshold
+        msgs = _run(
+            "search_files", 4
+        )  # identical args -> short-circuit, not repeat_threshold
         n = maybe_nudge(msgs)
         assert n is not None
         assert "SAME arguments" in n  # confirms the short-circuit path fired
         assert "repo_map" not in n and "delegate_task" not in n
-
 
 
 class TestRunBoundaries:
@@ -306,7 +326,9 @@ class TestSameQueryShortCircuit:
         msgs = [{"role": "user", "content": "research the topic"}]
         for i in range(4):
             cid = f"c{i}"
-            msgs.append(_asst("web_search", args={"query": "best cat food"}, call_id=cid))
+            msgs.append(
+                _asst("web_search", args={"query": "best cat food"}, call_id=cid)
+            )
             msgs.append(_result("3 relevant hits", call_id=cid))
         n = maybe_nudge(msgs)
         assert n is not None and "SAME arguments" in n
@@ -355,13 +377,21 @@ class TestShouldCronHardStop:
     text — interactive surfaces (a human is present) are never affected."""
 
     def test_below_threshold_never_stops(self):
-        assert should_cron_hard_stop("cron", CRON_LOOP_GUARD_HARD_STOP_THRESHOLD - 1) is False
+        assert (
+            should_cron_hard_stop("cron", CRON_LOOP_GUARD_HARD_STOP_THRESHOLD - 1)
+            is False
+        )
 
     def test_at_threshold_stops(self):
-        assert should_cron_hard_stop("cron", CRON_LOOP_GUARD_HARD_STOP_THRESHOLD) is True
+        assert (
+            should_cron_hard_stop("cron", CRON_LOOP_GUARD_HARD_STOP_THRESHOLD) is True
+        )
 
     def test_above_threshold_stops(self):
-        assert should_cron_hard_stop("cron", CRON_LOOP_GUARD_HARD_STOP_THRESHOLD + 5) is True
+        assert (
+            should_cron_hard_stop("cron", CRON_LOOP_GUARD_HARD_STOP_THRESHOLD + 5)
+            is True
+        )
 
     def test_zero_warnings_never_stops(self):
         assert should_cron_hard_stop("cron", 0) is False
