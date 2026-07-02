@@ -87,14 +87,16 @@ _SHORT_CIRCUIT_REPEAT_THRESHOLD = 4
 # tools it actually applies to.
 _EXPLORATION_ALTERNATIVE_HINT = {
     "read_file": (
-        " For broad codebase exploration, call `repo_map` FIRST; it gives a structured "
+        " For broad codebase exploration, call `repo_map` FIRST (if it is in your "
+        "toolset); it gives a structured "
         "overview (functions/classes/methods with file:line) in a single call — "
         "far cheaper than reading files one at a time (Python codebases only). "
         "For a large batch of files you already know you need, `delegate_task` a "
         "subagent to read them and report back, keeping this context lean."
     ),
     "search_files": (
-        " For broad codebase exploration, call `repo_map` FIRST; it gives a structured "
+        " For broad codebase exploration, call `repo_map` FIRST (if it is in your "
+        "toolset); it gives a structured "
         "overview (functions/classes/methods with file:line) in a single call — "
         "far cheaper than many narrow searches (Python codebases only). "
         "For a batch of searches you already know you need, `delegate_task` a "
