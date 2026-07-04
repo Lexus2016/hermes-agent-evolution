@@ -92,6 +92,16 @@ gh issue view <N> --repo Lexus2016/hermes-agent-evolution --json body,comments
    costs far more than skipping it. For EACH remaining open issue (NOT already
    handled as `needs-work` / `next-increment` above), first decide whether it
    should exist at all.
+
+   ⚠️ **PR guard (hard rule).** Triage closes ISSUES only. Every number you
+   close MUST come from the Phase-A `gh issue list` output above — that list
+   never contains pull requests, but `gh issue close <N>` silently accepts PR
+   numbers, so a mis-targeted close destroys the pipeline's own deliverable
+   (it happened: PR #708, the green fix for accepted issue #669, was closed
+   as its own "duplicate"; see #712). If an OPEN PR already covers an issue,
+   leave BOTH open — the issue closes automatically via the PR's `Closes #N`
+   when integration merges it; you may add the `accepted` label to the issue.
+
    REJECT it (do not rank, do not implement) if ANY holds:
    - **Already implemented** — the capability already exists. You MUST check the
      codebase before assuming it's new, e.g.:
@@ -111,7 +121,10 @@ gh issue view <N> --repo Lexus2016/hermes-agent-evolution --json body,comments
    - **Harmful** — it would add risk, heavy dependencies, scope creep, a
      security/compatibility regression, or conflict with existing architecture,
      outweighing its value.
-   - **Duplicate** — another open issue already covers it.
+   - **Duplicate** — another open issue already covers it. The cited duplicate
+     MUST be a DIFFERENT issue number than the one being closed (an item can
+     never be its own duplicate), and MUST be an issue — an open PR covering
+     the same work is NOT a duplicate, it is the PR guard case above.
 
    CLOSE every rejected issue with a clear reason + the canonical `rejected`
    status label, so the backlog shows at a glance what was turned down (the
