@@ -193,7 +193,12 @@ TOOLSETS = {
     
 
     "file": {
-        "description": "File manipulation tools: read, write, patch (with fuzzy matching), and search (content + files)",
+        "description": "File manipulation tools: read, write, patch (with fuzzy matching), search (content + files), and repo_map (Python codebase overview)",
+        # repo_map is deliberately NOT listed here: it self-registers into this
+        # toolset at import time (tools/repo_map.py, toolset="file"). Listing it
+        # statically breaks hermes_cli/tools_config.py's composite-subset
+        # inference — 'file' must stay a subset of the static hermes-* platform
+        # tool lists, which do not carry repo_map.
         "tools": ["read_file", "write_file", "patch", "search_files"],
         "includes": []
     },
@@ -365,7 +370,7 @@ TOOLSETS = {
         "tools": [
             "web_search", "web_extract",
             "terminal", "process", "read_terminal", "close_terminal",
-            "read_file", "write_file", "patch", "search_files",
+            "read_file", "write_file", "patch", "search_files", "repo_map",
             "vision_analyze",
             "skills_list", "skill_view", "skill_manage",
             "browser_navigate", "browser_snapshot", "browser_click",
@@ -397,7 +402,7 @@ TOOLSETS = {
         "tools": [
             "web_search", "web_extract",
             "terminal", "process",
-            "read_file", "write_file", "patch", "search_files",
+            "read_file", "write_file", "patch", "search_files", "repo_map",
             "vision_analyze",
             "skills_list", "skill_view", "skill_manage",
             "browser_navigate", "browser_snapshot", "browser_click",
