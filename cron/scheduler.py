@@ -3871,6 +3871,10 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
     Returns True if the job was processed (even if the job itself failed —
     failure is recorded via ``mark_job_run``), False only if processing raised.
     """
+    # This run's tool-call count (#701) — claimed from the side channel right
+    # after run_job returns; None until then so an early exception reports
+    # "unknown" rather than a stale prior-run value.
+    _job_tool_calls: Optional[int] = None
     try:
         # Pre-run dispatch claim (issue #38758): atomically commit a finite
         # one-shot's dispatch BEFORE its side effect runs, so a tick that dies
@@ -3891,6 +3895,12 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
         # re-fires recent ones) on next startup.
         mark_job_started(job["id"])
         success, output, final_response, error = run_job(job)
+        # Claim this run's tool-call count immediately (#701): popping into a
+        # local right after run_job returns closes the window where a stale
+        # entry from a prior interrupted run could be mis-attributed by the
+        # except path below. Anything that threw BEFORE this line reports
+        # None (= unknown).
+        _job_tool_calls = _LAST_RUN_TOOL_CALLS.pop(job["id"], None)
 
         # Classify provider-layer failures so the cron failure record and any
         # delivery summary can include a stable failure_category (e.g. timeout).
@@ -4012,18 +4022,13 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
             success,
             error,
             delivery_error=delivery_error,
-            tool_calls=_LAST_RUN_TOOL_CALLS.pop(job["id"], None),
+            tool_calls=_job_tool_calls,
         )
         return True
 
     except Exception as e:
         logger.error("Error processing job %s: %s", job["id"], e)
-        mark_job_run(
-            job["id"],
-            False,
-            str(e),
-            tool_calls=_LAST_RUN_TOOL_CALLS.pop(job["id"], None),
-        )
+        mark_job_run(job["id"], False, str(e), tool_calls=_job_tool_calls)
         return False
 
 
