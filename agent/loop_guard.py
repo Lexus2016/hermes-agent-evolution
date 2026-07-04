@@ -111,14 +111,15 @@ _EXPLORATION_ALTERNATIVE_HINT = {
 # keep their dedicated #625 hints above (checked first in _diversion_hint).
 _DIVERSION_HINT = {
     "terminal": (
-        " Before ANY further `terminal` call: read the failing output above, "
-        "verify cwd/env/prerequisites with ONE read-only check, and change the "
-        "command accordingly."
+        " Read the failing output above and act on its CONTENT (fix the code "
+        "or the command); only if the failure looks environmental, verify "
+        "cwd/env/prerequisites with one read-only check before another run."
     ),
     "patch": (
-        " Re-read the exact target region with `read_file` first — the file "
-        "content or anchor text likely differs from what you assumed; for a "
-        "large rewrite use `write_file` instead of another near-identical patch."
+        " Anchor-not-found failures: re-read the exact target region with "
+        "`read_file` — the file likely differs from what you assumed. Content "
+        "errors after a successful match: fix the replacement text itself. "
+        "Large rewrites: use `write_file`."
     ),
     "memory": (
         " Split the write into smaller entries or recall via `session_search` "
@@ -488,15 +489,23 @@ def maybe_nudge(
         )
 
     if consec_fail >= fail_threshold:
-        # Name the dominant failure class and surface its recovery hint (#365)
-        # so the model reacts to WHAT is failing, not just that it failed.
-        dominant = next(
-            (c for _t, failed, c, _a in same[:consec_fail] if failed and c), None
-        )
+        # Name the most frequent failure class among the trailing failures and
+        # surface its recovery hint (#365) so the model reacts to WHAT is
+        # failing, not just that it failed. Ties resolve to the most recent
+        # class (same is most-recent-first).
+        _fail_classes = [
+            c for _t, failed, c, _a in same[:consec_fail] if failed and c
+        ]
+        dominant = None
+        if _fail_classes:
+            _counts: Dict[str, int] = {}
+            for c in _fail_classes:
+                _counts[c] = _counts.get(c, 0) + 1
+            dominant = max(_counts, key=lambda k: (_counts[k], -_fail_classes.index(k)))
         class_note = ""
         if dominant:
             _hint = _category_hint(dominant)
-            class_note = f" Dominant error class: `{dominant}`." + (
+            class_note = f" Most frequent error class: `{dominant}`." + (
                 f" {_hint}" if _hint else ""
             )
         return (
@@ -526,10 +535,12 @@ def maybe_nudge(
                 f"Do NOT repeat `{tool}` with those identical arguments. Rephrase "
                 f"the query, broaden or narrow it, switch to a different information "
                 f"source, or state the blocker if no relevant results are available."
-                # Deliberately NOT _diversion_hint: the #625 exploration hint
-                # must not bleed into the #467 identical-query path (its advice
-                # is already specific); only the family diversion table applies.
-                f"{_DIVERSION_HINT.get(tool, '')}"
+                # Deliberately NO appended hints here: this branch's advice is
+                # already specific to identical-argument repetition, and e.g.
+                # web_search's 'stop reformulating' diversion would directly
+                # contradict the 'rephrase the query' instruction above
+                # (consult review). The #625 exploration hints are excluded by
+                # the same long-standing design decision.
             )
 
     if count >= repeat_threshold:

@@ -442,7 +442,27 @@ class TestFailureClassAndDiversionHints:
         assert n is not None
         assert "browser_snapshot" in n
 
-    def test_web_search_same_args_gets_synthesis_diversion(self):
+    def test_web_search_reformulation_run_gets_synthesis_diversion(self):
+        # #700's actual shape: many DIFFERENT queries (reformulations), each
+        # "succeeding", no synthesis. Hits the generic repeat path (idempotent
+        # threshold = 8).
+        msgs = [{"role": "user", "content": "go"}]
+        for i in range(8):
+            cid = f"c{i}"
+            msgs.append(
+                _asst("web_search", args=json.dumps({"query": f"attempt {i}"}), call_id=cid)
+            )
+            msgs.append(
+                _result("<untrusted_tool_result>10 hits</untrusted_tool_result>", call_id=cid)
+            )
+        n = maybe_nudge(msgs)
+        assert n is not None
+        assert "synthesize" in n.lower() or "web_extract" in n
+
+    def test_web_search_same_args_branch_has_no_contradicting_hint(self):
+        # The identical-args short-circuit (#467) carries NO appended hints —
+        # its own advice ('rephrase the query') would be directly contradicted
+        # by the 'stop reformulating' diversion (consult review).
         msgs = [{"role": "user", "content": "go"}]
         for i in range(4):
             cid = f"c{i}"
@@ -453,8 +473,8 @@ class TestFailureClassAndDiversionHints:
                 _result("<untrusted_tool_result>10 hits</untrusted_tool_result>", call_id=cid)
             )
         n = maybe_nudge(msgs)
-        assert n is not None
-        assert "synthesize" in n.lower() or "web_extract" in n
+        assert n is not None and "SAME arguments" in n
+        assert "Stop reformulating" not in n
 
     def test_read_file_exploration_hint_survives(self):
         # #625 hint must not be displaced by the new diversion table.
