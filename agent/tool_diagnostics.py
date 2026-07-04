@@ -98,6 +98,18 @@ def classify(content: Any) -> Optional[Tuple[str, str]]:
     return None
 
 
+def hint_for(category: str) -> Optional[str]:
+    """Recovery hint for a known failure category, else None.
+
+    Lets consumers that only stored the category (e.g. loop_guard's run
+    tracking) surface the same actionable advice ``classify`` would have
+    returned, without re-classifying the original content (#365)."""
+    for _pattern, cat, hint in _RULES:
+        if cat == category:
+            return hint
+    return None
+
+
 def inline_diagnostics_enabled(config: Optional[dict] = None) -> bool:
     """Return whether ``diagnostic_suffix`` may inject its hint into the
     tool result text the model sees.

@@ -104,6 +104,67 @@ _EXPLORATION_ALTERNATIVE_HINT = {
     ),
 }
 
+# Per-tool diversion advice appended to every nudge branch for the tools the
+# introspection evidence shows spiraling (#694 family): navigation (#680),
+# patch retries (#697), memory ops (#698), tool routing (#699), query
+# reformulation (#700), and terminal diagnostics (#694). Exploration tools
+# keep their dedicated #625 hints above (checked first in _diversion_hint).
+_DIVERSION_HINT = {
+    "terminal": (
+        " Read the failing output above and act on its CONTENT (fix the code "
+        "or the command); only if the failure looks environmental, verify "
+        "cwd/env/prerequisites with one read-only check before another run."
+    ),
+    "patch": (
+        " Anchor-not-found failures: re-read the exact target region with "
+        "`read_file` — the file likely differs from what you assumed. Content "
+        "errors after a successful match: fix the replacement text itself. "
+        "Large rewrites: use `write_file`."
+    ),
+    "memory": (
+        " Split the write into smaller entries or recall via `session_search` "
+        "(if it is in your toolset) instead of retrying the identical memory "
+        "operation."
+    ),
+    "tool_call": (
+        " Verify the tool name and argument schema first (`tool_describe` / "
+        "`skills_list`, if available); if an MCP server is unavailable, pick a "
+        "native alternative instead of re-invoking it."
+    ),
+    "tool_describe": (
+        " Verify the tool name first (`skills_list` or the available-tools "
+        "list); if an MCP server is unavailable, pick a native alternative."
+    ),
+    "browser_navigate": (
+        " Stop navigating: extract what you need from the CURRENT page "
+        "(`browser_snapshot` for structure, `web_extract` for content — "
+        "whichever is in your toolset) or change the information source "
+        "entirely."
+    ),
+    "web_search": (
+        " Stop reformulating queries: synthesize an answer from the results "
+        "you already have, or `web_extract` (if available) the most promising "
+        "hit for depth."
+    ),
+}
+
+
+def _diversion_hint(tool: str) -> str:
+    """Tool-specific redirect advice for a nudge; empty when none is defined."""
+    return _EXPLORATION_ALTERNATIVE_HINT.get(tool) or _DIVERSION_HINT.get(tool, "")
+
+
+def _category_hint(category: Optional[str]) -> Optional[str]:
+    """tool_diagnostics recovery hint for a failure category (#365). Lazy
+    import with a no-op fallback so loop_guard stays standalone."""
+    if not category:
+        return None
+    try:
+        from agent.tool_diagnostics import hint_for
+    except Exception:  # pragma: no cover - keep standalone if import path differs
+        return None
+    return hint_for(category)
+
 # Mutating tools get LOWER thresholds than idempotent tools because a fixation
 # on mutating operations (writing files, running commands) is more costly and
 # indicates a deeper strategy problem (#432).
@@ -424,9 +485,29 @@ def maybe_nudge(
             f"`{tool}` the same way again. Change the approach now: adjust the "
             f"parameters/path/command, route to a fallback tool, or report the "
             f"blocker concisely if it can't be resolved."
+            f"{_diversion_hint(tool)}"
         )
 
     if consec_fail >= fail_threshold:
+        # Name the most frequent failure class among the trailing failures and
+        # surface its recovery hint (#365) so the model reacts to WHAT is
+        # failing, not just that it failed. Ties resolve to the most recent
+        # class (same is most-recent-first).
+        _fail_classes = [
+            c for _t, failed, c, _a in same[:consec_fail] if failed and c
+        ]
+        dominant = None
+        if _fail_classes:
+            _counts: Dict[str, int] = {}
+            for c in _fail_classes:
+                _counts[c] = _counts.get(c, 0) + 1
+            dominant = max(_counts, key=lambda k: (_counts[k], -_fail_classes.index(k)))
+        class_note = ""
+        if dominant:
+            _hint = _category_hint(dominant)
+            class_note = f" Most frequent error class: `{dominant}`." + (
+                f" {_hint}" if _hint else ""
+            )
         return (
             f"[loop-guard] The `{tool}` tool ({cat_label}) has failed "
             f"{consec_fail} times in a row with the same approach. STOP repeating "
@@ -435,6 +516,8 @@ def maybe_nudge(
             f"different tool or strategy, or — if the blocker can't be resolved "
             f"— report it concisely instead of retrying. Do not call `{tool}` "
             f"again the same way."
+            f"{class_note}"
+            f"{_diversion_hint(tool)}"
         )
 
     # Same-argument repetition for known spiral-prone idempotent tools (#467).
@@ -452,13 +535,19 @@ def maybe_nudge(
                 f"Do NOT repeat `{tool}` with those identical arguments. Rephrase "
                 f"the query, broaden or narrow it, switch to a different information "
                 f"source, or state the blocker if no relevant results are available."
+                # Deliberately NO appended hints here: this branch's advice is
+                # already specific to identical-argument repetition, and e.g.
+                # web_search's 'stop reformulating' diversion would directly
+                # contradict the 'rephrase the query' instruction above
+                # (consult review). The #625 exploration hints are excluded by
+                # the same long-standing design decision.
             )
 
     if count >= repeat_threshold:
         # Build diversity score for the nudge.
         score = _tool_spiral_score(tool, count, repeat_threshold)
         score_line = f"\n{score}" if score else ""
-        exploration_hint = _EXPLORATION_ALTERNATIVE_HINT.get(tool, "")
+        exploration_hint = _diversion_hint(tool)
 
         if count >= escalate_threshold:
             return (

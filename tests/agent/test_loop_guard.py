@@ -400,3 +400,84 @@ class TestShouldCronHardStop:
         huge_count = CRON_LOOP_GUARD_HARD_STOP_THRESHOLD + 100
         for platform in ("cli", "telegram", "discord", "gateway", None, ""):
             assert should_cron_hard_stop(platform, huge_count) is False, platform
+
+
+class TestFailureClassAndDiversionHints:
+    """#694 family: the generic failure nudge names the dominant error class
+    with its tool_diagnostics recovery hint (#365), and the observed spiral
+    tools get concrete diversion advice (#680 #697 #698 #699 #700)."""
+
+    def _fail_run(self, tool, n, content):
+        msgs = [{"role": "user", "content": "go"}]
+        for i in range(n):
+            cid = f"c{i}"
+            msgs.append(_asst(tool, call_id=cid))
+            msgs.append(_result(content, call_id=cid))
+        return msgs
+
+    def test_generic_fail_nudge_names_dominant_class(self):
+        # "does not exist" classifies as not_found (retryable) → generic branch
+        n = maybe_nudge(self._fail_run("terminal", 2, "error: config.yaml does not exist"))
+        assert n is not None
+        assert "not_found" in n
+        assert "Re-check the path" in n
+
+    def test_patch_failures_get_reread_diversion(self):
+        n = maybe_nudge(self._fail_run("patch", 2, "error: old content not found in file"))
+        assert n is not None
+        assert "read_file" in n
+
+    def test_memory_failures_get_recall_diversion(self):
+        n = maybe_nudge(self._fail_run("memory", 2, "error: memory write failed"))
+        assert n is not None
+        assert "session_search" in n
+
+    def test_tool_call_failures_get_routing_diversion(self):
+        n = maybe_nudge(self._fail_run("tool_call", 2, "error: unknown tool 'frobnicate'"))
+        assert n is not None
+        assert "tool name" in n
+
+    def test_browser_navigate_repeat_gets_extraction_diversion(self):
+        n = maybe_nudge(_run("browser_navigate", 4))
+        assert n is not None
+        assert "browser_snapshot" in n
+
+    def test_web_search_reformulation_run_gets_synthesis_diversion(self):
+        # #700's actual shape: many DIFFERENT queries (reformulations), each
+        # "succeeding", no synthesis. Hits the generic repeat path (idempotent
+        # threshold = 8).
+        msgs = [{"role": "user", "content": "go"}]
+        for i in range(8):
+            cid = f"c{i}"
+            msgs.append(
+                _asst("web_search", args=json.dumps({"query": f"attempt {i}"}), call_id=cid)
+            )
+            msgs.append(
+                _result("<untrusted_tool_result>10 hits</untrusted_tool_result>", call_id=cid)
+            )
+        n = maybe_nudge(msgs)
+        assert n is not None
+        assert "synthesize" in n.lower() or "web_extract" in n
+
+    def test_web_search_same_args_branch_has_no_contradicting_hint(self):
+        # The identical-args short-circuit (#467) carries NO appended hints —
+        # its own advice ('rephrase the query') would be directly contradicted
+        # by the 'stop reformulating' diversion (consult review).
+        msgs = [{"role": "user", "content": "go"}]
+        for i in range(4):
+            cid = f"c{i}"
+            msgs.append(
+                _asst("web_search", args=json.dumps({"query": "same"}), call_id=cid)
+            )
+            msgs.append(
+                _result("<untrusted_tool_result>10 hits</untrusted_tool_result>", call_id=cid)
+            )
+        n = maybe_nudge(msgs)
+        assert n is not None and "SAME arguments" in n
+        assert "Stop reformulating" not in n
+
+    def test_read_file_exploration_hint_survives(self):
+        # #625 hint must not be displaced by the new diversion table.
+        n = maybe_nudge(_run("read_file", 8))
+        assert n is not None
+        assert "repo_map" in n
