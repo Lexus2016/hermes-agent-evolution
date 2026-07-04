@@ -2965,6 +2965,9 @@ def _run_conversation_impl(
                     )
                 )
                 if recovered_with_pool:
+                    # A fresh credential means the next 429 is a new story —
+                    # don't let the pre-rotation hits trip the fail-fast (#704).
+                    _retry.consecutive_rate_limit_hits = 0
                     continue
 
                 # Image-too-large recovery: shrink oversized native image
@@ -3708,6 +3711,9 @@ def _run_conversation_impl(
                             retry_count = 0
                             compression_attempts = 0
                             _retry.primary_recovery_attempted = False
+                            # New provider — restart the consecutive-429
+                            # fail-fast count from zero (#704).
+                            _retry.consecutive_rate_limit_hits = 0
                             continue
 
                 # ── Auth-failure provider failover ───────────────────────
@@ -3813,6 +3819,60 @@ def _run_conversation_impl(
                     # Upstream capacity 429: fall through to normal
                     # retry logic.  A different model (or the same
                     # model a moment later) will typically succeed.
+
+                # ── Consecutive-429 fail-fast (#704) ─────────────────────
+                # Reaching here rate-limited means NOTHING recovered on this
+                # pass: pool rotation didn't recover (or absorbed the error
+                # as a same-credential retry) and no fallback activated. One
+                # same-provider retry is allowed — the second consecutive
+                # 429 is deterministic (the quota window has not reset), so
+                # end the turn with a structured diagnostic instead of
+                # burning the remaining retry budget against an exhausted
+                # provider. Billing is excluded: it has its own guidance in
+                # the max-retries path. Counter resets on rotation/fallback
+                # success above and is per-API-call state (TurnRetryState).
+                if classified.reason in {
+                    FailoverReason.rate_limit,
+                    FailoverReason.upstream_rate_limit,
+                }:
+                    _retry.consecutive_rate_limit_hits += 1
+                    if _retry.consecutive_rate_limit_hits >= 2:
+                        _rl_provider = getattr(agent, "provider", "unknown")
+                        _rl_model = getattr(agent, "model", "unknown")
+                        _rl_summary = agent._summarize_api_error(api_error)
+                        _rl_diag = (
+                            f"Rate limited twice in a row by {_rl_provider}/{_rl_model} "
+                            "with no recovery path left: credential rotation did not "
+                            "recover and no fallback provider activated. Retrying the "
+                            "same provider cannot succeed until its quota window "
+                            "resets. Options: wait for the rate-limit window to reset, "
+                            "configure a fallback model/provider, or continue with "
+                            "steps that need no LLM call."
+                        )
+                        agent._emit_status(f"⛔ {_rl_diag}")
+                        logger.error(
+                            "%sConsecutive rate-limit fail-fast: 2 x %s from "
+                            "provider=%s model=%s with no rotation/fallback recovery "
+                            "— ending turn instead of retrying (#704). %s",
+                            agent.log_prefix,
+                            classified.reason.value,
+                            _rl_provider,
+                            _rl_model,
+                            _rl_summary,
+                        )
+                        agent._persist_session(messages, conversation_history)
+                        return {
+                            "final_response": _rl_diag,
+                            "messages": messages,
+                            "api_calls": api_call_count,
+                            "completed": False,
+                            "failed": True,
+                            "error": _rl_summary,
+                            # Same contract as the max-retries path: callers
+                            # (kanban worker, cron) distinguish a quota wall
+                            # from a real task error via failure_reason.
+                            "failure_reason": classified.reason.value,
+                        }
 
                 is_payload_too_large = (
                     classified.reason == FailoverReason.payload_too_large

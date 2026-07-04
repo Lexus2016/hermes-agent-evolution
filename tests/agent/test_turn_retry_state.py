@@ -28,6 +28,7 @@ EXPECTED_FIELDS = {
     "llama_cpp_grammar_retry_attempted",
     "primary_recovery_attempted",
     "has_retried_429",
+    "consecutive_rate_limit_hits",
     "fail_fast_attempted",
     "auth_failover_attempted",
     "restart_with_compressed_messages",
@@ -36,10 +37,18 @@ EXPECTED_FIELDS = {
 }
 
 
+# The one non-boolean field: a consecutive-event counter, not a one-shot guard
+# (#704). Everything else must stay a False-defaulting bool.
+COUNTER_FIELDS = {"consecutive_rate_limit_hits"}
+
+
 def test_all_guards_default_false():
     s = TurnRetryState()
     for name, value in s:
-        assert value is False, f"{name} should default to False"
+        if name in COUNTER_FIELDS:
+            assert value == 0, f"{name} should default to 0"
+        else:
+            assert value is False, f"{name} should default to False"
 
 
 def test_field_set_matches_contract():
