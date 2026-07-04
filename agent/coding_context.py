@@ -1035,5 +1035,15 @@ def build_coding_workspace_block(cwd: Optional[str | Path] = None) -> str:
             lines.append("- Recent commits:")
             lines.extend(f"    {c}" for c in recent.splitlines())
 
+        # What THIS branch already changed vs the repo's default branch (#651)
+        # — the "what is in flux here" scoping signal. Silently absent when
+        # origin/HEAD is unknown (local-only repos) or the delta is empty
+        # (sitting on the default branch itself).
+        default_ref = _git(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+        if default_ref:
+            shortstat = _git(root, "diff", "--shortstat", f"{default_ref}...HEAD")
+            if shortstat:
+                lines.append(f"- Diff vs {default_ref}: {shortstat}")
+
     lines.extend(_project_facts(root))
     return "\n".join(lines)

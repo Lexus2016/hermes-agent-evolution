@@ -628,3 +628,61 @@ class TestDetection:
     def test_bare_dir_is_not_coding(self, tmp_path):
         cfg = {"agent": {"coding_context": "auto"}}
         assert cc.is_coding_context(platform="cli", cwd=tmp_path, config=cfg) is False
+
+
+class TestWorkspaceBranchDelta:
+    """#651: the workspace snapshot names what THIS branch already changed
+    relative to the repo's default branch — the 'what is in flux' scoping
+    signal. Silently absent when there is no origin/HEAD (local-only repos)."""
+
+    def _repo_with_origin(self, tmp_path):
+        origin = tmp_path / "origin.git"
+        work = tmp_path / "work"
+        env = {
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+            "HOME": str(tmp_path),
+        }
+
+        def g(cwd, *args):
+            subprocess.run(
+                [shutil.which("git"), "-C", str(cwd), *args], check=True, env=env,
+                capture_output=True,
+            )
+
+        subprocess.run(
+            [shutil.which("git"), "init", "-q", "--bare", str(origin)],
+            check=True, env=env, capture_output=True,
+        )
+        work.mkdir()
+        (work / "main.py").write_text("print('hi')\n")
+        g(work, "init", "-q", "-b", "main")
+        g(work, "add", "-A")
+        g(work, "commit", "-q", "-m", "init")
+        g(work, "remote", "add", "origin", str(origin))
+        g(work, "push", "-q", "-u", "origin", "main")
+        g(work, "remote", "set-head", "origin", "main")
+        return work, g
+
+    def test_feature_branch_shows_delta_vs_default(self, tmp_path):
+        work, g = self._repo_with_origin(tmp_path)
+        g(work, "checkout", "-q", "-b", "feature")
+        (work / "extra.py").write_text("x = 1\n")
+        g(work, "add", "-A")
+        g(work, "commit", "-q", "-m", "add extra")
+
+        block = cc.build_coding_workspace_block(work)
+        assert "Diff vs origin/main:" in block
+        assert "1 file changed" in block
+
+    def test_default_branch_has_no_delta_line(self, tmp_path):
+        work, _g = self._repo_with_origin(tmp_path)
+        block = cc.build_coding_workspace_block(work)
+        assert "Diff vs" not in block
+
+    def test_local_only_repo_has_no_delta_line(self, tmp_path):
+        _git_init(tmp_path)
+        block = cc.build_coding_workspace_block(tmp_path)
+        assert "Diff vs" not in block
