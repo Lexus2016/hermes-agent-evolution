@@ -117,28 +117,38 @@ def _load_jobs(jobs_file: Path | None) -> List[dict]:
     return data.get("jobs", data if isinstance(data, list) else [])
 
 
-def _stage_ran_clean_for_slot(jobs: List[dict], stage: str, date: str, slot_hour: int) -> bool:
-    """True when the cron job for ``stage`` ran with ``last_status == "ok"`` at or
-    after its slot on ``date``. A MISSING report is only a death if the job did
-    NOT run clean for the slot: when it did, the stage executed and simply had
-    nothing to do (e.g. analysis selected 0 → implementation/integration are
-    legitimately idle and need not emit a report). That is a clean idle cycle,
-    not 'the job died without record'."""
+def _stage_clean_job_for_slot(
+    jobs: List[dict], stage: str, date: str, slot_hour: int
+) -> dict | None:
+    """The stage's cron job record when it ran with ``last_status == "ok"`` at
+    or after its slot on ``date`` — else None. A MISSING report is only a death
+    if the job did NOT run clean for the slot: when it did, the stage executed
+    and simply had nothing to do (e.g. analysis selected 0 →
+    implementation/integration are legitimately idle and need not emit a
+    report). That is a clean idle cycle, not 'the job died without record'.
+    Callers still inspect the returned record: a "clean" run with ZERO tool
+    calls could not have done any real work (#701)."""
     name = f"evolution-{stage}"
     for job in jobs:
         if str(job.get("name", "")) != name:
             continue
         if job.get("last_status") != "ok":
-            return False
+            return None
         last_run = _parse_iso(job.get("last_run_at"))
         if last_run is None:
-            return False
+            return None
         try:
             slot_dt = datetime.fromisoformat(date).replace(hour=slot_hour)
         except ValueError:
-            return False
-        return last_run >= slot_dt
-    return False
+            return None
+        return job if last_run >= slot_dt else None
+    return None
+
+
+def _stage_ran_clean_for_slot(jobs: List[dict], stage: str, date: str, slot_hour: int) -> bool:
+    """Boolean wrapper kept for existing callers — see
+    ``_stage_clean_job_for_slot``."""
+    return _stage_clean_job_for_slot(jobs, stage, date, slot_hour) is not None
 
 
 def check_stage_reports(
@@ -154,8 +164,19 @@ def check_stage_reports(
         date = expected_report_date(now, slot_hour)
         report = evolution_dir / stage / f"{date}.{ext}"
         if not report.exists():
-            if _stage_ran_clean_for_slot(jobs, stage, date, slot_hour):
-                continue  # ran clean, nothing to do — idle cycle, not a death
+            clean_job = _stage_clean_job_for_slot(jobs, stage, date, slot_hour)
+            if clean_job is not None:
+                if clean_job.get("last_tool_calls") == 0:
+                    # "Clean" but the agent never invoked a single tool: it
+                    # could only talk, not act — a broken/missing toolset is
+                    # far more likely than a legitimately idle cycle (#701).
+                    alerts.append(
+                        f"stage '{stage}': job reported ok for slot "
+                        f"{slot_hour:02d}:00 with ZERO tool calls and no "
+                        f"report — the agent could not act (broken or "
+                        f"missing toolset?); treating as a stage failure"
+                    )
+                continue  # ran clean with real tool use — idle cycle, not a death
             alerts.append(
                 f"stage '{stage}': expected report {report.name} is MISSING "
                 f"(slot {slot_hour:02d}:00 + {GRACE_HOURS}h grace passed; "

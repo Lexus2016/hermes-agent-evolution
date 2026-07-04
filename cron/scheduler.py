@@ -32,7 +32,7 @@ except ImportError:
     except ImportError:
         msvcrt = None
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 # Add parent directory to path for imports BEFORE repo-level imports.
 # Without this, standalone invocations (e.g. after `hermes update` reloads
@@ -2746,6 +2746,32 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         return result
 
 
+def _count_tool_calls(messages) -> int:
+    """Number of tool invocations in a run_conversation message list.
+
+    Counts ``role == "tool"`` entries — exactly one per executed tool call.
+    Tolerates junk (None, non-list, non-dict entries) because the messages
+    come back from an agent run that may have failed mid-flight (#701).
+    """
+    if not isinstance(messages, list):
+        return 0
+    return sum(
+        1
+        for m in messages
+        if isinstance(m, dict) and m.get("role") == "tool"
+    )
+
+
+# Tool-call counts per job id for the CURRENT run, written by _run_job_impl
+# and consumed (popped) by run_one_job's mark_job_run call. A side channel —
+# NOT part of run_job's (success, output, final_response, error) tuple — so
+# every existing caller and test stub of that 4-tuple contract keeps working;
+# a missing entry simply reads as None (= unknown, e.g. stubbed run_job or
+# no_agent scripts). Keys are per-job and a job cannot run concurrently with
+# itself (fire claims), so parallel ticks don't collide (#701).
+_LAST_RUN_TOOL_CALLS: Dict[str, Optional[int]] = {}
+
+
 def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
     """
     Execute a single cron job.
@@ -2755,6 +2781,9 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
     """
     job_id = job["id"]
     job_name = str(job.get("name") or job.get("prompt") or job_id or "cron job")
+    # Unknown until the agent path measures it; no_agent scripts and
+    # pre-agent failures leave it None (#701).
+    _LAST_RUN_TOOL_CALLS[job_id] = None
 
     # ---------------------------------------------------------------
     # no_agent short-circuit — the script IS the job, no LLM involvement.
@@ -3633,6 +3662,12 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
             )
 
         final_response = result.get("final_response", "") or ""
+        # Zero-tool-call detection (#701): a "successful" run that never
+        # invoked a single tool usually means a broken or missing toolset —
+        # the agent could only talk, not act. Recorded in the side channel;
+        # run_one_job forwards it to mark_job_run so the deterministic
+        # watchdog can tell a legitimately idle stage from a silent no-op.
+        _LAST_RUN_TOOL_CALLS[job_id] = _count_tool_calls(result.get("messages"))
         # Strip leaked placeholder text that upstream may inject on empty completions.
         if final_response.strip() == "(No response generated)":
             final_response = ""
@@ -3972,12 +4007,23 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
             success = False
             error = "Agent completed but produced empty response (model error, timeout, or misconfiguration)"
 
-        mark_job_run(job["id"], success, error, delivery_error=delivery_error)
+        mark_job_run(
+            job["id"],
+            success,
+            error,
+            delivery_error=delivery_error,
+            tool_calls=_LAST_RUN_TOOL_CALLS.pop(job["id"], None),
+        )
         return True
 
     except Exception as e:
         logger.error("Error processing job %s: %s", job["id"], e)
-        mark_job_run(job["id"], False, str(e))
+        mark_job_run(
+            job["id"],
+            False,
+            str(e),
+            tool_calls=_LAST_RUN_TOOL_CALLS.pop(job["id"], None),
+        )
         return False
 
 

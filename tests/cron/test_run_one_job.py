@@ -31,7 +31,7 @@ def _patch_pipeline(monkeypatch, *, success=True, output="out", final="final res
         calls.append(("deliver", job["id"]))
         return None
 
-    def fake_mark(jid, ok, err=None, delivery_error=None):
+    def fake_mark(jid, ok, err=None, delivery_error=None, tool_calls=None):
         calls.append(("mark", jid, ok))
 
     monkeypatch.setattr(s, "run_job", fake_run_job)
@@ -110,7 +110,7 @@ def test_run_one_job_exception_marks_failure(monkeypatch):
     marks = []
     monkeypatch.setattr(
         s, "mark_job_run",
-        lambda jid, ok, err=None, delivery_error=None: marks.append((jid, ok)),
+        lambda jid, ok, err=None, delivery_error=None, tool_calls=None: marks.append((jid, ok)),
     )
 
     ok = s.run_one_job({"id": "j6", "name": "t"})

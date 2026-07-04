@@ -2722,6 +2722,7 @@ class TestSilentDelivery:
             False,
             "Agent completed but produced empty response (model error, timeout, or misconfiguration)",
             delivery_error=None,
+            tool_calls=None,
         )
 
 

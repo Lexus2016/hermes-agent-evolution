@@ -98,10 +98,10 @@ class TestStageReports:
         alerts = check_stage_reports(tmp_path, NOW)
         assert len(alerts) == len(STAGES)
 
-    def _jobs_file(self, tmp_path, name, *, status="ok", last_run="2026-06-10T22:01:00"):
+    def _jobs_file(self, tmp_path, name, *, status="ok", last_run="2026-06-10T22:01:00", **extra):
         f = tmp_path / "jobs.json"
         f.write_text(json.dumps({"jobs": [
-            {"name": name, "enabled": True, "last_status": status, "last_run_at": last_run}
+            {"name": name, "enabled": True, "last_status": status, "last_run_at": last_run, **extra}
         ]}))
         return f
 
@@ -131,6 +131,35 @@ class TestStageReports:
         jf = self._jobs_file(tmp_path, "evolution-integration", last_run="2026-06-09T23:00:00")
         alerts = check_stage_reports(tmp_path, NOW, jf)
         assert len(alerts) == 1 and "integration" in alerts[0]
+
+    def test_missing_report_alerts_when_clean_run_had_zero_tool_calls(self, tmp_path):
+        # Job reported ok for the slot but made ZERO tool calls and left no
+        # report — the agent could not act (broken/missing toolset), which is
+        # a stage failure, not an idle cycle (#701).
+        slot = STAGES["implementation"][0]
+        exp = expected_report_date(NOW, slot)
+        self._make_reports(tmp_path, skip=("implementation",))
+        jf = self._jobs_file(
+            tmp_path, "evolution-implementation",
+            last_run=f"{exp}T{slot:02d}:01:00",
+            last_tool_calls=0,
+        )
+        alerts = check_stage_reports(tmp_path, NOW, jf)
+        assert len(alerts) == 1
+        assert "zero tool calls" in alerts[0].lower()
+
+    def test_missing_report_quiet_when_clean_run_used_tools(self, tmp_path):
+        # Clean slot run WITH real tool use and no report → legitimately idle
+        # cycle, stays quiet (the pre-#701 suppression must survive).
+        slot = STAGES["implementation"][0]
+        exp = expected_report_date(NOW, slot)
+        self._make_reports(tmp_path, skip=("implementation",))
+        jf = self._jobs_file(
+            tmp_path, "evolution-implementation",
+            last_run=f"{exp}T{slot:02d}:01:00",
+            last_tool_calls=7,
+        )
+        assert check_stage_reports(tmp_path, NOW, jf) == []
 
 
 class TestJobsHealth:

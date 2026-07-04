@@ -1070,6 +1070,7 @@ def create_job(
         "last_run_at": None,
         "last_status": None,
         "last_error": None,
+        "last_tool_calls": None,
         "last_delivery_error": None,
         "origin": origin,  # Tracks where job was created for "origin" delivery
         "deliver": deliver,
@@ -1314,6 +1315,7 @@ def mark_job_run(
     success: bool,
     error: Optional[str] = None,
     delivery_error: Optional[str] = None,
+    tool_calls: Optional[int] = None,
 ):
     """
     Mark a job as having been run.
@@ -1323,6 +1325,11 @@ def mark_job_run(
 
     ``delivery_error`` is tracked separately from the agent error — a job
     can succeed (agent produced output) but fail delivery (platform down).
+
+    ``tool_calls`` is the number of tool invocations the agent run made
+    (None = unknown: no_agent scripts, failures before the agent ran,
+    legacy callers). Persisted as ``last_tool_calls`` so the deterministic
+    evolution watchdog can flag "ran clean but could not act" runs (#701).
     """
     with _jobs_lock():
         jobs = load_jobs()
@@ -1332,6 +1339,7 @@ def mark_job_run(
                 job["last_run_at"] = now
                 job["last_status"] = "ok" if success else "error"
                 job["last_error"] = error if not success else None
+                job["last_tool_calls"] = tool_calls
                 # Track delivery failures separately — cleared on successful delivery
                 job["last_delivery_error"] = delivery_error
                 # Clear any external-fire claim so a re-armed recurring job can
