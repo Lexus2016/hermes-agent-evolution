@@ -14,7 +14,7 @@ from agent import coding_context as cc
 def test_coding_guidance_advertises_repo_map_first():
     assert "repo_map" in cc.CODING_AGENT_GUIDANCE
     assert (
-        "Before exploring an unfamiliar codebase, call `repo_map` FIRST"
+        "Before exploring an unfamiliar Python codebase, call `repo_map` FIRST"
         in cc.CODING_AGENT_GUIDANCE
     )
 
@@ -156,6 +156,7 @@ class TestCodingSelection:
             "write_file",
             "patch",
             "search_files",
+            "repo_map",
             "terminal",
             "todo",
         ):
@@ -452,7 +453,9 @@ class TestRuntimeMode:
 
     def test_no_instructions_block_when_unset(self, tmp_path):
         _git_init(tmp_path)
-        mode = cc.resolve_runtime_mode(platform="cli", cwd=tmp_path, config={"agent": {"coding_context": "on"}})
+        mode = cc.resolve_runtime_mode(
+            platform="cli", cwd=tmp_path, config={"agent": {"coding_context": "on"}}
+        )
         assert not any("Operator instructions" in b for b in mode.system_blocks())
 
     def test_toolset_selection_gated_on_focus(self, tmp_path):
