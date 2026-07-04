@@ -414,8 +414,10 @@ def main(argv: list[str]) -> int:
 
         # Refuse to register (or reconcile) an agent job whose skills need a
         # toolset the job definition does not grant — the scheduled job could
-        # only ever silently no-op (#702).
-        if not no_agent:
+        # only ever silently no-op (#702). Jobs that DECLARE no toolsets are
+        # exempt: enabled_toolsets stays None and the scheduler falls back to
+        # the platform default toolset, which includes 'terminal'.
+        if not no_agent and toolsets is not None:
             preflight_err = _validate_skill_toolsets(
                 name, spec.get("skills"), toolsets, lint_mod, skill_texts, existing_scripts
             )

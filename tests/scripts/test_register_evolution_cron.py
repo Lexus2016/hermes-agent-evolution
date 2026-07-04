@@ -549,3 +549,11 @@ class TestSkillToolsetPreflightRegistration:
         assert rc == 0
         assert len(created) == 1
         assert created[0]["name"] == "evolution-preflight-test"
+
+    def test_omitted_toolsets_field_is_exempt(self, tmp_path, monkeypatch):
+        # No `toolsets:` in the YAML → enabled_toolsets stays None and the
+        # scheduler falls back to the platform default toolset (which has
+        # terminal) — the pre-flight must not block that (consult review).
+        rc, created = self._run(tmp_path, monkeypatch, "")
+        assert rc == 0
+        assert len(created) == 1
