@@ -436,3 +436,124 @@ class TestEnsureEvolutionLabels:
         captured = capsys.readouterr()
         assert "warning: could not create label" in captured.err
         assert bad_label in captured.err
+
+
+def _import_lint_module():
+    import importlib.util
+
+    path = SCRIPT.parent / "evolution_skill_lint.py"
+    spec = importlib.util.spec_from_file_location("evolution_skill_lint_t", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestValidateSkillToolsets:
+    """Pure pre-flight helper: block only the no_terminal class (#702)."""
+
+    def test_blocks_when_terminal_missing(self):
+        mod = _import_module()
+        lint = _import_lint_module()
+        texts = {"evolution-fake": "Run `python3 scripts/fake_tool.py` next."}
+        scripts = {"scripts/fake_tool.py"}
+        err = mod._validate_skill_toolsets(
+            "job-x", ["evolution/fake"], ["web", "file"], lint, texts, scripts
+        )
+        assert err is not None
+        assert "terminal" in err
+        assert "evolution-fake" in err
+
+    def test_passes_with_terminal_granted(self):
+        mod = _import_module()
+        lint = _import_lint_module()
+        texts = {"evolution-fake": "Run `python3 scripts/fake_tool.py` next."}
+        scripts = {"scripts/fake_tool.py"}
+        err = mod._validate_skill_toolsets(
+            "job-x", ["evolution/fake"], ["web", "terminal"], lint, texts, scripts
+        )
+        assert err is None
+
+    def test_missing_script_warns_but_does_not_block(self, capsys):
+        mod = _import_module()
+        lint = _import_lint_module()
+        texts = {"evolution-fake": "Run `python3 scripts/gone.py` next."}
+        err = mod._validate_skill_toolsets(
+            "job-x", ["evolution/fake"], ["web"], lint, texts, set()
+        )
+        assert err is None
+        assert "does not exist" in capsys.readouterr().err
+
+    def test_skips_without_lint_module_or_skills(self):
+        mod = _import_module()
+        lint = _import_lint_module()
+        assert (
+            mod._validate_skill_toolsets("j", ["s"], ["web"], None, {}, set()) is None
+        )
+        assert mod._validate_skill_toolsets("j", None, ["web"], lint, {}, set()) is None
+
+
+class TestSkillToolsetPreflightRegistration:
+    """Registration refuses agent jobs whose skills need a toolset the job
+    does not grant (#702) — same wiring check as CI's evolution_skill_lint,
+    enforced BEFORE the broken job can ever be scheduled."""
+
+    def _write_yaml(self, src_dir, toolsets_lines):
+        # evolution-introspection's SKILL.md instructs running scripts/*.py,
+        # so a job granting no terminal can never execute them.
+        (src_dir / "introspection.yaml").write_text(
+            "name: evolution-preflight-test\n"
+            'schedule: "0 20 * * *"\n'
+            'prompt: "introspect"\n'
+            "skills:\n  - evolution/introspection\n" + toolsets_lines
+        )
+
+    def _run(self, tmp_path, monkeypatch, toolsets_lines):
+        mod = _import_module()
+        src_dir = tmp_path / "cron-src"
+        src_dir.mkdir()
+        self._write_yaml(src_dir, toolsets_lines)
+        home = tmp_path / "hermes-home"
+        home.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        monkeypatch.setattr(mod, "_ensure_evolution_labels", lambda *a, **k: [])
+
+        created = []
+
+        def fake_create_job(**kwargs):
+            created.append(kwargs)
+            return {"id": "pf1", "name": kwargs["name"]}
+
+        import cron.jobs as jobs_mod
+
+        monkeypatch.setattr(jobs_mod, "create_job", fake_create_job)
+        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+
+        rc = mod.main(["register_evolution_cron.py", str(src_dir)])
+        return rc, created
+
+    def test_missing_terminal_is_rejected(self, tmp_path, monkeypatch, capsys):
+        rc, created = self._run(
+            tmp_path, monkeypatch, "toolsets:\n  - web\n  - file\n"
+        )
+        assert rc == 2
+        assert created == []
+        out = capsys.readouterr().out
+        assert "toolset pre-flight" in out
+        assert "terminal" in out
+
+    def test_with_terminal_registers_normally(self, tmp_path, monkeypatch):
+        rc, created = self._run(
+            tmp_path, monkeypatch, "toolsets:\n  - web\n  - file\n  - terminal\n"
+        )
+        assert rc == 0
+        assert len(created) == 1
+        assert created[0]["name"] == "evolution-preflight-test"
+
+    def test_omitted_toolsets_field_is_exempt(self, tmp_path, monkeypatch):
+        # No `toolsets:` in the YAML → enabled_toolsets stays None and the
+        # scheduler falls back to the platform default toolset (which has
+        # terminal) — the pre-flight must not block that (consult review).
+        rc, created = self._run(tmp_path, monkeypatch, "")
+        assert rc == 0
+        assert len(created) == 1

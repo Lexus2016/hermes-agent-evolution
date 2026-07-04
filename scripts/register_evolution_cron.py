@@ -109,6 +109,71 @@ def _normalize_toolsets(raw) -> list[str] | None:
     return out or None
 
 
+def _load_skill_lint(repo_root: Path):
+    """Import the sibling ``evolution_skill_lint`` module (the CI lint's pure
+    core) so registration can run the same skill→toolset wiring check before a
+    broken job is ever scheduled (#702). Returns None when the module is
+    missing or unimportable — registration then proceeds without pre-flight."""
+    import importlib.util
+
+    path = repo_root / "scripts" / "evolution_skill_lint.py"
+    if not path.is_file():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("evolution_skill_lint", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception as exc:  # pragma: no cover - environment dependent
+        print(
+            f"[evolution-cron] warning: cannot load evolution_skill_lint: {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+
+def _validate_skill_toolsets(
+    name: str,
+    raw_skills,
+    toolsets: list[str] | None,
+    lint_mod,
+    skill_texts: dict,
+    existing_scripts: set,
+) -> str | None:
+    """Pre-flight the job's skill→toolset wiring at registration time (#702).
+
+    ``evolution_skill_lint`` already detects this class of bug in CI, but CI
+    runs AFTER the broken job has been scheduled. Blocking here prevents e.g.
+    a job whose skills instruct running ``scripts/X.py`` from registering
+    without the ``terminal`` toolset — that job could only ever no-op.
+
+    Only the ``no_terminal`` violation class blocks: ``missing_skill`` /
+    ``missing_script`` may be false positives for skills installed outside the
+    repo, so they are surfaced as warnings instead. Returns the blocking
+    reason, or None when the job is clean.
+    """
+    if lint_mod is None or not raw_skills:
+        return None
+    if isinstance(raw_skills, str):
+        raw_skills = [raw_skills]
+    stage = {
+        "name": name,
+        "skills": [str(s) for s in raw_skills],
+        "toolsets": list(toolsets or []),
+    }
+    violations = lint_mod.find_violations([stage], skill_texts, existing_scripts)
+    blocking = [v for v in violations if v["kind"] == "no_terminal"]
+    for v in violations:
+        if v["kind"] != "no_terminal":
+            print(
+                f"[evolution-cron] warning: {name}/{v['skill']}: {v['detail']}",
+                file=sys.stderr,
+            )
+    if blocking:
+        return "; ".join(f"skill '{v['skill']}': {v['detail']}" for v in blocking)
+    return None
+
+
 def _install_script(repo_root: Path, filename: str) -> str | None:
     """Copy a repo script into HERMES_HOME/scripts (the only place the cron
     scheduler is allowed to execute scripts from). Returns the script name on
@@ -286,6 +351,24 @@ def main(argv: list[str]) -> int:
     # imports (funnel -> metrics/realized_impact) resolve in HERMES_HOME/scripts.
     helper_scripts = [] if dry_run else _install_evolution_helpers(repo_root)
 
+    # Pre-flight context for the skill→toolset wiring check (#702): loaded once,
+    # reused for every agent job below.
+    lint_mod = _load_skill_lint(repo_root)
+    if lint_mod is not None:
+        skill_texts = lint_mod._load_skill_texts(repo_root / "skills")
+        existing_scripts = {
+            f"scripts/{p.name}"
+            for p in (repo_root / "scripts").glob("*")
+            if p.is_file()
+        }
+    else:
+        skill_texts, existing_scripts = {}, set()
+        print(
+            "[evolution-cron] warning: evolution_skill_lint.py not found — "
+            "skipping skill→toolset pre-flight",
+            file=sys.stderr,
+        )
+
     existing_jobs = {str(j.get("name", "")).strip(): j for j in load_jobs()}
     existing_names = set(existing_jobs)
     created: list[tuple[str, str]] = []
@@ -328,6 +411,19 @@ def main(argv: list[str]) -> int:
         skills = _normalize_skills(spec.get("skills"))
         toolsets = _normalize_toolsets(spec.get("toolsets"))
         deliver = str(spec.get("deliver") or "local").strip()
+
+        # Refuse to register (or reconcile) an agent job whose skills need a
+        # toolset the job definition does not grant — the scheduled job could
+        # only ever silently no-op (#702). Jobs that DECLARE no toolsets are
+        # exempt: enabled_toolsets stays None and the scheduler falls back to
+        # the platform default toolset, which includes 'terminal'.
+        if not no_agent and toolsets is not None:
+            preflight_err = _validate_skill_toolsets(
+                name, spec.get("skills"), toolsets, lint_mod, skill_texts, existing_scripts
+            )
+            if preflight_err:
+                failed.append((name, f"toolset pre-flight: {preflight_err}"))
+                continue
 
         # Existing job: reconcile mutable config from YAML instead of blindly
         # skipping. create_job() is idempotent-by-name, so without this an edit
