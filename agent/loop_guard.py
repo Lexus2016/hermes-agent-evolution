@@ -122,12 +122,13 @@ _DIVERSION_HINT = {
     ),
     "memory": (
         " Split the write into smaller entries or recall via `session_search` "
-        "instead of retrying the identical memory operation."
+        "(if it is in your toolset) instead of retrying the identical memory "
+        "operation."
     ),
     "tool_call": (
         " Verify the tool name and argument schema first (`tool_describe` / "
-        "`skills_list`); if an MCP server is unavailable, pick a native "
-        "alternative instead of re-invoking it."
+        "`skills_list`, if available); if an MCP server is unavailable, pick a "
+        "native alternative instead of re-invoking it."
     ),
     "tool_describe": (
         " Verify the tool name first (`skills_list` or the available-tools "
@@ -135,12 +136,14 @@ _DIVERSION_HINT = {
     ),
     "browser_navigate": (
         " Stop navigating: extract what you need from the CURRENT page "
-        "(`browser_snapshot` for structure, `web_extract` for content) or "
-        "change the information source entirely."
+        "(`browser_snapshot` for structure, `web_extract` for content — "
+        "whichever is in your toolset) or change the information source "
+        "entirely."
     ),
     "web_search": (
         " Stop reformulating queries: synthesize an answer from the results "
-        "you already have, or `web_extract` the most promising hit for depth."
+        "you already have, or `web_extract` (if available) the most promising "
+        "hit for depth."
     ),
 }
 
