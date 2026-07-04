@@ -58,6 +58,12 @@ class TurnRetryState:
     # ── Transport / rate-limit recovery ──────────────────────────────────
     primary_recovery_attempted: bool = False
     has_retried_429: bool = False
+    # Consecutive rate-limit errors on this attempt where NO recovery fired
+    # (pool rotation didn't recover, no fallback activated). At 2 the loop
+    # fails fast with a structured diagnostic instead of burning the rest of
+    # the retry budget against a provider whose quota window hasn't reset
+    # (#704). Reset whenever rotation or fallback succeeds.
+    consecutive_rate_limit_hits: int = 0
 
     # ── Fail-fast guard for non-retryable client errors ─────────────────
     fail_fast_attempted: bool = False
