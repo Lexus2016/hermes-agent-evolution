@@ -785,3 +785,21 @@ class TestGetHermesDir:
         legacy.symlink_to(empty)
         result = get_hermes_dir("cache/audio", "audio_cache")
         assert result == tmp_path / "cache/audio"
+
+
+class TestPython38Compatibility:
+    """hermes_constants.py must be importable under Python 3.8 grammar (#721).
+
+    The module is used by scripts/introspection_extract.py, which may be
+    invoked with the system ``python3`` (e.g. 3.8 on older hosts). PEP 604
+    union syntax like ``str | None`` would be a syntax error there; the
+    ``from __future__ import annotations`` guard stringizes annotations at
+    runtime so 3.8 can import the module.
+    """
+
+    def test_parses_under_python38_grammar(self):
+        import ast
+
+        source = Path(hermes_constants.__file__).read_text(encoding="utf-8")
+        # feature_version=(3,8) enforces the Python 3.8 parser grammar.
+        ast.parse(source, feature_version=(3, 8))
