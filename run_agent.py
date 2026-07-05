@@ -586,7 +586,7 @@ class AIAgent:
             pass_session_id=pass_session_id,
         )
 
-    def _get_session_db_for_recall(self):
+    def _get_session_db_for_recall(self, *, reason: str = "recall"):
         """Return a SessionDB for recall, lazily creating it if an entrypoint forgot.
 
         Most frontends pass ``session_db`` into ``AIAgent`` explicitly, but recall
@@ -608,15 +608,30 @@ class AIAgent:
             self._session_db = SessionDB()
             return self._session_db
         except Exception as exc:
-            logger.debug("SessionDB unavailable for recall", exc_info=True)
+            logger.debug("SessionDB unavailable for %s", reason, exc_info=True)
             return None
 
     def _ensure_db_session(self) -> None:
         """Create session DB row on first use. Disables _session_db on failure."""
         if getattr(self, "_persist_disabled", False):
             return
-        if self._session_db_created or not self._session_db:
+        if self._session_db_created:
             return
+        # Subagent (and other forked) sessions may be constructed without a
+        # parent-provided SessionDB handle. Open the canonical DB lazily here
+        # before any append_message / compression lock usage, rather than
+        # proceeding with a nil handle and silently losing persistence.
+        if not self._session_db:
+            db = self._get_session_db_for_recall(reason="subagent persistence")
+            if db is None:
+                from hermes_state import get_last_init_error
+
+                detail = get_last_init_error() or "state.db could not be opened"
+                raise RuntimeError(
+                    f"Session DB handle is nil; persistence and compression "
+                    f"are unavailable for this subagent session: {detail}"
+                )
+            self._session_db = db
         source = _session_source_for_agent(self.platform)
         try:
             self._session_db.create_session(
