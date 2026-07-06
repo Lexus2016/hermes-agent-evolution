@@ -2109,6 +2109,16 @@ class MCPServerTask:
         # case-insensitive so conventional casing is preserved.
         if not any(key.lower() == "mcp-protocol-version" for key in headers):
             headers["mcp-protocol-version"] = LATEST_PROTOCOL_VERSION
+        # Pin a brotli-free Accept-Encoding (#724). httpx negotiates ``br``
+        # whenever brotlicffi is importable; some MCP servers' streamed JSON
+        # then trips a brotlicffi decoder bug ("decoder process called with
+        # data when 'can_accept_more_data()' is False") that fails
+        # initialize() and drops the whole server's tools for the run — the
+        # 204 brotli DecodingErrors plus the downstream lazyweb CancelledErrors
+        # in #724. gzip/deflate decode fine; we simply never negotiate br.
+        # Respect an explicit per-server override (case-insensitive).
+        if not any(key.lower() == "accept-encoding" for key in headers):
+            headers["accept-encoding"] = "gzip, deflate"
         connect_timeout = config.get("connect_timeout", _DEFAULT_CONNECT_TIMEOUT)
         ssl_verify = config.get("ssl_verify", True)
         client_cert = _resolve_client_cert(self.name, config)
