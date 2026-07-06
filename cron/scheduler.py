@@ -2374,7 +2374,11 @@ def _build_job_prompt(job: dict, prerun_script: Optional[tuple] = None) -> str:
 
     # One-shot diversion directive: if the previous run of this job was
     # hard-stopped by the cron loop guard (see #720), steer this run away
-    # from the tool it got stuck on, then clear the flag so it only fires once.
+    # from the tool it got stuck on. The flag is cleared by the caller
+    # (_run_job_impl) once it knows the agent run is actually going ahead —
+    # NOT here, since this function can be short-circuited afterwards
+    # (CronPromptInjectionBlocked, empty script output) before any agent
+    # ever sees the directive.
     stuck_tool = job.get("last_hard_stop_tool")
     if stuck_tool:
         try:
@@ -2393,17 +2397,6 @@ def _build_job_prompt(job: dict, prerun_script: Optional[tuple] = None) -> str:
         except Exception:
             logger.debug(
                 "loop_guard: failed to build diversion hint for job_id=%r%s",
-                job.get("id"),
-                _cron_job_origin_log_suffix(job),
-                exc_info=True,
-            )
-        try:
-            update_job(
-                job["id"], {"last_hard_stop_tool": None, "last_hard_stop_at": None}
-            )
-        except Exception:
-            logger.debug(
-                "loop_guard: failed to clear hard-stop flag for job_id=%r%s",
                 job.get("id"),
                 _cron_job_origin_log_suffix(job),
                 exc_info=True,
@@ -3005,6 +2998,23 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
     if prompt is None:
         logger.info("Job '%s': script produced no output, skipping AI call.", job_name)
         return True, "", SILENT_MARKER, None
+
+    # The prompt (including any one-shot hard-stop diversion directive built
+    # by _build_job_prompt above) is final and the agent run is definitely
+    # going ahead — safe to consume the one-shot flag now. Doing this here,
+    # rather than inside _build_job_prompt, avoids clearing it on a run that
+    # never actually reaches the agent (see the two early returns above).
+    if job.get("last_hard_stop_tool"):
+        try:
+            update_job(
+                job_id, {"last_hard_stop_tool": None, "last_hard_stop_at": None}
+            )
+        except Exception:
+            logger.debug(
+                "loop_guard: failed to clear hard-stop flag for job '%s'",
+                job_name,
+                exc_info=True,
+            )
 
     origin = _resolve_origin(job)
     _cron_session_id = f"cron_{job_id}_{_hermes_now().strftime('%Y%m%d_%H%M%S')}"
