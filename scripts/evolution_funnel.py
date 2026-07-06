@@ -50,6 +50,7 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
     Every field defaults to 0 / {} so a missing stage report never crashes the
     metric — it just shows that stage produced nothing recorded that day.
     """
+
     # Stage reports are normally dicts, but some stages write a bare LIST (e.g.
     # introspection emits a list of patterns). Coerce non-dicts to {} so .get()
     # never crashes the metric — a list-shaped report previously raised
@@ -58,7 +59,7 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
     def _as_dict(x: Any) -> Dict[str, Any]:
         return x if isinstance(x, dict) else {}
 
-    issues_raw = _load_json(evolution_dir / "issues" / f"{date}.json")
+    issues_raw = _load_json(issues_path := evolution_dir / "issues" / f"{date}.json")
     analysis = _as_dict(_load_json(evolution_dir / "analysis" / f"{date}.json"))
     integration = _as_dict(_load_json(evolution_dir / "integration" / f"{date}.json"))
     introspection_raw = _load_json(evolution_dir / "introspection" / f"{date}.json")
@@ -73,7 +74,13 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
         patterns = introspection_raw
     else:
         patterns = _as_dict(introspection_raw).get("patterns_found") or []
-    created = issues.get("issues_created") or []
+    created = issues.get("issues_created") or issues.get("created") or []
+    if "issues_created" not in issues and "created" in issues:
+        logger.warning(
+            "Schema drift in %s: issues report uses legacy key 'created' "
+            "instead of 'issues_created'",
+            issues_path,
+        )
 
     return {
         "date": date,
@@ -187,7 +194,9 @@ def summarize(records: list[Dict[str, Any]], last: int = 7) -> Dict[str, Any]:
 
     flags: list[str] = []
     if reject_rate > 0.70:
-        flags.append("HIGH_REJECT_RATE: be more selective — only high-evidence proposals")
+        flags.append(
+            "HIGH_REJECT_RATE: be more selective — only high-evidence proposals"
+        )
     if merged_zero_streak >= 3:
         flags.append(
             f"MERGED_ZERO x{merged_zero_streak}: integration looks stuck — check CI / flaky gates"
@@ -262,7 +271,10 @@ def main(argv: list[str]) -> int:
 
             date = cycle_date(_now())
         except Exception:
-            print("[evolution-funnel] no date given and clock unavailable", file=sys.stderr)
+            print(
+                "[evolution-funnel] no date given and clock unavailable",
+                file=sys.stderr,
+            )
             return 1
 
     record = compute_funnel(evolution_dir, date)
@@ -274,12 +286,14 @@ def main(argv: list[str]) -> int:
     # agree), emit a halt state. This prevents the pipeline from burning
     # API credits on a broken loop: cron jobs check for the halt file before
     # spawning expensive LLM stages.
-    _halt_threshold_merged = 5   # cycles with merged=0
-    _halt_threshold_selected = 3 # cycles with selected=0
+    _halt_threshold_merged = 5  # cycles with merged=0
+    _halt_threshold_selected = 3  # cycles with selected=0
     _halt_file = evolution_dir / "halt-state.txt"
     try:
         _all_records = load_records(evolution_dir / "metrics.jsonl")
-        _summary = summarize(_all_records, max(_halt_threshold_merged, _halt_threshold_selected))
+        _summary = summarize(
+            _all_records, max(_halt_threshold_merged, _halt_threshold_selected)
+        )
         _merged_zero = _summary.get("merged_zero_streak", 0)
         # Count consecutive cycles with selected=0 too
         _selected_zero_streak = 0
@@ -288,7 +302,10 @@ def main(argv: list[str]) -> int:
                 _selected_zero_streak += 1
             else:
                 break
-        if _merged_zero >= _halt_threshold_merged and _selected_zero_streak >= _halt_threshold_selected:
+        if (
+            _merged_zero >= _halt_threshold_merged
+            and _selected_zero_streak >= _halt_threshold_selected
+        ):
             _halt_file.write_text(
                 f"# Evolution pipeline HALTED\n"
                 f"# Date: {date}\n"
@@ -324,7 +341,8 @@ def main(argv: list[str]) -> int:
     # the `file` toolset — they can't run `--summary` themselves (#84 loop).
     try:
         (evolution_dir / "funnel-summary.txt").write_text(
-            format_summary(summarize(load_records(evolution_dir / "metrics.jsonl"), 7)) + "\n",
+            format_summary(summarize(load_records(evolution_dir / "metrics.jsonl"), 7))
+            + "\n",
             encoding="utf-8",
         )
     except OSError:
@@ -337,7 +355,10 @@ def main(argv: list[str]) -> int:
         from evolution_metrics import compute_health, format_health
 
         (evolution_dir / "evolution-health.txt").write_text(
-            format_health(compute_health(load_records(evolution_dir / "metrics.jsonl"), 30)) + "\n",
+            format_health(
+                compute_health(load_records(evolution_dir / "metrics.jsonl"), 30)
+            )
+            + "\n",
             encoding="utf-8",
         )
     except Exception:
