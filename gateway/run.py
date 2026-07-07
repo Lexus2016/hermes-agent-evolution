@@ -18921,7 +18921,7 @@ def _run_planned_stop_watcher(
         stop_event.wait(poll_interval)
 
 
-def _start_gateway_housekeeping(stop_event: threading.Event, adapters=None, loop=None, interval: int = 60):
+def _start_gateway_housekeeping(stop_event: threading.Event, adapters=None, loop=None, interval: int = 60, runner=None):
     """Background thread for gateway-only periodic chores (NOT cron).
 
     Split out of the historical ``_start_cron_ticker`` so the cron *trigger*
@@ -18937,11 +18937,21 @@ def _start_gateway_housekeeping(stop_event: threading.Event, adapters=None, loop
     """
     from gateway.platforms.base import cleanup_image_cache, cleanup_document_cache
     from hermes_cli.debug import _sweep_expired_pastes
+    from gateway.code_skew import detect_code_skew
+    from hermes_cli.gateway import supports_systemd_services
 
     IMAGE_CACHE_EVERY = 60   # ticks — once per hour at default 60s interval
     CHANNEL_DIR_EVERY = 5    # ticks — every 5 minutes
     PASTE_SWEEP_EVERY = 60   # ticks — once per hour
     CURATOR_EVERY = 60       # ticks — poll hourly (inner gate handles the real cadence)
+    # Deploy-gap self-heal: a long-lived gateway freezes its ``sys.modules`` at
+    # boot, so a ``git pull`` / ``hermes update`` / evolution-integration deploy
+    # underneath it leaves the PROCESS running STALE code until it is restarted.
+    # Poll the checkout revision every few minutes and, on a service-managed
+    # host, request a graceful restart so the freshly-pulled code actually goes
+    # live without a human remembering to ``systemctl restart``.
+    SKEW_CHECK_EVERY = 5     # ticks — every ~5 minutes at the default 60s interval
+    _skew_restart_requested = False
 
     logger.info("Gateway housekeeping started (interval=%ds)", interval)
     tick_count = 0
@@ -19005,6 +19015,64 @@ def _start_gateway_housekeeping(stop_event: threading.Event, adapters=None, loop
                 )
             except Exception as e:
                 logger.debug("Curator tick error: %s", e)
+
+        # Deploy-gap self-heal (see SKEW_CHECK_EVERY above): detect a checkout
+        # that moved under this long-lived process and, on a service-managed
+        # host, request a graceful restart so the new code goes live. This is
+        # the SAME restart path as a manual ``/restart`` / SIGUSR1 (it drains
+        # active turns, then exits 75 so systemd respawns on the fresh
+        # checkout) — it introduces no restart behaviour that operators don't
+        # already invoke by hand. Evolution cron jobs are resumable by design
+        # (loop-guard/watchdog assume interruption), so we don't block on them;
+        # we DO defer while an interactive agent turn is mid-flight.
+        if (
+            not _skew_restart_requested
+            and runner is not None
+            and loop is not None
+            and tick_count % SKEW_CHECK_EVERY == 0
+        ):
+            try:
+                skew = detect_code_skew()
+                if skew is not None:
+                    boot_rev, disk_rev = skew
+                    if not supports_systemd_services():
+                        logger.info(
+                            "Code skew detected (booted %s, disk %s) but the gateway "
+                            "is not service-managed — restart it manually to load new "
+                            "code.",
+                            boot_rev,
+                            disk_rev,
+                        )
+                        _skew_restart_requested = True  # nothing to act on; notify once
+                    elif getattr(runner, "_running_agents", None):
+                        # An interactive turn is mid-flight — defer to the next
+                        # check rather than racing its drain. Latch stays False so
+                        # we retry; do NOT act now.
+                        logger.info(
+                            "Code skew detected (booted %s, disk %s); deferring "
+                            "restart until active agent turns finish.",
+                            boot_rev,
+                            disk_rev,
+                        )
+                    else:
+                        logger.warning(
+                            "Code skew detected (gateway booted at %s, checkout now "
+                            "at %s) — requesting a graceful restart to load new code.",
+                            boot_rev,
+                            disk_rev,
+                        )
+                        loop.call_soon_threadsafe(
+                            lambda: runner.request_restart(
+                                detached=False, via_service=True
+                            )
+                        )
+                        # Latch ONLY after the restart was successfully scheduled.
+                        # If call_soon_threadsafe raised (e.g. loop closing), the
+                        # except below catches it and the latch stays False, so the
+                        # next check retries instead of silently giving up.
+                        _skew_restart_requested = True
+            except Exception as e:
+                logger.debug("Code-skew restart check error: %s", e)
 
         stop_event.wait(timeout=interval)
     logger.info("Gateway housekeeping stopped")
@@ -19498,7 +19566,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     housekeeping_thread = threading.Thread(
         target=_start_gateway_housekeeping,
         args=(cron_stop,),
-        kwargs={"adapters": runner.adapters, "loop": asyncio.get_running_loop()},
+        kwargs={"adapters": runner.adapters, "loop": asyncio.get_running_loop(), "runner": runner},
         daemon=True,
         name="gateway-housekeeping",
     )

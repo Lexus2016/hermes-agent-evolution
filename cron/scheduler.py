@@ -301,6 +301,7 @@ from cron.jobs import (
     _jobs_lock,
     advance_next_run,
     claim_dispatch,
+    update_job,
 )
 
 # Sentinel: when a cron agent has nothing new to report, it can start its
@@ -2257,6 +2258,12 @@ def _parse_wake_gate(script_output: str) -> bool:
     return gate.get("wakeAgent", True) is not False
 
 
+# Number of turns the one-shot post-hard-stop diversion directive (see #720)
+# asks the agent to avoid the previously stuck tool for, at the start of the
+# next run of the same cron job.
+_HARD_STOP_DIVERSION_TURNS = 5
+
+
 def _build_job_prompt(job: dict, prerun_script: Optional[tuple] = None) -> str:
     """Build the effective prompt for a cron job, optionally loading one or more skills first.
 
@@ -2364,6 +2371,36 @@ def _build_job_prompt(job: dict, prerun_script: Optional[tuple] = None) -> str:
                     e,
                 )
                 # silent skip — do not pollute the prompt with error messages
+
+    # One-shot diversion directive: if the previous run of this job was
+    # hard-stopped by the cron loop guard (see #720), steer this run away
+    # from the tool it got stuck on. The flag is cleared by the caller
+    # (_run_job_impl) once it knows the agent run is actually going ahead —
+    # NOT here, since this function can be short-circuited afterwards
+    # (CronPromptInjectionBlocked, empty script output) before any agent
+    # ever sees the directive.
+    stuck_tool = job.get("last_hard_stop_tool")
+    if stuck_tool:
+        try:
+            from agent.loop_guard import _diversion_hint
+
+            advice = _diversion_hint(stuck_tool)
+            prompt = (
+                f"[NOTE: The previous run of this cron job was stopped by the "
+                f"loop guard after getting stuck repeating `{stuck_tool}` calls "
+                f"with no progress. For at least your first {_HARD_STOP_DIVERSION_TURNS} "
+                f"turns this run, avoid `{stuck_tool}` and prefer alternatives "
+                f"(file reads, repo_map, delegating to a subagent) unless it is "
+                f"truly unavoidable."
+                f"{(' ' + advice) if advice else ''}]\n\n"
+            ) + prompt
+        except Exception:
+            logger.debug(
+                "loop_guard: failed to build diversion hint for job_id=%r%s",
+                job.get("id"),
+                _cron_job_origin_log_suffix(job),
+                exc_info=True,
+            )
 
     # Always prepend cron execution guidance so the agent knows how
     # delivery works and can suppress delivery when appropriate.
@@ -2961,6 +2998,23 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
     if prompt is None:
         logger.info("Job '%s': script produced no output, skipping AI call.", job_name)
         return True, "", SILENT_MARKER, None
+
+    # The prompt (including any one-shot hard-stop diversion directive built
+    # by _build_job_prompt above) is final and the agent run is definitely
+    # going ahead — safe to consume the one-shot flag now. Doing this here,
+    # rather than inside _build_job_prompt, avoids clearing it on a run that
+    # never actually reaches the agent (see the two early returns above).
+    if job.get("last_hard_stop_tool"):
+        try:
+            update_job(
+                job_id, {"last_hard_stop_tool": None, "last_hard_stop_at": None}
+            )
+        except Exception:
+            logger.debug(
+                "loop_guard: failed to clear hard-stop flag for job '%s'",
+                job_name,
+                exc_info=True,
+            )
 
     origin = _resolve_origin(job)
     _cron_session_id = f"cron_{job_id}_{_hermes_now().strftime('%Y%m%d_%H%M%S')}"
@@ -3650,6 +3704,23 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
         if result.get("failed") is True or (
             result.get("completed") is False and not max_iteration_summary
         ):
+            if turn_exit_reason == "loop_guard_cron_hard_stop":
+                _stuck_tool = getattr(agent, "_loop_guard_tracked_tool", None)
+                if _stuck_tool:
+                    try:
+                        update_job(
+                            job_id,
+                            {
+                                "last_hard_stop_tool": _stuck_tool,
+                                "last_hard_stop_at": _hermes_now().isoformat(),
+                            },
+                        )
+                    except Exception:
+                        logger.debug(
+                            "loop_guard: failed to persist hard-stop tool for job '%s'",
+                            job_name,
+                            exc_info=True,
+                        )
             _err_text = (
                 result.get("error") or final_response_text or "agent reported failure"
             )

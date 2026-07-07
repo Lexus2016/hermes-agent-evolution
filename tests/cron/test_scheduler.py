@@ -1899,6 +1899,99 @@ class TestRunJobSessionPersistence:
         assert fake_db.close.call_count == 2
 
 
+class TestLoopGuardHardStopPersistence:
+    """Issue #720: when the cron loop guard hard-stops a run, persist the
+    stuck tool onto the job record so the NEXT run of the same job can be
+    steered away from it (see _build_job_prompt's diversion directive).
+    """
+
+    def _run(self, tmp_path, agent_result, tracked_tool):
+        job = {
+            "id": "hard-stop-job",
+            "name": "hard stop test job",
+            "prompt": "do something",
+        }
+        fake_db = MagicMock()
+
+        with patch("cron.scheduler._hermes_home", tmp_path), \
+             patch("cron.scheduler._resolve_origin", return_value=None), \
+             patch("hermes_cli.env_loader.load_hermes_dotenv"), \
+             patch("hermes_cli.env_loader.reset_secret_source_cache"), \
+             patch("hermes_state.SessionDB", return_value=fake_db), \
+             patch(
+                 "hermes_cli.runtime_provider.resolve_runtime_provider",
+                 return_value={
+                     "api_key": "***",
+                     "base_url": "https://example.invalid/v1",
+                     "provider": "openrouter",
+                     "api_mode": "chat_completions",
+                 },
+             ), \
+             patch("run_agent.AIAgent") as mock_agent_cls, \
+             patch("cron.scheduler.update_job") as mock_update_job:
+            mock_agent = MagicMock()
+            mock_agent._loop_guard_tracked_tool = tracked_tool
+            mock_agent.run_conversation.return_value = agent_result
+            mock_agent_cls.return_value = mock_agent
+
+            result = run_job(job)
+
+        return result, mock_update_job
+
+    def test_hard_stop_persists_stuck_tool_on_job(self, tmp_path):
+        agent_result = {
+            "final_response": "",
+            "completed": False,
+            "failed": True,
+            "turn_exit_reason": "loop_guard_cron_hard_stop",
+            "error": "[loop-guard] Unattended cron session stuck on `terminal` ...",
+        }
+        (success, output, final_response, error), mock_update_job = self._run(
+            tmp_path, agent_result, tracked_tool="terminal"
+        )
+
+        assert success is False
+        mock_update_job.assert_called_once()
+        called_job_id, called_updates = mock_update_job.call_args[0]
+        assert called_job_id == "hard-stop-job"
+        assert called_updates["last_hard_stop_tool"] == "terminal"
+        assert called_updates["last_hard_stop_at"]  # non-empty ISO timestamp
+
+    def test_non_hard_stop_failure_does_not_persist(self, tmp_path):
+        """A regular agent failure (not the loop-guard hard stop) must not
+        write a hard-stop marker — only the specific exit reason does."""
+        agent_result = {
+            "final_response": "",
+            "completed": False,
+            "failed": True,
+            "turn_exit_reason": "",
+            "error": "some other failure",
+        }
+        (success, output, final_response, error), mock_update_job = self._run(
+            tmp_path, agent_result, tracked_tool="terminal"
+        )
+
+        assert success is False
+        mock_update_job.assert_not_called()
+
+    def test_hard_stop_without_tracked_tool_does_not_persist(self, tmp_path):
+        """Defensive: if the loop guard hard-stopped but no tool name was
+        tracked on the agent, there is nothing useful to persist."""
+        agent_result = {
+            "final_response": "",
+            "completed": False,
+            "failed": True,
+            "turn_exit_reason": "loop_guard_cron_hard_stop",
+            "error": "[loop-guard] ...",
+        }
+        (success, output, final_response, error), mock_update_job = self._run(
+            tmp_path, agent_result, tracked_tool=None
+        )
+
+        assert success is False
+        mock_update_job.assert_not_called()
+
+
 class TestRunJobConfigLogging:
     """Verify that config.yaml parse failures are logged, not silently swallowed."""
 
@@ -2799,6 +2892,157 @@ class TestBuildJobPromptSilentHint:
         system_pos = result.index("do NOT use send_message")
         prompt_pos = result.index("My custom prompt")
         assert system_pos < prompt_pos
+
+
+class TestBuildJobPromptHardStopDiversion:
+    """Issue #720: a job whose previous run was hard-stopped by the cron loop
+    guard gets a one-shot directive steering it away from the stuck tool.
+
+    _build_job_prompt only builds the directive text — it must NOT clear the
+    flag itself, since the run can still be short-circuited afterwards
+    (CronPromptInjectionBlocked, empty script output) before the agent ever
+    sees it. Clearing is _run_job_impl's job, once the run is confirmed to
+    proceed — covered by TestLoopGuardHardStopPersistence below.
+    """
+
+    def test_no_directive_when_no_hard_stop_recorded(self):
+        job = {"id": "abc123deadbe", "prompt": "do something"}
+        with patch("cron.scheduler.update_job") as mock_update_job:
+            result = _build_job_prompt(job)
+        assert "loop guard" not in result
+        mock_update_job.assert_not_called()
+
+    def test_directive_mentions_stuck_tool_and_advice(self):
+        job = {
+            "id": "abc123deadbe",
+            "prompt": "do something",
+            "last_hard_stop_tool": "terminal",
+        }
+        with patch("cron.scheduler.update_job") as mock_update_job:
+            result = _build_job_prompt(job)
+        assert "`terminal`" in result
+        assert "loop guard" in result
+        # Reused straight from agent.loop_guard._DIVERSION_HINT["terminal"].
+        assert "Read the failing output above" in result
+        # _build_job_prompt only builds text — clearing happens in _run_job_impl.
+        mock_update_job.assert_not_called()
+
+    def test_directive_precedes_user_prompt(self):
+        job = {
+            "id": "abc123deadbe",
+            "prompt": "My custom prompt",
+            "last_hard_stop_tool": "terminal",
+        }
+        with patch("cron.scheduler.update_job"):
+            result = _build_job_prompt(job)
+        directive_pos = result.index("loop guard")
+        prompt_pos = result.index("My custom prompt")
+        assert directive_pos < prompt_pos
+
+    def test_directive_built_for_unknown_tool_without_clearing(self):
+        """An unrecognized tool name (no entry in the hint tables) should
+        still produce a directive; the flag is left for _run_job_impl to clear."""
+        job = {
+            "id": "abc123deadbe",
+            "prompt": "do something",
+            "last_hard_stop_tool": "some_future_tool",
+        }
+        with patch("cron.scheduler.update_job") as mock_update_job:
+            result = _build_job_prompt(job)
+        assert "`some_future_tool`" in result
+        mock_update_job.assert_not_called()
+
+
+class TestHardStopFlagClearing:
+    """Issue #720: the one-shot ``last_hard_stop_tool`` flag must be cleared
+    only once the agent run is confirmed to actually proceed — never on a
+    run that gets short-circuited before ``AIAgent`` is ever constructed
+    (wake-gate ``{"wakeAgent": false}``, ``CronPromptInjectionBlocked``).
+    See TestBuildJobPromptHardStopDiversion above for why the clearing call
+    lives in _run_job_impl rather than _build_job_prompt.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _stub_runtime_provider(self):
+        fake_runtime = {
+            "provider": "openrouter",
+            "api_mode": "chat_completions",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "test-key",
+            "source": "stub",
+            "requested_provider": None,
+        }
+        with patch(
+            "hermes_cli.runtime_provider.resolve_runtime_provider",
+            return_value=fake_runtime,
+        ):
+            yield
+
+    def _make_job(self, **overrides):
+        job = {
+            "id": "job_hard-stop-clear",
+            "name": "hard-stop-clear-test",
+            "prompt": "Do a thing",
+            "schedule": "*/5 * * * *",
+            "last_hard_stop_tool": "terminal",
+            "last_hard_stop_at": "2026-07-01T00:00:00+00:00",
+        }
+        job.update(overrides)
+        return job
+
+    def test_normal_run_clears_hard_stop_flag(self):
+        """A run that proceeds all the way to the agent clears the one-shot
+        flag so the diversion directive doesn't repeat forever."""
+        import cron.scheduler as scheduler
+
+        agent = MagicMock()
+        agent.run_conversation = MagicMock(return_value={
+            "final_response": "ok", "messages": []
+        })
+        with patch("run_agent.AIAgent", return_value=agent), \
+             patch("cron.scheduler.update_job") as mock_update_job:
+            success, doc, final, err = scheduler.run_job(self._make_job())
+
+        assert success is True
+        mock_update_job.assert_called_once_with(
+            "job_hard-stop-clear",
+            {"last_hard_stop_tool": None, "last_hard_stop_at": None},
+        )
+
+    def test_wake_gate_false_does_not_clear_flag(self):
+        """The wake-gate short-circuit fires BEFORE the agent is ever
+        constructed — the flag must survive so the diversion directive is
+        still there on the NEXT run."""
+        import cron.scheduler as scheduler
+
+        with patch.object(scheduler, "_run_job_script",
+                          return_value=(True, '{"wakeAgent": false}')), \
+             patch("run_agent.AIAgent") as agent_cls, \
+             patch("cron.scheduler.update_job") as mock_update_job:
+            success, doc, final, err = scheduler.run_job(
+                self._make_job(script="check.py")
+            )
+
+        assert success is True
+        agent_cls.assert_not_called()
+        mock_update_job.assert_not_called()
+
+    def test_prompt_injection_block_does_not_clear_flag(self):
+        """If the assembled prompt trips the injection scanner, the agent
+        never runs — the flag must be preserved for the next attempt."""
+        import cron.scheduler as scheduler
+
+        with patch.object(
+            scheduler, "_build_job_prompt",
+            side_effect=scheduler.CronPromptInjectionBlocked("prompt_injection: test"),
+        ), \
+             patch("run_agent.AIAgent") as agent_cls, \
+             patch("cron.scheduler.update_job") as mock_update_job:
+            success, doc, final, err = scheduler.run_job(self._make_job())
+
+        assert success is False
+        agent_cls.assert_not_called()
+        mock_update_job.assert_not_called()
 
 
 class TestParseWakeGate:
