@@ -75,6 +75,16 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
     else:
         patterns = _as_dict(introspection_raw).get("patterns_found") or []
     created = issues.get("issues_created") or issues.get("created") or []
+    # A legacy stage report may use `proposals_filed` (a list of issue dicts)
+    # but omit `issues_created`/`created`. Count those too.
+    if not created and "proposals_filed" in issues:
+        created = issues.get("proposals_filed") or []
+        if created:
+            logger.warning(
+                "Schema drift in %s: issues report uses legacy key 'proposals_filed' "
+                "instead of 'issues_created'",
+                issues_path,
+            )
     if "issues_created" not in issues and "created" in issues:
         logger.warning(
             "Schema drift in %s: issues report uses legacy key 'created' "

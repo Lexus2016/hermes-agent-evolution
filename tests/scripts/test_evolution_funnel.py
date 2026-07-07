@@ -125,15 +125,21 @@ class TestComputeFunnel:
         assert "legacy key 'created'" in caplog.text
         assert "2026-07-04" in caplog.text
 
-    def test_canonical_issues_created_key_no_warning(self, tmp_path, caplog):
-        # 2026-07-05 issue report uses canonical 'issues_created' key.
+    def test_legacy_proposals_filed_key_counts_and_warns(self, tmp_path, caplog):
+        # 2026-07-05 issue report used 'proposals_filed' instead of 'issues_created'.
         import logging
 
         d = "2026-07-05"
         _write(
             tmp_path / "issues" / f"{d}.json",
             {
-                "issues_created": [{"number": 737}],
+                "date": d,
+                "proposals_filed": [
+                    {"issue": "734", "title": "[FEATURE] Online verifier-based safety monitor", "priority_score": 1.31},
+                    {"issue": "735", "title": "[FEATURE] Stateful multi-PR attack monitor for coding agents", "priority_score": 1.40},
+                    {"issue": "736", "title": "[IMPROVEMENT] Recursive evidence replay for long-context reasoning", "priority_score": 1.25},
+                    {"issue": "737", "title": "[FIX] Harden terminal/read_file/browser tool retry spirals", "priority_score": 2.13},
+                ],
             },
         )
         _write(
@@ -145,8 +151,9 @@ class TestComputeFunnel:
         with caplog.at_level(logging.WARNING, logger="evolution_funnel"):
             r = compute_funnel(tmp_path, d)
 
-        assert r["issues_created"] == 1
-        assert "legacy key" not in caplog.text
+        assert r["issues_created"] == 4
+        assert "legacy key 'proposals_filed'" in caplog.text
+        assert d in caplog.text
 
 
 class TestCycleDate:
