@@ -155,6 +155,15 @@ Implement selected issues, create versions, and self-update.
 
 3. **Implement** each issue that passes the re-check:
 
+> ⛔ **You run inside a git WORKTREE for this whole session.** `git checkout main`
+> / `git switch main` / `git rebase main` / `git merge main` FAIL everywhere with
+> `fatal: 'main' is already used by worktree at ...` — do NOT run them at ANY
+> point (not to "start clean", "sync", "rebase onto main", or "reset"). Always
+> reference **`origin/main`** instead:
+> - start your branch: `git fetch origin main && git checkout -B <branch> origin/main`
+> - re-sync mid-work to latest main: `git fetch origin main && git rebase origin/main`
+> - discard to a clean main state: `git fetch origin main && git reset --hard origin/main`
+
 ### Create a branch
 ```bash
 # This job runs INSIDE a dedicated git worktree (its workdir is a separate
