@@ -134,9 +134,15 @@ Implement selected issues, create versions, and self-update.
 
 ### Create a branch
 ```bash
-git checkout main
-git pull origin main
-git checkout -b evolution/issue-123-feature-name
+# This job runs INSIDE a dedicated git worktree (its workdir is a separate
+# checkout, e.g. /root/hermes-evolution-work). `git checkout main` FAILS there
+# with "fatal: 'main' is already used by worktree at ..." because main is
+# checked out in the primary repo. Create the issue branch DIRECTLY from a
+# freshly-fetched origin/main with `-B` — this both starts from clean latest
+# main AND resets the shared worktree, discarding any leftover branch/state from
+# a previous run. Do NOT `git checkout main` here.
+git fetch origin main
+git checkout -B evolution/issue-123-feature-name origin/main
 ```
 
 ### Implement the changes

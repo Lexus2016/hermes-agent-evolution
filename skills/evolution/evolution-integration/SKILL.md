@@ -276,7 +276,10 @@ hermes update --yes
 # PRE-merge scripts, and the no_agent fix (funnel/watchdog/etc.) silently never
 # deploys. The tree is clean at this step (we only ran gh, no edits), so a
 # fast-forward to origin/main is safe and deterministic:
-git fetch origin --quiet && git checkout main 2>/dev/null && git reset --hard origin/main
+# worktree-safe: this job runs inside a shared worktree where `git checkout main`
+# fails ("main is already used by worktree"). Fetch + hard-reset the current
+# worktree branch to origin/main reaches the same clean, up-to-date main state.
+git fetch origin --quiet && git reset --hard origin/main
 # Re-deploy evolution scripts + cron. The scheduler runs scripts from
 # HERMES_HOME/scripts and cron jobs from ~/.hermes/cron/jobs.json — NOT from the
 # repo checkout. register_evolution_cron copies the whole evolution_* script

@@ -1420,7 +1420,14 @@ CONTEXT_TRUNCATE_TAIL_RATIO = 0.2
 # slice of the window on context files since they share the cached prefix with
 # the system prompt, tools, memory, and the whole conversation.
 _CONTEXT_FILE_CHARS_PER_TOKEN = 4
-_CONTEXT_FILE_WINDOW_FRACTION = 0.06
+# Bumped 0.06 -> 0.08 (#B3): at 0.06 a 256K-context model capped context files at
+# ~62.9K chars, which TRUNCATED the repo's 72K AGENTS.md — the evolution cron
+# agents silently lost its whole tail (## Known Pitfalls, incl. "squash merges
+# from stale branches silently revert fixes" — directly relevant to the merge
+# pipeline — and ## Testing standards). 0.08 fits AGENTS.md in full on a 256K
+# window. This only raises the cap for LARGE-context models; small-context models
+# stay pinned to the CONTEXT_FILE_MAX_CHARS (20K) floor, so nothing regresses.
+_CONTEXT_FILE_WINDOW_FRACTION = 0.08
 _CONTEXT_FILE_DYNAMIC_CEILING = 500_000
 
 
