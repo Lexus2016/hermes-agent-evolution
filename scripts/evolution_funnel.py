@@ -74,13 +74,29 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
         patterns = introspection_raw
     else:
         patterns = _as_dict(introspection_raw).get("patterns_found") or []
-    created = issues.get("issues_created") or issues.get("created") or []
-    if "issues_created" not in issues and "created" in issues:
-        logger.warning(
-            "Schema drift in %s: issues report uses legacy key 'created' "
-            "instead of 'issues_created'",
-            issues_path,
-        )
+    # The issues stage has historically emitted several keys for the same list.
+    # Canonical is ``issues_created``; aliases are ``created`` and
+    # ``proposals_filed`` (used briefly around 2026-07-05). Count any of them so
+    # a schema rename never silently zeros the funnel.
+    created = (
+        issues.get("issues_created")
+        or issues.get("created")
+        or issues.get("proposals_filed")
+        or []
+    )
+    if "issues_created" not in issues:
+        if "created" in issues:
+            logger.warning(
+                "Schema drift in %s: issues report uses legacy key 'created' "
+                "instead of 'issues_created'",
+                issues_path,
+            )
+        elif "proposals_filed" in issues:
+            logger.warning(
+                "Schema drift in %s: issues report uses legacy key 'proposals_filed' "
+                "instead of 'issues_created'",
+                issues_path,
+            )
 
     return {
         "date": date,

@@ -148,6 +148,32 @@ class TestComputeFunnel:
         assert r["issues_created"] == 1
         assert "legacy key" not in caplog.text
 
+    def test_proposals_filed_legacy_key_counts_and_warns(self, tmp_path, caplog):
+        # 2026-07-05 issue report briefly used 'proposals_filed' instead of
+        # 'issues_created', which caused metrics.jsonl to record created=0.
+        import logging
+
+        d = "2026-07-05"
+        _write(
+            tmp_path / "issues" / f"{d}.json",
+            {
+                "date": d,
+                "proposals_filed": [{"number": 734}, {"number": 735}],
+            },
+        )
+        _write(
+            tmp_path / "analysis" / f"{d}.json",
+            {"selected_for_implementation": [], "rejected": []},
+        )
+        _write(tmp_path / "integration" / f"{d}.json", {"merged": [], "skipped": []})
+
+        with caplog.at_level(logging.WARNING, logger="evolution_funnel"):
+            r = compute_funnel(tmp_path, d)
+
+        assert r["issues_created"] == 2
+        assert "legacy key 'proposals_filed'" in caplog.text
+        assert "2026-07-05" in caplog.text
+
 
 class TestCycleDate:
     def test_morning_run_measures_yesterday(self):
