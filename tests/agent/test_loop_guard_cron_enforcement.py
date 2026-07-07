@@ -16,6 +16,8 @@ from unittest.mock import patch
 
 from run_agent import AIAgent
 
+from agent.loop_guard import CRON_LOOP_GUARD_HARD_STOP_THRESHOLD
+
 
 def _make_tool_defs(*names: str) -> list[dict]:
     return [
@@ -200,6 +202,90 @@ def test_non_cron_platform_keeps_nudging_advisory_only():
         patch.object(agent, "_cleanup_task_resources"),
     ):
         result = agent.run_conversation("run the same command repeatedly")
+
+    assert result.get("failed") is not True
+    assert result["turn_exit_reason"] != "loop_guard_cron_hard_stop"
+
+
+def _distinct_terminal_run(n: int):
+    """n DISTINCT successful terminal calls, then a text-only "done" — models an
+    implementation job's real finalization burst (lint -> git add -> commit ->
+    push -> gh pr create): a run of different, succeeding commands, NOT a loop."""
+    responses = [
+        _mock_response(
+            content="",
+            finish_reason="tool_calls",
+            tool_calls=[
+                _mock_tool_call("terminal", json.dumps({"command": f"step-{i}"}), f"c{i}")
+            ],
+        )
+        for i in range(n)
+    ]
+    responses.append(_mock_response(content="done", finish_reason="stop", tool_calls=None))
+    return responses
+
+
+def _process_polling_run(n: int):
+    """n identical successful `process` polls (waiting on a background CI job),
+    then a text-only "done" — models an integration job polling a background
+    process while a PR's checks settle. Legitimate waiting, not a spiral."""
+    responses = [
+        _mock_response(
+            content="",
+            finish_reason="tool_calls",
+            tool_calls=[
+                _mock_tool_call("process", json.dumps({"action": "status", "id": "p1"}), f"c{i}")
+            ],
+        )
+        for i in range(n)
+    ]
+    responses.append(_mock_response(content="done", finish_reason="stop", tool_calls=None))
+    return responses
+
+
+def test_cron_does_not_hard_stop_distinct_successful_terminal_burst():
+    """Regression: the evolution-implementation job was hard-stopped and marked
+    failed on essentially every run because its PR-finalization burst of
+    DISTINCT successful `terminal` calls tripped the advisory-nudge counter.
+    The nudges still fire (proving the counter reached the hard-stop
+    threshold), but the second gate (run_warrants_cron_hard_stop) recognizes
+    real progress and refuses to kill the run."""
+    agent = _make_agent("terminal", max_iterations=25, platform="cron")
+    agent.client.chat.completions.create.side_effect = _distinct_terminal_run(18)
+
+    with (
+        patch("run_agent.handle_function_call", return_value="command completed"),
+        patch.object(agent, "_persist_session"),
+        patch.object(agent, "_save_trajectory"),
+        patch.object(agent, "_cleanup_task_resources"),
+    ):
+        result = agent.run_conversation("finalize and open the PR")
+
+    # The advisory counter DID reach the hard-stop threshold (>=2 nudges) ...
+    nudge_msgs = [
+        m for m in result["messages"]
+        if m.get("role") == "user" and "[loop-guard]" in str(m.get("content", ""))
+    ]
+    assert len(nudge_msgs) >= CRON_LOOP_GUARD_HARD_STOP_THRESHOLD
+    # ... but the run was NOT hard-stopped — distinct successful work is progress.
+    assert result.get("failed") is not True
+    assert result["turn_exit_reason"] != "loop_guard_cron_hard_stop"
+
+
+def test_cron_does_not_hard_stop_process_polling():
+    """Regression: the evolution-integration job was hard-stopped on every run
+    while legitimately polling a background `process` for CI completion.
+    Polling tools are exempt from the hard stop (only a FAILING poll stops)."""
+    agent = _make_agent("process", max_iterations=25, platform="cron")
+    agent.client.chat.completions.create.side_effect = _process_polling_run(18)
+
+    with (
+        patch("run_agent.handle_function_call", return_value="still running"),
+        patch.object(agent, "_persist_session"),
+        patch.object(agent, "_save_trajectory"),
+        patch.object(agent, "_cleanup_task_resources"),
+    ):
+        result = agent.run_conversation("merge the PR once CI is green")
 
     assert result.get("failed") is not True
     assert result["turn_exit_reason"] != "loop_guard_cron_hard_stop"

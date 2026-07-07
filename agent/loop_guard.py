@@ -214,6 +214,17 @@ _IDEMPOTENT_FAIL_THRESHOLD = 4
 _MUTATING_ESCALATE_THRESHOLD = 8
 _IDEMPOTENT_ESCALATE_THRESHOLD = 15
 
+# Monitoring/polling tools whose whole PURPOSE is to be called repeatedly to
+# observe a long-running background job (CI runs, `hermes update`, a spawned
+# process). Re-checking the same handle and getting the same "still running"
+# answer is legitimate WAITING, not a spiral, so these are exempt from the cron
+# HARD STOP below (they still receive purely-advisory nudges, and a genuinely
+# FAILING poll is still caught by the failure branch). Without this, the
+# evolution-integration job — which polls a background process while it waits
+# for a PR's CI to settle — was hard-stopped and marked failed on essentially
+# every run (see run_warrants_cron_hard_stop).
+_POLLING_TOOLS = frozenset({"process"})
+
 # Unattended cron sessions get real enforcement, not just advisory text (#624):
 # advisory nudges are routinely ignored by the model with no human present to
 # course-correct (observed: 9 warnings ignored, 65 consecutive terminal calls).
@@ -582,3 +593,103 @@ def current_run_signature(messages: List[Dict[str, Any]]) -> Optional[Tuple[str,
     if not runs:
         return None
     return (runs[0][0], len(runs))
+
+
+def run_warrants_cron_hard_stop(messages: List[Dict[str, Any]]) -> bool:
+    """Second gate on the #624 cron hard stop: end the turn as a failure ONLY
+    when the trailing single-tool run is genuinely FLAILING (no progress), never
+    when it is doing legitimate mono-tool work that merely LOOKS repetitive.
+
+    The advisory-nudge counter alone over-triggers: the evolution
+    implementation and integration jobs were hard-stopped and marked failed on
+    essentially every run because their legitimate core workflow IS a burst of
+    consecutive same-tool calls —
+
+      * implementation: a run of DISTINCT, successful `terminal` calls to
+        finalize a change (lint -> format -> git add -> commit -> push ->
+        gh pr create). Distinct successful commands are real progress, not a
+        spiral.
+      * integration: repeated `process` polls while WAITING for a PR's CI to
+        settle. Re-checking a background job is that tool's purpose, not a loop.
+
+    So a hard stop is warranted only for genuine non-progress:
+
+      1. A deterministic non-retryable failure repeated (`_NON_RETRYABLE`).
+      2. The tool FAILING `fail_threshold`+ times in a row (the real #624 case:
+         terminal timeouts / denied paths retried unchanged).
+      3. A non-monitoring tool called `>= 2` times with the EXACT same arguments
+         and no failure — a degenerate identical-call loop (`echo hi` x N).
+         Deliberately strict (not a diversity ratio): cyclic INSPECTION with
+         varied args (git status/diff across files) is legitimate progress.
+
+    A trailing run of DISTINCT, successful calls (real progress) or any polling
+    of a `_POLLING_TOOLS` handle returns False here: keep nudging advisorily,
+    but do NOT kill the run. The iteration/budget guard remains the backstop
+    against a truly unbounded distinct-call loop.
+    """
+    runs = _recent_tool_runs(messages)
+    if not runs:
+        return False
+    tool = runs[0][0]
+    same = [r for r in runs if r[0] == tool]
+
+    # Trailing consecutive failures (most-recent-first), tracking a run of the
+    # SAME deterministic non-retryable class — mirrors maybe_nudge's counting.
+    consec_fail = 0
+    consec_nonretry = 0
+    nonretry_class: Optional[str] = None
+    counting_nonretry = True
+    for _t, failed, category, _arg_hash in same:
+        if failed:
+            consec_fail += 1
+        else:
+            break
+        if counting_nonretry and category in _NON_RETRYABLE:
+            if nonretry_class is None or category == nonretry_class:
+                nonretry_class = category
+                consec_nonretry += 1
+            else:
+                counting_nonretry = False
+        else:
+            counting_nonretry = False
+
+    cat = _tool_category(tool)
+    is_mutating_or_unknown = cat in ("mutating", "unknown")
+    fail_threshold = (
+        _MUTATING_FAIL_THRESHOLD
+        if is_mutating_or_unknown
+        else _IDEMPOTENT_FAIL_THRESHOLD
+    )
+
+    # (1) + (2): genuine failing spiral — applies to every tool, including
+    # polling tools (a `process` that keeps ERRORING is still a real problem).
+    if consec_nonretry >= _NONRETRY_THRESHOLD:
+        return True
+    if consec_fail >= fail_threshold:
+        return True
+
+    # Polling/monitoring tools: repeated SUCCESSFUL identical polls are
+    # legitimate waiting, not a loop. Only the failure branch above can stop
+    # them. (Observed in prod: the integration job uses 60s BLOCKING waits, so
+    # a tight budget-burn is not the real pattern; the iteration budget is the
+    # backstop for a pathological no-sleep poller.)
+    if tool in _POLLING_TOOLS:
+        return False
+
+    # (3): degenerate EXACT-identical repetition with no failure — the same call
+    # producing the same non-progressing result (the canonical #624 `echo hi`
+    # x N loop). Deliberately STRICT (all args identical), not a diversity
+    # ratio: a cross-provider review (Kimi) showed that any "unique <= calls/2"
+    # style ratio false-positives on legitimate cyclic INSPECTION — e.g. a merge
+    # resolution doing `git status` -> `git diff A` -> `git diff B` -> `git
+    # status` ... (3 unique over 6 calls) is real progress with intervening
+    # state changes, not a spiral. Since the whole point of this gate is to stop
+    # KILLING legitimate work, we err toward the conservative check: a genuine
+    # oscillation that this misses merely wastes one run's budget (the iteration
+    # budget backstops it), whereas a false positive re-creates the exact
+    # daily-failure pain we are fixing. Distinct commands == real progress.
+    arg_hashes = [r[3] for r in same if r[3] is not None]
+    if len(same) >= 2 and arg_hashes and len(set(arg_hashes)) == 1:
+        return True
+
+    return False
