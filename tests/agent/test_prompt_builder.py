@@ -238,10 +238,10 @@ class TestDynamicContextFileCap:
         assert _dynamic_context_file_max_chars(8_000) == CONTEXT_FILE_MAX_CHARS
 
     def test_dynamic_scales_above_floor_for_large_window(self):
-        # 200K-token window → ~48K (200000 * 4 * 0.06), well above the floor
+        # 200K-token window → 64K (200000 * 4 * 0.08), well above the floor
         # and above Codex's 32 KiB project_doc default.
         cap = _dynamic_context_file_max_chars(200_000)
-        assert cap == 48_000
+        assert cap == 64_000
         assert cap > CONTEXT_FILE_MAX_CHARS
 
     def test_dynamic_respects_ceiling(self):
@@ -254,7 +254,7 @@ class TestDynamicContextFileCap:
 
     def test_get_context_file_max_chars_uses_context_length(self):
         # With no explicit config, the resolver derives the cap from context.
-        assert _get_context_file_max_chars(200_000) == 48_000
+        assert _get_context_file_max_chars(200_000) == 64_000
         assert _get_context_file_max_chars(None) == CONTEXT_FILE_MAX_CHARS
 
     def test_explicit_config_beats_dynamic(self, monkeypatch):
@@ -267,7 +267,7 @@ class TestDynamicContextFileCap:
 
     def test_large_window_avoids_truncation_of_midsize_doc(self):
         # A 30K-char AGENTS.md is truncated at the flat default but survives
-        # whole on a large-context model (dynamic cap ~48K).
+        # whole on a large-context model (dynamic cap ~64K).
         content = "z" * 30_000
         small = _truncate_content(content, "AGENTS.md", context_length=8_000)
         big = _truncate_content(content, "AGENTS.md", context_length=200_000)
