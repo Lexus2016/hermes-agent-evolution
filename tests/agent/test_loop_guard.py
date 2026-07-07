@@ -12,6 +12,7 @@ from agent.loop_guard import (
     CRON_LOOP_GUARD_HARD_STOP_THRESHOLD,
     current_run_signature,
     maybe_nudge,
+    run_warrants_cron_hard_stop,
     should_cron_hard_stop,
 )
 
@@ -481,3 +482,68 @@ class TestFailureClassAndDiversionHints:
         n = maybe_nudge(_run("read_file", 8))
         assert n is not None
         assert "repo_map" in n
+
+
+def _distinct_run(tool, n, *, result="ok"):
+    """n consecutive single-tool turns with DISTINCT arguments each (real
+    progress: a burst of different successful commands)."""
+    msgs = [{"role": "user", "content": "finalize the change"}]
+    for i in range(n):
+        cid = f"c{i}"
+        msgs.append(_asst(tool, args=json.dumps({"command": f"step-{i}"}), call_id=cid))
+        msgs.append(_result(result, call_id=cid))
+    return msgs
+
+
+class TestRunWarrantsCronHardStop:
+    """The second #624 gate: a cron hard stop is warranted ONLY for genuine
+    non-progress, never for legitimate mono-tool work that merely looks
+    repetitive (the evolution implementation/integration false positives)."""
+
+    def test_distinct_successful_terminal_burst_does_not_warrant(self):
+        # Implementation job: lint -> git add -> commit -> push -> gh pr create,
+        # 8 DISTINCT successful `terminal` calls. Real progress, not a spiral.
+        assert run_warrants_cron_hard_stop(_distinct_run("terminal", 8)) is False
+
+    def test_identical_successful_terminal_repeat_warrants(self):
+        # Canonical #624 degenerate loop: the SAME successful `echo hi` x N.
+        # Identical args + no progress -> hard stop stays warranted.
+        assert run_warrants_cron_hard_stop(_run("terminal", 6)) is True
+
+    def test_oscillating_successful_terminal_cycle_is_spared(self):
+        # Cyclic INSPECTION with varied args (git status -> git diff A ->
+        # git diff B -> ...) is legitimate progress with intervening state
+        # changes, NOT a spiral. A cross-provider review (Kimi) flagged that a
+        # diversity ratio would false-positive here and kill real merge-
+        # resolution work, so the gate deliberately spares varied-arg cycles
+        # (they are backstopped by the iteration budget, not hard-stopped).
+        msgs = [{"role": "user", "content": "figure out the state"}]
+        for i in range(6):
+            cid = f"c{i}"
+            cmd = "git status" if i % 2 == 0 else "git diff"
+            msgs.append(_asst("terminal", args=json.dumps({"command": cmd}), call_id=cid))
+            msgs.append(_result("ok", call_id=cid))
+        assert run_warrants_cron_hard_stop(msgs) is False
+
+    def test_process_polling_identical_success_does_not_warrant(self):
+        # Integration job: polling a background `process` handle while waiting
+        # for CI. Identical successful polls are legitimate waiting, not a loop.
+        assert run_warrants_cron_hard_stop(_run("process", 8)) is False
+
+    def test_process_repeated_failure_still_warrants(self):
+        # A polling tool that keeps ERRORING is a real problem — the failure
+        # branch applies even to exempt polling tools.
+        msgs = _run("process", 3, result="error: process crashed")
+        assert run_warrants_cron_hard_stop(msgs) is True
+
+    def test_failing_terminal_spiral_warrants(self):
+        # The real-world #624 case: terminal retried unchanged, failing.
+        msgs = _run("terminal", 3, result="error: build step blew up")
+        assert run_warrants_cron_hard_stop(msgs) is True
+
+    def test_no_tools_does_not_warrant(self):
+        assert run_warrants_cron_hard_stop([{"role": "user", "content": "hi"}]) is False
+
+    def test_distinct_process_calls_do_not_warrant(self):
+        # Even distinct successful process calls (varied handles) are fine.
+        assert run_warrants_cron_hard_stop(_distinct_run("process", 8)) is False

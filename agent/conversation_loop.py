@@ -780,6 +780,13 @@ def _run_conversation_impl(
             ):
                 _lg_nudge = _loop_guard.maybe_nudge(messages)
                 if _lg_nudge:
+                    # Decide hard-stop eligibility on the trailing run BEFORE the
+                    # advisory nudge is appended (appending a user message would
+                    # truncate what the guard sees as the trailing single-tool
+                    # run and always read "not stuck").
+                    _lg_genuine_spiral = _loop_guard.run_warrants_cron_hard_stop(
+                        messages
+                    )
                     messages.append({"role": "user", "content": _lg_nudge})
                     _lg_warnings = getattr(agent, "_loop_guard_warning_count", 0) + 1
                     agent._loop_guard_warning_count = _lg_warnings
@@ -791,8 +798,11 @@ def _run_conversation_impl(
                             _lg_tool,
                             _lg_count,
                         )
-                    if _loop_guard.should_cron_hard_stop(
-                        getattr(agent, "platform", None), _lg_warnings
+                    if (
+                        _loop_guard.should_cron_hard_stop(
+                            getattr(agent, "platform", None), _lg_warnings
+                        )
+                        and _lg_genuine_spiral
                     ):
                         logger.warning(
                             "loop_guard: cron hard stop — `%s` stuck run nudged "
