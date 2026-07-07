@@ -301,12 +301,13 @@ PROFILE_SKILLS="${HERMES_HOME:-$HOME/.hermes}/profiles/user1/skills/evolution"
    cycle and record it — a merged change broke the build and was rolled back.
 
 6. **Record the merge for the realized-impact loop** (so evolution is not blind —
-   we later verify whether this change actually helped). For EACH merged PR,
-   append one line to `~/.hermes/profiles/user1/evolution/realized/ledger.jsonl`:
+   we later verify whether this change actually helped). For EACH merged PR, run
+   the deterministic helper to append one line to
+   `~/.hermes/profiles/user1/evolution/realized/ledger.jsonl`:
 ```bash
-mkdir -p ~/.hermes/profiles/user1/evolution/realized
-echo '{"issue": <#>, "merged_at": "<YYYY-MM-DD>", "predicted_impact": <the issue'"'"'s analysis impact 0..1>, "target": "<one line: the concrete problem this was meant to fix>"}' \
-  >> ~/.hermes/profiles/user1/evolution/realized/ledger.jsonl
+python3 scripts/evolution_realized_impact.py record-merge \
+  <#> "<YYYY-MM-DD>" "<the issue's analysis impact 0..1>" \
+  "<one line: the concrete problem this was meant to fix>"
 ```
    `predicted_impact` is the impact the analysis stage assigned the issue; `target`
    is what "done" means for it. introspection later appends a `verdict` line for

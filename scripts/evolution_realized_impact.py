@@ -29,6 +29,7 @@ Pure functions + explicit IO so it is import-safe and unit-testable.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -69,6 +70,60 @@ def load_ledger(ledger_file: Path) -> List[Dict[str, Any]]:
     return [folded[k] for k in order]
 
 
+def append_ledger_record(ledger_file: Path, record: Dict[str, Any]) -> None:
+    """Append a single JSON line to the ledger atomically.
+
+    Creates parent directories if missing. Malformed records are rejected with
+    ValueError so callers cannot silently write invalid ledger lines.
+    """
+    if not isinstance(record, dict) or "issue" not in record:
+        raise ValueError("ledger record must be a dict with an 'issue' key")
+    ledger_file.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(record, sort_keys=True)
+    with open(ledger_file, "a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+
+
+def record_merge(
+    ledger_file: Path,
+    issue: int,
+    merged_at: str,
+    predicted_impact: float,
+    target: str,
+) -> None:
+    """Record a merge event in the realized-impact ledger."""
+    append_ledger_record(
+        ledger_file,
+        {
+            "issue": issue,
+            "merged_at": merged_at,
+            "predicted_impact": predicted_impact,
+            "target": target,
+        },
+    )
+
+
+def record_verdict(
+    ledger_file: Path,
+    issue: int,
+    verdict: str,
+    verified_at: str,
+    note: str,
+) -> None:
+    """Record a post-merge verification verdict in the ledger."""
+    if verdict not in (VERDICTS_GOOD | VERDICTS_BAD):
+        raise ValueError(f"verdict must be one of {VERDICTS_GOOD | VERDICTS_BAD}")
+    append_ledger_record(
+        ledger_file,
+        {
+            "issue": issue,
+            "verdict": verdict,
+            "verified_at": verified_at,
+            "note": note,
+        },
+    )
+
+
 def _days_between(a: Optional[str], b: Optional[str]) -> Optional[int]:
     """Whole days from ISO date ``a`` to ISO date ``b`` (both YYYY-MM-DD)."""
     if not a or not b:
@@ -97,7 +152,9 @@ def compute_realized(
     """
     window = records[-last:] if last and last > 0 else list(records)
 
-    verdicted = [r for r in window if r.get("verdict") in (VERDICTS_GOOD | VERDICTS_BAD)]
+    verdicted = [
+        r for r in window if r.get("verdict") in (VERDICTS_GOOD | VERDICTS_BAD)
+    ]
     confirmed = [r for r in verdicted if r.get("verdict") in VERDICTS_GOOD]
 
     # Matured-but-unverified: merged long enough ago to have been exercised, yet
@@ -142,7 +199,9 @@ def compute_realized(
         "verified": len(verdicted),
         "confirmed": len(confirmed),
         "matured_unverified": len(matured_unverified),
-        "realized_impact_rate": round(realized_rate, 3) if realized_rate is not None else None,
+        "realized_impact_rate": round(realized_rate, 3)
+        if realized_rate is not None
+        else None,
         "miss_streak": streak,
         "flags": flags,
     }
@@ -162,16 +221,56 @@ def format_realized(h: Dict[str, Any]) -> str:
     )
 
 
-def main(argv: List[str]) -> int:
-    import os
-
-    evolution_dir = Path(
+def _evolution_dir() -> Path:
+    return Path(
         os.environ.get(
             "EVOLUTION_PROFILE_DIR",
             str(Path.home() / ".hermes" / "profiles" / "user1" / "evolution"),
         )
     )
+
+
+def main(argv: List[str]) -> int:
+    evolution_dir = _evolution_dir()
+    ledger_file = evolution_dir / "realized" / "ledger.jsonl"
     args = argv[1:]
+
+    # Subcommand: record a merge line
+    if args and args[0] == "record-merge":
+        try:
+            issue = int(args[1])
+            merged_at = args[2]
+            predicted = float(args[3])
+            target = args[4]
+        except (IndexError, ValueError):
+            print(
+                "usage: evolution_realized_impact.py record-merge "
+                "<issue> <YYYY-MM-DD> <predicted_impact> <target>",
+                file=sys.stderr,
+            )
+            return 2
+        record_merge(ledger_file, issue, merged_at, predicted, target)
+        print(f"[realized-impact] recorded merge for issue #{issue}")
+        return 0
+
+    # Subcommand: record a verdict line
+    if args and args[0] == "record-verdict":
+        try:
+            issue = int(args[1])
+            verdict = args[2]
+            verified_at = args[3]
+            note = args[4]
+        except (IndexError, ValueError):
+            print(
+                "usage: evolution_realized_impact.py record-verdict "
+                "<issue> <confirmed|no-signal|regressed> <YYYY-MM-DD> <note>",
+                file=sys.stderr,
+            )
+            return 2
+        record_verdict(ledger_file, issue, verdict, verified_at, note)
+        print(f"[realized-impact] recorded verdict for issue #{issue}")
+        return 0
+
     last = 30
     if "--last" in args:
         i = args.index("--last")
@@ -191,7 +290,7 @@ def main(argv: List[str]) -> int:
 
         today = datetime.now(timezone.utc).date().isoformat()
 
-    records = load_ledger(evolution_dir / "realized" / "ledger.jsonl")
+    records = load_ledger(ledger_file)
     health = compute_realized(records, today=today, last=last)
     line = format_realized(health)
     print(line)

@@ -106,8 +106,11 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
    - For each, judge from the real sessions since its merge: did the `target`
      problem RECUR (the fix didn't hold)? is the merged capability actually used?
      did the friction it targeted disappear?
-   - Append ONE verdict line per such issue to the same ledger:
-     `{"issue": <#>, "verdict": "confirmed|no-signal|regressed", "verified_at": "<YYYY-MM-DD>", "note": "<one line of session evidence>"}`
+   - Record ONE verdict per such issue via the deterministic helper:
+     ```bash
+     python3 scripts/evolution_realized_impact.py record-verdict \
+       <#> "<confirmed|no-signal|regressed>" "<YYYY-MM-DD>" "<one line of session evidence>"
+     ```
      — `confirmed` = problem gone / change used; `no-signal` = no evidence it
      changed anything; `regressed` = problem recurred or got worse.
    - Be honest: a `no-signal`/`regressed` verdict on the agent's OWN past change is
