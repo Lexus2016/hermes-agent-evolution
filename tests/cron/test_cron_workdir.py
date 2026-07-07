@@ -265,8 +265,15 @@ class TestRunJobTerminalCwd:
     """
 
     @staticmethod
-    def _install_stubs(monkeypatch, observed: dict):
-        """Patch enough of run_job's deps that it executes without real creds."""
+    def _install_stubs(monkeypatch, observed: dict, clobber_cwd: str | None = None):
+        """Patch enough of run_job's deps that it executes without real creds.
+
+        ``clobber_cwd``: if set, ``FakeAgent.__init__`` overwrites
+        ``TERMINAL_CWD`` with it AFTER recording the value it saw — simulating
+        the real regression where the agent's construction (worker-thread
+        context restore + init) re-applied a stale TERMINAL_CWD, so the env was
+        built in the primary deploy checkout instead of the job workdir.
+        """
         import os
         import sys
         import cron.scheduler as sched
@@ -278,6 +285,8 @@ class TestRunJobTerminalCwd:
                 observed["terminal_cwd_during_init"] = os.environ.get(
                     "TERMINAL_CWD", "_UNSET_"
                 )
+                if clobber_cwd is not None:
+                    os.environ["TERMINAL_CWD"] = clobber_cwd
 
             def run_conversation(self, *_a, **_kw):
                 observed["terminal_cwd_during_run"] = os.environ.get(
@@ -351,6 +360,44 @@ class TestRunJobTerminalCwd:
         assert observed["terminal_cwd_during_run"] == str(tmp_path.resolve())
 
         # And it was restored to the original value in finally.
+        assert os.environ["TERMINAL_CWD"] == "/original/cwd"
+
+    def test_workdir_survives_agent_init_clobber(self, tmp_path, monkeypatch):
+        """Regression: the agent runs in a worker thread under a copied context;
+        that context restore + the agent's own construction could re-apply a
+        stale TERMINAL_CWD AFTER run_job set the job workdir, so the agent's
+        terminal/file env was built in the gateway's primary DEPLOY checkout
+        instead of the workdir — reading wrong paths (files "missing") and, for a
+        git-worktree workdir, running git/edits against the LIVE checkout and
+        corrupting the running deployment. run_job must re-assert the workdir
+        override inside the worker, immediately before run_conversation, so the
+        clobber cannot win."""
+        import os
+        import cron.scheduler as sched
+
+        monkeypatch.setenv("TERMINAL_CWD", "/original/cwd")
+        observed: dict = {}
+        # Agent construction clobbers TERMINAL_CWD to a wrong absolute path,
+        # mimicking the real deploy-checkout clobber.
+        self._install_stubs(
+            monkeypatch, observed, clobber_cwd="/wrong/deploy/checkout"
+        )
+
+        job = {
+            "id": "abc",
+            "name": "wd-job",
+            "workdir": str(tmp_path),
+            "schedule_display": "manual",
+        }
+        success, _output, response, error = sched.run_job(job)
+        assert success is True, f"run_job failed: error={error!r} response={response!r}"
+
+        # Construction recorded the workdir (set by run_job) BEFORE it clobbered...
+        assert observed["terminal_cwd_during_init"] == str(tmp_path.resolve())
+        # ...but by the time the agent RAN, the workdir override was re-asserted.
+        # Without the fix this is "/wrong/deploy/checkout".
+        assert observed["terminal_cwd_during_run"] == str(tmp_path.resolve())
+        # And the prior value is still restored in finally.
         assert os.environ["TERMINAL_CWD"] == "/original/cwd"
 
     def test_no_workdir_leaves_terminal_cwd_untouched(self, monkeypatch):
