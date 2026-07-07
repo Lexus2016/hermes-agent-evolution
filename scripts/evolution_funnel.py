@@ -372,7 +372,9 @@ def main(argv: list[str]) -> int:
 
         (evolution_dir / "evolution-health.txt").write_text(
             format_health(
-                compute_health(load_records(evolution_dir / "metrics.jsonl"), 30)
+                compute_health(
+                    load_records(evolution_dir / "metrics.jsonl"), 30, evolution_dir
+                )
             )
             + "\n",
             encoding="utf-8",

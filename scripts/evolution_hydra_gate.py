@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Hydra gate — pre-check that saves tokens by suppressing the LLM orchestrator
-when the evolution knowledge pool has no fresh material.
+when the evolution knowledge pool has no fresh material or the pipeline is
+in a halted state.
 
 Contract (Hermes cron gate):
   Last stdout line = wake signal.
@@ -9,6 +10,8 @@ Contract (Hermes cron gate):
 
 The gate checks upstream→downstream staleness for the 7 evolution stages and
 returns false (sleep) when every consumer is ahead of or equal to its producer.
+It also sleeps when ``halt-state.txt`` is present, preventing expensive LLM work
+on a broken pipeline (#770).
 """
 
 from __future__ import annotations
@@ -88,15 +91,15 @@ def _check_github_write_access() -> Tuple[bool, str]:
     If gh CLI works and the repo is reachable, assume WRITE access (a
     ``ghp_`` token with ``repo`` scope inherently has push capability).
     """
-    repo = os.environ.get(
-        "GITHUB_EVOLUTION_REPO", "Lexus2016/hermes-agent-evolution"
-    )
+    repo = os.environ.get("GITHUB_EVOLUTION_REPO", "Lexus2016/hermes-agent-evolution")
 
     # 1) gh CLI — auth + read check
     try:
         r = subprocess.run(
             ["gh", "auth", "status"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if r.returncode != 0:
             return False, "gh CLI not authenticated"
@@ -107,7 +110,9 @@ def _check_github_write_access() -> Tuple[bool, str]:
     try:
         r = subprocess.run(
             ["gh", "issue", "list", "--repo", repo, "--limit", "1", "--json", "number"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if r.returncode != 0:
             return False, f"cannot read repo {repo}: {r.stderr.strip()}"
@@ -118,7 +123,9 @@ def _check_github_write_access() -> Tuple[bool, str]:
     try:
         r = subprocess.run(
             ["gh", "api", "user", "--jq", ".login"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         user = r.stdout.strip() if r.returncode == 0 else "?"
     except (OSError, subprocess.TimeoutExpired):
@@ -127,17 +134,32 @@ def _check_github_write_access() -> Tuple[bool, str]:
     return True, f"gh CLI {user}: auth OK, repo {repo} readable, write assumed"
 
 
+def _check_halt(evo_dir: Path) -> Tuple[bool, Path]:
+    """Return (halted, halt_file_path) for the evolution pipeline.
+
+    If ``halt-state.txt`` exists, the pipeline has produced zero automated
+    deliverables for 5+ consecutive cycles and zero selections for 3+ cycles.
+    Expensive LLM stages (research, analysis, implementation) must sleep
+    until the halt file is manually cleared (#770).
+    """
+    halt_file = evo_dir / "halt-state.txt"
+    try:
+        return halt_file.exists(), halt_file
+    except OSError:
+        return False, halt_file
+
+
 def _check_pool(evo_dir: Path) -> Dict[str, bool]:
     """Check all upstream→downstream pairs for staleness. Returns per-pair
     freshness map."""
     # Upstream → downstream pairs in the evolution pipeline
     pairs = [
-        ("research", "issues"),       # new findings → need issues
-        ("issues", "analysis"),       # new issues → need analysis
-        ("introspection", "analysis"),# new patterns → need analysis
-        ("analysis", "implementation"),# new selections → need impl
-        ("implementation", "integration"),# new PRs → need merge
-        ("integration", "upstream-sync"),# new merges → need sync
+        ("research", "issues"),  # new findings → need issues
+        ("issues", "analysis"),  # new issues → need analysis
+        ("introspection", "analysis"),  # new patterns → need analysis
+        ("analysis", "implementation"),  # new selections → need impl
+        ("implementation", "integration"),  # new PRs → need merge
+        ("integration", "upstream-sync"),  # new merges → need sync
     ]
 
     results: Dict[str, bool] = {}
@@ -162,9 +184,9 @@ def _has_work(evo_dir: Path) -> Tuple[bool, str]:
     # the pool is settled — they generate the material that downstream stages
     # consume. With the stage crons paused, these are the Hydra's heartbeat.
     time_triggers = {
-        "research": 24,        # daily scan of AI agent landscape
-        "introspection": 24,   # daily session analysis
-        "upstream-sync": 28,   # daily fork sync (slightly wider window)
+        "research": 24,  # daily scan of AI agent landscape
+        "introspection": 24,  # daily session analysis
+        "upstream-sync": 28,  # daily fork sync (slightly wider window)
     }
     for stage, max_interval_h in time_triggers.items():
         last_mtime = _latest_output(evo_dir, stage)
@@ -182,12 +204,15 @@ def _has_work(evo_dir: Path) -> Tuple[bool, str]:
     # Safety net: if NO stage has produced output in the last 12 hours,
     # fire the Hydra anyway — something might be stuck.
     stages = [
-        "research", "issues", "introspection", "analysis",
-        "implementation", "integration", "upstream-sync",
+        "research",
+        "issues",
+        "introspection",
+        "analysis",
+        "implementation",
+        "integration",
+        "upstream-sync",
     ]
-    latest_any = max(
-        _latest_output(evo_dir, s) for s in stages
-    )
+    latest_any = max(_latest_output(evo_dir, s) for s in stages)
     if latest_any > 0:
         age_hours = (now_ts - latest_any) / 3600
         if age_hours >= 12:
@@ -207,7 +232,14 @@ def main() -> int:
         print('{"wakeAgent": false}')
         return 0
 
-    # 2) Check knowledge pool for fresh material
+    # 2) Check for pipeline halt-state BEFORE any LLM work
+    halted, halt_file = _check_halt(evo_dir)
+    if halted:
+        print(f"[hydra-gate] pipeline HALTED ({halt_file}) — sleeping")
+        print('{"wakeAgent": false}')
+        return 0
+
+    # 3) Check knowledge pool for fresh material
     has_work, reason = _has_work(evo_dir)
 
     if has_work:

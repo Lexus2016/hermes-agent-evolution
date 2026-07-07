@@ -25,12 +25,13 @@ evolution_funnel.load_records (single source of truth for reading the log).
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from evolution_funnel import load_records  # noqa: E402
+from evolution_funnel import is_evolution_halted, load_records  # noqa: E402
 
 
 def _int(rec: Dict[str, Any], key: str) -> int:
@@ -65,9 +66,21 @@ def _trend(values: List[int]) -> str:
     return "flat"
 
 
-def compute_health(records: List[Dict[str, Any]], last: int = 30) -> Dict[str, Any]:
+def compute_health(
+    records: List[Dict[str, Any]],
+    last: int = 30,
+    evolution_dir: Path | None = None,
+) -> Dict[str, Any]:
     window = records[-last:] if last and last > 0 else list(records)
     active = [r for r in window if _is_active(r)]
+
+    if evolution_dir is None:
+        evolution_dir = Path(
+            os.environ.get(
+                "EVOLUTION_PROFILE_DIR",
+                str(Path.home() / ".hermes" / "profiles" / "user1" / "evolution"),
+            )
+        )
 
     sel = sum(_int(r, "selected") for r in active)
     mrg = sum(_int(r, "merged") for r in active)
@@ -100,6 +113,16 @@ def compute_health(records: List[Dict[str, Any]], last: int = 30) -> Dict[str, A
     low_selection = any(f.startswith("LOW_SELECTION_EFFICIENCY") for f in flags)
     effort_budget = 1.5 if low_selection else 3.0
 
+    # Halt-state visibility (#770): the hydra gate and cron scheduler check
+    # halt-state.txt to suppress expensive LLM stages. Surfacing it in the
+    # health sidecar makes the automated halt obvious to the owner without
+    # needing to inspect a separate file.
+    halted = is_evolution_halted(evolution_dir)
+    if halted:
+        flags.append(
+            "HALTED: pipeline suspended — zero deliverables; clear halt-state.txt to resume"
+        )
+
     return {
         "cycles_total": len(window),
         "cycles_active": len(active),
@@ -107,11 +130,16 @@ def compute_health(records: List[Dict[str, Any]], last: int = 30) -> Dict[str, A
         "selected": sel,
         "merged": mrg,
         "rejected": rej,
-        "cycle_success_rate": round(cycle_success_rate, 3) if cycle_success_rate is not None else None,
-        "selection_efficiency": round(selection_efficiency, 3) if selection_efficiency is not None else None,
+        "cycle_success_rate": round(cycle_success_rate, 3)
+        if cycle_success_rate is not None
+        else None,
+        "selection_efficiency": round(selection_efficiency, 3)
+        if selection_efficiency is not None
+        else None,
         "reject_rate": round(reject_rate, 3) if reject_rate is not None else None,
         "merged_trend": _trend([_int(r, "merged") for r in active]),
         "effort_budget": effort_budget,
+        "halted": halted,
         "flags": flags,
     }
 
@@ -154,7 +182,7 @@ def main(argv: List[str]) -> int:
             except ValueError:
                 last = 30
     records = load_records(evolution_dir / "metrics.jsonl")
-    print(format_health(compute_health(records, last)))
+    print(format_health(compute_health(records, last, evolution_dir=evolution_dir)))
     return 0
 
 

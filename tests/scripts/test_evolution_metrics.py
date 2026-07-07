@@ -61,9 +61,13 @@ class TestComputeHealth:
         assert "n/a" in format_health(h)
 
     def test_merged_trend(self):
-        improving = [_rec(f"d{i}", selected=1, merged=m) for i, m in enumerate([0, 0, 3, 4])]
+        improving = [
+            _rec(f"d{i}", selected=1, merged=m) for i, m in enumerate([0, 0, 3, 4])
+        ]
         assert compute_health(improving)["merged_trend"] == "improving"
-        declining = [_rec(f"d{i}", selected=1, merged=m) for i, m in enumerate([4, 3, 0, 0])]
+        declining = [
+            _rec(f"d{i}", selected=1, merged=m) for i, m in enumerate([4, 3, 0, 0])
+        ]
         assert compute_health(declining)["merged_trend"] == "declining"
 
     def test_window_last_n(self):
@@ -86,11 +90,13 @@ class TestComputeHealth:
         assert compute_health(few)["effort_budget"] == 3.0
 
     def test_format_health_carries_budget_without_breaking_watchdog_tail(self):
-        # The budget token must sit in the body, NOT the tail: evolution_watchdog
+        # The budget token must sit in the BODY, NOT the tail: evolution_watchdog
         # keys on `.endswith("| healthy")` and treats everything after the last
         # `|` as the flags. A budget in the tail would silence/garble the alert.
         healthy = format_health(
-            compute_health([_rec(f"d{i}", selected=4, merged=3, rejected=1) for i in range(5)])
+            compute_health([
+                _rec(f"d{i}", selected=4, merged=3, rejected=1) for i in range(5)
+            ])
         )
         assert "effort_budget=3.0" in healthy
         assert healthy.endswith("| healthy")
@@ -100,3 +106,26 @@ class TestComputeHealth:
         assert "effort_budget=1.5" in flagged
         assert not flagged.endswith("| healthy")
         assert "LOW_SELECTION_EFFICIENCY" in flagged
+
+    def test_halt_state_visible_in_health(self, tmp_path):
+        # When halt-state.txt exists, compute_health() should surface HALTED in
+        # the flags and set halted=True so the health sidecar is self-describing.
+        (tmp_path / "halt-state.txt").write_text("HALTED\n", encoding="utf-8")
+        h = compute_health(
+            [_rec(f"d{i}", selected=4, merged=3, rejected=1) for i in range(5)],
+            evolution_dir=tmp_path,
+        )
+        assert h["halted"] is True
+        assert any("HALTED" in f for f in h["flags"])
+        formatted = format_health(h)
+        assert "HALTED" in formatted
+        assert "halt-state.txt" in formatted
+
+    def test_halt_state_absent_when_no_file(self, tmp_path):
+        h = compute_health(
+            [_rec(f"d{i}", selected=4, merged=3, rejected=1) for i in range(5)],
+            evolution_dir=tmp_path,
+        )
+        assert h["halted"] is False
+        assert not any("HALTED" in f for f in h["flags"])
+        assert "| healthy" in format_health(h)
