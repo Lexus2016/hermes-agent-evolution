@@ -124,6 +124,29 @@ Implement selected issues, create versions, and self-update.
      gh issue comment <N> --repo Lexus2016/hermes-agent-evolution \
        --body "Blocked: <exact missing prerequisite, e.g. token lacks workflow scope>. A human must <action>."
      ```
+   - **Evidence rule for `blocked` — do NOT fabricate a blocker.** The `blocked`
+     label asserts a human/infrastructure action is required. It is NOT an
+     escape hatch for transient friction, and a fabricated block wastes a whole
+     cycle. Hard rules:
+     - A SINGLE failed `read_file` / `search_files` / `terminal` call (an empty
+       read, a one-off timeout) is NORMAL. Retry it ONCE or route around it (a
+       different path, `terminal cat <file>`, a broader search). One error — or
+       even a few scattered across dozens of successful calls — is NEVER grounds
+       to block.
+     - Block ONLY when a SPECIFIC operation failed **3+ times in a row with the
+       SAME deterministic error** (e.g. `permission denied` on a real path, a
+       missing binary), and the comment MUST quote the exact command + the exact
+       error output you saw THIS session.
+     - NEVER cite "loop-guard", "anti-retry rules", "tool-read timeouts", or an
+       "environment regression / #647" as a blocker UNLESS you literally
+       received a `[loop-guard]` message in THIS session. If you did not see that
+       exact `[loop-guard]` text, the guard did not fire — claiming it did is a
+       fabricated blocker.
+     - Blocking MULTIPLE issues in one run with the same vague "environment
+       limitation" reason is a RED FLAG that you gave up, not that the work was
+       impossible. If `read_file` / `terminal` returned content on other calls
+       this session, the tools ARE working. Implement at least one issue
+       end-to-end before ever concluding the environment is unusable.
    - **Evidence rule for `already-exists`** (same as evolution-analysis): the
      closing comment MUST contain the exact file path / code location you
      verified in THIS session with a real `ls`/`grep` whose output you saw.
