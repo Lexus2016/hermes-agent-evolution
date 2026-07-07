@@ -3612,8 +3612,26 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
         # env passthrough registrations) when the cron run hops into the worker
         # thread used for inactivity timeout monitoring.
         _cron_context = contextvars.copy_context()
+
+        def _cron_run_reassert_workdir():
+            # run_conversation runs in this worker thread under the copied
+            # context above. That context restore (plus the agent's own init)
+            # can re-apply a TERMINAL_CWD captured BEFORE this job set its
+            # workdir — so the agent's lazily-created terminal/file env was built
+            # in the gateway's primary DEPLOY checkout instead of the job's
+            # workdir. For a git-worktree workdir that meant reading wrong paths
+            # (files "missing") and running `git checkout -B`/edits against the
+            # LIVE checkout, corrupting the running deployment. Re-assert the
+            # workdir override here — inside the worker context, immediately
+            # before the agent runs — so it wins over any stale value. Serialized
+            # by the workdir write-lock held for this whole run, so it can't leak
+            # into a concurrent workdir-less job.
+            if _job_workdir:
+                os.environ["TERMINAL_CWD"] = _job_workdir
+            return agent.run_conversation(prompt)
+
         _cron_future = _cron_pool.submit(
-            _cron_context.run, agent.run_conversation, prompt
+            _cron_context.run, _cron_run_reassert_workdir
         )
         _inactivity_timeout = False
         try:
