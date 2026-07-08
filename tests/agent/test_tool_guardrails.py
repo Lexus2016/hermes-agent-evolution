@@ -256,3 +256,72 @@ def test_reset_for_turn_clears_bounded_guardrail_state():
 
     assert controller.before_call("web_search", {"query": "same"}).action == "allow"
     assert controller.before_call("read_file", {"path": "/tmp/x"}).action == "allow"
+
+
+# ── #744/#785: fallback_directive field on ToolGuardrailDecision ──────────────
+
+
+def test_fallback_directive_populated_on_same_tool_failure_warning():
+    """A repeated same-tool failure warning carries a non-empty fallback_directive."""
+    controller = ToolCallGuardrailController()
+    args = {"path": "/nonexistent"}
+    # read_file is idempotent (fail_threshold for same_tool = 3 by default)
+    for _ in range(3):
+        controller.before_call("read_file", args)
+        decision = controller.after_call("read_file", args, '{"error":"not found"}', failed=True)
+    assert decision.action == "warn"
+    assert decision.fallback_directive != ""
+    assert "search_files" in decision.fallback_directive
+
+
+def test_fallback_directive_populated_on_exact_failure_warning():
+    """A repeated exact-failure warning carries a non-empty fallback_directive."""
+    controller = ToolCallGuardrailController()
+    args = {"query": "same"}
+    # exact_failure_warn_after = 2 by default
+    for _ in range(2):
+        controller.before_call("web_search", args)
+        decision = controller.after_call("web_search", args, '{"error":"boom"}', failed=True)
+    assert decision.action == "warn"
+    assert decision.fallback_directive != ""
+    assert "web_extract" in decision.fallback_directive
+
+
+def test_fallback_directive_empty_on_allow():
+    """A non-failure (allow) decision has an empty fallback_directive."""
+    controller = ToolCallGuardrailController()
+    controller.before_call("read_file", {"path": "/tmp/x"})
+    decision = controller.after_call("read_file", {"path": "/tmp/x"}, "content", failed=False)
+    assert decision.action == "allow"
+    assert decision.fallback_directive == ""
+
+
+def test_fallback_directive_empty_for_unknown_tool():
+    """An unknown tool without a known fallback gets an empty fallback_directive."""
+    controller = ToolCallGuardrailController(
+        ToolCallGuardrailConfig(same_tool_failure_warn_after=2)
+    )
+    args = {"key": "val"}
+    for _ in range(2):
+        controller.before_call("mcp_custom_tool", args)
+        decision = controller.after_call("mcp_custom_tool", args, '{"error":"bad"}', failed=True)
+    assert decision.action == "warn"
+    assert decision.fallback_directive == ""
+
+
+def test_fallback_directive_in_metadata():
+    """to_metadata() includes fallback_directive when non-empty, omits when empty."""
+    controller = ToolCallGuardrailController()
+    args = {"path": "/nonexistent"}
+    for _ in range(3):
+        controller.before_call("read_file", args)
+        decision = controller.after_call("read_file", args, '{"error":"not found"}', failed=True)
+    assert decision.fallback_directive != ""
+    meta = decision.to_metadata()
+    assert "fallback_directive" in meta
+    assert meta["fallback_directive"] == decision.fallback_directive
+
+    # Allow decisions omit the key entirely
+    controller.before_call("read_file", {"path": "/tmp/other"})
+    allow_decision = controller.after_call("read_file", {"path": "/tmp/other"}, "ok", failed=False)
+    assert "fallback_directive" not in allow_decision.to_metadata()

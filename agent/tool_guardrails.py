@@ -154,6 +154,11 @@ class ToolGuardrailDecision:
     tool_name: str = ""
     count: int = 0
     signature: ToolCallSignature | None = None
+    # #744/#785 — structured fallback guidance for non-retryable failures.
+    # Populated on warn/halt decisions arising from repeated tool failures so
+    # the agent loop (or a policy interceptor) can surface a concrete
+    # alternative action instead of only a free-text message.
+    fallback_directive: str = ""
 
     @property
     def allows_execution(self) -> bool:
@@ -173,6 +178,8 @@ class ToolGuardrailDecision:
         }
         if self.signature is not None:
             data["signature"] = self.signature.to_metadata()
+        if self.fallback_directive:
+            data["fallback_directive"] = self.fallback_directive
         return data
 
 
@@ -343,6 +350,7 @@ class ToolCallGuardrailController:
                     tool_name=tool_name,
                     count=same_count,
                     signature=signature,
+                    fallback_directive=_fallback_directive_for(tool_name),
                 )
                 self._halt_decision = decision
                 return decision
@@ -359,6 +367,7 @@ class ToolCallGuardrailController:
                     tool_name=tool_name,
                     count=exact_count,
                     signature=signature,
+                    fallback_directive=_fallback_directive_for(tool_name),
                 )
 
             if self.config.warnings_enabled and same_count >= self.config.same_tool_failure_warn_after:
@@ -369,6 +378,7 @@ class ToolCallGuardrailController:
                     tool_name=tool_name,
                     count=same_count,
                     signature=signature,
+                    fallback_directive=_fallback_directive_for(tool_name),
                 )
 
             return ToolGuardrailDecision(tool_name=tool_name, count=exact_count, signature=signature)
@@ -450,6 +460,28 @@ def _tool_failure_recovery_hint(tool_name: str, count: int) -> str:
         "or a different tool that can make progress. If the blocker is external, report "
         "the blocker after one diagnostic attempt instead of repeating the same failing path."
     )
+
+
+# #744/#785 — concise, structured fallback directives keyed by tool name.
+# Unlike _tool_failure_recovery_hint (which is a free-text nudge), these are
+# short imperative phrases suitable for structured consumption by the agent
+# loop or policy interceptors: "use <alternative> instead".
+_TOOL_FALLBACK_DIRECTIVE: dict[str, str] = {
+    "read_file": "use search_files to locate the file, or vision_analyze for binary/image files",
+    "terminal": "run a read-only diagnostic (pwd, ls) before retrying, or switch to read_file/patch",
+    "execute_code": "install missing packages via terminal, or verify the interpreter/venv first",
+    "web_search": "try web_extract on a known URL, or refine the query terms",
+    "web_extract": "try web_search to find alternative URLs, or use the browser tool",
+    "search_files": "try a broader glob pattern, or use read_file on a known path",
+    "patch": "use read_file to verify the exact text before patching, or use write_file",
+    "write_file": "verify the directory exists with terminal, or use patch for targeted edits",
+    "process": "use process action=list to find the correct session_id before retrying",
+}
+
+
+def _fallback_directive_for(tool_name: str) -> str:
+    """Return a concise fallback directive for a failing tool, or empty string."""
+    return _TOOL_FALLBACK_DIRECTIVE.get(tool_name, "")
 
 
 def _coerce_args(args: Mapping[str, Any] | None) -> Mapping[str, Any]:
