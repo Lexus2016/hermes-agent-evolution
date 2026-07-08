@@ -33,6 +33,45 @@ implementation. The mission focus test above is applied before scoring.
 
 ## Process
 
+### Phase 0 — Local triage pass (no GitHub API calls)
+
+**When private tools (GitHub token / `gh` CLI) are unavailable, this phase
+runs first and independently — producing a thin-list triage JSON from local
+sidecar files alone, so the pipeline is never blind.** When private tools ARE
+available, this phase still runs as a pre-pass to warm the selection with
+local context before the GitHub-dependent steps.
+
+```bash
+python scripts/evolution_local_triage.py
+# Reads: issues/, introspection/, research/ sidecars + evolution-health.txt
+#        + realized-impact.txt
+# Writes: analysis/YYYY-MM-DD.json (standard format, "local_triage": true)
+# Does NOT call any GitHub API
+```
+
+What it does:
+1. Reads the most recent `issues/`, `introspection/`, and `research/` sidecars
+   from `~/.hermes/profiles/user1/evolution/`
+2. Extracts filed proposals (decision=“filed” with issue numbers) and scores them
+3. Reads `evolution-health.txt` for `effort_budget` calibration (1.5 or 3.0)
+4. Reads `realized-impact.txt` for consolidation-mode detection
+5. Sorts by priority score, applies the effort budget cap, and writes the
+   result to `analysis/YYYY-MM-DD.json` in the standard format
+
+**Non-clobber rule:** if a full (non-local) analysis already exists for today,
+the script skips writing — a local-only pass never overwrites a complete one.
+
+When this phase produces output (private tools were unavailable), the analysis
+stage is DONE for this cycle — the `local_triage: true` flag in the JSON tells
+downstream stages the selection is local-only and the private dispatch (PR
+creation, implementation handoff) is deferred until private tools are available.
+
+### Phase 1 — Full analysis (requires GitHub token / gh CLI)
+
+The steps below are the original full-analysis pipeline. They run when private
+tools are available, producing a richer analysis that includes live issue
+bodies, rejection comments, and GitHub-side state.
+
 1. **Retrieve** all open issues — THIN first (context economy). `gh` is
    authorized via persistent `gh auth login` (~/.config/gh), set up by
    setup-hermes.sh — do NOT export GH_TOKEN from env (Hermes strips GitHub
