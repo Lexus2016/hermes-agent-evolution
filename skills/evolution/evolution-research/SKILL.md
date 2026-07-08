@@ -83,6 +83,33 @@ Keywords: "agent", "autonomous", "LLM tool use", "multi-agent"
    - `[REPLACEMENT]` — alternative to something existing
 4. **Generate a report** with an impact/effort assessment
 
+## Fallback: local-state research (no web tools)
+
+**Capability check first.** If the live web/research tools (`web_search`,
+`web_extract`, browser, arXiv, GitHub) are NOT exposed this session, do NOT
+return an empty report — switch to a deterministic local-state fallback so the
+self-improvement loop keeps producing signal on restricted installs (#733).
+
+This stage has only the `web` + `file` toolsets (no `terminal`), so mine local
+telemetry with `read_file` — never try to run a script:
+
+- Read `~/.hermes/profiles/user1/evolution/metrics.jsonl` (per-cycle counts),
+  `funnel-summary.txt` (the selectivity signal), and the newest prior
+  `research/*.md` report.
+- Surface pipeline-quality findings from what you read: integration stalls
+  (trailing `merged == 0` cycles), research stagnation (trailing
+  `issues_created == 0`), low selection efficiency (high reject rate /
+  `HIGH_REJECT_RATE`), and a stale frontier scan (newest report ≥ 7 days old).
+- Map each signal to the SAME schema as live research below, using the same
+  priority formula (`impact × 2 × (1 − 0.4 × effort)`, floor 0.7, max 20).
+
+The canonical, unit-tested reference for this logic is
+`scripts/evolution_research_local.py` (it mirrors `scripts/evolution_local_triage.py`,
+the analysis stage's local pass) — a terminal-capable runner such as the nightly
+funnel job can materialize the same `research/YYYY-MM-DD.md` deterministically. The
+fallback is gated by the capability check above — a deliberate switch, never a
+silent failure.
+
 ## Output format
 
 Save the result to `~/.hermes/profiles/user1/evolution/research/YYYY-MM-DD.md`:
