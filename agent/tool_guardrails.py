@@ -420,18 +420,28 @@ class ToolCallGuardrailController:
 
 
 def toolguard_synthetic_result(decision: ToolGuardrailDecision) -> str:
-    """Build a synthetic role=tool content string for a blocked tool call."""
-    return json.dumps(
-        {
-            "error": decision.message,
-            "guardrail": decision.to_metadata(),
-        },
-        ensure_ascii=False,
-    )
+    """Build a synthetic role=tool content string for a blocked tool call.
+
+    When the decision carries a ``fallback_directive`` (#744/#785/#787), it is
+    surfaced as a top-level field so the model sees a concrete alternative
+    action instead of only the free-text error message.
+    """
+    payload: dict[str, Any] = {
+        "error": decision.message,
+        "guardrail": decision.to_metadata(),
+    }
+    if decision.fallback_directive:
+        payload["fallback_directive"] = decision.fallback_directive
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def append_toolguard_guidance(result: str, decision: ToolGuardrailDecision) -> str:
-    """Append runtime guidance to the current tool result content."""
+    """Append runtime guidance to the current tool result content.
+
+    When the decision carries a ``fallback_directive`` (#744/#785/#787), the
+    directive is appended as a separate labelled line so the model sees a
+    concrete alternative action alongside the loop warning.
+    """
     if decision.action not in {"warn", "halt"} or not decision.message:
         return result
     label = "Tool loop hard stop" if decision.action == "halt" else "Tool loop warning"
@@ -439,6 +449,8 @@ def append_toolguard_guidance(result: str, decision: ToolGuardrailDecision) -> s
         f"\n\n[{label}: "
         f"{decision.code}; count={decision.count}; {decision.message}]"
     )
+    if decision.fallback_directive:
+        suffix += f"\n[Fallback directive: {decision.fallback_directive}]"
     return (result or "") + suffix
 
 

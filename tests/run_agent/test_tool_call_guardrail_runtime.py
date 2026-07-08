@@ -353,3 +353,44 @@ def test_guardrail_halt_emits_final_response_through_stream_delta_callback():
     assert halt_text in text_deltas, (
         f"halt message was never streamed; callback only saw {deltas!r}"
     )
+
+
+# ── #787: fallback_directive consumption in halt response ─────────────────────
+
+
+def test_controlled_halt_response_includes_fallback_directive_when_present():
+    """The halt response surfaces the fallback_directive so the model sees an alternative (#787)."""
+    from agent.tool_guardrails import ToolGuardrailDecision
+
+    agent = _make_agent("web_search")
+    decision = ToolGuardrailDecision(
+        action="halt",
+        code="same_tool_failure_halt",
+        message="web_search failed 8 times this turn.",
+        tool_name="web_search",
+        count=8,
+        fallback_directive="use web_extract on a known URL instead",
+    )
+    response = agent._toolguard_controlled_halt_response(decision)
+
+    assert "stopped retrying web_search" in response
+    assert "Suggested alternative: use web_extract on a known URL instead." in response
+
+
+def test_controlled_halt_response_omits_directive_when_empty():
+    """When fallback_directive is empty, the halt response is unchanged (backward compat)."""
+    from agent.tool_guardrails import ToolGuardrailDecision
+
+    agent = _make_agent("web_search")
+    decision = ToolGuardrailDecision(
+        action="halt",
+        code="same_tool_failure_halt",
+        message="web_search failed 8 times this turn.",
+        tool_name="web_search",
+        count=8,
+        fallback_directive="",
+    )
+    response = agent._toolguard_controlled_halt_response(decision)
+
+    assert "stopped retrying web_search" in response
+    assert "Suggested alternative:" not in response
