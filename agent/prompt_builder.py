@@ -609,6 +609,23 @@ PARALLEL_TOOL_CALL_GUIDANCE = (
     "in doubt and the calls are independent, batch them."
 )
 
+# Optional Model-First Reasoning scaffold (issue #750).  Off by default —
+# injected only when ``agent.model_first_reasoning`` is True.  Asks the model
+# to write down an explicit problem model (entities, state variables,
+# preconditions/effects, constraints) before producing a plan or tool
+# sequence for complex tasks.  Stable prompt prefix → no cache break.
+# Research: arxiv 2512.14474 (Model-First Reasoning reduces constraint
+# violations and hallucinations in planning).
+MODEL_FIRST_REASONING_GUIDANCE = (
+    "# Model-First Reasoning\n"
+    "Before producing a plan or tool sequence for a non-trivial task, write a "
+    "brief problem model: list the key entities, state variables, action "
+    "preconditions and effects, and constraints. Then produce your plan or "
+    "tool sequence with that model in mind. This reduces constraint violations "
+    "and hallucinated steps. Skip the model for trivial tasks (a single read, "
+    "a one-line answer, a simple formatting request) where it adds no value."
+)
+
 # OpenAI GPT/Codex-specific execution guidance.  Addresses known failure modes
 # where GPT models abandon work on partial results, skip prerequisite lookups,
 # hallucinate instead of using tools, and declare "done" without verification.

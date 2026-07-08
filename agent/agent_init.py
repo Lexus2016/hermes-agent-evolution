@@ -1362,6 +1362,12 @@ def init_agent(
     # are noisy.
     agent._environment_probe = bool(_agent_section.get("environment_probe", True))
 
+    # Optional Model-First Reasoning scaffold (issue #750).  Default False.
+    # When True, injects a prompt fragment asking the model to write an
+    # explicit problem model before planning non-trivial tasks.  Stable
+    # prefix — no prompt-cache break.
+    agent._model_first_reasoning = bool(_agent_section.get("model_first_reasoning", False))
+
     # Per-platform prompt-hint overrides (config.yaml → platform_hints).
     # Lets an enterprise admin append to or replace Hermes' built-in
     # platform hint for a single messaging platform (e.g. WhatsApp) without

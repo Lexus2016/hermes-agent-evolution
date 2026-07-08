@@ -34,6 +34,7 @@ from agent.prompt_builder import (
     HERMES_AGENT_HELP_GUIDANCE,
     KANBAN_GUIDANCE,
     MEMORY_GUIDANCE,
+    MODEL_FIRST_REASONING_GUIDANCE,
     OPENAI_MODEL_EXECUTION_GUIDANCE,
     PARALLEL_TOOL_CALL_GUIDANCE,
     PLATFORM_HINTS,
@@ -195,6 +196,13 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # (default True) and only injected when tools are actually loaded.
     if getattr(agent, "_parallel_tool_call_guidance", True) and agent.valid_tool_names:
         stable_parts.append(PARALLEL_TOOL_CALL_GUIDANCE)
+
+    # Optional Model-First Reasoning scaffold (issue #750).  Off by default
+    # — injected only when ``agent.model_first_reasoning`` is True.  Stable
+    # prompt prefix, so no cache break.  Asks the model to write an explicit
+    # problem model before planning complex tasks.
+    if getattr(agent, "_model_first_reasoning", False) and agent.valid_tool_names:
+        stable_parts.append(MODEL_FIRST_REASONING_GUIDANCE)
 
     # Tool-aware behavioral guidance: only inject when the tools are loaded
     tool_guidance = []

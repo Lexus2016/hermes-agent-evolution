@@ -122,3 +122,33 @@ class TestTqmemoryGuidance:
             platform="cli",
         )
         assert self.MARKER not in _stable_prompt(agent)
+
+
+class TestModelFirstReasoning:
+    """MODEL_FIRST_REASONING_GUIDANCE is injected only when
+    ``agent._model_first_reasoning`` is True and tools are loaded."""
+
+    MARKER = "# Model-First Reasoning"
+
+    def test_absent_by_default(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TERMINAL_CWD", str(tmp_path))
+        agent = _make_agent(valid_tool_names=["read_file"], platform="cli")
+        assert self.MARKER not in _stable_prompt(agent)
+
+    def test_injected_when_enabled(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TERMINAL_CWD", str(tmp_path))
+        agent = _make_agent(
+            valid_tool_names=["read_file"],
+            platform="cli",
+            _model_first_reasoning=True,
+        )
+        assert self.MARKER in _stable_prompt(agent)
+
+    def test_absent_without_tools_even_when_enabled(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TERMINAL_CWD", str(tmp_path))
+        agent = _make_agent(
+            valid_tool_names=[],
+            platform="cli",
+            _model_first_reasoning=True,
+        )
+        assert self.MARKER not in _stable_prompt(agent)

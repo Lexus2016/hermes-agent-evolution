@@ -977,6 +977,14 @@ DEFAULT_CONFIG = {
         # (docker/modal/ssh — they have their own probe).  Set False to
         # disable entirely.
         "environment_probe": True,
+        # Optional Model-First Reasoning scaffold (issue #750).  Off by
+        # default — when True, injects a prompt fragment asking the model to
+        # write an explicit problem model (entities, state variables,
+        # preconditions/effects, constraints) before producing a plan or tool
+        # sequence for non-trivial tasks.  Stable prompt prefix, so it does
+        # not break prompt caching.  Costs ~80 tokens in the cached system
+        # prompt when enabled.  Set True to enable globally.
+        "model_first_reasoning": False,
         # Embedder-supplied environment description appended to the system
         # prompt's environment-hints block. Lets a host that wraps Hermes
         # (sandbox runner, managed platform) explain the runtime environment
