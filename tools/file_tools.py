@@ -1851,11 +1851,15 @@ def _check_file_reqs():
 
 READ_FILE_SCHEMA = {
     "name": "read_file",
-    "description": "Read a text file with line numbers and pagination. Use this instead of cat/head/tail in terminal. Output format: 'LINE_NUM|CONTENT'. Suggests similar filenames if not found. Use offset and limit for large files. Reads exceeding ~100K characters are rejected; use offset and limit to read specific sections of large files. Jupyter notebooks (.ipynb), Word documents (.docx), and Excel workbooks (.xlsx) are auto-extracted to readable text. NOTE: Cannot read images or other binary files — use vision_analyze for images.",
+    "description": "Read a text file with line numbers and pagination. Use this instead of cat/head/tail in terminal. Output format: 'LINE_NUM|CONTENT'. Suggests similar filenames if not found. Use offset and limit for large files. Reads exceeding ~100K characters are rejected; use offset and limit to read specific sections of large files. Jupyter notebooks (.ipynb), Word documents (.docx), and Excel workbooks (.xlsx) are auto-extracted to readable text. NOTE: Cannot read images or other binary files — use vision_analyze for images. The 'path' parameter can also be a list of paths to read multiple files in one call (batch mode, max 10 files).",
     "parameters": {
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Path to the file to read (absolute, relative, or ~/path)"},
+            "path": {
+                "type": ["string", "array"],
+                "items": {"type": "string"},
+                "description": "Path to the file to read (absolute, relative, or ~/path), or a list of up to 10 paths for batch reading",
+            },
             "offset": {"type": "integer", "description": "Line number to start reading from (1-indexed, default: 1)", "default": 1, "minimum": 1},
             "limit": {"type": "integer", "description": "Maximum number of lines to read (default: 500, max: 2000)", "default": 500, "maximum": 2000}
         },
@@ -1954,7 +1958,44 @@ SEARCH_FILES_SCHEMA = {
 
 def _handle_read_file(args, **kw):
     tid = kw.get("task_id") or "default"
-    return read_file_tool(path=args.get("path", ""), offset=args.get("offset", 1), limit=args.get("limit", 500), task_id=tid)
+    path = args.get("path", "")
+    # #757/#784 — batch mode: read multiple files in one tool call.
+    if isinstance(path, list):
+        return _handle_read_file_batch(path, args, tid)
+    return read_file_tool(path=path, offset=args.get("offset", 1), limit=args.get("limit", 500), task_id=tid)
+
+
+_BATCH_READ_MAX_FILES = 10
+
+
+def _handle_read_file_batch(paths: list, args: dict, tid: str) -> str:
+    """Read multiple files in one call. Returns JSON with per-file results."""
+    if len(paths) > _BATCH_READ_MAX_FILES:
+        return json.dumps({
+            "error": (
+                f"Batch read supports at most {_BATCH_READ_MAX_FILES} files per call; "
+                f"got {len(paths)}. Split into smaller batches."
+            ),
+        })
+    offset = args.get("offset", 1)
+    limit = args.get("limit", 500)
+    files = []
+    for p in paths:
+        if not isinstance(p, str):
+            files.append({"path": str(p), "error": "Invalid path type: expected string"})
+            continue
+        raw = read_file_tool(path=p, offset=offset, limit=limit, task_id=tid)
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            parsed = {"raw": raw}
+        entry = {"path": p}
+        if "error" in parsed:
+            entry["error"] = parsed["error"]
+        else:
+            entry.update(parsed)
+        files.append(entry)
+    return json.dumps({"batch": True, "files": files}, ensure_ascii=False)
 
 
 def _handle_write_file(args, **kw):
