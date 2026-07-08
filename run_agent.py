@@ -6000,12 +6000,17 @@ class AIAgent:
         self, decision: ToolGuardrailDecision
     ) -> str:
         tool = decision.tool_name or "a tool"
-        return (
+        response = (
             f"I stopped retrying {tool} because it hit the tool-call guardrail "
             f"({decision.code}) after {decision.count} repeated non-progressing "
             "attempts. The last tool result explains the blocker; the next step is "
             "to change strategy instead of repeating the same call."
         )
+        # #744/#787 — surface the concrete fallback directive so the model
+        # (and the user) sees a suggested alternative action, not just a halt.
+        if decision.fallback_directive:
+            response += f" Suggested alternative: {decision.fallback_directive}."
+        return response
 
     def _append_guardrail_observation(
         self,

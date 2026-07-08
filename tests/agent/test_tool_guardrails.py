@@ -6,8 +6,10 @@ from agent.tool_guardrails import (
     ToolCallGuardrailConfig,
     ToolCallGuardrailController,
     ToolCallSignature,
+    append_toolguard_guidance,
     canonical_tool_args,
     classify_tool_failure,
+    toolguard_synthetic_result,
 )
 
 
@@ -365,3 +367,93 @@ def test_fallback_directive_covers_video_media_tools():
 
     assert "read_file" in _fallback_directive_for("video_analyze")
     assert "placeholder" in _fallback_directive_for("video_generate")
+
+
+# ── #787: fallback_directive consumption in guardrail output ──────────────────
+
+
+def _make_warn_decision_with_directive(
+    tool_name: str = "read_file", directive: str = "use search_files instead"
+):
+    """Build a warn decision with a non-empty fallback_directive for output tests."""
+    from agent.tool_guardrails import ToolGuardrailDecision, ToolCallSignature
+
+    return ToolGuardrailDecision(
+        action="warn",
+        code="repeated_exact_failure_warning",
+        message="read_file has failed 2 times with identical arguments.",
+        tool_name=tool_name,
+        count=2,
+        signature=ToolCallSignature.from_call(tool_name, {"path": "/bad"}),
+        fallback_directive=directive,
+    )
+
+
+def test_synthetic_result_includes_fallback_directive_as_top_level_field():
+    """toolguard_synthetic_result surfaces fallback_directive at the top level (#787)."""
+    decision = _make_warn_decision_with_directive(directive="use search_files instead")
+    payload = json.loads(toolguard_synthetic_result(decision))
+
+    assert "fallback_directive" in payload
+    assert payload["fallback_directive"] == "use search_files instead"
+    # The directive is also in the nested guardrail metadata (from #785)
+    assert payload["guardrail"]["fallback_directive"] == "use search_files instead"
+
+
+def test_synthetic_result_omits_fallback_directive_when_empty():
+    """When fallback_directive is empty, the top-level key is absent (backward compat)."""
+    from agent.tool_guardrails import ToolGuardrailDecision
+
+    decision = ToolGuardrailDecision(
+        action="block",
+        code="repeated_exact_failure_block",
+        message="blocked",
+        tool_name="web_search",
+        count=5,
+        fallback_directive="",
+    )
+    payload = json.loads(toolguard_synthetic_result(decision))
+
+    assert "fallback_directive" not in payload
+    assert "fallback_directive" not in payload.get("guardrail", {})
+
+
+def test_append_guidance_includes_fallback_directive_in_suffix():
+    """append_toolguard_guidance appends the fallback directive as a labelled line (#787)."""
+    decision = _make_warn_decision_with_directive(directive="use search_files instead")
+    result = append_toolguard_guidance("tool output here", decision)
+
+    assert "[Fallback directive: use search_files instead]" in result
+    assert "[Tool loop warning:" in result
+    assert result.startswith("tool output here")
+
+
+def test_append_guidance_omits_fallback_directive_line_when_empty():
+    """When fallback_directive is empty, no directive line is appended (backward compat)."""
+    from agent.tool_guardrails import ToolGuardrailDecision
+
+    decision = ToolGuardrailDecision(
+        action="warn",
+        code="repeated_exact_failure_warning",
+        message="failed 2 times",
+        tool_name="web_search",
+        count=2,
+        fallback_directive="",
+    )
+    result = append_toolguard_guidance("output", decision)
+
+    assert "[Fallback directive:" not in result
+    assert "[Tool loop warning:" in result
+
+
+def test_append_guidance_no_directive_for_allow_decision():
+    """Allow decisions are unchanged by fallback_directive wiring (#787 regression)."""
+    from agent.tool_guardrails import ToolGuardrailDecision
+
+    decision = ToolGuardrailDecision(
+        action="allow",
+        tool_name="read_file",
+        fallback_directive="",
+    )
+    result = append_toolguard_guidance("output", decision)
+    assert result == "output"
