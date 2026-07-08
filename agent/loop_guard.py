@@ -107,8 +107,9 @@ _EXPLORATION_ALTERNATIVE_HINT = {
 # Per-tool diversion advice appended to every nudge branch for the tools the
 # introspection evidence shows spiraling (#694 family): navigation (#680),
 # patch retries (#697), memory ops (#698), tool routing (#699), query
-# reformulation (#700), and terminal diagnostics (#694). Exploration tools
-# keep their dedicated #625 hints above (checked first in _diversion_hint).
+# reformulation (#700), terminal diagnostics (#694), and media generation /
+# analysis (#739). Exploration tools keep their dedicated #625 hints above
+# (checked first in _diversion_hint).
 _DIVERSION_HINT = {
     "terminal": (
         " Read the failing output above and act on its CONTENT (fix the code "
@@ -145,6 +146,28 @@ _DIVERSION_HINT = {
         " Stop reformulating queries: synthesize an answer from the results "
         "you already have, or `web_extract` (if available) the most promising "
         "hit for depth."
+    ),
+    "vision_analyze": (
+        " Stop re-calling: confirm the image path exists and the format is "
+        "supported (png/jpg/webp) with `read_file`. If the input is invalid or "
+        "the tool is unavailable, describe the visual from surrounding context "
+        "and report the blocker instead of retrying the same analysis."
+    ),
+    "image_generate": (
+        " Stop re-generating: verify the prompt and that an image provider is "
+        "configured. If generation keeps failing, deliver a text "
+        "description/placeholder and report the visual blocker rather than "
+        "looping on the same call."
+    ),
+    "video_analyze": (
+        " Stop re-calling: confirm the video path and format with `read_file`. "
+        "If the input is invalid or the tool is unavailable, work from a text "
+        "summary and report the blocker instead of retrying."
+    ),
+    "video_generate": (
+        " Stop re-generating: verify the prompt and that a video provider is "
+        "configured. If generation keeps failing, deliver a text placeholder "
+        "and report the visual blocker rather than looping."
     ),
 }
 
