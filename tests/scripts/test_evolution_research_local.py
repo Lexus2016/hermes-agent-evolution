@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from evolution_research_local import (  # noqa: E402
+    _default_evolution_dir,
     _load_records,
     _priority,
     _reject_rate,
@@ -254,3 +255,28 @@ def test_main_does_not_clobber_live_report(evo_dir: Path):
 
 def test_main_missing_dir_returns_error(tmp_path: Path):
     assert main(["--evolution-dir", str(tmp_path / "absent")]) == 1
+
+
+# ── profile-dir resolution: never hardcode 'user1' (#733 review fix) ──────────
+
+
+def test_default_dir_prefers_evolution_profile_dir_env(monkeypatch, tmp_path):
+    target = tmp_path / "srv" / "evolution"
+    monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(target))
+    assert _default_evolution_dir() == target
+
+
+def test_default_dir_uses_default_profile_not_user1(monkeypatch, tmp_path):
+    monkeypatch.delenv("EVOLUTION_PROFILE_DIR", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    resolved = _default_evolution_dir()
+    assert resolved == tmp_path / "profiles" / "default" / "evolution"
+    assert "user1" not in str(resolved)
+
+
+def test_default_dir_honors_active_profile_marker(monkeypatch, tmp_path):
+    monkeypatch.delenv("EVOLUTION_PROFILE_DIR", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / "active_profile").write_text("osoba\n", encoding="utf-8")
+    resolved = _default_evolution_dir()
+    assert resolved == tmp_path / "profiles" / "osoba" / "evolution"

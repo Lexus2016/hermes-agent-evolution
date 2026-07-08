@@ -46,6 +46,41 @@ _MAX_FINDINGS = 20
 _LOCAL_MARKER = "<!-- evolution-research: local-state fallback -->"
 
 
+def _default_evolution_dir() -> Path:
+    """Resolve the evolution profile directory WITHOUT hardcoding a profile name.
+
+    Priority (matches the rest of the evolution script family + the runtime):
+      1. ``$EVOLUTION_PROFILE_DIR`` — set explicitly by the evolution cron; this
+         is the authoritative path on the server.
+      2. ``<hermes_home>/profiles/<active_profile>/evolution`` — where
+         ``hermes_home`` is ``$HERMES_HOME`` or the platform default
+         (``~/.hermes``), and ``<active_profile>`` is read from the
+         ``<hermes_home>/active_profile`` marker, defaulting to ``"default"``.
+
+    The active profile is resolved dynamically, never assumed to be ``user1`` —
+    real installs (and the Osoba.ai server) use the ``default`` profile.
+    """
+    env = os.environ.get("EVOLUTION_PROFILE_DIR", "").strip()
+    if env:
+        return Path(env)
+
+    hermes_home = Path(
+        os.environ.get("HERMES_HOME", "").strip() or (Path.home() / ".hermes")
+    )
+
+    profile = "default"
+    marker = hermes_home / "active_profile"
+    try:
+        if marker.is_file():
+            name = marker.read_text(encoding="utf-8").strip()
+            if name:
+                profile = name
+    except OSError:
+        pass
+
+    return hermes_home / "profiles" / profile / "evolution"
+
+
 def web_tools_available(available_tools) -> bool:
     """Capability check: True if at least one live web/research tool is exposed.
 
@@ -327,8 +362,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--evolution-dir",
         default=None,
-        help="Path to the evolution directory (default: $EVOLUTION_PROFILE_DIR "
-        "or ~/.hermes/profiles/user1/evolution)",
+        help="Path to the evolution directory (default: $EVOLUTION_PROFILE_DIR, "
+        "else <hermes_home>/profiles/<active_profile>/evolution)",
     )
     parser.add_argument(
         "--print",
@@ -340,12 +375,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.evolution_dir:
         evolution_dir = Path(args.evolution_dir)
     else:
-        evolution_dir = Path(
-            os.environ.get(
-                "EVOLUTION_PROFILE_DIR",
-                str(Path.home() / ".hermes" / "profiles" / "user1" / "evolution"),
-            )
-        )
+        evolution_dir = _default_evolution_dir()
 
     if not evolution_dir.is_dir():
         print(f"Error: evolution directory not found: {evolution_dir}", file=sys.stderr)
