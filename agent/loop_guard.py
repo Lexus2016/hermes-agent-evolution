@@ -91,7 +91,9 @@ _EXPLORATION_ALTERNATIVE_HINT = {
         "toolset); it gives a structured "
         "overview (functions/classes/methods with file:line) in a single call — "
         "far cheaper than reading files one at a time (Python codebases only). "
-        "For a large batch of files you already know you need, `delegate_task` a "
+        "For several files you already know you need, pass a list of up to 10 "
+        "paths to `read_file` in one call instead of reading them sequentially. "
+        "For a large batch beyond that, `delegate_task` a "
         "subagent to read them and report back, keeping this context lean."
     ),
     "search_files": (
