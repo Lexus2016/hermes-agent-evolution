@@ -35,11 +35,11 @@ github:
 
 # Output configuration
 output:
-  file: ~/.hermes/profiles/user1/evolution/integration/{current_date}.json
+  file: ~/.hermes/evolution/integration/{current_date}.json
   format: json
 
 # Logging
-log_file: ~/.hermes/profiles/user1/logs/evolution-integration.log
+log_file: ~/.hermes/logs/evolution-integration.log
 log_level: INFO
 
 # Safety

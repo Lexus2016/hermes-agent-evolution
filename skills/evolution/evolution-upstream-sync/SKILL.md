@@ -218,7 +218,7 @@ never commit conflict markers, never merge directly into `main`.
 
 ## Output format
 
-Save the report to `~/.hermes/profiles/user1/evolution/upstream/YYYY-MM-DD.md`:
+Save the report to `~/.hermes/evolution/upstream/YYYY-MM-DD.md`:
 
 ```markdown
 # Upstream Sync Report - YYYY-MM-DD

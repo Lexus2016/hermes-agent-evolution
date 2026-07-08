@@ -177,11 +177,11 @@ def _total_max() -> int:
 
 
 def _hot_path(evolution_dir: Path) -> Path:
-    """Canonical path: $EVOLUTION_PROFILE_DIR or ~/.hermes/profiles/user1/evolution."""
+    """Canonical path: $EVOLUTION_PROFILE_DIR or ~/.hermes/evolution."""
     env = os.environ.get("EVOLUTION_PROFILE_DIR", "")
     if env:
         return Path(env)
-    return Path.home() / ".hermes" / "profiles" / "user1" / "evolution"
+    return Path.home() / ".hermes" / "evolution"
 
 
 # ──────────────────────────────────────────────────────────────────────

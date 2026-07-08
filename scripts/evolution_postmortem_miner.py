@@ -48,7 +48,7 @@ from typing import Any, Dict, List, Optional
 
 _DEFAULT_REPO = "Lexus2016/hermes-agent-evolution"
 _DEFAULT_LIMIT = 20
-_DEFAULT_OUTPUT_DIR = Path.home() / ".hermes" / "profiles" / "user1" / "evolution"
+_DEFAULT_OUTPUT_DIR = Path.home() / ".hermes" / "evolution"
 _OUTPUT_FILE = "postmortem-rules.json"
 
 # PR numbers that are always skipped (no-op / test PRs, etc.)

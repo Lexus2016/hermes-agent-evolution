@@ -10,7 +10,7 @@ prompt: |
   
   Use the evolution-issues skill for instructions.
   
-  Output to: ~/.hermes/profiles/user1/evolution/issues/{current_date}.json
+  Output to: ~/.hermes/evolution/issues/{current_date}.json
 
 skills:
   - evolution/issues
@@ -28,11 +28,11 @@ github:
 
 # Output configuration
 output:
-  file: ~/.hermes/profiles/user1/evolution/issues/{current_date}.json
+  file: ~/.hermes/evolution/issues/{current_date}.json
   format: json
 
 # Logging
-log_file: ~/.hermes/profiles/user1/logs/evolution-issues.log
+log_file: ~/.hermes/logs/evolution-issues.log
 log_level: INFO
 
 # Limits

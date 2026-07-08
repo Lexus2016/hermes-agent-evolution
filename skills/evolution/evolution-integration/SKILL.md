@@ -306,7 +306,7 @@ PROFILE_SKILLS="${HERMES_HOME:-$HOME/.hermes}/profiles/user1/skills/evolution"
 6. **Record the merge for the realized-impact loop** (so evolution is not blind —
    we later verify whether this change actually helped). For EACH merged PR, run
    the deterministic helper to append one line to
-   `~/.hermes/profiles/user1/evolution/realized/ledger.jsonl`:
+   `~/.hermes/evolution/realized/ledger.jsonl`:
 ```bash
 python3 scripts/evolution_realized_impact.py record-merge \
   <#> "<YYYY-MM-DD>" "<the issue's analysis impact 0..1>" \
@@ -335,7 +335,7 @@ python3 scripts/evolution_realized_impact.py record-merge \
 > is not currently open per `gh pr list`, you hallucinated — STOP and redo from
 > the real list.
 
-Save to `~/.hermes/profiles/user1/evolution/integration/YYYY-MM-DD.json` on
+Save to `~/.hermes/evolution/integration/YYYY-MM-DD.json` on
 **EVERY** run — including idle cycles (`merged: []`, `skipped: []`): a missing
 report is read by the watchdog as a dead job.
 

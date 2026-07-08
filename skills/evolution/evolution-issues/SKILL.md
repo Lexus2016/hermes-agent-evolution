@@ -16,7 +16,7 @@ Create GitHub issues and pull requests based on research.
 
 ## Process
 
-1. **Load** the latest research report from `~/.hermes/profiles/user1/evolution/research/`
+1. **Load** the latest research report from `~/.hermes/evolution/research/`
 1a. **Also mine the agent's OWN traces for weaknesses (#248).** Research is the
     external signal; the agent's own execution traces are the internal one. Run
     the deterministic trace miner and consider its weakness records alongside the
@@ -68,7 +68,7 @@ Create GitHub issues and pull requests based on research.
 
     **Fast-path — local dedup cache (O(1), avoids re-pulling history every run).**
     This install keeps a cache of every idea it has already filed/considered at
-    `~/.hermes/profiles/user1/evolution/dedup-cache.json`. Check each proposal
+    `~/.hermes/evolution/dedup-cache.json`. Check each proposal
     against it FIRST; a hit means we already handled this idea — skip it with no
     gh query, no in-context comparison:
     ```bash

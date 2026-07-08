@@ -17,7 +17,7 @@ Implement selected issues, create versions, and self-update.
 
 ## Process
 
-1. **Load** the latest analysis from `~/.hermes/profiles/user1/evolution/analysis/`
+1. **Load** the latest analysis from `~/.hermes/evolution/analysis/`
 
 1b. **Freshness gate — NEVER consume a stale selection.** Check the loaded
     JSON's `date` field: it must be from the CURRENT cycle (today, or the most
@@ -199,7 +199,7 @@ python scripts/evolution_pre_pr_test_runner.py --changed-files "$changed"
 ```
 
 If this gate FAILS (exit ≠ 0), read the log under
-`~/.hermes/profiles/user1/evolution/pre-pr-test-results/`, fix the failures,
+`~/.hermes/evolution/pre-pr-test-results/`, fix the failures,
 re-run until green, THEN proceed to step 2. Do NOT open a PR against a red gate.
 
 **Step 2: Lint + format (CI runs `ruff` as a blocking check):**
@@ -368,7 +368,7 @@ would update itself in the middle of its own work.
 ## Output
 
 After each run, append a Markdown report to
-`~/.hermes/profiles/user1/evolution/implementation/YYYY-MM-DD.md` with the
+`~/.hermes/evolution/implementation/YYYY-MM-DD.md` with the
 following structure:
 
 ```markdown

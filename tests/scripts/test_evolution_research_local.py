@@ -257,7 +257,7 @@ def test_main_missing_dir_returns_error(tmp_path: Path):
     assert main(["--evolution-dir", str(tmp_path / "absent")]) == 1
 
 
-# ── profile-dir resolution: never hardcode 'user1' (#733 review fix) ──────────
+# ── profile-dir resolution: $HERMES_HOME/evolution, never 'user1' ─────────────
 
 
 def test_default_dir_prefers_evolution_profile_dir_env(monkeypatch, tmp_path):
@@ -266,17 +266,20 @@ def test_default_dir_prefers_evolution_profile_dir_env(monkeypatch, tmp_path):
     assert _default_evolution_dir() == target
 
 
-def test_default_dir_uses_default_profile_not_user1(monkeypatch, tmp_path):
+def test_default_dir_uses_hermes_home_evolution_not_user1(monkeypatch, tmp_path):
     monkeypatch.delenv("EVOLUTION_PROFILE_DIR", raising=False)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     resolved = _default_evolution_dir()
-    assert resolved == tmp_path / "profiles" / "default" / "evolution"
+    # HERMES_HOME already encodes the profile — no profiles/<name> segment.
+    assert resolved == tmp_path / "evolution"
     assert "user1" not in str(resolved)
+    assert "profiles" not in str(resolved)
 
 
-def test_default_dir_honors_active_profile_marker(monkeypatch, tmp_path):
+def test_default_dir_falls_back_to_home_hermes_when_no_env(monkeypatch, tmp_path):
     monkeypatch.delenv("EVOLUTION_PROFILE_DIR", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    (tmp_path / "active_profile").write_text("osoba\n", encoding="utf-8")
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     resolved = _default_evolution_dir()
-    assert resolved == tmp_path / "profiles" / "osoba" / "evolution"
+    assert resolved == tmp_path / ".hermes" / "evolution"
+    assert "user1" not in str(resolved)

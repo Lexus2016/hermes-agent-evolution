@@ -59,7 +59,7 @@ class TestPreflightConfig:
 
 class TestDigestFallback:
     def test_find_latest_digest(self, tmp_path):
-        stage_dir = tmp_path / "profiles" / "user1" / "evolution" / "introspection"
+        stage_dir = tmp_path / "evolution" / "introspection"
         stage_dir.mkdir(parents=True)
         old = stage_dir / "2026-06-20.json"
         new = stage_dir / "2026-06-23.json"
@@ -70,7 +70,7 @@ class TestDigestFallback:
         assert ep.find_latest_digest("introspection", tmp_path) == new
 
     def test_load_digest_as_fallback(self, tmp_path):
-        stage_dir = tmp_path / "profiles" / "user1" / "evolution" / "analysis"
+        stage_dir = tmp_path / "evolution" / "analysis"
         stage_dir.mkdir(parents=True)
         digest = stage_dir / "2026-06-23.json"
         digest.write_text(json.dumps({"foo": "bar"}))
@@ -81,7 +81,7 @@ class TestDigestFallback:
         assert '"foo": "bar"' in text
 
     def test_load_digest_truncate(self, tmp_path):
-        stage_dir = tmp_path / "profiles" / "user1" / "evolution" / "implementation"
+        stage_dir = tmp_path / "evolution" / "implementation"
         stage_dir.mkdir(parents=True)
         digest = stage_dir / "2026-06-23.md"
         digest.write_text("x" * 300_000)
@@ -116,11 +116,13 @@ class TestPreflightProvider:
         fake_client = MagicMock()
         fake_client.chat.completions.create.return_value = MagicMock()
         with patch("openai.OpenAI", return_value=fake_client):
-            err = ep.preflight_provider({
-                "api_key": "k",
-                "model": "config-default-model",
-                "provider": "openrouter",
-            })
+            err = ep.preflight_provider(
+                {
+                    "api_key": "k",
+                    "model": "config-default-model",
+                    "provider": "openrouter",
+                }
+            )
         assert err is None
         # The model carried on the runtime dict must reach the client call.
         _, kwargs = fake_client.chat.completions.create.call_args
@@ -128,11 +130,13 @@ class TestPreflightProvider:
 
     def test_acp_treated_as_reachable(self):
         assert (
-            ep.preflight_provider({
-                "api_key": "k",
-                "model": "m",
-                "command": ["copilot"],
-            })
+            ep.preflight_provider(
+                {
+                    "api_key": "k",
+                    "model": "m",
+                    "command": ["copilot"],
+                }
+            )
             is None
         )
 
@@ -142,11 +146,13 @@ class TestPreflightProvider:
         fake_client.chat.completions.create.return_value = fake_response
         with patch("openai.OpenAI", return_value=fake_client):
             assert (
-                ep.preflight_provider({
-                    "api_key": "k",
-                    "model": "m",
-                    "provider": "openrouter",
-                })
+                ep.preflight_provider(
+                    {
+                        "api_key": "k",
+                        "model": "m",
+                        "provider": "openrouter",
+                    }
+                )
                 is None
             )
         fake_client.chat.completions.create.assert_called_once()
@@ -157,11 +163,13 @@ class TestPreflightProvider:
             "connection refused"
         )
         with patch("openai.OpenAI", return_value=fake_client):
-            err = ep.preflight_provider({
-                "api_key": "k",
-                "model": "m",
-                "provider": "openrouter",
-            })
+            err = ep.preflight_provider(
+                {
+                    "api_key": "k",
+                    "model": "m",
+                    "provider": "openrouter",
+                }
+            )
         assert err is not None
         assert "connection refused" in err
 
@@ -170,11 +178,13 @@ class TestPreflightProvider:
         fake_client = MagicMock()
         with patch("anthropic.Anthropic", return_value=fake_client):
             assert (
-                ep.preflight_provider({
-                    "api_key": "k",
-                    "model": "m",
-                    "api_mode": "anthropic_messages",
-                })
+                ep.preflight_provider(
+                    {
+                        "api_key": "k",
+                        "model": "m",
+                        "api_mode": "anthropic_messages",
+                    }
+                )
                 is None
             )
         fake_client.messages.create.assert_called_once()
@@ -184,11 +194,13 @@ class TestPreflightProvider:
         fake_client = MagicMock()
         fake_client.messages.create.side_effect = RuntimeError("timeout")
         with patch("anthropic.Anthropic", return_value=fake_client):
-            err = ep.preflight_provider({
-                "api_key": "k",
-                "model": "m",
-                "api_mode": "anthropic_messages",
-            })
+            err = ep.preflight_provider(
+                {
+                    "api_key": "k",
+                    "model": "m",
+                    "api_mode": "anthropic_messages",
+                }
+            )
         assert err is not None
         assert "timeout" in err
 
@@ -250,7 +262,7 @@ class TestSchedulerIntegration:
     def test_preflight_failure_with_digest_returns_stale_digest(self, tmp_path):
         from cron.scheduler import _run_job_impl
 
-        stage_dir = tmp_path / "profiles" / "user1" / "evolution" / "analysis"
+        stage_dir = tmp_path / "evolution" / "analysis"
         stage_dir.mkdir(parents=True)
         digest = stage_dir / "2026-06-23.json"
         digest.write_text(json.dumps({"selected": ["#123"]}))

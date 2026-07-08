@@ -32,7 +32,7 @@ CLI:
 
 Returns exit code 0 if all targeted tests pass, 1 if any fail.
 Logs the full pytest output to:
-    ~/.hermes/profiles/user1/evolution/pre-pr-test-results/{timestamp}.log
+    ~/.hermes/evolution/pre-pr-test-results/{timestamp}.log
 
 Standalone design: import-safe pure functions for unit-testability; the CLI
 entrypoint orchestrates IO (git diff, subprocess, file logging).
@@ -55,7 +55,7 @@ DEFAULT_TIMEOUT = 60
 DEFAULT_FALLBACK_TIMEOUT = 120
 DEFAULT_FALLBACK_KWARGS = "not slow and not docker"
 
-_LOG_DIR_TEMPLATE = "~/.hermes/profiles/user1/evolution/pre-pr-test-results"
+_LOG_DIR_TEMPLATE = "~/.hermes/evolution/pre-pr-test-results"
 
 # Source-root to test-root mapping: each source prefix maps to the
 # corresponding test directory prefix, so agent/... → tests/agent/...,
@@ -465,7 +465,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--log-dir",
         type=str,
         default=None,
-        help="Directory for test result logs (default: ~/.hermes/profiles/user1/evolution/pre-pr-test-results/)",
+        help="Directory for test result logs (default: ~/.hermes/evolution/pre-pr-test-results/)",
     )
     parser.add_argument(
         "--fail-fast",

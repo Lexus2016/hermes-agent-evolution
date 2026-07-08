@@ -51,7 +51,7 @@ python scripts/evolution_local_triage.py
 
 What it does:
 1. Reads the most recent `issues/`, `introspection/`, and `research/` sidecars
-   from `~/.hermes/profiles/user1/evolution/`
+   from `~/.hermes/evolution/`
 2. Extracts filed proposals (decision=“filed” with issue numbers) and scores them
 3. Reads `evolution-health.txt` for `effort_budget` calibration (1.5 or 3.0)
 4. Reads `realized-impact.txt` for consolidation-mode detection
@@ -234,7 +234,7 @@ final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + 
 
 5a. **Selection-capability calibration — pick only what you can land (goal 3).**
     BEFORE the final selection, read the sidecar
-    `~/.hermes/profiles/user1/evolution/evolution-health.txt` (one
+    `~/.hermes/evolution/evolution-health.txt` (one
     `[evolution-metrics] …` line, refreshed by the funnel job; missing → treat as
     signal OK, proceed). This is the longitudinal calibration loop: it reports
     whether what we SELECTED actually merged. It is INTERNAL plumbing — keep it
@@ -318,7 +318,7 @@ final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + 
     step 1c).
 
 6c. **Realized-impact feedback — don't evolve blind (goal 3).** Read the sidecar
-    `~/.hermes/profiles/user1/evolution/realized-impact.txt` (one
+    `~/.hermes/evolution/realized-impact.txt` (one
     `[evolution-realized-impact] …` line, refreshed by the funnel job; missing →
     treat as `healthy`). It closes the loop: it reports whether what we MERGED
     actually delivered value. Let its flags set this cycle's bar, silently (this
@@ -403,7 +403,7 @@ implementation and integration can confirm.
 
 ## Output format
 
-Save to `~/.hermes/profiles/user1/evolution/analysis/YYYY-MM-DD.json`:
+Save to `~/.hermes/evolution/analysis/YYYY-MM-DD.json`:
 
 ```json
 {

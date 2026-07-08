@@ -10,7 +10,7 @@ prompt: |
   
   Use the evolution-analysis skill for instructions.
   
-  Output to: ~/.hermes/profiles/user1/evolution/analysis/{current_date}.json
+  Output to: ~/.hermes/evolution/analysis/{current_date}.json
   
   CRITICAL: Verify `gh auth status` works before proceeding — the gh CLI is
   the primary auth mechanism. GITHUB_TOKEN is set as fallback. If neither
@@ -32,11 +32,11 @@ github:
 
 # Output configuration
 output:
-  file: ~/.hermes/profiles/user1/evolution/analysis/{current_date}.json
+  file: ~/.hermes/evolution/analysis/{current_date}.json
   format: json
 
 # Logging
-log_file: ~/.hermes/profiles/user1/logs/evolution-analysis.log
+log_file: ~/.hermes/logs/evolution-analysis.log
 log_level: DEBUG
 
 # Safety

@@ -171,7 +171,7 @@ def is_evolution_halted(evolution_dir: Path | None = None) -> bool | None:
         evolution_dir = Path(
             os.environ.get(
                 "EVOLUTION_PROFILE_DIR",
-                str(Path.home() / ".hermes" / "profiles" / "user1" / "evolution"),
+                str(Path.home() / ".hermes" / "evolution"),
             )
         )
     halt_file = evolution_dir / "halt-state.txt"
@@ -258,7 +258,7 @@ def main(argv: list[str]) -> int:
     evolution_dir = Path(
         os.environ.get(
             "EVOLUTION_PROFILE_DIR",
-            str(Path.home() / ".hermes" / "profiles" / "user1" / "evolution"),
+            str(Path.home() / ".hermes" / "evolution"),
         )
     )
     args = argv[1:]

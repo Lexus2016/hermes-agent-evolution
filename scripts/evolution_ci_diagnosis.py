@@ -588,7 +588,7 @@ def create_child_issue(
 
 
 def _report_dir() -> Path:
-    return get_hermes_home() / "profiles" / "user1" / "evolution" / "ci-diagnosis"
+    return get_hermes_home() / "evolution" / "ci-diagnosis"
 
 
 def save_diagnosis_report(

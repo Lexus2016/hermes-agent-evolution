@@ -59,7 +59,7 @@ def evolution_job_stage(job: Dict[str, Any]) -> Optional[str]:
 
 def _evolution_dir(hermes_home: Optional[Path] = None) -> Path:
     home = (hermes_home or get_hermes_home()).resolve()
-    return home / "profiles" / "user1" / "evolution"
+    return home / "evolution"
 
 
 def _preflight_timeout_seconds(cfg: Optional[Any] = None) -> float:

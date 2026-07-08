@@ -225,7 +225,7 @@ def _evolution_dir() -> Path:
     return Path(
         os.environ.get(
             "EVOLUTION_PROFILE_DIR",
-            str(Path.home() / ".hermes" / "profiles" / "user1" / "evolution"),
+            str(Path.home() / ".hermes" / "evolution"),
         )
     )
 

@@ -927,7 +927,7 @@ def main() -> int:
     evolution_dir = Path(
         os.environ.get(
             "EVOLUTION_PROFILE_DIR",
-            str(hermes_home / "profiles" / "user1" / "evolution"),
+            str(hermes_home / "evolution"),
         )
     )
     jobs_file = hermes_home / "cron" / "jobs.json"

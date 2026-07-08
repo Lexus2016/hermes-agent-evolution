@@ -30,7 +30,7 @@ def _hot_path() -> Path:
     env = os.environ.get("EVOLUTION_PROFILE_DIR", "")
     if env:
         return Path(env)
-    return Path.home() / ".hermes" / "profiles" / "user1" / "evolution"
+    return Path.home() / ".hermes" / "evolution"
 
 
 def _mtime(path: Path) -> float:

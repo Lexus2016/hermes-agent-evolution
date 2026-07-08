@@ -15,7 +15,7 @@ prompt: |
   PRIVACY: analyze sessions locally; issues must contain ONLY abstracted problem
   patterns — never raw session text, user content, or PII.
 
-  Output to: ~/.hermes/profiles/user1/evolution/introspection/{current_date}.json
+  Output to: ~/.hermes/evolution/introspection/{current_date}.json
 
 skills:
   - evolution/introspection
@@ -33,11 +33,11 @@ github:
 
 # Output configuration
 output:
-  file: ~/.hermes/profiles/user1/evolution/introspection/{current_date}.json
+  file: ~/.hermes/evolution/introspection/{current_date}.json
   format: json
 
 # Logging
-log_file: ~/.hermes/profiles/user1/logs/evolution-introspection.log
+log_file: ~/.hermes/logs/evolution-introspection.log
 log_level: INFO
 
 # Limits

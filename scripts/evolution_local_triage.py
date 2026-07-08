@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         import os
         hermes_home = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
-        evolution_dir = Path(hermes_home) / "profiles" / "user1" / "evolution"
+        evolution_dir = Path(hermes_home) / "evolution"
 
     if not evolution_dir.is_dir():
         print(f"Error: evolution directory not found: {evolution_dir}", file=sys.stderr)

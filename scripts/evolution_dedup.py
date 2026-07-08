@@ -8,7 +8,7 @@ grows forever with repo age (#91).
 
 This maintains a tiny local cache keyed on the NORMALIZED proposal title:
 
-    ~/.hermes/profiles/user1/evolution/dedup-cache.json
+    ~/.hermes/evolution/dedup-cache.json
     { "<key>": {"title": "...", "status": "filed|rejected|considered",
                 "issue": 123, "date": "YYYY-MM-DD"} }
 
@@ -99,7 +99,7 @@ def _cache_path() -> Path:
     return Path(
         os.environ.get(
             "EVOLUTION_PROFILE_DIR",
-            str(Path.home() / ".hermes" / "profiles" / "user1" / "evolution"),
+            str(Path.home() / ".hermes" / "evolution"),
         )
     ) / "dedup-cache.json"
 

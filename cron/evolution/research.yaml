@@ -10,7 +10,7 @@ prompt: |
   
   Use the evolution-research skill for instructions.
   
-  Output to: ~/.hermes/profiles/user1/evolution/research/{current_date}.md
+  Output to: ~/.hermes/evolution/research/{current_date}.md
 
 skills:
   - evolution/research
@@ -27,11 +27,11 @@ github:
 
 # Output configuration
 output:
-  file: ~/.hermes/profiles/user1/evolution/research/{current_date}.md
+  file: ~/.hermes/evolution/research/{current_date}.md
   format: markdown
 
 # Logging
-log_file: ~/.hermes/profiles/user1/logs/evolution-research.log
+log_file: ~/.hermes/logs/evolution-research.log
 log_level: INFO
 
 # Limits

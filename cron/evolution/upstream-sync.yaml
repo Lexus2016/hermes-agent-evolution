@@ -17,7 +17,7 @@ prompt: |
   authorship-driven conflict resolution → marker guard → verify → PR; escalate
   large/entangled merges to the owner instead of blind-resolving).
 
-  Output to: ~/.hermes/profiles/user1/evolution/upstream/{current_date}.md
+  Output to: ~/.hermes/evolution/upstream/{current_date}.md
 
   CRITICAL: This job ONLY runs in PRIVATE mode.
   If GITHUB_PRIVATE_TOKEN is not set, ABORT immediately.
@@ -38,11 +38,11 @@ github:
 
 # Output configuration
 output:
-  file: ~/.hermes/profiles/user1/evolution/upstream/{current_date}.md
+  file: ~/.hermes/evolution/upstream/{current_date}.md
   format: markdown
 
 # Logging
-log_file: ~/.hermes/profiles/user1/logs/evolution-upstream-sync.log
+log_file: ~/.hermes/logs/evolution-upstream-sync.log
 log_level: DEBUG
 
 # Safety

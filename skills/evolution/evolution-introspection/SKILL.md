@@ -101,7 +101,7 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
 6. **Post-merge verification — close the realized-impact loop (goal 3).** Evolution
    is blind unless we check whether what we MERGED actually helped. You are already
    reading real sessions here, so verify recent merges in the same pass:
-   - Read `~/.hermes/profiles/user1/evolution/realized/ledger.jsonl`; take entries
+   - Read `~/.hermes/evolution/realized/ledger.jsonl`; take entries
      **merged ≥ 5 days ago with no `verdict` yet** (matured + unverified).
    - For each, judge from the real sessions since its merge: did the `target`
      problem RECUR (the fix didn't hold)? is the merged capability actually used?

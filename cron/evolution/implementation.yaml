@@ -10,7 +10,7 @@ prompt: |
   
   Use the evolution-implementation skill for instructions.
   
-  Output to: ~/.hermes/profiles/user1/evolution/implementation/{current_date}.md
+  Output to: ~/.hermes/evolution/implementation/{current_date}.md
   
   CRITICAL SAFETY RULES:
   1. NEVER merge without tests passing
@@ -39,11 +39,11 @@ github:
 
 # Output configuration
 output:
-  file: ~/.hermes/profiles/user1/evolution/implementation/{current_date}.md
+  file: ~/.hermes/evolution/implementation/{current_date}.md
   format: markdown
 
 # Logging
-log_file: ~/.hermes/profiles/user1/logs/evolution-implementation.log
+log_file: ~/.hermes/logs/evolution-implementation.log
 log_level: DEBUG
 
 # Safety

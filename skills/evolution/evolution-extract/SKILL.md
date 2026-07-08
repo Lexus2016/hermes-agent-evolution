@@ -47,7 +47,7 @@ technique beats a list of vague gestures.
 Pick the single highest-value paper to extract from, in priority order:
 
 1. A `## Research Evidence` paper link in the latest research report
-   (`~/.hermes/profiles/user1/evolution/research/`) attached to the
+   (`~/.hermes/evolution/research/`) attached to the
    highest-`Priority Score` finding.
 2. If you were handed a specific paper/finding by an upstream stage, use that.
 
@@ -101,11 +101,11 @@ source (a draft with no traceable origin cannot be A/B tested or audited).
 
 4. **Deliver the validated draft** (the normalized object the validator returned)
    plus one line naming the paper and the single technique extracted. Save it to
-   `~/.hermes/profiles/user1/evolution/extract/YYYY-MM-DD.json` for the next stage.
+   `~/.hermes/evolution/extract/YYYY-MM-DD.json` for the next stage.
 
 ## Output format
 
-Save to `~/.hermes/profiles/user1/evolution/extract/YYYY-MM-DD.json` — the exact
+Save to `~/.hermes/evolution/extract/YYYY-MM-DD.json` — the exact
 normalized object the validator emitted on exit 0:
 
 ```json

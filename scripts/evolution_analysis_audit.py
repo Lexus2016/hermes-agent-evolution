@@ -160,7 +160,7 @@ def main(argv: List[str]) -> int:
     evolution_dir = Path(
         os.environ.get(
             "EVOLUTION_PROFILE_DIR",
-            str(Path.home() / ".hermes" / "profiles" / "user1" / "evolution"),
+            str(Path.home() / ".hermes" / "evolution"),
         )
     )
     repo_env = os.environ.get("EVOLUTION_REPO_DIR")

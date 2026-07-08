@@ -50,15 +50,13 @@ def _default_evolution_dir() -> Path:
     """Resolve the evolution profile directory WITHOUT hardcoding a profile name.
 
     Priority (matches the rest of the evolution script family + the runtime):
-      1. ``$EVOLUTION_PROFILE_DIR`` — set explicitly by the evolution cron; this
-         is the authoritative path on the server.
-      2. ``<hermes_home>/profiles/<active_profile>/evolution`` — where
-         ``hermes_home`` is ``$HERMES_HOME`` or the platform default
-         (``~/.hermes``), and ``<active_profile>`` is read from the
-         ``<hermes_home>/active_profile`` marker, defaulting to ``"default"``.
-
-    The active profile is resolved dynamically, never assumed to be ``user1`` —
-    real installs (and the Osoba.ai server) use the ``default`` profile.
+      1. ``$EVOLUTION_PROFILE_DIR`` — set explicitly by the evolution cron; the
+         authoritative override.
+      2. ``<hermes_home>/evolution`` — where ``hermes_home`` is ``$HERMES_HOME``
+         or the platform default (``~/.hermes``). HERMES_HOME already encodes the
+         active profile (default -> ``~/.hermes``, named ``foo`` ->
+         ``~/.hermes/profiles/foo``), so no profile segment is hardcoded — never
+         the legacy ``profiles/user1`` literal.
     """
     env = os.environ.get("EVOLUTION_PROFILE_DIR", "").strip()
     if env:
@@ -67,18 +65,7 @@ def _default_evolution_dir() -> Path:
     hermes_home = Path(
         os.environ.get("HERMES_HOME", "").strip() or (Path.home() / ".hermes")
     )
-
-    profile = "default"
-    marker = hermes_home / "active_profile"
-    try:
-        if marker.is_file():
-            name = marker.read_text(encoding="utf-8").strip()
-            if name:
-                profile = name
-    except OSError:
-        pass
-
-    return hermes_home / "profiles" / profile / "evolution"
+    return hermes_home / "evolution"
 
 
 def web_tools_available(available_tools) -> bool:
