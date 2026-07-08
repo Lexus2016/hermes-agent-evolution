@@ -291,12 +291,13 @@ for s in evolution_funnel evolution_watchdog; do
   diff -q "scripts/$s.py" "${HERMES_HOME:-$HOME/.hermes}/scripts/$s.py" >/dev/null 2>&1 \
     || echo "WARN: $s.py did NOT deploy to HERMES_HOME/scripts — investigate before relying on it"
 done
-# The SKILLS the agent READS live in the profile (profiles/<profile>/skills/),
-# seeded as COPIES by `hermes update` — which KEEPS copies it deems
+# The SKILLS the agent READS live under HERMES_HOME (<hermes_home>/skills/ —
+# ~/.hermes/skills on the default profile, ~/.hermes/profiles/<name>/skills on a
+# named one), seeded as COPIES by `hermes update` — which KEEPS copies it deems
 # user-modified, so a merged evolution-SKILL change (e.g. this very file) can
 # silently never reach the running agent. Force-sync our own evolution skills
 # (system-managed, not user content) from the just-synced checkout:
-PROFILE_SKILLS="${HERMES_HOME:-$HOME/.hermes}/profiles/user1/skills/evolution"
+PROFILE_SKILLS="${HERMES_HOME:-$HOME/.hermes}/skills/evolution"
 [ -d "$PROFILE_SKILLS" ] && cp -rf skills/evolution/. "$PROFILE_SKILLS"/ \
   && echo "evolution skills synced to profile" || echo "WARN: profile skills dir absent"
 ```
