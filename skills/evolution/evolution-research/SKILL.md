@@ -51,7 +51,7 @@ Keywords: "agent", "autonomous", "LLM tool use", "multi-agent"
 0. **Read the pipeline's own funnel signal FIRST** (closes the funnel feedback
    loop — #84). This stage has only the `web` + `file` toolsets (no `terminal`),
    so READ the sidecar the nightly funnel job refreshes — do NOT try to run a
-   script: open `~/.hermes/profiles/default/evolution/funnel-summary.txt` (a single
+   script: open `~/.hermes/evolution/funnel-summary.txt` (a single
    `[evolution-funnel] …` line). If it's missing, treat as `signal OK` and
    proceed. This signal is **INTERNAL — it only sets your selectivity bar. Do
    NOT mention it, the `[evolution-funnel]` line, `reject_rate`, or flag names in
@@ -94,7 +94,7 @@ This stage has only the `web` + `file` toolsets (no `terminal`), so mine local
 telemetry with `read_file` — never try to run a script:
 
 - Read the evolution profile directory (`$EVOLUTION_PROFILE_DIR`; on a standard
-  install `~/.hermes/profiles/default/evolution`): `metrics.jsonl` (per-cycle
+  install `~/.hermes/evolution`): `metrics.jsonl` (per-cycle
   counts), `funnel-summary.txt` (the selectivity signal), and the newest prior
   `research/*.md` report.
 - Surface pipeline-quality findings from what you read: integration stalls
@@ -113,7 +113,7 @@ silent failure.
 
 ## Output format
 
-Save the result to `~/.hermes/profiles/default/evolution/research/YYYY-MM-DD.md`:
+Save the result to `~/.hermes/evolution/research/YYYY-MM-DD.md`:
 
 ```markdown
 # Research Report - YYYY-MM-DD
