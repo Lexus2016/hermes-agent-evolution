@@ -325,3 +325,43 @@ def test_fallback_directive_in_metadata():
     controller.before_call("read_file", {"path": "/tmp/other"})
     allow_decision = controller.after_call("read_file", {"path": "/tmp/other"}, "ok", failed=False)
     assert "fallback_directive" not in allow_decision.to_metadata()
+
+
+# ── #739: media-tool fallback directives ──────────────────────────────────────
+
+
+def test_fallback_directive_populated_for_vision_analyze():
+    """Repeated vision_analyze failures carry a media-aware fallback_directive."""
+    controller = ToolCallGuardrailController()
+    args = {"path": "/bad.png"}
+    for _ in range(3):
+        controller.before_call("vision_analyze", args)
+        decision = controller.after_call(
+            "vision_analyze", args, '{"success": false, "error": "invalid image"}', failed=True
+        )
+    assert decision.action == "warn"
+    assert decision.fallback_directive != ""
+    assert "read_file" in decision.fallback_directive
+
+
+def test_fallback_directive_populated_for_image_generate():
+    """Repeated image_generate failures route to a text/placeholder fallback."""
+    controller = ToolCallGuardrailController()
+    args = {"prompt": "a cat"}
+    # exact_failure_warn_after = 2 by default
+    for _ in range(2):
+        controller.before_call("image_generate", args)
+        decision = controller.after_call(
+            "image_generate", args, '{"success": false, "error": "provider error"}', failed=True
+        )
+    assert decision.action == "warn"
+    assert decision.fallback_directive != ""
+    assert "placeholder" in decision.fallback_directive
+
+
+def test_fallback_directive_covers_video_media_tools():
+    """video_analyze / video_generate also carry non-empty fallback directives."""
+    from agent.tool_guardrails import _fallback_directive_for
+
+    assert "read_file" in _fallback_directive_for("video_analyze")
+    assert "placeholder" in _fallback_directive_for("video_generate")

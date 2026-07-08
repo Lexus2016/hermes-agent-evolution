@@ -483,6 +483,23 @@ class TestFailureClassAndDiversionHints:
         assert n is not None
         assert "repo_map" in n
 
+    def test_vision_analyze_failures_get_media_diversion(self):
+        # #739: a failed visual call is redirected to a check / text fallback,
+        # not a blind retry.
+        n = maybe_nudge(
+            self._fail_run("vision_analyze", 2, "vision_analyze failed: invalid image")
+        )
+        assert n is not None
+        assert "read_file" in n
+
+    def test_image_generate_failures_get_media_diversion(self):
+        # #739: repeated generation failures route to a text/placeholder fallback.
+        n = maybe_nudge(
+            self._fail_run("image_generate", 2, "image generation failed: provider down")
+        )
+        assert n is not None
+        assert "placeholder" in n or "provider" in n
+
 
 def _distinct_run(tool, n, *, result="ok"):
     """n consecutive single-tool turns with DISTINCT arguments each (real

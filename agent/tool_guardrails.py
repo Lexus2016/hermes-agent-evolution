@@ -476,6 +476,13 @@ _TOOL_FALLBACK_DIRECTIVE: dict[str, str] = {
     "patch": "use read_file to verify the exact text before patching, or use write_file",
     "write_file": "verify the directory exists with terminal, or use patch for targeted edits",
     "process": "use process action=list to find the correct session_id before retrying",
+    # #739 — media tools: a failed visual call is usually a bad path/format or an
+    # unavailable provider, not something a blind retry fixes. Route to a check
+    # or a text fallback instead of spiraling on the same call.
+    "vision_analyze": "verify the image path exists and is a supported format (png/jpg/webp) with read_file, or proceed from a text description instead of retrying",
+    "image_generate": "report the visual blocker and supply a text description/placeholder instead of retrying, or verify the prompt and image-provider configuration",
+    "video_analyze": "verify the video path and format with read_file, or work from a text summary of the video instead of retrying",
+    "video_generate": "report the visual blocker and supply a text placeholder instead of retrying, or verify the prompt and video-provider configuration",
 }
 
 
