@@ -267,6 +267,34 @@ def _is_retryable_download_error(error: Exception) -> bool:
     return True
 
 
+def _is_retryable_provider_error(error: Exception) -> bool:
+    """Return True only for transient vision-provider API failures worth retrying.
+
+    Non-retryable (fail-fast):
+      - httpx.HTTPStatusError with a 4xx status other than 429: auth errors,
+        unsupported model, invalid request — retrying can't fix these.
+      - ValueError / TypeError: deterministic client-side issues.
+      - KeyError / AttributeError: missing fields in a malformed response.
+
+    Retryable (transient):
+      - httpx 429 (rate limited) and 5xx (server-side) errors.
+      - httpx.TimeoutException / httpx.TransportError: network blips.
+      - ConnectionError / OSError: low-level network failures.
+      - Any other unclassified exception (may be a transient provider issue).
+    """
+    if isinstance(error, (ValueError, TypeError, KeyError, AttributeError)):
+        return False
+    if isinstance(error, httpx.HTTPStatusError):
+        status = error.response.status_code
+        if 400 <= status < 500 and status != 429:
+            return False
+        return True
+    if isinstance(error, (httpx.TimeoutException, httpx.TransportError,
+                          ConnectionError, OSError)):
+        return True
+    return True
+
+
 async def _download_image(image_url: str, destination: Path, max_retries: int = 3) -> Path:
     """
     Download an image from a URL to a local destination (async) with retry logic.
@@ -1111,24 +1139,44 @@ async def vision_analyze_tool(
         if model:
             call_kwargs["model"] = model
         # Try full-size image first; on size-related rejection, downscale and retry.
-        try:
-            response = await async_call_llm(**call_kwargs)
-        except Exception as _api_err:
-            if (_is_image_size_error(_api_err)
-                    and len(image_data_url) > _RESIZE_TARGET_BYTES):
-                logger.info(
-                    "API rejected image (%.1f MB, likely too large); "
-                    "auto-resizing to ~%.0f MB and retrying...",
-                    len(image_data_url) / (1024 * 1024),
-                    _RESIZE_TARGET_BYTES / (1024 * 1024),
-                )
-                image_data_url = await _run_encode_on_cpu_executor(
-                    _resize_image_for_vision,
-                    temp_image_path, mime_type=detected_mime_type)
-                messages[0]["content"][1]["image_url"]["url"] = image_data_url
+        # Also retry transient provider errors (429, 5xx, timeouts) with backoff
+        # so a rate-limited vision API doesn't immediately fail the whole call.
+        _provider_max_retries = 3
+        for _attempt in range(_provider_max_retries):
+            try:
                 response = await async_call_llm(**call_kwargs)
-            else:
+                break  # success
+            except Exception as _api_err:
+                # Size-related rejection: resize and retry (not a transient error).
+                if (_is_image_size_error(_api_err)
+                        and len(image_data_url) > _RESIZE_TARGET_BYTES):
+                    logger.info(
+                        "API rejected image (%.1f MB, likely too large); "
+                        "auto-resizing to ~%.0f MB and retrying...",
+                        len(image_data_url) / (1024 * 1024),
+                        _RESIZE_TARGET_BYTES / (1024 * 1024),
+                    )
+                    image_data_url = await _run_encode_on_cpu_executor(
+                        _resize_image_for_vision,
+                        temp_image_path, mime_type=detected_mime_type)
+                    messages[0]["content"][1]["image_url"]["url"] = image_data_url
+                    # Size retry is separate from transient retry — reset attempt counter.
+                    _attempt = -1  # type: ignore[assignment]
+                    continue
+                # Transient provider error: retry with exponential backoff.
+                if _is_retryable_provider_error(_api_err) and _attempt < _provider_max_retries - 1:
+                    _wait = 2 ** (_attempt + 1)  # 2s, 4s
+                    logger.warning(
+                        "Vision provider error (attempt %s/%s): %s — retrying in %ss",
+                        _attempt + 1, _provider_max_retries, str(_api_err)[:80], _wait,
+                    )
+                    await asyncio.sleep(_wait)
+                    continue
                 raise
+        else:
+            # Loop exhausted without break or raise — should be unreachable
+            # but keeps the type checker happy.
+            raise RuntimeError("Vision provider retry loop exhausted without result")
         
         # Extract the analysis — fall back to reasoning if content is empty
         analysis = extract_content_or_reasoning(response)
