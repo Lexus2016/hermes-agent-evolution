@@ -12287,6 +12287,58 @@ def cmd_memory(args):
         save_config(config)
         print("\n  ✓ Memory provider: built-in only")
         print("  Saved to config.yaml\n")
+    elif sub == "score":
+        from agent.memory_manager import MemoryManager
+
+        mm = MemoryManager()
+        limit = getattr(args, "limit", 10) or 10
+        # Score the active session's transcript if one is available, so the
+        # CLI reflects real turn history rather than an empty store. The
+        # active-agent ref lives in the ``cli`` module (the TUI entrypoint),
+        # so import it lazily and tolerate it being absent.
+        agent_ref = None
+        try:
+            import cli as _cli  # noqa: PLC0415
+
+            agent_ref = getattr(_cli, "_active_agent_ref", None)
+        except Exception:
+            agent_ref = None
+        if agent_ref is not None:
+            msgs = getattr(agent_ref, "_session_messages", None)
+            if isinstance(msgs, list):
+                # Walk adjacent user/assistant pairs and score each turn.
+                user_txt = None
+                for m in msgs:
+                    if not isinstance(m, dict):
+                        continue
+                    role = m.get("role")
+                    content = m.get("content") or ""
+                    if isinstance(content, list):
+                        content = " ".join(
+                            str(p.get("text", "")) if isinstance(p, dict) else str(p)
+                            for p in content
+                        )
+                    if role == "user" and content.strip():
+                        user_txt = str(content)
+                    elif role == "assistant" and user_txt is not None:
+                        mm.score_memories(
+                            user_txt,
+                            str(content),
+                            session_id=getattr(agent_ref, "session_id", "") or "",
+                            messages=msgs,
+                        )
+                        user_txt = None
+        events = mm.episodic_store.retrieve_by_importance(threshold=0.0)[:limit]
+        if not events:
+            print("\n  No episodic memory events scored yet.\n")
+            return
+        print(f"\n  Episodic memory importance (top {len(events)} of scored turns):\n")
+        for ev in events:
+            print(
+                f"    ◆ {ev.importance:.3f}  {ev.what[:70]!r}  "
+                f"signals={ev.friction_signals}"
+            )
+        print()
     elif sub == "reset":
         from hermes_constants import get_hermes_home, display_hermes_home
 

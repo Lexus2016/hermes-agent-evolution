@@ -33,6 +33,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
+from agent.memory_importance import EpisodicMemoryStore, MemoryEvent, score_importance
 from agent.memory_provider import MemoryProvider
 from agent.skill_commands import extract_user_instruction_from_skill_message
 from tools.registry import tool_error
@@ -368,6 +369,11 @@ class MemoryManager:
         # _submit_background() and the sync_all/queue_prefetch_all rationale.
         self._sync_executor: Optional[ThreadPoolExecutor] = None
         self._sync_executor_lock = threading.Lock()
+        # Episodic store for importance-weighted turn history (#752).
+        # Populated by score_memories() during sync_all(). Kept on the
+        # manager so the ``hermes memory score`` CLI subcommand and tests
+        # can inspect/score it without re-deriving the events.
+        self.episodic_store: EpisodicMemoryStore = EpisodicMemoryStore()
 
     # -- Registration --------------------------------------------------------
 
@@ -555,6 +561,123 @@ class MemoryManager:
             return True
         return "messages" in signature.parameters
 
+    # -- Importance scoring (#752) -------------------------------------------
+
+    @staticmethod
+    def _friction_signals_from_turn(
+        user_content: str,
+        assistant_content: str,
+        messages: Optional[List[Dict[str, Any]]] = None,
+    ) -> dict[str, int]:
+        """Derive friction signals for a completed turn.
+
+        Heuristic, deterministic, and side-effect free. Counts signals that
+        the weighted importance model in ``agent.memory_importance`` knows
+        how to score:
+
+        - ``retries``: tool calls in the turn that raised an error (a
+          retry loop surfaces as repeated error results).
+        - ``task_failures``: a turn whose assistant output looks like a
+          failure (apology + error-ish keywords) counts as one failure.
+        - ``human_corrections``: a user message that reads as a correction
+          ("no", "wrong", "actually", "instead") counts as one correction.
+        - ``explicit_saves``: a memory tool write in the turn counts as an
+          explicit save.
+
+        Unknown/empty signals simply contribute zero — the scorer ignores
+        them. This is intentionally cheap so it is safe to call on every
+        turn-sync.
+        """
+        signals: dict[str, int] = {}
+        if not user_content and not assistant_content:
+            return signals
+
+        # human_corrections: correction-like user phrasing.
+        if user_content:
+            u = user_content.lower()
+            correction_markers = ("no,", "wrong", "actually", "instead", "not that", "redo")
+            if any(m in u for m in correction_markers):
+                signals["human_corrections"] = 1
+
+        # task_failures: assistant output that looks like a failure.
+        if assistant_content:
+            a = assistant_content.lower()
+            failure_markers = ("sorry", "i can't", "i cannot", "failed", "error", "unable to")
+            if any(m in a for m in failure_markers):
+                signals["task_failures"] = 1
+
+        # retries / explicit_saves: inspect tool calls in the message list.
+        if messages:
+            errors = 0
+            saves = 0
+            for msg in messages:
+                if not isinstance(msg, dict):
+                    continue
+                role = msg.get("role")
+                if role == "assistant" and isinstance(msg.get("tool_calls"), list):
+                    for tc in msg["tool_calls"]:
+                        if not isinstance(tc, dict):
+                            continue
+                        fn = (tc.get("function") or {}).get("name", "") if isinstance(
+                            tc.get("function"), dict
+                        ) else ""
+                        if fn == "memory":
+                            saves += 1
+                if role == "tool":
+                    content = msg.get("content")
+                    if isinstance(content, str) and (
+                        "error" in content.lower() or "failed" in content.lower()
+                    ):
+                        errors += 1
+            if errors:
+                signals["retries"] = errors
+            if saves:
+                signals["explicit_saves"] = saves
+
+        return signals
+
+    def score_memories(
+        self,
+        user_content: str,
+        assistant_content: str,
+        *,
+        session_id: str = "",
+        messages: Optional[List[Dict[str, Any]]] = None,
+    ) -> MemoryEvent:
+        """Score a completed turn and record it as an episodic memory event.
+
+        This is the real consumer of ``agent.memory_importance``: it derives
+        friction signals from the turn, scores them with
+        :func:`score_importance`, wraps the result in a :class:`MemoryEvent`,
+        and adds it to :attr:`episodic_store`. Called from :meth:`sync_all`
+        on the turn-sync path and from the ``hermes memory score`` CLI
+        subcommand.
+
+        The returned event carries the raw (pre-decay) importance in its
+        ``importance`` field; callers can compute a decayed score on demand
+        via the store.
+        """
+        signals = self._friction_signals_from_turn(
+            user_content, assistant_content, messages
+        )
+        importance = score_importance(signals)
+        event = MemoryEvent(
+            what=user_content[:500] if user_content else "(empty turn)",
+            outcome=assistant_content[:500] if assistant_content else "",
+            importance=importance,
+            friction_signals=signals,
+            category="turn",
+            tags=[session_id] if session_id else [],
+            metadata={"session_id": session_id} if session_id else {},
+        )
+        self.episodic_store.add(event)
+        logger.debug(
+            "score_memories: recorded turn (importance=%.3f, signals=%s)",
+            importance,
+            signals,
+        )
+        return event
+
     def sync_all(
         self,
         user_content: str,
@@ -580,14 +703,33 @@ class MemoryManager:
         before turn N+1; provider implementations don't need their own
         ordering guarantees.
         """
-        providers = list(self._providers)
-        if not providers:
-            return
-
         clean_user_content = self._strip_skill_scaffolding(user_content)
         if not clean_user_content:
             return
         user_content = clean_user_content
+
+        # Score this turn's friction signals and record it as an episodic
+        # memory event (#752). This is the real consumer of
+        # agent.memory_importance — every synced turn is scored so the
+        # episodic store accumulates importance-weighted history. Scoring
+        # is synchronous and cheap (no network), so it runs inline before
+        # the provider guard; this keeps the store populated even in
+        # built-in-only mode without spawning the background executor.
+        try:
+            self.score_memories(
+                user_content,
+                assistant_content,
+                session_id=session_id,
+                messages=messages,
+            )
+        except Exception as e:
+            logger.debug(
+                "score_memories() failed during sync (non-fatal): %s", e
+            )
+
+        providers = list(self._providers)
+        if not providers:
+            return
 
         def _run() -> None:
             for provider in providers:
