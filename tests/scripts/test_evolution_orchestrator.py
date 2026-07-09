@@ -50,7 +50,9 @@ class TestBuildWorkerTasks:
         assert "YOUR ANGLE: c" in tasks[2]["goal"]
 
     def test_caps_at_max_workers_and_reports_dropped(self):
-        tasks, dropped = build_worker_tasks("st", ["a", "b", "c", "d", "e"], max_workers=3)
+        tasks, dropped = build_worker_tasks(
+            "st", ["a", "b", "c", "d", "e"], max_workers=3
+        )
         assert len(tasks) == 3
         assert dropped == 2
         # The KEPT tasks are the first three, in order.
@@ -86,7 +88,9 @@ class TestCollectCandidates:
         }
 
     def test_maps_results_to_candidates(self):
-        cands, ok, failed = collect_candidates(self._delegate_output(), ["ang0", "ang1"])
+        cands, ok, failed = collect_candidates(
+            self._delegate_output(), ["ang0", "ang1"]
+        )
         assert ok == 2
         assert failed == 0
         assert [c["candidate"] for c in cands] == ["finding A", "finding B"]
@@ -161,7 +165,9 @@ class TestCollectCandidates:
         # Empty scores -> evaluator can't judge -> nobody passes (correct: the
         # orchestrator collects, the evaluator scores; this skill never fakes a pass).
         payload = {"candidates": cands}
-        result = decide(payload["candidates"], threshold=0.75, current_pass=1, max_passes=3)
+        result = decide(
+            payload["candidates"], threshold=0.75, current_pass=1, max_passes=3
+        )
         assert result["best_score"] == 0.0
         # With budget left, an all-unscored set is OPTIMIZE, never a crash.
         assert result["verdict"] == "OPTIMIZE"
@@ -169,18 +175,16 @@ class TestCollectCandidates:
 
 class TestCLI:
     def test_build_emits_tasks(self, capsys):
-        rc = main(
-            [
-                "evolution_orchestrator.py",
-                "build",
-                "--subtask",
-                "how do agents bound depth",
-                "--angle",
-                "docs",
-                "--angle",
-                "failures",
-            ]
-        )
+        rc = main([
+            "evolution_orchestrator.py",
+            "build",
+            "--subtask",
+            "how do agents bound depth",
+            "--angle",
+            "docs",
+            "--angle",
+            "failures",
+        ])
         assert rc == 0
         out = json.loads(capsys.readouterr().out)
         assert len(out["tasks"]) == 2
@@ -195,31 +199,29 @@ class TestCLI:
         assert rc == 2
 
     def test_build_caps_and_reports_dropped(self, capsys):
-        rc = main(
-            [
-                "evolution_orchestrator.py",
-                "build",
-                "--subtask",
-                "s",
-                "--max-workers",
-                "2",
-                "--angle",
-                "a",
-                "--angle",
-                "b",
-                "--angle",
-                "c",
-            ]
-        )
+        rc = main([
+            "evolution_orchestrator.py",
+            "build",
+            "--subtask",
+            "s",
+            "--max-workers",
+            "2",
+            "--angle",
+            "a",
+            "--angle",
+            "b",
+            "--angle",
+            "c",
+        ])
         assert rc == 0
         out = json.loads(capsys.readouterr().out)
         assert len(out["tasks"]) == 2
         assert out["dropped"] == 1
 
     def test_collect_from_stdin(self, capsys, monkeypatch):
-        payload = json.dumps(
-            {"results": [{"task_index": 0, "status": "completed", "summary": "x"}]}
-        )
+        payload = json.dumps({
+            "results": [{"task_index": 0, "status": "completed", "summary": "x"}]
+        })
         monkeypatch.setattr("sys.stdin", io.StringIO(payload))
         rc = main(["evolution_orchestrator.py", "collect"])
         assert rc == 0
@@ -233,19 +235,21 @@ class TestCLI:
         angles.write_text(json.dumps(["docs", "failures"]), encoding="utf-8")
         results = tmp_path / "results.json"
         results.write_text(
-            json.dumps(
-                {
-                    "results": [
-                        {"task_index": 0, "status": "completed", "summary": "A"},
-                        {"task_index": 1, "status": "completed", "summary": "B"},
-                    ]
-                }
-            ),
+            json.dumps({
+                "results": [
+                    {"task_index": 0, "status": "completed", "summary": "A"},
+                    {"task_index": 1, "status": "completed", "summary": "B"},
+                ]
+            }),
             encoding="utf-8",
         )
-        rc = main(
-            ["evolution_orchestrator.py", "collect", str(results), "--angles", str(angles)]
-        )
+        rc = main([
+            "evolution_orchestrator.py",
+            "collect",
+            str(results),
+            "--angles",
+            str(angles),
+        ])
         assert rc == 0
         out = json.loads(capsys.readouterr().out)
         assert [c["angle"] for c in out["candidates"]] == ["docs", "failures"]
@@ -260,6 +264,98 @@ class TestCLI:
 
     def test_unknown_command(self, capsys):
         assert main(["evolution_orchestrator.py", "frobnicate"]) == 2
+
+
+class TestDraftCommands:
+    """Tests for the ``draft``, ``draft-select``, and ``route`` subcommands
+    that wire ``evolution_draft_selector`` as real call sites (#798 inc 2)."""
+
+    def test_draft_builds_n_identical_tasks(self, capsys):
+        rc = main([
+            "evolution_orchestrator.py",
+            "draft",
+            "--goal",
+            "write a report",
+            "--drafters",
+            "3",
+        ])
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        assert len(out["tasks"]) == 3
+        assert out["dropped"] == 0
+        # All tasks have the same goal (parallel draft = identical tasks).
+        assert all(t["goal"] == "write a report" for t in out["tasks"])
+        assert all(t["role"] == "leaf" for t in out["tasks"])
+
+    def test_draft_requires_goal(self, capsys):
+        rc = main(["evolution_orchestrator.py", "draft", "--drafters", "2"])
+        assert rc == 2
+
+    def test_draft_custom_toolsets(self, capsys):
+        rc = main([
+            "evolution_orchestrator.py",
+            "draft",
+            "--goal",
+            "g",
+            "--toolsets",
+            "web,file",
+        ])
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        assert all(t["toolsets"] == ["web", "file"] for t in out["tasks"])
+
+    def test_draft_select_from_stdin(self, capsys, monkeypatch):
+        payload = json.dumps({
+            "results": [
+                {"task_index": 0, "status": "completed", "summary": "short"},
+                {
+                    "task_index": 1,
+                    "status": "completed",
+                    "summary": "## H\n\nhttps://x.com\n",
+                },
+            ]
+        })
+        monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+        rc = main(["evolution_orchestrator.py", "draft-select"])
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["best_index"] == 1
+        assert out["best_score"] > 0.0
+
+    def test_draft_select_from_file(self, capsys, tmp_path):
+        results = tmp_path / "results.json"
+        results.write_text(
+            json.dumps({
+                "results": [{"task_index": 0, "status": "completed", "summary": "x"}]
+            }),
+            encoding="utf-8",
+        )
+        rc = main(["evolution_orchestrator.py", "draft-select", str(results)])
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["best_index"] == 0
+
+    def test_draft_select_bad_json(self, capsys, monkeypatch):
+        monkeypatch.setattr("sys.stdin", io.StringIO("{not json"))
+        rc = main(["evolution_orchestrator.py", "draft-select"])
+        assert rc == 2
+
+    def test_route_maps_complexity(self, capsys):
+        rc = main(["evolution_orchestrator.py", "route", "--complexity", "fix typo"])
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["complexity"] == "trivial"
+        assert out["tier"] == "cheap"
+
+    def test_route_positional_arg(self, capsys):
+        rc = main(["evolution_orchestrator.py", "route", "design a protocol"])
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["complexity"] == "complex"
+
+    def test_route_requires_complexity(self, capsys):
+        rc = main(["evolution_orchestrator.py", "route"])
+        assert rc == 2
 
 
 class TestSkillFrontmatter:

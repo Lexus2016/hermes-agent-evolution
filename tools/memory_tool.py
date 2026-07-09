@@ -412,6 +412,9 @@ class MemoryStore:
                 sanitized.append(parse_provenance(entry)[0])
         return sanitized
 
+    # Max time to wait for a file lock before giving up with a clear error.
+    _LOCK_TIMEOUT_SECONDS = 10.0
+
     @staticmethod
     @contextmanager
     def _file_lock(path: Path):
@@ -419,6 +422,11 @@ class MemoryStore:
 
         Uses a separate .lock file so the memory file itself can still be
         atomically replaced via os.replace().
+
+        On Unix, uses non-blocking flock with bounded retry + exponential
+        backoff so a stuck lock doesn't hang the agent indefinitely. If the
+        lock can't be acquired within _LOCK_TIMEOUT_SECONDS, raises
+        TimeoutError with a diagnostic message.
         """
         lock_path = path.with_suffix(path.suffix + ".lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -430,7 +438,7 @@ class MemoryStore:
         fd = open(lock_path, "a+", encoding="utf-8")
         try:
             if fcntl:
-                fcntl.flock(fd, fcntl.LOCK_EX)
+                MemoryStore._acquire_fcntl_lock(fd)
             else:
                 fd.seek(0)
                 msvcrt.locking(fd.fileno(), msvcrt.LK_LOCK, 1)
@@ -448,6 +456,33 @@ class MemoryStore:
                 except (OSError, IOError):
                     pass
             fd.close()
+
+    @staticmethod
+    def _acquire_fcntl_lock(fd, timeout: Optional[float] = None) -> None:
+        """Acquire an exclusive flock with bounded retry and backoff.
+
+        Uses LOCK_EX | LOCK_NB (non-blocking) in a retry loop with
+        exponential backoff (0.05s, 0.1s, 0.2s, ...). Raises TimeoutError
+        if the lock isn't acquired within *timeout* seconds.
+        """
+        timeout = timeout if timeout is not None else MemoryStore._LOCK_TIMEOUT_SECONDS
+        deadline = time.monotonic() + timeout
+        wait = 0.05
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return  # acquired
+            except (OSError, IOError):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(
+                        f"Could not acquire memory file lock within "
+                        f"{timeout:.0f}s — another process may hold it. "
+                        f"Lock file: {fd.name}"
+                    )
+                sleep_time = min(wait, remaining)
+                time.sleep(sleep_time)
+                wait = min(wait * 2, 1.0)  # cap at 1s per attempt
 
     @staticmethod
     def _path_for(target: str) -> Path:

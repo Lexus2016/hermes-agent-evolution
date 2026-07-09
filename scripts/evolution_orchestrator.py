@@ -57,6 +57,17 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Wire the parallel draft selector (#798 inc 2) as real call sites.
+# The orchestrator gains a ``draft`` command that builds N identical tasks
+# (via build_draft_tasks) and a ``select`` command that picks the best draft
+# (via select_best_draft) — closing the dead-code gap flagged in #798.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from evolution_draft_selector import (  # noqa: E402  # fmt: skip
+    build_draft_tasks,
+    route_cost_tier,
+    select_best_draft,
+)
+
 # Mirror the runtime default in tools/delegate_tool.py
 # (delegation.max_concurrent_children, default 3). The orchestrator never fans
 # out wider than the runtime will run in parallel — extra angles past the cap
@@ -107,7 +118,9 @@ def build_worker_task(
     return {
         "goal": goal,
         "context": context,
-        "toolsets": list(toolsets) if toolsets is not None else list(DEFAULT_WORKER_TOOLSETS),
+        "toolsets": list(toolsets)
+        if toolsets is not None
+        else list(DEFAULT_WORKER_TOOLSETS),
         "role": "leaf",
     }
 
@@ -194,16 +207,14 @@ def collect_candidates(
         angle: Optional[str] = None
         if angles is not None and 0 <= index < len(angles):
             angle = _clean_str(angles[index]) or None
-        candidates.append(
-            {
-                "index": index,
-                "angle": angle,
-                "status": status,
-                "ok": is_ok,
-                "candidate": summary,
-                "scores": {},
-            }
-        )
+        candidates.append({
+            "index": index,
+            "angle": angle,
+            "status": status,
+            "ok": is_ok,
+            "candidate": summary,
+            "scores": {},
+        })
     candidates.sort(key=lambda c: c["index"])
     return candidates, ok_count, failed_count
 
@@ -211,7 +222,9 @@ def collect_candidates(
 # ── IO boundary ────────────────────────────────────────────────────────────────
 def _read_text(path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     try:
-        return (Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()), None
+        return (
+            Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+        ), None
     except OSError as exc:
         return None, f"cannot read input: {exc}"
 
@@ -236,7 +249,9 @@ def _cmd_build(argv: List[str]) -> int:
         arg = argv[i]
         if arg == "--subtask":
             if i + 1 >= len(argv):
-                print("[evolution-orchestrator] --subtask needs a value", file=sys.stderr)
+                print(
+                    "[evolution-orchestrator] --subtask needs a value", file=sys.stderr
+                )
                 return 2
             subtask = argv[i + 1]
             i += 2
@@ -248,7 +263,10 @@ def _cmd_build(argv: List[str]) -> int:
             i += 2
         elif arg == "--max-workers":
             if i + 1 >= len(argv):
-                print("[evolution-orchestrator] --max-workers needs a value", file=sys.stderr)
+                print(
+                    "[evolution-orchestrator] --max-workers needs a value",
+                    file=sys.stderr,
+                )
                 return 2
             try:
                 max_workers = int(argv[i + 1])
@@ -261,7 +279,9 @@ def _cmd_build(argv: List[str]) -> int:
             i += 2
         elif arg == "--toolsets":
             if i + 1 >= len(argv):
-                print("[evolution-orchestrator] --toolsets needs a value", file=sys.stderr)
+                print(
+                    "[evolution-orchestrator] --toolsets needs a value", file=sys.stderr
+                )
                 return 2
             toolsets = [t.strip() for t in argv[i + 1].split(",") if t.strip()]
             i += 2
@@ -272,7 +292,9 @@ def _cmd_build(argv: List[str]) -> int:
         print("[evolution-orchestrator] --subtask is required", file=sys.stderr)
         return 2
     if not [a for a in angles if _clean_str(a)]:
-        print("[evolution-orchestrator] at least one --angle is required", file=sys.stderr)
+        print(
+            "[evolution-orchestrator] at least one --angle is required", file=sys.stderr
+        )
         return 2
     tasks, dropped = build_worker_tasks(
         subtask, angles, max_workers=max_workers, toolsets=toolsets
@@ -289,7 +311,9 @@ def _cmd_collect(argv: List[str]) -> int:
         arg = argv[i]
         if arg == "--angles":
             if i + 1 >= len(argv):
-                print("[evolution-orchestrator] --angles needs a value", file=sys.stderr)
+                print(
+                    "[evolution-orchestrator] --angles needs a value", file=sys.stderr
+                )
                 return 2
             angles_path = argv[i + 1]
             i += 2
@@ -310,7 +334,10 @@ def _cmd_collect(argv: List[str]) -> int:
             print(f"[evolution-orchestrator] --angles: {aerr}", file=sys.stderr)
             return 2
         if not isinstance(adata, list):
-            print("[evolution-orchestrator] --angles file must be a JSON list", file=sys.stderr)
+            print(
+                "[evolution-orchestrator] --angles file must be a JSON list",
+                file=sys.stderr,
+            )
             return 2
         angles = [a if isinstance(a, str) else "" for a in adata]
     candidates, ok_count, failed_count = collect_candidates(data, angles)
@@ -323,12 +350,142 @@ def _cmd_collect(argv: List[str]) -> int:
     return 0
 
 
+def _cmd_draft(argv: List[str]) -> int:
+    """Build N identical draft tasks for parallel draft mode (#798).
+
+    This is a REAL call site for ``build_draft_tasks`` — the draft selector's
+    fan-out helper.  The skill calls this from its terminal toolset, collects
+    the JSON output, dispatches it via ``delegate_task`` batch mode, then
+    pipes the results back through ``_cmd_draft_select``.
+    """
+    goal = ""
+    n_drafters = 3  # DEFAULT_MAX_DRAFTERS from the draft selector
+    context = ""
+    toolsets: Optional[List[str]] = None
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--goal":
+            if i + 1 >= len(argv):
+                print("[evolution-orchestrator] --goal needs a value", file=sys.stderr)
+                return 2
+            goal = argv[i + 1]
+            i += 2
+        elif arg == "--drafters":
+            if i + 1 >= len(argv):
+                print(
+                    "[evolution-orchestrator] --drafters needs a value", file=sys.stderr
+                )
+                return 2
+            try:
+                n_drafters = int(argv[i + 1])
+            except ValueError:
+                print(
+                    f"[evolution-orchestrator] --drafters must be int, got {argv[i + 1]!r}",
+                    file=sys.stderr,
+                )
+                return 2
+            i += 2
+        elif arg == "--context":
+            if i + 1 >= len(argv):
+                print(
+                    "[evolution-orchestrator] --context needs a value", file=sys.stderr
+                )
+                return 2
+            context = argv[i + 1]
+            i += 2
+        elif arg == "--toolsets":
+            if i + 1 >= len(argv):
+                print(
+                    "[evolution-orchestrator] --toolsets needs a value", file=sys.stderr
+                )
+                return 2
+            toolsets = [t.strip() for t in argv[i + 1].split(",") if t.strip()]
+            i += 2
+        else:
+            print(f"[evolution-orchestrator] unknown flag: {arg}", file=sys.stderr)
+            return 2
+    if not _clean_str(goal):
+        print("[evolution-orchestrator] --goal is required", file=sys.stderr)
+        return 2
+    tasks, dropped = build_draft_tasks(
+        goal, n_drafters, context=context, toolsets=toolsets
+    )
+    print(json.dumps({"tasks": tasks, "dropped": dropped}, ensure_ascii=False))
+    return 0
+
+
+def _cmd_draft_select(argv: List[str]) -> int:
+    """Select the best draft from parallel draft results (#798).
+
+    Real call site for ``select_best_draft``.  Reads delegate_task's JSON
+    output (from stdin or a file path) and prints the winner.
+    """
+    path: Optional[str] = None
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg.startswith("-"):
+            print(f"[evolution-orchestrator] unknown flag: {arg}", file=sys.stderr)
+            return 2
+        path = arg
+        i += 1
+    data, err = _load_json(path)
+    if err:
+        print(f"[evolution-orchestrator] {err}", file=sys.stderr)
+        return 2
+    bi, bs, drafts = select_best_draft(data)
+    print(
+        json.dumps(
+            {"best_index": bi, "best_score": bs, "drafts": drafts}, ensure_ascii=False
+        )
+    )
+    return 0
+
+
+def _cmd_route(argv: List[str]) -> int:
+    """Cost-aware model routing (#798 inc 2).
+
+    Real call site for ``route_cost_tier``.  Maps a task complexity string to
+    a model tier hint that the orchestrator can pass to delegate_task's model
+    override or to ``delegation.model`` in config.yaml.
+    """
+    complexity = ""
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--complexity":
+            if i + 1 >= len(argv):
+                print(
+                    "[evolution-orchestrator] --complexity needs a value",
+                    file=sys.stderr,
+                )
+                return 2
+            complexity = argv[i + 1]
+            i += 2
+        elif not arg.startswith("-"):
+            complexity = arg
+            i += 1
+        else:
+            print(f"[evolution-orchestrator] unknown flag: {arg}", file=sys.stderr)
+            return 2
+    if not _clean_str(complexity):
+        print("[evolution-orchestrator] --complexity is required", file=sys.stderr)
+        return 2
+    result = route_cost_tier(complexity)
+    print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
 def main(argv: List[str]) -> int:
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(
-            "usage: evolution_orchestrator.py {build,collect} ...\n"
-            "  build   --subtask S --angle A [--angle A ...] [--max-workers N] [--toolsets a,b]\n"
-            "  collect [results.json] [--angles angles.json]   (reads stdin if no path)",
+            "usage: evolution_orchestrator.py {build,collect,draft,draft-select,route} ...\n"
+            "  build         --subtask S --angle A [--angle A ...] [--max-workers N] [--toolsets a,b]\n"
+            "  collect       [results.json] [--angles angles.json]   (reads stdin if no path)\n"
+            "  draft         --goal G [--drafters N] [--context C] [--toolsets a,b]\n"
+            "  draft-select  [results.json]   (reads stdin if no path)\n"
+            '  route         --complexity "task desc"',
             file=sys.stderr,
         )
         return 2
@@ -337,6 +494,12 @@ def main(argv: List[str]) -> int:
         return _cmd_build(argv[2:])
     if cmd == "collect":
         return _cmd_collect(argv[2:])
+    if cmd == "draft":
+        return _cmd_draft(argv[2:])
+    if cmd == "draft-select":
+        return _cmd_draft_select(argv[2:])
+    if cmd == "route":
+        return _cmd_route(argv[2:])
     print(f"[evolution-orchestrator] unknown command: {cmd}", file=sys.stderr)
     return 2
 
