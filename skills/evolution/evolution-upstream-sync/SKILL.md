@@ -37,6 +37,13 @@ Nothing in a release is skipped; nothing of ours is lost.
 
 ```bash
 gh auth setup-git                      # route git auth through gh (no GH_TOKEN export)
+# Guard against a SHALLOW runtime clone (#823): a shallow clone carries an
+# artificial root commit with NO common ancestor to upstream release tags, so the
+# later `git merge <release>` fails with "refusing to merge unrelated histories"
+# and every sync escalates. Deepen to full history BEFORE any fetch/merge so
+# merge-base (and the BEHIND/AHEAD counts below) resolve correctly. Idempotent —
+# a no-op once the clone is full.
+[ -f .git/shallow ] && { echo "[upstream-sync] shallow clone — unshallowing (#823)"; git fetch origin --unshallow --quiet || true; }
 git fetch upstream --tags --quiet && git fetch origin --quiet
 git checkout main && git pull --ff-only origin main
 # The latest PUBLISHED upstream release (the v2026.M.D tags ARE the GitHub releases).
