@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Parallel draft mode (#798 inc 1): build N draft tasks, select best. Cost routing deferred."""
+"""Parallel draft mode (#798): build N draft tasks, select best, cost-aware routing.
+
+Increment 1 (PR #817) added ``build_draft_tasks`` and ``select_best_draft`` but
+left them without real call sites and deferred cost-aware routing.  This module
+now also provides ``route_cost_tier(complexity)`` — a deterministic mapping from
+task complexity to a model tier hint — and is wired into
+``evolution_orchestrator.py`` as real call sites (no more dead code).
+"""
 
 from __future__ import annotations
 
@@ -12,6 +19,67 @@ from typing import Any, Dict, List, Optional, Tuple
 DEFAULT_MAX_DRAFTERS = 3
 _OK = frozenset({"completed", "success", "ok"})
 _PAT = r"(?:^|\n)\s*(?:#{1,3}\s|```|[-*]\s|\d+\.\s)"
+
+# ── Cost-aware routing (#798 inc 2) ──────────────────────────────────────────
+# Map complexity bucket -> (tier label, config hint for delegation.model).
+# The hint is a *suggestion*: the orchestrator passes it to delegate_task's
+# model override or writes it to ``delegation.model`` in config.yaml.  The
+# actual model name is resolved by the runtime's provider layer.
+_TIERS: Dict[str, Tuple[str, str]] = {
+    "trivial": ("cheap", "fast-cheap"),
+    "simple": ("cheap", "fast-cheap"),
+    "moderate": ("standard", "standard"),
+    "complex": ("frontier", "frontier"),
+    "unknown": ("standard", "standard"),
+}
+
+# Keyword → complexity bucket.  Scanned in order; first match wins so that
+# more-specific keywords (``refactor``) are checked before generic ones.
+_CMAP: List[Tuple[str, str]] = [
+    ("trivial", "trivial"),
+    ("fix typo", "trivial"),
+    ("lint", "trivial"),
+    ("format", "trivial"),
+    ("rename", "trivial"),
+    ("simple", "simple"),
+    ("doc", "simple"),
+    ("comment", "simple"),
+    ("test", "simple"),
+    ("stub", "simple"),
+    ("moderate", "moderate"),
+    ("add", "moderate"),
+    ("extend", "moderate"),
+    ("refactor", "moderate"),
+    ("wire", "moderate"),
+    ("integrate", "moderate"),
+    ("complex", "complex"),
+    ("architect", "complex"),
+    ("design", "complex"),
+    ("security", "complex"),
+    ("multi-agent", "complex"),
+    ("protocol", "complex"),
+    ("migration", "complex"),
+]
+
+
+def route_cost_tier(complexity: str) -> Dict[str, str]:
+    """Map a task complexity description to a cost-tier model hint.
+
+    ``complexity`` is free-text (the task goal or a complexity label).  The
+    function scans for keywords, picks the first matching complexity bucket,
+    and returns ``{"complexity": <bucket>, "tier": <tier>, "model": <hint>}``.
+
+    Unknown / empty input falls back to the ``"standard"`` tier so the caller
+    never gets an un-actionable result.
+    """
+    text = (complexity or "").lower().strip()
+    bucket = "unknown"
+    for keyword, label in _CMAP:
+        if keyword in text:
+            bucket = label
+            break
+    tier, model_hint = _TIERS.get(bucket, _TIERS["unknown"])
+    return {"complexity": bucket, "tier": tier, "model": model_hint}
 
 
 def _s(v: Any) -> str:
@@ -99,7 +167,10 @@ def _flag(args: List[str], name: str) -> Optional[str]:
 
 def main(argv: List[str]) -> int:
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
-        print("usage: evolution_draft_selector.py {build,select} ...", file=sys.stderr)
+        print(
+            "usage: evolution_draft_selector.py {build,select,route} ...",
+            file=sys.stderr,
+        )
         return 2
     cmd, args = argv[1], argv[2:]
     if cmd == "build":
@@ -132,6 +203,20 @@ def main(argv: List[str]) -> int:
                 ensure_ascii=False,
             )
         )
+        return 0
+    if cmd == "route":
+        complexity = _flag(args, "--complexity")
+        if not complexity:
+            # Allow bare positional argument: route "fix typo in README"
+            positional = [a for a in args if not a.startswith("-")]
+            complexity = positional[0] if positional else ""
+        if not complexity:
+            print(
+                'usage: evolution_draft_selector.py route --complexity "task desc"',
+                file=sys.stderr,
+            )
+            return 2
+        print(json.dumps(route_cost_tier(complexity), ensure_ascii=False))
         return 0
     return 2
 
