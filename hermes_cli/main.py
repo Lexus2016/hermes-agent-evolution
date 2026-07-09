@@ -12332,6 +12332,23 @@ def cmd_memory(args):
             f"\n  Memory reset complete. New sessions will start with a blank slate."
         )
         print(f"  Files were in: {display_hermes_home()}/memories/\n")
+    elif sub == "stale":
+        # Staleness detection (#797): analyze the on-disk memory corpus and
+        # print a markdown report. This is the CLI entry point for the
+        # MemoryStalenessDetector wired into MemoryManager.check_staleness().
+        from agent.memory_manager import MemoryManager
+
+        config = {}
+        if getattr(args, "max_age_days", None) is not None:
+            config["max_age_days"] = args.max_age_days
+        if getattr(args, "min_content_length", None) is not None:
+            config["min_content_length"] = args.min_content_length
+        if getattr(args, "duplicate_jaccard_threshold", None) is not None:
+            config["duplicate_jaccard_threshold"] = args.duplicate_jaccard_threshold
+
+        mm = MemoryManager()
+        report = mm.render_staleness_report(config=config or None)
+        print(report)
     else:
         from hermes_cli.memory_setup import memory_command
 

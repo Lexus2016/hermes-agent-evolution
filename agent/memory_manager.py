@@ -982,6 +982,92 @@ class MemoryManager:
             except Exception as e:
                 logger.debug("notify_memory_tool_write failed for op %s: %s", action, e)
 
+    # -- Staleness detection (#797) ------------------------------------------
+
+    @staticmethod
+    def _entries_to_notes(entries: List[str], *, target: str) -> List["Note"]:
+        """Convert built-in memory-store entries to staleness :class:`Note` objects.
+
+        The built-in store keeps entries as plain strings (delimited by ``§``)
+        with no per-entry id/timestamp metadata. Each entry is mapped to a
+        :class:`~agent.memory_staleness.Note` using the entry index as a stable
+        id, the first non-empty line as the title, and the remainder as the
+        body content. The ``target`` (``"memory"``/``"user"``) is recorded as
+        the note ``kind`` so the report can distinguish the two stores.
+        """
+        from agent.memory_staleness import Note
+
+        notes: List[Note] = []
+        for idx, entry in enumerate(entries):
+            text = (entry or "").strip()
+            if not text:
+                continue
+            lines = text.splitlines()
+            title = lines[0].strip() if lines else text
+            content = "\n".join(lines[1:]).strip() if len(lines) > 1 else ""
+            notes.append(
+                Note(
+                    id=f"{target}-{idx}",
+                    title=title or text,
+                    content=content or text,
+                    kind=target,
+                )
+            )
+        return notes
+
+    def collect_notes(self) -> List["Note"]:
+        """Gather :class:`~agent.memory_staleness.Note` objects from all stores.
+
+        Reads the on-disk built-in memory store (MEMORY.md + USER.md) via
+        :func:`tools.memory_tool.load_on_disk_store` and converts each entry
+        to a :class:`Note`. This is the bridge between the real memory store
+        and the side-effect-free staleness analysis — no notes are mutated.
+
+        Returns an empty list when no memory files exist (a fresh profile),
+        which yields a pristine ``StalenessReport`` (quality score 1.0).
+        """
+        try:
+            from tools.memory_tool import load_on_disk_store
+
+            store = load_on_disk_store()
+        except Exception as e:
+            logger.warning("check_staleness: could not load memory store: %s", e)
+            return []
+
+        notes: List["Note"] = []
+        notes.extend(self._entries_to_notes(store.memory_entries, target="memory"))
+        notes.extend(self._entries_to_notes(store.user_entries, target="user"))
+        return notes
+
+    def check_staleness(self, *, config: Optional[Dict[str, Any]] = None) -> "StalenessReport":
+        """Run staleness detection over the current memory corpus (#797).
+
+        This is the real consumer of :func:`agent.memory_staleness.analyze`:
+        it collects notes from the on-disk memory store and runs every
+        staleness detector (age, contradiction, low-quality, duplicate,
+        superseded), then returns a :class:`StalenessReport` the caller can
+        render or act on. Suitable as an end-of-turn hook or a CLI
+        ``hermes memory stale`` invocation.
+
+        The analysis is pure — no notes are mutated and no memory API is
+        called. Pass ``config`` to override the default thresholds.
+        """
+        from agent.memory_staleness import analyze, StalenessReport
+
+        notes = self.collect_notes()
+        return analyze(notes, config=config)
+
+    def render_staleness_report(self, *, config: Optional[Dict[str, Any]] = None) -> str:
+        """Run :meth:`check_staleness` and render the result as markdown.
+
+        Convenience wrapper for the CLI ``hermes memory stale`` subcommand and
+        any caller that wants a human-readable string rather than the
+        structured :class:`StalenessReport`.
+        """
+        from agent.memory_staleness import render_report
+
+        return render_report(self.check_staleness(config=config))
+
     def on_delegation(self, task: str, result: str, *,
                       child_session_id: str = "", **kwargs) -> None:
         """Notify all providers that a subagent completed."""
