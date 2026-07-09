@@ -94,6 +94,7 @@ def build_worker_task(
     angle: str,
     *,
     toolsets: Optional[List[str]] = None,
+    complexity: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build ONE leaf-worker task dict for ``delegate_task``'s batch array.
 
@@ -101,6 +102,10 @@ def build_worker_task(
     ONE decomposition angle that worker owns. Subagents have no memory of the
     orchestrator's conversation, so the angle is carried in both ``goal`` (what to
     do) and ``context`` (the shared sub-task it serves) — never assumed shared.
+
+    When ``complexity`` is provided, ``route_cost_tier`` is called to determine
+    the model tier for this worker, and the result is attached as ``model_hint``
+    so the skill can pass it to ``delegate_task``'s model override (#798 inc 3).
     """
     subtask = _clean_str(subtask)
     angle = _clean_str(angle)
@@ -115,7 +120,7 @@ def build_worker_task(
         "finding only — no preamble.\n\n"
         f"Shared sub-task: {subtask}"
     )
-    return {
+    task = {
         "goal": goal,
         "context": context,
         "toolsets": list(toolsets)
@@ -123,6 +128,13 @@ def build_worker_task(
         else list(DEFAULT_WORKER_TOOLSETS),
         "role": "leaf",
     }
+    # Cost-aware routing (#798 inc 3): attach model tier hint when complexity
+    # is provided so the skill can route workers to cheaper models for simple
+    # tasks.  When complexity is None, no hint is attached (back-compat).
+    if complexity is not None:
+        tier_info = route_cost_tier(complexity)
+        task["model_hint"] = tier_info
+    return task
 
 
 def build_worker_tasks(
@@ -131,6 +143,7 @@ def build_worker_tasks(
     *,
     max_workers: int = DEFAULT_MAX_WORKERS,
     toolsets: Optional[List[str]] = None,
+    complexity: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int]:
     """Decompose a sub-task into a capped batch of leaf-worker task dicts.
 
@@ -145,7 +158,8 @@ def build_worker_tasks(
     dropped = max(0, len(kept_angles) - max_workers)
     kept_angles = kept_angles[:max_workers]
     tasks = [
-        build_worker_task(subtask, angle, toolsets=toolsets) for angle in kept_angles
+        build_worker_task(subtask, angle, toolsets=toolsets, complexity=complexity)
+        for angle in kept_angles
     ]
     return tasks, dropped
 
@@ -244,6 +258,7 @@ def _cmd_build(argv: List[str]) -> int:
     angles: List[str] = []
     max_workers = DEFAULT_MAX_WORKERS
     toolsets: Optional[List[str]] = None
+    complexity: Optional[str] = None
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -285,6 +300,15 @@ def _cmd_build(argv: List[str]) -> int:
                 return 2
             toolsets = [t.strip() for t in argv[i + 1].split(",") if t.strip()]
             i += 2
+        elif arg == "--complexity":
+            if i + 1 >= len(argv):
+                print(
+                    "[evolution-orchestrator] --complexity needs a value",
+                    file=sys.stderr,
+                )
+                return 2
+            complexity = argv[i + 1]
+            i += 2
         else:
             print(f"[evolution-orchestrator] unknown flag: {arg}", file=sys.stderr)
             return 2
@@ -297,7 +321,8 @@ def _cmd_build(argv: List[str]) -> int:
         )
         return 2
     tasks, dropped = build_worker_tasks(
-        subtask, angles, max_workers=max_workers, toolsets=toolsets
+        subtask, angles, max_workers=max_workers, toolsets=toolsets,
+        complexity=complexity,
     )
     print(json.dumps({"tasks": tasks, "dropped": dropped}, ensure_ascii=False))
     return 0
@@ -481,7 +506,7 @@ def main(argv: List[str]) -> int:
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(
             "usage: evolution_orchestrator.py {build,collect,draft,draft-select,route} ...\n"
-            "  build         --subtask S --angle A [--angle A ...] [--max-workers N] [--toolsets a,b]\n"
+            "  build         --subtask S --angle A [--angle A ...] [--max-workers N] [--toolsets a,b] [--complexity \"task desc\"]\n"
             "  collect       [results.json] [--angles angles.json]   (reads stdin if no path)\n"
             "  draft         --goal G [--drafters N] [--context C] [--toolsets a,b]\n"
             "  draft-select  [results.json]   (reads stdin if no path)\n"
