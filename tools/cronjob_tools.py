@@ -1018,20 +1018,13 @@ def cronjob(
     if action_error:
         return tool_error(action_error, success=False)
 
-    # Retry-rate limiter: noisy failure loops are capped per task.
-    failure_streak = _record_cron_failure(task_id)
-    if failure_streak > _MAX_CONSECUTIVE_CRON_FAILURES:
-        return tool_error(
-            f"Cron tool has failed {failure_streak} consecutive times for this task "
-            "(too many attempts). Please inspect the earlier errors or run "
-            "cronjob(action='list') before retrying.",
-            success=False,
-        )
-
-    # Preflight: ensure cron is available before invoking backend operations.
-    preflight_error = _cron_preflight_check()
-    if preflight_error:
-        return tool_error(preflight_error, success=False)
+    # Preflight: ensure cron is available before mutating operations.
+    # Skip for read-only 'list' — it only reads the JSON store and never
+    # touches crontab, so a missing binary should not block introspection.
+    if normalized != "list":
+        preflight_error = _cron_preflight_check()
+        if preflight_error:
+            return tool_error(preflight_error, success=False)
 
     try:
         if normalized == "create":
@@ -1349,14 +1342,19 @@ def cronjob(
         return tool_error(f"Unknown cron action '{action}'", success=False)
 
     except Exception as e:
-        _record_cron_failure(task_id)
+        streak = _record_cron_failure(task_id)
         cli_output = getattr(e, "output", None)
-        return tool_error(
-            _format_cron_error(
-                e, normalized or action or "unknown", cli_output=cli_output
-            ),
-            success=False,
+        error_msg = _format_cron_error(
+            e, normalized or action or "unknown", cli_output=cli_output
         )
+        if streak > _MAX_CONSECUTIVE_CRON_FAILURES:
+            error_msg += (
+                f"\n\nThis task has now failed {streak} consecutive times "
+                f"(window {_CRON_RETRY_WINDOW_SECONDS:.0f}s). Further attempts "
+                "will be rejected until the streak expires. Inspect the error "
+                "above or run cronjob(action='list') to inspect job state."
+            )
+        return tool_error(error_msg, success=False)
 
 
 CRONJOB_SCHEMA = {
