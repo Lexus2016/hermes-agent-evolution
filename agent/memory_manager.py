@@ -33,6 +33,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
+from agent.memory_importance import EpisodicMemoryStore, MemoryEvent, score_importance
 from agent.memory_provider import MemoryProvider
 from agent.skill_commands import extract_user_instruction_from_skill_message
 from tools.registry import tool_error
@@ -368,6 +369,11 @@ class MemoryManager:
         # _submit_background() and the sync_all/queue_prefetch_all rationale.
         self._sync_executor: Optional[ThreadPoolExecutor] = None
         self._sync_executor_lock = threading.Lock()
+        # Episodic store for importance-weighted turn history (#752).
+        # Populated by score_memories() during sync_all(). Kept on the
+        # manager so the ``hermes memory score`` CLI subcommand and tests
+        # can inspect/score it without re-deriving the events.
+        self.episodic_store: EpisodicMemoryStore = EpisodicMemoryStore()
 
     # -- Registration --------------------------------------------------------
 
@@ -555,6 +561,123 @@ class MemoryManager:
             return True
         return "messages" in signature.parameters
 
+    # -- Importance scoring (#752) -------------------------------------------
+
+    @staticmethod
+    def _friction_signals_from_turn(
+        user_content: str,
+        assistant_content: str,
+        messages: Optional[List[Dict[str, Any]]] = None,
+    ) -> dict[str, int]:
+        """Derive friction signals for a completed turn.
+
+        Heuristic, deterministic, and side-effect free. Counts signals that
+        the weighted importance model in ``agent.memory_importance`` knows
+        how to score:
+
+        - ``retries``: tool calls in the turn that raised an error (a
+          retry loop surfaces as repeated error results).
+        - ``task_failures``: a turn whose assistant output looks like a
+          failure (apology + error-ish keywords) counts as one failure.
+        - ``human_corrections``: a user message that reads as a correction
+          ("no", "wrong", "actually", "instead") counts as one correction.
+        - ``explicit_saves``: a memory tool write in the turn counts as an
+          explicit save.
+
+        Unknown/empty signals simply contribute zero — the scorer ignores
+        them. This is intentionally cheap so it is safe to call on every
+        turn-sync.
+        """
+        signals: dict[str, int] = {}
+        if not user_content and not assistant_content:
+            return signals
+
+        # human_corrections: correction-like user phrasing.
+        if user_content:
+            u = user_content.lower()
+            correction_markers = ("no,", "wrong", "actually", "instead", "not that", "redo")
+            if any(m in u for m in correction_markers):
+                signals["human_corrections"] = 1
+
+        # task_failures: assistant output that looks like a failure.
+        if assistant_content:
+            a = assistant_content.lower()
+            failure_markers = ("sorry", "i can't", "i cannot", "failed", "error", "unable to")
+            if any(m in a for m in failure_markers):
+                signals["task_failures"] = 1
+
+        # retries / explicit_saves: inspect tool calls in the message list.
+        if messages:
+            errors = 0
+            saves = 0
+            for msg in messages:
+                if not isinstance(msg, dict):
+                    continue
+                role = msg.get("role")
+                if role == "assistant" and isinstance(msg.get("tool_calls"), list):
+                    for tc in msg["tool_calls"]:
+                        if not isinstance(tc, dict):
+                            continue
+                        fn = (tc.get("function") or {}).get("name", "") if isinstance(
+                            tc.get("function"), dict
+                        ) else ""
+                        if fn == "memory":
+                            saves += 1
+                if role == "tool":
+                    content = msg.get("content")
+                    if isinstance(content, str) and (
+                        "error" in content.lower() or "failed" in content.lower()
+                    ):
+                        errors += 1
+            if errors:
+                signals["retries"] = errors
+            if saves:
+                signals["explicit_saves"] = saves
+
+        return signals
+
+    def score_memories(
+        self,
+        user_content: str,
+        assistant_content: str,
+        *,
+        session_id: str = "",
+        messages: Optional[List[Dict[str, Any]]] = None,
+    ) -> MemoryEvent:
+        """Score a completed turn and record it as an episodic memory event.
+
+        This is the real consumer of ``agent.memory_importance``: it derives
+        friction signals from the turn, scores them with
+        :func:`score_importance`, wraps the result in a :class:`MemoryEvent`,
+        and adds it to :attr:`episodic_store`. Called from :meth:`sync_all`
+        on the turn-sync path and from the ``hermes memory score`` CLI
+        subcommand.
+
+        The returned event carries the raw (pre-decay) importance in its
+        ``importance`` field; callers can compute a decayed score on demand
+        via the store.
+        """
+        signals = self._friction_signals_from_turn(
+            user_content, assistant_content, messages
+        )
+        importance = score_importance(signals)
+        event = MemoryEvent(
+            what=user_content[:500] if user_content else "(empty turn)",
+            outcome=assistant_content[:500] if assistant_content else "",
+            importance=importance,
+            friction_signals=signals,
+            category="turn",
+            tags=[session_id] if session_id else [],
+            metadata={"session_id": session_id} if session_id else {},
+        )
+        self.episodic_store.add(event)
+        logger.debug(
+            "score_memories: recorded turn (importance=%.3f, signals=%s)",
+            importance,
+            signals,
+        )
+        return event
+
     def sync_all(
         self,
         user_content: str,
@@ -580,14 +703,33 @@ class MemoryManager:
         before turn N+1; provider implementations don't need their own
         ordering guarantees.
         """
-        providers = list(self._providers)
-        if not providers:
-            return
-
         clean_user_content = self._strip_skill_scaffolding(user_content)
         if not clean_user_content:
             return
         user_content = clean_user_content
+
+        # Score this turn's friction signals and record it as an episodic
+        # memory event (#752). This is the real consumer of
+        # agent.memory_importance — every synced turn is scored so the
+        # episodic store accumulates importance-weighted history. Scoring
+        # is synchronous and cheap (no network), so it runs inline before
+        # the provider guard; this keeps the store populated even in
+        # built-in-only mode without spawning the background executor.
+        try:
+            self.score_memories(
+                user_content,
+                assistant_content,
+                session_id=session_id,
+                messages=messages,
+            )
+        except Exception as e:
+            logger.debug(
+                "score_memories() failed during sync (non-fatal): %s", e
+            )
+
+        providers = list(self._providers)
+        if not providers:
+            return
 
         def _run() -> None:
             for provider in providers:
@@ -986,6 +1128,92 @@ class MemoryManager:
                 )
             except Exception as e:
                 logger.debug("notify_memory_tool_write failed for op %s: %s", action, e)
+
+    # -- Staleness detection (#797) ------------------------------------------
+
+    @staticmethod
+    def _entries_to_notes(entries: List[str], *, target: str) -> List["Note"]:
+        """Convert built-in memory-store entries to staleness :class:`Note` objects.
+
+        The built-in store keeps entries as plain strings (delimited by ``§``)
+        with no per-entry id/timestamp metadata. Each entry is mapped to a
+        :class:`~agent.memory_staleness.Note` using the entry index as a stable
+        id, the first non-empty line as the title, and the remainder as the
+        body content. The ``target`` (``"memory"``/``"user"``) is recorded as
+        the note ``kind`` so the report can distinguish the two stores.
+        """
+        from agent.memory_staleness import Note
+
+        notes: List[Note] = []
+        for idx, entry in enumerate(entries):
+            text = (entry or "").strip()
+            if not text:
+                continue
+            lines = text.splitlines()
+            title = lines[0].strip() if lines else text
+            content = "\n".join(lines[1:]).strip() if len(lines) > 1 else ""
+            notes.append(
+                Note(
+                    id=f"{target}-{idx}",
+                    title=title or text,
+                    content=content or text,
+                    kind=target,
+                )
+            )
+        return notes
+
+    def collect_notes(self) -> List["Note"]:
+        """Gather :class:`~agent.memory_staleness.Note` objects from all stores.
+
+        Reads the on-disk built-in memory store (MEMORY.md + USER.md) via
+        :func:`tools.memory_tool.load_on_disk_store` and converts each entry
+        to a :class:`Note`. This is the bridge between the real memory store
+        and the side-effect-free staleness analysis — no notes are mutated.
+
+        Returns an empty list when no memory files exist (a fresh profile),
+        which yields a pristine ``StalenessReport`` (quality score 1.0).
+        """
+        try:
+            from tools.memory_tool import load_on_disk_store
+
+            store = load_on_disk_store()
+        except Exception as e:
+            logger.warning("check_staleness: could not load memory store: %s", e)
+            return []
+
+        notes: List["Note"] = []
+        notes.extend(self._entries_to_notes(store.memory_entries, target="memory"))
+        notes.extend(self._entries_to_notes(store.user_entries, target="user"))
+        return notes
+
+    def check_staleness(self, *, config: Optional[Dict[str, Any]] = None) -> "StalenessReport":
+        """Run staleness detection over the current memory corpus (#797).
+
+        This is the real consumer of :func:`agent.memory_staleness.analyze`:
+        it collects notes from the on-disk memory store and runs every
+        staleness detector (age, contradiction, low-quality, duplicate,
+        superseded), then returns a :class:`StalenessReport` the caller can
+        render or act on. Suitable as an end-of-turn hook or a CLI
+        ``hermes memory stale`` invocation.
+
+        The analysis is pure — no notes are mutated and no memory API is
+        called. Pass ``config`` to override the default thresholds.
+        """
+        from agent.memory_staleness import analyze, StalenessReport
+
+        notes = self.collect_notes()
+        return analyze(notes, config=config)
+
+    def render_staleness_report(self, *, config: Optional[Dict[str, Any]] = None) -> str:
+        """Run :meth:`check_staleness` and render the result as markdown.
+
+        Convenience wrapper for the CLI ``hermes memory stale`` subcommand and
+        any caller that wants a human-readable string rather than the
+        structured :class:`StalenessReport`.
+        """
+        from agent.memory_staleness import render_report
+
+        return render_report(self.check_staleness(config=config))
 
     def on_delegation(self, task: str, result: str, *,
                       child_session_id: str = "", **kwargs) -> None:

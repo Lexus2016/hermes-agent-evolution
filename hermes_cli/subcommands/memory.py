@@ -34,6 +34,42 @@ def build_memory_parser(subparsers, *, cmd_memory: Callable) -> None:
     )
     memory_sub.add_parser("status", help="Show current memory provider config")
     memory_sub.add_parser("off", help="Disable external provider (built-in only)")
+    _score_parser = memory_sub.add_parser(
+        "score",
+        help="Score episodic memory importance for recent turns (#752)",
+    )
+    _score_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="How many recent events to show (default 10)",
+    )
+
+    # Staleness detection (#797): run MemoryStalenessDetector over the current
+    # memory corpus and print a markdown report of flagged/consolidable notes.
+    _stale_parser = memory_sub.add_parser(
+        "stale",
+        help="Detect stale, duplicated, and low-quality memory notes",
+    )
+    _stale_parser.add_argument(
+        "--max-age-days",
+        type=int,
+        default=None,
+        help="Override the age threshold (days). Older notes are flagged AGE.",
+    )
+    _stale_parser.add_argument(
+        "--min-content-length",
+        type=int,
+        default=None,
+        help="Override the minimum content length (chars). Shorter notes are "
+        "flagged LOW_QUALITY.",
+    )
+    _stale_parser.add_argument(
+        "--duplicate-jaccard-threshold",
+        type=float,
+        default=None,
+        help="Override the Jaccard similarity threshold for DUPLICATE flags.",
+    )
     _reset_parser = memory_sub.add_parser(
         "reset",
         help="Erase all built-in memory (MEMORY.md and USER.md)",
