@@ -574,6 +574,10 @@ def _build_fal_payload(
     Translates aspect_ratio into the model's native size spec (preset enum,
     aspect-ratio enum, or GPT literal string), merges model defaults, applies
     caller overrides, then filters to the model's ``supports`` whitelist.
+
+    Raises ``ValueError`` when an override key is explicitly provided but not
+    in the model's ``supports`` whitelist, so the caller gets a clear
+    non-retryable validation error instead of a silent drop (issue #830).
     """
     meta = FAL_MODELS[model_id]
     size_style = meta["size_style"]
@@ -596,12 +600,24 @@ def _build_fal_payload(
     if seed is not None and isinstance(seed, int):
         payload["seed"] = seed
 
+    supports = meta["supports"]
+
     if overrides:
         for k, v in overrides.items():
             if v is not None:
+                # Reject unsupported override keys with a clear validation
+                # error so the agent can adjust parameters instead of
+                # silently sending a request that ignores them (issue #830).
+                if k not in supports and k != "prompt":
+                    raise ValueError(
+                        f"Parameter '{k}' is not supported by model "
+                        f"'{meta.get('display', model_id)}' ({model_id}). "
+                        f"Supported parameters: {', '.join(sorted(supports))}. "
+                        f"Remove '{k}' from overrides or switch to a model "
+                        f"that supports it via `hermes tools` → Image Generation."
+                    )
                 payload[k] = v
 
-    supports = meta["supports"]
     # ``prompt`` is required by every FAL text-to-image endpoint; keep it even
     # if a model's ``supports`` whitelist omits it, so a missing whitelist entry
     # can't silently strip the prompt and send an empty request.
@@ -835,6 +851,109 @@ def _postprocess_image_generate_result(raw: str, task_id: str | None = None) -> 
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _categorize_image_error(exc: Exception) -> tuple:
+    """Categorize an image generation exception into actionable types.
+
+    Returns ``(error_type, error_message)`` where ``error_type`` is one of:
+
+    - ``authentication_error`` — missing or invalid FAL API key (401/403)
+    - ``provider_unavailable`` — FAL.ai is down or unreachable (network, 5xx)
+    - ``payload_validation_error`` — unsupported parameter combination
+    - ``generation_error`` — other API errors (4xx not auth-related)
+    - ``internal_error`` — unexpected non-API exceptions
+
+    The categorized message includes remediation guidance so the agent
+    can act instead of blindly retrying (issue #830).
+    """
+    exc_str = str(exc)
+    exc_type_name = type(exc).__name__
+
+    # Missing backend / API key — raised as ValueError before any network call.
+    if "Image generation is unavailable" in exc_str or "FAL_KEY" in exc_str:
+        return (
+            "authentication_error",
+            exc_str
+            + "\n\nTo fix: set FAL_KEY=<your-key> or configure a managed FAL "
+            "gateway via `hermes setup`. This error is non-retryable until "
+            "the key is configured.",
+        )
+
+    # Payload validation errors raised by _build_fal_payload before dispatch.
+    if "not supported by model" in exc_str or "Unknown size_style" in exc_str:
+        return (
+            "payload_validation_error",
+            exc_str
+            + "\n\nThis is a non-retryable validation error — adjust the "
+            "parameters (aspect_ratio, overrides) to match the active model's "
+            "capabilities. Use `hermes tools` → Image Generation to inspect "
+            "the configured model.",
+        )
+
+    # Edit-capability mismatch — model doesn't support image-to-image.
+    if "not capable of image-to-image" in exc_str:
+        return (
+            "payload_validation_error",
+            exc_str,
+        )
+
+    # Inspect HTTP status for provider-level errors.
+    status = _extract_http_status(exc)
+    if status is not None:
+        if status in (401, 403):
+            return (
+                "authentication_error",
+                f"FAL.ai rejected the request with HTTP {status} "
+                f"(authentication/authorization failure). {exc_str}\n\n"
+                "This is non-retryable — check that FAL_KEY is valid and "
+                "has not expired, or reconfigure via `hermes setup`.",
+            )
+        if 500 <= status < 600:
+            return (
+                "provider_unavailable",
+                f"FAL.ai returned HTTP {status} (server error). {exc_str}\n\n"
+                "The provider may be temporarily unavailable — retrying "
+                "after a short delay is reasonable, but avoid tight loops.",
+            )
+        if status == 429:
+            return (
+                "provider_unavailable",
+                f"FAL.ai returned HTTP 429 (rate limited). {exc_str}\n\n"
+                "Reduce generation frequency or upgrade your FAL plan. "
+                "Non-retryable within the same turn.",
+            )
+        if 400 <= status < 500:
+            return (
+                "generation_error",
+                f"FAL.ai returned HTTP {status} (client error). {exc_str}\n\n"
+                "This is likely a request-level issue (unsupported model, "
+                "invalid parameters). Adjust the request before retrying.",
+            )
+
+    # Network / connectivity errors (no HTTP status extractable).
+    if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+        return (
+            "provider_unavailable",
+            f"Could not reach FAL.ai: {exc_str}\n\n"
+            "Check network connectivity. Retrying after a delay is "
+            "reasonable, but avoid tight loops.",
+        )
+
+    # Import errors (fal_client package missing).
+    if isinstance(exc, ImportError):
+        return (
+            "authentication_error",
+            f"FAL client not available: {exc_str}\n\n"
+            "Install the fal-client package or configure an alternative "
+            "image generation provider via `hermes tools`.",
+        )
+
+    # Fallback — unknown error, keep the raw exception for debugging.
+    return (
+        "internal_error",
+        f"{exc_str} (exception type: {exc_type_name})",
+    )
+
+
 def image_generate_tool(
     prompt: str,
     aspect_ratio: str = DEFAULT_ASPECT_RATIO,
@@ -1022,11 +1141,15 @@ def image_generate_tool(
         error_msg = f"Error generating image: {str(e)}"
         logger.error("%s", error_msg, exc_info=True)
 
+        # Categorize the error so the agent can respond with actionable
+        # diagnostics instead of a generic retry loop (issue #830).
+        error_type, categorized_error = _categorize_image_error(e)
+
         response_data = {
             "success": False,
             "image": None,
-            "error": str(e),
-            "error_type": type(e).__name__,
+            "error": categorized_error,
+            "error_type": error_type,
         }
 
         debug_call_data["error"] = error_msg
