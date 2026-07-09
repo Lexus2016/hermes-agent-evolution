@@ -137,24 +137,24 @@ class TestBuildFalPayloadValidation:
         assert test_key in payload
         assert payload[test_key] == 5
 
-    def test_unsupported_override_raises_value_error(self):
+    def test_unsupported_override_is_stripped(self):
         from tools.image_generation_tool import _build_fal_payload, DEFAULT_MODEL, FAL_MODELS
 
         supports = FAL_MODELS[DEFAULT_MODEL]["supports"]
 
-        # Find a key that is NOT in supports
+        # A key NOT in the model's supports whitelist must be silently stripped
+        # (historical contract + BYOK-secret safety like ``openai_api_key``),
+        # never raised and never sent to the API. Real runtime failures are what
+        # ``_categorize_image_error`` classifies (issue #830), not param shape.
         test_key = "nonexistent_parameter_xyz"
         assert test_key not in supports
 
-        with pytest.raises(ValueError) as exc_info:
-            _build_fal_payload(
-                DEFAULT_MODEL,
-                "a test prompt",
-                overrides={test_key: 42},
-            )
-
-        assert "not supported by model" in str(exc_info.value)
-        assert test_key in str(exc_info.value)
+        payload = _build_fal_payload(
+            DEFAULT_MODEL,
+            "a test prompt",
+            overrides={test_key: 42},
+        )
+        assert test_key not in payload
 
     def test_none_overrides_are_silently_skipped(self):
         from tools.image_generation_tool import _build_fal_payload, DEFAULT_MODEL
@@ -166,24 +166,6 @@ class TestBuildFalPayloadValidation:
             overrides={"nonexistent_param": None},
         )
         assert "nonexistent_param" not in payload
-
-    def test_error_message_lists_supported_params(self):
-        from tools.image_generation_tool import _build_fal_payload, DEFAULT_MODEL, FAL_MODELS
-
-        supports = FAL_MODELS[DEFAULT_MODEL]["supports"]
-        with pytest.raises(ValueError) as exc_info:
-            _build_fal_payload(
-                DEFAULT_MODEL,
-                "test",
-                overrides={"bogus_param": 1},
-            )
-        msg = str(exc_info.value)
-        # The error message should list at least one supported parameter
-        # so the agent knows what IS available.
-        assert "Supported parameters:" in msg
-        # At least one actual supported param should appear
-        found = any(s in msg for s in supports if s != "prompt")
-        assert found, f"None of {supports} found in error message: {msg}"
 
 
 # ---------------------------------------------------------------------------

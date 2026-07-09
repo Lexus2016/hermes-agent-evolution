@@ -605,17 +605,13 @@ def _build_fal_payload(
     if overrides:
         for k, v in overrides.items():
             if v is not None:
-                # Reject unsupported override keys with a clear validation
-                # error so the agent can adjust parameters instead of
-                # silently sending a request that ignores them (issue #830).
-                if k not in supports and k != "prompt":
-                    raise ValueError(
-                        f"Parameter '{k}' is not supported by model "
-                        f"'{meta.get('display', model_id)}' ({model_id}). "
-                        f"Supported parameters: {', '.join(sorted(supports))}. "
-                        f"Remove '{k}' from overrides or switch to a model "
-                        f"that supports it via `hermes tools` → Image Generation."
-                    )
+                # Unsupported override keys (and BYOK secrets like
+                # ``openai_api_key``) are stripped by the return filter below —
+                # the model's ``supports`` whitelist is authoritative. Keep the
+                # historical silent-strip contract rather than raising: callers
+                # and the BYOK-strip security tests rely on it. Genuine runtime
+                # failures are still classified by ``_categorize_image_error``
+                # to prevent retry spirals (issue #830).
                 payload[k] = v
 
     # ``prompt`` is required by every FAL text-to-image endpoint; keep it even
