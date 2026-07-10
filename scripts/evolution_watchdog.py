@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta
@@ -94,15 +95,17 @@ EDGE_COOLDOWN_DAYS = 7
 ALERT_STATE_FILENAME = "watchdog-alert-state.json"
 
 
-def expected_report_date(now: datetime, slot_hour: int, grace_hours: int = GRACE_HOURS) -> str:
+def expected_report_date(
+    now: datetime, slot_hour: int, grace_hours: int = GRACE_HOURS
+) -> str:
     """Date (YYYY-MM-DD) whose report should exist for a daily slot.
 
     If the slot (plus grace) has already passed today, today's report is
     expected; otherwise yesterday's is the most recent one that must exist.
     """
-    slot_deadline = now.replace(hour=slot_hour, minute=0, second=0, microsecond=0) + timedelta(
-        hours=grace_hours
-    )
+    slot_deadline = now.replace(
+        hour=slot_hour, minute=0, second=0, microsecond=0
+    ) + timedelta(hours=grace_hours)
     day = now.date() if now >= slot_deadline else (now - timedelta(days=1)).date()
     return day.isoformat()
 
@@ -145,7 +148,9 @@ def _stage_clean_job_for_slot(
     return None
 
 
-def _stage_ran_clean_for_slot(jobs: List[dict], stage: str, date: str, slot_hour: int) -> bool:
+def _stage_ran_clean_for_slot(
+    jobs: List[dict], stage: str, date: str, slot_hour: int
+) -> bool:
     """Boolean wrapper kept for existing callers — see
     ``_stage_clean_job_for_slot``."""
     return _stage_clean_job_for_slot(jobs, stage, date, slot_hour) is not None
@@ -257,7 +262,9 @@ def _default_runner(cmd: List[str]) -> Tuple[int, str]:
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
-def check_gh(runner: Callable[[List[str]], Tuple[int, str]] = _default_runner) -> List[str]:
+def check_gh(
+    runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
+) -> List[str]:
     """Alert when gh auth is broken or API rate budget is nearly gone."""
     alerts: List[str] = []
     try:
@@ -374,9 +381,15 @@ def _release_lag_alerts(
     # exits 0 = ancestor (merged), 1 = not an ancestor (missing), 128/other = bad
     # ref (tag not fetched locally yet) → unmeasurable, stay silent.
     try:
-        rc, _out = runner(
-            ["git", "-C", str(repo), "merge-base", "--is-ancestor", tag, "HEAD"]
-        )
+        rc, _out = runner([
+            "git",
+            "-C",
+            str(repo),
+            "merge-base",
+            "--is-ancestor",
+            tag,
+            "HEAD",
+        ])
     except Exception:  # noqa: BLE001
         return []
     if rc == 0:
@@ -433,9 +446,15 @@ def _latest_upstream_release(
 ) -> Tuple[str, str] | None:
     """(tagName, publishedAt) of upstream's latest GitHub release, or None."""
     try:
-        rc, out = runner(
-            ["gh", "release", "view", "--repo", slug, "--json", "tagName,publishedAt"]
-        )
+        rc, out = runner([
+            "gh",
+            "release",
+            "view",
+            "--repo",
+            slug,
+            "--json",
+            "tagName,publishedAt",
+        ])
     except Exception:  # noqa: BLE001 — gh missing/unauthed: fail-open
         return None
     if rc != 0 or not out.strip():
@@ -535,19 +554,17 @@ def ensure_upstream_issue(
 
     # 1) Look for an existing open [UPSTREAM] issue (the idempotency key).
     try:
-        rc, out = runner(
-            [
-                "gh",
-                "issue",
-                "list",
-                "--search",
-                f"{UPSTREAM_ISSUE_PREFIX} in:title",
-                "--state",
-                "open",
-                "--json",
-                "number,title",
-            ]
-        )
+        rc, out = runner([
+            "gh",
+            "issue",
+            "list",
+            "--search",
+            f"{UPSTREAM_ISSUE_PREFIX} in:title",
+            "--state",
+            "open",
+            "--json",
+            "number,title",
+        ])
     except Exception:  # noqa: BLE001 — gh missing/spawn failure: fail-open
         return None
     if rc != 0:
@@ -577,9 +594,7 @@ def ensure_upstream_issue(
         f"fork (owner review of any conflicts), then close this issue.\n"
     )
     try:
-        rc, _out = runner(
-            ["gh", "issue", "create", "--title", title, "--body", body]
-        )
+        rc, _out = runner(["gh", "issue", "create", "--title", title, "--body", body])
     except Exception:  # noqa: BLE001 — fail-open on create spawn failure
         return None
     if rc != 0:
@@ -604,16 +619,27 @@ def _upstream_lag_unmeasurable(
     before — this can never make the check worse than today.
     """
     try:
-        rc, out = runner(
-            ["git", "-C", str(repo), "rev-parse", "--is-shallow-repository"]
-        )
+        rc, out = runner([
+            "git",
+            "-C",
+            str(repo),
+            "rev-parse",
+            "--is-shallow-repository",
+        ])
         if rc == 0 and out.strip() == "true":
             return True
     except Exception:  # noqa: BLE001 — inconclusive probe: don't block the real check
         return False
 
     try:
-        rc, out = runner(["git", "-C", str(repo), "merge-base", "HEAD", "upstream/main"])
+        rc, out = runner([
+            "git",
+            "-C",
+            str(repo),
+            "merge-base",
+            "HEAD",
+            "upstream/main",
+        ])
     except Exception:  # noqa: BLE001
         return False
     # No common ancestor: git exits non-zero with NOTHING on stdout. A non-zero
@@ -663,17 +689,15 @@ def check_runtime_divergence(
         return []
 
     try:
-        rc_anc, _out = runner(
-            [
-                "git",
-                "-C",
-                str(repo),
-                "merge-base",
-                "--is-ancestor",
-                "HEAD",
-                "origin/main",
-            ]
-        )
+        rc_anc, _out = runner([
+            "git",
+            "-C",
+            str(repo),
+            "merge-base",
+            "--is-ancestor",
+            "HEAD",
+            "origin/main",
+        ])
     except Exception:  # noqa: BLE001 — spawn failure: fail-open
         return []
     # rc 0 == HEAD IS an ancestor of origin/main → ff-able → not frozen.
@@ -685,9 +709,14 @@ def check_runtime_divergence(
         return []
 
     try:
-        rc_ahead, out_ahead = runner(
-            ["git", "-C", str(repo), "rev-list", "--count", "origin/main..HEAD"]
-        )
+        rc_ahead, out_ahead = runner([
+            "git",
+            "-C",
+            str(repo),
+            "rev-list",
+            "--count",
+            "origin/main..HEAD",
+        ])
     except Exception:  # noqa: BLE001
         return []
     if rc_ahead != 0:
@@ -701,9 +730,14 @@ def check_runtime_divergence(
 
     behind = 0
     try:
-        rc_behind, out_behind = runner(
-            ["git", "-C", str(repo), "rev-list", "--count", "HEAD..origin/main"]
-        )
+        rc_behind, out_behind = runner([
+            "git",
+            "-C",
+            str(repo),
+            "rev-list",
+            "--count",
+            "HEAD..origin/main",
+        ])
         if rc_behind == 0:
             behind = int(out_behind.strip().split()[0])
     except (Exception, ValueError, IndexError):  # noqa: BLE001 — count is cosmetic
@@ -728,7 +762,9 @@ def check_health(evolution_dir: Path) -> List[str]:
     there is no sidecar yet (the stage-report checks already cover 'funnel didn't
     run')."""
     try:
-        line = (evolution_dir / "evolution-health.txt").read_text(encoding="utf-8").strip()
+        line = (
+            (evolution_dir / "evolution-health.txt").read_text(encoding="utf-8").strip()
+        )
     except OSError:
         return []
     if not line or line.endswith("| healthy"):
@@ -746,7 +782,9 @@ def check_realized_impact(evolution_dir: Path) -> List[str]:
     running. This is the loop that stops the agent from optimizing a predicted
     impact it never checks against reality. Silent when healthy or absent."""
     try:
-        line = (evolution_dir / "realized-impact.txt").read_text(encoding="utf-8").strip()
+        line = (
+            (evolution_dir / "realized-impact.txt").read_text(encoding="utf-8").strip()
+        )
     except OSError:
         return []
     if not line or line.endswith("| healthy"):
@@ -771,6 +809,127 @@ def check_analysis_integrity(evolution_dir: Path) -> List[str]:
         f"analysis selection integrity: {v}"
         for v in audit_latest(evolution_dir, _resolve_repo_dir())
     ]
+
+
+# ---------------------------------------------------------------------------
+# Reality reconciliation — never forward a metric-derived diagnosis that
+# GitHub reality contradicts.
+#
+# The class of failure this catches: the pipeline measures ITSELF, so when its
+# self-measurement is wrong it draws (and escalates) a wrong conclusion. The
+# 2026-07 incident: the funnel counted `merged` only from the integration
+# stage's self-report, missing the owner's manual merges — so health screamed
+# "integration stuck / picks more than it can land" for 7 days while GitHub
+# showed 15 evolution PRs actually merging. PR #885 anchored `merged` to GitHub
+# so the sidecar is now truthful, but a self-measuring system needs a standing
+# immune response: if a FUTURE metric regression (or a mis-dated stage report,
+# #667) ever makes the health line claim a merge/selection stall while GitHub
+# shows evolution PRs merging, that is an INSTRUMENTATION fault, not a pipeline
+# stall. Relabel it so the owner gets the honest diagnosis instead of chasing a
+# phantom — and so the pipeline can act on the right (funnel/#667) issue.
+#
+# Fail-open + no-mask: any gh failure, or GitHub agreeing there are no merges
+# (a real stall), leaves the alerts EXACTLY as-is. Reconciliation can only ever
+# RELABEL a merge/selection alert that reality demonstrably contradicts; it
+# never suppresses one.
+#
+# SCOPE — only MERGED_ZERO. It is the sole health flag whose predicate is a
+# COUNT claim ("zero merges this window") that a nonzero GitHub count genuinely
+# contradicts. LOW_SUCCESS and LOW_SELECTION_EFFICIENCY are RATE/RATIO claims
+# (fraction of cycles that landed a merge; distinct-selected-that-landed /
+# distinct-selected) — a single existing merge does NOT refute a low rate
+# (select 100, land 1 → ratio 0.01 is a TRUE degradation that coexists with
+# count>=1). Relabeling those on a mere count would VIOLATE no-mask and hide the
+# very quality signal the watchdog exists to protect, so they are deliberately
+# excluded. A sound ratio reconciliation (GitHub-derived merged/selected over
+# the same window) is a possible future enhancement, not needed for correctness.
+# ---------------------------------------------------------------------------
+
+_DIVERGEABLE_FLAGS = ("MERGED_ZERO",)
+_MIN_HEALTHY_MERGES = 1  # >=1 evolution/issue-* issue merged == the zero claim is false
+_REALITY_WINDOW_DAYS = 7
+
+
+def recent_merged_evolution_issue_count(
+    now: datetime,
+    runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
+    window_days: int = _REALITY_WINDOW_DAYS,
+    branch_prefix: str = "evolution/issue-",
+) -> int | None:
+    """Distinct evolution issues merged on GitHub within the last ``window_days``.
+
+    Returns None on any gh failure so the caller can fall open (never suppress a
+    real alert on a reconciliation error). Distinct issue numbers, so increment
+    PRs (issue-798-inc1/2/3) count once."""
+    try:
+        rc, out = runner([
+            "gh",
+            "pr",
+            "list",
+            "--state",
+            "merged",
+            "--json",
+            "headRefName,mergedAt",
+            "--limit",
+            "100",
+        ])
+        if rc != 0:
+            return None
+        prs = json.loads(out)
+    except Exception:  # noqa: BLE001 — any gh/parse failure → fall open
+        return None
+    if not isinstance(prs, list):
+        return None
+    cutoff = (now - timedelta(days=window_days)).strftime("%Y-%m-%d")
+    pat = re.compile(re.escape(branch_prefix) + r"(\d+)")
+    ids: set[int] = set()
+    for pr in prs:
+        if not isinstance(pr, dict):
+            continue
+        merged_day = str(pr.get("mergedAt", "") or "")[:10]  # ISO dates sort lexically
+        m = pat.match(str(pr.get("headRefName", "")))
+        if m and merged_day and merged_day >= cutoff:
+            ids.add(int(m.group(1)))
+    return len(ids)
+
+
+def reconcile_health_with_reality(
+    health_alerts: List[str],
+    now: datetime,
+    runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
+    window_days: int = _REALITY_WINDOW_DAYS,
+) -> List[str]:
+    """Relabel a MERGED_ZERO health alert that GitHub reality contradicts.
+
+    MERGED_ZERO claims the funnel recorded zero merges for a run of cycles. If
+    GitHub shows evolution issues actually merging in the window, that COUNT
+    claim is false — replace the alert with a single honest METRIC_DIVERGENCE
+    line (stable flag tail, so edge-triggering keys on it without re-screaming
+    the drifting merge count). Only MERGED_ZERO is in scope (see the block
+    above): rate/ratio flags are deliberately NOT relabeled on a count, to
+    preserve no-mask. Fail-open: gh unknown, or GitHub agreeing there were no
+    merges, leaves ``health_alerts`` untouched."""
+    if not any(any(f in a for f in _DIVERGEABLE_FLAGS) for a in health_alerts):
+        return health_alerts
+    merged = recent_merged_evolution_issue_count(now, runner, window_days)
+    if merged is None or merged < _MIN_HEALTHY_MERGES:
+        return health_alerts  # gh unknown OR reality agrees it's stalled → keep as-is
+    divergence = (
+        f"funnel reports zero merges, but GitHub shows {merged} evolution/issue-* "
+        f"issue(s) merged in the last {window_days}d "
+        "| METRIC_DIVERGENCE: instrumentation suspect (funnel / #667), NOT the "
+        "pipeline — verify the metric, auto-clears once the funnel backfills"
+    )
+    out: List[str] = []
+    inserted = False
+    for a in health_alerts:
+        if any(f in a for f in _DIVERGEABLE_FLAGS):
+            if not inserted:  # collapse all diverging flags into one honest line
+                out.append(divergence)
+                inserted = True
+        else:
+            out.append(a)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -851,16 +1010,19 @@ def load_alert_state(state_path: Path) -> dict | None:
     return data
 
 
-def save_alert_state(state_path: Path, signature: str, last_emitted_at: datetime) -> None:
+def save_alert_state(
+    state_path: Path, signature: str, last_emitted_at: datetime
+) -> None:
     """Persist the current signature + last-emitted timestamp. FAIL-OPEN: a
     write failure is swallowed — it must never crash the run nor (by raising)
     suppress an alert the caller already decided to emit."""
     try:
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state_path.write_text(
-            json.dumps(
-                {"signature": signature, "last_emitted_at": last_emitted_at.isoformat()}
-            ),
+            json.dumps({
+                "signature": signature,
+                "last_emitted_at": last_emitted_at.isoformat(),
+            }),
             encoding="utf-8",
         )
     except OSError:
@@ -969,7 +1131,12 @@ def main() -> int:
     # but suppresses the verbatim daily repeat. No-mask + fail-open preserved.
     health: List[str] = []
     health += check_runtime_divergence()
-    health += check_health(evolution_dir)
+    # Reality-reconcile the merge/selection health line before it can page the
+    # owner: a metric that claims a stall while GitHub shows evolution PRs
+    # merging is an instrumentation fault, not a pipeline one (see the
+    # reconcile_health_with_reality block). Fail-open — never suppresses a real
+    # degradation, only relabels one reality demonstrably contradicts.
+    health += reconcile_health_with_reality(check_health(evolution_dir), now)
     health += check_realized_impact(evolution_dir)
     health += check_analysis_integrity(evolution_dir)
     health = apply_edge_trigger(health, evolution_dir / ALERT_STATE_FILENAME, now)

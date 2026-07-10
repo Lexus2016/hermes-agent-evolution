@@ -98,11 +98,23 @@ class TestStageReports:
         alerts = check_stage_reports(tmp_path, NOW)
         assert len(alerts) == len(STAGES)
 
-    def _jobs_file(self, tmp_path, name, *, status="ok", last_run="2026-06-10T22:01:00", **extra):
+    def _jobs_file(
+        self, tmp_path, name, *, status="ok", last_run="2026-06-10T22:01:00", **extra
+    ):
         f = tmp_path / "jobs.json"
-        f.write_text(json.dumps({"jobs": [
-            {"name": name, "enabled": True, "last_status": status, "last_run_at": last_run, **extra}
-        ]}))
+        f.write_text(
+            json.dumps({
+                "jobs": [
+                    {
+                        "name": name,
+                        "enabled": True,
+                        "last_status": status,
+                        "last_run_at": last_run,
+                        **extra,
+                    }
+                ]
+            })
+        )
         return f
 
     def test_missing_report_quiet_when_job_ran_clean(self, tmp_path):
@@ -112,7 +124,8 @@ class TestStageReports:
         exp = expected_report_date(NOW, slot)
         self._make_reports(tmp_path, skip=("implementation",))
         jf = self._jobs_file(
-            tmp_path, "evolution-implementation",
+            tmp_path,
+            "evolution-implementation",
             last_run=f"{exp}T{slot:02d}:01:00",
         )
         assert check_stage_reports(tmp_path, NOW, jf) == []
@@ -128,7 +141,9 @@ class TestStageReports:
         # job ran ok but BEFORE the slot (stale/previous day) → not this slot's
         # clean run → still alert.
         self._make_reports(tmp_path, skip=("integration",))
-        jf = self._jobs_file(tmp_path, "evolution-integration", last_run="2026-06-09T23:00:00")
+        jf = self._jobs_file(
+            tmp_path, "evolution-integration", last_run="2026-06-09T23:00:00"
+        )
         alerts = check_stage_reports(tmp_path, NOW, jf)
         assert len(alerts) == 1 and "integration" in alerts[0]
 
@@ -140,7 +155,8 @@ class TestStageReports:
         exp = expected_report_date(NOW, slot)
         self._make_reports(tmp_path, skip=("implementation",))
         jf = self._jobs_file(
-            tmp_path, "evolution-implementation",
+            tmp_path,
+            "evolution-implementation",
             last_run=f"{exp}T{slot:02d}:01:00",
             last_tool_calls=0,
         )
@@ -155,7 +171,8 @@ class TestStageReports:
         exp = expected_report_date(NOW, slot)
         self._make_reports(tmp_path, skip=("implementation",))
         jf = self._jobs_file(
-            tmp_path, "evolution-implementation",
+            tmp_path,
+            "evolution-implementation",
             last_run=f"{exp}T{slot:02d}:01:00",
             last_tool_calls=7,
         )
@@ -496,23 +513,31 @@ class TestCheckHealth:
 
     def test_healthy_sidecar_is_silent(self, tmp_path):
         from evolution_watchdog import check_health
+
         (tmp_path / "evolution-health.txt").write_text(
-            "[evolution-metrics] 5/5 active cycles: success=80% ... | healthy\n", encoding="utf-8"
+            "[evolution-metrics] 5/5 active cycles: success=80% ... | healthy\n",
+            encoding="utf-8",
         )
         assert check_health(tmp_path) == []
 
     def test_flagged_sidecar_alerts(self, tmp_path):
         from evolution_watchdog import check_health
+
         (tmp_path / "evolution-health.txt").write_text(
             "[evolution-metrics] 4/4 active cycles: success=10% ... | "
             "LOW_SUCCESS: <1/3 of active cycles land a merge\n",
             encoding="utf-8",
         )
         alerts = check_health(tmp_path)
-        assert len(alerts) == 1 and "health degraded" in alerts[0] and "LOW_SUCCESS" in alerts[0]
+        assert (
+            len(alerts) == 1
+            and "health degraded" in alerts[0]
+            and "LOW_SUCCESS" in alerts[0]
+        )
 
     def test_missing_sidecar_is_silent(self, tmp_path):
         from evolution_watchdog import check_health
+
         assert check_health(tmp_path) == []
 
 
@@ -635,8 +660,8 @@ class TestEdgeTrigger:
 
         sp = self._state(tmp_path)
         t0 = datetime(2026, 6, 20, 7, 47)
-        assert apply_edge_trigger(self.COND_A, sp, t0) == self.COND_A          # fault
-        assert len(apply_edge_trigger([], sp, t0 + timedelta(days=1))) == 1     # recovery
+        assert apply_edge_trigger(self.COND_A, sp, t0) == self.COND_A  # fault
+        assert len(apply_edge_trigger([], sp, t0 + timedelta(days=1))) == 1  # recovery
         # Recurrence the very next day (well within the 7d cooldown):
         out = apply_edge_trigger(self.COND_A, sp, t0 + timedelta(days=2))
         assert out == self.COND_A, "a fault recurring after recovery must re-alert"
@@ -652,7 +677,9 @@ class TestEdgeTrigger:
         # Past the cooldown, unchanged → a single "still unresolved" nudge.
         later = t0 + timedelta(days=EDGE_COOLDOWN_DAYS + 1)
         out = apply_edge_trigger(self.COND_A, sp, later)
-        assert out, "a long-persisting condition must re-remind, never go silent forever"
+        assert out, (
+            "a long-persisting condition must re-remind, never go silent forever"
+        )
         assert any("LOW_SELECTION_EFFICIENCY" in a for a in out)
         # Cooldown clock resets after the reminder → next day suppressed again.
         assert apply_edge_trigger(self.COND_A, sp, later + timedelta(days=1)) == []
@@ -702,7 +729,9 @@ class TestMainEdgeTriggerWiring:
     """main() must route ONLY health alerts through the edge-trigger and leave
     operational alerts (upstream-lag, stage reports, jobs, gh) untouched."""
 
-    def test_upstream_lag_and_infra_alerts_bypass_edge_trigger(self, tmp_path, monkeypatch, capsys):
+    def test_upstream_lag_and_infra_alerts_bypass_edge_trigger(
+        self, tmp_path, monkeypatch, capsys
+    ):
         import evolution_watchdog as w
 
         # Infra/operational alerts present every run; health alerts steady.
@@ -710,15 +739,24 @@ class TestMainEdgeTriggerWiring:
         monkeypatch.setattr(w, "check_jobs", lambda *a, **k: [])
         monkeypatch.setattr(w, "check_gh", lambda *a, **k: ["gh auth status FAILED"])
         monkeypatch.setattr(
-            w, "check_upstream_lag", lambda *a, **k: ["upstream sync stuck: fork is 301 behind"]
+            w,
+            "check_upstream_lag",
+            lambda *a, **k: ["upstream sync stuck: fork is 301 behind"],
         )
         monkeypatch.setattr(
-            w, "check_health", lambda *a, **k: [
+            w,
+            "check_health",
+            lambda *a, **k: [
                 "pipeline health degraded: x | LOW_SELECTION_EFFICIENCY: y"
-            ]
+            ],
         )
         monkeypatch.setattr(w, "check_realized_impact", lambda *a, **k: [])
         monkeypatch.setattr(w, "check_analysis_integrity", lambda *a, **k: [])
+        # Keep reconciliation hermetic (no real gh): fall open so the health
+        # alert is exercised as-is by the edge-trigger, which is what this tests.
+        monkeypatch.setattr(
+            w, "recent_merged_evolution_issue_count", lambda *a, **k: None
+        )
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
 
@@ -732,9 +770,15 @@ class TestMainEdgeTriggerWiring:
         # Run 2: health is suppressed (steady), but upstream-lag + gh STILL fire.
         w.main()
         out2 = capsys.readouterr().out
-        assert "upstream sync stuck" in out2, "operational upstream-lag must never be edge-suppressed"
-        assert "gh auth status FAILED" in out2, "operational gh failure must never be edge-suppressed"
-        assert "LOW_SELECTION_EFFICIENCY" not in out2, "steady health condition should be suppressed"
+        assert "upstream sync stuck" in out2, (
+            "operational upstream-lag must never be edge-suppressed"
+        )
+        assert "gh auth status FAILED" in out2, (
+            "operational gh failure must never be edge-suppressed"
+        )
+        assert "LOW_SELECTION_EFFICIENCY" not in out2, (
+            "steady health condition should be suppressed"
+        )
 
 
 class TestRuntimeDivergence:
@@ -832,7 +876,9 @@ class TestRuntimeDivergence:
 
         assert check_runtime_divergence(runner=fake_run) == []
 
-    def test_diverged_routed_through_edge_trigger_in_main(self, tmp_path, monkeypatch, capsys):
+    def test_diverged_routed_through_edge_trigger_in_main(
+        self, tmp_path, monkeypatch, capsys
+    ):
         # The divergence alert is steady-state (persists until the owner
         # reconciles), so it must route through the edge-trigger: emit once,
         # suppress the identical repeat next run.
@@ -846,7 +892,8 @@ class TestRuntimeDivergence:
         monkeypatch.setattr(w, "check_realized_impact", lambda *a, **k: [])
         monkeypatch.setattr(w, "check_analysis_integrity", lambda *a, **k: [])
         monkeypatch.setattr(
-            w, "check_runtime_divergence",
+            w,
+            "check_runtime_divergence",
             lambda *a, **k: [
                 "runtime checkout diverged from origin/main by 2 local "
                 "commit(s) — nightly self-update is frozen (can't fast-forward)"
@@ -1005,7 +1052,9 @@ class TestUpstreamLagFilesIssue:
             clock=self._clock(72),
         )
         assert any("not merged" in a for a in alerts), "text alert preserved"
-        assert calls.get("behind") == 391, "real escalation must ensure the tracking issue"
+        assert calls.get("behind") == 391, (
+            "real escalation must ensure the tracking issue"
+        )
         assert calls.get("tag") == "v2026.6.19", "issue names the missing release tag"
 
     def test_merged_release_does_not_file_issue(self, monkeypatch):
@@ -1013,7 +1062,8 @@ class TestUpstreamLagFilesIssue:
 
         called = {"n": 0}
         monkeypatch.setattr(
-            w, "ensure_upstream_issue",
+            w,
+            "ensure_upstream_issue",
             lambda *a, **k: called.__setitem__("n", called["n"] + 1),
         )
         assert (
@@ -1031,7 +1081,8 @@ class TestUpstreamLagFilesIssue:
 
         called = {"n": 0}
         monkeypatch.setattr(
-            w, "ensure_upstream_issue",
+            w,
+            "ensure_upstream_issue",
             lambda *a, **k: called.__setitem__("n", called["n"] + 1),
         )
         assert (
@@ -1050,7 +1101,8 @@ class TestUpstreamLagFilesIssue:
 
         called = {"n": 0}
         monkeypatch.setattr(
-            w, "ensure_upstream_issue",
+            w,
+            "ensure_upstream_issue",
             lambda *a, **k: called.__setitem__("n", called["n"] + 1),
         )
 
@@ -1063,3 +1115,131 @@ class TestUpstreamLagFilesIssue:
 
         assert check_upstream_lag(runner=fake_run, repo_dir=self.REPO) == []
         assert called["n"] == 0, "shallow path must never file an issue"
+
+
+class TestRealityReconciliation:
+    """The immune backstop: never forward a MERGED_ZERO health alert that GitHub
+    reality contradicts. Relabels it to METRIC_DIVERGENCE (instrumentation fault)
+    instead of paging the owner with a phantom 'integration stuck'. Rate/ratio
+    flags are deliberately NOT relabeled on a count (no-mask)."""
+
+    from datetime import datetime as _dt
+
+    NOW = _dt(2026, 7, 10, 8, 0)
+    # A COUNT claim (zero merges) — a nonzero GitHub count genuinely refutes it.
+    MERGED_ZERO = [
+        "pipeline health degraded: [evolution-funnel] ... merged=0 "
+        "| MERGED_ZERO x7: integration looks stuck — check CI / flaky gates"
+    ]
+    # A RATE claim — a single existing merge does NOT refute a low ratio, so this
+    # must NEVER be relabeled on a mere count (else no-mask is violated and a real
+    # low-landing-rate is hidden).
+    RATE_FLAG = [
+        "pipeline health degraded: [evolution-metrics] ... selection_efficiency=7% "
+        "| LOW_SELECTION_EFFICIENCY: picks more than it can land"
+    ]
+
+    def _runner_with_merges(self, prs):
+        def _r(cmd):
+            return (0, __import__("json").dumps(prs))
+
+        return _r
+
+    def test_relabels_mergedzero_when_github_shows_merges(self):
+        from evolution_watchdog import reconcile_health_with_reality
+
+        prs = [
+            {
+                "headRefName": "evolution/issue-752-x",
+                "mergedAt": "2026-07-09T19:16:20Z",
+            },
+            {
+                "headRefName": "evolution/issue-756-y",
+                "mergedAt": "2026-07-09T01:02:00Z",
+            },
+        ]
+        out = reconcile_health_with_reality(
+            self.MERGED_ZERO, self.NOW, runner=self._runner_with_merges(prs)
+        )
+        assert len(out) == 1
+        assert "METRIC_DIVERGENCE" in out[0]
+        assert "MERGED_ZERO" not in out[0]  # phantom diagnosis dropped
+        assert "2" in out[0]  # reports the reconciled merge count
+
+    def test_rate_flags_never_relabeled_even_with_merges(self):
+        # no-mask: a merge COUNT cannot refute a low RATIO (select 100, land 1 ->
+        # ratio 0.01 is a real degradation). LOW_SELECTION_EFFICIENCY must survive.
+        from evolution_watchdog import reconcile_health_with_reality
+
+        prs = [
+            {"headRefName": "evolution/issue-752-x", "mergedAt": "2026-07-09T19:16:20Z"}
+        ]
+
+        def _boom(cmd):
+            raise AssertionError("gh must not be probed for a rate/ratio flag")
+
+        # gh must not even be called: the guard skips non-MERGED_ZERO flags early.
+        out = reconcile_health_with_reality(self.RATE_FLAG, self.NOW, runner=_boom)
+        assert out == self.RATE_FLAG
+
+    def test_keeps_mergedzero_when_github_agrees_zero(self):
+        from evolution_watchdog import reconcile_health_with_reality
+
+        # No evolution/issue-* merges in the window -> reality agrees -> keep.
+        prs = [{"headRefName": "sync/upstream", "mergedAt": "2026-07-09T00:00:00Z"}]
+        out = reconcile_health_with_reality(
+            self.MERGED_ZERO, self.NOW, runner=self._runner_with_merges(prs)
+        )
+        assert out == self.MERGED_ZERO
+
+    def test_excludes_merges_outside_window(self):
+        from evolution_watchdog import reconcile_health_with_reality
+
+        prs = [
+            {"headRefName": "evolution/issue-700-z", "mergedAt": "2026-06-01T00:00:00Z"}
+        ]
+        out = reconcile_health_with_reality(
+            self.MERGED_ZERO, self.NOW, runner=self._runner_with_merges(prs)
+        )
+        assert out == self.MERGED_ZERO  # merge too old -> not counted -> keep alert
+
+    def test_fail_open_on_gh_error(self):
+        from evolution_watchdog import reconcile_health_with_reality
+
+        out = reconcile_health_with_reality(
+            self.MERGED_ZERO, self.NOW, runner=lambda cmd: (1, "")
+        )
+        assert out == self.MERGED_ZERO  # gh failed -> never suppress a real alert
+
+    def test_non_diverging_alerts_untouched_without_gh(self):
+        from evolution_watchdog import reconcile_health_with_reality
+
+        other = ["realized-impact degraded: ... | REALIZED_RATE_LOW: ..."]
+
+        def _boom(cmd):
+            raise AssertionError("gh must not be called when nothing diverges")
+
+        assert reconcile_health_with_reality(other, self.NOW, runner=_boom) == other
+
+    def test_recent_count_distinct_issues(self):
+        from evolution_watchdog import recent_merged_evolution_issue_count
+
+        prs = [
+            {
+                "headRefName": "evolution/issue-798-inc1",
+                "mergedAt": "2026-07-09T01:00:00Z",
+            },
+            {
+                "headRefName": "evolution/issue-798-inc2",
+                "mergedAt": "2026-07-09T02:00:00Z",
+            },
+            {
+                "headRefName": "evolution/issue-750-a",
+                "mergedAt": "2026-07-08T01:00:00Z",
+            },
+            {"headRefName": "sync/upstream", "mergedAt": "2026-07-09T01:00:00Z"},
+        ]
+        n = recent_merged_evolution_issue_count(
+            self.NOW, runner=lambda cmd: (0, __import__("json").dumps(prs))
+        )
+        assert n == 2  # {798, 750}; increments collapse, sync excluded
