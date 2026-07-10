@@ -336,13 +336,29 @@ python3 scripts/evolution_realized_impact.py record-merge \
 > is not currently open per `gh pr list`, you hallucinated — STOP and redo from
 > the real list.
 
-Save to `~/.hermes/evolution/integration/YYYY-MM-DD.json` on
+> ⚠️ **Date is deterministic — NEVER type a date from memory.** Issue #667: the
+> agent wrote future-dated reports (2026-08-31.json on July 2, dates up to
+> September) because it hallucinated the date. This corrupts funnel metrics
+> and effort_budget calibration. ALWAYS get the date from the shell:
+> ```bash
+> TODAY=$(date +%Y-%m-%d)
+> ```
+> Use `$TODAY` as the `date` field AND the filename. Never type a date literal.
+
+Save to `~/.hermes/evolution/integration/$TODAY.json` on
 **EVERY** run — including idle cycles (`merged: []`, `skipped: []`): a missing
 report is read by the watchdog as a dead job.
 
+```bash
+# Deterministic date — NEVER type a date from memory (issue #667).
+TODAY=$(date +%Y-%m-%d)
+REPORT="$HOME/.hermes/evolution/integration/${TODAY}.json"
+mkdir -p "$(dirname "$REPORT")"
+```
+
 ```json
 {
-  "date": "YYYY-MM-DD",
+  "date": "<$TODAY — from `date +%Y-%m-%d`, never from memory>",
   "merged": [
     {"pr": "<real PR number you merged>", "issue": "<#>", "title": "<...>", "self_update": "ok|deferred|failed"}
   ],
