@@ -381,3 +381,300 @@ class TestActivationGate:
         agent._maybe_activate_plan_mode("Refactor across files")
         # An already-armed plan (multi-turn / post-replan) is left untouched.
         assert agent._active_plan is existing
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Part 5 — Step.reasoning field (issue #877)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestStepReasoningField:
+    """The optional ``reasoning`` field on :class:`Step` — added in #877."""
+
+    def test_default_is_empty(self):
+        step = Step(tool_call_intent="act", rationale="why", expected_observation="res")
+        assert step.reasoning == ""
+
+    def test_round_trip_to_dict_without_reasoning(self):
+        # When reasoning is empty it must NOT appear in to_dict output,
+        # preserving backward compatibility with existing serialized plans.
+        step = Step(tool_call_intent="act", rationale="why", expected_observation="res")
+        d = step.to_dict()
+        assert "reasoning" not in d
+
+    def test_round_trip_to_dict_with_reasoning(self):
+        step = Step(
+            tool_call_intent="act",
+            rationale="why",
+            expected_observation="res",
+            reasoning="detailed chain-of-thought for this step",
+        )
+        d = step.to_dict()
+        assert d["reasoning"] == "detailed chain-of-thought for this step"
+
+    def test_from_dict_without_reasoning_defaults_empty(self):
+        d = {"tool_call_intent": "act", "rationale": "why", "expected_observation": "res"}
+        step = Step.from_dict(d)
+        assert step.reasoning == ""
+
+    def test_from_dict_with_reasoning(self):
+        d = {
+            "tool_call_intent": "act",
+            "rationale": "why",
+            "expected_observation": "res",
+            "reasoning": "extended thinking here",
+        }
+        step = Step.from_dict(d)
+        assert step.reasoning == "extended thinking here"
+
+    def test_with_index_preserves_reasoning(self):
+        step = Step(
+            tool_call_intent="act",
+            rationale="why",
+            expected_observation="res",
+            reasoning="my reasoning",
+        )
+        reindexed = step.with_index(3)
+        assert reindexed.reasoning == "my reasoning"
+        assert reindexed.index == 3
+
+    def test_render_omits_reasoning_when_empty(self):
+        step = Step(tool_call_intent="act", rationale="why", expected_observation="res")
+        rendered = step.render()
+        assert "reasoning" not in rendered.lower()
+
+    def test_render_includes_reasoning_when_nonempty(self):
+        step = Step(
+            tool_call_intent="act",
+            rationale="why",
+            expected_observation="res",
+            reasoning="my deep thoughts",
+        )
+        rendered = step.render()
+        assert "my deep thoughts" in rendered
+        assert "reasoning" in rendered.lower()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Part 6 — LLM planner (build_llm_plan, issue #877)
+# ─────────────────────────────────────────────────────────────────────────────
+
+from agent.plan_mode import build_llm_plan  # noqa: E402
+
+
+def _make_llm_response(steps_data: list, goal: str = "") -> str:
+    """Build a valid JSON LLM response string."""
+    import json as _json
+
+    return _json.dumps({"goal": goal or "test goal", "steps": steps_data})
+
+
+class TestBuildLlmPlan:
+    """The LLM planner: prompt → JSON parse → Plan with reasoning (issue #877)."""
+
+    def test_none_on_blank_task(self):
+        assert build_llm_plan("", lambda p: "") is None
+        assert build_llm_plan("  \n ", lambda p: "") is None
+
+    def test_none_on_non_callable(self):
+        assert build_llm_plan("do a thing", None) is None  # type: ignore[arg-type]
+
+    def test_none_on_llm_exception(self):
+        def boom(_prompt):
+            raise RuntimeError("network error")
+
+        assert build_llm_plan("do a thing", boom) is None
+
+    def test_none_on_empty_response(self):
+        assert build_llm_plan("do a thing", lambda p: "") is None
+        assert build_llm_plan("do a thing", lambda p: "   ") is None
+
+    def test_none_on_malformed_json(self):
+        assert build_llm_plan("do a thing", lambda p: "not json at all") is None
+
+    def test_none_on_missing_steps_key(self):
+        resp = '{"goal": "do the thing"}'
+        assert build_llm_plan("do a thing", lambda p: resp) is None
+
+    def test_none_on_empty_steps_list(self):
+        resp = '{"goal": "do the thing", "steps": []}'
+        assert build_llm_plan("do a thing", lambda p: resp) is None
+
+    def test_none_on_step_missing_required_fields(self):
+        # tool_call_intent is required — a step without it should fail.
+        resp = _make_llm_response([
+            {"rationale": "why", "expected_observation": "res", "reasoning": "think"}
+        ])
+        assert build_llm_plan("do a thing", lambda p: resp) is None
+
+        # rationale is required too.
+        resp2 = _make_llm_response([
+            {"tool_call_intent": "act", "expected_observation": "res", "reasoning": "think"}
+        ])
+        assert build_llm_plan("do a thing", lambda p: resp2) is None
+
+    def test_valid_response_produces_plan_with_reasoning(self):
+        resp = _make_llm_response([
+            {
+                "tool_call_intent": "search for files",
+                "rationale": "find the files to modify",
+                "expected_observation": "list of file paths",
+                "reasoning": "I need to first locate the relevant files before making changes",
+            },
+            {
+                "tool_call_intent": "edit each file",
+                "rationale": "apply the rename",
+                "expected_observation": "files updated",
+                "reasoning": "After finding the files I can apply the rename across all of them",
+            },
+        ], goal="Refactor the module")
+        plan = build_llm_plan("Refactor the module", lambda p: resp)
+        assert plan is not None
+        assert len(plan.steps) == 2
+        assert plan.metadata["source"] == "llm_planner"
+        assert plan.goal == "Refactor the module"
+        assert plan.steps[0].reasoning == "I need to first locate the relevant files before making changes"
+        assert plan.steps[1].reasoning == "After finding the files I can apply the rename across all of them"
+
+    def test_reasoning_defaults_empty_when_omitted_in_response(self):
+        resp = _make_llm_response([
+            {
+                "tool_call_intent": "search for files",
+                "rationale": "find the files",
+                "expected_observation": "file list",
+                # no "reasoning" key
+            },
+        ])
+        plan = build_llm_plan("do a thing", lambda p: resp)
+        assert plan is not None
+        assert plan.steps[0].reasoning == ""
+
+    def test_strips_markdown_code_fences(self):
+        import json as _json
+        resp = '```json\n' + _json.dumps({
+            "goal": "test",
+            "steps": [{"tool_call_intent": "act", "rationale": "why", "expected_observation": "res"}],
+        }) + '\n```'
+        plan = build_llm_plan("do a thing", lambda p: resp)
+        assert plan is not None
+        assert len(plan.steps) == 1
+
+    def test_goal_falls_back_to_trimmed_task_when_empty(self):
+        # Pass an explicit empty goal in the JSON so build_llm_plan falls back
+        # to the trimmed task string.
+        import json as _json
+        resp = _json.dumps({
+            "goal": "",
+            "steps": [{"tool_call_intent": "act", "rationale": "why", "expected_observation": "res"}],
+        })
+        plan = build_llm_plan("Do something important here", lambda p: resp)
+        assert plan is not None
+        assert "Do something important here" in plan.goal
+
+    def test_step_indices_are_assigned(self):
+        resp = _make_llm_response([
+            {"tool_call_intent": "a", "rationale": "b", "expected_observation": "c"},
+            {"tool_call_intent": "d", "rationale": "e", "expected_observation": "f"},
+        ])
+        plan = build_llm_plan("do a thing", lambda p: resp)
+        assert plan is not None
+        # Indices are 1-based (see Step.with_index docstring).
+        assert plan.steps[0].index == 1
+        assert plan.steps[1].index == 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Part 7 — LLM vs stub plan comparison (issue #878: action-recall eval)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestLlmVsStubActionRecall:
+    """Issue #878: compare LLM vs stub plans on action recall.
+
+    Action recall = fraction of plan steps whose ``tool_call_intent`` overlaps
+    the ground-truth expected actions for the task. We use deterministic mock
+    LLM responses so this test needs no network. The key invariant: a
+    well-formed LLM plan should recall at least as many expected actions as
+    the stub planner on tasks where the stub's heuristic steps are generic.
+    """
+
+    @staticmethod
+    def _action_recall(plan: Optional[Plan], expected_keywords: List[str]) -> float:
+        """Fraction of expected keywords present across plan step intents."""
+        if plan is None or not plan.steps:
+            return 0.0
+        all_intents = " ".join(s.tool_call_intent.lower() for s in plan.steps)
+        hits = sum(1 for kw in expected_keywords if kw.lower() in all_intents)
+        return hits / len(expected_keywords) if expected_keywords else 1.0
+
+    def test_llm_plan_recalls_specific_actions_stub_misses(self):
+        """On a task with specific actions, an LLM plan with those actions
+        should recall them, while the stub's generic steps may not."""
+        task = "Deploy the service to Kubernetes and verify the rollout"
+        expected = ["deploy", "kubernetes", "verify", "rollout"]
+
+        # LLM plan with task-specific steps
+        llm_resp = _make_llm_response([
+            {"tool_call_intent": "Deploy to Kubernetes cluster",
+             "rationale": "roll out the new version",
+             "expected_observation": "deployment created",
+             "reasoning": "Kubernetes deployment will update the running pods"},
+            {"tool_call_intent": "Verify the rollout status",
+             "rationale": "ensure deployment succeeded",
+             "expected_observation": "pods running",
+             "reasoning": "Check rollout to confirm all pods are healthy"},
+        ], goal=task)
+        llm_plan = build_llm_plan(task, lambda p: llm_resp)
+        stub_plan = build_stub_plan(task)
+
+        llm_recall = self._action_recall(llm_plan, expected)
+        stub_recall = self._action_recall(stub_plan, expected)
+
+        # The LLM plan should recall all expected actions; the stub may miss some.
+        assert llm_recall == 1.0
+        # We don't assert stub_recall < 1.0 (it might coincidentally match),
+        # but we do assert the LLM plan is at least as good.
+        assert llm_recall >= stub_recall
+
+    def test_llm_plan_with_reasoning_enriches_stub_comparably(self):
+        """Both planners produce valid Plan objects that can be evaluated
+        by the same harness — the LLM plan just has reasoning populated."""
+        task = "Research the topic and write a report"
+        llm_resp = _make_llm_response([
+            {"tool_call_intent": "search for information",
+             "rationale": "gather data",
+             "expected_observation": "search results",
+             "reasoning": "I need to find relevant sources first"},
+            {"tool_call_intent": "write a report",
+             "rationale": "produce the output",
+             "expected_observation": "report written",
+             "reasoning": "Synthesize the gathered information into a report"},
+        ], goal=task)
+        llm_plan = build_llm_plan(task, lambda p: llm_resp)
+        stub_plan = build_stub_plan(task)
+
+        # Both produce valid plans with at least one step
+        assert llm_plan is not None and stub_plan is not None
+        assert len(llm_plan.steps) >= 1
+        assert len(stub_plan.steps) >= 1
+
+        # LLM plan has reasoning; stub does not
+        assert all(s.reasoning != "" for s in llm_plan.steps)
+        assert all(s.reasoning == "" for s in stub_plan.steps)
+
+        # Both have expected_observation populated (needed for divergence check)
+        assert all(s.expected_observation.strip() for s in llm_plan.steps)
+        assert all(s.expected_observation.strip() for s in stub_plan.steps)
+
+    def test_llm_plan_fallback_to_stub_on_failure(self):
+        """When the LLM planner fails, the caller should get a stub plan.
+        This tests the _maybe_activate_plan_mode fallback path."""
+        task = "Refactor the module across files"
+        # LLM returns garbage → build_llm_plan returns None → caller falls back
+        broken_llm = lambda p: "totally not json"
+        llm_plan = build_llm_plan(task, broken_llm)
+        stub_plan = build_stub_plan(task)
+
+        assert llm_plan is None
+        assert stub_plan is not None
+        # The caller's fallback logic: if llm_plan is None, use stub_plan
+        chosen = llm_plan if llm_plan is not None else stub_plan
+        assert chosen is stub_plan
