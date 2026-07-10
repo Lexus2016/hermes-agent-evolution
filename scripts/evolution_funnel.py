@@ -253,29 +253,49 @@ def count_merged_evolution_prs(
     return None if ids is None else len(ids)
 
 
+def _resolve_repo_dir() -> Path | None:
+    """Locate the git repo, working when this script runs as a COPY under
+    HERMES_HOME/scripts (outside the repo) — which is exactly how the cron
+    scheduler executes no_agent scripts. Mirrors evolution_watchdog: an env
+    override, then the in-tree location (when run from the repo), then the common
+    server install / agent-clone paths. Returns None when none is a git repo."""
+    candidates = [
+        os.environ.get("EVOLUTION_REPO_DIR"),
+        str(Path(__file__).resolve().parent.parent),  # in-tree: scripts/ -> repo root
+        "/usr/local/lib/hermes-agent",
+        str(Path.home() / "hermes-agent-evolution"),
+    ]
+    for cand in candidates:
+        if cand and (Path(cand) / ".git").exists():
+            return Path(cand)
+    return None
+
+
 def _resolve_repo() -> str | None:
-    """Resolve OWNER/REPO for the gh queries — fork-agnostic and config-free:
-    explicit env override -> this checkout's origin remote -> gh's default.
-    Returns None if none resolve (merge counting then fails open)."""
+    """Resolve OWNER/REPO for the gh queries. Must work when this script runs as
+    a copy under HERMES_HOME/scripts (cron), NOT only from an in-tree checkout —
+    otherwise the merge enrichment silently no-ops in production. Order: explicit
+    slug env -> origin remote of a resolved repo dir (env / in-tree / common
+    install paths) -> gh's default. None if none resolve (merge counting then
+    fails open to the self-report)."""
     env = os.environ.get("EVOLUTION_GH_REPO", "").strip()
     if env:
         return env
-    # Parse the origin remote of the checkout this script lives in. A fork's
-    # origin points at the fork, so this stays correct upstream and downstream.
-    repo_root = Path(__file__).resolve().parents[1]
-    try:
-        url = subprocess.run(
-            ["git", "-C", str(repo_root), "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=True,
-        ).stdout.strip()
-        m = re.search(r"github\.com[:/]+([^/]+/[^/]+?)(?:\.git)?/?$", url)
-        if m:
-            return m.group(1)
-    except Exception:
-        pass
+    repo_dir = _resolve_repo_dir()
+    if repo_dir is not None:
+        try:
+            url = subprocess.run(
+                ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=True,
+            ).stdout.strip()
+            m = re.search(r"github\.com[:/]+([^/]+/[^/]+?)(?:\.git)?/?$", url)
+            if m:
+                return m.group(1)
+        except Exception:
+            pass
     try:
         out = subprocess.run(
             ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],

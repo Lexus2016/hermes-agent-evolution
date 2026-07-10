@@ -850,29 +850,61 @@ _MIN_HEALTHY_MERGES = 1  # >=1 evolution/issue-* issue merged == the zero claim 
 _REALITY_WINDOW_DAYS = 7
 
 
+def _resolve_repo_slug() -> str | None:
+    """OWNER/REPO for gh queries, resolved from the repo dir so ``gh`` works even
+    when this script runs as a copy under HERMES_HOME/scripts (cron) with a cwd
+    that is not a git repo. None if unresolvable (the caller then falls open)."""
+    env = os.environ.get("EVOLUTION_GH_REPO", "").strip()
+    if env:
+        return env
+    repo_dir = _resolve_repo_dir()
+    if repo_dir is None:
+        return None
+    try:
+        url = subprocess.run(
+            ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        ).stdout.strip()
+        m = re.search(r"github\.com[:/]+([^/]+/[^/]+?)(?:\.git)?/?$", url)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
 def recent_merged_evolution_issue_count(
     now: datetime,
     runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
     window_days: int = _REALITY_WINDOW_DAYS,
     branch_prefix: str = "evolution/issue-",
+    repo: str | None = None,
 ) -> int | None:
     """Distinct evolution issues merged on GitHub within the last ``window_days``.
 
     Returns None on any gh failure so the caller can fall open (never suppress a
     real alert on a reconciliation error). Distinct issue numbers, so increment
-    PRs (issue-798-inc1/2/3) count once."""
+    PRs (issue-798-inc1/2/3) count once. ``repo`` is resolved from the repo dir
+    when omitted and passed as ``--repo`` so gh does not depend on cwd (cron runs
+    this outside the repo)."""
+    if repo is None:
+        repo = _resolve_repo_slug()
+    cmd = [
+        "gh",
+        "pr",
+        "list",
+        "--state",
+        "merged",
+        "--json",
+        "headRefName,mergedAt",
+        "--limit",
+        "100",
+    ]
+    if repo:
+        cmd += ["--repo", repo]
     try:
-        rc, out = runner([
-            "gh",
-            "pr",
-            "list",
-            "--state",
-            "merged",
-            "--json",
-            "headRefName,mergedAt",
-            "--limit",
-            "100",
-        ])
+        rc, out = runner(cmd)
         if rc != 0:
             return None
         prs = json.loads(out)
