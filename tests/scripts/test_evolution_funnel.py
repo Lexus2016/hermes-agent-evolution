@@ -445,3 +445,15 @@ class TestMergedFromGitHub:
     def test_resolve_repo_prefers_env(self, monkeypatch):
         monkeypatch.setenv("EVOLUTION_GH_REPO", "owner/repo-from-env")
         assert ef._resolve_repo() == "owner/repo-from-env"
+
+    def test_resolve_repo_dir_env_override_works_outside_a_checkout(
+        self, tmp_path, monkeypatch
+    ):
+        # Cron runs this script as a COPY under HERMES_HOME/scripts (outside the
+        # repo), so _resolve_repo must NOT depend on __file__ being in a repo.
+        # The EVOLUTION_REPO_DIR override / common-path fallback is what makes the
+        # merge enrichment fire in production instead of silently no-opping.
+        repo = tmp_path / "checkout"
+        (repo / ".git").mkdir(parents=True)
+        monkeypatch.setenv("EVOLUTION_REPO_DIR", str(repo))
+        assert ef._resolve_repo_dir() == repo

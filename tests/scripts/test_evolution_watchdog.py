@@ -1240,6 +1240,23 @@ class TestRealityReconciliation:
             {"headRefName": "sync/upstream", "mergedAt": "2026-07-09T01:00:00Z"},
         ]
         n = recent_merged_evolution_issue_count(
-            self.NOW, runner=lambda cmd: (0, __import__("json").dumps(prs))
+            self.NOW,
+            runner=lambda cmd: (0, __import__("json").dumps(prs)),
+            repo="o/r",  # explicit -> no real git/gh resolution in the unit test
         )
         assert n == 2  # {798, 750}; increments collapse, sync excluded
+
+    def test_recent_count_passes_repo_flag(self):
+        # Cron runs outside the repo, so gh MUST be scoped with --repo or it
+        # errors on "no git remote". Verify the flag is forwarded.
+        from evolution_watchdog import recent_merged_evolution_issue_count
+
+        seen = {}
+
+        def _spy(cmd):
+            seen["cmd"] = cmd
+            return (0, "[]")
+
+        recent_merged_evolution_issue_count(self.NOW, runner=_spy, repo="acme/app")
+        assert "--repo" in seen["cmd"]
+        assert "acme/app" in seen["cmd"]
