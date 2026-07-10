@@ -2197,11 +2197,54 @@ def _redact_process_result(result: dict) -> dict:
     return result
 
 
+def _suggest_process_action(action: str) -> str | None:
+    """Return the closest valid action name by edit distance, or None.
+
+    Issue #890: models frequently invent action names like ``create``,
+    ``start``, ``run``, ``status``, ``stop``, ``check``, ``tail``, or
+    ``restart`` — none of which exist.  A bare "unknown action" error
+    leaves the model to guess.  This suggests the nearest valid action
+    so the model can self-correct in one round-trip.
+    """
+    import difflib
+
+    valid = ["list", "poll", "log", "wait", "kill", "write", "submit", "close"]
+    # Common synonyms the model tries — map them explicitly so the
+    # suggestion is the *right* action, not just the closest string.
+    synonyms = {
+        "create": "list",    # "create a process" → list to see existing
+        "start": "list",     # "start managing" → list
+        "run": "list",       # "run" → list
+        "status": "poll",    # "check status" → poll
+        "check": "poll",     # "check on it" → poll
+        "stop": "kill",     # "stop it" → kill
+        "tail": "log",       # "tail output" → log
+        "restart": "poll",   # "restart" → poll (no restart action)
+        "read": "log",       # "read output" → log
+        "send": "submit",    # "send input" → submit
+        "output": "log",     # "show output" → log
+        "info": "list",      # "info" → list
+        "delete": "kill",    # "delete" → kill
+        "remove": "kill",    # "remove" → kill
+        "end": "kill",       # "end" → kill
+        "terminate": "kill", # "terminate" → kill
+        "attach": "log",     # "attach" → log
+        "show": "log",       # "show output" → log
+    }
+    if action in synonyms:
+        return synonyms[action]
+    # Fall back to edit-distance matching
+    matches = difflib.get_close_matches(action, valid, n=1, cutoff=0.4)
+    return matches[0] if matches else None
+
+
 def _handle_process(args, **kw):
     task_id = kw.get("task_id")
     action = args.get("action", "")
     # Coerce to string — some models send session_id as an integer
     session_id = str(args.get("session_id", "")) if args.get("session_id") is not None else ""
+
+    valid_actions = {"list", "poll", "log", "wait", "kill", "write", "submit", "close"}
 
     if action == "list":
         # Surface session-scoped background processes (e.g. a forgotten
@@ -2216,9 +2259,35 @@ def _handle_process(args, **kw):
             {"processes": process_registry.list_sessions(task_id=task_id, session_key=session_key or None)},
             ensure_ascii=False,
         )
-    elif action in {"poll", "log", "wait", "kill", "write", "submit", "close"}:
+    elif action in valid_actions - {"list"}:
         if not session_id:
-            return tool_error(f"session_id is required for {action}")
+            # Issue #890: auto-fill session_id when exactly one process
+            # exists — the model often omits it when there's only one
+            # background process, then fails with "session_id is required".
+            try:
+                from tools.approval import get_current_session_key
+                session_key = get_current_session_key(default="") or ""
+            except Exception:
+                session_key = ""
+            all_procs = process_registry.list_sessions(
+                task_id=task_id, session_key=session_key or None
+            )
+            active_procs = [
+                p for p in all_procs
+                if isinstance(p, dict) and p.get("status") != "exited"
+            ]
+            if len(active_procs) == 1:
+                session_id = active_procs[0].get("id", "")
+            elif len(all_procs) == 1:
+                session_id = all_procs[0].get("id", "")
+            else:
+                hint = ""
+                if len(active_procs) > 1:
+                    ids = ", ".join(p.get("id", "?") for p in active_procs[:5])
+                    hint = f" {len(active_procs)} processes are running. Specify one of: {ids}"
+                elif len(all_procs) > 1:
+                    hint = f" {len(all_procs)} processes exist. Use action='list' to see all."
+                return tool_error(f"session_id is required for {action}.{hint}")
         if action == "poll":
             return json.dumps(_redact_process_result(process_registry.poll(session_id)), ensure_ascii=False)
         elif action == "log":
@@ -2234,7 +2303,19 @@ def _handle_process(args, **kw):
             return json.dumps(process_registry.submit_stdin(session_id, str(args.get("data", ""))), ensure_ascii=False)
         elif action == "close":
             return json.dumps(process_registry.close_stdin(session_id), ensure_ascii=False)
-    return tool_error(f"Unknown process action: {action}. Use: list, poll, log, wait, kill, write, submit, close")
+    else:
+        # Issue #890: suggest the closest valid action by edit distance
+        # so the model can self-correct instead of guessing blindly.
+        suggestion = _suggest_process_action(action)
+        valid_list = ", ".join(sorted(valid_actions))
+        if suggestion:
+            return tool_error(
+                f"Unknown process action: {action!r}. Did you mean '{suggestion}'? "
+                f"Valid actions: {valid_list}"
+            )
+        return tool_error(
+            f"Unknown process action: {action!r}. Valid actions: {valid_list}"
+        )
 
 
 registry.register(
