@@ -90,7 +90,37 @@ def compute_health(
 
     succeeded = sum(1 for r in active if _int(r, "merged") > 0)
     cycle_success_rate = (succeeded / len(active)) if active else None
-    selection_efficiency = (mrg / sel) if sel else None
+
+    # Cohort selection-efficiency (evolution watchdog false-alarm fix): the
+    # honest "can it land what it picks" signal is the fraction of DISTINCT
+    # selected issues that landed >=1 merged PR — bounded 0..1 and immune to the
+    # increment-PR inflation (issue-798-inc1/2/3 collapse to one issue) that a
+    # raw merged/selected count ratio suffered (it swung to a meaningless
+    # ~100%). Falls back to the legacy count ratio for pre-cohort records that
+    # predate the funnel emitting issue-id lists.
+    def _id_set(key: str) -> set:
+        s: set = set()
+        for r in window:
+            v = r.get(key)
+            if isinstance(v, list):
+                for x in v:
+                    try:
+                        s.add(int(x))
+                    except (TypeError, ValueError):
+                        continue
+        return s
+
+    _has_cohort = any(
+        "selected_issue_ids" in r or "merged_issue_ids" in r for r in window
+    )
+    if _has_cohort:
+        _sel_ids = _id_set("selected_issue_ids")
+        _mrg_ids = _id_set("merged_issue_ids")
+        selection_efficiency = (
+            len(_sel_ids & _mrg_ids) / len(_sel_ids) if _sel_ids else None
+        )
+    else:
+        selection_efficiency = (mrg / sel) if sel else None
     reject_rate = (rej / triaged) if triaged else None
 
     flags: List[str] = []

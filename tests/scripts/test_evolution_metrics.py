@@ -129,3 +129,58 @@ class TestComputeHealth:
         assert h["halted"] is False
         assert not any("HALTED" in f for f in h["flags"])
         assert "| healthy" in format_health(h)
+
+
+class TestCohortSelectionEfficiency:
+    """selection_efficiency is a COHORT ratio when the funnel emits issue-id
+    lists: distinct selected issues that landed >=1 merge / distinct selected
+    issues. Bounded 0..1, immune to increment-PR inflation and temporal skew.
+    Falls back to the legacy merged/selected count ratio for pre-cohort records.
+    """
+
+    def _crec(self, date, selected_ids=None, merged_ids=None, rejected=0):
+        r = {
+            "date": date,
+            "issues_created": 0,
+            "selected": len(selected_ids or []),
+            "merged": len(merged_ids or []),
+            "rejected": rejected,
+        }
+        if selected_ids is not None:
+            r["selected_issue_ids"] = list(selected_ids)
+        if merged_ids is not None:
+            r["merged_issue_ids"] = list(merged_ids)
+        return r
+
+    def test_cohort_ratio_from_issue_ids(self):
+        # 4 distinct selected issues; 2 of them landed -> 0.5, NOT merged/selected.
+        recs = [
+            self._crec("d1", selected_ids=[1, 2], merged_ids=[2]),
+            self._crec("d2", selected_ids=[3, 4], merged_ids=[4]),
+        ]
+        h = compute_health(recs)
+        assert h["selection_efficiency"] == 0.5
+
+    def test_increment_merges_do_not_exceed_100pct(self):
+        # One selected issue, three increment merges recorded as one issue id.
+        recs = [
+            self._crec(f"d{i}", selected_ids=[798], merged_ids=[798]) for i in range(3)
+        ]
+        h = compute_health(recs)
+        assert h["selection_efficiency"] == 1.0  # bounded, never >1
+
+    def test_temporal_lag_issue_selected_then_merged_next_cycle(self):
+        # Selected on d1 (no merge yet), merged on d2 -> counts as landed.
+        recs = [
+            self._crec("d1", selected_ids=[798], merged_ids=[]),
+            self._crec("d2", selected_ids=[801], merged_ids=[798]),
+        ]
+        h = compute_health(recs)
+        # both 798 and 801 selected; only 798 landed -> 0.5
+        assert h["selection_efficiency"] == 0.5
+
+    def test_legacy_records_without_ids_use_count_ratio(self):
+        # No issue-id fields -> fall back to merged/selected counts (0.3).
+        recs = [_rec(f"d{i}", selected=10, merged=3) for i in range(5)]
+        h = compute_health(recs)
+        assert h["selection_efficiency"] == round(15 / 50, 3)

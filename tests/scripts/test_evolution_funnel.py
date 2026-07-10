@@ -4,10 +4,13 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from datetime import datetime  # noqa: E402
 
+import evolution_funnel as ef  # noqa: E402
 from evolution_funnel import (  # noqa: E402
     append_funnel,
     compute_funnel,
@@ -21,6 +24,15 @@ from evolution_funnel import (  # noqa: E402
 def _write(p: Path, obj):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(obj), encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_gh(monkeypatch):
+    """Hermetic default: the funnel's GitHub `merged` enrichment must NEVER hit
+    the network in tests. Each test that exercises merged-from-GitHub opts in by
+    re-patching `_gh_pr_list_merged` (a later setattr wins). raising=False keeps
+    the fixture valid during the TDD red phase before the seam exists."""
+    monkeypatch.setattr(ef, "_gh_pr_list_merged", lambda *a, **k: None, raising=False)
 
 
 class TestComputeFunnel:
@@ -288,3 +300,148 @@ class TestSummarySidecar:
         assert body.startswith("[evolution-funnel] last")
         # the seeded 90% reject cycle should surface the directive
         assert "HIGH_REJECT_RATE" in body
+
+
+class TestMergedFromGitHub:
+    """`merged` is counted authoritatively from GitHub, not the integration
+    stage's self-report. This is the fix for the evolution watchdog's 7-day
+    false MERGED_ZERO / LOW_SELECTION_EFFICIENCY alarm: owner-reviewed merges
+    (and merges the autonomous <=200-line gate can't perform) become visible,
+    and the count is immune to future-dated stage reports (#667)."""
+
+    # A realistic slice of the real 2026-07-08/09 merge history on osoba.
+    _PRS = [
+        {
+            "number": 854,
+            "headRefName": "evolution/issue-752-memory-importance-v2",
+            "mergedAt": "2026-07-09T19:16:20Z",
+        },
+        {
+            "number": 819,
+            "headRefName": "evolution/issue-756-refusal-taxonomy",
+            "mergedAt": "2026-07-09T01:02:00Z",
+        },
+        {
+            "number": 843,
+            "headRefName": "evolution/issue-798-inc3",
+            "mergedAt": "2026-07-09T17:12:26Z",
+        },
+        {
+            "number": 816,
+            "headRefName": "evolution/issue-750-mfr-v2",
+            "mergedAt": "2026-07-08T21:02:53Z",
+        },
+        # excluded: not an evolution/issue-* branch
+        {
+            "number": 806,
+            "headRefName": "evolution/fix-research-skill-default-path",
+            "mergedAt": "2026-07-08T12:39:00Z",
+        },
+        {
+            "number": 848,
+            "headRefName": "sync/upstream-release-v2026.7.7.2",
+            "mergedAt": "2026-07-09T20:09:01Z",
+        },
+    ]
+
+    def test_counts_only_evolution_issue_branches_on_that_date(self, monkeypatch):
+        monkeypatch.setattr(ef, "_gh_pr_list_merged", lambda repo, **k: list(self._PRS))
+        # 2026-07-09: #854, #819, #843 are evolution/issue-*; #848 (sync/*) excluded
+        assert ef.count_merged_evolution_prs("2026-07-09", "o/r") == 3
+        # 2026-07-08: #816 is evolution/issue-*; #806 (evolution/fix-*) excluded
+        assert ef.count_merged_evolution_prs("2026-07-08", "o/r") == 1
+        # a day with no evolution/issue-* merges
+        assert ef.count_merged_evolution_prs("2026-07-07", "o/r") == 0
+
+    def test_increment_prs_collapse_to_distinct_issue(self, monkeypatch):
+        # issue-798-inc1/inc2/inc3 are three PRs for ONE issue — they must count
+        # as a single landed issue, else selection-efficiency inflates past 100%.
+        prs = [
+            {
+                "number": 817,
+                "headRefName": "evolution/issue-798-draft-selector",
+                "mergedAt": "2026-07-09T01:02:12Z",
+            },
+            {
+                "number": 820,
+                "headRefName": "evolution/issue-798-cost-routing",
+                "mergedAt": "2026-07-09T07:36:04Z",
+            },
+            {
+                "number": 843,
+                "headRefName": "evolution/issue-798-inc3",
+                "mergedAt": "2026-07-09T17:12:26Z",
+            },
+        ]
+        monkeypatch.setattr(ef, "_gh_pr_list_merged", lambda repo, **k: prs)
+        assert ef.merged_evolution_issue_ids("2026-07-09", "o/r") == {798}
+        assert ef.count_merged_evolution_prs("2026-07-09", "o/r") == 1  # not 3
+
+    def test_compute_funnel_records_selected_issue_ids(self, tmp_path):
+        d = "2026-07-09"
+        _write(
+            tmp_path / "analysis" / f"{d}.json",
+            {
+                "selected_for_implementation": [
+                    {"issue_number": 756, "selected_reason": "score"},
+                    {"issue_number": 798, "selected_reason": "score"},
+                    {"selected_reason": "anti-starvation"},  # no issue_number
+                ],
+                "rejected": [],
+            },
+        )
+        r = compute_funnel(tmp_path, d)
+        assert r["selected"] == 3
+        assert r["selected_issue_ids"] == [756, 798]  # entry without id skipped
+
+    def test_fail_open_returns_none_when_gh_unavailable(self, monkeypatch):
+        monkeypatch.setattr(ef, "_gh_pr_list_merged", lambda repo, **k: None)
+        assert ef.count_merged_evolution_prs("2026-07-09", "o/r") is None
+        assert ef.merged_evolution_issue_ids("2026-07-09", "o/r") is None
+
+    def test_main_overrides_selfreport_merged_with_github_truth(
+        self, tmp_path, monkeypatch
+    ):
+        # Integration self-report says merged=0 (read-only / future-dated), but
+        # GitHub shows evolution/issue-* PRs actually merged that day.
+        d = "2026-07-09"
+        _write(
+            tmp_path / "analysis" / f"{d}.json",
+            {
+                "selected_for_implementation": [
+                    {"issue_number": 756, "selected_reason": "score"}
+                ],
+                "rejected": [],
+            },
+        )
+        _write(tmp_path / "integration" / f"{d}.json", {"merged": [], "skipped": []})
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
+        monkeypatch.setenv("EVOLUTION_GH_REPO", "o/r")
+        monkeypatch.setattr(ef, "_gh_pr_list_merged", lambda repo, **k: list(self._PRS))
+
+        rc = ef.main(["evolution_funnel.py", d])
+        assert rc == 0
+        rec = [r for r in load_records(tmp_path / "metrics.jsonl") if r["date"] == d][0]
+        assert rec["merged"] == 3  # distinct issues {752, 756, 798}, not 0
+        assert rec["merged_issue_ids"] == [752, 756, 798]
+        assert rec["selected_issue_ids"] == [756]
+
+    def test_main_fail_open_keeps_selfreport_when_gh_none(self, tmp_path, monkeypatch):
+        # gh unavailable (offline/CI) -> keep the integration self-report count.
+        d = "2026-07-01"
+        _write(
+            tmp_path / "integration" / f"{d}.json",
+            {"merged": [{"pr": 1}], "skipped": []},
+        )
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
+        monkeypatch.setenv("EVOLUTION_GH_REPO", "o/r")
+        monkeypatch.setattr(ef, "_gh_pr_list_merged", lambda repo, **k: None)
+
+        rc = ef.main(["evolution_funnel.py", d])
+        assert rc == 0
+        rec = [r for r in load_records(tmp_path / "metrics.jsonl") if r["date"] == d][0]
+        assert rec["merged"] == 1  # self-report preserved (fail-open)
+
+    def test_resolve_repo_prefers_env(self, monkeypatch):
+        monkeypatch.setenv("EVOLUTION_GH_REPO", "owner/repo-from-env")
+        assert ef._resolve_repo() == "owner/repo-from-env"
