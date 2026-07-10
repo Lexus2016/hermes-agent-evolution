@@ -65,6 +65,12 @@ class Step:
                                step goes as planned. The yardstick a later
                                replanning pass (#292) will compare reality
                                against; unused here beyond being recorded.
+    ``reasoning``             — optional extended chain-of-thought produced by
+                               an LLM planner (#877). Longer and more detailed
+                               than ``rationale`` (which stays a one-line "why"),
+                               this captures the planner's per-step deliberation.
+                               Empty for stub-built plans; populated only by
+                               :func:`agent.plan_mode.build_llm_plan`.
 
     ``index`` is an optional 1-based position used only for human-readable
     rendering. :meth:`Plan.__post_init__` assigns it when steps are collected
@@ -74,6 +80,7 @@ class Step:
     tool_call_intent: str
     rationale: str
     expected_observation: str
+    reasoning: str = ""
     index: Optional[int] = None
 
     def __post_init__(self) -> None:
@@ -95,17 +102,21 @@ class Step:
             tool_call_intent=self.tool_call_intent,
             rationale=self.rationale,
             expected_observation=self.expected_observation,
+            reasoning=self.reasoning,
             index=index,
         )
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to a plain dict (session-state / transcript friendly)."""
-        return {
+        d = {
             "tool_call_intent": self.tool_call_intent,
             "rationale": self.rationale,
             "expected_observation": self.expected_observation,
             "index": self.index,
         }
+        if self.reasoning:
+            d["reasoning"] = self.reasoning
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Step":
@@ -119,6 +130,7 @@ class Step:
             tool_call_intent=str(data.get("tool_call_intent", "")),
             rationale=str(data.get("rationale", "")),
             expected_observation=str(data.get("expected_observation", "")),
+            reasoning=str(data.get("reasoning", "")),
             index=data.get("index"),
         )
 
@@ -129,6 +141,8 @@ class Step:
         lines.append(f"   why: {self.rationale}")
         if self.expected_observation and self.expected_observation.strip():
             lines.append(f"   expect: {self.expected_observation}")
+        if self.reasoning and self.reasoning.strip():
+            lines.append(f"   reasoning: {self.reasoning}")
         return "\n".join(lines)
 
 

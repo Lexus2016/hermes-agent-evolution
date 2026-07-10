@@ -6146,12 +6146,19 @@ class AIAgent:
         so the emission and divergence hooks stay no-ops and the agent behaves
         exactly as it did before plan mode existed.
 
-        When the flag is on, it derives a deterministic, model-free plan from the
-        user's task (:func:`agent.plan_mode.build_stub_plan`) and assigns it to
-        ``self._active_plan`` (re-arming per-run emission). That assignment is
-        what flips ``_emit_plan_before_tool_calls`` and
-        ``_check_step_divergence_after_tool_calls`` live. A real LLM planner is a
-        drop-in replacement behind this same assignment.
+        When the flag is on, it derives a plan from the user's task and assigns
+        it to ``self._active_plan`` (re-arming per-run emission). That assignment
+        is what flips ``_emit_plan_before_tool_calls`` and
+        ``_check_step_divergence_after_tool_calls`` live.
+
+        Planner selection (issue #877): when ``self.client`` is available, an
+        LLM-based planner (:func:`agent.plan_mode.build_llm_plan`) is tried
+        first, producing a :class:`Plan` with per-step ``reasoning``. If the LLM
+        planner fails (network error, malformed output, no client), it falls
+        back to the deterministic, model-free stub planner
+        (:func:`agent.plan_mode.build_stub_plan`). The stub is also the
+        guaranteed path when ``self.client`` is ``None`` (e.g. in eval harnesses
+        with no live model).
 
         Idempotent per run: if a plan is already active (e.g. a multi-turn
         conversation, or a replanner already swapped one in) it is left alone.
@@ -6160,12 +6167,37 @@ class AIAgent:
             return
         if getattr(self, "_active_plan", None) is not None:
             return
-        try:
-            from agent.plan_mode import build_stub_plan
 
-            plan = build_stub_plan(user_message)
-        except Exception:
-            plan = None
+        plan = None
+
+        # Try the LLM planner first when a model client is available.
+        client = getattr(self, "client", None)
+        if client is not None:
+            try:
+                from agent.plan_mode import build_llm_plan
+
+                def _llm_call(prompt: str) -> str:
+                    resp = client.chat.completions.create(
+                        model=self.model,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=1024,
+                        temperature=0,
+                    )
+                    return resp.choices[0].message.content or ""
+
+                plan = build_llm_plan(user_message, _llm_call)
+            except Exception:
+                plan = None
+
+        # Fall back to the deterministic, model-free stub planner.
+        if plan is None:
+            try:
+                from agent.plan_mode import build_stub_plan
+
+                plan = build_stub_plan(user_message)
+            except Exception:
+                plan = None
+
         if plan is None:
             return
         self._active_plan = plan

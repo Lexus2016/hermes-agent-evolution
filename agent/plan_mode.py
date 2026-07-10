@@ -43,6 +43,7 @@ plan-mode path with no agent instance and no network.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Callable, Dict, List, Optional
 
@@ -219,3 +220,109 @@ def build_stub_plan(task: str) -> Optional[Plan]:
         ]
 
     return Plan(steps=steps, goal=goal, metadata={"source": "stub_planner", "family": family})
+
+
+# ---------------------------------------------------------------------------
+# LLM planner (issue #877)
+# ---------------------------------------------------------------------------
+
+# An LLM call callable: takes a prompt string, returns a response string.
+# Injectable so the planner and its tests never need a live OpenAI client.
+LlmCallable = Callable[[str], str]
+
+_LLM_PLAN_PROMPT = (
+    "You are a task planner. Given a user's task, produce a step-by-step execution plan.\n"
+    "Return ONLY a JSON object with this exact shape:\n"
+    '{{\n'
+    '  "goal": "<one-line summary of the task>",\n'
+    '  "steps": [\n'
+    '    {{\n'
+    '      "tool_call_intent": "<the action to take>",\n'
+    '      "rationale": "<one-line reason for this step>",\n'
+    '      "expected_observation": "<what we expect to see after this step>",\n'
+    '      "reasoning": "<detailed chain-of-thought for this step>"\n'
+    '    }}\n'
+    '  ]\n'
+    '}}\n\n'
+    "Task: {task}\n"
+)
+
+
+def build_llm_plan(
+    task: str,
+    llm_call: LlmCallable,
+) -> Optional[Plan]:
+    """Build a :class:`Plan` using an LLM call (issue #877).
+
+    Unlike :func:`build_stub_plan`, this asks a model to produce a structured
+    plan with per-step ``reasoning`` (extended chain-of-thought). The
+    ``llm_call`` callable receives a prompt string and returns the model's
+    text response. Any failure — network error, malformed JSON, missing
+    fields, empty steps — returns ``None`` so the caller falls back to the
+    deterministic stub planner.
+
+    This function is the drop-in replacement the module docstring and the
+    ``_maybe_activate_plan_mode`` comment anticipate: it produces the same
+    :class:`Plan` type, just with richer per-step reasoning.
+    """
+    if not task or not task.strip():
+        return None
+    if not callable(llm_call):
+        return None
+
+    try:
+        prompt = _LLM_PLAN_PROMPT.format(task=task)
+        raw = llm_call(prompt)
+    except Exception:
+        return None
+
+    if not raw or not raw.strip():
+        return None
+
+    # Tolerate markdown code fences around the JSON.
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        # Drop the opening fence line (```json or ```) and closing fence.
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    raw_steps = data.get("steps")
+    if not isinstance(raw_steps, list) or not raw_steps:
+        return None
+
+    steps: List[Step] = []
+    for item in raw_steps:
+        if not isinstance(item, dict):
+            return None
+        intent = str(item.get("tool_call_intent", "")).strip()
+        rationale = str(item.get("rationale", "")).strip()
+        if not intent or not rationale:
+            return None
+        steps.append(
+            Step(
+                tool_call_intent=intent,
+                rationale=rationale,
+                expected_observation=str(item.get("expected_observation", "")),
+                reasoning=str(item.get("reasoning", "")),
+            )
+        )
+
+    goal = str(data.get("goal", "")).strip() or _trimmed_goal(task)
+
+    return Plan(
+        steps=steps,
+        goal=goal,
+        metadata={"source": "llm_planner"},
+    )
