@@ -1338,12 +1338,32 @@ def handle_function_call(
         except Exception as _hook_err:
             logger.debug("transform_tool_result hook error: %s", _hook_err)
 
+        # Record successful tool outcome for circuit-breaker tracking.
+        try:
+            from agent.tool_error_recovery import record_tool_outcome
+            record_tool_outcome(function_name, success=True)
+        except Exception:
+            pass
+
         return result
 
     except Exception as e:
         error_msg = f"Error executing {function_name}: {str(e)}"
         logger.exception(error_msg)
-        return json.dumps({"error": _sanitize_tool_error(error_msg)}, ensure_ascii=False)
+        # Classify the tool-level error and enrich the result with a
+        # recovery hint so the model sees not just *what* failed but
+        # *what to try next* (retry, check path, fix args, etc.).
+        enriched = _sanitize_tool_error(error_msg)
+        try:
+            from agent.tool_error_recovery import classify_tool_error, recovery_hint, record_tool_outcome
+            failure = classify_tool_error(function_name, str(e))
+            hint = recovery_hint(failure)
+            if hint:
+                enriched = f"{enriched}{hint}"
+            record_tool_outcome(function_name, success=False)
+        except Exception:
+            pass  # never let the recovery module itself cause a failure
+        return json.dumps({"error": enriched}, ensure_ascii=False)
 
 
 # =============================================================================

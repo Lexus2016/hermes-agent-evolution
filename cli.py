@@ -8634,6 +8634,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
             self._show_gateway_status()
         elif canonical == "status":
             self._show_session_status()
+        elif canonical == "verify":
+            self._handle_verify_command()
         elif canonical == "statusbar":
             self._status_bar_visible = not self._status_bar_visible
             state = "visible" if self._status_bar_visible else "hidden"
@@ -9229,6 +9231,107 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
                 except Exception as exc:
                     logging.debug("goal continuation enqueue failed: %s", exc)
 
+
+    def _handle_verify_command(self):
+        """Run adversarial verification on the last agent response.
+
+        Spawns a verifier subagent via delegate_task with an adversarial
+        system prompt. The verifier reviews the last agent response for
+        flaws and reports a verdict.
+        """
+        # Find the last assistant message in conversation history
+        last_response = ""
+        if self.conversation_history:
+            for i in range(len(self.conversation_history) - 1, -1, -1):
+                msg = self.conversation_history[i]
+                if msg.get("role") == "assistant":
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        # Extract text from multimodal content
+                        content = " ".join(
+                            block.get("text", "") for block in content
+                            if isinstance(block, dict) and block.get("type") == "text"
+                        )
+                    last_response = content
+                    break
+
+        if not last_response.strip():
+            self._console_print("  (._.) No agent response to verify.")
+            return
+
+        # Find the last user message as context
+        user_context = ""
+        if self.conversation_history:
+            for i in range(len(self.conversation_history) - 1, -1, -1):
+                if self.conversation_history[i].get("role") == "user":
+                    user_context = str(self.conversation_history[i].get("content", ""))
+                    break
+
+        try:
+            from agent.adversarial_verification import (
+                generate_verifier_prompt,
+                get_verifier_system_prompt,
+                parse_verifier_output,
+                format_verification_result,
+            )
+        except ImportError:
+            self._console_print("  (x) Adversarial verification module not available.")
+            return
+
+        # Build the verifier prompt
+        verifier_prompt = generate_verifier_prompt(
+            solution=last_response,
+            context=user_context,
+            solution_type="code",
+        )
+        verifier_system = get_verifier_system_prompt()
+
+        # Use the agent's chat method to get a verification — this runs
+        # a fresh LLM call with the adversarial system prompt, which is
+        # the simplest way to get a verification without touching the
+        # agent loop's tool-calling machinery.
+        if not self.agent:
+            self._console_print("  (x) No active agent to run verification.")
+            return
+
+        self._console_print("  (⚡) Running adversarial verification...")
+
+        try:
+            # Save the current system prompt and temporarily swap it
+            # for the adversarial verifier prompt. This gives the
+            # verifier a fresh context with opposing incentives.
+            # We use a simple chat() call (no tools) to get the verdict.
+            original_system = getattr(self.agent, "system_message", None)
+
+            # Build a minimal conversation for the verifier
+            verify_messages = [
+                {"role": "system", "content": verifier_system},
+                {"role": "user", "content": verifier_prompt},
+            ]
+
+            # Use the agent's client directly for a one-shot verification
+            # call — no tool calling, no iteration, just a verdict.
+            import json as _json
+            client = self.agent._get_client() if hasattr(self.agent, "_get_client") else None
+            if client is None:
+                # Fall back to chat() which is simpler but may include tools
+                verdict_text = self.agent.chat(verifier_prompt)
+            else:
+                response = client.chat.completions.create(
+                    model=self.agent.model,
+                    messages=verify_messages,
+                    temperature=0.3,  # low temp for focused analysis
+                )
+                verdict_text = response.choices[0].message.content or ""
+
+            # Parse the verdict
+            result = parse_verifier_output(verdict_text)
+            formatted = format_verification_result(result)
+            self._console_print(f"\n{formatted}\n")
+
+        except Exception as e:
+            logging.error("adversarial verification failed: %s", e, exc_info=True)
+            self._console_print(f"  (x) Verification failed: {e}")
 
 
     def _toggle_verbose(self):
