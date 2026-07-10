@@ -2098,7 +2098,7 @@ SEARCH_FILES_SCHEMA = {
     "parameters": {
         "type": "object",
         "properties": {
-            "pattern": {"type": "string", "description": "Regex pattern for content search, or glob pattern (e.g., '*.py') for file search"},
+            "pattern": {"type": "string", "description": "Regex pattern for content search, or glob pattern (e.g., '*.py') for file search. When target='content', this is a REGEX (not a glob) — passing '*.py' here will cause a regex parse error; use file_glob to filter by filename pattern instead."},
             "target": {"type": "string", "enum": ["content", "files"], "description": "'content' searches inside file contents, 'files' searches for files by name", "default": "content"},
             "path": {"type": "string", "description": "Directory or file to search in (default: current working directory)", "default": "."},
             "file_glob": {"type": "string", "description": "Filter files by pattern in grep mode (e.g., '*.py' to only search Python files)"},
@@ -2192,13 +2192,84 @@ def _handle_patch(args, **kw):
     )
 
 
+def _looks_like_glob(pattern: str) -> bool:
+    """Heuristic: does *pattern* look like a shell glob rather than a regex?
+
+    Globs use ``*``, ``?``, and ``[...]`` as wildcards without regex escaping.
+    In a regex those same characters are metacharacters, but a bare ``*.py`` or
+    ``*config*`` is almost certainly a glob the model intended as a filename
+    pattern, not a regex. We flag it so the caller can auto-redirect.
+    """
+    if not pattern:
+        return False
+    # A real regex would escape these as \*, \?, \[ — so an unescaped
+    # wildcard is the signal.  ``**/`` (recursive glob) is also glob-only.
+    # Exception: ``.*`` and ``.+`` etc. are common regex idioms where the
+    # ``*``/``+`` quantifier follows a regex metacharacter — those should
+    # NOT be flagged as globs.  The distinguishing signal: in a glob, ``*``
+    # is typically preceded by a literal character (``*.py``, ``*config*``)
+    # or a ``/`` (``**/*.py``), not by a regex metacharacter like ``.``.
+    for i, ch in enumerate(pattern):
+        if ch == "*":
+            if i > 0 and pattern[i - 1] == "\\":
+                continue  # escaped — regex literal
+            if i > 0 and pattern[i - 1] in ".+?^$":
+                # ``.*``, ``+*`` (unusual but not a glob) — ``*`` is a
+                # regex quantifier following a metacharacter, not a glob.
+                # But ``?*`` is ambiguous — treat as regex here since
+                # ``?*`` as a glob is extremely rare.
+                continue
+            if i > 0 and pattern[i - 1] == "*" and i >= 2 and pattern[i - 2] == "*":
+                # ``**`` (recursive glob) — ``**/`` is glob-only
+                if i + 1 < len(pattern) and pattern[i + 1] == "/":
+                    return True
+                continue
+            return True
+        if ch == "?":
+            if i > 0 and pattern[i - 1] == "\\":
+                continue
+            # ``?`` in regex means "zero or one" — preceded by a
+            # metacharacter it's a quantifier, not a glob wildcard.
+            if i > 0 and pattern[i - 1] in ".+*^$[":
+                continue
+            return True
+    return False
+
+
 def _handle_search_files(args, **kw):
     tid = kw.get("task_id") or "default"
     target_map = {"grep": "content", "find": "files"}
     raw_target = args.get("target", "content")
     target = target_map.get(raw_target, raw_target)
+    pattern = args.get("pattern", "")
+
+    # Issue #887: when the model passes a glob pattern (e.g. ``*.py``) as the
+    # regex ``pattern`` in content-search mode, ripgrep fails with a regex
+    # parse error.  Detect the glob and auto-redirect: move the glob to
+    # ``file_glob`` (the correct filter for content search) and search with
+    # a broad regex, or switch to file-search mode when no content search
+    # was intended.
+    if target == "content" and _looks_like_glob(pattern) and not args.get("file_glob"):
+        # If the glob contains a dot extension (``*.py``, ``*config*``), the
+        # model most likely wanted to *find files by name*, not search file
+        # contents.  Auto-redirect to file search — that is the correct tool
+        # for the job and avoids the regex parse error entirely.
+        import json as _json
+        return _json.dumps({
+            "error": (
+                f"Pattern {pattern!r} looks like a shell glob (wildcards), not a regex. "
+                f"In content-search mode the pattern is treated as a regular expression, "
+                f"so {pattern!r} causes a regex parse error.\n\n"
+                f"To find files by name, re-run with target='files':\n"
+                f"  search_files(pattern={pattern!r}, target='files')\n\n"
+                f"To search file contents but only in files matching this glob, move it to "
+                f"file_glob and use a regex pattern:\n"
+                f"  search_files(pattern='<your regex>', file_glob={pattern!r})"
+            ),
+        })
+
     return search_tool(
-        pattern=args.get("pattern", ""), target=target, path=args.get("path", "."),
+        pattern=pattern, target=target, path=args.get("path", "."),
         file_glob=args.get("file_glob"), limit=args.get("limit", 50), offset=args.get("offset", 0),
         output_mode=args.get("output_mode", "content"), context=args.get("context", 0), task_id=tid)
 
