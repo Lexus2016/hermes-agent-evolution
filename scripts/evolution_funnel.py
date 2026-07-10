@@ -20,6 +20,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
@@ -69,6 +71,17 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
     rejected = analysis.get("rejected") or []
     merged = integration.get("merged") or []
     skipped = integration.get("skipped") or []
+    # Issue numbers of the selected picks — lets evolution_metrics compute a
+    # COHORT selection-efficiency (distinct selected issues that landed >=1 merge
+    # / distinct selected issues), which is bounded 0..1 and immune to
+    # increment-PR inflation, unlike a raw merged/selected count ratio.
+    selected_issue_ids: list[int] = []
+    for _e in selected if isinstance(selected, list) else []:
+        if isinstance(_e, dict):
+            try:
+                selected_issue_ids.append(int(_e["issue_number"]))
+            except (KeyError, TypeError, ValueError):
+                continue
     # introspection may be a bare list of patterns OR a dict with patterns_found.
     if isinstance(introspection_raw, list):
         patterns = introspection_raw
@@ -108,6 +121,7 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
         # triage / selection
         "selected": len(selected) if isinstance(selected, list) else 0,
         "selected_by_reason": _counts_by(selected, "selected_reason"),
+        "selected_issue_ids": selected_issue_ids,
         "rejected": len(rejected) if isinstance(rejected, list) else 0,
         "rejected_by_reason": _counts_by(rejected, "reason_code"),
         # outflow
@@ -153,6 +167,128 @@ def load_records(metrics_file: Path) -> list[Dict[str, Any]]:
         if isinstance(obj, dict):
             out.append(obj)
     return out
+
+
+# ── GitHub-authoritative merge counting ──────────────────────────────────────
+# The `merged` funnel signal used to come ONLY from the integration stage's
+# self-report (integration/<date>.json). That undercounted reality two ways:
+#   1. Blind to owner-reviewed merges — the human merges evolution PRs in
+#      batches (including oversized ones the autonomous <=200-line self-merge
+#      gate cannot touch), and those never appear in a self-merge report.
+#   2. LLM stages sometimes write FUTURE-dated reports (#667), so even a
+#      recorded merge landed in a file compute_funnel never reads for the real
+#      cycle date.
+# Both inflated a FALSE MERGED_ZERO / LOW_SELECTION_EFFICIENCY watchdog alarm.
+# GitHub is the authority for "did the selected work actually land", so count
+# merged evolution/issue-* PRs directly. Deterministic + fail-open: any failure
+# (gh missing, unauth, offline, bad JSON) returns None and the caller keeps the
+# self-report, so this no_agent job never depends on the network.
+
+_EVOLUTION_BRANCH_PREFIX = "evolution/issue-"
+
+
+def _gh_pr_list_merged(repo: str, limit: int = 200, timeout: int = 30):
+    """Return merged PRs for ``repo`` as a list of dicts, or None on any failure.
+    Injection seam: tests monkeypatch this to stay off the network."""
+    try:
+        out = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                repo,
+                "--state",
+                "merged",
+                "--json",
+                "number,headRefName,mergedAt",
+                "--limit",
+                str(limit),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=True,
+        ).stdout
+        data = json.loads(out)
+    except Exception:  # gh missing / unauth / network / bad JSON — fail open
+        return None
+    return data if isinstance(data, list) else None
+
+
+def merged_evolution_issue_ids(
+    date: str, repo: str, branch_prefix: str = _EVOLUTION_BRANCH_PREFIX
+) -> set[int] | None:
+    """Return the DISTINCT issue numbers whose ``branch_prefix`` PRs merged ON
+    ``date`` (UTC) in ``repo`` — e.g. issue-798-inc1/inc2/inc3 collapse to
+    ``{798}``. Returns None when GitHub is unavailable so the caller can fall
+    back to the integration stage's self-report. Collapsing to distinct issues
+    keeps the selection-efficiency numerator dimensionally aligned with the
+    distinct selected-issue denominator (increment PRs must not inflate it)."""
+    prs = _gh_pr_list_merged(repo)
+    if prs is None:
+        return None
+    pat = re.compile(re.escape(branch_prefix) + r"(\d+)")
+    ids: set[int] = set()
+    for pr in prs:
+        if not isinstance(pr, dict):
+            continue
+        head = str(pr.get("headRefName", ""))
+        merged_at = str(pr.get("mergedAt", "") or "")
+        if merged_at[:10] != date:
+            continue
+        m = pat.match(head)
+        if m:
+            ids.add(int(m.group(1)))
+    return ids
+
+
+def count_merged_evolution_prs(
+    date: str, repo: str, branch_prefix: str = _EVOLUTION_BRANCH_PREFIX
+) -> int | None:
+    """Count DISTINCT issues merged ON ``date`` (see merged_evolution_issue_ids).
+    Returns None when GitHub is unavailable so the caller can fall back to the
+    integration stage's self-report count."""
+    ids = merged_evolution_issue_ids(date, repo, branch_prefix)
+    return None if ids is None else len(ids)
+
+
+def _resolve_repo() -> str | None:
+    """Resolve OWNER/REPO for the gh queries — fork-agnostic and config-free:
+    explicit env override -> this checkout's origin remote -> gh's default.
+    Returns None if none resolve (merge counting then fails open)."""
+    env = os.environ.get("EVOLUTION_GH_REPO", "").strip()
+    if env:
+        return env
+    # Parse the origin remote of the checkout this script lives in. A fork's
+    # origin points at the fork, so this stays correct upstream and downstream.
+    repo_root = Path(__file__).resolve().parents[1]
+    try:
+        url = subprocess.run(
+            ["git", "-C", str(repo_root), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        ).stdout.strip()
+        m = re.search(r"github\.com[:/]+([^/]+/[^/]+?)(?:\.git)?/?$", url)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    try:
+        out = subprocess.run(
+            ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        ).stdout.strip()
+        if out:
+            return out
+    except Exception:
+        pass
+    return None
 
 
 def is_evolution_halted(evolution_dir: Path | None = None) -> bool | None:
@@ -294,6 +430,28 @@ def main(argv: list[str]) -> int:
             return 1
 
     record = compute_funnel(evolution_dir, date)
+
+    # Replace the integration stage's self-reported merge count with GitHub
+    # truth when available: this counts owner-reviewed merges the self-report
+    # can't see AND is immune to future-dated stage reports (#667). Fail-open —
+    # keep the self-report if gh is unavailable so this deterministic no_agent
+    # job never depends on the network.
+    _repo = _resolve_repo()
+    if _repo:
+        _merged_ids = merged_evolution_issue_ids(date, _repo)
+        if _merged_ids is not None:
+            _gh_merged = len(_merged_ids)
+            if _gh_merged != record["merged"]:
+                logger.info(
+                    "funnel merged[%s]: self-report=%d -> gh=%d distinct issues "
+                    "(authoritative)",
+                    date,
+                    record["merged"],
+                    _gh_merged,
+                )
+            record["merged"] = _gh_merged
+            record["merged_issue_ids"] = sorted(_merged_ids)
+
     append_funnel(evolution_dir / "metrics.jsonl", record)
 
     # ── Halt detection gate (#evolution — zero-deliverables auto-halt) ──
