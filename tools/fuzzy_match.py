@@ -67,7 +67,11 @@ def fuzzy_find_and_replace(content: str, old_string: str, new_string: str,
         return content, 0, None, "old_string cannot be empty"
 
     if old_string == new_string:
-        return content, 0, None, "old_string and new_string are identical"
+        # No-op edit — return a sentinel so callers can surface a clean
+        # "no changes needed" message instead of a hard error (#889).
+        # Using a distinct return shape (match_count=0, strategy="identical")
+        # lets callers distinguish "nothing to do" from a genuine failure.
+        return content, 0, "identical", "old_string and new_string are identical"
 
     # Try each matching strategy in order
     strategies: List[Tuple[str, Callable]] = [
@@ -88,8 +92,16 @@ def fuzzy_find_and_replace(content: str, old_string: str, new_string: str,
         if matches:
             # Found matches with this strategy
             if len(matches) > 1 and not replace_all:
+                # Include line numbers for each match location so the agent
+                # can narrow its old_string with surrounding context (#889).
+                line_nums: List[str] = []
+                for (start, _end) in matches[:10]:
+                    line_no = content.count('\n', 0, start) + 1
+                    line_nums.append(str(line_no))
+                locs = ', '.join(line_nums)
                 return content, 0, None, (
-                    f"Found {len(matches)} matches for old_string. "
+                    f"Found {len(matches)} matches for old_string"
+                    f"{f' at lines {locs}' if line_nums else ''}. "
                     f"Provide more context to make it unique, or use replace_all=True."
                 )
 

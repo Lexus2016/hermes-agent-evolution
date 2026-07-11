@@ -1204,7 +1204,15 @@ class ShellFileOperations(FileOperations):
         )
     
     def _suggest_similar_files(self, path: str) -> ReadResult:
-        """Suggest similar files when the requested file is not found."""
+        """Suggest similar files when the requested file is not found.
+
+        When the parent directory exists, scores its entries by similarity to
+        the requested filename.  When no similar files are found (or the
+        directory itself doesn't exist), falls back to listing the available
+        files in the nearest existing ancestor directory so the agent can see
+        what *is* on disk instead of guessing blindly — the root cause of
+        read_file file-not-found spirals (#886).
+        """
         dir_path = os.path.dirname(path) or "."
         filename = os.path.basename(path)
         basename_no_ext = os.path.splitext(filename)[0]
@@ -1215,11 +1223,13 @@ class ShellFileOperations(FileOperations):
         ls_cmd = f"ls -1 {self._escape_shell_arg(dir_path)} 2>/dev/null | head -50"
         ls_result = self._exec(ls_cmd)
 
+        dir_entries: list[str] = []
         scored: list = []  # (score, filepath) — higher is better
         if ls_result.exit_code == 0 and ls_result.stdout.strip():
             for f in ls_result.stdout.strip().split('\n'):
                 if not f:
                     continue
+                dir_entries.append(f)
                 lf = f.lower()
                 score = 0
 
@@ -1250,8 +1260,58 @@ class ShellFileOperations(FileOperations):
         scored.sort(key=lambda x: -x[0])
         similar = [fp for _, fp in scored[:5]]
 
+        # ── Anti-spiral fallback (#886) ──────────────────────────────
+        # When no similar files were found, list what IS available so the
+        # agent stops guessing and uses a real path.  When the parent
+        # directory itself doesn't exist, walk up to the nearest existing
+        # ancestor and list *its* contents (including subdirectories) so
+        # the agent can see which path components are valid.
+        hint_parts: list[str] = []
+        if not similar and dir_entries:
+            # Directory exists but nothing scored — show all entries.
+            available = sorted(dir_entries[:20])
+            hint_parts.append(
+                f"No similar files found in {dir_path}. "
+                f"Available files: {', '.join(available)}"
+            )
+        elif not similar and not dir_entries:
+            # Parent directory doesn't exist (or is empty) — walk up to
+            # the nearest existing ancestor and list its contents.
+            ancestor = dir_path
+            ancestor_entries: list[str] = []
+            while ancestor and ancestor != "/" and ancestor != ".":
+                check_cmd = f"ls -1 {self._escape_shell_arg(ancestor)} 2>/dev/null | head -30"
+                check_result = self._exec(check_cmd)
+                if check_result.exit_code == 0 and check_result.stdout.strip():
+                    ancestor_entries = [
+                        e for e in check_result.stdout.strip().split('\n') if e
+                    ]
+                    break
+                parent = os.path.dirname(ancestor)
+                if parent == ancestor:
+                    break
+                ancestor = parent
+
+            if ancestor_entries:
+                ancestor_display = ancestor if ancestor != dir_path else "parent directory"
+                hint_parts.append(
+                    f"Directory {dir_path} does not exist. "
+                    f"Contents of nearest existing ancestor ({ancestor_display}): "
+                    f"{', '.join(sorted(ancestor_entries[:20]))}"
+                )
+            else:
+                hint_parts.append(
+                    f"File not found: {path}. "
+                    f"The path {dir_path} does not exist and no ancestor "
+                    f"directory was found. Verify the path before retrying."
+                )
+
+        error_msg = f"File not found: {path}"
+        if hint_parts:
+            error_msg += "\n\n" + "\n".join(hint_parts)
+
         return ReadResult(
-            error=f"File not found: {path}",
+            error=error_msg,
             similar_files=similar
         )
     
@@ -1569,7 +1629,22 @@ class ShellFileOperations(FileOperations):
         new_content, match_count, _strategy, error = fuzzy_find_and_replace(
             content, old_string, new_string, replace_all
         )
-        
+
+        # ── Identical-strings no-op (#889) ────────────────────────────
+        # When old_string == new_string, the fuzzy matcher returns a
+        # sentinel (strategy="identical") so we can surface a clean
+        # "no changes needed" message instead of a hard error.  This
+        # eliminates the 14 identical-edit failures observed in the
+        # introspection data where the agent accidentally submitted a
+        # no-op edit and then wasted turns retrying.
+        if _strategy == "identical":
+            return PatchResult(
+                error=(
+                    "old_string and new_string are identical — no changes "
+                    "needed. The file content is already in the desired state."
+                )
+            )
+
         if error or match_count == 0:
             err_msg = error or f"Could not find match for old_string in {path}"
             try:
