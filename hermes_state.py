@@ -1139,6 +1139,47 @@ class SessionDB:
                 self._warn_fts5_unavailable(exc)
             return False
 
+    def _ensure_conn(self) -> sqlite3.Connection:
+        """Return a live connection, lazily reconnecting if ``self._conn`` is None.
+
+        After a ``hermes update`` or other process that invalidates the
+        in-memory DB connection, ``self._conn`` can become ``None``.  Every
+        subsequent ``append_message`` / write call would then fail with
+        ``AttributeError: 'NoneType' object has no attribute 'execute'``,
+        cascading into compression aborts and mass message persistence loss
+        (1651+ observed failures).  This method detects the stale connection
+        and rebuilds it in-place before the caller uses it.
+
+        Read-only connections are never lazily reconnected — they are only
+        used for cross-profile aggregation and callers guard on
+        ``db_path.exists()`` before constructing them.
+        """
+        if self._conn is not None:
+            return self._conn
+        if self.read_only:
+            # Read-only connections are constructed in __init__ and never
+            # lazily reconnected — callers should create a new SessionDB.
+            raise sqlite3.DatabaseError(
+                "Session DB read-only connection is None and cannot be "
+                "lazily reconnected"
+            )
+        logger.info(
+            "SessionDB connection is None (stale after update?) — "
+            "lazily reconnecting to %s", self.db_path,
+        )
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(
+            str(self.db_path),
+            check_same_thread=False,
+            timeout=1.0,
+            isolation_level=None,
+        )
+        self._conn.row_factory = sqlite3.Row
+        apply_wal_with_fallback(self._conn, db_label="state.db")
+        self._conn.execute("PRAGMA foreign_keys=ON")
+        self._init_schema()
+        return self._conn
+
     def _execute_write(self, fn: Callable[[sqlite3.Connection], T]) -> T:
         """Execute a write transaction with BEGIN IMMEDIATE and jitter retry.
 
@@ -1158,13 +1199,14 @@ class SessionDB:
         for attempt in range(self._WRITE_MAX_RETRIES):
             try:
                 with self._lock:
-                    self._conn.execute("BEGIN IMMEDIATE")
+                    conn = self._ensure_conn()
+                    conn.execute("BEGIN IMMEDIATE")
                     try:
-                        result = fn(self._conn)
-                        self._conn.commit()
+                        result = fn(conn)
+                        conn.commit()
                     except BaseException:
                         try:
-                            self._conn.rollback()
+                            conn.rollback()
                         except Exception:
                             pass
                         raise

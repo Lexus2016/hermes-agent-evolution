@@ -2367,6 +2367,42 @@ def terminal_tool(
             if not approval["approved"]:
                 # Check if this is an approval_required (gateway ask mode)
                 if approval.get("status") == "pending_approval":
+                    # In cron/subagent contexts, no human is present to
+                    # approve.  Returning pending_approval with an empty
+                    # error string causes the agent to retry with command
+                    # variations, wasting budget and triggering loop_guard
+                    # hard stops (92 total failures, 3 cron job failures).
+                    # Convert to a clear non-retryable error so the agent
+                    # stops retrying and switches strategy.
+                    from tools.approval import (
+                        _is_interactive_cli,
+                        _is_gateway_approval_context,
+                    )
+                    is_cron = env_var_enabled("HERMES_CRON_SESSION")
+                    is_cli_ctx = _is_interactive_cli()
+                    is_gw_ctx = _is_gateway_approval_context()
+                    if is_cron or (not is_cli_ctx and not is_gw_ctx):
+                        desc = approval.get("description", "command flagged")
+                        return json.dumps({
+                            "output": "",
+                            "exit_code": -1,
+                            "error": (
+                                f"BLOCKED: Command requires approval ({desc}) "
+                                f"but no interactive user or gateway is present "
+                                f"to approve it in this "
+                                f"{'cron' if is_cron else 'subagent'} context. "
+                                f"Do NOT retry this command — find an "
+                                f"alternative approach using file/search tools "
+                                f"instead of terminal, or set "
+                                f"approvals.cron_mode: approve in config.yaml "
+                                f"if this command is safe to auto-approve."
+                            ),
+                            "status": "blocked",
+                            "approval_pending": False,
+                            "command": approval.get("command", command),
+                            "description": desc,
+                            "pattern_key": approval.get("pattern_key", ""),
+                        }, ensure_ascii=False)
                     return json.dumps({
                         "output": "",
                         "exit_code": -1,

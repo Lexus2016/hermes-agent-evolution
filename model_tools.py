@@ -903,11 +903,33 @@ def _coerce_json(value: str, expected_python_type: type):
     causes the LLM to emit the array/object as a JSON string instead of a native
     structure.  Returns the original string if parsing fails or yields the wrong
     Python type.
+
+    For empty/whitespace-only strings — a common drift pattern where the model
+    emits ``""`` or ``" "`` where a list/object is expected — we return an
+    empty container of the expected type instead of logging a parse-failure
+    warning on every call.  This eliminates the high-volume
+    ``failed to parse string as JSON for expected type list`` log spam (2393+
+    occurrences) from providers whose tool-call serialization does not align
+    with JSON Schema expectations.  Non-empty non-JSON strings still fall
+    through to the caller's single-element wrapping logic.
     """
+    # Empty/whitespace-only string → empty container of expected type.
+    # This is the most common drift pattern (model emits "" for a list
+    # parameter) and silencing it here prevents 2000+ log warnings/day.
+    if not value or not value.strip():
+        if expected_python_type is list:
+            return []
+        if expected_python_type is dict:
+            return {}
+        return value
     try:
         parsed = json.loads(value)
     except (ValueError, TypeError) as exc:
-        logger.warning(
+        # Demote to debug: the caller (coerce_tool_args) already handles
+        # the fallback by wrapping non-JSON strings in a single-element
+        # list.  Logging a warning here on every failure was the primary
+        # source of log spam — the wrap fallback is the intended path.
+        logger.debug(
             "coerce_tool_args: failed to parse string as JSON for expected type %s: %s",
             expected_python_type.__name__,
             exc,
@@ -919,7 +941,7 @@ def _coerce_json(value: str, expected_python_type: type):
             expected_python_type.__name__,
         )
         return parsed
-    logger.warning(
+    logger.debug(
         "coerce_tool_args: JSON-parsed value is %s, expected %s — skipping coercion",
         type(parsed).__name__,
         expected_python_type.__name__,
