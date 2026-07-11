@@ -1887,6 +1887,21 @@ def _interpret_exit_code(command: str, exit_code: int) -> str | None:
     if cmd_semantics and exit_code in cmd_semantics:
         return cmd_semantics[exit_code]
 
+    # Signal-based exit codes (128 + signal number).  These are common,
+    # frequently produce empty stderr, and leave the agent with no
+    # diagnostic because the "unknown" path sets error=None.
+    _SIGNAL_NAMES = {
+        129: "SIGHUP (hang up)",
+        130: "SIGINT (interrupted by Ctrl+C)",
+        131: "SIGQUIT (quit)",
+        134: "SIGABRT (abort)",
+        137: "SIGKILL (killed, possibly OOM)",
+        139: "SIGSEGV (segmentation fault)",
+        143: "SIGTERM (terminated)",
+    }
+    if exit_code >= 128 and exit_code in _SIGNAL_NAMES:
+        return f"Process terminated by {_SIGNAL_NAMES[exit_code]}"
+
     return None
 
 
@@ -2826,7 +2841,7 @@ def terminal_tool(
                         result_dict = {
                             "output": output,
                             "exit_code": returncode,
-                            "error": None,
+                            "error": classification.hint,
                             "failure_class": classification.category.value,
                             "suggestion": classification.hint,
                             "should_retry": False,
@@ -2924,10 +2939,25 @@ def terminal_tool(
             # (e.g. grep=1 means "no matches", diff=1 means "files differ")
             exit_note = _interpret_exit_code(command, returncode)
 
+            # Minimum diagnostic for non-zero exits on the "unknown" path.
+            # Without this, 511 non-zero exits produce error=null, leaving
+            # the agent with no signal that anything went wrong and causing
+            # it to retry the same failing command.
+            _min_error = None
+            if returncode != 0 and not exit_note:
+                _min_error = (
+                    f"Command exited with code {returncode}."
+                )
+                if not output.strip():
+                    _min_error += " No output was produced."
+                _min_error += (
+                    " Review the output above for details."
+                )
+
             result_dict = {
                 "output": output,
                 "exit_code": returncode,
-                "error": None,
+                "error": _min_error,
             }
             try:
                 from agent.verification_evidence import record_terminal_result

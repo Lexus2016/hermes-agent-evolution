@@ -323,3 +323,144 @@ class TestTerminalStreakHelpers:
         assert terminal_tool._increment_terminal_streak(None) == 1
         assert terminal_tool.get_terminal_streak() == 1
         terminal_tool._reset_terminal_streak(None)
+
+
+# ---------------------------------------------------------------------------
+# Signal-based exit code classification
+# ---------------------------------------------------------------------------
+
+
+class TestClassifySignalExits:
+    """Signal-based exits (128+signal) should be classified with a
+    human-readable signal name rather than a generic persistent_error."""
+
+    @pytest.mark.parametrize(
+        "exit_code, expected_signal",
+        [
+            (130, "SIGINT"),
+            (137, "SIGKILL"),
+            (139, "SIGSEGV"),
+            (143, "SIGTERM"),
+            (134, "SIGABRT"),
+            (129, "SIGHUP"),
+        ],
+    )
+    def test_signal_exit_classified_with_name(self, exit_code, expected_signal):
+        result = classifier.classify_terminal_failure(
+            "somecmd", exit_code, "", ""
+        )
+        assert result.category == classifier.FailureCategory.persistent_error
+        assert result.should_retry is False
+        assert expected_signal in result.hint
+
+    def test_unknown_signal_still_classified(self):
+        """Exit codes >= 128 that aren't in the known map still get a
+        generic 'signal N' hint."""
+        result = classifier.classify_terminal_failure(
+            "somecmd", 159, "", ""
+        )
+        assert result.category == classifier.FailureCategory.persistent_error
+        assert "signal" in result.hint.lower()
+
+    def test_signal_exit_hint_mentions_investigation(self):
+        result = classifier.classify_terminal_failure(
+            "somecmd", 137, "", ""
+        )
+        assert "investigate" in result.hint.lower() or "switch" in result.hint.lower()
+
+
+# ---------------------------------------------------------------------------
+# Error field population for non-zero exits (issue #888)
+# ---------------------------------------------------------------------------
+
+
+class TestErrorFieldPopulation:
+    """Non-zero exits should populate the 'error' field with a minimum
+    diagnostic instead of leaving it null (issue #888)."""
+
+    def test_unknown_nonzero_exit_populates_error(self, monkeypatch):
+        """A non-zero exit that the classifier can't match to a specific
+        category should still produce a non-null error field (the
+        classifier's persistent_error hint) instead of null."""
+        monkeypatch.setenv("TERMINAL_ENV", "local")
+        fake = FakeEnvironment([{"output": "some output", "returncode": 42}])
+        monkeypatch.setattr(terminal_tool, "_active_environments", {"default": fake})
+
+        result = terminal_tool.terminal_tool("mycommand", task_id="test-streak")
+        data = json.loads(result)
+
+        assert data["exit_code"] == 42
+        assert data["error"] is not None
+        assert data["failure_class"] == "persistent_error"
+
+    def test_unknown_nonzero_no_output_populates_error(self, monkeypatch):
+        """A non-zero exit with no output should still produce a non-null
+        error field so the agent knows something went wrong."""
+        monkeypatch.setenv("TERMINAL_ENV", "local")
+        fake = FakeEnvironment([{"output": "", "returncode": 5}])
+        monkeypatch.setattr(terminal_tool, "_active_environments", {"default": fake})
+
+        result = terminal_tool.terminal_tool("mycommand", task_id="test-streak")
+        data = json.loads(result)
+
+        assert data["exit_code"] == 5
+        assert data["error"] is not None
+        assert data["failure_class"] == "persistent_error"
+
+    def test_informational_exit_error_is_none(self, monkeypatch):
+        """Informational exits (grep=1) should still have error=None
+        because exit_note is set."""
+        monkeypatch.setenv("TERMINAL_ENV", "local")
+        fake = FakeEnvironment([{"output": "", "returncode": 1}])
+        monkeypatch.setattr(terminal_tool, "_active_environments", {"default": fake})
+
+        result = terminal_tool.terminal_tool("grep foo bar", task_id="test-streak")
+        data = json.loads(result)
+
+        assert data["exit_code"] == 1
+        assert data.get("error") is None
+        assert data.get("exit_code_meaning") == "No matches found (not an error)"
+
+    def test_classified_failure_error_has_hint(self, monkeypatch):
+        """Classified failures (e.g. missing_command) should populate
+        the error field with the classification hint."""
+        monkeypatch.setenv("TERMINAL_ENV", "local")
+        fake = FakeEnvironment([
+            {"output": "bash: notreal: command not found", "returncode": 127}
+        ])
+        monkeypatch.setattr(terminal_tool, "_active_environments", {"default": fake})
+
+        result = terminal_tool.terminal_tool("notreal", task_id="test-streak")
+        data = json.loads(result)
+
+        assert data["exit_code"] == 127
+        assert data["failure_class"] == "missing_command"
+        assert data["error"] is not None
+        assert data["error"] == data["suggestion"]
+
+    def test_signal_exit_populates_error_field(self, monkeypatch):
+        """Signal-based exits (e.g. 137=SIGKILL) should populate the
+        error field with the signal hint."""
+        monkeypatch.setenv("TERMINAL_ENV", "local")
+        fake = FakeEnvironment([{"output": "", "returncode": 137}])
+        monkeypatch.setattr(terminal_tool, "_active_environments", {"default": fake})
+
+        result = terminal_tool.terminal_tool("memoryhog", task_id="test-streak")
+        data = json.loads(result)
+
+        assert data["exit_code"] == 137
+        assert data["failure_class"] == "persistent_error"
+        assert data["error"] is not None
+        assert "SIGKILL" in data["error"]
+
+    def test_zero_exit_error_is_none(self, monkeypatch):
+        """Successful commands (exit 0) should still have error=None."""
+        monkeypatch.setenv("TERMINAL_ENV", "local")
+        fake = FakeEnvironment([{"output": "ok", "returncode": 0}])
+        monkeypatch.setattr(terminal_tool, "_active_environments", {"default": fake})
+
+        result = terminal_tool.terminal_tool("echo ok", task_id="test-streak")
+        data = json.loads(result)
+
+        assert data["exit_code"] == 0
+        assert data.get("error") is None

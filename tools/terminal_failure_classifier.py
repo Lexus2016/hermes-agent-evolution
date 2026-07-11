@@ -177,6 +177,32 @@ def classify_terminal_failure(
             should_retry=False,
         )
 
+    # Signal-based termination (128 + signal number).  These frequently
+    # produce empty output and would otherwise fall through to
+    # persistent_error with a generic message.  Surface the signal so the
+    # agent can distinguish OOM kills, segfaults, and user interrupts.
+    if exit_code >= 128:
+        _signal_hints = {
+            129: "SIGHUP (terminal hang up)",
+            130: "SIGINT (interrupted by Ctrl+C or stop signal)",
+            131: "SIGQUIT (quit with core dump)",
+            134: "SIGABRT (abort, possibly assert failure or OOM)",
+            137: "SIGKILL (killed, likely OOM killer or manual kill -9)",
+            139: "SIGSEGV (segmentation fault — bug in the command)",
+            143: "SIGTERM (terminated by request or timeout)",
+        }
+        sig_name = _signal_hints.get(exit_code, f"signal {exit_code - 128}")
+        return TerminalFailureClassification(
+            category=FailureCategory.persistent_error,
+            hint=(
+                f"Command terminated by {sig_name}. "
+                "This is not a retryable error — investigate the cause "
+                "(memory limits, missing dependencies, user interrupt) "
+                "or switch to a different approach."
+            ),
+            should_retry=False,
+        )
+
     # Some commands use non-zero exit codes for normal informational purposes.
     if base_cmd in _EXPECTED_NONZERO_COMMANDS:
         return TerminalFailureClassification(
