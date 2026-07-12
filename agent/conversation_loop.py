@@ -1626,6 +1626,13 @@ def _run_conversation_impl(
                         return agent._interruptible_streaming_api_call(
                             next_api_kwargs, on_first_delta=_stop_spinner
                         )
+                    from agent.chat_completion_helpers import (
+                        direct_api_call,
+                        should_use_direct_api_call,
+                    )
+
+                    if should_use_direct_api_call(agent):
+                        return direct_api_call(agent, next_api_kwargs)
                     return agent._interruptible_api_call(next_api_kwargs)
 
                 from hermes_cli.middleware import run_llm_execution_middleware
