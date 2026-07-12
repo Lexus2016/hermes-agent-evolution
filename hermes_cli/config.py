@@ -1693,8 +1693,28 @@ DEFAULT_CONFIG = {
             "timeout": 900,
             "extra_body": {},
         },
+        # Adversarial verification (/verify, #825) — model-diverse fact-
+        # checking (#909). Generator and verifier sharing a model family
+        # share blind spots: research shows cross-family verification
+        # catches ~45% of harmful approvals vs ~6% for same-family, and raw
+        # self-consistency is a weak correctness signal (worst for frontier
+        # models: 77% agreement, 48% wrong on GPQA). "auto"/"" (default)
+        # keeps today's behavior — verification runs on the main chat model.
+        # Set model/provider to a DIFFERENT model family (e.g. provider
+        # "openrouter", model "google/gemini-3-flash-preview" when the main
+        # model is Claude/GPT) to get cross-family verification;
+        # agent.adversarial_verification.resolve_verifier_model() detects
+        # same-family setups so the /verify command can warn about them.
+        "adversarial_verification": {
+            "provider": "auto",
+            "model": "",
+            "base_url": "",
+            "api_key": "",
+            "timeout": 120,
+            "extra_body": {},
+        },
     },
-    
+
     "display": {
         "compact": False,
         "personality": "",

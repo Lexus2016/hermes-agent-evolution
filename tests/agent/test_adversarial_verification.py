@@ -7,10 +7,12 @@ from agent.adversarial_verification import (
     VerificationResult,
     VerificationSeverity,
     VerificationVerdict,
+    detect_model_family,
     format_verification_result,
     generate_verifier_prompt,
     get_verifier_system_prompt,
     parse_verifier_output,
+    resolve_verifier_model,
 )
 
 
@@ -223,3 +225,157 @@ class TestEnums:
     def test_all_verdicts_have_values(self):
         for verdict in VerificationVerdict:
             assert isinstance(verdict.value, str)
+
+
+# ── Model-family diversity tests (#909) ─────────────────────────────────
+
+
+class TestDetectModelFamily:
+    def test_claude_models(self):
+        assert detect_model_family("anthropic/claude-opus-4.8") == "anthropic"
+        assert detect_model_family("claude-sonnet-4-6") == "anthropic"
+
+    def test_openai_models(self):
+        assert detect_model_family("gpt-5.5") == "openai"
+        assert detect_model_family("openai/gpt-4o") == "openai"
+
+    def test_google_models(self):
+        assert detect_model_family("google/gemini-3-flash-preview") == "google"
+
+    def test_xai_models(self):
+        assert detect_model_family("x-ai/grok-4") == "xai"
+
+    def test_meta_models(self):
+        assert detect_model_family("meta-llama/llama-4") == "meta"
+
+    def test_deepseek_models(self):
+        assert detect_model_family("deepseek/deepseek-v4-pro") == "deepseek"
+
+    def test_qwen_models(self):
+        assert detect_model_family("qwen/qwen3-max") == "qwen"
+
+    def test_mistral_models(self):
+        assert detect_model_family("mistralai/mixtral-8x22b") == "mistral"
+
+    def test_nous_hermes_models(self):
+        assert detect_model_family("nousresearch/hermes-4-70b") == "nous"
+
+    def test_luminous_not_misfiled_as_nous(self):
+        # "nous" is a substring of "luminous" (Aleph Alpha) — ordering in the
+        # keyword table must classify it as its own family, not Nous Research.
+        assert detect_model_family("luminous-supreme") == "alephalpha"
+
+    def test_unknown_model(self):
+        assert detect_model_family("some-obscure-local-model") == "unknown"
+
+    def test_empty_or_none(self):
+        assert detect_model_family("") == "unknown"
+        assert detect_model_family(None) == "unknown"
+
+    def test_case_insensitive(self):
+        assert detect_model_family("CLAUDE-Opus-4.8") == "anthropic"
+
+
+class TestResolveVerifierModel:
+    def test_explicit_cross_family_model(self):
+        result = resolve_verifier_model(
+            "anthropic/claude-opus-4.8",
+            {"model": "google/gemini-3-flash-preview", "provider": "openrouter"},
+        )
+        assert result["model"] == "google/gemini-3-flash-preview"
+        assert result["provider"] == "openrouter"
+        assert result["generator_family"] == "anthropic"
+        assert result["verifier_family"] == "google"
+        assert result["cross_family"] is True
+
+    def test_explicit_same_family_model(self):
+        result = resolve_verifier_model(
+            "anthropic/claude-opus-4.8",
+            {"model": "claude-sonnet-4-6", "provider": ""},
+        )
+        assert result["cross_family"] is False
+        assert result["generator_family"] == "anthropic"
+        assert result["verifier_family"] == "anthropic"
+
+    def test_explicit_model_unknown_family(self):
+        result = resolve_verifier_model(
+            "anthropic/claude-opus-4.8",
+            {"model": "some-local-model"},
+        )
+        assert result["cross_family"] is None
+        assert result["verifier_family"] == "unknown"
+
+    def test_provider_only_override_is_unknown(self):
+        result = resolve_verifier_model(
+            "anthropic/claude-opus-4.8",
+            {"provider": "openrouter", "model": ""},
+        )
+        assert result["cross_family"] is None
+        assert result["model"] == ""
+        assert result["provider"] == "openrouter"
+
+    def test_no_config_is_same_family(self):
+        result = resolve_verifier_model("anthropic/claude-opus-4.8", None)
+        assert result["cross_family"] is False
+        assert result["generator_family"] == "anthropic"
+        assert result["verifier_family"] == "anthropic"
+
+    def test_auto_provider_no_config_is_same_family(self):
+        result = resolve_verifier_model("gpt-5.5", {"provider": "auto", "model": ""})
+        assert result["cross_family"] is False
+        assert result["generator_family"] == "openai"
+
+    def test_no_config_unrecognized_generator_still_same_family(self):
+        # Auto/empty config inherits the generator's exact model, so it is
+        # same-family even when we don't recognize the family (#909 review).
+        result = resolve_verifier_model("some-local-model", {})
+        assert result["cross_family"] is False
+        assert result["generator_family"] == "unknown"
+
+    def test_empty_generator_model(self):
+        result = resolve_verifier_model(None, {})
+        assert result["generator_family"] == "unknown"
+        assert result["cross_family"] is None
+
+    def test_identical_unrecognized_models_are_same_family(self):
+        # Same exact unrecognized model string on both sides — same blind
+        # spots — must be flagged same-family even though the family is
+        # "unknown" (#909 review, false-negative fix).
+        result = resolve_verifier_model(
+            "some-local-model", {"model": "some-local-model"}
+        )
+        assert result["cross_family"] is False
+        assert result["generator_family"] == "unknown"
+        assert result["verifier_family"] == "unknown"
+
+    def test_luminous_vs_nous_is_cross_family(self):
+        # Regression guard for the substring collision: a luminous generator
+        # and a nous verifier are different families, not the same.
+        result = resolve_verifier_model("luminous-supreme", {"model": "nous-hermes-2"})
+        assert result["generator_family"] == "alephalpha"
+        assert result["verifier_family"] == "nous"
+        assert result["cross_family"] is True
+
+    def test_single_family_provider_override_detects_family(self):
+        # Provider-only override on a single-family provider identifies the
+        # family from the provider name (#909 review, false-negative fix).
+        cross = resolve_verifier_model(
+            "openai/gpt-4o", {"provider": "anthropic", "model": ""}
+        )
+        assert cross["verifier_family"] == "anthropic"
+        assert cross["cross_family"] is True
+
+        same = resolve_verifier_model(
+            "anthropic/claude-opus-4.8", {"provider": "anthropic", "model": ""}
+        )
+        assert same["verifier_family"] == "anthropic"
+        assert same["cross_family"] is False
+
+    def test_multi_model_provider_override_stays_unknown(self):
+        # Aggregators like openrouter can't be pinned to one family — degrade
+        # to None rather than guessing.
+        result = resolve_verifier_model(
+            "anthropic/claude-opus-4.8", {"provider": "openrouter", "model": ""}
+        )
+        assert result["verifier_family"] == "unknown"
+        assert result["cross_family"] is None

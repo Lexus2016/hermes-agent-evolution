@@ -9235,9 +9235,12 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
     def _handle_verify_command(self):
         """Run adversarial verification on the last agent response.
 
-        Spawns a verifier subagent via delegate_task with an adversarial
-        system prompt. The verifier reviews the last agent response for
-        flaws and reports a verdict.
+        Runs a one-shot LLM call with an adversarial system prompt against
+        the last agent response, routed through the
+        ``auxiliary.adversarial_verification`` config (see call_llm) so it
+        can run on a different model/provider than the one that generated
+        the response — same-model-family verification shares blind spots
+        with the solution it's checking (#909).
         """
         # Find the last assistant message in conversation history
         last_response = ""
@@ -9273,6 +9276,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
                 get_verifier_system_prompt,
                 parse_verifier_output,
                 format_verification_result,
+                resolve_verifier_model,
             )
         except ImportError:
             self._console_print("  (x) Adversarial verification module not available.")
@@ -9286,10 +9290,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
         )
         verifier_system = get_verifier_system_prompt()
 
-        # Use the agent's chat method to get a verification — this runs
-        # a fresh LLM call with the adversarial system prompt, which is
-        # the simplest way to get a verification without touching the
-        # agent loop's tool-calling machinery.
+        # A one-shot LLM call with the adversarial system prompt, deliberately
+        # bypassing the agent loop's tool-calling machinery (see call_llm below).
         if not self.agent:
             self._console_print("  (x) No active agent to run verification.")
             return
@@ -9297,32 +9299,45 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
         self._console_print("  (⚡) Running adversarial verification...")
 
         try:
-            # Save the current system prompt and temporarily swap it
-            # for the adversarial verifier prompt. This gives the
-            # verifier a fresh context with opposing incentives.
-            # We use a simple chat() call (no tools) to get the verdict.
-            original_system = getattr(self.agent, "system_message", None)
-
             # Build a minimal conversation for the verifier
             verify_messages = [
                 {"role": "system", "content": verifier_system},
                 {"role": "user", "content": verifier_prompt},
             ]
 
-            # Use the agent's client directly for a one-shot verification
-            # call — no tool calling, no iteration, just a verdict.
-            import json as _json
-            client = self.agent._get_client() if hasattr(self.agent, "_get_client") else None
-            if client is None:
-                # Fall back to chat() which is simpler but may include tools
-                verdict_text = self.agent.chat(verifier_prompt)
-            else:
-                response = client.chat.completions.create(
-                    model=self.agent.model,
-                    messages=verify_messages,
-                    temperature=0.3,  # low temp for focused analysis
+            # Resolve whether verification will run same-family as the
+            # generator (#909) and warn the user when it will — same-family
+            # verification shares blind spots with the solution it's
+            # checking (research: ~6% harmful-approval reduction same-family
+            # vs ~45% cross-family).
+            verifier_cfg = CLI_CONFIG.get("auxiliary", {}).get(
+                "adversarial_verification", {}
+            )
+            resolution = resolve_verifier_model(
+                getattr(self.agent, "model", None), verifier_cfg
+            )
+            if resolution["cross_family"] is False:
+                self._console_print(
+                    "  (!) Verifier is running on the SAME model family as the "
+                    f"generator ({resolution['generator_family']}) — same-family "
+                    "verification misses more issues than cross-family (#909). Set "
+                    "auxiliary.adversarial_verification.model to a different "
+                    "provider's model to strengthen this check."
                 )
-                verdict_text = response.choices[0].message.content or ""
+
+            # One-shot verification call — no tool calling, no iteration, just
+            # a verdict. Routed through call_llm's auxiliary-task resolution so
+            # auxiliary.adversarial_verification.{provider,model,base_url,
+            # api_key} can point the verifier at a different model/provider
+            # than the one that generated the solution being checked.
+            from agent.auxiliary_client import call_llm
+
+            response = call_llm(
+                task="adversarial_verification",
+                messages=verify_messages,
+                temperature=0.3,  # low temp for focused analysis
+            )
+            verdict_text = response.choices[0].message.content or ""
 
             # Parse the verdict
             result = parse_verifier_output(verdict_text)
