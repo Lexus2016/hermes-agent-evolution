@@ -27,6 +27,7 @@ from cron.jobs import (
     AmbiguousJobReference,
     claim_job_for_fire,
     create_job,
+    DELIVERY_VERBOSITY_LEVELS,
     get_job,
     list_jobs,
     mark_job_run,
@@ -937,6 +938,8 @@ def _format_job(job: Dict[str, Any]) -> Dict[str, Any]:
         result["enabled_toolsets"] = job["enabled_toolsets"]
     if job.get("workdir"):
         result["workdir"] = job["workdir"]
+    if job.get("delivery_verbosity"):
+        result["delivery_verbosity"] = job["delivery_verbosity"]
     return result
 
 
@@ -1010,6 +1013,7 @@ def cronjob(
     no_agent: Optional[bool] = None,
     attach_to_session: Optional[bool] = None,
     approval_mode: Optional[str] = None,
+    delivery_verbosity: Optional[str] = None,
     task_id: str = None,
 ) -> str:
     """Unified cron job management tool."""
@@ -1072,6 +1076,15 @@ def cronjob(
             if base_url_error:
                 return tool_error(base_url_error, success=False)
 
+            # Validate delivery_verbosity (issue #924) before persisting.
+            if delivery_verbosity is not None and str(delivery_verbosity).strip():
+                if str(delivery_verbosity).strip().lower() not in DELIVERY_VERBOSITY_LEVELS:
+                    return tool_error(
+                        "delivery_verbosity must be one of "
+                        f"{', '.join(DELIVERY_VERBOSITY_LEVELS)}",
+                        success=False,
+                    )
+
             # Validate context_from references existing jobs
             if context_from:
                 from cron.jobs import get_job as _get_job
@@ -1105,6 +1118,7 @@ def cronjob(
                 no_agent=_no_agent,
                 attach_to_session=attach_to_session,
                 approval_mode=approval_mode,
+                delivery_verbosity=delivery_verbosity,
             )
             _reset_cron_failure(task_id)
             _notify_provider_jobs_changed_safe()
@@ -1308,6 +1322,17 @@ def cronjob(
                 updates["approval_mode"] = (
                     _normalize_optional_job_value(approval_mode) or None
                 )
+            if delivery_verbosity is not None:
+                # Empty string clears the override (restores "full"); otherwise
+                # validate against the known levels before persisting (#924).
+                _dv = str(delivery_verbosity).strip().lower()
+                if _dv and _dv not in DELIVERY_VERBOSITY_LEVELS:
+                    return tool_error(
+                        "delivery_verbosity must be one of "
+                        f"{', '.join(DELIVERY_VERBOSITY_LEVELS)}",
+                        success=False,
+                    )
+                updates["delivery_verbosity"] = _dv or None
             if no_agent is not None:
                 # Toggling no_agent on/off at update time. If flipping to True,
                 # we need a script to already exist on the job (or be part of
@@ -1477,6 +1502,11 @@ Important safety rule: cron-run sessions should not recursively schedule more cr
             "attach_to_session": {
                 "type": "boolean",
                 "description": "When True, this job becomes CONTINUABLE: the user can reply to its delivery and the agent has the brief in context instead of asking 'what is that?'. On thread-capable platforms (Telegram topics, Discord/Slack threads) a dedicated thread is opened for the job and its replies; on DM-only platforms (WhatsApp/Signal) the brief is mirrored into the origin DM session. Use this for conversational recurring jobs the user will reply to — daily briefings, reminders that kick off follow-up work. Leave unset for fire-and-forget alerts/watchdogs. Overrides the global cron.mirror_delivery config for this one job. Only the origin chat is touched (never fan-out targets); no effect when deliver='local'."
+            },
+            "delivery_verbosity": {
+                "type": "string",
+                "enum": ["full", "result_only", "summary", "silent"],
+                "description": "Optional per-job delivery verbosity (issue #924). Controls how much of the run's output is delivered to the target chat: 'full' (default — the response as produced), 'result_only' (final answer only, any reasoning/trace stripped — ideal for mail/health checks that flood a channel), 'summary' (one-line status + final answer trimmed to ~280 chars), or 'silent' (deliver nothing on success; failures ALWAYS deliver so a broken job can't fail silently). Absent = 'full'. Note: a delivery target chat configured with display.chat_overrides mode 'quiet' implies 'result_only' and 'silent' implies 'silent' unless this per-job value overrides it. On update, pass an empty string to clear (restore 'full')."
             },
         },
         "required": ["action"],

@@ -234,6 +234,34 @@ def _normalize_approval_mode(value: Optional[str]) -> Optional[str]:
 # into output writes/deletes.
 _IMMUTABLE_JOB_FIELDS = frozenset({"id"})
 
+# Per-job cron delivery verbosity levels (issue #924). Absent/None on a job
+# means "full" (current behavior) for backward compatibility.
+#   full        — deliver the content as produced (current behavior)
+#   result_only — deliver only the final response (reasoning/trace stripped)
+#   summary     — one-line status + final response trimmed to N chars
+#   silent      — no delivery on success (errors are always delivered)
+DELIVERY_VERBOSITY_LEVELS = ("full", "result_only", "summary", "silent")
+
+
+def _normalize_delivery_verbosity(value: Any) -> Optional[str]:
+    """Normalize/validate a per-job ``delivery_verbosity`` value.
+
+    Returns the canonical lowercase level, or None for an empty/unset value
+    (which readers treat as ``full``). Raises ``ValueError`` for an unknown
+    level so the caller can surface a clear error.
+    """
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text not in DELIVERY_VERBOSITY_LEVELS:
+        raise ValueError(
+            "delivery_verbosity must be one of "
+            f"{', '.join(DELIVERY_VERBOSITY_LEVELS)} (got {value!r})"
+        )
+    return text
+
 
 def _job_output_dir(job_id: str) -> Path:
     """Resolve a job's output directory, rejecting any path-escape attempt.
@@ -953,6 +981,7 @@ def create_job(
     no_agent: bool = False,
     attach_to_session: Optional[bool] = None,
     approval_mode: Optional[str] = None,
+    delivery_verbosity: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create a new cron job.
@@ -1001,6 +1030,11 @@ def create_job(
                 Values "approve" / "allow" / "yes" / "off" auto-approve dangerous
                 commands within this job; any other explicit value denies them.
                 When omitted, the global ``approvals.cron_mode`` applies.
+        delivery_verbosity: Optional per-job delivery verbosity (issue #924).
+                One of "full" (default — current behavior), "result_only"
+                (final response only, reasoning/trace stripped), "summary"
+                (one-line status + trimmed final response), or "silent" (no
+                delivery on success; failures always deliver). Absent = "full".
 
     Returns:
         The created job dict
@@ -1042,6 +1076,7 @@ def create_job(
         attach_to_session if isinstance(attach_to_session, bool) else None
     )
     normalized_approval = _normalize_approval_mode(approval_mode)
+    normalized_delivery_verbosity = _normalize_delivery_verbosity(delivery_verbosity)
 
     # no_agent jobs are meaningless without a script — the script IS the job.
     # Surface this as a clear ValueError at create time so bad configs never
@@ -1143,6 +1178,9 @@ def create_job(
         job["approval_mode"] = normalized_approval
     if normalized_attach is not None:
         job["attach_to_session"] = normalized_attach
+    # Absent delivery_verbosity = "full" (back-compat); only persist when set.
+    if normalized_delivery_verbosity is not None:
+        job["delivery_verbosity"] = normalized_delivery_verbosity
 
     with _jobs_lock():
         jobs = load_jobs()

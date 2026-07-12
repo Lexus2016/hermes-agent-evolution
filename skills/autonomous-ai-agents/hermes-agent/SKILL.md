@@ -389,7 +389,7 @@ Edit with `hermes config edit` or `hermes config set section.key value`.
 | `agent` | `max_turns` (90), `tool_use_enforcement` |
 | `terminal` | `backend` (local/docker/ssh/modal), `cwd`, `timeout` (180) |
 | `compression` | `enabled`, `threshold` (0.50), `target_ratio` (0.20) |
-| `display` | `skin`, `interface` (cli/tui), `tool_progress`, `show_reasoning`, `show_cost`, `language` |
+| `display` | `skin`, `interface` (cli/tui), `tool_progress`, `show_reasoning`, `show_cost`, `language`, `chat_overrides`, `quiet_chats` (see Display verbosity below) |
 | `stt` | `enabled`, `provider` (local/groq/openai/mistral) |
 | `tts` | `provider` (edge/elevenlabs/openai/minimax/mistral/neutts) |
 | `memory` | `memory_enabled`, `user_profile_enabled`, `provider` |
@@ -399,6 +399,71 @@ Edit with `hermes config edit` or `hermes config set section.key value`.
 | `curator` | `enabled`, `consolidate` (false — opt-in aux-model skill consolidation), `interval_hours`, `stale_after_days` |
 
 Full config reference: https://hermes-agent.nousresearch.com/docs/user-guide/configuration
+
+### Display verbosity (per-platform · per-chat · per-cron-job)
+
+Hermes controls how much of the agent's intermediate work (tool calls,
+reasoning, "still working" heartbeats, interim status messages) is shown. There
+are three layers, each narrower than the last:
+
+1. **Per-platform** — `display.platforms.<platform>.*` (e.g. quiet Telegram, verbose Discord).
+2. **Per-chat** — `display.chat_overrides.<chat_id>` / `display.quiet_chats` — override verbosity for one chat/topic/DM, even on a platform whose default differs. Applies to interactive sessions **and** cron deliveries into that chat.
+3. **Per-cron-job** — `delivery_verbosity` on a job — controls how much of a cron run's output is delivered.
+
+**Verbosity modes** (used by `chat_overrides.<id>.mode` and `quiet_chats`):
+
+| Mode | tool_progress | interim messages | heartbeats | reasoning | delivery |
+|------|:---:|:---:|:---:|:---:|---|
+| `verbose` | all | yes | yes | yes | full |
+| `normal` | (falls through to the platform default — no override) | | | | full |
+| `quiet` | off | no | no | no | final answer only |
+| `silent` | off | no | no | no | nothing (cron: no delivery on success) |
+
+Explicit individual keys on a chat entry win over its `mode` preset (e.g.
+`mode: quiet` + `show_reasoning: true` keeps reasoning in that one chat).
+
+**Resolution order — interactive:** per-chat override → per-platform setting → built-in platform tier → global default. (`mode: normal`, or a preset that doesn't define a setting, falls through unchanged.)
+
+**Resolution order — cron delivery:** per-job `delivery_verbosity` → per-chat override at the delivery target (`mode: quiet`/`quiet_chats` ⇒ `result_only`; `mode: silent` ⇒ `silent`) → default `full`.
+
+**Per-cron-job `delivery_verbosity`** values: `full` (default — output as produced), `result_only` (final answer only, reasoning/trace stripped), `summary` (one-line status + final answer trimmed to ~280 chars), `silent` (deliver nothing on success — but **failures always deliver** so a broken job can't fail silently).
+
+#### Config example — mixed public/private Telegram
+
+```yaml
+# config.yaml
+display:
+  platforms:
+    telegram:
+      tool_progress: "off"          # platform-wide default
+  chat_overrides:
+    "-1001234567890":               # customer-facing group → clean answers only
+      mode: quiet
+    "256875587":                    # your private DM → full detail
+      mode: verbose
+    "-1009876543210":               # team dev channel, mostly quiet…
+      mode: quiet
+      show_reasoning: true          # …but keep reasoning visible here
+  quiet_chats:                      # shorthand: these chat ids imply mode: quiet
+    - "-1005550000000"
+```
+
+#### Cron example — mail check delivers only the result
+
+```jsonc
+// jobs.json (or via the cronjob tool: cronjob(action='create', ..., delivery_verbosity='result_only'))
+{
+  "id": "3c5220ab270e",
+  "name": "Mailbox check",
+  "schedule": "every 15m",
+  "deliver": "origin",
+  "delivery_verbosity": "result_only"   // final answer only; the tool-call trace is dropped
+}
+```
+
+Set it from the tool: `cronjob(action='update', job_id='3c5220ab270e', delivery_verbosity='silent')` (pass an empty string to clear back to `full`). A cron job whose delivery target chat is `mode: quiet` automatically delivers `result_only` even without a per-job value; a `silent` target suppresses successful deliveries.
+
+Both features are backward-compatible: absent `chat_overrides`/`quiet_chats` and absent `delivery_verbosity` mean exactly the current per-platform behavior.
 
 ### Providers
 
