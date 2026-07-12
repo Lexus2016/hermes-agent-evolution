@@ -1215,6 +1215,42 @@ class MemoryManager:
 
         return render_report(self.check_staleness(config=config))
 
+    # -- Conflict detection (#908) -------------------------------------------
+
+    def detect_memory_conflicts(
+        self, *, config: Optional[Dict[str, Any]] = None
+    ) -> "ConflictReport":
+        """Run conflict detection over the current memory corpus (#908).
+
+        This is the real consumer of :func:`agent.memory_conflicts.analyze_conflicts`:
+        it collects notes from the on-disk memory store (the same
+        :meth:`collect_notes` used by :meth:`check_staleness`) and flags pairs
+        of notes that claim different values for the same topic. Both notes
+        stay exactly as they are — this is analysis only, not a mutation —
+        so a caller can surface the disagreement (CLI report, system-prompt
+        note) instead of an agent silently trusting whichever entry it read
+        last.
+
+        Pass ``config`` to override the default similarity thresholds.
+        """
+        from agent.memory_conflicts import ConflictReport, analyze_conflicts
+
+        notes = self.collect_notes()
+        return analyze_conflicts(notes, config=config)
+
+    def render_memory_conflicts(
+        self, *, config: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """Run :meth:`detect_memory_conflicts` and render the result as markdown.
+
+        Convenience wrapper for the CLI ``hermes memory conflicts`` subcommand
+        and any caller that wants a human-readable string rather than the
+        structured :class:`~agent.memory_conflicts.ConflictReport`.
+        """
+        from agent.memory_conflicts import render_conflict_report
+
+        return render_conflict_report(self.detect_memory_conflicts(config=config))
+
     def on_delegation(self, task: str, result: str, *,
                       child_session_id: str = "", **kwargs) -> None:
         """Notify all providers that a subagent completed."""

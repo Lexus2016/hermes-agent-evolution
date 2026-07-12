@@ -12699,6 +12699,22 @@ def cmd_memory(args):
         mm = MemoryManager()
         report = mm.render_staleness_report(config=config or None)
         print(report)
+    elif sub == "conflicts":
+        # Conflict detection (#908): analyze the on-disk memory corpus and
+        # print a markdown report of notes that claim different values for
+        # the same topic. This is the CLI entry point for the conflict
+        # detector wired into MemoryManager.detect_memory_conflicts().
+        from agent.memory_manager import MemoryManager
+
+        config = {}
+        if getattr(args, "topic_similarity_threshold", None) is not None:
+            config["topic_similarity_threshold"] = args.topic_similarity_threshold
+        if getattr(args, "value_similarity_threshold", None) is not None:
+            config["value_similarity_threshold"] = args.value_similarity_threshold
+
+        mm = MemoryManager()
+        report = mm.render_memory_conflicts(config=config or None)
+        print(report)
     else:
         from hermes_cli.memory_setup import memory_command
 

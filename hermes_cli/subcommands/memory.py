@@ -70,6 +70,27 @@ def build_memory_parser(subparsers, *, cmd_memory: Callable) -> None:
         default=None,
         help="Override the Jaccard similarity threshold for DUPLICATE flags.",
     )
+
+    # Conflict detection (#908): flag pairs of notes that claim different
+    # values for the same topic instead of silently letting the agent trust
+    # whichever one it read last.
+    _conflicts_parser = memory_sub.add_parser(
+        "conflicts",
+        help="Detect memory notes with contradictory claims about the same topic",
+    )
+    _conflicts_parser.add_argument(
+        "--topic-similarity-threshold",
+        type=float,
+        default=None,
+        help="Override the Jaccard similarity threshold for 'same topic' (default 0.6).",
+    )
+    _conflicts_parser.add_argument(
+        "--value-similarity-threshold",
+        type=float,
+        default=None,
+        help="Override the Jaccard similarity threshold below which values "
+        "count as 'different' (default 0.5).",
+    )
     _reset_parser = memory_sub.add_parser(
         "reset",
         help="Erase all built-in memory (MEMORY.md and USER.md)",
