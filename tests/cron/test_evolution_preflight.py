@@ -35,6 +35,53 @@ class TestEvolutionJobStage:
         )
 
 
+class TestHaltGate:
+    """Halt-state gate (#913): expensive LLM stages must skip when the
+    evolution pipeline is structurally halted (scripts/evolution_funnel.py's
+    halt-state.txt)."""
+
+    def test_no_halt_file_not_skipped(self, tmp_path):
+        (tmp_path / "evolution").mkdir()
+        assert ep.should_skip_for_halt("research", tmp_path) is False
+
+    def test_halt_file_present_gated_stage_skipped(self, tmp_path):
+        evo_dir = tmp_path / "evolution"
+        evo_dir.mkdir()
+        (evo_dir / "halt-state.txt").write_text("halted")
+        for stage in ("research", "analysis", "implementation", "introspection"):
+            assert ep.should_skip_for_halt(stage, tmp_path) is True
+
+    def test_halt_file_present_funnel_not_gated(self, tmp_path):
+        evo_dir = tmp_path / "evolution"
+        evo_dir.mkdir()
+        (evo_dir / "halt-state.txt").write_text("halted")
+        assert ep.should_skip_for_halt("funnel", tmp_path) is False
+
+    def test_halt_file_present_integration_not_gated(self, tmp_path):
+        evo_dir = tmp_path / "evolution"
+        evo_dir.mkdir()
+        (evo_dir / "halt-state.txt").write_text("halted")
+        assert ep.should_skip_for_halt("integration", tmp_path) is False
+
+    def test_none_stage_never_skipped(self, tmp_path):
+        evo_dir = tmp_path / "evolution"
+        evo_dir.mkdir()
+        (evo_dir / "halt-state.txt").write_text("halted")
+        assert ep.should_skip_for_halt(None, tmp_path) is False
+
+    def test_missing_evolution_dir_not_halted(self, tmp_path):
+        # No evolution/ dir at all yet — must not raise, must not skip.
+        assert ep.should_skip_for_halt("research", tmp_path) is False
+
+    def test_halt_check_fail_safe_on_error(self, tmp_path):
+        # Any error resolving/reading the halt file must be treated as
+        # NOT halted — a broken check must never wrongly skip a job.
+        with patch.object(ep, "_evolution_dir", side_effect=OSError("boom")):
+            assert ep._halt_state_active(tmp_path) is False
+        with patch.object(ep, "_evolution_dir", side_effect=RuntimeError("boom")):
+            assert ep._halt_state_active(tmp_path) is False
+
+
 class TestPreflightConfig:
     def test_preflight_timeout_default(self):
         with patch("hermes_cli.config.load_config_readonly", return_value={}):
@@ -465,4 +512,152 @@ class TestSchedulerIntegration:
         assert success is True
         assert final_response == "ok"
         mock_preflight.assert_not_called()
+        mock_agent_cls.assert_called_once()
+
+
+class TestSchedulerHaltGate:
+    """Scheduler-level wiring for the halt-state gate (#913): a job for a
+    gated stage must be skipped BEFORE any provider ping or agent
+    construction when scripts/evolution_funnel.py's halt-state.txt is
+    present, and jobs for ungated stages (funnel is no_agent and never
+    reaches this code path; integration is left ungated) must proceed."""
+
+    def _make_job(self, stage):
+        return {
+            "id": f"evolution-{stage}",
+            "name": f"evolution-{stage}",
+            "prompt": "do work",
+        }
+
+    def _write_halt_file(self, tmp_path):
+        evo_dir = tmp_path / "evolution"
+        evo_dir.mkdir(parents=True, exist_ok=True)
+        (evo_dir / "halt-state.txt").write_text("halted")
+
+    def test_halted_gated_stage_skips_without_agent_or_preflight(self, tmp_path):
+        from cron.scheduler import _run_job_impl
+
+        self._write_halt_file(tmp_path)
+        job = self._make_job("analysis")
+        with (
+            patch("cron.scheduler._get_hermes_home", return_value=tmp_path),
+            patch("cron.scheduler._resolve_origin", return_value=None),
+            patch("dotenv.load_dotenv"),
+            patch("hermes_state.SessionDB", return_value=MagicMock()),
+            patch(
+                "hermes_cli.runtime_provider.resolve_runtime_provider",
+                return_value={
+                    "api_key": "test-key",
+                    "base_url": "https://example.invalid/v1",
+                    "provider": "openrouter",
+                    "api_mode": "chat_completions",
+                    "model": "openrouter/model",
+                },
+            ),
+            patch("cron.evolution_preflight.preflight_provider") as mock_preflight,
+            patch("run_agent.AIAgent") as mock_agent_cls,
+        ):
+            success, output, final_response, error = _run_job_impl(job)
+
+        assert success is True
+        assert final_response == "[SILENT]"
+        assert error is None
+        assert "pipeline halted" in output
+        mock_preflight.assert_not_called()
+        mock_agent_cls.assert_not_called()
+
+    def test_halted_all_four_gated_stages_skip(self, tmp_path):
+        from cron.scheduler import _run_job_impl
+
+        self._write_halt_file(tmp_path)
+        for stage in ("research", "analysis", "implementation", "introspection"):
+            job = self._make_job(stage)
+            with (
+                patch("cron.scheduler._get_hermes_home", return_value=tmp_path),
+                patch("cron.scheduler._resolve_origin", return_value=None),
+                patch("dotenv.load_dotenv"),
+                patch("hermes_state.SessionDB", return_value=MagicMock()),
+                patch(
+                    "hermes_cli.runtime_provider.resolve_runtime_provider",
+                    return_value={
+                        "api_key": "test-key",
+                        "base_url": "https://example.invalid/v1",
+                        "provider": "openrouter",
+                        "api_mode": "chat_completions",
+                        "model": "openrouter/model",
+                    },
+                ),
+                patch("run_agent.AIAgent") as mock_agent_cls,
+            ):
+                success, _output, final_response, _error = _run_job_impl(job)
+            assert success is True
+            assert final_response == "[SILENT]"
+            mock_agent_cls.assert_not_called()
+
+    def test_halted_integration_stage_not_gated(self, tmp_path):
+        """Integration is intentionally left ungated: gating it too would
+        deadlock the halt (merged=0 triggers halt; integration is what
+        performs merges, so it must keep running to let the pipeline
+        recover on its own)."""
+        from cron.scheduler import _run_job_impl
+
+        self._write_halt_file(tmp_path)
+        job = self._make_job("integration")
+        with (
+            patch("cron.scheduler._get_hermes_home", return_value=tmp_path),
+            patch("cron.scheduler._resolve_origin", return_value=None),
+            patch("dotenv.load_dotenv"),
+            patch("hermes_state.SessionDB", return_value=MagicMock()),
+            patch(
+                "hermes_cli.runtime_provider.resolve_runtime_provider",
+                return_value={
+                    "api_key": "test-key",
+                    "base_url": "https://example.invalid/v1",
+                    "provider": "openrouter",
+                    "api_mode": "chat_completions",
+                    "model": "openrouter/model",
+                },
+            ),
+            patch("cron.evolution_preflight.preflight_provider", return_value=None),
+            patch("run_agent.AIAgent") as mock_agent_cls,
+        ):
+            mock_agent = MagicMock()
+            mock_agent.run_conversation.return_value = {"final_response": "ok"}
+            mock_agent_cls.return_value = mock_agent
+            success, _output, final_response, _error = _run_job_impl(job)
+
+        assert success is True
+        assert final_response == "ok"
+        mock_agent_cls.assert_called_once()
+
+    def test_no_halt_file_gated_stage_proceeds_normally(self, tmp_path):
+        from cron.scheduler import _run_job_impl
+
+        (tmp_path / "evolution").mkdir(parents=True, exist_ok=True)
+        job = self._make_job("research")
+        with (
+            patch("cron.scheduler._get_hermes_home", return_value=tmp_path),
+            patch("cron.scheduler._resolve_origin", return_value=None),
+            patch("dotenv.load_dotenv"),
+            patch("hermes_state.SessionDB", return_value=MagicMock()),
+            patch(
+                "hermes_cli.runtime_provider.resolve_runtime_provider",
+                return_value={
+                    "api_key": "test-key",
+                    "base_url": "https://example.invalid/v1",
+                    "provider": "openrouter",
+                    "api_mode": "chat_completions",
+                    "model": "openrouter/model",
+                },
+            ),
+            patch("cron.evolution_preflight.preflight_provider", return_value=None),
+            patch("run_agent.AIAgent") as mock_agent_cls,
+        ):
+            mock_agent = MagicMock()
+            mock_agent.run_conversation.return_value = {"final_response": "ok"}
+            mock_agent_cls.return_value = mock_agent
+            success, _output, final_response, _error = _run_job_impl(job)
+
+        assert success is True
+        assert final_response == "ok"
         mock_agent_cls.assert_called_once()

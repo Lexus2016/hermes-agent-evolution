@@ -3410,6 +3410,44 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
         # so downstream evolution jobs still have stale-but-structured input
         # instead of failing silently during retries. (#486)
         stage = evolution_preflight.evolution_job_stage(job)
+
+        # Halt-state gate (#913): scripts/evolution_funnel.py writes
+        # halt-state.txt once the pipeline has produced zero merged PRs for
+        # 5+ consecutive cycles AND zero selections for 3+ consecutive
+        # cycles. evolution_hydra_gate.py already sleeps on this file, but
+        # the individual research/analysis/implementation/introspection cron
+        # jobs spawn their own LLM agents directly and never consulted it —
+        # so a structurally-halted pipeline kept burning tokens on every
+        # scheduled stage run. Check BEFORE the provider ping (cheaper) and
+        # before any agent construction. `funnel` (deterministic, no_agent)
+        # is never gated — it is what clears the halt once metrics recover.
+        if stage and evolution_preflight.should_skip_for_halt(
+            stage, _get_hermes_home()
+        ):
+            logger.warning(
+                "Job '%s' (evolution-%s): SKIPPED — evolution pipeline is "
+                "halted (halt-state.txt present). No LLM agent was spawned. "
+                "The pipeline resumes automatically once the funnel job "
+                "clears the halt (merged/selected recover), or the file can "
+                "be removed manually.",
+                job_id,
+                stage,
+            )
+            now_iso = _hermes_now().strftime("%Y-%m-%d %H:%M:%S")
+            silent_doc = (
+                f"# Cron Job: {job_name}\n\n"
+                f"**Job ID:** {job_id}\n"
+                f"**Run Time:** {now_iso}\n"
+                f"**Status:** silent (evolution pipeline halted)\n\n"
+                "The evolution pipeline is halted (zero merged PRs for 5+ "
+                "cycles and zero selections for 3+ cycles — see "
+                "scripts/evolution_funnel.py). This expensive LLM stage was "
+                "skipped to avoid burning tokens on a structurally blocked "
+                "pipeline. `funnel` keeps running and will clear the halt "
+                "automatically once metrics recover.\n"
+            )
+            return True, silent_doc, SILENT_MARKER, None
+
         if stage and evolution_preflight._preflight_enabled(_cfg):
             # ROOT-FIX (#486): resolve_runtime_provider() does NOT populate
             # runtime["model"] — the model is resolved into the local ``model``
