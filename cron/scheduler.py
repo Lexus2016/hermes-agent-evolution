@@ -1541,6 +1541,23 @@ def _apply_delivery_verbosity(
     if verbosity == "silent":
         return None
     if verbosity == "result_only":
+        # Try to extract just the final response section from the full output
+        # document. The output is typically structured as:
+        #   # Cron Job: ...
+        #   ## Prompt
+        #   ...
+        #   ## Response
+        #   <actual answer>
+        # We want only the content under ## Response (or ## Final Response).
+        import re as _re
+        _resp_match = _re.search(
+            r'^##\s+(?:Final\s+)?Response\s*\n(.*)',
+            content,
+            _re.MULTILINE | _re.DOTALL,
+        )
+        if _resp_match:
+            return _resp_match.group(1).strip()
+        # Fallback: strip reasoning and return as-is
         return strip_reasoning_for_delivery(content)
     if verbosity == "summary":
         return _summarize_job_result(content, limit=summary_limit)
@@ -1621,7 +1638,7 @@ def _deliver_result(
     except Exception:
         pass
 
-    if wrap_response:
+    if wrap_response and _verbosity not in ("result_only", "summary"):
         task_name = job.get("name", job["id"])
         job_id = job.get("id", "")
         delivery_content = (
