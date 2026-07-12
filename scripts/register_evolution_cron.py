@@ -385,17 +385,22 @@ def main(argv: list[str]) -> int:
 
         name = str(spec.get("name") or yaml_file.stem).strip()
 
-        # Refresh installed no_agent scripts on EVERY run — including for
-        # already-registered jobs — mirroring the access gate above:
-        # `hermes update` refreshes the repo checkout, but the scheduler
-        # executes the copy in HERMES_HOME/scripts; without this refresh the
-        # installed script stays frozen at whatever version existed when the
-        # job was first registered.
-        if (
-            spec.get("no_agent")
-            and str(spec.get("script") or "").strip()
-            and not dry_run
-        ):
+        # Refresh any YAML-declared script on EVERY run — no_agent AND
+        # per-job agent-gate scripts (Hydra's evolution_hydra_gate.py,
+        # evolution-analysis's evolution_analysis_gate.sh, etc.) alike —
+        # including for already-registered jobs, mirroring the access gate
+        # above: `hermes update` refreshes the repo checkout, but the
+        # scheduler executes the copy in HERMES_HOME/scripts. Without this
+        # refresh, two things go stale: (a) the installed script's CONTENT
+        # stays frozen at whatever version existed when the job was first
+        # registered, and (b) worse, on a script NAME change (e.g. #910's
+        # evolution_access_gate.sh -> evolution_analysis_gate.sh) the
+        # reconcile branch below only updates the job record's `script`
+        # field — it does NOT install the file — so the job would end up
+        # pointing at a script that was never copied into
+        # HERMES_HOME/scripts/ at all. Installing here, unconditionally and
+        # before that reconcile runs, covers both cases for every job kind.
+        if str(spec.get("script") or "").strip() and not dry_run:
             _install_script(repo_root, str(spec["script"]).strip())
 
         schedule = str(spec.get("schedule") or "").strip()

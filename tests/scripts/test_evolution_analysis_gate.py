@@ -59,7 +59,7 @@ exit 1
     gh.chmod(gh.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def _run_gate(tmp_path: Path, bin_dir: Path) -> tuple[str, Path]:
+def _run_gate(tmp_path: Path, bin_dir: Path, gate: Path = GATE) -> tuple[str, Path]:
     """Run the gate; return (last stdout line, evolution dir).
 
     Unlike ``test_evolution_access_gate.py`` (which tests a script with no
@@ -70,6 +70,10 @@ def _run_gate(tmp_path: Path, bin_dir: Path) -> tuple[str, Path]:
     interpreter/shim mechanism it needs on the host) resolvable exactly as
     it would be in production, while still fully controlling which ``gh``
     the gate sees — the fake one in ``bin_dir`` always shadows any real one.
+
+    ``gate`` defaults to the real ``scripts/evolution_analysis_gate.sh`` but
+    can point at a copy in an isolated directory (e.g. to test behavior when
+    a sibling script like ``evolution_access_gate.sh`` is deliberately absent).
     """
     home = tmp_path / "hermes_home"
     evolution_dir = home / "evolution"
@@ -81,7 +85,7 @@ def _run_gate(tmp_path: Path, bin_dir: Path) -> tuple[str, Path]:
     for k in ("GITHUB_TOKEN", "GITHUB_PRIVATE_TOKEN"):
         env.pop(k, None)
     proc = subprocess.run(
-        [BASH, str(GATE)],
+        [BASH, str(gate)],
         capture_output=True,
         text=True,
         env=env,
@@ -151,6 +155,29 @@ def test_unauthenticated_does_not_wake_but_still_writes_local_triage(
     bin_dir.mkdir()
     _write_fake_gh(bin_dir, perms="{}", authed=False)
     line, evo_dir = _run_gate(tmp_path, bin_dir)
+    assert not _wakes(line)
+    result = _analysis_json(evo_dir)
+    assert result["local_triage"] is True
+
+
+def test_missing_access_gate_fails_closed(tmp_path: Path) -> None:
+    """If evolution_access_gate.sh is somehow absent (a degraded install —
+    register_evolution_cron.py's _install_access_gate runs unconditionally,
+    so this should never normally happen), we cannot confirm write access.
+    The gate must fail CLOSED (not wake) rather than default to waking the
+    agent — waking unconditionally would defeat the entire point of the
+    write-access gate."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_scripts = tmp_path / "fake_scripts"
+    fake_scripts.mkdir()
+    shutil.copy(GATE, fake_scripts / GATE.name)
+    shutil.copy(
+        REPO_ROOT / "scripts" / "evolution_local_triage.py",
+        fake_scripts / "evolution_local_triage.py",
+    )
+    # Deliberately do NOT copy evolution_access_gate.sh alongside it.
+    line, evo_dir = _run_gate(tmp_path, bin_dir, gate=fake_scripts / GATE.name)
     assert not _wakes(line)
     result = _analysis_json(evo_dir)
     assert result["local_triage"] is True

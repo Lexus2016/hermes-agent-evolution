@@ -44,20 +44,29 @@ else
 fi
 
 # Phase 1 gate — reuse the generic write-access wake-gate verbatim so the
-# decision logic (and its tests) live in exactly one place. `source` (not
-# `exec bash ...`) on purpose: spawning a nested `bash` would need to resolve
-# the `bash` binary via PATH, which can be empty/restricted (e.g. under a
-# locked-down cron PATH, or this script's own test harness) — sourcing runs
-# it in THIS already-running interpreter, no new process, no PATH lookup.
-# Its own last stdout line is the `{"wakeAgent": ...}` JSON this script's
+# decision logic (and its tests) live in exactly one place. `source` inside
+# a `( ... )` subshell (not `exec bash ...`, not a bare top-level `source`):
+# a subshell forks THIS already-running interpreter (no execve, no PATH
+# lookup needed — unlike spawning a nested `bash` binary, which would need
+# to resolve `bash` via PATH, possibly empty/restricted under a locked-down
+# cron PATH or this script's own test harness), while also containing the
+# access gate's `.env` exports (it sources `$HERMES_HOME/.env` with `set -a`)
+# to the subshell instead of leaking them into this script's own remaining
+# environment. The subshell's stdout still flows straight through to ours,
+# so its last line is still the `{"wakeAgent": ...}` JSON this script's
 # contract requires as ITS last line too.
 if [ -f "$SCRIPT_DIR/evolution_access_gate.sh" ]; then
     # shellcheck disable=SC1090
-    source "$SCRIPT_DIR/evolution_access_gate.sh"
+    ( source "$SCRIPT_DIR/evolution_access_gate.sh" )
     exit 0
 fi
 
-# Fallback: no access gate installed alongside us — default to waking the
-# agent (matches the scheduler's "gate absent -> wake" contract).
-echo "evolution-analysis-gate: evolution_access_gate.sh not found — defaulting to wake" >&2
-echo '{"wakeAgent": true}'
+# Fallback: the generic write-access gate isn't installed alongside us — a
+# degraded install (register_evolution_cron.py's _install_access_gate runs
+# unconditionally on every registration, so this should always be present).
+# We cannot confirm write access without it, so fail CLOSED: do not wake the
+# LLM agent. Phase 0's local-triage output above already stands as this
+# cycle's result, and no tokens are spent on work that might not even be
+# pushable.
+echo "evolution-analysis-gate: evolution_access_gate.sh not found — cannot confirm write access, not waking" >&2
+echo '{"wakeAgent": false}'
