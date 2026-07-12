@@ -266,6 +266,54 @@ class TestReconcileExistingJob:
             'prompt: "sync upstream"\n'
         )
 
+    def _write_agent_yaml_with_script(self, src_dir, schedule, script_name):
+        (src_dir / "upstream-sync.yaml").write_text(
+            "name: evolution-upstream-sync\n"
+            f'schedule: "{schedule}"\n'
+            "enabled: true\n"
+            'prompt: "sync upstream"\n'
+            "skills:\n"
+            "  - evolution/upstream-sync\n"
+            "toolsets:\n"
+            "  - web\n"
+            "  - file\n"
+            "  - terminal\n"
+            f"script: {script_name}\n"
+        )
+
+    def test_changed_script_reconciles_record_and_installs_file(
+        self, tmp_path, monkeypatch
+    ):
+        """CRITICAL regression (#910 review finding): reconciling an already-
+        registered AGENT job's YAML-declared `script:` field (e.g. evolution-
+        analysis moving from the generic evolution_access_gate.sh to its own
+        evolution_analysis_gate.sh) must not just flip the DB record via
+        update_job() — the new script file must actually be installed into
+        HERMES_HOME/scripts/, or the scheduler ends up pointing at a file
+        that was never copied and the wake-gate silently stops running."""
+        mod = _import_module()
+        import cron.jobs as jobs_mod
+
+        src_dir = tmp_path / "cron-src"
+        src_dir.mkdir()
+        self._write_agent_yaml_with_script(
+            src_dir, "0 8 * * 1,3,5", "evolution_analysis_gate.sh"
+        )
+        existing = self._existing(mod, jobs_mod, "0 8 * * 1,3,5")  # schedule matches
+        existing["script"] = "evolution_access_gate.sh"  # stale script name
+        calls = self._wire(mod, jobs_mod, monkeypatch, tmp_path, existing)
+
+        rc = mod.main(["register_evolution_cron.py", str(src_dir)])
+
+        assert rc == 0
+        assert calls["updates"] == {"script": "evolution_analysis_gate.sh"}
+        home = tmp_path / "hermes-home"
+        installed = home / "scripts" / "evolution_analysis_gate.sh"
+        assert installed.is_file(), (
+            "reconcile updated the job record but never installed the new "
+            "script file into HERMES_HOME/scripts/"
+        )
+
     def test_existing_agent_job_without_skills_does_not_crash(self, tmp_path, monkeypatch):
         """Regression: _normalize_skills(None) returns None; reconcile must not
         call list(None) — that TypeError silently aborted EVERY re-register (and

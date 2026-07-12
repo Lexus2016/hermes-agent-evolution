@@ -3,18 +3,33 @@ schedule: "0 1,5,9,13,17,21 * * *"  # Every 4h (was daily 21:00). Raises process
 enabled: true
 mode: PRIVATE
 
+# #910: analysis has a token-free LOCAL triage half (Phase 0, reads
+# issues/introspection/research sidecars, writes analysis/YYYY-MM-DD.json)
+# and a GitHub-dependent full pass (Phase 1). Without this dedicated gate,
+# the job fell back to the generic access-gate default, which skipped the
+# ENTIRE run — Phase 0 included — whenever GitHub write access was
+# unavailable. evolution_analysis_gate.sh always runs Phase 0's local
+# triage first (best-effort, never blocking), then gates only the LLM
+# agent wake decision on GitHub write access, same as every other stage.
+script: evolution_analysis_gate.sh
+
 prompt: |
   You are Hermes Evolution Analyzer.
-  
+
   Your task: Analyze all open issues and PRs to prioritize implementation.
-  
+
   Use the evolution-analysis skill for instructions.
-  
+
   Output to: ~/.hermes/evolution/analysis/{current_date}.json
-  
-  CRITICAL: Verify `gh auth status` works before proceeding — the gh CLI is
-  the primary auth mechanism. GITHUB_TOKEN is set as fallback. If neither
-  gh CLI auth nor GITHUB_TOKEN is available, ABORT immediately.
+
+  NOTE: The wake-gate script already ran Phase 0 (local, token-free triage)
+  before you were woken, so analysis/{current_date}.json already exists with
+  at least a local-triage baseline. You were only woken because GitHub write
+  access is confirmed — proceed with Phase 1 (the full, GitHub-aware pass)
+  per the evolution-analysis skill, refining/superseding the local-only
+  baseline. If mid-run `gh auth status` / GITHUB_TOKEN turns out to be
+  unavailable after all, ABORT Phase 1 only — the local-triage baseline
+  already on disk still stands as this cycle's output.
 
 skills:
   - evolution/analysis

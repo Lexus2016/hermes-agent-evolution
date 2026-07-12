@@ -441,7 +441,17 @@ Save to `~/.hermes/evolution/analysis/YYYY-MM-DD.json`:
 
 ## Security
 
-Verify `gh auth status` works before proceeding — the gh CLI is the primary
-auth mechanism. If gh CLI auth is unavailable AND GITHUB_TOKEN is not set,
-**ABORT**. Do NOT export tokens into the environment — `gh` handles auth via
-its own stored credentials.
+**This ABORT applies to Phase 1 only — it never applies to Phase 0.** Phase 0
+(local triage, see above) reads only local sidecar files and makes no GitHub
+API calls, so it has nothing to abort: it always runs and always produces
+`analysis/YYYY-MM-DD.json`, private-tool availability notwithstanding (#910 —
+this stage previously conflated "no private-repo access" with "cannot do
+local triage", aborting the whole run and leaving no output at all on days
+the private token was unavailable).
+
+Before starting Phase 1, verify `gh auth status` works — the gh CLI is the
+primary auth mechanism. If gh CLI auth is unavailable AND GITHUB_TOKEN is not
+set, **ABORT Phase 1 only**: skip the GitHub-dependent triage/reject/close
+work and leave Phase 0's local-triage output (already written, per above) as
+this cycle's result. Do NOT export tokens into the environment — `gh` handles
+auth via its own stored credentials.
