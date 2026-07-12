@@ -155,6 +155,33 @@ class MemoryConflict:
     detail: str = ""
 
 
+def _extract_claims(
+    notes: Iterable[Note],
+) -> list[tuple[Note, str, str, set[str], set[str]]]:
+    """Return the subset of ``notes`` usable as a ``(topic, value)`` claim.
+
+    Skips deprecated notes, notes with no recognizable claim structure (see
+    :func:`split_claim`), and notes whose topic or value tokenizes to an
+    empty word set (nothing to compare, e.g. a value of ``"---"``). Shared by
+    :func:`detect_conflicts` and :func:`analyze_conflicts` so "notes with a
+    recognizable claim" means exactly the same thing in both places.
+    """
+    claims: list[tuple[Note, str, str, set[str], set[str]]] = []
+    for note in notes:
+        if note.deprecated:
+            continue
+        split = split_claim(note.title)
+        if split is None:
+            continue
+        topic, value = split
+        topic_words = _word_set(topic)
+        value_words = _word_set(value)
+        if not topic_words or not value_words:
+            continue
+        claims.append((note, topic, value, topic_words, value_words))
+    return claims
+
+
 def detect_conflicts(
     notes: Iterable[Note],
     *,
@@ -170,24 +197,16 @@ def detect_conflicts(
     ``value_similarity_threshold``; pairs where either value has no words at
     all (an empty value after the separator) are skipped — there is no value
     to compare.
+
+    The returned list is sorted by ``(note_a_id, note_b_id)`` so the report is
+    fully deterministic regardless of the input notes' traversal order (not
+    just the per-pair id ordering within each :class:`MemoryConflict`).
     """
     cfg = {**DEFAULT_CONFIG, **(config or {})}
     topic_threshold = float(cfg["topic_similarity_threshold"])
     value_threshold = float(cfg["value_similarity_threshold"])
 
-    claims: list[tuple[Note, str, str, set[str], set[str]]] = []
-    for note in notes:
-        if note.deprecated:
-            continue
-        split = split_claim(note.title)
-        if split is None:
-            continue
-        topic, value = split
-        topic_words = _word_set(topic)
-        value_words = _word_set(value)
-        if not topic_words or not value_words:
-            continue
-        claims.append((note, topic, value, topic_words, value_words))
+    claims = _extract_claims(notes)
 
     conflicts: list[MemoryConflict] = []
     for i, (note_a, topic_a, value_a, topic_words_a, value_words_a) in enumerate(
@@ -228,6 +247,7 @@ def detect_conflicts(
                     ),
                 )
             )
+    conflicts.sort(key=lambda c: (c.note_a_id, c.note_b_id))
     return conflicts
 
 
@@ -268,9 +288,9 @@ def analyze_conflicts(
     effective_config = {**DEFAULT_CONFIG, **(config or {})}
     materialized = list(notes)
     total = len(materialized)
-    total_claims = sum(
-        1 for n in materialized if not n.deprecated and split_claim(n.title) is not None
-    )
+    # Same eligibility rule detect_conflicts() uses, so "notes with a
+    # recognizable claim" in the report matches what was actually compared.
+    total_claims = len(_extract_claims(materialized))
 
     conflicts = detect_conflicts(materialized, config=effective_config)
 

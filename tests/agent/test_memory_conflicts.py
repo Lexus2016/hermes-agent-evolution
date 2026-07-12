@@ -95,6 +95,24 @@ def test_detect_conflicts_is_order_independent():
     assert backward[0].note_a_id == "a-note"
 
 
+def test_detect_conflicts_list_is_sorted_regardless_of_traversal_order():
+    # With more than one conflict, the *list* itself must also be
+    # order-independent, not just the id ordering within each MemoryConflict.
+    notes_forward = [
+        Note(id="c-note", title="Deploy target: staging", content=""),
+        Note(id="d-note", title="Deploy target: production", content=""),
+        Note(id="a-note", title="Favorite color: blue", content=""),
+        Note(id="b-note", title="Favorite color: red", content=""),
+    ]
+    notes_backward = list(reversed(notes_forward))
+    forward = detect_conflicts(notes_forward)
+    backward = detect_conflicts(notes_backward)
+    assert len(forward) == len(backward) == 2
+    forward_pairs = [(c.note_a_id, c.note_b_id) for c in forward]
+    backward_pairs = [(c.note_a_id, c.note_b_id) for c in backward]
+    assert forward_pairs == backward_pairs == sorted(forward_pairs)
+
+
 def test_detect_conflicts_same_value_is_not_a_conflict():
     # Same topic, same value (a near-duplicate claim, not a conflict) — that's
     # memory_staleness.detect_duplicates' territory, not this module's.
@@ -137,8 +155,9 @@ def test_detect_conflicts_no_pair_among_single_note():
 def test_detect_conflicts_config_overrides_thresholds():
     a = Note(id="a", title="Deploy target: staging", content="")
     b = Note(id="b", title="Deploy target: production", content="")
-    # An absurdly high value_similarity_threshold makes even very different
-    # values fail to register as a conflict (nothing is "different enough").
+    # Jaccard similarity is always >= 0.0, so a value_similarity_threshold of
+    # 0.0 means "value_sim >= 0.0" is always true — no pair can ever be
+    # "different enough" to register as a conflict.
     conflicts = detect_conflicts([a, b], config={"value_similarity_threshold": 0.0})
     assert conflicts == []
 
@@ -174,6 +193,19 @@ def test_analyze_conflicts_passes_config_through():
     report = analyze_conflicts(notes, config={"value_similarity_threshold": 0.0})
     assert report.conflicts == []
     assert report.config["value_similarity_threshold"] == 0.0
+
+
+def test_analyze_conflicts_total_claims_excludes_empty_word_set():
+    # "Deploy target: ---" passes split_claim (non-empty topic/value strings)
+    # but "---" tokenizes to an empty word set, so detect_conflicts() cannot
+    # use it as a claim. total_claims must reflect that same exclusion
+    # rather than counting it as a usable claim.
+    notes = [
+        Note(id="a", title="Deploy target: staging", content=""),
+        Note(id="b", title="Deploy target: ---", content=""),
+    ]
+    report = analyze_conflicts(notes)
+    assert report.total_claims == 1
 
 
 # ── render_conflict_report ───────────────────────────────────────────────────────
