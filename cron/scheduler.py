@@ -302,6 +302,7 @@ from cron.jobs import (
     advance_next_run,
     claim_dispatch,
     update_job,
+    DELIVERY_VERBOSITY_LEVELS,
 )
 
 # Sentinel: when a cron agent has nothing new to report, it can start its
@@ -1455,7 +1456,105 @@ def _confirm_adapter_delivery(send_result) -> bool:
     return bool(getattr(send_result, "success"))
 
 
-def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Optional[str]:
+def _summarize_job_result(content: str, *, limit: int = 280) -> str:
+    """One-line-ish status + trimmed final response for delivery_verbosity=summary.
+
+    Strips any leading reasoning trace, then truncates to *limit* chars with an
+    ellipsis. The cron wrap header (``Cronjob Response: <name>``) already carries
+    the run identity, so this keeps the body to a short digestible tail.
+    """
+    text = strip_reasoning_for_delivery(content or "").strip()
+    if not text:
+        return text
+    if len(text) > limit:
+        text = text[:limit].rstrip() + "…"
+    return text
+
+
+def _resolve_delivery_verbosity(job: dict, target_chat_ids, user_cfg: dict) -> str:
+    """Resolve the effective cron delivery verbosity level.
+
+    Order (issue #924):
+      1. per-job ``delivery_verbosity``
+      2. per-chat override at the delivery target(s)
+         (``mode: quiet``/``quiet_chats`` ⇒ ``result_only``;
+          ``mode: silent`` ⇒ ``silent``; verbose/normal ⇒ ``full``)
+      3. default ``full`` (per-platform display tiers carry no delivery-content
+         equivalent, so the effective fallback is byte-identical to prior
+         behavior).
+
+    Multi-target jobs (``deliver: all`` / fan-out) share ONE delivered
+    ``content``, so the per-chat layer resolves to the MOST RESTRICTIVE shaping
+    across targets — the full trace is never delivered to a chat that asked to
+    be quiet/silent. ``silent`` (full suppression) is only chosen when EVERY
+    resolvable target is silent; a mix of silent + others degrades to
+    ``result_only`` (deliver the final answer everywhere, leak nothing) rather
+    than suppressing delivery to the non-silent targets.
+
+    Returns one of ``DELIVERY_VERBOSITY_LEVELS``.
+    """
+    raw = job.get("delivery_verbosity")
+    if raw:
+        norm = str(raw).strip().lower()
+        if norm in DELIVERY_VERBOSITY_LEVELS:
+            return norm
+
+    try:
+        from gateway.display_config import resolve_chat_mode
+    except Exception:
+        return "full"
+
+    modes = [
+        resolve_chat_mode(user_cfg, str(chat_id))
+        for chat_id in (target_chat_ids or [])
+        if chat_id is not None
+    ]
+    configured = [m for m in modes if m]
+    if not configured:
+        return "full"
+    # Every resolvable target wants silence → suppress. (Only when there are no
+    # unconfigured targets that would otherwise expect a delivery.)
+    if all(m == "silent" for m in modes):
+        return "silent"
+    # Any quiet/silent target present → never leak the full trace to it.
+    if any(m in ("silent", "quiet") for m in modes):
+        return "result_only"
+    return "full"
+
+
+def _apply_delivery_verbosity(
+    verbosity: str,
+    content: str,
+    *,
+    success: bool = True,
+    summary_limit: int = 280,
+) -> Optional[str]:
+    """Transform delivery content per verbosity level.
+
+    Returns the (possibly transformed) content, or ``None`` to SUPPRESS delivery
+    entirely. Error deliveries (``success=False``) are NEVER transformed or
+    suppressed — a failing job always delivers its full failure summary so
+    ``silent``/``result_only``/``summary`` can't swallow error alerts.
+    """
+    if not success:
+        return content
+    if verbosity == "silent":
+        return None
+    if verbosity == "result_only":
+        return strip_reasoning_for_delivery(content)
+    if verbosity == "summary":
+        return _summarize_job_result(content, limit=summary_limit)
+    return content  # "full" (default) — unchanged
+
+
+def _deliver_result(
+    job: dict,
+    content: str,
+    adapters=None,
+    loop=None,
+    *,
+    success: bool = True,
+) -> Optional[str]:
     """
     Deliver job output to the configured target(s) (origin chat, specific platform, etc.).
 
@@ -1487,6 +1586,26 @@ def _deliver_result(job: dict, content: str, adapters=None, loop=None) -> Option
         msg = f"no delivery target resolved for deliver={deliver_value}"
         logger.warning("Job '%s': %s", job["id"], msg)
         return msg
+
+    # ── Delivery verbosity (issue #924) ──────────────────────────────────
+    # Resolve per-job → per-chat@target → default 'full', then shape the
+    # content. Error deliveries (success=False) always pass through untouched
+    # so silent/result_only/summary can never swallow a failure alert.
+    try:
+        _verbosity_cfg = load_config() or {}
+    except Exception:
+        _verbosity_cfg = {}
+    _verbosity = _resolve_delivery_verbosity(
+        job, [t.get("chat_id") for t in targets], _verbosity_cfg
+    )
+    _shaped = _apply_delivery_verbosity(_verbosity, content, success=success)
+    if _shaped is None:
+        logger.info(
+            "Job '%s': delivery suppressed (delivery_verbosity=silent on success)",
+            job.get("name", job.get("id", "?")),
+        )
+        return None
+    content = _shaped
 
     from tools.send_message_tool import _send_to_platform
     from gateway.config import load_gateway_config, Platform
@@ -4178,7 +4297,7 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
         if should_deliver:
             try:
                 delivery_error = _deliver_result(
-                    job, deliver_content, adapters=adapters, loop=loop
+                    job, deliver_content, adapters=adapters, loop=loop, success=success
                 )
             except Exception as de:
                 delivery_error = str(de)

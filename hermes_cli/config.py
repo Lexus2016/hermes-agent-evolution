@@ -1884,6 +1884,21 @@ DEFAULT_CONFIG = {
             "telegram": {"streaming": True},
             "discord": {"streaming": False},
         },
+        # Per-chat verbosity overrides (issue #924). Each key is a chat id
+        # (Telegram/Discord/etc. chat, topic, or DM id, as a string) mapping to
+        # either a shorthand ``mode`` preset (verbose|normal|quiet|silent) and/or
+        # individual display keys that override the per-platform value for THAT
+        # chat only. Explicit keys win over the mode preset. Applies to both
+        # interactive sessions AND cron deliveries to that chat. Empty by default
+        # (absent = per-platform behavior, unchanged). Example:
+        #   chat_overrides:
+        #     "-1001234567890": {mode: quiet}      # customer-facing group
+        #     "256875587":      {mode: verbose}    # private DM, full detail
+        "chat_overrides": {},
+        # Convenience shorthand: a list of chat ids that implies ``mode: quiet``
+        # (final answer only — no tool progress, interim messages, reasoning, or
+        # heartbeats). Equivalent to a chat_overrides entry with mode: quiet.
+        "quiet_chats": [],
         # Gateway runtime-metadata footer appended to the FINAL message of a turn
         # (disabled by default to keep replies minimal). When enabled, renders
         # e.g. `model · 68% · ~/projects/hermes`. Per-platform overrides go under
@@ -3272,7 +3287,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 33,
+    "_config_version": 34,
 }
 
 # =============================================================================
@@ -6009,6 +6024,15 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
                     "delegation.max_concurrent_children now caps background "
                     "delegations too."
                 )
+
+    # ── Version 33 → 34: per-chat display verbosity keys (issue #924) ──
+    # display.chat_overrides / display.quiet_chats are added to DEFAULT_CONFIG
+    # with empty defaults ({} / []). Per the migration invariant, pure schema
+    # defaults are NOT materialised to disk — load_config()'s deep-merge supplies
+    # them at read time, so absent keys mean "no per-chat override" (identical to
+    # prior per-platform behavior). No data transform is needed; the version bump
+    # below records the schema change and get_missing_config_fields() surfaces the
+    # new options in `hermes update`.
 
     # ── Post-migration: disable exfiltration-shaped MCP stdio entries ──
     # Users can hand-edit mcp_servers, and older installs may already contain a
