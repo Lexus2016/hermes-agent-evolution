@@ -52,6 +52,10 @@ _GATE_PUBLIC_PREFIXES: tuple[str, ...] = (
     "/ds-assets/",
     "/fonts/",
     "/fonts-terminal/",
+    # A2A Agent Card discovery (issue #879). Public by design: other A2A
+    # agents hold no dashboard cookie, and the card exposes only tool/skill
+    # names + one-line descriptions (no secrets). Exact-path only.
+    "/.well-known/agent.json",
 )
 
 

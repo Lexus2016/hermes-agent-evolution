@@ -16542,6 +16542,30 @@ def _mount_plugin_api_routes():
             _log.warning("Failed to load plugin %s API routes: %s", plugin["name"], exc)
 
 
+# A2A Agent Card discovery endpoint (issue #879). Registered here, before the
+# SPA catch-all below, so /{full_path:path} doesn't swallow it. Public by
+# design (see skills/a2a/): A2A clients hold no dashboard session, and the card
+# carries only tool/skill names + one-line descriptions -- never secrets. It
+# registers no core tools; it is a read-only view over Hermes' existing tools
+# and skills. The /.well-known/agent.json path is non-/api/, so the legacy
+# loopback auth_middleware never gates it; the OAuth gate allowlists it via
+# dashboard_auth.middleware._GATE_PUBLIC_PREFIXES.
+@app.get("/.well-known/agent.json")
+async def well_known_agent_card(request: Request):
+    """Serve the A2A Agent Card advertising Hermes' tools and skills."""
+    from hermes_cli.a2a import build_agent_card, get_discovery_snapshot
+
+    config, capabilities = get_discovery_snapshot()
+    if not config.get("enabled", True):
+        return JSONResponse(status_code=404, content={"detail": "A2A disabled"})
+    card = build_agent_card(
+        config,
+        capabilities=capabilities,
+        base_url=str(request.base_url).rstrip("/"),
+    )
+    return JSONResponse(card.to_dict(), media_type="application/json")
+
+
 # Mount plugin API routes before the SPA catch-all.
 _mount_plugin_api_routes()
 
