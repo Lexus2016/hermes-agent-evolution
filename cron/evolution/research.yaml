@@ -19,6 +19,15 @@ toolsets:
   - web
   - file
 
+# Per-stage model allocation (#905): research is broad exploration — harness-
+# updating quality is flat across capability tiers (arXiv:2605.30621), so a
+# cheaper/mid-tier model is a candidate here. Uncomment and set to the
+# deployment's actual cheap-tier provider/model id; the registrar passes both
+# through to cron.jobs.create_job/update_job. Left commented out, this stage
+# stays unpinned and follows the global default (no behavior change).
+# model: <cheap-tier-model-id>
+# provider: <provider-name>
+
 # GitHub API configuration (PUBLIC mode)
 github:
   token_env: GITHUB_TOKEN
