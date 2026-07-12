@@ -106,6 +106,39 @@ class TestHaltGate:
         (evo_dir / "halt-state.txt").write_text("halted")
         assert ep.should_skip_for_halt("research", tmp_path) is True
 
+    def test_evolution_profile_dir_set_is_exclusive_not_additive(
+        self, tmp_path, monkeypatch
+    ):
+        # When EVOLUTION_PROFILE_DIR is set, the writer (evolution_funnel.py)
+        # uses that location EXCLUSIVELY — it never also looks at
+        # HERMES_HOME/evolution. The gate must mirror that: a stale
+        # halt-state.txt left over in the HERMES_HOME tree (e.g. from a
+        # previous deployment/profile) must NOT cause a false "halted" when
+        # the active EVOLUTION_PROFILE_DIR itself is clear (#913 follow-up).
+        profile_dir = tmp_path / "custom-profile"
+        profile_dir.mkdir()
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(profile_dir))
+
+        stale_home = tmp_path / "stale-hermes-home"
+        stale_evo = stale_home / "evolution"
+        stale_evo.mkdir(parents=True)
+        (stale_evo / "halt-state.txt").write_text("stale halt from another profile")
+
+        assert ep.should_skip_for_halt("research", stale_home) is False
+
+    def test_evolution_profile_dir_expands_user_and_relative(
+        self, tmp_path, monkeypatch
+    ):
+        # The writer's own resolution is a raw Path(env_var); real deployments
+        # may still set it to a `~`-relative value, so the gate should not be
+        # any less permissive than a literal, resolved path would be.
+        profile_dir = tmp_path / "custom-profile"
+        profile_dir.mkdir()
+        (profile_dir / "halt-state.txt").write_text("halted")
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", "~/custom-profile")
+        assert ep.should_skip_for_halt("research", tmp_path / "unused-home") is True
+
 
 class TestPreflightConfig:
     def test_preflight_timeout_default(self):
@@ -652,6 +685,48 @@ class TestSchedulerHaltGate:
             success, _output, final_response, _error = _run_job_impl(job)
 
         assert success is True
+        assert final_response == "ok"
+        mock_agent_cls.assert_called_once()
+
+    def test_gate_classification_error_proceeds_normally_not_skipped(self, tmp_path):
+        """Fail-safe (#913 follow-up): if stage classification or the halt
+        check itself raises for any reason, the job must proceed through the
+        normal LLM path — never silently skipped and never crashed. A broken
+        gate must fail OPEN (run the job), not closed (skip it)."""
+        from cron.scheduler import _run_job_impl
+
+        self._write_halt_file(tmp_path)  # even with halt active...
+        job = self._make_job("research")
+        with (
+            patch("cron.scheduler._get_hermes_home", return_value=tmp_path),
+            patch("cron.scheduler._resolve_origin", return_value=None),
+            patch("dotenv.load_dotenv"),
+            patch("hermes_state.SessionDB", return_value=MagicMock()),
+            patch(
+                "cron.evolution_preflight.evolution_job_stage",
+                side_effect=RuntimeError("boom"),
+            ),
+            patch(
+                "hermes_cli.runtime_provider.resolve_runtime_provider",
+                return_value={
+                    "api_key": "test-key",
+                    "base_url": "https://example.invalid/v1",
+                    "provider": "openrouter",
+                    "api_mode": "chat_completions",
+                    "model": "openrouter/model",
+                },
+            ),
+            patch("cron.evolution_preflight.preflight_provider", return_value=None),
+            patch("run_agent.AIAgent") as mock_agent_cls,
+        ):
+            mock_agent = MagicMock()
+            mock_agent.run_conversation.return_value = {"final_response": "ok"}
+            mock_agent_cls.return_value = mock_agent
+            # ...classification blowing up must not raise out of _run_job_impl.
+            success, _output, final_response, error = _run_job_impl(job)
+
+        assert success is True
+        assert error is None
         assert final_response == "ok"
         mock_agent_cls.assert_called_once()
 

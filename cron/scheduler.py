@@ -2957,10 +2957,33 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
     # path `stage` can be known. `funnel` (deterministic, no_agent) is
     # never gated — it already returned above and is what clears the
     # halt once metrics recover.
+    #
+    # The whole classification+check is wrapped here too (not just the
+    # leaf `_halt_state_active` existence check): stage classification or
+    # `_get_hermes_home()` blowing up must never turn into "silently skip
+    # a job" or "crash the run" — fail-safe means falling through to the
+    # normal, ungated LLM path below, exactly as it would for a job that
+    # isn't part of the evolution pipeline at all.
     from cron import evolution_preflight
 
-    stage = evolution_preflight.evolution_job_stage(job)
-    if stage and evolution_preflight.should_skip_for_halt(stage, _get_hermes_home()):
+    stage: Optional[str] = None
+    halted_for_gate = False
+    try:
+        stage = evolution_preflight.evolution_job_stage(job)
+        halted_for_gate = bool(stage) and evolution_preflight.should_skip_for_halt(
+            stage, _get_hermes_home()
+        )
+    except Exception as exc:  # pragma: no cover - defense in depth
+        logger.debug(
+            "Job '%s': halt-state gate classification failed, proceeding "
+            "without it: %s",
+            job_id,
+            exc,
+        )
+        stage = None
+        halted_for_gate = False
+
+    if halted_for_gate:
         # info, not warning: halt is an expected, potentially long-lived
         # state (can persist for days), not an anomaly — this line would
         # otherwise spam the log on every tick of every gated stage.

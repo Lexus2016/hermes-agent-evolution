@@ -84,12 +84,16 @@ def _halt_state_active(hermes_home: Optional[Path] = None) -> bool:
     directory as ``EVOLUTION_PROFILE_DIR`` if set, else ``~/.hermes/evolution``
     — independently of ``HERMES_HOME``, since those run as standalone script
     copies under ``HERMES_HOME/scripts`` and cannot rely on importing this
-    package. Check that exact location FIRST so a custom evolution profile
-    (``EVOLUTION_PROFILE_DIR``) still gates correctly, then fall back to
-    :func:`_evolution_dir` — the same ``HERMES_HOME``-based resolution the
-    scheduler already uses for ``load_digest_as_fallback``/
-    ``find_latest_digest``, and which matches the writer's own default when
-    neither ``EVOLUTION_PROFILE_DIR`` nor ``HERMES_HOME`` is overridden.
+    package. Mirror that resolution EXACTLY (not "check both"): if
+    ``EVOLUTION_PROFILE_DIR`` is set, it is the writer's one and only
+    location, so it is the one and only location checked here too — falling
+    through to :func:`_evolution_dir` in that case would risk a false
+    "halted" from an unrelated stale ``halt-state.txt`` left over in a
+    different ``HERMES_HOME`` tree. Only when ``EVOLUTION_PROFILE_DIR`` is
+    unset do we fall back to :func:`_evolution_dir` — the same
+    ``HERMES_HOME``-based resolution the scheduler already uses for
+    ``load_digest_as_fallback``/``find_latest_digest``, and which matches
+    the writer's own default in that case.
 
     Fail-safe: ANY error while resolving a path or checking existence is
     treated as NOT halted — a broken halt check must never wrongly skip a
@@ -97,9 +101,11 @@ def _halt_state_active(hermes_home: Optional[Path] = None) -> bool:
     """
     try:
         profile_dir = os.environ.get("EVOLUTION_PROFILE_DIR", "").strip()
-        if profile_dir and (Path(profile_dir) / "halt-state.txt").exists():
-            return True
-        return (_evolution_dir(hermes_home) / "halt-state.txt").exists()
+        if profile_dir:
+            halt_dir = Path(profile_dir).expanduser().resolve()
+        else:
+            halt_dir = _evolution_dir(hermes_home)
+        return (halt_dir / "halt-state.txt").exists()
     except OSError:
         return False
     except Exception as exc:  # pragma: no cover - defense in depth
