@@ -24,6 +24,14 @@ toolsets:
   - file
   - terminal   # needed for `gh issue list` (gh is authorized via GITHUB_TOKEN)
 
+# Per-stage model allocation (#905): triage/analysis quality is sufficient
+# with a mid-tier model per the harness-updating research (arXiv:2605.30621).
+# Uncomment and set to the deployment's actual mid-tier provider/model id;
+# the registrar passes both through to cron.jobs.create_job/update_job. Left
+# commented out, this stage stays unpinned and follows the global default.
+# model: <mid-tier-model-id>
+# provider: <provider-name>
+
 # GitHub API configuration (uses GITHUB_TOKEN; gh CLI is preferred)
 github:
   token_env: GITHUB_TOKEN
