@@ -316,7 +316,14 @@ SILENT_MARKER = "[SILENT]"
 # a marker is the entire response OR appears as its own first/last line — but
 # NOT when a token merely appears mid-sentence in a genuine report (e.g.
 # "I considered staying [SILENT] but here is the summary…" must deliver).
-_CRON_SILENCE_TOKENS = frozenset({"[SILENT]", "SILENT", "NO_REPLY", "NO REPLY"})
+_CRON_SILENCE_TOKENS = frozenset({
+    "[SILENT]",
+    "SILENT",
+    "[СИЛЕНТ]",
+    "СИЛЕНТ",
+    "NO_REPLY",
+    "NO REPLY",
+})
 
 
 def _is_cron_silence_response(text: str) -> bool:
@@ -335,7 +342,11 @@ def _is_cron_silence_response(text: str) -> bool:
         return False
 
     def _is_token(line: str) -> bool:
-        return " ".join(line.strip().upper().split()) in _CRON_SILENCE_TOKENS
+        normalized = " ".join(line.strip().upper().split())
+        # Models occasionally add spaces inside the brackets.  Normalize only
+        # the bracketed token shape; preserve ordinary prose spacing.
+        normalized = re.sub(r"\[\s*(SILENT|СИЛЕНТ)\s*\]", r"[\1]", normalized)
+        return normalized in _CRON_SILENCE_TOKENS
 
     # Whole response is exactly a token.
     if _is_token(stripped):
@@ -349,7 +360,8 @@ def _is_cron_silence_response(text: str) -> bool:
     # pattern "[SILENT] No changes detected".  Restricted to the bracketed
     # form so a bare word like "Silent retry succeeded" is NOT swallowed.
     upper = stripped.upper()
-    if upper.startswith("[SILENT]"):
+    upper = re.sub(r"\[\s*(SILENT|СИЛЕНТ)\s*\]", r"[\1]", upper, count=1)
+    if upper.startswith("[SILENT]") or upper.startswith("[СИЛЕНТ]"):
         return True
     return False
 
@@ -4071,9 +4083,8 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
             if success
             else _summarize_cron_failure_for_delivery(job, error, failure_category)
         )
-        # Treat whitespace-only final responses the same as empty
-        # responses: do not deliver a blank message, and let the
-        # empty-response guard below mark the run as a soft failure.
+        # Whitespace-only output is a valid quiet no-work result.  It is already
+        # saved locally above and must not become a Telegram message.
         should_deliver = bool(deliver_content.strip())
         # Cron silence suppression — see _is_cron_silence_response.  Replaces the
         # old `SILENT_MARKER in ...upper()` substring check, which both leaked
@@ -4098,13 +4109,6 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
             except Exception as de:
                 delivery_error = str(de)
                 logger.error("Delivery failed for job %s: %s", job["id"], de)
-
-        # Treat empty final_response as a soft failure so last_status
-        # is not "ok" — the agent ran but produced nothing useful.
-        # (issue #8585)
-        if success and not final_response.strip():
-            success = False
-            error = "Agent completed but produced empty response (model error, timeout, or misconfiguration)"
 
         mark_job_run(
             job["id"],

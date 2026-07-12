@@ -78,14 +78,31 @@ def test_run_one_job_silent_skips_delivery(monkeypatch):
     assert "deliver" not in kinds
 
 
-def test_run_one_job_empty_response_is_soft_failure(monkeypatch):
-    """An empty final response marks the run as NOT ok (issue #8585)."""
+def test_run_one_job_empty_response_is_quiet_success(monkeypatch):
+    """An empty no-work response is successful and is never delivered."""
     calls = _patch_pipeline(monkeypatch, final="   ")
 
-    s.run_one_job({"id": "j4", "name": "t"})
+    ok = s.run_one_job({"id": "j4", "name": "t"})
 
-    mark = [c for c in calls if c[0] == "mark"][0]
-    assert mark == ("mark", "j4", False)
+    assert ok is True
+    kinds = [c[0] for c in calls]
+    assert "deliver" not in kinds
+    assert ("mark", "j4", True) in calls
+
+
+def test_run_one_job_cyrillic_silent_skips_delivery(monkeypatch):
+    """The Cyrillic silence marker is internal and never delivered."""
+    calls = _patch_pipeline(monkeypatch, silent_marker_in="[СИЛЕНТ]")
+
+    s.run_one_job({"id": "j4-cyr", "name": "t"})
+
+    assert "deliver" not in [c[0] for c in calls]
+
+
+def test_cron_silence_response_accepts_spaced_brackets_and_cyrillic():
+    """Whitespace inside brackets is tolerated for all supported markers."""
+    assert s._is_cron_silence_response("[ SILENT ]")
+    assert s._is_cron_silence_response("[ СИЛЕНТ ]")
 
 
 def test_run_one_job_failed_job_delivers_error(monkeypatch):

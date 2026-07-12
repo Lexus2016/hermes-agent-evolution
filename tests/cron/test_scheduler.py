@@ -1686,11 +1686,8 @@ class TestRunJobSessionPersistence:
         assert "final fallback report" in output
         assert "(FAILED)" not in output
 
-    def test_tick_marks_empty_response_as_error(self, tmp_path):
-        """When run_job returns success=True but final_response is empty,
-        tick() should mark the job as error so last_status != 'ok'.
-        (issue #8585)
-        """
+    def test_tick_marks_empty_response_as_quiet_success(self, tmp_path):
+        """An empty successful response is a quiet no-work completion."""
         from cron.scheduler import tick
 
         job = {
@@ -1715,12 +1712,12 @@ class TestRunJobSessionPersistence:
              patch("cron.scheduler.run_job", return_value=(True, "output", "", None)):
             tick(verbose=False)
 
-        # Should be called with success=False because final_response is empty
+        # Empty no-work output is successful and must not be surfaced as an error.
         mock_mark.assert_called_once()
         call_args = mock_mark.call_args
         assert call_args[0][0] == "empty-job"
-        assert call_args[0][1] is False  # success should be False
-        assert "empty" in call_args[0][2].lower()  # error should mention empty
+        assert call_args[0][1] is True
+        assert call_args[0][2] is None
 
     def test_run_job_sets_auto_delivery_env_from_dotenv_home_channel(self, tmp_path, monkeypatch):
         job = {
@@ -2799,8 +2796,8 @@ class TestSilentDelivery:
         save_mock.assert_called_once_with("monitor-job", "# full output")
         deliver_mock.assert_not_called()
 
-    def test_whitespace_only_response_is_marked_failed_not_delivered(self):
-        """Whitespace-only final responses should behave like empty responses."""
+    def test_whitespace_only_response_is_quiet_success_not_delivered(self):
+        """Whitespace-only final responses are successful no-work results."""
         with patch("cron.scheduler.get_due_jobs", return_value=[self._make_job()]), \
              patch("cron.scheduler.run_job", return_value=(True, "# output", "   \n\t  ", None)), \
              patch("cron.scheduler.save_job_output", return_value="/tmp/out.md"), \
@@ -2811,11 +2808,7 @@ class TestSilentDelivery:
 
         deliver_mock.assert_not_called()
         mark_mock.assert_called_once_with(
-            "monitor-job",
-            False,
-            "Agent completed but produced empty response (model error, timeout, or misconfiguration)",
-            delivery_error=None,
-            tool_calls=None,
+            "monitor-job", True, None, delivery_error=None, tool_calls=None
         )
 
 
