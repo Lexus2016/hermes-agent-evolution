@@ -369,6 +369,155 @@ class TestPreToolCallBlocking:
 
 
 # =========================================================================
+# Deterministic tool-argument contract enforcement (issue #904)
+# =========================================================================
+
+class TestArgContractEnforcement:
+    """handle_function_call() re-checks args against the tool's own schema
+    at the composition boundary, right before dispatch — but only when
+    agent.tool_arg_contract.tool_arg_contract_enabled() opts in (default OFF,
+    matching agent.verify_policy's gating convention)."""
+
+    def test_disabled_by_default_lets_invalid_call_through_to_dispatch(
+        self, monkeypatch
+    ):
+        """With the feature off (the default), a call missing a required
+        arg still reaches dispatch unchanged — no new blocking behavior
+        for anyone who hasn't opted in."""
+        monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
+        monkeypatch.setattr(
+            "hermes_cli.config.load_config", lambda *a, **k: {}, raising=False
+        )
+        monkeypatch.setattr(
+            "model_tools.registry.get_schema",
+            lambda name: {
+                "parameters": {
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                }
+            },
+        )
+        monkeypatch.setattr(
+            "model_tools.registry.dispatch", lambda *a, **kw: json.dumps({"ok": True})
+        )
+
+        result = json.loads(handle_function_call("read_file", {}, task_id="t1"))
+        assert result == {"ok": True}
+
+    def test_enabled_blocks_missing_required_arg_before_dispatch(self, monkeypatch):
+        monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", "1")
+        monkeypatch.setattr(
+            "model_tools.registry.get_schema",
+            lambda name: {
+                "parameters": {
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                }
+            },
+        )
+
+        def fake_dispatch(*args, **kwargs):
+            raise AssertionError("dispatch should not run when contract is violated")
+
+        monkeypatch.setattr("model_tools.registry.dispatch", fake_dispatch)
+
+        result = json.loads(handle_function_call("read_file", {}, task_id="t1"))
+        assert "error" in result
+        assert "path" in result["error"]
+
+    def test_enabled_blocks_invalid_enum_before_dispatch(self, monkeypatch):
+        monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", "1")
+        monkeypatch.setattr(
+            "model_tools.registry.get_schema",
+            lambda name: {
+                "parameters": {
+                    "properties": {
+                        "path": {"type": "string"},
+                        "mode": {"type": "string", "enum": ["replace", "patch"]},
+                    },
+                    "required": ["path"],
+                }
+            },
+        )
+
+        def fake_dispatch(*args, **kwargs):
+            raise AssertionError("dispatch should not run when contract is violated")
+
+        monkeypatch.setattr("model_tools.registry.dispatch", fake_dispatch)
+
+        result = json.loads(
+            handle_function_call(
+                "patch", {"path": "a.txt", "mode": "bogus"}, task_id="t1"
+            )
+        )
+        assert "error" in result
+        assert "mode" in result["error"]
+
+    def test_enabled_allows_conforming_call_through_to_dispatch(self, monkeypatch):
+        monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", "1")
+        monkeypatch.setattr(
+            "model_tools.registry.get_schema",
+            lambda name: {
+                "parameters": {
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                }
+            },
+        )
+        monkeypatch.setattr(
+            "model_tools.registry.dispatch", lambda *a, **kw: json.dumps({"ok": True})
+        )
+
+        result = json.loads(
+            handle_function_call("read_file", {"path": "a.txt"}, task_id="t1")
+        )
+        assert result == {"ok": True}
+
+    def test_enabled_fires_post_tool_call_hook_with_blocked_status(self, monkeypatch):
+        hook_calls = []
+
+        def fake_invoke_hook(hook_name, **kwargs):
+            hook_calls.append((hook_name, kwargs))
+            return []
+
+        monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", "1")
+        monkeypatch.setattr("hermes_cli.plugins.invoke_hook", fake_invoke_hook)
+        monkeypatch.setattr("hermes_cli.plugins.has_hook", lambda name: True)
+        monkeypatch.setattr(
+            "model_tools.registry.get_schema",
+            lambda name: {
+                "parameters": {
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                }
+            },
+        )
+        monkeypatch.setattr(
+            "model_tools.registry.dispatch",
+            lambda *a, **kw: (_ for _ in ()).throw(AssertionError("should not run")),
+        )
+
+        handle_function_call("read_file", {}, task_id="t1")
+
+        post_call = next(c for c in hook_calls if c[0] == "post_tool_call")
+        assert post_call[1]["status"] == "blocked"
+        assert post_call[1]["error_type"] == "arg_contract_violation"
+        assert "path" in post_call[1]["error_message"]
+
+    def test_enabled_fail_open_when_tool_has_no_schema(self, monkeypatch):
+        """A tool with no registered schema is out of scope for this check —
+        it can't invent a stricter contract than none at all."""
+        monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", "1")
+        monkeypatch.setattr("model_tools.registry.get_schema", lambda name: None)
+        monkeypatch.setattr(
+            "model_tools.registry.dispatch", lambda *a, **kw: json.dumps({"ok": True})
+        )
+
+        result = json.loads(handle_function_call("read_file", {}, task_id="t1"))
+        assert result == {"ok": True}
+
+
+# =========================================================================
 # Legacy toolset map
 # =========================================================================
 

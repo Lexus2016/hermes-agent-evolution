@@ -1252,6 +1252,42 @@ def handle_function_call(
             except Exception:
                 pass  # file_tools may not be loaded yet
 
+        # Deterministic tool-argument contract check (issue #904). Re-checks
+        # the final, post-coercion/post-middleware arguments against the
+        # tool's own registered schema (``required`` fields, ``enum``
+        # values) right at the composition boundary, before dispatch()
+        # invokes the handler. Opt-in and fail-open — see
+        # agent.tool_arg_contract for rationale and default-OFF gating.
+        try:
+            from agent.tool_arg_contract import (
+                check_tool_args_contract,
+                tool_arg_contract_enabled,
+            )
+            if tool_arg_contract_enabled():
+                _contract_outcome = check_tool_args_contract(
+                    function_name, function_args, registry.get_schema(function_name)
+                )
+                if not _contract_outcome.ok:
+                    _contract_error = _contract_outcome.error_message()
+                    result = json.dumps({"error": _contract_error}, ensure_ascii=False)
+                    _emit_post_tool_call_hook(
+                        function_name=function_name,
+                        function_args=function_args,
+                        result=result,
+                        task_id=task_id,
+                        session_id=session_id,
+                        tool_call_id=tool_call_id,
+                        turn_id=turn_id,
+                        api_request_id=api_request_id,
+                        status="blocked",
+                        error_type="arg_contract_violation",
+                        error_message=_contract_error,
+                        middleware_trace=list(_tool_middleware_trace),
+                    )
+                    return result
+        except Exception as _contract_check_err:
+            logger.debug("tool_arg_contract check error: %s", _contract_check_err)
+
         # Measure tool dispatch latency so post_tool_call and
         # transform_tool_result hooks can observe per-tool duration.
         # Inspired by Claude Code 2.1.119, which added ``duration_ms`` to
