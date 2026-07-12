@@ -427,6 +427,12 @@ class TestGeneratedSystemdUnits:
         assert "ExecStop=" not in unit
         assert "ExecReload=/bin/kill -USR1 $MAINPID" in unit
         assert f"RestartForceExitStatus={GATEWAY_SERVICE_RESTART_EXIT_CODE}" in unit
+        # SuccessExitStatus must ALSO list the planned-restart code so a graceful
+        # exit-75 (SIGUSR1 restart / stale-code respawn / /restart) is recorded
+        # as a CLEAN stop, not "Failed with result 'exit-code'". Without it every
+        # planned restart pollutes systemctl status/journal as a bogus failure,
+        # masking real crashes and misreading as instability.
+        assert f"SuccessExitStatus={GATEWAY_SERVICE_RESTART_EXIT_CODE}" in unit
         # TimeoutStopSec must exceed the default drain_timeout (60s) so
         # systemd doesn't SIGKILL the cgroup before post-interrupt cleanup
         # (tool subprocess kill, adapter disconnect) runs — issue #8202.
@@ -538,6 +544,12 @@ class TestGeneratedSystemdUnits:
         assert "ExecStop=" not in unit
         assert "ExecReload=/bin/kill -USR1 $MAINPID" in unit
         assert f"RestartForceExitStatus={GATEWAY_SERVICE_RESTART_EXIT_CODE}" in unit
+        # SuccessExitStatus must ALSO list the planned-restart code so a graceful
+        # exit-75 (SIGUSR1 restart / stale-code respawn / /restart) is recorded
+        # as a CLEAN stop, not "Failed with result 'exit-code'". Without it every
+        # planned restart pollutes systemctl status/journal as a bogus failure,
+        # masking real crashes and misreading as instability.
+        assert f"SuccessExitStatus={GATEWAY_SERVICE_RESTART_EXIT_CODE}" in unit
         # TimeoutStopSec must exceed the default drain_timeout (60s) so
         # systemd doesn't SIGKILL the cgroup before post-interrupt cleanup
         # (tool subprocess kill, adapter disconnect) runs — issue #8202.
