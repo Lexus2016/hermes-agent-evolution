@@ -1,0 +1,29 @@
+name: evolution-meta-analysis
+# 08:50 daily — after the postmortem miner (06:00) and well before research
+# (09:00), so a fresh proposal record exists before the pipeline's first LLM
+# stage of the day runs. Off the :00 mark per the funnel/rubric-judge/watchdog
+# convention (avoids cron-stampede contention on the round marks).
+schedule: "50 8 * * *"
+enabled: true
+mode: PRIVATE
+
+# Deterministic meta-analysis pass — NO LLM agent (issue #906 / AEvo). Reads
+# the funnel's accumulated evidence (metrics.jsonl) and proposes AT MOST one
+# bounded adjustment per registered tunable parameter (see TUNABLE_PARAMS in
+# scripts/evolution_meta_editor.py). Writes a proposal record to
+# evolution/meta/{date}.json — advisory only. This script NEVER edits
+# cron/evolution/*.yaml itself; applying a proposal is a separate,
+# human-reviewed action.
+no_agent: true
+script: evolution_meta_editor.py
+
+# Keep on disk for the owner to review; a procedure-adjustment PROPOSAL is
+# advisory data, not an alert — nothing is delivered to channels.
+deliver: local
+
+prompt: |
+  Deterministic meta-analysis pass (no LLM). Aggregates the funnel's
+  accumulated evidence (reject rate, merged-zero streak, halt state) into a
+  process-level state snapshot and proposes bounded, registry-validated
+  adjustments to the pipeline's own min_priority_score quality bars — NEVER
+  applied automatically. See scripts/evolution_meta_editor.py (issue #906).
