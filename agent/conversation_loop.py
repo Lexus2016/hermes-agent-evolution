@@ -494,6 +494,72 @@ def _content_policy_blocked_result(
     }
 
 
+# ── User-actionable provider-error guidance (issue #758) ─────────────────
+#
+# A subset of provider-layer failures are deterministic for the current
+# (provider, model, request) tuple — they fail identically on every retry —
+# but are *user-fixable* when surfaced clearly. Historically these fell
+# through the terminal ``is_client_error`` abort with only a generic
+# "retrying won't help" line and a returned ``final_response`` that was the
+# raw provider summary. For a CLI user that's merely unhelpful; for a
+# gateway/bot user (Telegram/Discord) the raw summary with no next step made
+# the session look like it ended silently.
+#
+# Unlike ``auth`` / ``billing`` / ``content_policy_blocked`` /
+# ``ssl_cert_verification`` — which already have dedicated actionable branches
+# in the abort handler — these two reasons had none:
+#   • model_not_found — wrong/unavailable model slug → correct it or fall back
+#   • format_error   — BadRequestError / ValidationException, usually a schema
+#                      or parameter mismatch between the client and endpoint
+#
+# The guidance is keyed on the classifier's ``FailoverReason`` so the
+# classification is CONSUMED by the recovery/messaging path (not merely
+# logged — the prior gap this closes). See issue #758.
+_USER_ACTIONABLE_ABORT_REASONS = frozenset({
+    FailoverReason.model_not_found,
+    FailoverReason.format_error,
+})
+
+
+def _user_actionable_provider_guidance(
+    reason: FailoverReason,
+    *,
+    provider: str,
+    model: str,
+) -> Optional[str]:
+    """Concise, actionable recovery text for a user-fixable provider error.
+
+    Returns a short multi-line hint (first line prefixed with ``💡`` so it
+    slots into both the console ``_vprint`` guidance and the returned
+    ``final_response``) or ``None`` when ``reason`` is not one this helper
+    covers. Only the two reasons in ``_USER_ACTIONABLE_ABORT_REASONS`` are
+    handled here — the rest keep their existing dedicated branches. See
+    issue #758.
+    """
+    _provider = provider or "the provider"
+    if reason == FailoverReason.model_not_found:
+        return (
+            f"💡 The model '{model}' was rejected by {_provider} — not found or "
+            "not available on this endpoint. Retrying will not help.\n"
+            "What you can do:\n"
+            "  • Check the model name for typos, or run `hermes model` to pick a valid one.\n"
+            "  • Add a fallback model so this routes automatically: `hermes fallback add`."
+        )
+    if reason == FailoverReason.format_error:
+        return (
+            f"💡 {_provider} rejected the request as malformed (bad request / "
+            "validation error). Retrying the same request will not help — this "
+            "usually means a schema or parameter mismatch between the client and "
+            "this endpoint.\n"
+            "What you can do:\n"
+            "  • Switch to a compatible model/provider with `hermes model`, or add "
+            "a fallback: `hermes fallback add`.\n"
+            "  • If this is a local or test endpoint, verify it implements the API "
+            "schema your client expects."
+        )
+    return None
+
+
 def _sync_failover_system_message(agent, api_messages, active_system_prompt):
     """Refresh the in-flight system message after a provider failover.
 
@@ -3999,6 +4065,16 @@ def _run_conversation_impl(
                             agent._vprint(f"{agent.log_prefix}      • Does your account have access to {_model}?", force=True)
                             if base_url_host_matches(str(_base), "openrouter.ai"):
                                 agent._vprint(f"{agent.log_prefix}      • Check credits: https://openrouter.ai/settings/credits", force=True)
+                    elif classified.reason in _USER_ACTIONABLE_ABORT_REASONS:
+                        # model_not_found / format_error: user-fixable and
+                        # deterministic — surface the concrete next step instead
+                        # of the generic "retrying won't help" line. Wires the
+                        # classification into the user-facing message (#758).
+                        _actionable_guidance = _user_actionable_provider_guidance(
+                            classified.reason, provider=_provider, model=_model,
+                        )
+                        for _line in (_actionable_guidance or "").splitlines():
+                            agent._vprint(f"{agent.log_prefix}   {_line}", force=True)
                     else:
                         agent._vprint(f"{agent.log_prefix}   💡 This type of error won't be fixed by retrying.", force=True)
                     # Content-policy blocks deserve their own actionable
@@ -4087,6 +4163,31 @@ def _run_conversation_impl(
                             final_response=_policy_response,
                             error_detail=_nonretryable_summary,
                         )
+                    if classified.reason in _USER_ACTIONABLE_ABORT_REASONS:
+                        # User-fixable, deterministic provider error. Return the
+                        # actionable guidance AS the ``final_response`` so bot /
+                        # gateway users (Telegram/Discord) — who only ever see
+                        # ``final_response``, not the console ``_vprint`` lines —
+                        # get a concrete next step instead of a bare provider
+                        # summary. Keep the raw summary in ``error`` for
+                        # logs/telemetry. (#758)
+                        _actionable_guidance = _user_actionable_provider_guidance(
+                            classified.reason, provider=_provider, model=_model,
+                        )
+                        _actionable_final = (
+                            f"{_actionable_guidance}\n\nProvider message: {_nonretryable_summary}"
+                            if _actionable_guidance
+                            else _nonretryable_summary
+                        )
+                        return {
+                            "final_response": _actionable_final,
+                            "messages": messages,
+                            "api_calls": api_call_count,
+                            "completed": False,
+                            "failed": True,
+                            "error": _nonretryable_summary,
+                            "user_actionable": True,
+                        }
                     return {
                         "final_response": _nonretryable_summary,
                         "messages": messages,
