@@ -55,6 +55,17 @@ fi
 # environment. The subshell's stdout still flows straight through to ours,
 # so its last line is still the `{"wakeAgent": ...}` JSON this script's
 # contract requires as ITS last line too.
+#
+# `exit 0` here (NOT `exit $?`) is deliberate, not exit-code masking: the
+# scheduler's wake-gate contract (cron/scheduler.py `_run_job_script` +
+# `_parse_wake_gate`) treats a NONZERO/failed script run as "gate could not
+# run" and wakes the agent UNCONDITIONALLY, ignoring any JSON it printed —
+# the opposite of fail-closed. Propagating a hypothetical future nonzero
+# exit from evolution_access_gate.sh (today it always ends in a successful
+# `echo`, so this is currently moot) would flip a real failure from "don't
+# wake" into "wake anyway", which is the one outcome this whole gate exists
+# to prevent. Exiting 0 unconditionally keeps the printed JSON — not the
+# process exit code — as the single source of truth for the wake decision.
 if [ -f "$SCRIPT_DIR/evolution_access_gate.sh" ]; then
     # shellcheck disable=SC1090
     ( source "$SCRIPT_DIR/evolution_access_gate.sh" )
