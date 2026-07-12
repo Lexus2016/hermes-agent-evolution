@@ -223,6 +223,22 @@ python -m pytest tests/ -x -q
   ```
 - Only when local checks are green do you continue to commit + push + PR.
 
+**Step 2b: If the PR touches any `skills/**/SKILL.md` — bounded skill edits
+(#907, SkillOpt).** SkillOpt treats a skill's text as an optimized parameter
+and argues unbounded full-rewrites are unstable; `evolution_skill_lint.py`
+enforces a per-cycle edit budget (default 50% of the skill's line count
+changed) so a skill is nudged incrementally, not rewritten wholesale:
+
+```bash
+python scripts/evolution_skill_lint.py --skill-edit-budget
+```
+
+- **Clean** → proceed to Step 3.
+- **Violation** → split the change into a smaller increment that stays inside
+  the budget, or (if the file genuinely needs a full rewrite this cycle)
+  document why in the PR body and accept it will need human review — do not
+  bump `EVOLUTION_SKILL_EDIT_BUDGET_RATIO` just to silence the gate.
+
 **Step 3: Landability gate — fit the autonomous self-merge cap.** Integration
 merges unattended ONLY when the PR's total changed lines (additions +
 deletions, summed over ALL files — tests and docs count) is ≤ 200

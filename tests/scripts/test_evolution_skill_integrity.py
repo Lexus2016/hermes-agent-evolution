@@ -4,6 +4,12 @@ The real-repo test is the ENFORCEMENT: if any evolution skill ever instructs a
 stage to run a script that doesn't exist, or a command in a stage without the
 `terminal` toolset, CI fails — turning the lesson of #101/#188 from "the agent
 should notice" into "merge is blocked".
+
+``TestCheckSkillEditBudget`` / ``TestFindEditBudgetViolations`` cover the #907
+(SkillOpt) bounded-edit gate: the pure per-cycle churn-ratio check, exercised
+with synthetic diff stats (the git-diff IO boundary is untested here by design
+— same convention as ``evolution_merge_gate.py``'s atomic-merge IO, which is
+"exercised only via the pure policy" in its own test file).
 """
 
 import sys
@@ -12,7 +18,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from evolution_skill_lint import (  # noqa: E402
+    check_skill_edit_budget,
     extract_run_commands,
+    find_edit_budget_violations,
     find_violations,
     lint_repo,
     skill_ref_to_name,
@@ -92,3 +100,65 @@ class TestFindViolations:
 def test_skill_ref_to_name():
     assert skill_ref_to_name("evolution/research") == "evolution-research"
     assert skill_ref_to_name("evolution/upstream-sync") == "evolution-upstream-sync"
+
+
+class TestCheckSkillEditBudget:
+    """#907 (SkillOpt) — the per-cycle churn-ratio cap on one SKILL.md."""
+
+    def test_small_edit_within_budget_is_clean(self):
+        # 20 changed lines of 100 = 20%, well under the 50% default budget.
+        assert check_skill_edit_budget("skills/x/SKILL.md", 100, 10, 10) is None
+
+    def test_edit_exceeding_budget_is_flagged(self):
+        v = check_skill_edit_budget("skills/x/SKILL.md", 100, 40, 20)  # 60%
+        assert v is not None
+        assert v["kind"] == "edit_budget_exceeded"
+        assert v["path"] == "skills/x/SKILL.md"
+        assert "60%" in v["detail"]
+
+    def test_edit_at_exact_ratio_is_ok(self):
+        # Exactly at the cap (50/100 = 50%) — inclusive, not a violation.
+        assert check_skill_edit_budget("skills/x/SKILL.md", 100, 50, 0) is None
+
+    def test_edit_just_over_ratio_is_flagged(self):
+        v = check_skill_edit_budget("skills/x/SKILL.md", 100, 51, 0)
+        assert v is not None and v["kind"] == "edit_budget_exceeded"
+
+    def test_brand_new_skill_is_exempt(self):
+        # before_lines == 0 -> creation, not a rewrite.
+        assert check_skill_edit_budget("skills/x/SKILL.md", 0, 500, 0) is None
+
+    def test_tiny_existing_skill_is_exempt(self):
+        # Below MIN_SKILL_LINES_FOR_BUDGET (20) the ratio isn't meaningful yet.
+        assert check_skill_edit_budget("skills/x/SKILL.md", 10, 10, 0) is None
+
+    def test_custom_ratio_override(self):
+        # 30% churn passes the 50% default but fails a stricter 20% budget.
+        assert check_skill_edit_budget("skills/x/SKILL.md", 100, 30, 0) is None
+        v = check_skill_edit_budget("skills/x/SKILL.md", 100, 30, 0, ratio=0.2)
+        assert v is not None
+
+    def test_custom_min_lines_override(self):
+        # A 15-line skill is exempt by default (< 20) but covered once the
+        # floor is lowered.
+        assert check_skill_edit_budget("skills/x/SKILL.md", 15, 15, 0) is None
+        v = check_skill_edit_budget("skills/x/SKILL.md", 15, 15, 0, min_lines=10)
+        assert v is not None
+
+
+class TestFindEditBudgetViolations:
+    def test_mixed_diffs_only_flags_the_oversized_one(self):
+        diffs = [
+            {"path": "skills/a/SKILL.md", "before_lines": 100, "added": 10, "removed": 5},
+            {"path": "skills/b/SKILL.md", "before_lines": 100, "added": 60, "removed": 10},
+        ]
+        v = find_edit_budget_violations(diffs)
+        assert [x["path"] for x in v] == ["skills/b/SKILL.md"]
+
+    def test_no_diffs_is_clean(self):
+        assert find_edit_budget_violations([]) == []
+
+    def test_missing_keys_default_safely(self):
+        # A malformed entry (missing counts) defaults to 0 everywhere rather
+        # than raising — before_lines=0 makes it exempt (looks "new").
+        assert find_edit_budget_violations([{"path": "skills/x/SKILL.md"}]) == []
