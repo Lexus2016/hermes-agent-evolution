@@ -1602,3 +1602,163 @@ class TestClaimDispatch:
         due = get_due_jobs()
         assert due == []
         assert load_jobs() == []  # cleaned up
+
+
+class TestSchedulerFreezeHardening:
+    """Regression: a single malformed job record must NOT freeze the whole scheduler.
+
+    Re-implemented from upstream 26f040ef2 / 8e2ce4352 / c71d19c0e (hand-ported
+    rather than cherry-picked so our per-job ``delivery_verbosity`` field is
+    preserved). Each freeze case — an id-less record, a non-dict ``schedule``,
+    and a malformed ``next_run_at`` — used to raise mid-tick in
+    ``_get_due_jobs_locked`` BEFORE ``save_jobs()`` ran, discarding every healthy
+    sibling's fast-forwarded ``next_run_at`` on the exception unwind and wedging
+    the entire profile's scheduler in a per-minute loop. The guards must skip /
+    repair the bad record while healthy siblings still load and run.
+    """
+
+    def test_idless_job_does_not_crash_or_block_sibling_jobs(self, tmp_cron_dir):
+        """A job missing its 'id' key must not crash the tick or freeze siblings.
+
+        Direct jobs.json edits (bypassing create_job) sometimes used the key
+        'job_id' instead of 'id'. The logging helpers evaluated
+        ``job.get("name", job["id"])`` -- Python evaluates the default argument
+        ``job["id"]`` eagerly, so an id-less job raised ``KeyError: 'id'``
+        mid-tick, aborting the scan before ``save_jobs()`` ran.
+        """
+        healthy = create_job(prompt="Healthy", schedule="every 1h")
+
+        jobs = load_jobs()
+        # Push the healthy job beyond its grace window so the fast-forward path
+        # (one of the id-less-crash sites) runs.
+        jobs[0]["next_run_at"] = (datetime.now() - timedelta(minutes=35)).isoformat()
+        # A malformed record: no 'id' key, mirroring the real corruption.
+        jobs.append({
+            "name": "idless-job",
+            "schedule": {"kind": "cron", "expr": "0 4 * * *"},
+            "enabled": True,
+            "no_agent": True,
+            "next_run_at": None,
+        })
+        save_jobs(jobs)
+
+        # Must not raise KeyError.
+        due = get_due_jobs()
+
+        # The healthy sibling is still discovered despite the malformed neighbor.
+        assert any(d.get("id") == healthy["id"] for d in due)
+
+        # The id-less record was repaired (given an id) and persisted, not dropped.
+        loaded = load_jobs()
+        assert any(j.get("name") == "idless-job" and j.get("id") for j in loaded)
+
+    def test_bad_schedule_does_not_crash_or_block_sibling_jobs(self, tmp_cron_dir):
+        """A job with a non-dict 'schedule' (null / string / etc.) must not crash.
+
+        ``schedule.get("kind")`` / ``schedule["kind"]`` raises on a non-dict
+        value and aborts the whole scan, so healthy siblings lose their
+        fast-forwarded next_run_at.
+        """
+        past = (datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat()
+        future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+
+        bad = {
+            "id": "bad-sched",
+            "name": "bad",
+            "enabled": True,
+            "schedule": None,  # poison: not a dict
+            "next_run_at": future,  # not due
+        }
+        good = {
+            "id": "good",
+            "name": "good",
+            "enabled": True,
+            "schedule": {"kind": "interval", "minutes": 5},
+            "next_run_at": past,
+        }
+        save_jobs([bad, good])
+
+        due = get_due_jobs()
+        due_ids = [j["id"] for j in due]
+        assert "good" in due_ids
+        assert "bad-sched" not in due_ids  # bad one ignored, no crash
+
+        # The good job's record survives intact (no corruption from the neighbor).
+        loaded = {j["id"]: j for j in load_jobs()}
+        assert "good" in loaded
+
+    def test_bad_next_run_at_does_not_crash_or_block_sibling_jobs(self, tmp_cron_dir):
+        """A malformed next_run_at must not crash the due scan or starve siblings.
+
+        ``datetime.fromisoformat(next_run)`` raises on an unparseable value and
+        aborts the scan before ``save_jobs()``; the bad record must instead be
+        repaired (next_run_at cleared so recovery can set a sane value).
+        """
+        now = datetime.now(timezone.utc)
+        past = (now - timedelta(seconds=30)).isoformat()
+
+        bad_job = {
+            "id": "bad-next",
+            "schedule": {"kind": "interval", "minutes": 60},
+            "next_run_at": "not-a-valid-iso-timestamp!!!",
+            "enabled": True,
+            "created_at": past,
+        }
+        good_job = {
+            "id": "good-sibling",
+            "schedule": {"kind": "interval", "minutes": 5},
+            "next_run_at": past,
+            "enabled": True,
+            "created_at": past,
+        }
+        save_jobs([bad_job, good_job])
+
+        # Must not raise.
+        due = get_due_jobs()
+
+        ids = [j["id"] for j in due]
+        assert "good-sibling" in ids, f"healthy sibling missing from due jobs: {ids}"
+        # bad one is repaired (recomputed next_run in the future) → not yet due
+        assert "bad-next" not in ids
+
+        repaired = get_job("bad-next")
+        assert repaired is not None
+        nr = repaired.get("next_run_at")
+        if nr is not None:
+            # If present it must now be parseable.
+            datetime.fromisoformat(nr)
+
+        # Re-scanning must remain stable (no crash, sibling still due).
+        due2 = get_due_jobs()
+        assert any(j["id"] == "good-sibling" for j in due2)
+
+    def test_delivery_verbosity_still_works_alongside_guards(self, tmp_cron_dir):
+        """Our per-job delivery_verbosity field is preserved through a due scan.
+
+        Guards against a regression where the hand-ported freeze fixes might
+        strip or ignore our fork-specific field.
+        """
+        job = create_job(
+            prompt="verbose job",
+            schedule="every 1h",
+            delivery_verbosity="result_only",
+        )
+        assert job["delivery_verbosity"] == "result_only"
+
+        # A malformed neighbor triggers all the repair paths in the same scan.
+        jobs = load_jobs()
+        jobs.append({
+            "name": "idless-poison",
+            "schedule": None,
+            "next_run_at": "not-iso",
+            "enabled": True,
+            "no_agent": True,
+        })
+        save_jobs(jobs)
+
+        get_due_jobs()  # must not raise
+
+        # delivery_verbosity survives the scan / save round-trip untouched.
+        persisted = get_job(job["id"])
+        assert persisted is not None
+        assert persisted.get("delivery_verbosity") == "result_only"
