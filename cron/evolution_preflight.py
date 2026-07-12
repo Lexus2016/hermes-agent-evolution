@@ -11,6 +11,7 @@ useful input instead of failing silently.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -78,20 +79,26 @@ def _evolution_dir(hermes_home: Optional[Path] = None) -> Path:
 def _halt_state_active(hermes_home: Optional[Path] = None) -> bool:
     """Return whether the evolution pipeline halt-state file is present.
 
-    Same file, same directory resolution (:func:`_evolution_dir`) as the rest
-    of this module — i.e. the same evolution dir the scheduler already
-    resolves for ``load_digest_as_fallback``/``find_latest_digest``. Mirrors
-    ``scripts/evolution_funnel.py::is_evolution_halted()`` and
-    ``scripts/evolution_hydra_gate.py::_check_halt()``, which independently
-    do the same trivial existence check (those run as standalone script
+    ``scripts/evolution_funnel.py::is_evolution_halted()`` (the writer) and
+    ``scripts/evolution_hydra_gate.py::_check_halt()`` resolve their
+    directory as ``EVOLUTION_PROFILE_DIR`` if set, else ``~/.hermes/evolution``
+    — independently of ``HERMES_HOME``, since those run as standalone script
     copies under ``HERMES_HOME/scripts`` and cannot rely on importing this
-    package, so the check is intentionally duplicated rather than shared).
+    package. Check that exact location FIRST so a custom evolution profile
+    (``EVOLUTION_PROFILE_DIR``) still gates correctly, then fall back to
+    :func:`_evolution_dir` — the same ``HERMES_HOME``-based resolution the
+    scheduler already uses for ``load_digest_as_fallback``/
+    ``find_latest_digest``, and which matches the writer's own default when
+    neither ``EVOLUTION_PROFILE_DIR`` nor ``HERMES_HOME`` is overridden.
 
-    Fail-safe: ANY error while resolving the path or checking existence is
+    Fail-safe: ANY error while resolving a path or checking existence is
     treated as NOT halted — a broken halt check must never wrongly skip a
     job (#913).
     """
     try:
+        profile_dir = os.environ.get("EVOLUTION_PROFILE_DIR", "").strip()
+        if profile_dir and (Path(profile_dir) / "halt-state.txt").exists():
+            return True
         return (_evolution_dir(hermes_home) / "halt-state.txt").exists()
     except OSError:
         return False

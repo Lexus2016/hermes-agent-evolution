@@ -81,6 +81,31 @@ class TestHaltGate:
         with patch.object(ep, "_evolution_dir", side_effect=RuntimeError("boom")):
             assert ep._halt_state_active(tmp_path) is False
 
+    def test_evolution_profile_dir_checked_first(self, tmp_path, monkeypatch):
+        # scripts/evolution_funnel.py (the writer) resolves its directory via
+        # EVOLUTION_PROFILE_DIR when set, independently of HERMES_HOME. The
+        # gate must check that exact location too, or a custom-profile
+        # deployment's halt file would never be seen (#913 follow-up).
+        profile_dir = tmp_path / "custom-profile"
+        profile_dir.mkdir()
+        (profile_dir / "halt-state.txt").write_text("halted")
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(profile_dir))
+
+        # hermes_home points somewhere else entirely and has no halt file —
+        # the EVOLUTION_PROFILE_DIR match must still win.
+        other_home = tmp_path / "other-hermes-home"
+        (other_home / "evolution").mkdir(parents=True)
+        assert ep.should_skip_for_halt("research", other_home) is True
+
+    def test_evolution_profile_dir_unset_falls_back_to_hermes_home(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.delenv("EVOLUTION_PROFILE_DIR", raising=False)
+        evo_dir = tmp_path / "evolution"
+        evo_dir.mkdir()
+        (evo_dir / "halt-state.txt").write_text("halted")
+        assert ep.should_skip_for_halt("research", tmp_path) is True
+
 
 class TestPreflightConfig:
     def test_preflight_timeout_default(self):

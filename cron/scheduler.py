@@ -2943,6 +2943,51 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
     # at module top keeps no_agent ticks from paying for AIAgent / SessionDB
     # construction costs.
     # ---------------------------------------------------------------
+
+    # Halt-state gate (#913): scripts/evolution_funnel.py writes
+    # halt-state.txt once the pipeline has produced zero merged PRs for
+    # 5+ consecutive cycles AND zero selections for 3+ consecutive
+    # cycles. evolution_hydra_gate.py already sleeps on this file, but
+    # the individual research/analysis/implementation/introspection cron
+    # jobs spawn their own LLM agents directly and never consulted it —
+    # so a structurally-halted pipeline kept burning tokens on every
+    # scheduled stage run. Checked here, before SessionDB/AIAgent
+    # construction, any prerun script, config/model resolution, or
+    # provider/credential resolution — the earliest point in the LLM
+    # path `stage` can be known. `funnel` (deterministic, no_agent) is
+    # never gated — it already returned above and is what clears the
+    # halt once metrics recover.
+    from cron import evolution_preflight
+
+    stage = evolution_preflight.evolution_job_stage(job)
+    if stage and evolution_preflight.should_skip_for_halt(stage, _get_hermes_home()):
+        # info, not warning: halt is an expected, potentially long-lived
+        # state (can persist for days), not an anomaly — this line would
+        # otherwise spam the log on every tick of every gated stage.
+        logger.info(
+            "Job '%s' (evolution-%s): SKIPPED — evolution pipeline is "
+            "halted (halt-state.txt present). No LLM agent was spawned. "
+            "The pipeline resumes automatically once the funnel job "
+            "clears the halt (merged/selected recover), or the file can "
+            "be removed manually.",
+            job_id,
+            stage,
+        )
+        now_iso = _hermes_now().strftime("%Y-%m-%d %H:%M:%S")
+        silent_doc = (
+            f"# Cron Job: {job_name}\n\n"
+            f"**Job ID:** {job_id}\n"
+            f"**Run Time:** {now_iso}\n"
+            f"**Status:** silent (evolution pipeline halted)\n\n"
+            "The evolution pipeline is halted (zero merged PRs for 5+ "
+            "cycles and zero selections for 3+ cycles — see "
+            "scripts/evolution_funnel.py). This expensive LLM stage was "
+            "skipped to avoid burning tokens on a structurally blocked "
+            "pipeline. `funnel` keeps running and will clear the halt "
+            "automatically once metrics recover.\n"
+        )
+        return True, silent_doc, SILENT_MARKER, None
+
     from run_agent import AIAgent
 
     # Initialize SQLite session store so cron job messages are persisted
@@ -3347,7 +3392,9 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
             format_runtime_provider_error,
         )
         from hermes_cli.auth import AuthError
-        from cron import evolution_preflight
+
+        # evolution_preflight was already imported above (halt-state gate,
+        # #913) — reused here for _preflight_enabled()/preflight_provider().
 
         # F8 runtime backstop: never resolve a stored provider/base_url pair that
         # would ship a named provider's stored credential to an off-host endpoint
@@ -3409,45 +3456,11 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
         # build an agent. If it fails, return the most recent on-disk digest
         # so downstream evolution jobs still have stale-but-structured input
         # instead of failing silently during retries. (#486)
-        stage = evolution_preflight.evolution_job_stage(job)
-
-        # Halt-state gate (#913): scripts/evolution_funnel.py writes
-        # halt-state.txt once the pipeline has produced zero merged PRs for
-        # 5+ consecutive cycles AND zero selections for 3+ consecutive
-        # cycles. evolution_hydra_gate.py already sleeps on this file, but
-        # the individual research/analysis/implementation/introspection cron
-        # jobs spawn their own LLM agents directly and never consulted it —
-        # so a structurally-halted pipeline kept burning tokens on every
-        # scheduled stage run. Check BEFORE the provider ping (cheaper) and
-        # before any agent construction. `funnel` (deterministic, no_agent)
-        # is never gated — it is what clears the halt once metrics recover.
-        if stage and evolution_preflight.should_skip_for_halt(
-            stage, _get_hermes_home()
-        ):
-            logger.warning(
-                "Job '%s' (evolution-%s): SKIPPED — evolution pipeline is "
-                "halted (halt-state.txt present). No LLM agent was spawned. "
-                "The pipeline resumes automatically once the funnel job "
-                "clears the halt (merged/selected recover), or the file can "
-                "be removed manually.",
-                job_id,
-                stage,
-            )
-            now_iso = _hermes_now().strftime("%Y-%m-%d %H:%M:%S")
-            silent_doc = (
-                f"# Cron Job: {job_name}\n\n"
-                f"**Job ID:** {job_id}\n"
-                f"**Run Time:** {now_iso}\n"
-                f"**Status:** silent (evolution pipeline halted)\n\n"
-                "The evolution pipeline is halted (zero merged PRs for 5+ "
-                "cycles and zero selections for 3+ cycles — see "
-                "scripts/evolution_funnel.py). This expensive LLM stage was "
-                "skipped to avoid burning tokens on a structurally blocked "
-                "pipeline. `funnel` keeps running and will clear the halt "
-                "automatically once metrics recover.\n"
-            )
-            return True, silent_doc, SILENT_MARKER, None
-
+        #
+        # `stage` and the halt-state gate (#913) were already resolved
+        # earlier in this function, right after the no_agent short-circuit —
+        # before SessionDB/AIAgent construction, prerun scripts, and this
+        # provider resolution — so a halted job never reaches this point.
         if stage and evolution_preflight._preflight_enabled(_cfg):
             # ROOT-FIX (#486): resolve_runtime_provider() does NOT populate
             # runtime["model"] — the model is resolved into the local ``model``
