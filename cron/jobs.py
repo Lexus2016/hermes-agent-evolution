@@ -571,7 +571,7 @@ def _recoverable_oneshot_run_at(
     their requested minute still run on the next tick. Once a one-shot has
     already run, it is never eligible again.
     """
-    if schedule.get("kind") != "once":
+    if not isinstance(schedule, dict) or schedule.get("kind") != "once":
         return None
     if last_run_at:
         return None
@@ -580,7 +580,10 @@ def _recoverable_oneshot_run_at(
     if not run_at:
         return None
 
-    run_at_dt = _ensure_aware(datetime.fromisoformat(run_at))
+    try:
+        run_at_dt = _ensure_aware(datetime.fromisoformat(run_at))
+    except Exception:
+        return None
     if run_at_dt >= now - timedelta(seconds=ONESHOT_GRACE_SECONDS):
         return run_at
     return None
@@ -604,16 +607,18 @@ def _compute_grace_seconds(schedule: dict) -> int:
         return max(MIN_GRACE, min(grace, MAX_GRACE))
 
     if kind == "cron" and HAS_CRONITER:
-        try:
-            now = _hermes_now()
-            cron = croniter(schedule["expr"], now)
-            first = cron.get_next(datetime)
-            second = cron.get_next(datetime)
-            period_seconds = int((second - first).total_seconds())
-            grace = period_seconds // 2
-            return max(MIN_GRACE, min(grace, MAX_GRACE))
-        except Exception:
-            pass
+        expr = schedule.get("expr")
+        if expr:
+            try:
+                now = _hermes_now()
+                cron = croniter(expr, now)
+                first = cron.get_next(datetime)
+                second = cron.get_next(datetime)
+                period_seconds = int((second - first).total_seconds())
+                grace = period_seconds // 2
+                return max(MIN_GRACE, min(grace, MAX_GRACE))
+            except Exception:
+                pass
 
     return MIN_GRACE
 
@@ -628,28 +633,42 @@ def compute_next_run(
     """
     now = _hermes_now()
 
-    if schedule["kind"] == "once":
+    if not isinstance(schedule, dict):
+        return None
+    kind = schedule.get("kind")
+    if kind is None:
+        return None
+
+    if kind == "once":
         return _recoverable_oneshot_run_at(schedule, now, last_run_at=last_run_at)
 
-    elif schedule["kind"] == "interval":
-        minutes = schedule["minutes"]
+    elif kind == "interval":
+        minutes = schedule.get("minutes")
+        if minutes is None:
+            return None
         if last_run_at:
             # Next run is last_run + interval
-            last = _ensure_aware(datetime.fromisoformat(last_run_at))
-            next_run = last + timedelta(minutes=minutes)
+            try:
+                last = _ensure_aware(datetime.fromisoformat(last_run_at))
+                next_run = last + timedelta(minutes=minutes)
+            except Exception:
+                next_run = now + timedelta(minutes=minutes)
         else:
             # First run is now + interval
             next_run = now + timedelta(minutes=minutes)
         return next_run.isoformat()
 
-    elif schedule["kind"] == "cron":
+    elif kind == "cron":
+        expr = schedule.get("expr")
+        if not expr:
+            return None
         if not HAS_CRONITER:
             logger.warning(
                 "Cannot compute next run for cron schedule %r: 'croniter' is "
                 "not installed. croniter is a core dependency as of v0.9.x; "
                 "reinstall hermes-agent or run 'pip install croniter' in your "
                 "runtime env.",
-                schedule.get("expr"),
+                expr,
             )
             return None
         # Use last_run_at as the croniter base when available, consistent
@@ -658,8 +677,11 @@ def compute_next_run(
         # rather than to an arbitrary restart time.
         base_time = now
         if last_run_at:
-            base_time = _ensure_aware(datetime.fromisoformat(last_run_at))
-        cron = croniter(schedule["expr"], base_time)
+            try:
+                base_time = _ensure_aware(datetime.fromisoformat(last_run_at))
+            except Exception:
+                base_time = now
+        cron = croniter(expr, base_time)
         next_run = cron.get_next(datetime)
         return next_run.isoformat()
 
@@ -1530,7 +1552,7 @@ def mark_job_run(
                             "Job '%s' (%s) could not compute next_run_at; "
                             "leaving enabled and marking state=error so the "
                             "job is not silently disabled.",
-                            job.get("name", job["id"]),
+                            job.get("name", job.get("id", "?")),
                             kind,
                         )
                     else:
@@ -1584,7 +1606,7 @@ def claim_dispatch(job_id: str) -> bool:
                 save_jobs(jobs)
                 logger.info(
                     "Job '%s': dispatch limit reached (%d/%d) — removing",
-                    job.get("name", job["id"]),
+                    job.get("name", job.get("id", "?")),
                     completed,
                     times,
                 )
@@ -1594,7 +1616,7 @@ def claim_dispatch(job_id: str) -> bool:
             save_jobs(jobs)
             logger.debug(
                 "Job '%s': claimed dispatch %d/%d",
-                job.get("name", job["id"]),
+                job.get("name", job.get("id", "?")),
                 repeat["completed"],
                 times,
             )
@@ -1803,9 +1825,71 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
     """Inner implementation of get_due_jobs(); must be called with _jobs_lock held."""
     now = _hermes_now()
     raw_jobs = load_jobs()
+    needs_save = False
+
+    # Repair malformed persisted records at the source, BEFORE they are copied
+    # into ``jobs`` and BEFORE anything keys off ``job["id"]`` /
+    # ``job["schedule"]`` / ``job["next_run_at"]``. A direct jobs.json edit, an
+    # old writer, or on-disk corruption can leave a record that raises mid-tick:
+    #   - missing "id"            -> KeyError (logging helpers + the
+    #                                ``for rj in raw_jobs: if rj["id"] ...``
+    #                                persistence loops index job["id"] eagerly)
+    #   - non-dict "schedule"     -> AttributeError on schedule.get("kind") /
+    #                                schedule["expr"] / ["minutes"]
+    #   - bad "next_run_at"/      -> ValueError from datetime.fromisoformat(...)
+    #     "last_run_at"
+    # Any such raise aborts the whole scan *before* save_jobs() runs, so every
+    # healthy sibling's fast-forwarded next_run_at is recomputed in memory then
+    # discarded on the exception unwind — freezing the entire profile's
+    # scheduler in a per-minute loop. Sanitizing raw_jobs up front (before the
+    # deepcopy below) repairs the whole bug class in one pass and keeps the
+    # in-memory ``jobs`` copies clean too, so no downstream site needs guarding.
+    # Upstream: 26f040ef2 / 8e2ce4352 / c71d19c0e (re-implemented, not
+    # cherry-picked, to preserve our delivery_verbosity field).
+    for rj in raw_jobs:
+        # id-less record: recover the id from a drifted "job_id" key (older
+        # writers used it), else synthesize one.
+        if not rj.get("id"):
+            rj["id"] = rj.pop("job_id", None) or uuid.uuid4().hex[:12]
+            needs_save = True
+
+        # non-dict "schedule" (null / string / etc.): normalize to {} so the
+        # kind/expr/minutes lookups later never raise.
+        if not isinstance(rj.get("schedule"), dict):
+            rj["schedule"] = {}
+            needs_save = True
+
+        # unparseable "next_run_at": strip it so the existing "no next_run_at"
+        # recovery path recomputes a sane value and persists it for this job.
+        nr = rj.get("next_run_at")
+        if nr is not None:
+            if not isinstance(nr, str):
+                rj.pop("next_run_at", None)
+                needs_save = True
+            else:
+                try:
+                    datetime.fromisoformat(nr)
+                except Exception:
+                    rj.pop("next_run_at", None)
+                    needs_save = True
+
+        # unparseable "last_run_at" (used as the base in recovery /
+        # compute_next_run): strip it too.
+        lr = rj.get("last_run_at")
+        if lr is not None:
+            if not isinstance(lr, str):
+                rj.pop("last_run_at", None)
+                needs_save = True
+            else:
+                try:
+                    datetime.fromisoformat(lr)
+                except Exception:
+                    rj.pop("last_run_at", None)
+                    needs_save = True
+
     jobs = [_apply_skill_fields(j) for j in copy.deepcopy(raw_jobs)]
     due = []
-    needs_save = False
+
     # Resolve the one-shot running-claim stale-recovery TTL once per scan
     # (derived from HERMES_CRON_TIMEOUT). See _oneshot_run_claim_ttl_seconds.
     _run_claim_ttl = _oneshot_run_claim_ttl_seconds()
@@ -1862,7 +1946,7 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
             next_run = recovered_next
             logger.info(
                 "Job '%s' had no next_run_at; recovering %s run at %s",
-                job.get("name", job["id"]),
+                job.get("name", job.get("id", "?")),
                 recovery_kind,
                 recovered_next,
             )
@@ -1903,7 +1987,7 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
                 logger.info(
                     "Job '%s' next_run_at offset changed (%s -> %s). "
                     "Recomputing cron run to preserve local wall-clock intent: %s",
-                    job.get("name", job["id"]),
+                    job.get("name", job.get("id", "?")),
                     raw_next_run_dt.utcoffset(),
                     now.utcoffset(),
                     new_next,
@@ -1933,7 +2017,7 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
                         "Job '%s' missed its scheduled time (%s, grace=%ds). "
                         "Running now; next run provisionally set to: %s "
                         "(re-anchored on completion)",
-                        job.get("name", job["id"]),
+                        job.get("name", job.get("id", "?")),
                         next_run,
                         grace,
                         new_next,
@@ -1967,7 +2051,7 @@ def _get_due_jobs_locked() -> List[Dict[str, Any]]:
                         logger.info(
                             "Job '%s': one-shot dispatch limit reached (%d/%d) "
                             "— removing stale due entry",
-                            job.get("name", job["id"]),
+                            job.get("name", job.get("id", "?")),
                             completed,
                             times,
                         )
