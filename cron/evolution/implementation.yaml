@@ -31,6 +31,13 @@ toolsets:
   - file
   - terminal
 
+# Per-stage model allocation (#905): implementation is where capability
+# matters most (actual code changes), so this stage intentionally has no
+# model:/provider: override here — it stays unpinned and rides the
+# deployment's main/frontier default, same as today. Set model:/provider:
+# explicitly ONLY if the global default ever needs to change out from under
+# this stage without affecting research/analysis.
+
 # GitHub API configuration (uses GITHUB_TOKEN; gh CLI is preferred)
 github:
   token_env: GITHUB_TOKEN
