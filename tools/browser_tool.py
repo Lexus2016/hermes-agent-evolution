@@ -987,6 +987,42 @@ def _copy_fallback_warning(target: Dict[str, Any], result: Dict[str, Any]) -> Di
     return target
 
 
+def _annotate_browser_failure(response: Dict[str, Any]) -> Dict[str, Any]:
+    """Tag a failed browser tool response with the shared failure taxonomy.
+
+    Adds a ``failure_class`` drawn from ``agent/tool_diagnostics`` (via
+    ``browser_navigate_fallback.classify_browser_error``) so browser
+    click/type/console failures surface the same categories as
+    ``browser_navigate`` and the native tools (#745/#737). No-op on success or
+    when already tagged; never raises."""
+    if response.get("success") is False and "failure_class" not in response:
+        try:
+            from tools.browser_navigate_fallback import classify_browser_error
+
+            response["failure_class"] = classify_browser_error(response.get("error"))
+        except Exception:  # pragma: no cover - tagging must never break a result
+            pass
+    return response
+
+
+def _tag_browser_failure_class(payload: str) -> str:
+    """String-level variant of ``_annotate_browser_failure`` for call sites that
+    only have the serialized JSON (e.g. delegated ``_browser_eval`` / camofox
+    output). Returns the payload unchanged on success or unparseable input."""
+    try:
+        data = json.loads(payload)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return payload
+    if not isinstance(data, dict) or data.get("success") is not False:
+        return payload
+    if "failure_class" in data:
+        return payload
+    _annotate_browser_failure(data)
+    if "failure_class" not in data:
+        return payload
+    return json.dumps(data, ensure_ascii=False)
+
+
 def _run_chrome_fallback_command(
     task_id: str,
     command: str,
@@ -3036,12 +3072,12 @@ def browser_click(ref: str, task_id: Optional[str] = None) -> str:
     """
     if _is_camofox_mode():
         from tools.browser_camofox import camofox_click
-        return camofox_click(ref, task_id)
+        return _tag_browser_failure_class(camofox_click(ref, task_id))
 
     effective_task_id = _last_session_key(task_id or "default")
     blocked = _blocked_private_page_action(effective_task_id, "click")
     if blocked is not None:
-        return blocked
+        return _tag_browser_failure_class(blocked)
 
     # Ensure ref starts with @
     if not ref.startswith("@"):
@@ -3060,6 +3096,7 @@ def browser_click(ref: str, task_id: Optional[str] = None) -> str:
             "success": False,
             "error": result.get("error", f"Failed to click {ref}")
         }
+        _annotate_browser_failure(response)
         return json.dumps(_copy_fallback_warning(response, result), ensure_ascii=False)
 
 
@@ -3077,12 +3114,12 @@ def browser_type(ref: str, text: str, task_id: Optional[str] = None) -> str:
     """
     if _is_camofox_mode():
         from tools.browser_camofox import camofox_type
-        return camofox_type(ref, text, task_id)
+        return _tag_browser_failure_class(camofox_type(ref, text, task_id))
 
     effective_task_id = _last_session_key(task_id or "default")
     blocked = _blocked_private_page_action(effective_task_id, "type")
     if blocked is not None:
-        return blocked
+        return _tag_browser_failure_class(blocked)
 
     # Ensure ref starts with @
     if not ref.startswith("@"):
@@ -3116,6 +3153,7 @@ def browser_type(ref: str, text: str, task_id: Optional[str] = None) -> str:
             "success": False,
             "error": result.get("error", f"Failed to type into {ref}")
         }
+        _annotate_browser_failure(response)
         response = _copy_fallback_warning(response, result)
         response = redact_browser_typed_text_for_display(response, text)
         return json.dumps(response, ensure_ascii=False)
@@ -3292,27 +3330,33 @@ def browser_console(clear: bool = False, expression: Optional[str] = None, task_
     if expression is not None:
         policy_error = _enforce_browser_eval_policy(expression)
         if policy_error:
-            return json.dumps({"success": False, "error": policy_error}, ensure_ascii=False)
-        return _browser_eval(expression, task_id)
+            return json.dumps(
+                _annotate_browser_failure({"success": False, "error": policy_error}),
+                ensure_ascii=False,
+            )
+        return _tag_browser_failure_class(_browser_eval(expression, task_id))
 
     # --- Console output mode (original behaviour) ---
     if _is_camofox_mode():
         from tools.browser_camofox import camofox_console
-        return camofox_console(clear, task_id)
+        return _tag_browser_failure_class(camofox_console(clear, task_id))
 
     effective_task_id = _last_session_key(task_id or "default")
 
     if _eval_ssrf_guard_active(effective_task_id):
         _blocked_url = _current_page_private_url(effective_task_id)
         if _blocked_url:
-            return json.dumps({
-                "success": False,
-                "error": (
-                    "Blocked: page URL targets a private or internal address "
-                    f"({_blocked_url}). This may have been caused by a "
-                    "JavaScript navigation via browser_console."
-                ),
-            }, ensure_ascii=False)
+            return json.dumps(
+                _annotate_browser_failure({
+                    "success": False,
+                    "error": (
+                        "Blocked: page URL targets a private or internal address "
+                        f"({_blocked_url}). This may have been caused by a "
+                        "JavaScript navigation via browser_console."
+                    ),
+                }),
+                ensure_ascii=False,
+            )
 
     console_args = ["--clear"] if clear else []
     error_args = ["--clear"] if clear else []

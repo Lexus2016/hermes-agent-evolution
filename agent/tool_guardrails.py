@@ -80,6 +80,14 @@ class ToolCallGuardrailConfig:
     same_tool_failure_halt_after: int = 8
     no_progress_warn_after: int = 2
     no_progress_block_after: int = 5
+    # #745 — browser tools spiral expensively (each call drives a real browser)
+    # and their deterministic failures (CDP down, nav timeout, missing tool) do
+    # not recover on a blind retry. Cap consecutive same-browser-tool failures
+    # this turn and HALT regardless of ``hard_stop_enabled`` — mirroring the
+    # always-on per-URL cap in ``tools/browser_navigate_fallback`` — so a browser
+    # retry spiral is bounded even in the default (hard-stop-off) mode. ``0``
+    # disables the browser cap (falls back to the generic same-tool behaviour).
+    browser_failure_cap: int = 3
     idempotent_tools: frozenset[str] = field(default_factory=lambda: IDEMPOTENT_TOOL_NAMES)
     mutating_tools: frozenset[str] = field(default_factory=lambda: MUTATING_TOOL_NAMES)
 
@@ -123,6 +131,10 @@ class ToolCallGuardrailConfig:
             no_progress_block_after=_positive_int(
                 hard_stop_after.get("idempotent_no_progress", data.get("no_progress_block_after")),
                 defaults.no_progress_block_after,
+            ),
+            browser_failure_cap=_non_negative_int(
+                data.get("browser_failure_cap"),
+                defaults.browser_failure_cap,
             ),
         )
 
@@ -339,6 +351,35 @@ class ToolCallGuardrailController:
             same_count = self._same_tool_failure_counts.get(tool_name, 0) + 1
             self._same_tool_failure_counts[tool_name] = same_count
 
+            # #745 — browser tools get an always-on per-tool failure cap that
+            # halts REGARDLESS of ``hard_stop_enabled``. Browser retries are
+            # expensive and their deterministic failures (CDP down, nav timeout,
+            # missing tool) do not recover on a blind retry, so bound the spiral
+            # even in the default hard-stop-off mode. This mirrors the per-URL
+            # cap in ``tools/browser_navigate_fallback`` and does NOT change the
+            # generic hard_stop circuit breaker for native tools below.
+            if (
+                self.config.browser_failure_cap >= 1
+                and _is_browser_tool(tool_name)
+                and same_count >= self.config.browser_failure_cap
+            ):
+                decision = ToolGuardrailDecision(
+                    action="halt",
+                    code="browser_tool_failure_cap",
+                    message=(
+                        f"Stopped {tool_name}: it failed {same_count} times this turn, "
+                        f"reaching the browser retry cap ({self.config.browser_failure_cap}). "
+                        "Browser retries are expensive and this failure is deterministic — "
+                        "stop re-driving the browser and use the fallback."
+                    ),
+                    tool_name=tool_name,
+                    count=same_count,
+                    signature=signature,
+                    fallback_directive=_fallback_directive_for(tool_name),
+                )
+                self._halt_decision = decision
+                return decision
+
             if self.config.hard_stop_enabled and same_count >= self.config.same_tool_failure_halt_after:
                 decision = ToolGuardrailDecision(
                     action="halt",
@@ -495,12 +536,36 @@ _TOOL_FALLBACK_DIRECTIVE: dict[str, str] = {
     "image_generate": "report the visual blocker and supply a text description/placeholder instead of retrying, or verify the prompt and image-provider configuration",
     "video_analyze": "verify the video path and format with read_file, or work from a text summary of the video instead of retrying",
     "video_generate": "report the visual blocker and supply a text placeholder instead of retrying, or verify the prompt and video-provider configuration",
+    # #745 — browser tools: a deterministic browser failure (backend down, nav
+    # timeout, stale ref) does not recover on a blind retry. Route to the
+    # web_extract/web_search text fallback or a fresh snapshot instead of
+    # re-driving the browser.
+    "browser_navigate": "use web_extract or web_search for this URL instead of re-navigating; the page-text fallback is in the last result",
+    "browser_click": "re-run browser_snapshot to refresh element refs, or extract the page text with web_extract instead of retrying the same ref",
+    "browser_type": "re-run browser_snapshot to refresh element refs, or extract the page text with web_extract instead of retrying the same ref",
+    "browser_console": "the JS eval failed deterministically; read values via browser_snapshot or extract the page with web_extract instead of re-evaluating",
 }
+
+# #745 — generic fallback for any browser_* tool not explicitly listed above.
+_BROWSER_FALLBACK_DIRECTIVE = (
+    "stop re-driving the browser; use web_extract/web_search on the target URL, "
+    "or work from the page text already retrieved, instead of retrying"
+)
+
+
+def _is_browser_tool(tool_name: str) -> bool:
+    """Whether ``tool_name`` is a browser tool subject to the browser retry cap."""
+    return tool_name.startswith("browser_")
 
 
 def _fallback_directive_for(tool_name: str) -> str:
     """Return a concise fallback directive for a failing tool, or empty string."""
-    return _TOOL_FALLBACK_DIRECTIVE.get(tool_name, "")
+    directive = _TOOL_FALLBACK_DIRECTIVE.get(tool_name)
+    if directive is not None:
+        return directive
+    if _is_browser_tool(tool_name):
+        return _BROWSER_FALLBACK_DIRECTIVE
+    return ""
 
 
 def _coerce_args(args: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -549,6 +614,18 @@ def _positive_int(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return parsed if parsed >= 1 else default
+
+
+def _non_negative_int(value: Any, default: int) -> int:
+    """Like ``_positive_int`` but allows ``0`` (used to DISABLE the browser
+    failure cap). Negative values fall back to the default."""
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
 
 
 def _sha256(value: str) -> str:

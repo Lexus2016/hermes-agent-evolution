@@ -1,31 +1,66 @@
-"""Tests for tools/browser_navigate_fallback.py (#234/#213)."""
+"""Tests for tools/browser_navigate_fallback.py (#234/#213/#745).
 
+Since #745 the browser failure classes are the SHARED ``agent/tool_diagnostics``
+categories (no parallel browser-only taxonomy): CDP/backend down -> provider_dead,
+navigation timeout -> timeout, absent tool set -> missing_command, DOM read
+failure / generic -> runtime_error.
+"""
+
+import agent.tool_diagnostics as td
 import tools.browser_navigate_fallback as bnf
 
 
-class TestClassify:
-    def test_cdp_unavailable(self):
-        assert bnf.classify_navigation_error("CDP command timed out: Page.navigate") in (
-            "cdp_unavailable", "navigation_timeout")  # both are valid; timeout wins by order
+# Every class the browser classifier can return must be a real tool_diagnostics
+# category — this is what "no parallel taxonomy" means concretely.
+_SHARED_CATEGORIES = {cat for _pat, cat, _hint in td._RULES}
 
-    def test_pure_cdp(self):
-        assert bnf.classify_navigation_error("Could not connect to Chrome backend") == "cdp_unavailable"
+
+class TestClassify:
+    def test_cdp_timed_out_is_provider_dead_or_timeout(self):
+        # "CDP ... timed out" matches both the CDP (provider_dead) and timeout
+        # signals; the CDP rule is ordered first, so provider_dead wins.
+        assert bnf.classify_browser_error("CDP command timed out: Page.navigate") in (
+            "provider_dead", "timeout"
+        )
+
+    def test_pure_cdp_is_provider_dead(self):
+        assert bnf.classify_browser_error("Could not connect to Chrome backend") == "provider_dead"
 
     def test_timeout(self):
-        assert bnf.classify_navigation_error("navigation timed out after 60s") == "navigation_timeout"
+        assert bnf.classify_browser_error("navigation timed out after 60s") == "timeout"
 
-    def test_tool_not_present(self):
-        assert bnf.classify_navigation_error("Tool does not exist. Available tools: open, click") == "tool_not_present"
+    def test_tool_not_present_is_missing_command(self):
+        assert bnf.classify_browser_error(
+            "Tool does not exist. Available tools: open, click"
+        ) == "missing_command"
 
-    def test_dom_error(self):
-        assert bnf.classify_navigation_error("Could not compute box model") == "dom_error"
+    def test_dom_error_is_runtime_error(self):
+        assert bnf.classify_browser_error("Could not compute box model") == "runtime_error"
 
-    def test_generic(self):
-        assert bnf.classify_navigation_error("something weird happened") == "navigation_error"
+    def test_generic_is_runtime_error(self):
+        assert bnf.classify_browser_error("something weird happened") == "runtime_error"
 
-    def test_empty(self):
-        assert bnf.classify_navigation_error(None) == "navigation_error"
-        assert bnf.classify_navigation_error("") == "navigation_error"
+    def test_empty_is_runtime_error(self):
+        assert bnf.classify_browser_error(None) == "runtime_error"
+        assert bnf.classify_browser_error("") == "runtime_error"
+
+    def test_navigation_alias_matches_browser_error(self):
+        # Back-compat alias returns the same shared category.
+        assert bnf.classify_navigation_error("navigation timed out") == "timeout"
+
+    def test_all_outputs_are_shared_categories(self):
+        samples = [
+            "Could not connect to Chrome backend",
+            "navigation timed out after 60s",
+            "Tool does not exist. Available tools: open",
+            "Could not compute box model",
+            "something weird happened",
+            "permission denied writing profile",
+            None,
+            "",
+        ]
+        for s in samples:
+            assert bnf.classify_browser_error(s) in _SHARED_CATEGORIES
 
 
 class TestFailureCounter:
@@ -59,7 +94,8 @@ class TestBuildNavigationFailure:
         monkeypatch.setattr(bnf, "web_extract_fallback", lambda url: (None, "extract boom"))
         r = bnf.build_navigation_failure("https://x", "Could not connect to Chrome")
         assert r["fallback_used"] is None
-        assert r["failure_class"] == "cdp_unavailable"
+        assert r["failure_class"] == "provider_dead"
+        assert r["failure_class"] in _SHARED_CATEGORIES
         assert r["fallback_error"] == "extract boom"
         assert "web_search" in r["recovery"] or "extracted" in r["recovery"]
 
@@ -70,3 +106,4 @@ class TestBuildNavigationFailure:
         r = bnf.build_navigation_failure("https://x", "timeout")
         assert r["nav_failures_for_url"] == bnf.MAX_NAV_FAILURES
         assert "cap" in r["recovery"].lower() and "STOP" in r["recovery"]
+
