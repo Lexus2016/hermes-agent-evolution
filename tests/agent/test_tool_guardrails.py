@@ -46,6 +46,7 @@ def test_default_config_is_soft_warning_only_with_hard_stop_disabled():
     assert cfg.exact_failure_block_after == 5
     assert cfg.same_tool_failure_halt_after == 8
     assert cfg.no_progress_block_after == 5
+    assert cfg.browser_failure_cap == 3
 
 
 def test_config_parses_nested_warn_and_hard_stop_thresholds():
@@ -457,3 +458,152 @@ def test_append_guidance_no_directive_for_allow_decision():
     )
     result = append_toolguard_guidance("output", decision)
     assert result == "output"
+
+
+# ── #745: browser tool retry-spiral cap (always-on, hard_stop-independent) ─────
+
+
+def test_browser_failure_cap_halts_spiral_with_hard_stop_off():
+    """A browser tool spiral halts at the browser cap even with hard_stop OFF.
+
+    This is the core #745 regression: the 15-consecutive browser_navigate /
+    10-consecutive browser_console spirals from the trace must be bounded in the
+    default (hard-stop-off) mode, not only when the generic circuit breaker is on.
+    """
+    controller = ToolCallGuardrailController()  # defaults: hard_stop_enabled=False
+    assert controller.config.hard_stop_enabled is False
+    assert controller.config.browser_failure_cap == 3
+
+    # Simulate a cross-iteration spiral: same browser tool, varying args (a
+    # broken backend fails regardless of URL), each result a failure.
+    decisions = []
+    for i in range(6):
+        # before_call would still allow (hard_stop off), but the after_call cap
+        # records a halt that ends the turn.
+        assert controller.before_call("browser_navigate", {"url": f"https://x/{i}"}).allows_execution
+        decisions.append(
+            controller.after_call(
+                "browser_navigate",
+                {"url": f"https://x/{i}"},
+                '{"success": false, "error": "Could not connect to Chrome backend"}',
+                failed=True,
+            )
+        )
+
+    # First two failures do not hit the cap (cap=3); the third halts and the
+    # spiral is stopped — no unbounded 15-in-a-row.
+    assert decisions[0].action == "allow"
+    halt = decisions[2]
+    assert halt.action == "halt"
+    assert halt.should_halt is True
+    assert halt.code == "browser_tool_failure_cap"
+    assert halt.count == 3
+    assert halt.fallback_directive != ""
+    assert controller.halt_decision is not None
+    assert controller.halt_decision.code == "browser_tool_failure_cap"
+
+
+def test_browser_failure_cap_applies_to_console_and_click():
+    """The cap covers every browser_* tool, not just navigate (browser_console
+    spiraled 10× in the trace)."""
+    for tool in ("browser_console", "browser_click", "browser_type"):
+        controller = ToolCallGuardrailController()
+        last = None
+        for _ in range(3):
+            last = controller.after_call(
+                tool, {"x": 1}, '{"success": false, "error": "boom"}', failed=True
+            )
+        assert last.action == "halt", tool
+        assert last.code == "browser_tool_failure_cap", tool
+        assert last.tool_name == tool
+
+
+def test_browser_cap_does_not_fire_before_threshold():
+    """Below the cap, browser failures only warn — the cap does not over-trigger."""
+    controller = ToolCallGuardrailController()
+    first = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    second = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    assert first.action == "allow"
+    assert second.action == "warn"  # exact_failure_warn_after == 2
+    assert controller.halt_decision is None
+
+
+def test_browser_cap_can_be_disabled():
+    """browser_failure_cap=0 disables the browser cap; spirals then follow the
+    generic same-tool behaviour (warn-only when hard_stop is off)."""
+    controller = ToolCallGuardrailController(ToolCallGuardrailConfig(browser_failure_cap=0))
+    decisions = [
+        controller.after_call(
+            "browser_navigate", {"url": f"u{i}"}, '{"error":"boom"}', failed=True
+        )
+        for i in range(6)
+    ]
+    assert all(d.action != "halt" for d in decisions)
+    assert controller.halt_decision is None
+
+
+def test_browser_cap_leaves_native_tool_hard_stop_semantics_unchanged():
+    """The always-on browser cap must not leak into native tools: with hard_stop
+    OFF, a native same-tool failure spiral still only warns (never halts)."""
+    controller = ToolCallGuardrailController()  # hard_stop off
+    decisions = [
+        controller.after_call(
+            "terminal", {"command": f"cmd-{i}"}, '{"exit_code":1}', failed=True
+        )
+        for i in range(10)
+    ]
+    assert all(d.action != "halt" for d in decisions)
+    assert controller.halt_decision is None
+
+
+def test_browser_cap_success_resets_streak():
+    """A successful browser call clears the failure streak, so the cap only
+    fires on a genuine consecutive spiral."""
+    controller = ToolCallGuardrailController()
+    controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    # A success resets the same-tool failure count.
+    controller.after_call("browser_navigate", {"url": "u"}, '{"success": true}', failed=False)
+    # Two more failures should NOT reach the cap (streak restarted at 1, 2).
+    d1 = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    d2 = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    assert d1.action != "halt"
+    assert d2.action != "halt"
+    assert controller.halt_decision is None
+
+
+def test_browser_cap_reset_for_turn_clears_streak():
+    """Per-turn reset clears the browser failure streak (no cross-turn leakage)."""
+    controller = ToolCallGuardrailController()
+    for _ in range(3):
+        controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    assert controller.halt_decision is not None
+    controller.reset_for_turn()
+    assert controller.halt_decision is None
+    d = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    assert d.action == "allow"
+
+
+def test_browser_failure_cap_parsed_from_mapping():
+    cfg = ToolCallGuardrailConfig.from_mapping({"browser_failure_cap": 5})
+    assert cfg.browser_failure_cap == 5
+    # 0 is honoured (disables); negative falls back to default.
+    assert ToolCallGuardrailConfig.from_mapping({"browser_failure_cap": 0}).browser_failure_cap == 0
+    assert ToolCallGuardrailConfig.from_mapping({"browser_failure_cap": -3}).browser_failure_cap == 3
+    assert ToolCallGuardrailConfig.from_mapping({}).browser_failure_cap == 3
+
+
+def test_browser_fallback_directive_for_all_browser_tools():
+    """Every browser_* tool resolves a non-empty fallback directive (explicit or
+    the generic browser default)."""
+    from agent.tool_guardrails import _fallback_directive_for
+
+    assert "web_extract" in _fallback_directive_for("browser_navigate")
+    assert "snapshot" in _fallback_directive_for("browser_click")
+    # An unlisted browser tool still gets the generic browser directive.
+    assert _fallback_directive_for("browser_get_images") == (
+        "stop re-driving the browser; use web_extract/web_search on the target URL, "
+        "or work from the page text already retrieved, instead of retrying"
+    )
+    # Non-browser unknown tools remain empty (unchanged behaviour).
+    assert _fallback_directive_for("mcp_custom_tool") == ""
