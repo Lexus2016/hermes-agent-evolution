@@ -526,6 +526,7 @@ def _user_actionable_provider_guidance(
     *,
     provider: str,
     model: str,
+    phase: str = "abort",
 ) -> Optional[str]:
     """Concise, actionable recovery text for a user-fixable provider error.
 
@@ -535,13 +536,29 @@ def _user_actionable_provider_guidance(
     covers. Only the two reasons in ``_USER_ACTIONABLE_ABORT_REASONS`` are
     handled here — the rest keep their existing dedicated branches. See
     issue #758.
+
+    ``phase`` selects only the *opening sentence* so the same single-sourced
+    recovery steps are reused by both callers (never forked):
+      * ``"abort"`` (default) — the reactive #758 path, AFTER the provider
+        rejected the model. Byte-for-byte identical to the original wording.
+      * ``"preflight"`` — the proactive #929 path, caught BEFORE any request
+        was sent, so the lead is phrased accordingly.
     """
     _provider = provider or "the provider"
     if reason == FailoverReason.model_not_found:
+        if phase == "preflight":
+            _lead = (
+                f"💡 Pre-flight check: '{model}' is not a usable model name for "
+                f"{_provider}, so no request was sent. This fails the same way "
+                "every time until the model name is fixed.\n"
+            )
+        else:
+            _lead = (
+                f"💡 The model '{model}' was rejected by {_provider} — not found or "
+                "not available on this endpoint. Retrying will not help.\n"
+            )
         return (
-            f"💡 The model '{model}' was rejected by {_provider} — not found or "
-            "not available on this endpoint. Retrying will not help.\n"
-            "What you can do:\n"
+            _lead + "What you can do:\n"
             "  • Check the model name for typos, or run `hermes model` to pick a valid one.\n"
             "  • Add a fallback model so this routes automatically: `hermes fallback add`."
         )
@@ -558,6 +575,87 @@ def _user_actionable_provider_guidance(
             "schema your client expects."
         )
     return None
+
+
+def _preflight_model_validation_result(agent, messages):
+    """Early turn-result if the configured model is structurally unresolvable (#929).
+
+    Runs once per turn, BEFORE the first provider request. Complements #758's
+    reactive path: instead of burning a full round trip on a model name the
+    provider can never serve (and, in unattended cron/subagent contexts,
+    risking a cascade into provider connection exhaustion), catch the
+    deterministic failures locally and fail fast with the SAME actionable
+    guidance style — reusing ``_user_actionable_provider_guidance`` with
+    ``phase="preflight"`` rather than forking the message.
+
+    Returns a turn-result ``dict`` (``api_calls == 0``, ``user_actionable``)
+    on a validation miss, or ``None`` to proceed normally. LOCAL-only; see
+    ``agent/model_preflight.py`` for the validation-source boundary. The check
+    must never itself break a run, so any unexpected error fails open.
+    """
+    try:
+        from agent.model_preflight import check_model
+    except Exception:
+        return None
+
+    provider = str(getattr(agent, "provider", "") or "")
+    model = getattr(agent, "model", "")
+    base_url = str(getattr(agent, "base_url", "") or "")
+
+    # ACP/relay transports don't route through a conventional model catalog —
+    # their "model" is managed by the subprocess. Skip to avoid false positives.
+    _base_l = base_url.lower()
+    if (
+        provider in {"copilot-acp"}
+        or _base_l.startswith("acp://")
+        or _base_l.startswith("acp+tcp://")
+    ):
+        return None
+
+    try:
+        miss = check_model(provider, model, base_url)
+    except Exception:
+        return None
+    if miss is None:
+        return None
+
+    guidance = _user_actionable_provider_guidance(
+        FailoverReason.model_not_found,
+        provider=provider,
+        model=str(model),
+        phase="preflight",
+    )
+    _parts = [guidance] if guidance else []
+    if miss.suggestions:
+        _parts.append(
+            f"  • Known-good models for {provider or 'this provider'}: "
+            f"{', '.join(miss.suggestions)}."
+        )
+    final_response = (
+        "\n".join(_parts) if _parts else f"Model pre-flight failed: {miss.detail}."
+    )
+
+    # Console guidance for CLI users; bot/gateway users read ``final_response``.
+    for _line in final_response.splitlines():
+        agent._vprint(f"{agent.log_prefix}   {_line}", force=True)
+    logger.error(
+        "%sPre-flight model validation failed (no request sent): %s "
+        "(provider=%s model=%r)",
+        agent.log_prefix,
+        miss.detail,
+        provider,
+        model,
+    )
+
+    return {
+        "final_response": final_response,
+        "messages": messages,
+        "api_calls": 0,
+        "completed": False,
+        "failed": True,
+        "error": f"model_preflight: {miss.detail}",
+        "user_actionable": True,
+    }
 
 
 def _sync_failover_system_message(agent, api_messages, active_system_prompt):
@@ -742,6 +840,16 @@ def _run_conversation_impl(
             effective_task_id=effective_task_id,
             should_review_memory=_should_review_memory,
         )
+
+    # Pre-flight provider/model validation (#929): catch a structurally
+    # unresolvable model config BEFORE the first provider request, so the turn
+    # fails fast with actionable guidance instead of burning a round trip on a
+    # model the provider can never serve. Skipped for MOA (multi-model routing
+    # has its own dispatch). Complements #758's reactive recovery path.
+    if moa_config is None:
+        _preflight_result = _preflight_model_validation_result(agent, messages)
+        if _preflight_result is not None:
+            return _preflight_result
 
     while (api_call_count < agent.max_iterations and agent.iteration_budget.remaining > 0) or agent._budget_grace_call:
         # Reset per-turn checkpoint dedup so each iteration can take one snapshot
