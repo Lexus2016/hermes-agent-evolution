@@ -20,6 +20,29 @@ skill's canonical name is ``evolution-research``. We normalize ``/`` -> ``-``
 so the scheduler resolves the real skill (``evolution/analysis`` ->
 ``evolution-analysis``, etc.).
 
+Per-stage model allocation (#905)
+----------------------------------
+A stage YAML may set optional ``model:`` / ``provider:`` keys to pin that
+stage to a specific model — e.g. a cheaper/mid-tier model for the broad,
+capability-flat research/analysis stages, leaving implementation on the
+deployment's main/frontier default. Both are independent and optional;
+omitting either leaves that axis unpinned (follows the global config
+default, same as today). This is a *static per-stage* pin, distinct from
+the *dynamic per-subtask* complexity routing added by #798
+(``evolution_draft_selector.route_cost_tier`` / ``model_hint`` on delegated
+worker tasks) — the two do not overlap.
+
+Caveat: ``model`` and ``provider`` reconcile independently (each only
+updates when its own YAML value differs from the stored one), matching the
+pre-existing skills/toolsets pattern below. cron.jobs.create_job/update_job
+already allow pinning either axis alone, with no cross-validation between
+them — that is inherited, not introduced here. If a stage's model and
+provider are both pinned, always edit both together when changing either;
+an edit that changes only one of the two while the job already has a
+mismatched value for the other risks an invalid model/provider combination
+at run time. The shipped stage YAMLs avoid this by leaving both commented
+out as a single paired block (see research.yaml / analysis.yaml).
+
 Usage
 -----
     python scripts/register_evolution_cron.py [--dry-run] [SRC_DIR]
@@ -411,6 +434,16 @@ def main(argv: list[str]) -> int:
         skills = _normalize_skills(spec.get("skills"))
         toolsets = _normalize_toolsets(spec.get("toolsets"))
         deliver = str(spec.get("deliver") or "local").strip()
+        # Per-stage model allocation (#905): an evolution stage may pin a
+        # cheaper/mid-tier model (research, analysis) while leaving others
+        # (implementation) on the deployment's main/frontier default. Both
+        # keys are optional and independent — omitting one leaves that axis
+        # unpinned (follows global config, same as today). Values pass
+        # through to cron.jobs.create_job/update_job unchanged; that layer
+        # already validates/normalizes and (#44585) drift-guards unpinned
+        # jobs against a later global default change.
+        model = str(spec.get("model") or "").strip() or None
+        provider = str(spec.get("provider") or "").strip() or None
 
         # Refuse to register (or reconcile) an agent job whose skills need a
         # toolset the job definition does not grant — the scheduled job could
@@ -459,6 +492,15 @@ def main(argv: list[str]) -> int:
                     cur.get("enabled_toolsets") or []
                 ):
                     changes["enabled_toolsets"] = toolsets
+                # model/provider (#905): same "None means leave as-is" rule as
+                # skills/toolsets above — a YAML that doesn't mention model:/
+                # provider: must never clear an already-pinned job back to
+                # unpinned. The two reconcile independently (see module
+                # docstring caveat) — always edit both together in the YAML.
+                if model is not None and model != cur.get("model"):
+                    changes["model"] = model
+                if provider is not None and provider != cur.get("provider"):
+                    changes["provider"] = provider
                 # Detect script changes (e.g. Hydra replacing access gate)
                 cur_script = str(cur.get("script") or "").strip()
                 yaml_script = str(spec.get("script") or "").strip()
@@ -507,6 +549,8 @@ def main(argv: list[str]) -> int:
                 skills=skills,
                 enabled_toolsets=toolsets,
                 deliver=deliver,
+                model=model,
+                provider=provider,
             )
             # Does the YAML define its own script? (Hydra gate, etc.)
             yaml_script = str(spec.get("script") or "").strip() if not no_agent else None
