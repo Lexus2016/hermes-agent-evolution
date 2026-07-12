@@ -1,0 +1,59 @@
+# A2A Agent Card configuration schema.
+#
+# Consumed by hermes_cli/a2a.py to build the Agent Card served at
+# /.well-known/agent.json. Every key overlays the built-in defaults in
+# _DEFAULT_CONFIG, so this file can be partial. Keys use the A2A protocol's
+# camelCase where they map directly onto Agent Card fields.
+
+# Master switch. When false the discovery endpoint returns 404 (Hermes stops
+# advertising an Agent Card) without any code change.
+enabled: true
+
+# Human-facing identity of this agent on the A2A network.
+name: "Hermes"
+description: "Hermes agent advertising its tools and skills over A2A."
+
+# A2A service endpoint. A leading-slash (relative) value is resolved against
+# the incoming request's scheme+host, so the card advertises an absolute URL
+# without hardcoding a hostname. SECURITY: behind a reverse proxy that does not
+# pin the Host header, set an absolute https URL here to stop a spoofed Host
+# from redirecting A2A callers to an attacker origin. NOTE: the A2A JSON-RPC
+# server itself is a later slice (#881); this only advertises where it lives.
+url: "/a2a"
+
+# version: omit to inherit the running Hermes version (hermes_cli.__version__).
+
+# Card provider block (organization + homepage).
+provider:
+  organization: "NousResearch"
+  url: "https://github.com/NousResearch/hermes"
+
+# Advertised authentication methods (A2A "auth methods"). Slice 1 only
+# publishes the schemes; enforcement arrives with the server slice (#881).
+authentication:
+  schemes:
+    - "bearer"
+
+# A2A protocol capabilities. All false for Slice 1 (discovery only) -- the
+# streaming / push-notification server behaviours come with #881.
+capabilities:
+  streaming: false
+  pushNotifications: false
+  stateTransitionHistory: false
+
+# Default IO content modes advertised on the card and per skill.
+defaultInputModes:
+  - "text"
+defaultOutputModes:
+  - "text"
+
+# Which existing Hermes capabilities to surface as A2A skills, and the cap on
+# the total number of skill entries (tools are listed first).
+expose:
+  tools: true
+  skills: true
+  max_skills: 128
+  # Names to hide from the public card. Accepts a tool name (e.g. "shell_exec")
+  # or a skill id ("skill:<name>"). The card is public, so blocklist any tool
+  # whose mere existence you would rather not advertise. Empty = advertise all.
+  exclude: []
