@@ -11,6 +11,7 @@ useful input instead of failing silently.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -30,6 +31,19 @@ _EVOLUTION_STAGES = {
     "funnel": ".md",
     "integration": ".md",
 }
+
+# Stages that spawn an expensive LLM agent and must respect the pipeline
+# halt-state file written by scripts/evolution_funnel.py (merged=0 for 5+
+# cycles AND selected=0 for 3+ cycles). `funnel` is a deterministic no_agent
+# job that MUST keep running every cycle regardless of halt state — it is
+# what measures recovery and clears halt-state.txt once metrics improve.
+# `integration` is intentionally left ungated for now (#913).
+_HALT_GATED_STAGES = frozenset({
+    "introspection",
+    "analysis",
+    "implementation",
+    "research",
+})
 
 
 def evolution_job_stage(job: Dict[str, Any]) -> Optional[str]:
@@ -60,6 +74,62 @@ def evolution_job_stage(job: Dict[str, Any]) -> Optional[str]:
 def _evolution_dir(hermes_home: Optional[Path] = None) -> Path:
     home = (hermes_home or get_hermes_home()).resolve()
     return home / "evolution"
+
+
+def _halt_state_active(hermes_home: Optional[Path] = None) -> bool:
+    """Return whether the evolution pipeline halt-state file is present.
+
+    ``scripts/evolution_funnel.py::is_evolution_halted()`` (the writer) and
+    ``scripts/evolution_hydra_gate.py::_check_halt()`` resolve their
+    directory as ``EVOLUTION_PROFILE_DIR`` if set, else ``~/.hermes/evolution``
+    — independently of ``HERMES_HOME``, since those run as standalone script
+    copies under ``HERMES_HOME/scripts`` and cannot rely on importing this
+    package. Mirror that resolution EXACTLY (not "check both"): if
+    ``EVOLUTION_PROFILE_DIR`` is set, it is the writer's one and only
+    location, so it is the one and only location checked here too — falling
+    through to :func:`_evolution_dir` in that case would risk a false
+    "halted" from an unrelated stale ``halt-state.txt`` left over in a
+    different ``HERMES_HOME`` tree. Only when ``EVOLUTION_PROFILE_DIR`` is
+    unset do we fall back to :func:`_evolution_dir` — the same
+    ``HERMES_HOME``-based resolution the scheduler already uses for
+    ``load_digest_as_fallback``/``find_latest_digest``, and which matches
+    the writer's own default in that case.
+
+    Fail-safe: ANY error while resolving a path or checking existence is
+    treated as NOT halted — a broken halt check must never wrongly skip a
+    job (#913).
+    """
+    try:
+        profile_dir = os.environ.get("EVOLUTION_PROFILE_DIR", "").strip()
+        if profile_dir:
+            halt_dir = Path(profile_dir).expanduser().resolve()
+        else:
+            halt_dir = _evolution_dir(hermes_home)
+        return (halt_dir / "halt-state.txt").exists()
+    except OSError:
+        return False
+    except Exception as exc:  # pragma: no cover - defense in depth
+        logger.debug("Halt-state check failed, treating as not halted: %s", exc)
+        return False
+
+
+def should_skip_for_halt(
+    stage: Optional[str], hermes_home: Optional[Path] = None
+) -> bool:
+    """Return True if a cron job for ``stage`` should be skipped because the
+    evolution pipeline is structurally halted.
+
+    Only the expensive LLM-agent stages in :data:`_HALT_GATED_STAGES`
+    (introspection, analysis, implementation, research) are gated — this
+    extends the halt-state gate that already covers the Hydra orchestrator
+    (``evolution_hydra_gate.py``) to the individual stage crons that spawn
+    their own agents directly, so a structurally-halted pipeline stops
+    burning tokens on every stage, not only Hydra (#913). ``funnel`` and
+    ``integration`` are never skipped here.
+    """
+    if stage not in _HALT_GATED_STAGES:
+        return False
+    return _halt_state_active(hermes_home)
 
 
 def _preflight_timeout_seconds(cfg: Optional[Any] = None) -> float:
