@@ -59,11 +59,34 @@ from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from evolution_funnel import (  # noqa: E402
-    _resolve_repo_dir,
     is_evolution_halted,
     load_records,
     summarize,
 )
+
+
+def _resolve_repo_dir() -> Optional[Path]:
+    """Locate the git repo to read the live cron/evolution/*.yaml values from.
+
+    Duplicated locally rather than imported (matches evolution_watchdog's own
+    copy, not evolution_funnel's): this script runs as a COPY under
+    HERMES_HOME/scripts, outside the repo, so it cannot rely on importing
+    another script's private helper staying in sync. Env override, then the
+    in-tree location (when run from the repo), then the common server
+    install / agent-clone paths. Returns None when none is a git repo — the
+    caller then falls back to each TunableParam's registry default.
+    """
+    candidates = [
+        os.environ.get("EVOLUTION_REPO_DIR"),
+        str(Path(__file__).resolve().parent.parent),  # scripts/ -> repo root (in-tree)
+        "/usr/local/lib/hermes-agent",
+        str(Path.home() / "hermes-agent-evolution"),
+    ]
+    for cand in candidates:
+        if cand and (Path(cand) / ".git").exists():
+            return Path(cand)
+    return None
+
 
 # ---------------------------------------------------------------------------
 # The registry — the ONLY edits this module may ever propose.
