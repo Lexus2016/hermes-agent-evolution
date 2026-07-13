@@ -4576,9 +4576,18 @@ def _convert_mcp_schema(server_name: str, mcp_tool) -> dict:
         A dict suitable for ``registry.register(schema=...)``.
     """
     prefixed_name = mcp_prefixed_tool_name(server_name, mcp_tool.name)
+    # Sanitize the tool description to strip hidden prompt-injection
+    # vectors (HTML comments, zero-width chars, control chars) before
+    # presenting it to the model (#944).
+    raw_description = mcp_tool.description or f"MCP tool {mcp_tool.name} from {server_name}"
+    try:
+        from agent.mcp_tool_pinning import sanitize_tool_description
+        description = sanitize_tool_description(raw_description)
+    except Exception:
+        description = raw_description
     return {
         "name": prefixed_name,
-        "description": mcp_tool.description or f"MCP tool {mcp_tool.name} from {server_name}",
+        "description": description,
         "parameters": _normalize_mcp_input_schema(getattr(mcp_tool, "inputSchema", None)),
     }
 
@@ -4845,6 +4854,25 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
         if exclude_set:
             return tool_name not in exclude_set
         return True
+
+    # Tool definition pinning (#944): verify tool definitions against
+    # pinned fingerprints. On first connection, pins are established.
+    # On reconnect, changes are logged as warnings. Tools are still
+    # registered — pinning is advisory, not blocking — so the user
+    # sees the warning and can decide whether to trust the changes.
+    try:
+        from agent.mcp_tool_pinning import verify_tools, sanitize_tool_description
+        _pin_diff = verify_tools(name, server._tools)
+        if _pin_diff.has_changes:
+            logger.warning(
+                "MCP server '%s': tool definition changes detected — %s. "
+                "Review before trusting. Use 'hermes mcp repin %s' to accept.",
+                name,
+                _pin_diff.summary(),
+                name,
+            )
+    except Exception as _pin_err:
+        logger.debug("MCP tool pinning check failed for '%s': %s", name, _pin_err)
 
     for mcp_tool in server._tools:
         if not _should_register(mcp_tool.name):
