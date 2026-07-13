@@ -819,6 +819,7 @@ def _run_conversation_impl(
     truncated_response_parts: List[str] = []
     compression_attempts = 0
     _turn_exit_reason = "unknown"  # Diagnostic: why the loop ended
+    agent._refusal_nudged_this_turn = False  # Reset per-turn (#975)
 
     # Per-turn tally of consecutive successful credential-pool token refreshes,
     # keyed by (provider, pool-entry-id). A persistent upstream 401 lets
@@ -5659,6 +5660,36 @@ def _run_conversation_impl(
                     logger.debug("pre_verify nudge issued (attempt %d)",
                                  agent._pre_verify_nudges)
                     continue
+
+                # ── Refusal recovery nudge (#975) ───────────────────
+                # If the final text response contains refusal language
+                # ("I can't", "I don't have access", etc.), give the model
+                # one chance to course-correct before accepting the refusal.
+                # Mirrors the tool-spiral nudge pattern but for text-only
+                # responses.  Only fires once per turn to avoid spamming.
+                if not getattr(agent, "_refusal_nudged_this_turn", False):
+                    try:
+                        _refusal_nudge = _loop_guard.maybe_refusal_nudge(
+                            messages,
+                            already_nudged=False,
+                        )
+                    except Exception:
+                        _refusal_nudge = None
+                    if _refusal_nudge:
+                        agent._refusal_nudged_this_turn = True
+                        final_msg["finish_reason"] = "refusal_nudge"
+                        final_msg["_refusal_nudge_synthetic"] = True
+                        messages.append(final_msg)
+                        messages.append({
+                            "role": "user",
+                            "content": _refusal_nudge,
+                            "_refusal_nudge_synthetic": True,
+                        })
+                        agent._session_messages = messages
+                        logger.debug(
+                            "refusal nudge issued: %s", _refusal_nudge[:80]
+                        )
+                        continue
 
                 messages.append(final_msg)
                 

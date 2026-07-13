@@ -30,6 +30,13 @@ requires the model to explain progress before continuing (#432).
 
 Pure functions over the ``messages`` list -> fully unit-testable, no agent state
 required (the caller tracks "already nudged this run" to avoid spamming).
+
+Refusal detection (#975): assistant text responses containing refusal language
+("I can't", "I don't have access", "I'm unable to") are classified via a
+lightweight taxonomy and a recovery directive is returned.  The caller injects
+it as a user-role nudge so the model gets one chance to course-correct before
+the refusal is accepted as the final answer.  Mirrors the tool-spiral nudge
+pattern but for text-only responses.
 """
 
 from __future__ import annotations
@@ -718,3 +725,122 @@ def run_warrants_cron_hard_stop(messages: List[Dict[str, Any]]) -> bool:
         return True
 
     return False
+
+
+# ── Refusal taxonomy and recovery (#975) ──────────────────────────────
+# Lightweight inline taxonomy — mirrors scripts/evolution_refusal_taxonomy.py
+# but lives in the agent core so the conversation loop can call it without a
+# subprocess.  Classifies refusal language in assistant text responses and
+# returns a recovery directive the caller injects as a user-role nudge.
+
+_REFUSAL_PAT = re.compile(
+    "|".join([  # fmt: skip
+        r"i can'?t",
+        r"i can not",
+        r"i don'?t have (?:access|permission)",
+        r"no access",
+        r"i'?m unable to",
+        r"i don'?t have (?:a |the )?(?:tool|skill|feature|plugin|ability|capability)",
+        r"i cannot (?:help|assist|do|provide|access)",
+        r"not (?:able|allowed) to",
+    ]),
+    re.IGNORECASE,
+)
+# Rhetorical false positives — "I can't stress this enough" etc.
+_FP_REFUSAL_PAT = re.compile(
+    r"i can'?t (?:stress|emphasize|overstate|imagine|believe|say|thank|praise|wait)",
+    re.IGNORECASE,
+)
+
+_REFUSAL_CATEGORIES = {
+    "true_capability_gap": (
+        r"don'?t have (?:a |the )?(?:tool|skill|plugin|feature)",
+        "A capability gap was cited. Check whether the capability exists "
+        "locally (use `hermes tools` or check skills) before accepting the "
+        "refusal. If a tool/skill is available, use it directly. If genuinely "
+        "missing, suggest how to install or configure it rather than stopping.",
+    ),
+    "permission_boundary": (
+        r"permission|security|unauthorized|forbidden",
+        "A permission/security boundary was cited. Verify this is a genuine "
+        "security boundary and not an over-refusal — check whether the "
+        "action is safe and permitted in the current context. If legitimate, "
+        "explain the boundary and suggest an alternative approach.",
+    ),
+    "over_refusal": (
+        r"",
+        "The capability likely exists locally. Before accepting this refusal, "
+        "re-check available tools and skills — the requested action may be "
+        "achievable with the tools already configured. Use them directly.",
+    ),
+}
+
+
+def _classify_refusal(text: str) -> str:
+    """Classify a refusal snippet into a category, or empty string if spurious."""
+    # Check false-positive pattern first
+    if _FP_REFUSAL_PAT.search(text):
+        return ""
+    # Check each category in priority order
+    for cat, (pat, _) in _REFUSAL_CATEGORIES.items():
+        if pat and re.search(pat, text, re.IGNORECASE):
+            return cat
+    return "over_refusal"
+
+
+def maybe_refusal_nudge(
+    messages: List[Dict[str, Any]],
+    *,
+    already_nudged: bool = False,
+) -> Optional[str]:
+    """Return a recovery directive if the last assistant message contains
+    refusal language, else None.
+
+    Called from the conversation loop when the assistant produces a text-only
+    response (no tool calls).  If the text matches refusal patterns, a
+    taxonomy-specific recovery nudge is returned for injection as a user
+    message — giving the model one chance to course-correct before the
+    refusal is accepted as the final answer.
+
+    ``already_nudged`` prevents double-nudging the same refusal (the caller
+    tracks this, mirroring the tool-spiral nudge pattern).
+    """
+    if already_nudged:
+        return None
+    # Find the last assistant message with text content
+    last_assistant_text = None
+    for msg in reversed(messages):
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content", "")
+        if not isinstance(content, str) or not content.strip():
+            continue
+        # Skip synthetic/recovery messages
+        if msg.get("_empty_terminal_sentinel") or msg.get("_thinking_prefill"):
+            continue
+        last_assistant_text = content
+        break
+    if not last_assistant_text:
+        return None
+    # Detect refusal language
+    refusals = [
+        m for m in _REFUSAL_PAT.finditer(last_assistant_text)
+        if not _FP_REFUSAL_PAT.match(last_assistant_text[m.start():m.start() + 40])
+    ]
+    if not refusals:
+        return None
+    # Classify using the context around the first refusal
+    first = refusals[0]
+    snippet = last_assistant_text[first.start():first.start() + 120]
+    category = _classify_refusal(snippet)
+    if not category:
+        return None
+    # Build recovery directive
+    _, recovery = _REFUSAL_CATEGORIES.get(category, _REFUSAL_CATEGORIES["over_refusal"])
+    return (
+        f"[loop-guard] Refusal detected ({category}). {recovery} "
+        f"Do not simply repeat the refusal — take concrete action or "
+        f"explain specifically what is needed to proceed."
+    )
