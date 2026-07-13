@@ -34,6 +34,15 @@ class TestClassifyFileError:
         klass, rec = classify_file_error("search block did not match the file content")
         assert klass == "fuzzy_match" and "EXACT" in rec
 
+    def test_ambiguous_match_is_classified(self):
+        """'Found N matches' errors get a specific error_class and recovery (#976)."""
+        klass, rec = classify_file_error(
+            "Found 3 matches for old_string at:\n  Line 10: def foo()\n"
+            "Provide more context to make it unique, or use replace_all=True."
+        )
+        assert klass == "ambiguous_match"
+        assert "replace_all" in rec or "context" in rec
+
     def test_verification(self):
         klass, _ = classify_file_error("Post-write verification failed: could not re-read x")
         assert klass == "verification"
@@ -60,6 +69,16 @@ class TestResultToDict:
     def test_patch_result_error_classified(self):
         d = PatchResult(success=False, error="Failed to parse patch: x").to_dict()
         assert d["error_class"] == "patch_parse" and "recovery" in d
+
+    def test_patch_result_ambiguous_match_classified(self):
+        """PatchResult with ambiguous-match error gets error_class (#976)."""
+        d = PatchResult(
+            success=False,
+            error="Found 3 matches for old_string at:\n  Line 10: x\n"
+            "Provide more context to make it unique, or use replace_all=True.",
+        ).to_dict()
+        assert d["error_class"] == "ambiguous_match"
+        assert "replace_all" in d["recovery"] or "context" in d["recovery"]
 
     def test_patch_result_success_clean(self):
         d = PatchResult(success=True, diff="--- a").to_dict()

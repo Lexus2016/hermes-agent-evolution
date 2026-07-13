@@ -192,6 +192,12 @@ def classify_file_error(
             "The write succeeded but re-read verification failed. Re-read the file to "
             "see actual state before editing again."
         )
+    if "found" in low and "matches" in low and "old_string" in low:
+        return "ambiguous_match", (
+            "Multiple matches found. Include more surrounding context lines in "
+            "old_string to make it unique, or use replace_all=True if you want "
+            "all occurrences replaced."
+        )
     if "did not match" in low or "no match" in low or ("match" in low and "block" in low):
         return "fuzzy_match", (
             "The search block didn't match the file. Re-read the file and copy the EXACT "
