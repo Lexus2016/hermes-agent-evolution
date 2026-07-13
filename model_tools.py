@@ -1288,6 +1288,43 @@ def handle_function_call(
         except Exception as _contract_check_err:
             logger.debug("tool_arg_contract check error: %s", _contract_check_err)
 
+        # Circuit-breaker gate: if this tool has tripped its per-tool breaker
+        # (N consecutive failures), refuse the call and return a diagnostic
+        # that tells the model to stop retrying and use an alternative tool.
+        # This prevents the retry-spiral pattern where the agent re-calls a
+        # failing terminal command dozens of times across a session (#942).
+        try:
+            from agent.tool_error_recovery import get_breaker
+            _breaker = get_breaker(function_name)
+            if _breaker.should_trip():
+                _breaker_count = _breaker._consecutive_failures
+                _breaker_msg = (
+                    f"Circuit breaker open: {function_name} has failed "
+                    f"{_breaker_count} consecutive times. Stop retrying "
+                    f"{function_name} and use an alternative tool "
+                    f"(read_file, search_files, write_file) or report the "
+                    f"blocker. Repeatedly calling {function_name} will keep "
+                    f"failing."
+                )
+                result = json.dumps({"error": _breaker_msg}, ensure_ascii=False)
+                _emit_post_tool_call_hook(
+                    function_name=function_name,
+                    function_args=function_args,
+                    result=result,
+                    task_id=task_id,
+                    session_id=session_id,
+                    tool_call_id=tool_call_id,
+                    turn_id=turn_id,
+                    api_request_id=api_request_id,
+                    status="blocked",
+                    error_type="circuit_breaker",
+                    error_message=_breaker_msg,
+                    middleware_trace=list(_tool_middleware_trace),
+                )
+                return result
+        except Exception as _cb_err:
+            logger.debug("circuit breaker check error: %s", _cb_err)
+
         # Measure tool dispatch latency so post_tool_call and
         # transform_tool_result hooks can observe per-tool duration.
         # Inspired by Claude Code 2.1.119, which added ``duration_ms`` to
@@ -1413,12 +1450,23 @@ def handle_function_call(
         # *what to try next* (retry, check path, fix args, etc.).
         enriched = _sanitize_tool_error(error_msg)
         try:
-            from agent.tool_error_recovery import classify_tool_error, recovery_hint, record_tool_outcome
+            from agent.tool_error_recovery import classify_tool_error, recovery_hint, record_tool_outcome, get_breaker
             failure = classify_tool_error(function_name, str(e))
             hint = recovery_hint(failure)
             if hint:
                 enriched = f"{enriched}{hint}"
             record_tool_outcome(function_name, success=False)
+            # Failure-class-aware escalation (#942): when the breaker is
+            # close to tripping, append a stronger warning so the model
+            # knows it is in a retry spiral before the hard gate fires.
+            _breaker = get_breaker(function_name)
+            _fail_count = _breaker._consecutive_failures
+            if _fail_count >= 3 and not _breaker.should_trip():
+                enriched = (
+                    f"{enriched} [WARNING: {function_name} has now failed "
+                    f"{_fail_count} consecutive times. Consider switching "
+                    f"to an alternative tool or approach.]"
+                )
         except Exception:
             pass  # never let the recovery module itself cause a failure
         return json.dumps({"error": enriched}, ensure_ascii=False)
