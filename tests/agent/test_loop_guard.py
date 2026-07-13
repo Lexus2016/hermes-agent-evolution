@@ -12,6 +12,7 @@ from agent.loop_guard import (
     CRON_LOOP_GUARD_HARD_STOP_THRESHOLD,
     current_run_signature,
     maybe_nudge,
+    maybe_refusal_nudge,
     run_warrants_cron_hard_stop,
     should_cron_hard_stop,
 )
@@ -564,3 +565,110 @@ class TestRunWarrantsCronHardStop:
     def test_distinct_process_calls_do_not_warrant(self):
         # Even distinct successful process calls (varied handles) are fine.
         assert run_warrants_cron_hard_stop(_distinct_run("process", 8)) is False
+
+
+# ── Refusal nudge tests (#975) ─────────────────────────────────────────
+
+
+def _asst_text(content: str) -> dict:
+    """Build an assistant text-only message (no tool calls)."""
+    return {"role": "assistant", "content": content}
+
+
+class TestMaybeRefusalNudge:
+    """Tests for maybe_refusal_nudge — refusal detection in assistant text."""
+
+    def test_no_refusal_returns_none(self):
+        msgs = [
+            {"role": "user", "content": "do the task"},
+            _asst_text("I'll help you with that. Let me start by running the tests."),
+        ]
+        assert maybe_refusal_nudge(msgs) is None
+
+    def test_over_refusal_detected(self):
+        msgs = [
+            {"role": "user", "content": "run the build"},
+            _asst_text("I can't do that right now."),
+        ]
+        nudge = maybe_refusal_nudge(msgs)
+        assert nudge is not None
+        assert "over_refusal" in nudge
+        assert "[loop-guard]" in nudge
+
+    def test_capability_gap_detected(self):
+        msgs = [
+            {"role": "user", "content": "deploy to kubernetes"},
+            _asst_text("I don't have a tool for that."),
+        ]
+        nudge = maybe_refusal_nudge(msgs)
+        assert nudge is not None
+        assert "true_capability_gap" in nudge
+
+    def test_permission_boundary_detected(self):
+        msgs = [
+            {"role": "user", "content": "read /etc/shadow"},
+            _asst_text("I don't have permission to access that file."),
+        ]
+        nudge = maybe_refusal_nudge(msgs)
+        assert nudge is not None
+        assert "permission_boundary" in nudge
+
+    def test_rhetorical_false_positive_ignored(self):
+        """'I can't stress this enough' is NOT a refusal."""
+        msgs = [
+            {"role": "user", "content": "review the code"},
+            _asst_text("I can't stress this enough — the code looks great!"),
+        ]
+        assert maybe_refusal_nudge(msgs) is None
+
+    def test_already_nudged_returns_none(self):
+        msgs = [
+            {"role": "user", "content": "do the thing"},
+            _asst_text("I can't help with that."),
+        ]
+        assert maybe_refusal_nudge(msgs, already_nudged=True) is None
+
+    def test_no_assistant_message_returns_none(self):
+        msgs = [
+            {"role": "user", "content": "hello"},
+        ]
+        assert maybe_refusal_nudge(msgs) is None
+
+    def test_empty_assistant_content_returns_none(self):
+        msgs = [
+            {"role": "user", "content": "hello"},
+            _asst_text(""),
+        ]
+        assert maybe_refusal_nudge(msgs) is None
+
+    def test_synthetic_sentinel_skipped(self):
+        """Empty terminal sentinel messages are skipped when looking for text."""
+        msgs = [
+            {"role": "user", "content": "do the thing"},
+            {"role": "assistant", "content": "I can't do that.", "role": "assistant"},
+            {"role": "assistant", "content": "(empty)", "_empty_terminal_sentinel": True},
+        ]
+        # Should find the real refusal text, not the sentinel
+        nudge = maybe_refusal_nudge(msgs)
+        assert nudge is not None
+        assert "over_refusal" in nudge
+
+    def test_nudge_contains_recovery_directive(self):
+        msgs = [
+            {"role": "user", "content": "build the project"},
+            _asst_text("I'm unable to build the project."),
+        ]
+        nudge = maybe_refusal_nudge(msgs)
+        assert nudge is not None
+        assert "Do not simply repeat the refusal" in nudge
+        assert "concrete action" in nudge
+
+    def test_multiple_refusals_still_nudges_once(self):
+        msgs = [
+            {"role": "user", "content": "do x and y"},
+            _asst_text("I can't do x. I also don't have access to y."),
+        ]
+        nudge = maybe_refusal_nudge(msgs)
+        assert nudge is not None
+        # Should classify the first refusal
+        assert "[loop-guard]" in nudge
