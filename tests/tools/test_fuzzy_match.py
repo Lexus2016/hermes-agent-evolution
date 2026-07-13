@@ -666,3 +666,55 @@ class TestEscapeNormalizedNewString:
         assert count == 1
         assert "return 2" in new
 
+
+class TestAmbiguousMatchEnrichment:
+    """Tests for the enriched ambiguous-match error (#976).
+
+    The error must include the actual line content at each match location,
+    not just bare line numbers, so the agent can disambiguate without
+    re-reading the file.
+    """
+
+    def test_ambiguous_error_includes_line_content(self):
+        """The 'Found N matches' error shows the actual line text at each match."""
+        content = "def foo():\n    pass\ndef bar():\n    return 1\n"
+        _, count, _, err = fuzzy_find_and_replace(
+            content, "def ", "x ", replace_all=False
+        )
+        assert count == 0
+        assert "Found 2 matches" in err
+        # Line content (first line at each match) must appear, not just numbers
+        assert "def foo():" in err
+        assert "def bar():" in err
+
+    def test_ambiguous_error_includes_line_numbers(self):
+        """Line numbers are still present in the enriched format."""
+        content = "x = 1\nx = 1\n"
+        _, count, _, err = fuzzy_find_and_replace(
+            content, "x = 1\n", "x = 2\n", replace_all=False
+        )
+        assert count == 0
+        assert "Line 1" in err
+        assert "Line 2" in err
+
+    def test_ambiguous_error_format_is_multiline(self):
+        """The enriched error uses a multi-line format for readability."""
+        content = "aaa\naaa\naaa\n"
+        _, count, _, err = fuzzy_find_and_replace(
+            content, "aaa\n", "bbb\n", replace_all=False
+        )
+        assert count == 0
+        assert "Found 3 matches" in err
+        # The format should use newlines to separate match locations
+        assert "\n  " in err
+
+    def test_ambiguous_error_still_says_provide_more_context(self):
+        """The recovery guidance is still present."""
+        content = "aaa bbb aaa\n"
+        _, count, _, err = fuzzy_find_and_replace(
+            content, "aaa", "ccc", replace_all=False
+        )
+        assert count == 0
+        assert "Provide more context" in err
+        assert "replace_all=True" in err
+

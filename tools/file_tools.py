@@ -1867,11 +1867,18 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                 _reset_patch_failures(task_id, [
                     _r for _r in (_path_to_resolved.get(_p) for _p in _paths_to_check) if _r
                 ])
-        # Hint when old_string not found — saves iterations where the agent
-        # retries with stale content instead of re-reading the file.
+        # Hint when patch fails — saves iterations where the agent retries
+        # with stale content or an ambiguous old_string instead of
+        # re-reading the file or providing more context.
+        # Covers both no-match ("Could not find") and ambiguous-match
+        # ("Found N matches") failures — both cause the same spiral
+        # pattern where the agent retries with slight variations.
         # Suppressed when patch_replace already attached a rich "Did you mean?"
         # snippet (which is strictly more useful than the generic hint).
-        if result_dict.get("error") and "Could not find" in str(result_dict["error"]):
+        err_str = str(result_dict.get("error") or "")
+        is_no_match = "Could not find" in err_str
+        is_ambiguous = "Found" in err_str and "matches" in err_str and "old_string" in err_str
+        if err_str and (is_no_match or is_ambiguous):
             # Track per-file consecutive failures for replace mode.  The
             # ``path`` arg only exists for replace mode; for V4A patches
             # we'd need to walk the headers, but in practice V4A failures
@@ -1897,7 +1904,15 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                     "replace the entire file if the targeted region is hard "
                     "to anchor."
                 )
-            elif "Did you mean one of these sections?" not in str(result_dict["error"]):
+            elif is_ambiguous:
+                result_dict["_hint"] = (
+                    "Multiple matches found. Use read_file to see the "
+                    "surrounding context at each match location, then "
+                    "provide a longer old_string that uniquely identifies "
+                    "the target. The error message above shows the line "
+                    "content at each match."
+                )
+            elif "Did you mean one of these sections?" not in err_str:
                 result_dict["_hint"] = (
                     "old_string not found. Use read_file to verify the current "
                     "content, or search_files to locate the text."

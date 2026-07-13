@@ -543,12 +543,14 @@ def test_browser_cap_can_be_disabled():
 
 
 def test_browser_cap_leaves_native_tool_hard_stop_semantics_unchanged():
-    """The always-on browser cap must not leak into native tools: with hard_stop
-    OFF, a native same-tool failure spiral still only warns (never halts)."""
+    """The always-on browser cap must not leak into non-spiral-prone native
+    tools: with hard_stop OFF, a non-spiral same-tool failure spiral still
+    only warns (never halts).  Note: terminal and execute_code ARE now
+    spiral-prone (see test_spiral_* below), so we use write_file here."""
     controller = ToolCallGuardrailController()  # hard_stop off
     decisions = [
         controller.after_call(
-            "terminal", {"command": f"cmd-{i}"}, '{"exit_code":1}', failed=True
+            "write_file", {"path": f"p-{i}"}, '{"error":"boom"}', failed=True
         )
         for i in range(10)
     ]
@@ -607,3 +609,172 @@ def test_browser_fallback_directive_for_all_browser_tools():
     )
     # Non-browser unknown tools remain empty (unchanged behaviour).
     assert _fallback_directive_for("mcp_custom_tool") == ""
+
+
+# ── #974/#969/#970 — spiral-prone tool failure cap ──────────────────────
+
+def test_spiral_cap_halts_terminal_after_threshold():
+    """Terminal failures hit the always-on spiral cap (default 5) and halt,
+    regardless of hard_stop_enabled.  This is the core fix for #974:
+    1237 terminal failures / 410 sessions despite 4 prior fixes — the
+    loop_guard's fallback_directive was advisory and the agent ignored it."""
+    controller = ToolCallGuardrailController()  # hard_stop OFF (default)
+    decisions = []
+    for i in range(6):
+        controller.before_call("terminal", {"command": f"cmd-{i}"})
+        decisions.append(
+            controller.after_call(
+                "terminal",
+                {"command": f"cmd-{i}"},
+                '{"exit_code": 1, "error": "boom"}',
+                failed=True,
+            )
+        )
+    # First 4 failures do not hit the cap (cap=5); the 5th halts.
+    for d in decisions[:4]:
+        assert d.action != "halt", f"cap fired too early at {d.count}"
+    halt = decisions[4]
+    assert halt.action == "halt"
+    assert halt.should_halt is True
+    assert halt.code == "spiral_prone_tool_failure_cap"
+    assert halt.count == 5
+    assert halt.fallback_directive != ""
+    assert "read_file" in halt.fallback_directive or "diagnostic" in halt.fallback_directive
+    assert controller.halt_decision is not None
+    assert controller.halt_decision.code == "spiral_prone_tool_failure_cap"
+
+
+def test_spiral_cap_halts_execute_code_after_threshold():
+    """execute_code failures hit the spiral cap and halt (#969: 59 failures /
+    14 sessions, max 17 consecutive retries)."""
+    controller = ToolCallGuardrailController()
+    decisions = []
+    for i in range(6):
+        decisions.append(
+            controller.after_call(
+                "execute_code",
+                {"code": f"print({i})"},
+                '{"error": "NameError: name not defined"}',
+                failed=True,
+            )
+        )
+    halt = decisions[4]
+    assert halt.action == "halt"
+    assert halt.code == "spiral_prone_tool_failure_cap"
+    assert halt.tool_name == "execute_code"
+    assert halt.fallback_directive != ""
+
+
+def test_spiral_cap_halts_read_file_after_threshold():
+    """read_file failures hit the spiral cap and halt (#970: 26 failures,
+    10 sessions with ≥5 consecutive reads)."""
+    controller = ToolCallGuardrailController()
+    decisions = []
+    for i in range(6):
+        decisions.append(
+            controller.after_call(
+                "read_file",
+                {"path": f"/nonexistent/{i}"},
+                '{"error": "File not found"}',
+                failed=True,
+            )
+        )
+    halt = decisions[4]
+    assert halt.action == "halt"
+    assert halt.code == "spiral_prone_tool_failure_cap"
+    assert halt.tool_name == "read_file"
+    assert halt.fallback_directive != ""
+
+
+def test_spiral_cap_does_not_fire_before_threshold():
+    """Below the cap, spiral-prone tool failures only warn — the cap does not
+    over-trigger.  Uses the same command twice so exact_failure_warn_after (2)
+    fires on the second call, matching the browser cap test pattern."""
+    controller = ToolCallGuardrailController()
+    first = controller.after_call("terminal", {"command": "same"}, '{"exit_code":1}', failed=True)
+    second = controller.after_call("terminal", {"command": "same"}, '{"exit_code":1}', failed=True)
+    assert first.action == "allow"
+    assert second.action == "warn"  # exact_failure_warn_after == 2
+    assert controller.halt_decision is None
+
+
+def test_spiral_cap_can_be_disabled():
+    """spiral_failure_cap=0 disables the cap; spirals then follow the generic
+    same-tool behaviour (warn-only when hard_stop is off)."""
+    controller = ToolCallGuardrailController(ToolCallGuardrailConfig(spiral_failure_cap=0))
+    decisions = [
+        controller.after_call(
+            "terminal", {"command": f"cmd-{i}"}, '{"exit_code":1}', failed=True
+        )
+        for i in range(10)
+    ]
+    assert all(d.action != "halt" for d in decisions)
+    assert controller.halt_decision is None
+
+
+def test_spiral_cap_success_resets_streak():
+    """A successful terminal call clears the failure streak, so the cap only
+    fires on a genuine consecutive spiral."""
+    controller = ToolCallGuardrailController()
+    for _ in range(4):
+        controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+    # A success resets the same-tool failure count.
+    controller.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
+    # Four more failures should NOT reach the cap (streak restarted at 1-4).
+    for _ in range(4):
+        d = controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+        assert d.action != "halt"
+    assert controller.halt_decision is None
+
+
+def test_spiral_cap_reset_for_turn_clears_streak():
+    """Per-turn reset clears the spiral failure streak (no cross-turn leakage)."""
+    controller = ToolCallGuardrailController()
+    for _ in range(5):
+        controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+    assert controller.halt_decision is not None
+    controller.reset_for_turn()
+    assert controller.halt_decision is None
+    d = controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+    assert d.action == "allow"
+
+
+def test_spiral_cap_does_not_affect_non_spiral_tools():
+    """The spiral cap only applies to spiral-prone tools (terminal,
+    execute_code, read_file) — not to write_file, patch, etc."""
+    controller = ToolCallGuardrailController()
+    last = None
+    for _ in range(10):
+        last = controller.after_call(
+            "write_file", {"path": "x"}, '{"error":"boom"}', failed=True
+        )
+    assert last is not None
+    assert last.action != "halt"
+    assert controller.halt_decision is None
+
+
+def test_spiral_cap_parsed_from_mapping():
+    cfg = ToolCallGuardrailConfig.from_mapping({"spiral_failure_cap": 7})
+    assert cfg.spiral_failure_cap == 7
+    # 0 is honoured (disables); negative falls back to default.
+    assert ToolCallGuardrailConfig.from_mapping({"spiral_failure_cap": 0}).spiral_failure_cap == 0
+    assert ToolCallGuardrailConfig.from_mapping({"spiral_failure_cap": -3}).spiral_failure_cap == 5
+    assert ToolCallGuardrailConfig.from_mapping({}).spiral_failure_cap == 5
+
+
+def test_spiral_cap_default_is_5():
+    """The default spiral cap is 5 — high enough to allow reasonable retries
+    but low enough to stop the 55-1237-consecutive-retry spirals seen in
+    the trace data."""
+    cfg = ToolCallGuardrailConfig()
+    assert cfg.spiral_failure_cap == 5
+
+
+def test_spiral_prone_tools_set():
+    """The spiral-prone set contains exactly the three tools with the highest
+    trace-miner failure frequency."""
+    cfg = ToolCallGuardrailConfig()
+    assert "terminal" in cfg.spiral_prone_tools
+    assert "execute_code" in cfg.spiral_prone_tools
+    assert "read_file" in cfg.spiral_prone_tools
+    assert len(cfg.spiral_prone_tools) == 3
