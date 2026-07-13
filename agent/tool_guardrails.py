@@ -62,6 +62,14 @@ MUTATING_TOOL_NAMES = frozenset(
     }
 )
 
+# #974/#969/#970 — tools whose retry spirals are the system's largest failure
+# sources. Trace-miner evidence: terminal (1237 failures / 410 sessions),
+# execute_code (59 failures / 14 sessions, max 17 consecutive retries),
+# read_file (26 failures / 10 sessions with ≥5 consecutive reads). These tools
+# get an always-on per-tool failure cap that halts regardless of
+# ``hard_stop_enabled``, mirroring the browser_failure_cap pattern.
+_SPIRAL_PRONE_TOOLS = frozenset({"terminal", "execute_code", "read_file"})
+
 
 @dataclass(frozen=True)
 class ToolCallGuardrailConfig:
@@ -88,6 +96,20 @@ class ToolCallGuardrailConfig:
     # retry spiral is bounded even in the default (hard-stop-off) mode. ``0``
     # disables the browser cap (falls back to the generic same-tool behaviour).
     browser_failure_cap: int = 3
+    # #974/#969/#970 — terminal and execute_code are the system's largest
+    # failure sources (1237 terminal failures / 410 sessions, 59 execute_code
+    # failures / 14 sessions, 26 read_file failures / 10 sessions). Four prior
+    # fixes (#942, #863, #888, #902) closed completed but the problem worsened
+    # because the loop_guard's fallback_directive is advisory — the agent
+    # ignores it and retries. This cap is an always-on enforcement gate
+    # (independent of ``hard_stop_enabled``) that halts the turn after N
+    # consecutive same-tool failures, mirroring the browser_failure_cap pattern.
+    # The fallback_directive is surfaced on the halt decision so the agent sees
+    # a concrete alternative action. ``0`` disables the cap.
+    spiral_failure_cap: int = 5
+    spiral_prone_tools: frozenset[str] = field(
+        default_factory=lambda: _SPIRAL_PRONE_TOOLS
+    )
     idempotent_tools: frozenset[str] = field(default_factory=lambda: IDEMPOTENT_TOOL_NAMES)
     mutating_tools: frozenset[str] = field(default_factory=lambda: MUTATING_TOOL_NAMES)
 
@@ -135,6 +157,10 @@ class ToolCallGuardrailConfig:
             browser_failure_cap=_non_negative_int(
                 data.get("browser_failure_cap"),
                 defaults.browser_failure_cap,
+            ),
+            spiral_failure_cap=_non_negative_int(
+                data.get("spiral_failure_cap"),
+                defaults.spiral_failure_cap,
             ),
         )
 
@@ -376,6 +402,36 @@ class ToolCallGuardrailController:
                     count=same_count,
                     signature=signature,
                     fallback_directive=_fallback_directive_for(tool_name),
+                )
+                self._halt_decision = decision
+                return decision
+
+            # #974/#969/#970 — terminal, execute_code, and read_file are the
+            # system's largest failure sources. Their retry spirals persist
+            # because the loop_guard's fallback_directive is advisory (the
+            # agent ignores it and retries). This always-on cap halts the turn
+            # after N consecutive same-tool failures REGARDLESS of
+            # ``hard_stop_enabled``, mirroring the browser_failure_cap pattern.
+            # The fallback_directive gives the agent a concrete alternative.
+            if (
+                self.config.spiral_failure_cap >= 1
+                and tool_name in self.config.spiral_prone_tools
+                and same_count >= self.config.spiral_failure_cap
+            ):
+                directive = _fallback_directive_for(tool_name)
+                decision = ToolGuardrailDecision(
+                    action="halt",
+                    code="spiral_prone_tool_failure_cap",
+                    message=(
+                        f"Stopped {tool_name}: it failed {same_count} times this turn, "
+                        f"reaching the retry cap ({self.config.spiral_failure_cap}). "
+                        "This failure pattern is deterministic — retrying the same way "
+                        "will not fix it. Use the fallback directive below."
+                    ),
+                    tool_name=tool_name,
+                    count=same_count,
+                    signature=signature,
+                    fallback_directive=directive,
                 )
                 self._halt_decision = decision
                 return decision
