@@ -595,6 +595,60 @@ def main(argv: list[str]) -> int:
     for name, err in failed:
         print(f"  ! {name}: {err}")
 
+    # Config-drift validation (#938): warn when an agent-stage job has BOTH
+    # model and provider unpinned (both None), meaning it inherits the global
+    # inference config and is vulnerable to config drift that caused a mass
+    # blackout in July 2026. no_agent jobs (deterministic scripts) do not use
+    # model/provider and are excluded from this check.
+    def _is_unpinned_yaml(yaml_path: Path) -> bool | None:
+        """Check if a YAML file defines an unpinned agent job.
+        Returns True if unpinned, False if pinned, None if no_agent or not found."""
+        if not yaml_path.exists():
+            return None
+        try:
+            spec = _load_yaml(yaml_path)
+        except Exception:
+            return None
+        if bool(spec.get("no_agent")):
+            return None
+        yaml_model = str(spec.get("model") or "").strip() or None
+        yaml_provider = str(spec.get("provider") or "").strip() or None
+        return yaml_model is None and yaml_provider is None
+
+    def _check_unpinned(name: str, src_dir: Path) -> bool:
+        """Check if a named job is unpinned in its YAML definition."""
+        stem = name.replace("evolution-", "")
+        yaml_path = src_dir / f"{stem}.yaml"
+        result = _is_unpinned_yaml(yaml_path)
+        if result is True:
+            return True
+        if result is None and not yaml_path.exists():
+            # Fallback: search all YAMLs
+            for candidate in sorted(src_dir.glob("*.yaml")):
+                r = _is_unpinned_yaml(candidate)
+                if r is not None:
+                    return r
+        return False
+
+    unpinned: list[str] = []
+    all_processed: list[str] = []
+    all_processed.extend(n for n, _ in created)
+    all_processed.extend(n for n, _ in updated)
+    all_processed.extend(skipped)  # skipped is list[str]
+    for name in all_processed:
+        if _check_unpinned(name, src_dir):
+            unpinned.append(name)
+
+    if unpinned:
+        print(
+            "[evolution-cron] warning: the following agent jobs have unpinned "
+            "model AND provider — they are vulnerable to global inference config "
+            "drift. Set model:/provider: in their YAML to pin them to a specific "
+            f"deployment model (see #938).\n"
+            f"  unpinned: {', '.join(sorted(set(unpinned)))}",
+            file=sys.stderr,
+        )
+
     return 2 if failed else 0
 
 
