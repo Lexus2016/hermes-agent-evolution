@@ -272,6 +272,13 @@ class PatchResult:
     # See :class:`WriteResult.lsp_diagnostics`.
     lsp_diagnostics: Optional[str] = None
     error: Optional[str] = None
+    # Structured error context for self-correction (#996).  Contains
+    # error-type classification, the closest matching region with line
+    # numbers, and a recovery suggestion.  Populated by patch_replace
+    # on match failures; consumed by patch_tool to add a ``_diagnostic``
+    # field to the tool result so the model can correct on its next
+    # turn without re-reading the file.
+    structured_error: Optional[str] = None
     
     def to_dict(self) -> dict:
         result = {"success": self.success}
@@ -292,6 +299,8 @@ class PatchResult:
             hit = classify_file_error(self.error)
             if hit:
                 result["error_class"], result["recovery"] = hit
+        if self.structured_error:
+            result["_diagnostic"] = self.structured_error
         return result
 
 
@@ -1653,12 +1662,30 @@ class ShellFileOperations(FileOperations):
 
         if error or match_count == 0:
             err_msg = error or f"Could not find match for old_string in {path}"
+            # Build structured error context for self-correction (#996).
+            # This gives the model the closest matching region with line
+            # numbers and a classified error type so it can produce a
+            # corrected patch without re-reading the file.
+            structured_err = ""
             try:
-                from tools.fuzzy_match import format_no_match_hint
-                err_msg += format_no_match_hint(err_msg, match_count, old_string, content)
+                from tools.fuzzy_match import format_structured_error
+                structured_err = format_structured_error(
+                    error, match_count, old_string, new_string, content,
+                    file_path=path, strategy=_strategy,
+                )
             except Exception:
                 pass
-            return PatchResult(error=err_msg)
+            # Append the legacy "Did you mean?" hint only when the
+            # structured error didn't already produce a richer context
+            # snippet (the structured error is strictly more useful
+            # because it includes line numbers and a recovery hint).
+            if not structured_err:
+                try:
+                    from tools.fuzzy_match import format_no_match_hint
+                    err_msg += format_no_match_hint(err_msg, match_count, old_string, content)
+                except Exception:
+                    pass
+            return PatchResult(error=err_msg, structured_error=structured_err or None)
 
         # ── Line-ending preservation ──────────────────────────────────
         # Models nearly always send old_string/new_string with bare LF

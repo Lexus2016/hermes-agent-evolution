@@ -95,6 +95,9 @@ class TestPatchFailureEscalation:
             last_hint = d.get("_hint", "") or ""
 
         assert "failure #3" in last_hint, repr(last_hint)
+        assert "PERMANENT FAILURE" in last_hint, (
+            "Escalating hint should classify as PERMANENT FAILURE"
+        )
         assert "Stop retrying" in last_hint
         assert "write_file" in last_hint, (
             "Escalating hint should mention write_file fallback"

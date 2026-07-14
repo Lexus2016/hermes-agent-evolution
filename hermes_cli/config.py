@@ -3286,6 +3286,15 @@ DEFAULT_CONFIG = {
         "region": "global",
     },
 
+    # Patch tool self-correction settings (issue #996).
+    # Controls how many consecutive patch failures on the same file are
+    # allowed before the error is classified as "permanent" and the model
+    # is instructed to stop retrying and use an alternative strategy
+    # (re-read the file, use write_file, etc.).  1–5; default 3.
+    "patch": {
+        "self_correction_retries": 3,
+    },
+
     # Config schema version - bump this when adding new required fields
     "_config_version": 34,
 }

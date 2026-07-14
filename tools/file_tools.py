@@ -84,6 +84,35 @@ def _get_max_read_chars() -> int:
     return _max_read_chars_cached
 
 
+# ── Self-correction retry threshold (issue #996) ─────────────────────────
+# Controls how many consecutive patch failures on the same file are allowed
+# before the error is classified as "permanent" and the model is told to
+# stop retrying.  Read from ``patch.self_correction_retries`` in config.yaml
+# on first call, cached for the process lifetime.  Default 3, max 5.
+_DEFAULT_SELF_CORRECTION_RETRIES = 3
+_MAX_SELF_CORRECTION_RETRIES = 5
+_self_correction_retries_cached: int | None = None
+
+
+def _get_self_correction_retries() -> int:
+    """Return the configured self-correction retry threshold for patches."""
+    global _self_correction_retries_cached
+    if _self_correction_retries_cached is not None:
+        return _self_correction_retries_cached
+    try:
+        from hermes_cli.config import load_config
+        cfg = load_config()
+        patch_cfg = cfg.get("patch", {})
+        val = patch_cfg.get("self_correction_retries")
+        if isinstance(val, (int, float)) and 1 <= int(val) <= _MAX_SELF_CORRECTION_RETRIES:
+            _self_correction_retries_cached = int(val)
+            return _self_correction_retries_cached
+    except Exception:
+        pass
+    _self_correction_retries_cached = _DEFAULT_SELF_CORRECTION_RETRIES
+    return _self_correction_retries_cached
+
+
 def _truncate_to_char_budget(content: str, max_chars: int) -> tuple[str, int, bool]:
     """Trim line-numbered ``read_file`` content to fit a char budget.
 
@@ -1874,10 +1903,12 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
         # ("Found N matches") failures — both cause the same spiral
         # pattern where the agent retries with slight variations.
         # Suppressed when patch_replace already attached a rich "Did you mean?"
-        # snippet (which is strictly more useful than the generic hint).
+        # snippet or a structured _diagnostic (#996) — both are strictly
+        # more useful than the generic hint.
         err_str = str(result_dict.get("error") or "")
         is_no_match = "Could not find" in err_str
         is_ambiguous = "Found" in err_str and "matches" in err_str and "old_string" in err_str
+        has_diagnostic = bool(result_dict.get("_diagnostic"))
         if err_str and (is_no_match or is_ambiguous):
             # Track per-file consecutive failures for replace mode.  The
             # ``path`` arg only exists for replace mode; for V4A patches
@@ -1888,7 +1919,13 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                 resolved = _path_to_resolved.get(path) or path
                 failure_count = _record_patch_failure(task_id, resolved)
 
-            if failure_count >= 3:
+            # Config-gated retry threshold (#996).  After this many
+            # consecutive failures on the same file, classify the failure
+            # as "permanent" and instruct the model to stop retrying and
+            # use an alternative strategy (re-read or write_file).
+            retry_threshold = _get_self_correction_retries()
+
+            if failure_count >= retry_threshold:
                 # Escalating hint after multiple consecutive failures on the
                 # same path.  Most common cause is a stale view of the file —
                 # the model is retrying with the same old_string against
@@ -1896,15 +1933,16 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                 # so the model recognises it's in a loop and breaks out by
                 # re-reading or falling back to write_file.
                 result_dict["_hint"] = (
-                    f"This is failure #{failure_count} patching {path!r}. "
-                    "Stop retrying with variations of the same old_string. "
-                    "Either: (1) re-read the file fresh to verify current "
-                    "content, (2) use a longer / more unique old_string with "
-                    "surrounding context lines, or (3) use write_file to "
-                    "replace the entire file if the targeted region is hard "
-                    "to anchor."
+                    f"PERMANENT FAILURE: This is failure #{failure_count} "
+                    f"patching {path!r}, exceeding the retry threshold of "
+                    f"{retry_threshold}. Stop retrying with variations of "
+                    f"the same old_string. Either: (1) re-read the file fresh "
+                    f"to verify current content, (2) use a longer / more "
+                    f"unique old_string with surrounding context lines, or "
+                    f"(3) use write_file to replace the entire file if the "
+                    f"targeted region is hard to anchor."
                 )
-            elif is_ambiguous:
+            elif is_ambiguous and not has_diagnostic:
                 result_dict["_hint"] = (
                     "Multiple matches found. Use read_file to see the "
                     "surrounding context at each match location, then "
@@ -1912,7 +1950,7 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                     "the target. The error message above shows the line "
                     "content at each match."
                 )
-            elif "Did you mean one of these sections?" not in err_str:
+            elif not has_diagnostic and "Did you mean one of these sections?" not in err_str:
                 result_dict["_hint"] = (
                     "old_string not found. Use read_file to verify the current "
                     "content, or search_files to locate the text."

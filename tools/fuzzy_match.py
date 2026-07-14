@@ -965,3 +965,211 @@ def format_no_match_hint(error: Optional[str], match_count: int,
     if not hint:
         return ""
     return "\n\nDid you mean one of these sections?\n" + hint
+
+
+# ---------------------------------------------------------------------------
+# Structured error context for self-correction (issue #996)
+#
+# The functions below build a rich, structured error package that gives the
+# model everything it needs to produce a corrected patch on its next turn
+# WITHOUT re-reading the file: the error type, the closest matching lines
+# with line numbers, and the surrounding file content near the best match.
+#
+# This is the "Aider-style self-correction reflection loop" adapted to
+# Hermes's architecture: rather than re-invoking the LLM from inside the
+# tool handler (which would break the conversation loop, prompt caching,
+# and the narrow-waist principle), we enrich the tool-result error so the
+# model naturally self-corrects on its next turn.  The model already retries
+# failed patches — it just needs better information to guide the retry.
+# ---------------------------------------------------------------------------
+
+# Error-type classification labels.  These appear in the structured error
+# package so the model can reason about WHY the patch failed and choose the
+# right recovery strategy (re-read, add context, fix escapes, etc.).
+ERROR_TYPES = {
+    "no_match": "old_string not found in file",
+    "ambiguous": "multiple matches found — old_string is not unique",
+    "identical": "old_string and new_string are identical — no change needed",
+    "escape_drift": "escape-drift detected — likely tool-call serialization artifact",
+    "permission": "permission denied or protected path",
+    "read_failed": "could not read the file",
+    "write_failed": "could not write changes to the file",
+    "unknown": "unclassified failure",
+}
+
+
+def classify_error(error: Optional[str], strategy: Optional[str]) -> str:
+    """Classify a patch error string into a known error type.
+
+    Returns one of the keys from ``ERROR_TYPES``.
+    """
+    if not error:
+        return "unknown"
+    err = error.lower()
+    if strategy == "identical" or "identical" in err:
+        return "identical"
+    if "escape-drift" in err or "escape drift" in err:
+        return "escape_drift"
+    if "found" in err and "matches" in err:
+        return "ambiguous"
+    if "could not find" in err or "not find a match" in err:
+        return "no_match"
+    if "permission" in err or "denied" in err or "protected" in err:
+        return "permission"
+    if "failed to read" in err:
+        return "read_failed"
+    if "failed to write" in err:
+        return "write_failed"
+    return "unknown"
+
+
+def _format_file_context_snippet(
+    content: str,
+    old_string: str,
+    context_lines: int = 5,
+) -> str:
+    """Return a snippet of ``content`` around the best-matching region.
+
+    Uses the same line-similarity scoring as ``find_closest_lines`` to
+    locate the region of the file most similar to ``old_string``, then
+    returns ``±context_lines`` lines of file content with line numbers
+    so the model can see exactly what's there and craft a corrected
+    ``old_string`` without needing to re-read.
+
+    Returns an empty string when no useful snippet can be produced.
+    """
+    if not old_string or not content:
+        return ""
+
+    old_lines = old_string.splitlines()
+    content_lines = content.splitlines()
+
+    if not old_lines or not content_lines:
+        return ""
+
+    # Use first non-blank line of old_string as anchor
+    anchor = ""
+    for line in old_lines:
+        if line.strip():
+            anchor = line.strip()
+            break
+    if not anchor:
+        return ""
+
+    # Score each line by similarity to anchor
+    best_ratio = 0.0
+    best_idx = -1
+    for i, line in enumerate(content_lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        ratio = SequenceMatcher(None, anchor, stripped).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_idx = i
+
+    if best_idx < 0 or best_ratio < 0.3:
+        return ""
+
+    # Build the ±context_lines snippet around the best match
+    start = max(0, best_idx - context_lines)
+    end = min(len(content_lines), best_idx + len(old_lines) + context_lines)
+
+    snippet_lines = []
+    for j in range(start, end):
+        marker = ">>" if j == best_idx else "  "
+        snippet_lines.append(f"{j + 1:4d}{marker}| {content_lines[j]}")
+
+    return "\n".join(snippet_lines)
+
+
+def format_structured_error(
+    error: Optional[str],
+    match_count: int,
+    old_string: str,
+    new_string: str,
+    content: str,
+    file_path: str = "",
+    strategy: Optional[str] = None,
+) -> str:
+    """Build a structured error context for patch failures (issue #996).
+
+    Returns a multi-section diagnostic string containing:
+    - Error type classification
+    - The file path (when provided)
+    - The closest matching region with line numbers (±5 lines)
+    - A recovery suggestion matched to the error type
+
+    Returns an empty string when the error doesn't warrant structured
+    context (e.g. successful operations).
+    """
+    if not error:
+        return ""
+
+    error_type = classify_error(error, strategy)
+
+    # Don't add structured context for non-match failures that already
+    # have clear messages (permission, read/write failures).
+    if error_type in ("permission", "read_failed", "write_failed", "unknown"):
+        return ""
+
+    sections: List[str] = []
+    sections.append(f"Error type: {error_type} — {ERROR_TYPES.get(error_type, '')}")
+    if file_path:
+        sections.append(f"File: {file_path}")
+
+    # For no-match: show the closest matching region so the model can
+    # see what's actually there and craft a corrected old_string.
+    if error_type == "no_match":
+        snippet = _format_file_context_snippet(content, old_string, context_lines=5)
+        if snippet:
+            sections.append(
+                "Closest matching region in the file (>> marks best match):\n"
+                + snippet
+            )
+
+    # For ambiguous: the error message already lists the match locations,
+    # so we just add a recovery hint.
+    if error_type == "ambiguous":
+        sections.append(
+            "Recovery: provide a longer old_string with more surrounding "
+            "context lines to make the match unique, or use replace_all=True "
+            "if you intend to replace all occurrences."
+        )
+
+    # For escape-drift: the error already explains the issue; add a
+    # concise recovery hint.
+    if error_type == "escape_drift":
+        sections.append(
+            "Recovery: re-read the file with read_file, then pass "
+            "old_string/new_string without backslash-escaping apostrophe "
+            "or quote characters."
+        )
+
+    # For identical: just confirm no action needed.
+    if error_type == "identical":
+        sections.append(
+            "Recovery: no action needed — the file is already in the "
+            "desired state. Proceed with the next step."
+        )
+
+    # For no-match with a snippet, add a general recovery hint.
+    if error_type == "no_match":
+        snippet = _format_file_context_snippet(content, old_string, context_lines=5)
+        if snippet:
+            sections.append(
+                "Recovery: use the closest matching region above to craft "
+                "a corrected old_string that exactly matches the file's "
+                "current content (including indentation). Alternatively, "
+                "use read_file to see the full file, or use write_file to "
+                "replace the entire file if the targeted region is hard to "
+                "anchor."
+            )
+        else:
+            # No snippet found — fall back to the generic hint
+            sections.append(
+                "Recovery: use read_file to verify the current file "
+                "content, or search_files to locate the text."
+            )
+
+    return "\n\n".join(sections)
