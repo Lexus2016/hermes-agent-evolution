@@ -733,6 +733,41 @@ def dispatch_tool_search(args: Dict[str, Any],
     }, ensure_ascii=False)
 
 
+def _fuzzy_tool_names(query: str, available: List[str], limit: int = 3) -> List[str]:
+    """Return up to ``limit`` tool names closest to ``query`` by substring /
+    edit-distance. Used so ``tool_describe`` can suggest the right name when
+    the model's requested name is slightly wrong (#978), avoiding a separate
+    ``tool_search`` round-trip."""
+    q = query.lower()
+    if not q or not available:
+        return []
+    # Fast path: substring match (catches typos like "github_create" →
+    # "github_create_issue").
+    sub = [n for n in available if q in n.lower()]
+    if sub:
+        return sorted(sub, key=len)[:limit]
+
+    # Edit-distance fallback for near-misses.
+    def _dist(a: str, b: str) -> int:
+        """Simple Levenshtein distance (small strings, no dep needed)."""
+        a, b = a.lower(), b.lower()
+        if len(a) < len(b):
+            a, b = b, a
+        if not b:
+            return len(a)
+        prev = list(range(len(b) + 1))
+        for i, ca in enumerate(a, 1):
+            cur = [i]
+            for j, cb in enumerate(b, 1):
+                cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+            prev = cur
+        return prev[-1]
+
+    scored = sorted(available, key=lambda n: _dist(q, n))[:limit]
+    # Only suggest if reasonably close (distance ≤ 3 for short names).
+    return [n for n in scored if _dist(q, n) <= max(3, len(q) // 3)]
+
+
 def dispatch_tool_describe(args: Dict[str, Any],
                            *,
                            current_tool_defs: List[Dict[str, Any]],
@@ -744,6 +779,25 @@ def dispatch_tool_describe(args: Dict[str, Any],
     if not name:
         return json.dumps({"error": "name is required"}, ensure_ascii=False)
     if not is_deferrable_tool_name(name, config):
+        # #978 — fuzzy name matching even for non-deferrable names: the
+        # model may have slightly misspelled a deferrable tool. Suggest
+        # close matches from the current tool defs so it can self-correct
+        # without a separate tool_search round-trip.
+        _, deferrable = classify_tools(current_tool_defs, config)
+        available_names = [
+            (td.get("function") or {}).get("name", "")
+            for td in deferrable
+        ]
+        suggestions = _fuzzy_tool_names(name, available_names)
+        if suggestions:
+            return json.dumps({
+                "error": (
+                    f"'{name}' is not a deferrable tool. Did you mean one of: "
+                    f"{', '.join(suggestions)}? Use the exact name with "
+                    f"tool_describe or tool_call."
+                ),
+                "suggestions": suggestions,
+            }, ensure_ascii=False)
         return json.dumps({
             "error": (
                 f"'{name}' is not a deferrable tool. If you see it in the tools list "
@@ -759,6 +813,22 @@ def dispatch_tool_describe(args: Dict[str, Any],
                 "description": fn.get("description", ""),
                 "parameters": fn.get("parameters", {}),
             }, ensure_ascii=False)
+    # #978 — fuzzy name matching: suggest closest matches so the agent can
+    # self-correct without a separate tool_search round-trip.
+    available_names = [
+        (td.get("function") or {}).get("name", "")
+        for td in deferrable
+    ]
+    suggestions = _fuzzy_tool_names(name, available_names)
+    if suggestions:
+        return json.dumps({
+            "error": (
+                f"'{name}' is not currently available. Did you mean one of: "
+                f"{', '.join(suggestions)}? Use the exact name with tool_describe "
+                f"or tool_call."
+            ),
+            "suggestions": suggestions,
+        }, ensure_ascii=False)
     return json.dumps({
         "error": f"'{name}' is not currently available. Re-run tool_search to refresh.",
     }, ensure_ascii=False)
