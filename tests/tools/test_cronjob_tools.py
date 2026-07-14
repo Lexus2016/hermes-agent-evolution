@@ -632,12 +632,14 @@ class TestCronPreflightAndValidation:
 
         assert _cron_preflight_check() is None
 
-    def test_preflight_reports_missing_crontab(self, tmp_path, monkeypatch):
+    def test_preflight_soft_fails_when_crontab_missing(self, tmp_path, monkeypatch):
+        """PR #985: missing crontab is a soft-fail — preflight returns None
+        (with a warning) so job operations proceed via the internal JSON
+        scheduler instead of being blocked."""
         monkeypatch.setattr("cron.jobs.CRON_DIR", tmp_path / "cron")
         monkeypatch.setattr("tools.cronjob_tools.shutil.which", lambda cmd: None)
         err = _cron_preflight_check()
-        assert err is not None
-        assert "crontab" in err.lower()
+        assert err is None
 
     def test_preflight_reports_crontab_error_output(self, tmp_path, monkeypatch):
         monkeypatch.setattr("cron.jobs.CRON_DIR", tmp_path / "cron")
@@ -685,22 +687,34 @@ class TestCronRetryLimiter:
     def test_retry_limit_kicks_in_after_max_failures(self, tmp_path, monkeypatch):
         from tools.cronjob_tools import cronjob, _cron_failure_tracker
 
-        # Use a temp cron dir and a broken crontab to force failures.
-        monkeypatch.setattr("cron.jobs.CRON_DIR", tmp_path / "cron")
-        monkeypatch.setattr("cron.jobs.JOBS_FILE", tmp_path / "cron" / "jobs.json")
-        monkeypatch.setattr("cron.jobs.OUTPUT_DIR", tmp_path / "cron" / "output")
-        monkeypatch.setattr("tools.cronjob_tools.shutil.which", lambda cmd: None)
+        # Use a temp cron dir and an unwritable directory to force preflight
+        # failures.  (PR #985 made missing-crontab a soft-fail, so we can no
+        # longer use shutil.which → None to trigger failures.)
+        cron_dir = tmp_path / "cron"
+        cron_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr("cron.jobs.CRON_DIR", cron_dir)
+        monkeypatch.setattr("cron.jobs.JOBS_FILE", cron_dir / "jobs.json")
+        monkeypatch.setattr("cron.jobs.OUTPUT_DIR", cron_dir / "output")
+
+        # Force preflight to fail by making directory writes raise.
+        def failing_write_text(*args, **kwargs):
+            raise PermissionError("cannot write")
+
+        monkeypatch.setattr(Path(".").__class__, "write_text", failing_write_text)
 
         task_id = "test-task-214"
         # Clear any stale state
         _cron_failure_tracker.pop(task_id, None)
 
-        for i in range(_MAX_CONSECUTIVE_CRON_FAILURES):
+        # PR #985 changed the retry check from > to strict > and stopped
+        # pre-incrementing, so we need _MAX_CONSECUTIVE_CRON_FAILURES + 1
+        # actual failures before the limiter short-circuits the next call.
+        for i in range(_MAX_CONSECUTIVE_CRON_FAILURES + 1):
             result = json.loads(
                 cronjob(action="list", task_id=task_id)
             )
             assert result["success"] is False
-            assert "crontab" in result["error"].lower()
+            assert "not writable" in result["error"].lower()
 
         # Next call should short-circuit with the retry-limit message.
         result = json.loads(
@@ -712,10 +726,17 @@ class TestCronRetryLimiter:
     def test_retry_counter_resets_on_success(self, tmp_path, monkeypatch):
         from tools.cronjob_tools import cronjob, _cron_failure_tracker
 
-        monkeypatch.setattr("cron.jobs.CRON_DIR", tmp_path / "cron")
-        monkeypatch.setattr("cron.jobs.JOBS_FILE", tmp_path / "cron" / "jobs.json")
-        monkeypatch.setattr("cron.jobs.OUTPUT_DIR", tmp_path / "cron" / "output")
-        monkeypatch.setattr("tools.cronjob_tools.shutil.which", lambda cmd: None)
+        cron_dir = tmp_path / "cron"
+        cron_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr("cron.jobs.CRON_DIR", cron_dir)
+        monkeypatch.setattr("cron.jobs.JOBS_FILE", cron_dir / "jobs.json")
+        monkeypatch.setattr("cron.jobs.OUTPUT_DIR", cron_dir / "output")
+
+        # Force an initial preflight failure by making directory writes raise.
+        def failing_write_text(*args, **kwargs):
+            raise PermissionError("cannot write")
+
+        monkeypatch.setattr(Path(".").__class__, "write_text", failing_write_text)
 
         task_id = "test-task-reset"
         _cron_failure_tracker.pop(task_id, None)
@@ -724,16 +745,14 @@ class TestCronRetryLimiter:
         result = json.loads(cronjob(action="list", task_id=task_id))
         assert result["success"] is False
 
-        # Simulate recovery by restoring a working crontab.
-        monkeypatch.setattr("tools.cronjob_tools.shutil.which", lambda cmd: "/usr/bin/crontab")
-        fake_result = type(
-            "FakeResult",
-            (),
-            {"returncode": 1, "stderr": "no crontab for user"},
-        )()
-        monkeypatch.setattr(
-            "tools.cronjob_tools.subprocess.run", lambda *a, **kw: fake_result
-        )
+        # Simulate recovery by restoring writable directory operations.
+        monkeypatch.undo()
+        monkeypatch.setattr("cron.jobs.CRON_DIR", cron_dir)
+        monkeypatch.setattr("cron.jobs.JOBS_FILE", cron_dir / "jobs.json")
+        monkeypatch.setattr("cron.jobs.OUTPUT_DIR", cron_dir / "output")
+        # crontab absent is now a soft-fail (PR #985), so list succeeds via
+        # the internal JSON scheduler.
+        monkeypatch.setattr("tools.cronjob_tools.shutil.which", lambda cmd: None)
 
         result = json.loads(cronjob(action="list", task_id=task_id))
         assert result["success"] is True
