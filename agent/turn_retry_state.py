@@ -64,6 +64,11 @@ class TurnRetryState:
     # the retry budget against a provider whose quota window hasn't reset
     # (#704). Reset whenever rotation or fallback succeeds.
     consecutive_rate_limit_hits: int = 0
+    # Consecutive 503/overloaded errors from the same provider. After 2 the
+    # loop fails over to the next provider instead of continuing backoff
+    # retries on a genuinely overloaded provider (#943). Reset on successful
+    # fallback or any non-overloaded response.
+    consecutive_overload_hits: int = 0
 
     # ── Fail-fast guard for non-retryable client errors ─────────────────
     fail_fast_attempted: bool = False

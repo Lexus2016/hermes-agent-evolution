@@ -92,16 +92,21 @@ def fuzzy_find_and_replace(content: str, old_string: str, new_string: str,
         if matches:
             # Found matches with this strategy
             if len(matches) > 1 and not replace_all:
-                # Include line numbers for each match location so the agent
-                # can narrow its old_string with surrounding context (#889).
-                line_nums: List[str] = []
+                # Include line numbers AND the actual line content at each
+                # match location so the agent can see what's there and pick
+                # the right one without re-reading the file (#976).
+                content_lines = content.splitlines()
+                location_parts: List[str] = []
                 for (start, _end) in matches[:10]:
                     line_no = content.count('\n', 0, start) + 1
-                    line_nums.append(str(line_no))
-                locs = ', '.join(line_nums)
+                    # Show the actual line content (first line of the match)
+                    line_idx = line_no - 1
+                    line_text = content_lines[line_idx].strip() if 0 <= line_idx < len(content_lines) else ""
+                    location_parts.append(f"Line {line_no}: {line_text}")
+                locs_block = "\n  ".join(location_parts)
                 return content, 0, None, (
                     f"Found {len(matches)} matches for old_string"
-                    f"{f' at lines {locs}' if line_nums else ''}. "
+                    f" at:\n  {locs_block}\n"
                     f"Provide more context to make it unique, or use replace_all=True."
                 )
 

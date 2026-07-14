@@ -104,7 +104,7 @@ class TestHandleProcessSessionIdAutoFill:
 
     def test_auto_fill_when_one_active_process(self):
         """When exactly one active process exists, session_id is auto-filled."""
-        mock_procs = [{"id": "proc_abc", "status": "running"}]
+        mock_procs = [{"session_id": "proc_abc", "status": "running"}]
         with patch("tools.process_registry.process_registry") as mock_reg, \
              patch("tools.approval.get_current_session_key") as mock_key:
             mock_reg.list_sessions.return_value = mock_procs
@@ -121,8 +121,8 @@ class TestHandleProcessSessionIdAutoFill:
     def test_error_when_multiple_processes_and_no_session_id(self):
         """When multiple processes exist, error lists available IDs."""
         mock_procs = [
-            {"id": "proc_abc", "status": "running"},
-            {"id": "proc_def", "status": "running"},
+            {"session_id": "proc_abc", "status": "running"},
+            {"session_id": "proc_def", "status": "running"},
         ]
         with patch("tools.process_registry.process_registry") as mock_reg, \
              patch("tools.approval.get_current_session_key") as mock_key:
@@ -155,8 +155,8 @@ class TestHandleProcessSessionIdAutoFill:
     def test_auto_fill_prefers_active_over_exited(self):
         """When one active and one exited process exist, the active one is used."""
         mock_procs = [
-            {"id": "proc_old", "status": "exited"},
-            {"id": "proc_new", "status": "running"},
+            {"session_id": "proc_old", "status": "exited"},
+            {"session_id": "proc_new", "status": "running"},
         ]
         with patch("tools.process_registry.process_registry") as mock_reg, \
              patch("tools.approval.get_current_session_key") as mock_key:

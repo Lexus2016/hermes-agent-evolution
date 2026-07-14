@@ -85,6 +85,20 @@ def _record_cron_failure(task_id: Optional[str]) -> int:
         return len(window)
 
 
+def _get_cron_failure_streak(task_id: Optional[str]) -> int:
+    """Return the current failure streak for *task_id* without incrementing."""
+    if not task_id:
+        return 0
+    now = time.monotonic()
+    with _cron_failure_tracker_lock:
+        window = [
+            ts
+            for ts in _cron_failure_tracker.get(task_id, [])
+            if now - ts < _CRON_RETRY_WINDOW_SECONDS
+        ]
+        return len(window)
+
+
 def _reset_cron_failure(task_id: Optional[str]) -> None:
     """Reset the failure streak for *task_id* after a successful operation."""
     if not task_id:
@@ -117,11 +131,18 @@ def _cron_preflight_check() -> Optional[str]:
 
     crontab = shutil.which("crontab")
     if crontab is None:
-        return (
-            "The 'crontab' command is not available on PATH. "
-            "Install a cron implementation (e.g. cronie, vixie-cron) "
-            "or verify that Hermes is running in an environment with cron support."
+        # Hermes has its own internal JSON scheduler (cron/scheduler.py) that
+        # does NOT require the external crontab binary. Many environments
+        # (containers, CI, embedded) intentionally lack crontab but still
+        # run scheduled jobs via the internal scheduler. Downgrade the
+        # missing-crontab check from a hard failure to a warning so job
+        # create/list/update operations proceed via the internal scheduler.
+        logger.warning(
+            "The 'crontab' command is not on PATH — only the internal JSON "
+            "scheduler will be available. Install cronie or vixie-cron if "
+            "system-level crontab integration is needed."
         )
+        return None
 
     try:
         result = subprocess.run(
@@ -1023,7 +1044,11 @@ def cronjob(
         return tool_error(action_error, success=False)
 
     # Retry-rate limiter: noisy failure loops are capped per task.
-    failure_streak = _record_cron_failure(task_id)
+    # Only *check* the current streak — do NOT increment here. The counter
+    # is incremented only on actual failures (except block below) and reset
+    # on success. Pre-incrementing caused every call (even successful ones)
+    # to bump the counter, so 3 quick successes would block the 4th call.
+    failure_streak = _get_cron_failure_streak(task_id)
     if failure_streak > _MAX_CONSECUTIVE_CRON_FAILURES:
         return tool_error(
             f"Cron tool has failed {failure_streak} consecutive times for this task "
@@ -1035,6 +1060,7 @@ def cronjob(
     # Preflight: ensure cron is available before invoking backend operations.
     preflight_error = _cron_preflight_check()
     if preflight_error:
+        _record_cron_failure(task_id)
         return tool_error(preflight_error, success=False)
 
     try:

@@ -819,6 +819,7 @@ def _run_conversation_impl(
     truncated_response_parts: List[str] = []
     compression_attempts = 0
     _turn_exit_reason = "unknown"  # Diagnostic: why the loop ended
+    agent._refusal_nudged_this_turn = False  # Reset per-turn (#975)
 
     # Per-turn tally of consecutive successful credential-pool token refreshes,
     # keyed by (provider, pool-entry-id). A persistent upstream 401 lets
@@ -3472,6 +3473,14 @@ def _run_conversation_impl(
                     FailoverReason.timeout,
                     FailoverReason.overloaded,
                 }
+                # Track consecutive 503/overloaded errors for the overload
+                # circuit breaker (#943). After 2 consecutive overloaded
+                # errors, fail over immediately instead of waiting for the
+                # generic transport retry_count >= 2 gate.
+                if classified.reason == FailoverReason.overloaded:
+                    _retry.consecutive_overload_hits += 1
+                else:
+                    _retry.consecutive_overload_hits = 0
                 # Z.AI Coding Plan GLM-5.2 overload 429s classify as
                 # `overloaded` (to spare the credential pool), but `overloaded`
                 # is excluded from `is_rate_limited` — the gate for the adaptive
@@ -3487,6 +3496,11 @@ def _run_conversation_impl(
                 _should_fallback = (
                     is_rate_limited
                     or (_is_transport_failure and retry_count >= 2)
+                    # Overload circuit breaker (#943): after 2 consecutive
+                    # 503/overloaded errors, fail over immediately rather
+                    # than waiting for the generic transport gate.
+                    or (classified.reason == FailoverReason.overloaded
+                        and _retry.consecutive_overload_hits >= 2)
                 )
                 if _should_fallback and agent._fallback_index < len(agent._fallback_chain):
                     # Don't eagerly fallback if credential pool rotation may
@@ -3518,9 +3532,14 @@ def _run_conversation_impl(
                                 "⚠️ Billing or credits exhausted — switching to fallback provider..."
                             )
                         elif _is_transport_failure:
-                            agent._buffer_status(
-                                "⚠️ Provider unreachable — switching to fallback provider..."
-                            )
+                            if classified.reason == FailoverReason.overloaded:
+                                agent._buffer_status(
+                                    "⚠️ Provider overloaded (503) — switching to fallback provider..."
+                                )
+                            else:
+                                agent._buffer_status(
+                                    "⚠️ Provider unreachable — switching to fallback provider..."
+                                )
                         else:
                             agent._buffer_status("⚠️ Rate limited — switching to fallback provider...")
                         if agent._try_activate_fallback(reason=classified.reason):
@@ -3530,6 +3549,7 @@ def _run_conversation_impl(
                             compression_attempts = 0
                             _retry.primary_recovery_attempted = False
                             _retry.consecutive_rate_limit_hits = 0
+                            _retry.consecutive_overload_hits = 0
                             continue
 
                 # ── Auth-failure provider failover ───────────────────────
@@ -5640,6 +5660,36 @@ def _run_conversation_impl(
                     logger.debug("pre_verify nudge issued (attempt %d)",
                                  agent._pre_verify_nudges)
                     continue
+
+                # ── Refusal recovery nudge (#975) ───────────────────
+                # If the final text response contains refusal language
+                # ("I can't", "I don't have access", etc.), give the model
+                # one chance to course-correct before accepting the refusal.
+                # Mirrors the tool-spiral nudge pattern but for text-only
+                # responses.  Only fires once per turn to avoid spamming.
+                if not getattr(agent, "_refusal_nudged_this_turn", False):
+                    try:
+                        _refusal_nudge = _loop_guard.maybe_refusal_nudge(
+                            messages,
+                            already_nudged=False,
+                        )
+                    except Exception:
+                        _refusal_nudge = None
+                    if _refusal_nudge:
+                        agent._refusal_nudged_this_turn = True
+                        final_msg["finish_reason"] = "refusal_nudge"
+                        final_msg["_refusal_nudge_synthetic"] = True
+                        messages.append(final_msg)
+                        messages.append({
+                            "role": "user",
+                            "content": _refusal_nudge,
+                            "_refusal_nudge_synthetic": True,
+                        })
+                        agent._session_messages = messages
+                        logger.debug(
+                            "refusal nudge issued: %s", _refusal_nudge[:80]
+                        )
+                        continue
 
                 messages.append(final_msg)
                 
