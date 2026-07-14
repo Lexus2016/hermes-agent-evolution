@@ -103,6 +103,13 @@ _EXPLORATION_ALTERNATIVE_HINT = {
         "far cheaper than many narrow searches (Python codebases only). "
         "For a batch of searches you already know you need, `delegate_task` a "
         "subagent to run them and report back, keeping this context lean."
+        # #973 — regex/glob parse errors are deterministic: a near-identical
+        # retry reproduces them. Route to repo_map or read_file instead of
+        # re-issuing the same failing pattern.
+        " If search_files is returning regex/glob parse errors, the pattern is "
+        "likely invalid — use `search_files target='files'` with a glob pattern "
+        "instead of a content regex, or switch to `repo_map` for a structured "
+        "overview."
     ),
 }
 
@@ -238,6 +245,15 @@ _MUTATING_FAIL_THRESHOLD = 2
 _IDEMPOTENT_FAIL_THRESHOLD = 4
 _MUTATING_ESCALATE_THRESHOLD = 8
 _IDEMPOTENT_ESCALATE_THRESHOLD = 15
+
+# #973 — Per-tool fail threshold overrides. ``search_files`` failures are
+# typically regex/glob parse errors — deterministic and cheap to route
+# around (switch to repo_map or read_file). Trip one call sooner than the
+# generic idempotent threshold so the agent gets the diversion hint before
+# burning another iteration on the same broken pattern.
+_TOOL_FAIL_THRESHOLD_OVERRIDE: dict[str, int] = {
+    "search_files": 3,
+}
 
 # Monitoring/polling tools whose whole PURPOSE is to be called repeatedly to
 # observe a long-running background job (CI runs, `hermes update`, a spawned
@@ -463,6 +479,8 @@ def maybe_nudge(
             if (is_mutating or is_unknown)
             else _IDEMPOTENT_FAIL_THRESHOLD
         )
+        # #973 — per-tool override (e.g. search_files trips sooner).
+        fail_threshold = _TOOL_FAIL_THRESHOLD_OVERRIDE.get(tool, fail_threshold)
     escalate_threshold = (
         _MUTATING_ESCALATE_THRESHOLD
         if (is_mutating or is_unknown)

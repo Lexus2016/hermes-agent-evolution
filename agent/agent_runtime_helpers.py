@@ -2254,7 +2254,31 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
                 next_args,
             )
     elif function_name == "memory":
+        # #977 — memory circuit breaker: after 3 consecutive failures the
+        # memory tool returns a "proceed without persistence" directive so
+        # the agent continues the task instead of looping on a broken
+        # storage backend. Uses a dedicated breaker (threshold=3) separate
+        # from the generic tool breaker (threshold=5) because memory
+        # failures are cheaper to route around — the agent can work
+        # without persistence — so we trip sooner.
+        from agent.tool_error_recovery import get_breaker as _get_mem_breaker
+        _mem_breaker = _get_mem_breaker("memory", threshold=3)
+
         def _execute(next_args: dict) -> Any:
+            # If the breaker is already open, short-circuit with a directive.
+            if _mem_breaker.should_trip():
+                _mem_breaker_count = _mem_breaker._consecutive_failures
+                _mem_msg = (
+                    f"Memory is unavailable — proceed without persistence. "
+                    f"Memory tool has failed {_mem_breaker_count} consecutive "
+                    f"times. Continue the task without reading or writing "
+                    f"memory. Do not retry the memory tool."
+                )
+                logger.warning("memory circuit breaker open after %d failures", _mem_breaker_count)
+                return _finish_agent_tool(
+                    json.dumps({"success": False, "error": _mem_msg}, ensure_ascii=False),
+                    next_args,
+                )
             target = next_args.get("target", "memory")
             operations = next_args.get("operations")
             from tools.memory_tool import memory_tool as _memory_tool
@@ -2266,10 +2290,25 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
                 operations=operations,
                 store=agent._memory_store,
             )
+            # Track success/failure for the memory breaker.
+            try:
+                _parsed = json.loads(result) if isinstance(result, str) else result
+                _ok = bool(_parsed.get("success", True)) if isinstance(_parsed, dict) else True
+            except Exception:
+                _ok = True
+            if _ok:
+                _mem_breaker.record_success()
+            else:
+                _mem_breaker.record_failure()
+                if _mem_breaker.should_trip():
+                    logger.warning(
+                        "memory circuit breaker tripped — returning "
+                        "proceed-without-persistence directive"
+                    )
             # Mirror successful built-in memory writes to external providers.
             # All gating/op-expansion lives behind the manager interface
             # (MemoryManager.notify_memory_tool_write).
-            if agent._memory_manager:
+            if agent._memory_manager and _ok:
                 agent._memory_manager.notify_memory_tool_write(
                     result,
                     next_args,
