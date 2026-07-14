@@ -2277,13 +2277,13 @@ def _handle_process(args, **kw):
                 if isinstance(p, dict) and p.get("status") != "exited"
             ]
             if len(active_procs) == 1:
-                session_id = active_procs[0].get("id", "")
+                session_id = active_procs[0].get("session_id", "")
             elif len(all_procs) == 1:
-                session_id = all_procs[0].get("id", "")
+                session_id = all_procs[0].get("session_id", "")
             else:
                 hint = ""
                 if len(active_procs) > 1:
-                    ids = ", ".join(p.get("id", "?") for p in active_procs[:5])
+                    ids = ", ".join(p.get("session_id", "?") for p in active_procs[:5])
                     hint = f" {len(active_procs)} processes are running. Specify one of: {ids}"
                 elif len(all_procs) > 1:
                     hint = f" {len(all_procs)} processes exist. Use action='list' to see all."
