@@ -24,7 +24,12 @@ def hermes_home(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(home))
     yield home
     try:
-        from tools.file_tools import clear_file_ops_cache, _read_tracker_lock, _read_tracker
+        from tools.file_tools import (
+            clear_file_ops_cache,
+            _read_tracker_lock,
+            _read_tracker,
+        )
+
         clear_file_ops_cache()
         with _read_tracker_lock:
             _read_tracker.clear()
@@ -32,6 +37,7 @@ def hermes_home(monkeypatch, tmp_path):
         pass
     try:
         from tools.terminal_tool import _active_environments, _env_lock
+
         with _env_lock:
             _active_environments.clear()
     except Exception:
@@ -52,7 +58,9 @@ def fresh_tracker():
 
 
 class TestPatchFailureEscalation:
-    def test_first_two_failures_use_normal_hint(self, hermes_home, tmp_path, fresh_tracker):
+    def test_first_two_failures_use_normal_hint(
+        self, hermes_home, tmp_path, fresh_tracker
+    ):
         from tools.file_tools import _handle_patch
 
         target = tmp_path / "f.py"
@@ -74,7 +82,9 @@ class TestPatchFailureEscalation:
                 f"Escalating hint fired too early on attempt {_i + 1}: {hint!r}"
             )
 
-    def test_third_consecutive_failure_escalates(self, hermes_home, tmp_path, fresh_tracker):
+    def test_third_consecutive_failure_escalates(
+        self, hermes_home, tmp_path, fresh_tracker
+    ):
         from tools.file_tools import _handle_patch
 
         target = tmp_path / "f.py"
@@ -184,9 +194,7 @@ class TestPatchFailureEscalation:
         )
         d = json.loads(result)
         hint = d.get("_hint", "") or ""
-        assert "failure #" not in hint, (
-            f"b.py's hint inherited a.py's count: {hint!r}"
-        )
+        assert "failure #" not in hint, f"b.py's hint inherited a.py's count: {hint!r}"
 
     def test_different_tasks_have_independent_counters(
         self, hermes_home, tmp_path, fresh_tracker

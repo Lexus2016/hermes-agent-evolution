@@ -26,10 +26,15 @@ from tools.fuzzy_match import (
 
 class TestClassifyError:
     def test_no_match(self):
-        assert classify_error("Could not find a match for old_string", None) == "no_match"
+        assert (
+            classify_error("Could not find a match for old_string", None) == "no_match"
+        )
 
     def test_no_match_variant(self):
-        assert classify_error("Could not find match for old_string in file.py", None) == "no_match"
+        assert (
+            classify_error("Could not find match for old_string in file.py", None)
+            == "no_match"
+        )
 
     def test_ambiguous(self):
         assert classify_error("Found 3 matches for old_string", None) == "ambiguous"
@@ -38,13 +43,22 @@ class TestClassifyError:
         assert classify_error("some error", "identical") == "identical"
 
     def test_identical_via_text(self):
-        assert classify_error("old_string and new_string are identical", None) == "identical"
+        assert (
+            classify_error("old_string and new_string are identical", None)
+            == "identical"
+        )
 
     def test_escape_drift(self):
-        assert classify_error("Escape-drift detected: backslash issue", None) == "escape_drift"
+        assert (
+            classify_error("Escape-drift detected: backslash issue", None)
+            == "escape_drift"
+        )
 
     def test_escape_drift_no_hyphen(self):
-        assert classify_error("Escape drift detected in old_string", None) == "escape_drift"
+        assert (
+            classify_error("Escape drift detected in old_string", None)
+            == "escape_drift"
+        )
 
     def test_permission(self):
         assert classify_error("Write denied: protected path", None) == "permission"
@@ -110,8 +124,12 @@ class TestFormatFileContextSnippet:
                     line_nums.add(int(num_part.strip()))
                 except ValueError:
                     pass
-        assert 1 not in line_nums, f"line 1 should not be in snippet, got lines: {sorted(line_nums)}"
-        assert 20 not in line_nums, f"line 20 should not be in snippet, got lines: {sorted(line_nums)}"
+        assert 1 not in line_nums, (
+            f"line 1 should not be in snippet, got lines: {sorted(line_nums)}"
+        )
+        assert 20 not in line_nums, (
+            f"line 20 should not be in snippet, got lines: {sorted(line_nums)}"
+        )
 
 
 class TestFormatStructuredError:
@@ -121,7 +139,10 @@ class TestFormatStructuredError:
         new_string = "def foo():\n    return 42"
         result = format_structured_error(
             "Could not find a match for old_string in the file",
-            0, old_string, new_string, content,
+            0,
+            old_string,
+            new_string,
+            content,
             file_path="/tmp/test.py",
         )
         assert "Error type: no_match" in result
@@ -137,7 +158,10 @@ class TestFormatStructuredError:
         new_string = "ccc"
         result = format_structured_error(
             "Found 2 matches for old_string",
-            0, old_string, new_string, content,
+            0,
+            old_string,
+            new_string,
+            content,
             file_path="/tmp/test.py",
         )
         assert "Error type: ambiguous" in result
@@ -146,7 +170,10 @@ class TestFormatStructuredError:
     def test_identical_includes_error_type_and_recovery(self):
         result = format_structured_error(
             "old_string and new_string are identical",
-            0, "foo", "foo", "foo bar\n",
+            0,
+            "foo",
+            "foo",
+            "foo bar\n",
             strategy="identical",
         )
         assert "Error type: identical" in result
@@ -155,7 +182,10 @@ class TestFormatStructuredError:
     def test_escape_drift_includes_error_type_and_recovery(self):
         result = format_structured_error(
             "Escape-drift detected: backslash issue",
-            0, "old\\'", "new\\'", "content\n",
+            0,
+            "old\\'",
+            "new\\'",
+            "content\n",
         )
         assert "Error type: escape_drift" in result
         assert "read_file" in result
@@ -163,14 +193,20 @@ class TestFormatStructuredError:
     def test_silent_on_permission_error(self):
         result = format_structured_error(
             "Write denied: protected path",
-            0, "old", "new", "content\n",
+            0,
+            "old",
+            "new",
+            "content\n",
         )
         assert result == ""
 
     def test_silent_on_unknown_error(self):
         result = format_structured_error(
             "something weird",
-            0, "old", "new", "content\n",
+            0,
+            "old",
+            "new",
+            "content\n",
         )
         assert result == ""
 
@@ -182,7 +218,9 @@ class TestFormatStructuredError:
         """When no similar content exists, still provide a generic recovery hint."""
         result = format_structured_error(
             "Could not find a match for old_string in the file",
-            0, "totally_unique_xyzzy", "replacement",
+            0,
+            "totally_unique_xyzzy",
+            "replacement",
             "completely different content\n",
         )
         assert "Error type: no_match" in result
@@ -191,7 +229,10 @@ class TestFormatStructuredError:
     def test_file_path_optional(self):
         result = format_structured_error(
             "Could not find a match for old_string in the file",
-            0, "foo", "bar", "def foo():\n    pass\n",
+            0,
+            "foo",
+            "bar",
+            "def foo():\n    pass\n",
         )
         assert "Error type: no_match" in result
         # Should still work without file_path
@@ -203,6 +244,7 @@ class TestPatchResultStructuredError:
 
     def test_to_dict_includes_diagnostic_when_set(self):
         from tools.file_operations import PatchResult
+
         result = PatchResult(
             error="Could not find a match for old_string",
             structured_error="Error type: no_match — old_string not found in file",
@@ -213,12 +255,14 @@ class TestPatchResultStructuredError:
 
     def test_to_dict_omits_diagnostic_when_none(self):
         from tools.file_operations import PatchResult
+
         result = PatchResult(error="some error")
         d = result.to_dict()
         assert "_diagnostic" not in d
 
     def test_to_dict_omits_diagnostic_on_success(self):
         from tools.file_operations import PatchResult
+
         result = PatchResult(success=True, diff="--- a\n+++ b\n")
         d = result.to_dict()
         assert "_diagnostic" not in d
@@ -230,34 +274,50 @@ class TestSelfCorrectionConfigGate:
     def test_default_value(self, monkeypatch):
         """When config is unavailable, the default of 3 is returned."""
         import tools.file_tools as ft
+
         # Reset the cache
         monkeypatch.setattr(ft, "_self_correction_retries_cached", None)
         # Force the config load to fail
-        monkeypatch.setattr("hermes_cli.config.load_config", lambda: (_ for _ in ()).throw(Exception("no config")))
+        monkeypatch.setattr(
+            "hermes_cli.config.load_config",
+            lambda: (_ for _ in ()).throw(Exception("no config")),
+        )
         monkeypatch.setattr(ft, "_self_correction_retries_cached", None)
         assert ft._get_self_correction_retries() == 3
 
     def test_clamps_to_max(self, monkeypatch):
         """Values above 5 are rejected in favor of the default."""
         import tools.file_tools as ft
+
         monkeypatch.setattr(ft, "_self_correction_retries_cached", None)
-        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {"patch": {"self_correction_retries": 99}})
+        monkeypatch.setattr(
+            "hermes_cli.config.load_config",
+            lambda: {"patch": {"self_correction_retries": 99}},
+        )
         monkeypatch.setattr(ft, "_self_correction_retries_cached", None)
         assert ft._get_self_correction_retries() == 3
 
     def test_clamps_to_min(self, monkeypatch):
         """Values below 1 are rejected in favor of the default."""
         import tools.file_tools as ft
+
         monkeypatch.setattr(ft, "_self_correction_retries_cached", None)
-        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {"patch": {"self_correction_retries": 0}})
+        monkeypatch.setattr(
+            "hermes_cli.config.load_config",
+            lambda: {"patch": {"self_correction_retries": 0}},
+        )
         monkeypatch.setattr(ft, "_self_correction_retries_cached", None)
         assert ft._get_self_correction_retries() == 3
 
     def test_valid_value_used(self, monkeypatch):
         """A valid value (1-5) is used as-is."""
         import tools.file_tools as ft
+
         monkeypatch.setattr(ft, "_self_correction_retries_cached", None)
-        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {"patch": {"self_correction_retries": 5}})
+        monkeypatch.setattr(
+            "hermes_cli.config.load_config",
+            lambda: {"patch": {"self_correction_retries": 5}},
+        )
         monkeypatch.setattr(ft, "_self_correction_retries_cached", None)
         assert ft._get_self_correction_retries() == 5
 
@@ -273,6 +333,7 @@ class TestPatchFailureEscalationWithDiagnostic:
         yield home
         try:
             from tools.file_tools import clear_file_ops_cache
+
             clear_file_ops_cache()
         except Exception:
             pass
@@ -280,6 +341,7 @@ class TestPatchFailureEscalationWithDiagnostic:
     @pytest.fixture
     def fresh_tracker(self):
         from tools.file_tools import _patch_failure_tracker, _patch_failure_lock
+
         with _patch_failure_lock:
             _patch_failure_tracker.clear()
         yield
@@ -293,8 +355,10 @@ class TestPatchFailureEscalationWithDiagnostic:
         be present and the generic _hint should be suppressed (since the
         diagnostic is strictly more useful)."""
         from tools.file_tools import _handle_patch
+
         # Reset the config cache so we get the default threshold
         import tools.file_tools as ft
+
         monkeypatch.setattr(ft, "_self_correction_retries_cached", None)
 
         target = tmp_path / "f.py"
