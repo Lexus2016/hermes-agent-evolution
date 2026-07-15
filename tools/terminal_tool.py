@@ -32,6 +32,7 @@ Usage:
 """
 
 import importlib.util
+import hashlib
 import json
 import logging
 import os
@@ -1033,15 +1034,24 @@ _DEFAULT_MAX_COMMAND_REPEATS = 3
 _MAX_COMMAND_REPEATS_CEILING = 20
 _max_command_repeats_cached: Optional[int] = None
 
-# Only the tail of the output feeds the signature — errors surface at the end,
-# and this bounds the retained per-task state to a small, fixed size.
-_FAILURE_SIGNATURE_OUTPUT_TAIL = 2048
-
 
 def _terminal_failure_signature(command: str, exit_code: int, output: str) -> str:
-    """Build the signature that identifies a repeated identical failure."""
-    tail = (output or "")[-_FAILURE_SIGNATURE_OUTPUT_TAIL:]
-    return f"{(command or '').strip()}\x00{exit_code}\x00{tail}"
+    """Return a compact hash identifying a specific terminal failure.
+
+    Hashing (rather than retaining the raw command+output) keeps the per-task
+    state stored in ``_terminal_failure_repeats`` to a fixed ~40 bytes — matching
+    the footprint of ``_terminal_streak_counts`` — so a long-lived process that
+    accumulates one entry per never-succeeding task does not retain kilobytes of
+    output per task.  The full output feeds the hash, so discrimination is exact
+    (no truncation window).
+    """
+    h = hashlib.sha1()
+    h.update((command or "").strip().encode("utf-8", "replace"))
+    h.update(b"\x00")
+    h.update(str(exit_code).encode("ascii", "replace"))
+    h.update(b"\x00")
+    h.update((output or "").encode("utf-8", "replace"))
+    return h.hexdigest()
 
 
 def _note_terminal_failure(

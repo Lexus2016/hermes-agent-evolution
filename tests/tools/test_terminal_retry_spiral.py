@@ -46,6 +46,14 @@ class TestFailureSignature:
         b = terminal_tool._terminal_failure_signature("  make", 1, "x")
         assert a == b
 
+    def test_signature_is_fixed_size_hash(self):
+        # Bounded regardless of output size, so per-task retained state stays
+        # small even for huge command output.
+        small = terminal_tool._terminal_failure_signature("make", 1, "x")
+        huge = terminal_tool._terminal_failure_signature("make", 1, "y" * 500_000)
+        assert len(small) == len(huge) == 40
+        assert small != huge
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: identical-failure repeat tracker
