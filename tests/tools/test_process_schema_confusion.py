@@ -167,5 +167,66 @@ class TestHandleProcessSessionIdAutoFill:
                 {"action": "poll"},
                 task_id="test",
             )
+            data = json.loads(result)
+            assert data["status"] == "ok"
             # Should use the active process, not the exited one
             mock_reg.poll.assert_called_once_with("proc_new")
+
+
+class TestInvalidSessionIdRecovery:
+    """#1014 — when session_id doesn't match any process, the error should
+    include available process IDs so the model can self-correct in one
+    round-trip instead of retrying the same stale ID."""
+
+    def test_invalid_session_id_lists_available(self):
+        """When session_id is stale, error includes available IDs."""
+        mock_procs = [
+            {"session_id": "proc_a", "status": "running"},
+            {"session_id": "proc_b", "status": "running"},
+        ]
+        with patch("tools.process_registry.process_registry") as mock_reg, \
+             patch("tools.approval.get_current_session_key") as mock_key:
+            mock_reg.get.return_value = None  # session_id not found
+            mock_reg.list_sessions.return_value = mock_procs
+            mock_key.return_value = ""
+            result = _handle_process(
+                {"action": "poll", "session_id": "stale_id"},
+                task_id="test",
+            )
+            data = json.loads(result)
+            assert "error" in data
+            assert "stale_id" in data["error"]
+            assert "proc_a" in data["error"]
+            assert "proc_b" in data["error"]
+
+    def test_invalid_session_id_no_processes(self):
+        """When session_id is stale and no processes exist, error says so."""
+        with patch("tools.process_registry.process_registry") as mock_reg, \
+             patch("tools.approval.get_current_session_key") as mock_key:
+            mock_reg.get.return_value = None
+            mock_reg.list_sessions.return_value = []
+            mock_key.return_value = ""
+            result = _handle_process(
+                {"action": "poll", "session_id": "stale_id"},
+                task_id="test",
+            )
+            data = json.loads(result)
+            assert "error" in data
+            assert "stale_id" in data["error"]
+            assert "No processes" in data["error"]
+
+    def test_valid_session_id_proceeds_normally(self):
+        """When session_id is valid, the validation gate passes through."""
+        mock_session = MagicMock()
+        mock_session.id = "proc_valid"
+        with patch("tools.process_registry.process_registry") as mock_reg, \
+             patch("tools.approval.get_current_session_key") as mock_key:
+            mock_reg.get.return_value = mock_session
+            mock_reg.poll.return_value = {"status": "ok", "output": "test"}
+            mock_key.return_value = ""
+            result = _handle_process(
+                {"action": "poll", "session_id": "proc_valid"},
+                task_id="test",
+            )
+            data = json.loads(result)
+            assert data["status"] == "ok"
