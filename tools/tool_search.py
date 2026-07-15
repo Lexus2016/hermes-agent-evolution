@@ -696,6 +696,24 @@ def is_bridge_tool(name: str) -> bool:
     return name in BRIDGE_TOOL_NAMES
 
 
+# #1015 — cache for tool_describe results. Keyed by (name, toolset_signature)
+# so the cache invalidates naturally when the tool set changes (different
+# session, enabled/disabled toolsets). The value is the JSON string returned
+# by dispatch_tool_describe, so a cache hit skips the full catalog scan.
+_describe_cache: dict[tuple[str, str], str] = {}
+_DESCRIBE_CACHE_MAX = 64
+
+
+def _toolset_signature(tool_defs: List[Dict[str, Any]]) -> str:
+    """A stable signature of the current tool definitions for cache keying."""
+    names = sorted(
+        (td.get("function") or {}).get("name", "")
+        for td in tool_defs
+        if (td.get("function") or {}).get("name")
+    )
+    return "|".join(names)
+
+
 def _format_search_hit(entry: CatalogEntry) -> Dict[str, Any]:
     return {
         "name": entry.name,
@@ -778,6 +796,36 @@ def dispatch_tool_describe(args: Dict[str, Any],
     name = str(args.get("name") or "").strip()
     if not name:
         return json.dumps({"error": "name is required"}, ensure_ascii=False)
+
+    # #1015 — check the describe cache first. Repeated calls for the same
+    # tool name (common when the model forgets the schema between turns)
+    # hit the cache and skip the full catalog scan, eliminating the
+    # re-classification overhead that was a top failure source.
+    sig = _toolset_signature(current_tool_defs)
+    cache_key = (name, sig)
+    cached = _describe_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    result = _dispatch_tool_describe_inner(args, name, current_tool_defs, config)
+    # Cache successful results (not error responses — those may change as
+    # tools are added/removed).
+    if '"error"' not in result:
+        if len(_describe_cache) >= _DESCRIBE_CACHE_MAX:
+            # Evict oldest entries (dict preserves insertion order in 3.7+).
+            _oldest_key = next(iter(_describe_cache))
+            del _describe_cache[_oldest_key]
+        _describe_cache[cache_key] = result
+    return result
+
+
+def _dispatch_tool_describe_inner(
+    args: Dict[str, Any],
+    name: str,
+    current_tool_defs: List[Dict[str, Any]],
+    config: "ToolSearchConfig",
+) -> str:
+    """Inner logic for dispatch_tool_describe, separated for caching."""
     if not is_deferrable_tool_name(name, config):
         # #978 — fuzzy name matching even for non-deferrable names: the
         # model may have slightly misspelled a deferrable tool. Suggest
@@ -904,6 +952,11 @@ def resolve_underlying_call(
     return name, raw_args, None
 
 
+def clear_describe_cache() -> None:
+    """Clear the tool_describe result cache (#1015)."""
+    _describe_cache.clear()
+
+
 __all__ = [
     "TOOL_SEARCH_NAME",
     "TOOL_DESCRIBE_NAME",
@@ -923,8 +976,9 @@ __all__ = [
     "bridge_tool_schemas",
     "assemble_tool_defs",
     "is_bridge_tool",
-    "dispatch_tool_search",
     "dispatch_tool_describe",
+    "dispatch_tool_search",
     "resolve_underlying_call",
     "scoped_deferrable_names",
+    "clear_describe_cache",
 ]

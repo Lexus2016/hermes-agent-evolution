@@ -733,3 +733,116 @@ class TestRegression_ToolsetScoping:
         # core tools are never deferrable
         assert "terminal" not in names
 
+
+# ---------------------------------------------------------------------------
+# #1015 — tool_describe schema caching
+# ---------------------------------------------------------------------------
+
+
+class TestDescribeCache:
+    """#1015 — dispatch_tool_describe caches successful results keyed by
+    (name, toolset_signature) so repeated calls skip the full catalog scan."""
+
+    def test_cache_hit_returns_same_result(self):
+        from tools.tool_search import (
+            dispatch_tool_describe,
+            clear_describe_cache,
+            is_deferrable_tool_name,
+        )
+        clear_describe_cache()
+
+        # Register a deferrable tool so describe has something to find.
+        from tools.registry import registry
+        registry.register(
+            name="cache_test_tool",
+            toolset="mcp-cache-test",
+            schema={
+                "name": "cache_test_tool",
+                "description": "Test tool for caching.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+            handler=lambda args, **kw: '{"ok": true}',
+        )
+        try:
+            # Use a toolset that will classify it as deferrable.
+            defs = [{
+                "type": "function",
+                "function": {
+                    "name": "cache_test_tool",
+                    "description": "Test tool for caching.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }]
+            r1 = dispatch_tool_describe({"name": "cache_test_tool"}, current_tool_defs=defs)
+            r2 = dispatch_tool_describe({"name": "cache_test_tool"}, current_tool_defs=defs)
+            # Cache hit: same JSON string (identity check — not just equal).
+            assert r1 == r2
+            assert "cache_test_tool" in r1
+        finally:
+            clear_describe_cache()
+
+    def test_cache_invalidates_on_toolset_change(self):
+        from tools.tool_search import (
+            dispatch_tool_describe,
+            clear_describe_cache,
+        )
+        clear_describe_cache()
+
+        from tools.registry import registry
+        registry.register(
+            name="cache_sig_tool",
+            toolset="mcp-sig-test",
+            schema={
+                "name": "cache_sig_tool",
+                "description": "v1",
+                "parameters": {"type": "object", "properties": {}},
+            },
+            handler=lambda args, **kw: '{"ok": true}',
+        )
+        try:
+            defs_v1 = [{
+                "type": "function",
+                "function": {
+                    "name": "cache_sig_tool",
+                    "description": "v1",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }]
+            defs_v2 = [{
+                "type": "function",
+                "function": {
+                    "name": "cache_sig_tool",
+                    "description": "v2 CHANGED",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }, {
+                "type": "function",
+                "function": {
+                    "name": "other_tool",
+                    "description": "other",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }]
+            r1 = dispatch_tool_describe({"name": "cache_sig_tool"}, current_tool_defs=defs_v1)
+            r2 = dispatch_tool_describe({"name": "cache_sig_tool"}, current_tool_defs=defs_v2)
+            # Different signatures → cache miss → different result.
+            assert r1 != r2
+            assert "v2 CHANGED" in r2
+        finally:
+            clear_describe_cache()
+
+    def test_error_results_not_cached(self):
+        from tools.tool_search import (
+            dispatch_tool_describe,
+            clear_describe_cache,
+        )
+        clear_describe_cache()
+
+        defs: List[Dict[str, Any]] = []
+        r1 = dispatch_tool_describe({"name": "nonexistent"}, current_tool_defs=defs)
+        # Error response should not be cached — verify it's an error.
+        assert "error" in r1
+        # A second call should also return an error (not a stale cache hit).
+        r2 = dispatch_tool_describe({"name": "nonexistent"}, current_tool_defs=defs)
+        assert "error" in r2
+

@@ -364,14 +364,61 @@ class TestSameQueryShortCircuit:
 
     def test_different_queries_still_spiral_at_repeat_threshold(self):
         # 8 DIFFERENT web_search queries: the same-query short-circuit must NOT
-        # fire (varied args), but the GENERIC mono-tool spiral detection still
-        # triggers at the idempotent repeat threshold (8). Proves the fix leaves
-        # spiral detection intact and does not over-trigger on varied queries.
+        # fire (varied args), but the #1012 diverse-query cap fires at 6
+        # (before the generic repeat threshold of 8). The nudge should mention
+        # "STOP searching" — the #1012 synthesis nudge — not "SAME arguments".
         msgs = self._web_run([f'{{"query": "topic {i}"}}' for i in range(8)])
         n = maybe_nudge(msgs)
         assert n is not None
         assert "SAME arguments" not in n  # not the #467 short-circuit
-        assert "web_search" in n  # the generic spiral nudge still fires
+        assert "web_search" in n  # the nudge still fires
+        assert "STOP searching" in n  # #1012 diverse-query synthesis nudge
+
+
+class TestWebSearchDiverseQueryCap:
+    """#1012 — web_search with *different* queries is a distinct spiral from
+    the same-argument loop (#467). The model reformulates the query each time,
+    each call "succeeds", but it never stops to synthesize. The diverse-query
+    cap fires at 6 (below the generic repeat threshold of 8) with a nudge that
+    explicitly directs synthesis."""
+
+    def _web_run(self, queries, *, result="3 relevant hits"):
+        msgs = [{"role": "user", "content": "research the topic"}]
+        for i, q in enumerate(queries):
+            cid = f"c{i}"
+            msgs.append(_asst("web_search", args=q, call_id=cid))
+            msgs.append(_result(result, call_id=cid))
+        return msgs
+
+    def test_diverse_queries_below_cap_quiet(self):
+        # 5 different queries < cap (6) → no nudge.
+        msgs = self._web_run([f'{{"query": "topic {i}"}}' for i in range(5)])
+        assert maybe_nudge(msgs) is None
+
+    def test_diverse_queries_at_cap_nudges_synthesis(self):
+        # 6 different queries ≥ cap (6) → synthesis nudge.
+        msgs = self._web_run([f'{{"query": "topic {i}"}}' for i in range(6)])
+        n = maybe_nudge(msgs)
+        assert n is not None
+        assert "STOP searching" in n
+        assert "synthesize" in n
+        assert "loop-guard" in n
+
+    def test_diverse_queries_above_cap_still_nudges(self):
+        # 7 different queries > cap (6) and < repeat_threshold (8) → nudge.
+        msgs = self._web_run([f'{{"query": "topic {i}"}}' for i in range(7)])
+        n = maybe_nudge(msgs)
+        assert n is not None
+        assert "STOP searching" in n
+
+    def test_same_queries_not_caught_by_diverse_cap(self):
+        # 6 identical queries: the same-arg short-circuit fires first (at 4),
+        # not the diverse-query cap. Verify the nudge is the same-arg one.
+        msgs = self._web_run(['{"query": "same query"}'] * 6)
+        n = maybe_nudge(msgs)
+        assert n is not None
+        assert "SAME arguments" in n
+        assert "STOP searching" not in n
 
 
 class TestShouldCronHardStop:
