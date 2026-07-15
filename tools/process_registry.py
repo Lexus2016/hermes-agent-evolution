@@ -2288,6 +2288,38 @@ def _handle_process(args, **kw):
                 elif len(all_procs) > 1:
                     hint = f" {len(all_procs)} processes exist. Use action='list' to see all."
                 return tool_error(f"session_id is required for {action}.{hint}")
+        # #1014 — validate session_id before dispatching to the registry.
+        # The registry returns a bare "not_found" with no recovery hint, so
+        # the model retries the same stale ID. Enrich the error with the
+        # actual available session IDs so the model can self-correct in one
+        # round-trip instead of looping.
+        if session_id:
+            _existing = process_registry.get(session_id)
+            if _existing is None:
+                try:
+                    from tools.approval import get_current_session_key
+                    _sk = get_current_session_key(default="") or ""
+                except Exception:
+                    _sk = ""
+                _avail = process_registry.list_sessions(
+                    task_id=task_id, session_key=_sk or None
+                )
+                _avail_ids = [
+                    p.get("session_id", "?")
+                    for p in _avail
+                    if isinstance(p, dict) and p.get("session_id")
+                ]
+                if _avail_ids:
+                    return tool_error(
+                        f"No process with ID '{session_id}'. "
+                        f"Available: {', '.join(_avail_ids[:5])}. "
+                        f"Use action='list' to see all processes."
+                    )
+                return tool_error(
+                    f"No process with ID '{session_id}'. "
+                    "No processes are currently registered. "
+                    "Use action='list' to verify."
+                )
         if action == "poll":
             return json.dumps(_redact_process_result(process_registry.poll(session_id)), ensure_ascii=False)
         elif action == "log":

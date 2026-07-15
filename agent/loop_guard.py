@@ -86,6 +86,15 @@ _NONRETRY_THRESHOLD = 2
 _SHORT_CIRCUIT_IDEMPOTENT = frozenset({"search_files", "web_search", "web_extract"})
 _SHORT_CIRCUIT_REPEAT_THRESHOLD = 4
 
+# #1012 — web_search with *different* queries is a distinct spiral from the
+# same-argument loop (#467): the model reformulates the query each time, each
+# call technically "succeeds", but it never stops to synthesize the results
+# into an answer. The generic repeat_threshold (8 for idempotent tools) is too
+# high — by then the agent has wasted 8+ iterations. This cap triggers earlier,
+# at a count where the model should already have enough results to synthesize.
+# The nudge explicitly tells it to stop searching and write the answer.
+_WEB_SEARCH_DIVERSE_QUERY_CAP = 6
+
 # Code-exploration tools whose mono-tool spiral is a STRATEGY problem, not a
 # failure (#625): 16-17 consecutive read_file calls / 14 consecutive
 # search_files calls, one file/query at a time, each succeeding — the agent
@@ -602,6 +611,29 @@ def maybe_nudge(
                 # contradict the 'rephrase the query' instruction above
                 # (consult review). The #625 exploration hints are excluded by
                 # the same long-standing design decision.
+            )
+
+    # #1012 — web_search diverse-query spiral: the model keeps reformulating
+    # the query (different args each time, each call "succeeds") but never
+    # stops to synthesize an answer. The same-argument guard above does NOT
+    # catch this because the args differ. This cap fires at a lower count than
+    # the generic repeat_threshold, with a nudge that explicitly directs
+    # synthesis from the results already gathered.
+    if (
+        tool == "web_search"
+        and count >= _WEB_SEARCH_DIVERSE_QUERY_CAP
+    ):
+        arg_hashes = [r[3] for r in same if r[3] is not None]
+        # Only trigger when queries are genuinely diverse (not all identical —
+        # that's already handled by the same-arg branch above).
+        if arg_hashes and len(set(arg_hashes)) >= 2:
+            return (
+                f"[loop-guard] You have called `web_search` {count} times with "
+                f"different queries. You have enough information — STOP searching "
+                f"and synthesize an answer from the results you already have. "
+                f"If the results are insufficient, use `web_extract` on the most "
+                f"promising URL for depth, or report what you found and what is "
+                f"still missing instead of running another search."
             )
 
     if count >= repeat_threshold:
