@@ -256,3 +256,29 @@ def streak_recommendation(streak: int) -> str | None:
             "or ask the user before continuing."
         )
     return None
+
+
+def spiral_break_diagnostic(command: str, repeat_count: int, budget: int) -> str:
+    """Build the diagnostic returned when a retry spiral is detected.
+
+    Args:
+        command: The command that has been repeated back-to-back.
+        repeat_count: How many times this exact failure has occurred in a row.
+        budget: The configured threshold of identical consecutive failures.
+
+    Returns:
+        A directive message telling the agent to stop re-issuing the command
+        and change approach.  This is an advisory signal to the model — it does
+        not by itself prevent another call — so it is worded to make the futility
+        explicit rather than to imply the tool blocked anything.
+    """
+    preview = command if len(command) <= 120 else command[:117] + "..."
+    return (
+        f"Retry spiral detected: this exact command has failed identically "
+        f"{repeat_count} times in a row (threshold {budget}). It is failing "
+        "deterministically — running it again unchanged will produce the same "
+        "failure. Stop retrying it: read the last error and fix the root cause, "
+        "change the command or its arguments, switch to another tool (read_file, "
+        "execute_code, process, web_search), or report the blocker to the user. "
+        f"Command: {preview}"
+    )

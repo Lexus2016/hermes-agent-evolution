@@ -43,7 +43,7 @@ import atexit
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 from utils import env_var_enabled
 
@@ -51,6 +51,7 @@ from tools.terminal_failure_classifier import (
     FailureCategory,
     TerminalFailureClassification,
     classify_terminal_failure,
+    spiral_break_diagnostic,
     streak_recommendation,
 )
 
@@ -1011,6 +1012,88 @@ def _reset_terminal_streak(task_id: Optional[str]) -> None:
 def get_terminal_streak(task_id: Optional[str] = None) -> int:
     """Return the current terminal streak for the given task/session."""
     return _terminal_streak_counts.get(task_id or "default", 0)
+
+
+# Per-session tracker of consecutive IDENTICAL terminal failures (issue #1022).
+# The session-global streak above counts any terminal failure; this detects a
+# true retry spiral: the SAME command producing the SAME failure (exit code +
+# output) back-to-back (up to 55 consecutive observed in trace data).  Any
+# observable change — a different command, exit code, or output — resets the
+# count, so legitimate loops that make progress between runs (edit-then-test,
+# poll-until-ready) are never flagged.  Keyed by task/session ->
+# (failure signature, consecutive count).
+_terminal_failure_repeats: Dict[str, Tuple[str, int]] = {}
+
+# Retry-spiral detection threshold (issue #1022): how many identical
+# consecutive terminal failures are allowed before the returned result is
+# escalated to a ``retry_spiral`` diagnostic.  Read from
+# ``terminal.max_command_repeats`` in config.yaml on first use, cached for the
+# process lifetime.  Default 3, floored at 1 and ceilinged at 20.
+_DEFAULT_MAX_COMMAND_REPEATS = 3
+_MAX_COMMAND_REPEATS_CEILING = 20
+_max_command_repeats_cached: Optional[int] = None
+
+# Only the tail of the output feeds the signature — errors surface at the end,
+# and this bounds the retained per-task state to a small, fixed size.
+_FAILURE_SIGNATURE_OUTPUT_TAIL = 2048
+
+
+def _terminal_failure_signature(command: str, exit_code: int, output: str) -> str:
+    """Build the signature that identifies a repeated identical failure."""
+    tail = (output or "")[-_FAILURE_SIGNATURE_OUTPUT_TAIL:]
+    return f"{(command or '').strip()}\x00{exit_code}\x00{tail}"
+
+
+def _note_terminal_failure(
+    task_id: Optional[str], command: str, exit_code: int, output: str
+) -> int:
+    """Record a terminal FAILURE and return its consecutive-repeat count.
+
+    The count is how many times this exact (command, exit code, output tail)
+    failure has occurred back-to-back — including this one.  A different
+    command, exit code, or output resets it to 1, because a changed result
+    means the loop is making progress rather than spiralling.
+    """
+    key = task_id or "default"
+    signature = _terminal_failure_signature(command, exit_code, output)
+    last_sig, count = _terminal_failure_repeats.get(key, ("", 0))
+    count = count + 1 if signature == last_sig else 1
+    _terminal_failure_repeats[key] = (signature, count)
+    return count
+
+
+def _reset_terminal_failure_repeats(task_id: Optional[str]) -> None:
+    """Clear the identical-failure repeat counter for the given task/session."""
+    key = task_id or "default"
+    _terminal_failure_repeats.pop(key, None)
+
+
+def get_terminal_failure_repeat(task_id: Optional[str] = None) -> int:
+    """Return the current identical-failure repeat count for the task/session."""
+    return _terminal_failure_repeats.get(task_id or "default", ("", 0))[1]
+
+
+def _get_max_command_repeats() -> int:
+    """Return the configured retry-spiral budget (identical consecutive calls)."""
+    global _max_command_repeats_cached
+    if _max_command_repeats_cached is not None:
+        return _max_command_repeats_cached
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config()
+        term_cfg = cfg.get("terminal", {})
+        val = term_cfg.get("max_command_repeats")
+        if (
+            isinstance(val, (int, float))
+            and 1 <= int(val) <= _MAX_COMMAND_REPEATS_CEILING
+        ):
+            _max_command_repeats_cached = int(val)
+            return _max_command_repeats_cached
+    except Exception:
+        pass
+    _max_command_repeats_cached = _DEFAULT_MAX_COMMAND_REPEATS
+    return _max_command_repeats_cached
 
 
 _env_lock = threading.Lock()
@@ -2883,6 +2966,26 @@ def terminal_tool(
                             "should_retry": False,
                             "terminal_streak": streak,
                         }
+                        # Retry-spiral detection (issue #1022): if this exact
+                        # command has produced this exact failure back-to-back
+                        # beyond the budget, escalate the returned result to a
+                        # precise `retry_spiral` diagnostic so the agent gets a
+                        # sharper stop signal than the generic persistent-error
+                        # hint.  A changed command, exit code, or output resets
+                        # the counter, so edit-then-test and poll-until-ready
+                        # loops (which make progress) never trip it.  This is an
+                        # advisory signal — hard loop enforcement lives in
+                        # agent/loop_guard.py.
+                        repeat = _note_terminal_failure(
+                            task_id, command, returncode, output
+                        )
+                        budget = _get_max_command_repeats()
+                        if repeat > budget:
+                            diagnostic = spiral_break_diagnostic(command, repeat, budget)
+                            result_dict["error"] = diagnostic
+                            result_dict["suggestion"] = diagnostic
+                            result_dict["failure_class"] = "retry_spiral"
+                            result_dict["failure_repeat_count"] = repeat
                         if approval_note:
                             # An approved command interrupted mid-run exits 130
                             # with the executor's marker — never imply success in
@@ -2902,6 +3005,7 @@ def terminal_tool(
 
                 # Successful (or informational) result: reset streak and process output.
                 _reset_terminal_streak(task_id)
+                _reset_terminal_failure_repeats(task_id)
                 break
 
             # Extract output

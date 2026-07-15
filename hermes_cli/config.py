@@ -1219,6 +1219,16 @@ DEFAULT_CONFIG = {
         "modal_mode": "auto",
         "cwd": ".",  # Use current directory
         "timeout": 180,
+        # Retry-spiral detection (issue #1022): the number of times a command
+        # may produce the *identical* failure (same exit code + output)
+        # back-to-back before the returned result is escalated to a precise
+        # ``retry_spiral`` diagnostic that tells the agent to stop and change
+        # approach.  Any observable change — a different command, exit code, or
+        # output — resets the counter, so edit-then-test and poll-until-ready
+        # loops that make progress are never flagged.  This is an advisory
+        # signal to the model (hard loop enforcement lives in the loop guard),
+        # so it does not by itself abort execution.  1–20; default 3.
+        "max_command_repeats": 3,
         # Bounded grace period (seconds) between SIGTERM and an escalated
         # SIGKILL when terminating a host process tree (browser daemons, etc.).
         # A daemon that stalls in its SIGTERM handler is force-killed after this
