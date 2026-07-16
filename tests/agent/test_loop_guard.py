@@ -49,8 +49,18 @@ class TestRepeatTrigger:
         assert n is not None and "terminal" in n and "loop-guard" in n
 
     def test_idempotent_below_threshold_is_quiet(self):
-        # read_file is idempotent (repeat_threshold=8) — 7 calls should be quiet.
-        assert maybe_nudge(_run("read_file", 7)) is None
+        # read_file is idempotent (repeat_threshold=8). 7 reads of DIFFERENT
+        # ranges are legitimate exploration and stay quiet. (Identical-argument
+        # repeats now trip the debounce at 4 — see
+        # test_loop_guard_readfile_debounce.py, #1092.)
+        msgs = [{"role": "user", "content": "explore"}]
+        for i in range(7):
+            cid = f"c{i}"
+            msgs.append(
+                _asst("read_file", args=json.dumps({"path": "a.py", "offset": i * 100}), call_id=cid)
+            )
+            msgs.append(_result("ok", call_id=cid))
+        assert maybe_nudge(msgs) is None
 
     def test_idempotent_at_threshold_nudges(self):
         n = maybe_nudge(_run("read_file", 8))

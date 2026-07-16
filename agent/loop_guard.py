@@ -84,6 +84,17 @@ _NONRETRY_THRESHOLD = 2
 # return "success". Count these as non-progress after a shorter run so the model
 # is nudged toward a different query / tool / strategy.
 _SHORT_CIRCUIT_IDEMPOTENT = frozenset({"search_files", "web_search", "web_extract"})
+# File-read tools: re-reading the SAME path+offset+limit returns content the
+# model already has, so an identical-argument repeat is a spiral just like a
+# repeated search query.  read_file is the second-largest retry-spiral cluster
+# in the agent's own traces (up to 8 consecutive identical calls, #1092), so
+# trip the same-argument short-circuit at _SHORT_CIRCUIT_REPEAT_THRESHOLD (4)
+# instead of waiting for the generic idempotent repeat_threshold (8) — half the
+# wasted calls / prompt-cache budget.  Kept as a distinct set so the nudge can
+# speak in file terms (offset/limit) rather than the search "rephrase the query"
+# wording, which does not apply to a file read.
+_SHORT_CIRCUIT_FILE_READ = frozenset({"read_file", "mcp_filesystem_read_file"})
+_SHORT_CIRCUIT_IDEMPOTENT = _SHORT_CIRCUIT_IDEMPOTENT | _SHORT_CIRCUIT_FILE_READ
 _SHORT_CIRCUIT_REPEAT_THRESHOLD = 4
 
 # #1012 — web_search with *different* queries is a distinct spiral from the
@@ -597,21 +608,44 @@ def maybe_nudge(
     if tool in _SHORT_CIRCUIT_IDEMPOTENT and count >= short_circuit_threshold:
         arg_hashes = [r[3] for r in same if r[3] is not None]
         if arg_hashes and len(set(arg_hashes)) == 1:
-            score = _tool_spiral_score(tool, count, short_circuit_threshold)
-            score_line = f"\n{score}" if score else ""
-            return (
-                f"[loop-guard] You have called `{tool}` {count} times with the "
-                f"SAME arguments and the result is not making progress.{score_line} "
-                f"Do NOT repeat `{tool}` with those identical arguments. Rephrase "
-                f"the query, broaden or narrow it, switch to a different information "
-                f"source, or state the blocker if no relevant results are available."
-                # Deliberately NO appended hints here: this branch's advice is
-                # already specific to identical-argument repetition, and e.g.
-                # web_search's 'stop reformulating' diversion would directly
-                # contradict the 'rephrase the query' instruction above
-                # (consult review). The #625 exploration hints are excluded by
-                # the same long-standing design decision.
-            )
+            _is_file_read = tool in _SHORT_CIRCUIT_FILE_READ
+            # File-read tools defer an extreme identical-read spiral
+            # (>= escalate_threshold) to the stronger escalation interrupt
+            # below; the debounce owns the earlier
+            # [short_circuit_threshold, escalate_threshold) window. Search tools
+            # have no escalation tie-in, so they keep short-circuiting at any
+            # count above the threshold. (#1092)
+            if not (_is_file_read and count >= escalate_threshold):
+                score = _tool_spiral_score(tool, count, short_circuit_threshold)
+                score_line = f"\n{score}" if score else ""
+                if _is_file_read:
+                    return (
+                        f"[loop-guard] You have called `{tool}` {count} times with the "
+                        f"SAME path/offset/limit — you already have that file content "
+                        f"and re-reading returns the same bytes.{score_line} Do NOT "
+                        f"re-read the identical range. Use the content you already "
+                        f"have, read a DIFFERENT part of the file (change offset/limit) "
+                        f"or a different file, or state the blocker if the file does "
+                        f"not contain what you need."
+                        # Unlike the search branch below, the #625 exploration
+                        # hint (repo_map / bulk read / delegate_task) does NOT
+                        # contradict "don't re-read the identical range" — it is
+                        # the complementary better strategy, so keep it.
+                        f"{_diversion_hint(tool)}"
+                    )
+                return (
+                    f"[loop-guard] You have called `{tool}` {count} times with the "
+                    f"SAME arguments and the result is not making progress.{score_line} "
+                    f"Do NOT repeat `{tool}` with those identical arguments. Rephrase "
+                    f"the query, broaden or narrow it, switch to a different information "
+                    f"source, or state the blocker if no relevant results are available."
+                    # Deliberately NO appended hints here: this branch's advice is
+                    # already specific to identical-argument repetition, and e.g.
+                    # web_search's 'stop reformulating' diversion would directly
+                    # contradict the 'rephrase the query' instruction above
+                    # (consult review). The #625 exploration hints are excluded by
+                    # the same long-standing design decision.
+                )
 
     # #1012 — web_search diverse-query spiral: the model keeps reformulating
     # the query (different args each time, each call "succeeds") but never
