@@ -804,6 +804,33 @@ def recover_with_credential_pool(
             )
             agent._swap_credential(next_entry)
             return True, False
+        # Pool exhausted for billing — attempt cross-PROVIDER fallback so
+        # the session isn't blocked when one provider's credits run out but
+        # a fallback chain is configured. See issue #1043.
+        _ra().logger.info(
+            "Credential pool exhausted (billing %s) for provider %s — "
+            "attempting cross-provider fallback",
+            rotate_status,
+            pool_provider or current_provider or "(unknown)",
+        )
+        try:
+            activated = agent._try_activate_fallback(reason=FailoverReason.billing)
+        except Exception as exc:  # noqa: BLE001 — never let fallback errors mask the original 402
+            _ra().logger.warning("Cross-provider fallback raised: %s", exc)
+            activated = False
+        if activated:
+            _ra().logger.info(
+                "Billing pool exhausted — switched to fallback provider %s",
+                getattr(agent, "provider", "?"),
+            )
+            return True, False
+        # All providers exhausted: no pool credentials AND no usable fallback.
+        _ra().logger.error(
+            "All providers exhausted for billing (status %s): no pool "
+            "credentials remain and no fallback provider is available. "
+            "Add credits or configure fallback_providers to recover.",
+            rotate_status,
+        )
         return False, has_retried_429
 
     if effective_reason == FailoverReason.rate_limit:
