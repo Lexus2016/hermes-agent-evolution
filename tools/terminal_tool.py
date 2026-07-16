@@ -2513,6 +2513,8 @@ def terminal_tool(
                             "command": approval.get("command", command),
                             "description": desc,
                             "pattern_key": approval.get("pattern_key", ""),
+                            "smart_denied": approval.get("smart_denied", False),
+                            "allow_permanent": approval.get("allow_permanent", True),
                         }, ensure_ascii=False)
                     return json.dumps({
                         "output": "",

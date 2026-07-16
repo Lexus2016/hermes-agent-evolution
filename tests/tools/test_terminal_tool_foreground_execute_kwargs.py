@@ -19,7 +19,7 @@ import tools.terminal_tool as terminal_tool_module
 
 
 def _strict_execute(command, cwd="", *, timeout=None, stdin_data=None,
-                     rewrite_compound_background=True):
+                     rewrite_compound_background=True, bounded_capture=False):
     """Mirrors BaseEnvironment.execute()'s real signature: no session_id/pty."""
     return {"output": "ok", "returncode": 0}
 
