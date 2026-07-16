@@ -20,6 +20,10 @@ class FailureCategory(str, Enum):
     permission_denied = "permission_denied"
     persistent_error = "persistent_error"
     timeout = "timeout"
+    # Repeated identical timeout — deterministic, cannot be recovered by
+    # retrying with the same command.  The agent must change at least one
+    # of {command, cwd, timeout, flags} or switch tools (issue #1091).
+    timeout_deterministic = "timeout_deterministic"
     unknown = "unknown"
 
 
@@ -133,15 +137,23 @@ def classify_terminal_failure(
     base_cmd = _base_command(command)
 
     # Transient timeout / partial output is safe to retry with backoff.
+    # After 2 consecutive identical timeouts (was 3) the failure is
+    # deterministic — the same command with the same parameters cannot
+    # succeed.  Promote to ``timeout_deterministic`` so the agent gets a
+    # distinct signal to change parameters or switch tools (issue #1091).
     if exit_code == 124 or any(p.search(text) for p in _TIMEOUT_PATTERNS):
-        if consecutive_count >= 3:
+        if consecutive_count >= 2:
             return TerminalFailureClassification(
-                category=FailureCategory.persistent_error,
+                category=FailureCategory.timeout_deterministic,
                 hint=(
-                    "The command has timed out repeatedly ("
-                    f"{consecutive_count} consecutive terminal calls). "
-                    "Consider running it as a background process with "
-                    "notify_on_complete=true, or break the work into smaller steps."
+                    "The command has timed out deterministically ("
+                    f"{consecutive_count} consecutive identical failures). "
+                    "Retrying the same command with the same parameters will "
+                    "produce the same timeout. Change at least one of: the "
+                    "command, the working directory, the timeout value, or "
+                    "the flags. Alternatively, run it in the background with "
+                    "notify_on_complete=true, use execute_code, or split the "
+                    "work into smaller steps."
                 ),
                 should_retry=False,
             )

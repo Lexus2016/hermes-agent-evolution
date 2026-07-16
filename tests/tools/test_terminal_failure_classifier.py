@@ -50,12 +50,42 @@ class TestClassifyTimeout:
         assert result.category == classifier.FailureCategory.timeout
         assert result.should_retry is True
 
-    def test_high_streak_becomes_persistent(self):
+    def test_first_timeout_is_retryable(self):
+        """A single timeout (consecutive_count=1) is retryable."""
+        result = classifier.classify_terminal_failure(
+            "sleep 10", 124, "", "", consecutive_count=1
+        )
+        assert result.category == classifier.FailureCategory.timeout
+        assert result.should_retry is True
+
+    def test_second_consecutive_timeout_is_deterministic(self):
+        """After 2 consecutive identical timeouts, the failure is
+        classified as ``timeout_deterministic`` (non-retryable) so
+        the agent gets a distinct signal to change parameters (issue #1091)."""
+        result = classifier.classify_terminal_failure(
+            "sleep 10", 124, "", "", consecutive_count=2
+        )
+        assert result.category == classifier.FailureCategory.timeout_deterministic
+        assert result.should_retry is False
+
+    def test_high_streak_is_deterministic(self):
+        """A high consecutive count also classifies as timeout_deterministic
+        (was persistent_error before issue #1091 lowered the threshold)."""
         result = classifier.classify_terminal_failure(
             "sleep 10", 124, "", "", consecutive_count=5
         )
-        assert result.category == classifier.FailureCategory.persistent_error
+        assert result.category == classifier.FailureCategory.timeout_deterministic
         assert result.should_retry is False
+
+    def test_deterministic_timeout_hint_mentions_parameter_change(self):
+        """The hint for timeout_deterministic should tell the agent to
+        change command/cwd/timeout/flags, not just 'try again'."""
+        result = classifier.classify_terminal_failure(
+            "slowcmd", 124, "", "", consecutive_count=3
+        )
+        assert result.category == classifier.FailureCategory.timeout_deterministic
+        assert "Change at least one of" in result.hint
+        assert "command" in result.hint.lower()
 
 
 class TestClassifyRetryableTransient:

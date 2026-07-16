@@ -2898,7 +2898,12 @@ def terminal_tool(
                     )
 
                     # Timeout-like execution errors surface as exit code 124.
-                    if classification.category == FailureCategory.timeout:
+                    # Includes ``timeout_deterministic`` (repeated identical
+                    # timeouts) which is non-retryable (issue #1091).
+                    if classification.category in {
+                        FailureCategory.timeout,
+                        FailureCategory.timeout_deterministic,
+                    }:
                         result_dict = {
                             "output": "",
                             "exit_code": 124,

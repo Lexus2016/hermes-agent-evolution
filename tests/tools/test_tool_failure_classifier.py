@@ -242,6 +242,16 @@ class TestTerminalDelegation:
         # Repeated timeouts stop being retryable — force a strategy change.
         assert result.should_retry is False
 
+    def test_deterministic_timeout_maps_to_persistent(self):
+        """timeout_deterministic from terminal classifier maps to
+        ToolFailureCategory.persistent_error (issue #1091)."""
+        result = tfc.classify_tool_failure(
+            "terminal", "", exit_code=124, consecutive_count=2
+        )
+        assert result.category == tfc.ToolFailureCategory.persistent_error
+        assert result.should_retry is False
+        assert result.tool_type == tfc.ToolType.terminal
+
 
 # ---------------------------------------------------------------------------
 # Extensibility

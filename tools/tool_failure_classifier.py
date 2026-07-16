@@ -307,6 +307,9 @@ _TERMINAL_CATEGORY_MAP: dict[_TerminalCategory, ToolFailureCategory] = {
     _TerminalCategory.missing_command: ToolFailureCategory.tool_unavailable,
     _TerminalCategory.permission_denied: ToolFailureCategory.permission_denied,
     _TerminalCategory.persistent_error: ToolFailureCategory.persistent_error,
+    # Deterministic timeout (repeated identical failures) maps to persistent
+    # — the call cannot succeed unchanged (issue #1091).
+    _TerminalCategory.timeout_deterministic: ToolFailureCategory.persistent_error,
     _TerminalCategory.timeout: ToolFailureCategory.timeout,
     _TerminalCategory.unknown: ToolFailureCategory.unknown,
 }
