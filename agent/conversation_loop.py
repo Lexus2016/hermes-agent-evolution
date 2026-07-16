@@ -992,6 +992,42 @@ def _run_conversation_impl(
                             {"role": "assistant", "content": final_response}
                         )
                         break
+                    elif (
+                        _loop_guard.should_interactive_hard_stop(
+                            getattr(agent, "platform", None),
+                            _lg_warnings,
+                            _lg_genuine_spiral,
+                        )
+                    ):
+                        # #1109–#1112 — interactive failing-spiral enforcement:
+                        # the tool is genuinely failing (not just repetitive-
+                        # successful) and has ignored
+                        # INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD warnings.
+                        # Stop burning context/budget instead of nudging again.
+                        logger.warning(
+                            "loop_guard: interactive hard stop — `%s` failing "
+                            "spiral nudged %d times with no course-correction "
+                            "(%d consecutive calls), ending turn as a failure "
+                            "(#1109)",
+                            _lg_tool,
+                            _lg_warnings,
+                            _lg_count,
+                        )
+                        final_response = (
+                            f"[loop-guard] `{_lg_tool}` has been failing "
+                            f"repeatedly — {_lg_warnings} advisory warnings were "
+                            f"ignored across {_lg_count} consecutive calls with no "
+                            f"course-correction. Stopping to preserve context and "
+                            f"budget. Review the errors above and change the "
+                            f"approach, or report the blocker if it can't be "
+                            f"resolved."
+                        )
+                        failed = True
+                        _turn_exit_reason = "loop_guard_interactive_hard_stop"
+                        messages.append(
+                            {"role": "assistant", "content": final_response}
+                        )
+                        break
                     if not agent.quiet_mode:
                         agent._safe_print("\n🌀 loop-guard: nudging a strategy change")
         except Exception as _lg_err:  # never let the guard break the loop

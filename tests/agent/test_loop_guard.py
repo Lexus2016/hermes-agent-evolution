@@ -10,11 +10,13 @@ import json
 
 from agent.loop_guard import (
     CRON_LOOP_GUARD_HARD_STOP_THRESHOLD,
+    INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD,
     current_run_signature,
     maybe_nudge,
     maybe_refusal_nudge,
     run_warrants_cron_hard_stop,
     should_cron_hard_stop,
+    should_interactive_hard_stop,
 )
 
 
@@ -459,6 +461,76 @@ class TestShouldCronHardStop:
         huge_count = CRON_LOOP_GUARD_HARD_STOP_THRESHOLD + 100
         for platform in ("cli", "telegram", "discord", "gateway", None, ""):
             assert should_cron_hard_stop(platform, huge_count) is False, platform
+
+
+class TestShouldInteractiveHardStop:
+    """#1109–#1112: interactive failing-spiral enforcement. After enough
+    advisory warnings for a GENUINE failing spiral (run_warrants_cron_hard_stop
+    is True), interactive surfaces also stop — not just cron. Legitimate
+    repetitive-but-successful work is never affected."""
+
+    def test_below_threshold_never_stops(self):
+        assert (
+            should_interactive_hard_stop(
+                "cli",
+                INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD - 1,
+                genuine_spiral=True,
+            )
+            is False
+        )
+
+    def test_at_threshold_stops_for_genuine_spiral(self):
+        assert (
+            should_interactive_hard_stop(
+                "cli",
+                INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD,
+                genuine_spiral=True,
+            )
+            is True
+        )
+
+    def test_above_threshold_stops(self):
+        assert (
+            should_interactive_hard_stop(
+                "telegram",
+                INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD + 5,
+                genuine_spiral=True,
+            )
+            is True
+        )
+
+    def test_never_stops_for_non_genuine_spiral(self):
+        """Repetitive-but-successful work: keep nudging, never hard-stop."""
+        huge = INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD + 100
+        for platform in ("cli", "gateway", "telegram", "discord", None, ""):
+            assert should_interactive_hard_stop(
+                platform, huge, genuine_spiral=False
+            ) is False, platform
+
+    def test_cron_platform_never_triggers_interactive_path(self):
+        """Cron uses its own lower-threshold path; should_interactive_hard_stop
+        must defer to that and always return False for cron."""
+        assert (
+            should_interactive_hard_stop(
+                "cron",
+                INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD + 10,
+                genuine_spiral=True,
+            )
+            is False
+        )
+
+    def test_all_interactive_platforms_covered(self):
+        """Every non-cron platform should be eligible once the threshold is
+        met for a genuine spiral."""
+        for platform in ("cli", "gateway", "telegram", "discord", "web", None, ""):
+            assert should_interactive_hard_stop(
+                platform,
+                INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD,
+                genuine_spiral=True,
+            ) is True, platform
+
+    def test_zero_warnings_never_stops(self):
+        assert should_interactive_hard_stop("cli", 0, genuine_spiral=True) is False
 
 
 class TestFailureClassAndDiversionHints:

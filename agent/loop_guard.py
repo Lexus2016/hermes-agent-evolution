@@ -301,6 +301,21 @@ _POLLING_TOOLS = frozenset({"process"})
 # constant is only consulted when ``agent.platform == "cron"``.
 CRON_LOOP_GUARD_HARD_STOP_THRESHOLD = 2
 
+# Interactive escalation (#1109, #1110, #1111, #1112): advisory nudges are
+# also routinely ignored on INTERACTIVE surfaces when the spiral is a genuine
+# failing one (``run_warrants_cron_hard_stop`` is True — the tool is actually
+# failing or stuck in an identical-call loop, not just doing repetitive but
+# successful work). Observed: terminal retry spirals reaching 29 consecutive
+# calls (#1109), execute_code at 17 (#1110), browser_navigate at 21 (#1111),
+# read_file at 8 (#1112). A human is present but the spiral burns context and
+# budget with no benefit. After this many warnings for the SAME stuck run —
+# deliberately HIGHER than the cron threshold (2) to give a human more room to
+# intervene — also end the interactive turn as a failure for genuine spirals.
+# Legitimate mono-tool runs that merely LOOK repetitive (distinct successful
+# calls) never reach this gate because ``run_warrants_cron_hard_stop`` returns
+# False for them, so this only ever stops genuine non-progress.
+INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD = 4
+
 
 def should_cron_hard_stop(platform: Optional[str], warning_count: int) -> bool:
     """True when an unattended cron turn should end as a failure instead of
@@ -310,6 +325,35 @@ def should_cron_hard_stop(platform: Optional[str], warning_count: int) -> bool:
     (CLI/gateway/messaging) always return False — a human is present there to
     course-correct, so the guard stays purely advisory."""
     return platform == "cron" and warning_count >= CRON_LOOP_GUARD_HARD_STOP_THRESHOLD
+
+
+def should_interactive_hard_stop(
+    platform: Optional[str],
+    warning_count: int,
+    genuine_spiral: bool,
+) -> bool:
+    """True when an INTERACTIVE (non-cron) turn should end as a failure for a
+    genuine failing spiral that has ignored ``INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD``
+    advisory warnings (#1109–#1112).
+
+    Only fires when ALL of the following hold:
+      * ``platform`` is NOT ``"cron"`` (cron uses its own lower threshold).
+      * ``genuine_spiral`` is True — i.e. ``run_warrants_cron_hard_stop`` says
+        the trailing run is genuinely flailing (failing repeatedly or stuck in
+        an identical-call loop), NOT merely doing repetitive-but-successful
+        mono-tool work.
+      * ``warning_count >= INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD`` — the
+        model has been given several escalating chances to course-correct.
+
+    This ensures interactive spirals that burn context with no progress are
+    stopped, while preserving the purely-advisory behaviour for legitimate
+    repetitive work (the iteration/budget guard remains the backstop there).
+    """
+    if platform == "cron":
+        return False  # cron has its own path via should_cron_hard_stop
+    if not genuine_spiral:
+        return False  # repetitive-but-successful work: keep nudging
+    return warning_count >= INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD
 
 
 def _failure_category(content: Any) -> Optional[str]:
