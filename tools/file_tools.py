@@ -968,6 +968,24 @@ def _record_patch_failure(task_id: str, resolved_path: str) -> int:
         return task_failures[resolved_path]
 
 
+def _get_patch_failure_count(task_id: str, resolved_path: str) -> int:
+    """Return the current consecutive-failure count for a path (0 if none)."""
+    with _patch_failure_lock:
+        task_failures = _patch_failure_tracker.get(task_id)
+        if not task_failures:
+            return 0
+        return task_failures.get(resolved_path, 0)
+
+
+def _read_file_content(path: str) -> str:
+    """Read a file's content for patch auto-suggest. Returns empty on error."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except Exception:
+        return ""
+
+
 def _reset_patch_failures(task_id: str, resolved_paths: list) -> None:
     """Clear consecutive-failure counts for the given paths."""
     if not resolved_paths:
@@ -1470,8 +1488,14 @@ def read_file_tool(
                 pass  # stat failed — fall through to full read
 
         # ── Perform the read ──────────────────────────────────────────
+        # Pass the RESOLVED path (str(_resolved)) to FileOperations.read_file
+        # so the shell commands inside (wc -c, sed, head) use the fully-
+        # qualified absolute path.  Passing the raw *path* here means a
+        # relative path is resolved by the shell's cwd, which may differ
+        # from the terminal env's tracked cwd — the root cause of the
+        # read_file file-not-found spiral (#1044, #886, #970).
         file_ops = _get_file_ops(task_id)
-        result = file_ops.read_file(path, offset, limit)
+        result = file_ops.read_file(str(_resolved), offset, limit)
         result_dict = result.to_dict()
 
         # ── Character-count guard ─────────────────────────────────────
@@ -1992,6 +2016,45 @@ def patch_tool(
                     return tool_error("path required")
                 if old_string is None or new_string is None:
                     return tool_error("old_string and new_string required")
+                # Hard stop: refuse further patch attempts to a file that has
+                # already exceeded the consecutive-failure threshold (#1037).
+                # Previously the code only emitted a "_hint" after the
+                # threshold — the model could keep retrying and wasting API
+                # calls.  Now we refuse the call outright and direct the
+                # model to re-read or use write_file.
+                # EXCEPTION: if the old_string is actually present in the
+                # file (exact match), let the patch proceed — it would
+                # succeed and clear the failure counter, which is the
+                # desired recovery path.
+                _resolved_for_gate = _path_to_resolved.get(path) or path
+                _prior_failures = _get_patch_failure_count(task_id, _resolved_for_gate)
+                if _prior_failures >= _get_self_correction_retries():
+                    # Check if old_string exists in the file — if it does,
+                    # this is a valid patch that should proceed.
+                    _gate_content = _read_file_content(_resolved_for_gate)
+                    if _gate_content and old_string and old_string not in _gate_content:
+                        _suggested = ""
+                        try:
+                            from tools.fuzzy_match import suggest_closest_match
+                            if _gate_content:
+                                _suggested = suggest_closest_match(old_string, _gate_content)
+                        except Exception:
+                            pass
+                        _suggest_block = ""
+                        if _suggested:
+                            _suggest_block = (
+                                f"\n\nSuggested old_string (closest match in file):\n"
+                                f"---\n{_suggested}\n---\n"
+                            )
+                        return tool_error(
+                            f"PATCH REFUSED: {path} has {_prior_failures} consecutive "
+                            f"patch failures (threshold: {_get_self_correction_retries()}). "
+                            f"Stop retrying with variations of the same old_string. "
+                            f"Either: (1) re-read the file with read_file to verify "
+                            f"current content, (2) use write_file to replace the "
+                            f"entire file, or (3) use the suggested match below if "
+                            f"applicable.{_suggest_block}"
+                        )
                 # Pass the resolved ABSOLUTE path to the shell layer so it
                 # operates on the exact file the tool layer resolved — the
                 # shell's own cwd may differ (worktree-cwd bug), and a relative
@@ -2110,6 +2173,40 @@ def patch_tool(
                     "old_string not found. Use read_file to verify the current "
                     "content, or search_files to locate the text."
                 )
+
+            # Auto-suggest the closest matching substring from the file
+            # so the model can use it as the corrected old_string instead
+            # of guessing (#1037).  Runs for ALL no-match failures,
+            # including those where patch_replace already added a "Did
+            # you mean?" snippet or where the generic hint was set above.
+            if is_no_match and mode == "replace" and path:
+                try:
+                    from tools.fuzzy_match import suggest_closest_match
+                    _rp = _path_to_resolved.get(path) or path
+                    _fc = _read_file_content(_rp)
+                    if _fc:
+                        _suggest = suggest_closest_match(
+                            old_string or "", _fc
+                        )
+                        if _suggest:
+                            _suggest_block = (
+                                "\n\nSuggested old_string "
+                                "(closest match in file):\n"
+                                f"---\n{_suggest}\n---\n"
+                            )
+                            _existing_hint = result_dict.get("_hint", "") or ""
+                            if _existing_hint:
+                                result_dict["_hint"] = (
+                                    _existing_hint + _suggest_block
+                                )
+                            else:
+                                result_dict["_hint"] = (
+                                    "old_string not found. "
+                                    "Use read_file to verify the "
+                                    f"current content.{_suggest_block}"
+                                )
+                except Exception:
+                    pass
         return json.dumps(result_dict, ensure_ascii=False)
     except Exception as e:
         return tool_error(str(e))
