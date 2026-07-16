@@ -248,3 +248,47 @@ def overload_retry_ceiling(short_attempts: int = _OVERLOAD_SHORT_ATTEMPTS) -> in
     exceed the last long-tier index for every long wait to actually execute.
     """
     return short_attempts + len(_OVERLOAD_LONG_BACKOFF) + 1
+
+
+# Connection/read timeouts classify as ``FailoverReason.timeout``.  They mean
+# the provider accepted the request but did not respond within the deadline —
+# usually provider-side slowness or a hung upstream, not a fast-failing network
+# error.  The generic path retried a timed-out request after only the short
+# exponential (2s → 4s → …), but a request that already burned a full timeout
+# window rarely succeeds 2s later — the provider is still busy.  Like 503/529
+# overload (#1040), a timeout deserves a progressive backoff that gives a
+# slow/hung provider room to recover before we spend another full timeout
+# window.  The schedule is gentler than overload's (10s → 20s → 40s → 60s):
+# the timeout deadline itself already imposes a long delay per attempt, so we
+# don't stack the very long 90/120s waits on top.  (#1093)
+_TIMEOUT_LONG_BACKOFF = (10.0, 20.0, 40.0, 60.0)
+_TIMEOUT_SHORT_ATTEMPTS = 1
+
+
+def adaptive_timeout_backoff(
+    attempt: int,
+    *,
+    default_wait: float,
+    short_attempts: int = _TIMEOUT_SHORT_ATTEMPTS,
+) -> tuple[float, str | None]:
+    """Provider-agnostic jittered backoff for connection/read timeouts (#1093).
+
+    Mirrors :func:`adaptive_overload_backoff`.  The first ``short_attempts``
+    retry uses ``default_wait`` (a genuine transient hiccup often clears
+    immediately); after that, waits walk :data:`_TIMEOUT_LONG_BACKOFF`
+    (10s → 20s → 40s → 60s, capped) with light jitter, giving a slow/hung
+    provider room to recover instead of burning another full timeout window on
+    an immediate retry.
+
+    ``attempt`` is 1-based.  Returns ``(wait_seconds, reason_label)``.
+    """
+    if attempt <= short_attempts:
+        return default_wait, "timeout_short"
+    idx = min(attempt - short_attempts - 1, len(_TIMEOUT_LONG_BACKOFF) - 1)
+    base_delay = _TIMEOUT_LONG_BACKOFF[idx]
+    return (
+        jittered_backoff(
+            1, base_delay=base_delay, max_delay=base_delay, jitter_ratio=0.2
+        ),
+        "timeout_long",
+    )

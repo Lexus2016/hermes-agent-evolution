@@ -61,6 +61,7 @@ from agent.prompt_caching import apply_anthropic_cache_control
 from agent.retry_utils import (
     adaptive_overload_backoff,
     adaptive_rate_limit_backoff,
+    adaptive_timeout_backoff,
     is_zai_coding_overload_error,
     jittered_backoff,
     overload_retry_ceiling,
@@ -4706,8 +4707,22 @@ def _run_conversation_impl(
                     and not _is_zai_coding_overload
                     and not is_rate_limited
                 )
+                # Provider timeout backoff (#1093): connection/read timeouts get
+                # the progressive timeout schedule instead of the generic short
+                # exponential — a request that already burned its full timeout
+                # window rarely succeeds on an immediate retry.
+                _is_transient_timeout = (
+                    classified.reason == FailoverReason.timeout
+                    and not is_rate_limited
+                    and not _retry_after
+                )
                 if _is_generic_overload and not _retry_after:
                     wait_time, _backoff_policy = adaptive_overload_backoff(
+                        retry_count,
+                        default_wait=wait_time,
+                    )
+                elif _is_transient_timeout:
+                    wait_time, _backoff_policy = adaptive_timeout_backoff(
                         retry_count,
                         default_wait=wait_time,
                     )
@@ -4737,6 +4752,17 @@ def _run_conversation_impl(
                         agent._emit_status(_rate_limit_status)
                     else:
                         agent._buffer_status(_rate_limit_status)
+                elif _is_transient_timeout:
+                    _policy_note = (
+                        " (adaptive timeout backoff)"
+                        if _backoff_policy == "timeout_long"
+                        else ""
+                    )
+                    _timeout_status = f"⏱️ Provider timeout. Waiting {wait_time:.1f}s (attempt {retry_count + 1}/{max_retries}){_policy_note}..."
+                    if _backoff_policy == "timeout_long":
+                        agent._emit_status(_timeout_status)
+                    else:
+                        agent._buffer_status(_timeout_status)
                 else:
                     agent._buffer_status(f"⏳ Retrying in {wait_time:.1f}s (attempt {retry_count}/{max_retries})...")
                 logger.warning(
