@@ -164,6 +164,27 @@ class ErrorClassifier:
     :meth:`add_pattern`.
     """
 
+    @staticmethod
+    def _pattern_matches(pattern: str, text: str) -> bool:
+        """Return True if *pattern* occurs in *text* (both already lower-cased).
+
+        Short single-token patterns (``<= 4`` chars, no whitespace) — e.g. HTTP
+        status codes like ``"404"`` or short words like ``"host"`` — are matched
+        with alphanumeric boundaries so they do not spuriously fire when
+        embedded inside a larger token (``"400"`` inside ``"4001"``, ``"host"``
+        inside ``"ghost"``).  Longer or multi-word patterns keep plain
+        substring semantics.
+        """
+        if len(pattern) <= 4 and " " not in pattern:
+            return (
+                re.search(
+                    r"(?<![0-9a-z])" + re.escape(pattern) + r"(?![0-9a-z])",
+                    text,
+                )
+                is not None
+            )
+        return pattern in text
+
     # Default patterns per category, lower-cased substrings.
     _DEFAULT_PATTERNS: Dict[FailureCategory, List[str]] = {
         FailureCategory.TIMEOUT: [
@@ -284,7 +305,7 @@ class ErrorClassifier:
             for cat in priority:
                 patterns = self._patterns.get(cat, [])
                 for pat in patterns:
-                    if pat in combined:
+                    if self._pattern_matches(pat, combined):
                         return cat
         return FailureCategory.UNKNOWN
 
@@ -317,7 +338,7 @@ class ErrorClassifier:
         counts: Dict[FailureCategory, int] = {}
         with self._lock:
             for cat, patterns in self._patterns.items():
-                c = sum(1 for p in patterns if p in combined)
+                c = sum(1 for p in patterns if self._pattern_matches(p, combined))
                 if c:
                     counts[cat] = c
         return counts

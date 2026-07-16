@@ -159,9 +159,22 @@ class FeasibilityCheck(ABC):
 # ---------------------------------------------------------------------------
 
 
-def _default_exists(path: str) -> bool:
-    """Default filesystem-existence predicate (``os.path.exists``)."""
-    return os.path.exists(path)
+def _default_isfile(path: str) -> bool:
+    """Default file-existence predicate (``os.path.isfile``).
+
+    Unlike :func:`os.path.exists`, this rejects a directory presented where a
+    regular file is required, so the check is honest to its name.
+    """
+    return os.path.isfile(path)
+
+
+def _default_isdir(path: str) -> bool:
+    """Default directory-existence predicate (``os.path.isdir``).
+
+    Rejects a regular file presented where a directory is required, preventing
+    a downstream ``NotADirectoryError`` from a falsely-``FEASIBLE`` verdict.
+    """
+    return os.path.isdir(path)
 
 
 def _default_can_write(path: str) -> bool:
@@ -203,7 +216,7 @@ class FileExistenceCheck(FeasibilityCheck):
         name: Optional[str] = None,
     ) -> None:
         self.context_key = context_key
-        self.exists_func = exists_func or _default_exists
+        self.exists_func = exists_func or _default_isfile
         if name:
             self.name = name
 
@@ -250,7 +263,7 @@ class DirectoryExistenceCheck(FeasibilityCheck):
         name: Optional[str] = None,
     ) -> None:
         self.context_key = context_key
-        self.exists_func = exists_func or _default_exists
+        self.exists_func = exists_func or _default_isdir
         if name:
             self.name = name
 

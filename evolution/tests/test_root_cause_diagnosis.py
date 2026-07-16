@@ -233,6 +233,16 @@ class TestErrorClassifier:
     def test_classify_resource_429(self, classifier):
         assert classifier.classify("HTTP 429 Too Many Requests") == FailureCategory.RESOURCE_LIMIT
 
+    def test_classify_status_code_not_matched_when_embedded(self, classifier):
+        # Regression: a status-code pattern must not fire when embedded inside
+        # a larger number ("400" inside "4001").
+        assert classifier.classify("listening on port 4001") != FailureCategory.VALIDATION
+
+    def test_classify_host_not_matched_in_ghost(self, classifier):
+        # Regression: the short "host" network pattern must not fire inside
+        # "ghost".
+        assert classifier.classify("ghost process terminated") == FailureCategory.UNKNOWN
+
     def test_classify_resource_quota(self, classifier):
         assert classifier.classify("Quota exceeded for today") == FailureCategory.RESOURCE_LIMIT
 

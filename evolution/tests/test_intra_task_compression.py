@@ -382,6 +382,26 @@ class TestIntraTaskCompressor:
         assert len(new_msgs) <= len(msgs)  # should have shrunk
         assert result.tokens_saved > 0
 
+    def test_compress_propagates_trigger(self):
+        # Regression: the result echoes the trigger that fired compression,
+        # not a hard-coded TOKEN_THRESHOLD.
+        comp = IntraTaskCompressor(CompressionConfig(preserve_recent_count=3))
+        msgs = self._make_msgs(10, content_size=200)
+        _, result = comp.compress(msgs, trigger=CompressionTrigger.CONTEXT_PRESSURE)
+        assert result.trigger == "context_pressure"
+
+    def test_compression_ratio_affects_summary_size(self):
+        # Regression: compression_ratio is honoured — a lower ratio yields a
+        # smaller compressed footprint (previously the field was ignored).
+        msgs = [{"role": "assistant", "content": "x" * 400} for _ in range(10)]
+        _, r_low = IntraTaskCompressor(
+            CompressionConfig(preserve_recent_count=3, compression_ratio=0.1)
+        ).compress(list(msgs))
+        _, r_high = IntraTaskCompressor(
+            CompressionConfig(preserve_recent_count=3, compression_ratio=0.9)
+        ).compress(list(msgs))
+        assert r_low.compressed_token_count < r_high.compressed_token_count
+
     def test_system_messages_preserved(self):
         comp = IntraTaskCompressor(
             CompressionConfig(preserve_recent_count=2, preserve_system_messages=True)

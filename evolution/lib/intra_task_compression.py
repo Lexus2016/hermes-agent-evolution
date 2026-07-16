@@ -251,9 +251,17 @@ class IntraTaskCompressor:
     # -- main entry --------------------------------------------------------
 
     def compress(
-        self, messages: List[Dict[str, Any]]
+        self,
+        messages: List[Dict[str, Any]],
+        trigger: CompressionTrigger = CompressionTrigger.TOKEN_THRESHOLD,
     ) -> Tuple[List[Dict[str, Any]], CompressionResult]:
-        """Compress *messages* and return (new_messages, result)."""
+        """Compress *messages* and return (new_messages, result).
+
+        ``trigger`` records *why* compression fired and is echoed back on the
+        resulting :class:`CompressionResult` (e.g. ``CONTEXT_PRESSURE`` vs the
+        default ``TOKEN_THRESHOLD``).  It documents the cause; it does not
+        change how the compression itself is performed.
+        """
         original_tokens = self._estimator.estimate(messages)
         self._stats_total += 1
 
@@ -316,7 +324,7 @@ class IntraTaskCompressor:
         result = CompressionResult(
             original_token_count=original_tokens,
             compressed_token_count=compressed_tokens,
-            trigger=CompressionTrigger.TOKEN_THRESHOLD.value,
+            trigger=trigger.value,
             messages_preserved=len(system_msgs) + len(recent),
             messages_compressed=len(to_compress),
             metadata={
@@ -346,29 +354,39 @@ class IntraTaskCompressor:
 
         knowledge_blocks = self._extractor.extract(messages)
 
+        # Derive the summary character budget from the configured
+        # compression_ratio ("target fraction of original tokens to retain"),
+        # bounded by a floor (keep the summary useful) and a ceiling (never
+        # unbounded).  A lower ratio yields a tighter summary.
+        original_chars = sum(
+            len(m.get("content", ""))
+            for m in messages
+            if isinstance(m.get("content", ""), str)
+        )
+        budget = max(200, min(1000, int(original_chars * self.config.compression_ratio)))
+
         summary_parts: List[str] = []
         for kb in knowledge_blocks:
             summary_parts.append(kb["content"])
 
         # If no structured knowledge was extracted, fall back to a
-        # heavily-truncated concatenation of the original content.
-        # Cap each message to ~50 chars and total to 500 to ensure
-        # the summary is always smaller than the original messages.
+        # heavily-truncated concatenation of the original content, capping
+        # each message to ~50 chars and the total to the ratio-derived budget
+        # so the summary is always smaller than the original messages.
         if not summary_parts:
             per_msg_cap = 50
-            total_cap = 500
             running_len = 0
             for m in messages:
                 content = m.get("content", "")
                 if isinstance(content, str) and content.strip():
                     snippet = content.strip()[:per_msg_cap]
-                    if running_len + len(snippet) > total_cap:
+                    if running_len + len(snippet) > budget:
                         break
                     summary_parts.append(snippet)
                     running_len += len(snippet)
 
-        # Cap total summary to 1000 chars regardless of source
-        summary_text = " | ".join(summary_parts)[:1000]
+        # Cap total summary to the ratio-derived budget.
+        summary_text = " | ".join(summary_parts)[:budget]
 
         return {
             "role": "system",

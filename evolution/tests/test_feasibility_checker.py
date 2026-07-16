@@ -269,6 +269,13 @@ class TestFileExistenceCheck:
         r = chk.check({"required_files": [str(f)]})
         assert r.status is FeasibilityStatus.FEASIBLE
 
+    def test_default_rejects_directory(self, tmp_path):
+        # Regression: a FileExistenceCheck must not accept a directory where a
+        # file is required (default now uses os.path.isfile, not exists).
+        chk = FileExistenceCheck()
+        r = chk.check({"required_files": [str(tmp_path)]})
+        assert r.status is FeasibilityStatus.INFEASIBLE
+
 
 # ---------------------------------------------------------------------------
 # 5. DirectoryExistenceCheck
@@ -306,6 +313,20 @@ class TestDirectoryExistenceCheck:
         chk = DirectoryExistenceCheck(exists_func=lambda p: False)
         r = chk.check({"required_dirs": ["/x"]})
         assert "director" in r.reason
+
+    def test_default_dir_exists(self, tmp_path):
+        chk = DirectoryExistenceCheck()
+        r = chk.check({"required_dirs": [str(tmp_path)]})
+        assert r.status is FeasibilityStatus.FEASIBLE
+
+    def test_default_rejects_file(self, tmp_path):
+        # Regression: a DirectoryExistenceCheck must not accept a regular file
+        # where a directory is required (default now uses os.path.isdir).
+        f = tmp_path / "f.txt"
+        f.write_text("x")
+        chk = DirectoryExistenceCheck()
+        r = chk.check({"required_dirs": [str(f)]})
+        assert r.status is FeasibilityStatus.INFEASIBLE
 
 
 # ---------------------------------------------------------------------------
