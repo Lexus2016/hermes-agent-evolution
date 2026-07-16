@@ -285,6 +285,12 @@ class ToolCallGuardrailController:
     ):
         self.config = config or ToolCallGuardrailConfig()
         self.policy_registry = policy_registry
+        # Cross-turn failure streaks — NOT reset by reset_for_turn so that
+        # one-failing-call-per-turn spirals (the common pattern: the model
+        # calls the same failing tool once per API turn) accumulate across
+        # turns and trigger the cap.  reset_for_turn only clears per-turn
+        # bookkeeping (exact-failure, no-progress, halt_decision).
+        self._cross_turn_tool_failure_counts: dict[str, int] = {}
         self.reset_for_turn()
 
     def reset_for_turn(self) -> None:
@@ -309,6 +315,52 @@ class ToolCallGuardrailController:
                 return policy_decision
 
         signature = ToolCallSignature.from_call(tool_name, _coerce_args(args))
+
+        # Cross-turn spiral enforcement (#1109/#1110/#1111/#1112): if the
+        # same tool has been failing across turns and the cross-turn streak
+        # has already reached the cap, block execution immediately — BEFORE
+        # the hard_stop_enabled gate.  This makes the browser/spiral caps
+        # truly always-on: the model gets a synthetic blocked result with
+        # the fallback directive instead of being allowed to execute the
+        # same failing call again.  reset_for_turn clears _halt_decision but
+        # NOT _cross_turn_tool_failure_counts, so the streak survives.
+        cross_turn_count = self._cross_turn_tool_failure_counts.get(tool_name, 0)
+        if (
+            cross_turn_count >= 1
+            and (
+                (self.config.spiral_failure_cap >= 1
+                 and tool_name in self.config.spiral_prone_tools
+                 and cross_turn_count >= self.config.spiral_failure_cap)
+                or
+                (self.config.browser_failure_cap >= 1
+                 and _is_browser_tool(tool_name)
+                 and cross_turn_count >= self.config.browser_failure_cap)
+            )
+        ):
+            directive = _fallback_directive_for(tool_name)
+            if _is_browser_tool(tool_name) and tool_name not in self.config.spiral_prone_tools:
+                code = "browser_tool_failure_cap"
+                cap = self.config.browser_failure_cap
+            else:
+                code = "spiral_prone_tool_failure_cap"
+                cap = self.config.spiral_failure_cap
+            decision = ToolGuardrailDecision(
+                action="block",
+                code=code,
+                message=(
+                    f"Blocked {tool_name}: it has failed {cross_turn_count} times across "
+                    f"recent turns, reaching the retry cap ({cap}). This failure pattern "
+                    "is deterministic — retrying the same way will not fix it. "
+                    "Use the fallback directive below."
+                ),
+                tool_name=tool_name,
+                count=cross_turn_count,
+                signature=signature,
+                fallback_directive=directive,
+            )
+            self._halt_decision = decision
+            return decision
+
         if not self.config.hard_stop_enabled:
             return ToolGuardrailDecision(tool_name=tool_name, signature=signature)
 
@@ -377,6 +429,20 @@ class ToolCallGuardrailController:
             same_count = self._same_tool_failure_counts.get(tool_name, 0) + 1
             self._same_tool_failure_counts[tool_name] = same_count
 
+            # Cross-turn accumulation: the same tool failing once per turn
+            # is the dominant spiral pattern.  The per-turn counter resets
+            # each API turn, so without this cross-turn tracker the cap
+            # only catches rare within-turn spirals (multiple calls in one
+            # tool batch).  Here we carry the streak forward.
+            cross_turn_count = self._cross_turn_tool_failure_counts.get(tool_name, 0) + 1
+            self._cross_turn_tool_failure_counts[tool_name] = cross_turn_count
+
+            # Effective streak is the max of per-turn and cross-turn counts.
+            # Within-turn spirals (5 calls in one batch) still trip the cap
+            # via the per-turn count; cross-turn spirals (1 call/turn for 5
+            # turns) trip it via the cross-turn count.
+            effective_streak = max(same_count, cross_turn_count)
+
             # #745 — browser tools get an always-on per-tool failure cap that
             # halts REGARDLESS of ``hard_stop_enabled``. Browser retries are
             # expensive and their deterministic failures (CDP down, nav timeout,
@@ -387,19 +453,19 @@ class ToolCallGuardrailController:
             if (
                 self.config.browser_failure_cap >= 1
                 and _is_browser_tool(tool_name)
-                and same_count >= self.config.browser_failure_cap
+                and effective_streak >= self.config.browser_failure_cap
             ):
                 decision = ToolGuardrailDecision(
                     action="halt",
                     code="browser_tool_failure_cap",
                     message=(
-                        f"Stopped {tool_name}: it failed {same_count} times this turn, "
+                        f"Stopped {tool_name}: it failed {effective_streak} times, "
                         f"reaching the browser retry cap ({self.config.browser_failure_cap}). "
                         "Browser retries are expensive and this failure is deterministic — "
                         "stop re-driving the browser and use the fallback."
                     ),
                     tool_name=tool_name,
-                    count=same_count,
+                    count=effective_streak,
                     signature=signature,
                     fallback_directive=_fallback_directive_for(tool_name),
                 )
@@ -409,43 +475,43 @@ class ToolCallGuardrailController:
             # #974/#969/#970 — terminal, execute_code, and read_file are the
             # system's largest failure sources. Their retry spirals persist
             # because the loop_guard's fallback_directive is advisory (the
-            # agent ignores it and retries). This always-on cap halts the turn
-            # after N consecutive same-tool failures REGARDLESS of
+            # agent ignores it and retries). This always-on cap halts the
+            # turn after N consecutive same-tool failures REGARDLESS of
             # ``hard_stop_enabled``, mirroring the browser_failure_cap pattern.
             # The fallback_directive gives the agent a concrete alternative.
             if (
                 self.config.spiral_failure_cap >= 1
                 and tool_name in self.config.spiral_prone_tools
-                and same_count >= self.config.spiral_failure_cap
+                and effective_streak >= self.config.spiral_failure_cap
             ):
                 directive = _fallback_directive_for(tool_name)
                 decision = ToolGuardrailDecision(
                     action="halt",
                     code="spiral_prone_tool_failure_cap",
                     message=(
-                        f"Stopped {tool_name}: it failed {same_count} times this turn, "
+                        f"Stopped {tool_name}: it failed {effective_streak} times, "
                         f"reaching the retry cap ({self.config.spiral_failure_cap}). "
                         "This failure pattern is deterministic — retrying the same way "
                         "will not fix it. Use the fallback directive below."
                     ),
                     tool_name=tool_name,
-                    count=same_count,
+                    count=effective_streak,
                     signature=signature,
                     fallback_directive=directive,
                 )
                 self._halt_decision = decision
                 return decision
 
-            if self.config.hard_stop_enabled and same_count >= self.config.same_tool_failure_halt_after:
+            if self.config.hard_stop_enabled and effective_streak >= self.config.same_tool_failure_halt_after:
                 decision = ToolGuardrailDecision(
                     action="halt",
                     code="same_tool_failure_halt",
                     message=(
-                        f"Stopped {tool_name}: it failed {same_count} times this turn. "
+                        f"Stopped {tool_name}: it failed {effective_streak} times. "
                         "Stop retrying the same failing tool path and choose a different approach."
                     ),
                     tool_name=tool_name,
-                    count=same_count,
+                    count=effective_streak,
                     signature=signature,
                     fallback_directive=_fallback_directive_for(tool_name),
                 )
@@ -467,13 +533,13 @@ class ToolCallGuardrailController:
                     fallback_directive=_fallback_directive_for(tool_name),
                 )
 
-            if self.config.warnings_enabled and same_count >= self.config.same_tool_failure_warn_after:
+            if self.config.warnings_enabled and effective_streak >= self.config.same_tool_failure_warn_after:
                 return ToolGuardrailDecision(
                     action="warn",
                     code="same_tool_failure_warning",
-                    message=_tool_failure_recovery_hint(tool_name, same_count),
+                    message=_tool_failure_recovery_hint(tool_name, effective_streak),
                     tool_name=tool_name,
-                    count=same_count,
+                    count=effective_streak,
                     signature=signature,
                     fallback_directive=_fallback_directive_for(tool_name),
                 )
@@ -482,6 +548,8 @@ class ToolCallGuardrailController:
 
         self._exact_failure_counts.pop(signature, None)
         self._same_tool_failure_counts.pop(tool_name, None)
+        # A success breaks the cross-turn failure streak too.
+        self._cross_turn_tool_failure_counts.pop(tool_name, None)
 
         if not self._is_idempotent(tool_name):
             self._no_progress.pop(signature, None)

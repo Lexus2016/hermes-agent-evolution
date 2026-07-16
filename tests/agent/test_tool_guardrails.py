@@ -478,17 +478,27 @@ def test_browser_failure_cap_halts_spiral_with_hard_stop_off():
     # broken backend fails regardless of URL), each result a failure.
     decisions = []
     for i in range(6):
-        # before_call would still allow (hard_stop off), but the after_call cap
-        # records a halt that ends the turn.
-        assert controller.before_call("browser_navigate", {"url": f"https://x/{i}"}).allows_execution
-        decisions.append(
-            controller.after_call(
-                "browser_navigate",
-                {"url": f"https://x/{i}"},
-                '{"success": false, "error": "Could not connect to Chrome backend"}',
-                failed=True,
+        # With cross-turn tracking, before_call blocks after the streak
+        # reaches the cap.  First 3 calls allow; after 3 failures the
+        # 4th before_call blocks (stronger than the old allow-then-halt).
+        bc = controller.before_call("browser_navigate", {"url": f"https://x/{i}"})
+        if i < 3:
+            assert bc.allows_execution
+            decisions.append(
+                controller.after_call(
+                    "browser_navigate",
+                    {"url": f"https://x/{i}"},
+                    '{"success": false, "error": "Could not connect to Chrome backend"}',
+                    failed=True,
+                )
             )
-        )
+        else:
+            # After 3 failures, before_call blocks — the spiral is stopped
+            # before the tool even executes.
+            assert not bc.allows_execution
+            assert bc.code == "browser_tool_failure_cap"
+            decisions.append(bc)
+            break
 
     # First two failures do not hit the cap (cap=3); the third halts and the
     # spiral is stopped — no unbounded 15-in-a-row.
@@ -575,15 +585,24 @@ def test_browser_cap_success_resets_streak():
 
 
 def test_browser_cap_reset_for_turn_clears_streak():
-    """Per-turn reset clears the browser failure streak (no cross-turn leakage)."""
+    """Per-turn reset clears the halt decision but NOT the cross-turn streak."""
     controller = ToolCallGuardrailController()
     for _ in range(3):
         controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
     assert controller.halt_decision is not None
     controller.reset_for_turn()
     assert controller.halt_decision is None
-    d = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
-    assert d.action == "allow"
+    # The cross-turn streak persists — before_call now blocks the browser tool.
+    d = controller.before_call("browser_navigate", {"url": "u"})
+    assert d.action == "block"
+    assert d.code == "browser_tool_failure_cap"
+    # A success after reset clears the cross-turn streak.
+    controller.reset_for_turn()
+    controller.before_call("browser_navigate", {"url": "u"})
+    d_ok = controller.after_call("browser_navigate", {"url": "u"}, '{"ok":true}', failed=False)
+    assert d_ok.action == "allow"
+    controller.reset_for_turn()
+    assert controller.before_call("browser_navigate", {"url": "u"}).action == "allow"
 
 
 def test_browser_failure_cap_parsed_from_mapping():
@@ -728,15 +747,30 @@ def test_spiral_cap_success_resets_streak():
 
 
 def test_spiral_cap_reset_for_turn_clears_streak():
-    """Per-turn reset clears the spiral failure streak (no cross-turn leakage)."""
+    """Per-turn reset clears the halt decision but NOT the cross-turn streak.
+
+    The cross-turn count persists so one-failing-call-per-turn spirals
+    accumulate (#1109–#1112).  After reset, halt_decision is cleared, but
+    the next before_call for the same spiral-prone tool is blocked because
+    the cross-turn streak already reached the cap.
+    """
     controller = ToolCallGuardrailController()
     for _ in range(5):
         controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
     assert controller.halt_decision is not None
     controller.reset_for_turn()
     assert controller.halt_decision is None
-    d = controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
-    assert d.action == "allow"
+    # The cross-turn streak persists — before_call now blocks the tool.
+    d = controller.before_call("terminal", {"command": "x"})
+    assert d.action == "block"
+    assert d.code == "spiral_prone_tool_failure_cap"
+    # A success after reset clears the cross-turn streak.
+    controller.reset_for_turn()
+    controller.before_call("terminal", {"command": "x"})
+    d_ok = controller.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
+    assert d_ok.action == "allow"
+    controller.reset_for_turn()
+    assert controller.before_call("terminal", {"command": "x"}).action == "allow"
 
 
 def test_spiral_cap_does_not_affect_non_spiral_tools():
@@ -778,3 +812,88 @@ def test_spiral_prone_tools_set():
     assert "execute_code" in cfg.spiral_prone_tools
     assert "read_file" in cfg.spiral_prone_tools
     assert len(cfg.spiral_prone_tools) == 3
+
+
+# ── Cross-turn spiral enforcement (#1109–#1112) ─────────────────────────────
+
+
+def test_cross_turn_spiral_accumulates_across_resets():
+    """One failing terminal call per turn accumulates across reset_for_turn
+    calls and eventually triggers the spiral cap via the cross-turn counter."""
+    controller = ToolCallGuardrailController()
+    for _ in range(4):  # 4 turns, one failing call each
+        controller.before_call("terminal", {"command": "x"})
+        controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+        controller.reset_for_turn()
+    # 4 failures: not yet at cap (5), before_call should still allow
+    assert controller.before_call("terminal", {"command": "x"}).action == "allow"
+    # 5th turn: one more failure reaches the cap
+    controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+    assert controller.halt_decision is not None
+    assert controller.halt_decision.code == "spiral_prone_tool_failure_cap"
+
+
+def test_cross_turn_before_call_blocks_after_cap_reached():
+    """After the cross-turn streak reaches the cap, before_call blocks the
+    tool on the NEXT turn even though per-turn state was reset."""
+    controller = ToolCallGuardrailController()
+    for _ in range(5):
+        controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+    controller.reset_for_turn()
+    # Next turn: before_call must block, not allow
+    d = controller.before_call("terminal", {"command": "x"})
+    assert d.action == "block"
+    assert d.code == "spiral_prone_tool_failure_cap"
+    assert d.fallback_directive != ""
+
+
+def test_cross_turn_success_clears_streak():
+    """A successful call after failures clears the cross-turn streak so
+    legitimate retry-after-fix work is not blocked."""
+    controller = ToolCallGuardrailController()
+    for _ in range(3):
+        controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+    controller.reset_for_turn()
+    # Success on next turn
+    controller.before_call("terminal", {"command": "x"})
+    controller.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
+    controller.reset_for_turn()
+    # Streak cleared — before_call allows
+    assert controller.before_call("terminal", {"command": "x"}).action == "allow"
+
+
+def test_cross_turn_browser_cap_blocks_after_reset():
+    """Browser tool cross-turn streak persists across reset and blocks via
+    before_call."""
+    controller = ToolCallGuardrailController()
+    for _ in range(3):
+        controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    controller.reset_for_turn()
+    d = controller.before_call("browser_navigate", {"url": "u"})
+    assert d.action == "block"
+    assert d.code == "browser_tool_failure_cap"
+    assert d.fallback_directive != ""
+
+
+def test_cross_turn_does_not_affect_non_spiral_tools():
+    """The cross-turn enforcement only applies to spiral-prone and browser
+    tools — not to write_file, patch, etc."""
+    controller = ToolCallGuardrailController()
+    for _ in range(10):
+        controller.after_call("write_file", {"path": "x"}, '{"error":"boom"}', failed=True)
+    controller.reset_for_turn()
+    assert controller.before_call("write_file", {"path": "x"}).action == "allow"
+
+
+def test_cross_turn_blocks_with_hard_stop_disabled():
+    """Cross-turn enforcement fires even when hard_stop_enabled is False —
+    the spiral and browser caps are always-on."""
+    controller = ToolCallGuardrailController(
+        ToolCallGuardrailConfig(hard_stop_enabled=False)
+    )
+    for _ in range(5):
+        controller.after_call("execute_code", {"code": "x"}, '{"error":"boom"}', failed=True)
+    controller.reset_for_turn()
+    d = controller.before_call("execute_code", {"code": "x"})
+    assert d.action == "block"
+    assert d.code == "spiral_prone_tool_failure_cap"
