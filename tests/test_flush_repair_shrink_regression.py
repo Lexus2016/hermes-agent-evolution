@@ -39,6 +39,9 @@ def _make_flusher(db, session_id):
     stub._flush_messages_to_session_db = types.MethodType(
         AIAgent._flush_messages_to_session_db, stub
     )
+    stub._flush_messages_to_session_db_unlocked = types.MethodType(
+        AIAgent._flush_messages_to_session_db_unlocked, stub
+    )
     return stub
 
 
