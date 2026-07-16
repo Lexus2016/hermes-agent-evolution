@@ -999,7 +999,9 @@ class TestRunJobSessionPersistence:
         fake_db.end_session.assert_called_once()
         call_args = fake_db.end_session.call_args
         assert call_args[0][0].startswith("cron_test-job_")
-        assert call_args[0][1] == "cron_complete"
+        # The mock agent returns {"final_response": "ok"} with no tool calls,
+        # so the session is marked cron_noop (not cron_complete) per #607.
+        assert call_args[0][1] == "cron_noop"
         fake_db.close.assert_called_once()
         mock_agent.close.assert_called_once()
 
@@ -1552,10 +1554,10 @@ class TestRunJobSessionPersistence:
         advance.assert_not_called()
         run_one.assert_not_called()
 
-    def test_tick_marks_empty_response_as_error(self, tmp_path):
+    def test_tick_marks_empty_response_as_quiet_success(self, tmp_path):
         """When run_job returns success=True but final_response is empty,
-        tick() should mark the job as error so last_status != 'ok'.
-        (issue #8585)
+        tick() should still mark the job as ok (quiet success, not delivered).
+        See test_run_one_job.py::test_run_one_job_empty_response_is_quiet_success.
         """
         from cron.scheduler import tick
 
@@ -1581,12 +1583,11 @@ class TestRunJobSessionPersistence:
              patch("cron.scheduler.run_job", return_value=(True, "output", "", None)):
             tick(verbose=False)
 
-        # Should be called with success=False because final_response is empty
+        # Empty response is quiet success — marked ok=True, no error
         mock_mark.assert_called_once()
         call_args = mock_mark.call_args
         assert call_args[0][0] == "empty-job"
-        assert call_args[0][1] is False  # success should be False
-        assert "empty" in call_args[0][2].lower()  # error should mention empty
+        assert call_args[0][1] is True  # success is True for quiet success
 
     def test_run_job_sets_auto_delivery_env_from_dotenv_home_channel(self, tmp_path, monkeypatch):
         job = {
@@ -2629,8 +2630,9 @@ class TestSilentDelivery:
         save_mock.assert_called_once_with("monitor-job", "# full output")
         deliver_mock.assert_not_called()
 
-    def test_whitespace_only_response_is_marked_failed_not_delivered(self):
-        """Whitespace-only final responses should behave like empty responses."""
+    def test_whitespace_only_response_is_quiet_success_not_delivered(self):
+        """Whitespace-only final responses are quiet successes: not delivered,
+        but marked ok (matching run_one_job's empty-response contract)."""
         with patch("cron.scheduler.get_due_jobs", return_value=[self._make_job()]), \
              patch("cron.scheduler.run_job", return_value=(True, "# output", "   \n\t  ", None)), \
              patch("cron.scheduler.save_job_output", return_value="/tmp/out.md"), \
@@ -2642,9 +2644,10 @@ class TestSilentDelivery:
         deliver_mock.assert_not_called()
         mark_mock.assert_called_once_with(
             "monitor-job",
-            False,
-            "Agent completed but produced empty response (model error, timeout, or misconfiguration)",
+            True,
+            None,
             delivery_error=None,
+            tool_calls=None,
         )
 
 
