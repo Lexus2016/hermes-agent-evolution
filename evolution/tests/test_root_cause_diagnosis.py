@@ -555,6 +555,15 @@ class TestRootCauseAnalyzer:
         d = analyzer.analyze("my_tool", "timeout", "", {})
         assert any("my_tool" in fix for fix in d.suggested_fixes)
 
+    def test_fixes_unknown_interpolate_tool_name(self, analyzer):
+        # Regression: UNKNOWN-category fixes must interpolate the real tool
+        # name, never leak a literal "{tool_name}" placeholder (missing
+        # f-prefix bug).
+        d = analyzer.analyze("weird_tool", "bizarre error", "", {})
+        assert d.category == FailureCategory.UNKNOWN
+        assert all("{tool_name}" not in fix for fix in d.suggested_fixes)
+        assert any("weird_tool" in fix for fix in d.suggested_fixes)
+
     def test_fixes_returns_copy(self, analyzer):
         d1 = analyzer.analyze("search", "timeout", "", {})
         d2 = analyzer.analyze("search", "timeout", "", {})

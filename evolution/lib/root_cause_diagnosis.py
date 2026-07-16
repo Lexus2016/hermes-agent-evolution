@@ -548,7 +548,7 @@ class RootCauseAnalyzer:
             ],
             FailureCategory.UNKNOWN: [
                 f"Inspect the full error output from '{tool_name}' for clues.",
-                "Try running '{tool_name}' with verbose/debug logging enabled.",
+                f"Try running '{tool_name}' with verbose/debug logging enabled.",
                 "Search for known issues related to this error message.",
                 "Escalate to a human if the failure persists.",
             ],
