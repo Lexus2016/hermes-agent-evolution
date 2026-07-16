@@ -1020,6 +1020,46 @@ def format_no_match_hint(
     return "\n\nDid you mean one of these sections?\n" + hint
 
 
+def suggest_closest_match(
+    old_string: str, content: str, context_lines: int = 0
+) -> str:
+    """Extract the closest matching substring from ``content`` for ``old_string``.
+
+    Returns the actual text from the file that best matches ``old_string``
+    — the text the model should use as its corrected ``old_string`` (#1037).
+    Returns empty when no useful match is found (similarity < 0.3).
+    """
+    if not old_string or not content:
+        return ""
+    old_lines = old_string.splitlines()
+    content_lines = content.splitlines()
+    if not old_lines or not content_lines:
+        return ""
+    anchor = ""
+    for line in old_lines:
+        if line.strip():
+            anchor = line.strip()
+            break
+    if not anchor:
+        return ""
+    best_ratio = 0.0
+    best_idx = -1
+    for i, line in enumerate(content_lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        ratio = SequenceMatcher(None, anchor, stripped).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_idx = i
+    if best_idx < 0 or best_ratio < 0.3:
+        return ""
+    block_len = max(1, len(old_lines))
+    start = max(0, best_idx - context_lines)
+    end = min(len(content_lines), best_idx + block_len + context_lines)
+    return "\n".join(content_lines[start:end])
+
+
 # ---------------------------------------------------------------------------
 # Structured error context for self-correction (issue #996)
 #
