@@ -1949,8 +1949,49 @@ def _deliver_result(
                 and looks_like_telegram_private_chat_id(str(chat_id))
                 and _looks_like_int(str(thread_id))
             )
-            if is_private_dm_topic:
-                # Routed via direct_messages_topic_id (mode 2), no bare thread_id.
+            # Probe the live adapter's get_chat_info to distinguish a genuine
+            # Bot API 10.0 channel DM topic (route via direct_messages_topic_id)
+            # from a normal forum-style topic in a private chat (route via
+            # message_thread_id).  The old #22773 heuristic guessed "channel DM
+            # topic" from positive chat_id + numeric thread alone, which
+            # mis-routed forum topics in private chats to the General lane
+            # (#52060).  Fail SAFE to message_thread_id on any probe problem
+            # (missing adapter method, non-awaitable, None, non-dict, error
+            # dict) — the common case is a forum topic, and
+            # direct_messages_topic_id is only correct for genuine channels.
+            is_channel_dm_topic = False
+            if is_private_dm_topic and runtime_adapter is not None:
+                probe_coro = None
+                try:
+                    probe_fn = getattr(runtime_adapter, "get_chat_info", None)
+                    if probe_fn is not None:
+                        probe_coro = probe_fn(str(chat_id))
+                except Exception:
+                    probe_coro = None
+                if probe_coro is not None:
+                    from agent.async_utils import safe_schedule_threadsafe
+
+                    probe_future = safe_schedule_threadsafe(probe_coro, loop)
+                    if probe_future is not None:
+                        try:
+                            chat_info = probe_future.result(timeout=15)
+                            if (
+                                isinstance(chat_info, dict)
+                                and str(chat_info.get("type", "")).lower() == "channel"
+                            ):
+                                is_channel_dm_topic = True
+                        except Exception:
+                            # Probe failed (timeout, raise, non-awaitable) —
+                            # fail safe to message_thread_id.
+                            pass
+                    else:
+                        # Could not schedule — close the coroutine to avoid
+                        # "never awaited" warning.
+                        if asyncio.iscoroutine(probe_coro):
+                            probe_coro.close()
+            if is_private_dm_topic and is_channel_dm_topic:
+                # Genuine Bot API 10.0 channel DM topic — route via
+                # direct_messages_topic_id (mode 2), no bare thread_id.
                 route_thread_id = None
                 route_metadata = {
                     "direct_messages_topic_id": str(thread_id),
@@ -1962,7 +2003,9 @@ def _deliver_result(
             else:
                 route_thread_id = str(thread_id) if thread_id is not None else None
                 route_metadata = {"job_id": job["id"]}
-                media_metadata = {"thread_id": thread_id} if thread_id else None
+                if thread_id is not None:
+                    route_metadata["thread_id"] = str(thread_id)
+                media_metadata = {"thread_id": str(thread_id)} if thread_id else None
 
             try:
                 # Send cleaned text (MEDIA tags stripped) — not the raw content.
@@ -2741,6 +2784,18 @@ def _build_job_prompt(job: dict, prerun_script: Optional[tuple] = None) -> str:
         skills = [skills]
 
     skill_names = [str(name).strip() for name in skills if str(name).strip()]
+    # Normalize absolute paths to skill slugs: a cron job may store an absolute
+    # path (e.g. /home/user/.hermes/skills/my-skill) but skill_view rejects
+    # absolute names for security.  Extract the directory basename as the slug.
+    normalized_names = []
+    for _name in skill_names:
+        if _name.startswith("/") or "\\" in _name or _name.startswith("~"):
+            from pathlib import Path as _Path
+
+            normalized_names.append(_Path(_name).expanduser().name)
+        else:
+            normalized_names.append(_name)
+    skill_names = normalized_names
     if not skill_names:
         return _scan_assembled_cron_prompt(
             prompt,

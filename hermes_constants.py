@@ -318,12 +318,18 @@ def node_tool_runnable(path: str | None) -> bool:
 
     import subprocess
 
+    from hermes_cli import _subprocess_compat
+
     try:
         result = subprocess.run(
             [path, "--version"],
             capture_output=True,
             timeout=10,
             env=with_hermes_node_path(),
+            # Hide the transient Windows console window on the version probe.
+            # windows_hide_flags() returns 0 on POSIX, so this is a no-op off
+            # Windows and keeps capture_output working (no DETACHED_PROCESS).
+            creationflags=_subprocess_compat.windows_hide_flags(),
         )
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return False
@@ -563,12 +569,18 @@ def agent_browser_runnable(path: str | None) -> bool:
         return False
     import subprocess
 
+    from hermes_cli import _subprocess_compat
+
     try:
         result = subprocess.run(
             [path, "--version"],
             capture_output=True,
             timeout=10,
             env=with_hermes_node_path(),
+            # Hide the transient Windows console window on the version probe.
+            # windows_hide_flags() returns 0 on POSIX, so this is a no-op off
+            # Windows and keeps capture_output working (no DETACHED_PROCESS).
+            creationflags=_subprocess_compat.windows_hide_flags(),
         )
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return False
