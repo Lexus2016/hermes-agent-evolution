@@ -122,6 +122,13 @@ def gw_session(monkeypatch):
     with A._lock:
         A._gateway_queues.pop(session_key, None)
         A._gateway_notify_cbs.pop(session_key, None)
+        # Prevent the developer's real permanent allowlist (loaded at import
+        # time by load_permanent_allowlist) from short-circuiting the gateway
+        # approval path — without this, is_approved() returns True before the
+        # resolver callback is ever invoked, so the test never exercises the
+        # gateway decision flow.
+        _saved_permanent = set(A._permanent_approved)
+        A._permanent_approved.discard("execute_code")
     try:
         yield session_key
     finally:
@@ -129,6 +136,8 @@ def gw_session(monkeypatch):
         with A._lock:
             A._gateway_queues.pop(session_key, None)
             A._gateway_notify_cbs.pop(session_key, None)
+            A._permanent_approved.clear()
+            A._permanent_approved.update(_saved_permanent)
 
 
 def _register_resolver(session_key: str, result):
