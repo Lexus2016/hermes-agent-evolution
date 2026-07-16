@@ -2183,8 +2183,8 @@ class MCPServerTask:
         finally:
             for t in (shutdown_task, reconnect_task):
                 if not t.done():
-                    t.cancel()
                     try:
+                        t.cancel()
                         await t
                     except (asyncio.CancelledError, Exception):
                         pass
@@ -2227,8 +2227,8 @@ class MCPServerTask:
         finally:
             for t in (shutdown_task, reconnect_task):
                 if not t.done():
-                    t.cancel()
                     try:
+                        t.cancel()
                         await t
                     except (asyncio.CancelledError, Exception):
                         pass
