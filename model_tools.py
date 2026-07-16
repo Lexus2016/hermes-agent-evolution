@@ -1148,6 +1148,13 @@ def handle_function_call(
                         "Use tool_search to find tools you can call."
                     ),
                 }, ensure_ascii=False)
+            # Pre-execution schema validation (#1039): catch wrong argument
+            # types and missing required params before dispatching the tool,
+            # returning a clear error instead of letting it fail at runtime.
+            _schema = registry.get_schema(underlying_name)
+            _ok, _err = _ts_mod.validate_tool_args(underlying_name, underlying_args, _schema)
+            if not _ok:
+                return json.dumps({"error": _err}, ensure_ascii=False)
             # Recurse with the underlying tool. All hooks fire against the
             # real tool name. The bridge is invisible to hooks by design.
             return handle_function_call(

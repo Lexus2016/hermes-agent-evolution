@@ -911,6 +911,76 @@ def scoped_deferrable_names(
     return frozenset(names)
 
 
+# Map JSON Schema type strings to Python types for validation. ``number``
+# accepts both int and float (JSON ints are a subset of floats).
+_SCHEMA_PY_TYPES: Dict[str, Tuple[type, ...]] = {
+    "string": (str,),
+    "integer": (int,),
+    "number": (int, float),
+    "boolean": (bool,),
+    "array": (list, tuple),
+    "object": (dict,),
+}
+
+
+def validate_tool_args(
+    name: str,
+    args: Dict[str, Any],
+    schema: Optional[dict],
+) -> Tuple[bool, Optional[str]]:
+    """Validate *args* against a tool's OpenAI-format parameter *schema*.
+
+    Returns ``(True, None)`` when valid, ``(False, error_message)`` otherwise.
+    Checks required-parameter presence and basic type matching for the
+    common JSON Schema types. Only top-level parameters are validated.
+    """
+    if not schema:
+        return True, None
+    params = schema.get("parameters") or {}
+    properties = params.get("properties") or {}
+    required = params.get("required") or []
+
+    if not isinstance(args, dict):
+        return False, f"Arguments for '{name}' must be an object"
+
+    # Required parameters
+    for req in required:
+        if req not in args or args[req] is None:
+            return False, f"Missing required parameter '{req}' for tool '{name}'"
+
+    # Type matching
+    for key, value in args.items():
+        if value is None:
+            continue  # null is acceptable for optional params
+        prop = properties.get(key)
+        if not prop:
+            continue  # unknown params are not our concern here
+        expected_types = prop.get("type")
+        if not expected_types:
+            continue
+        if isinstance(expected_types, str):
+            expected_types = [expected_types]
+        if not any(_check_type(value, t) for t in expected_types):
+            got = type(value).__name__
+            want = " or ".join(expected_types)
+            return False, (
+                f"Parameter '{key}' for tool '{name}' has wrong type: "
+                f"expected {want}, got {got}"
+            )
+    return True, None
+
+
+def _check_type(value: Any, type_str: str) -> bool:
+    """Check whether *value* matches the JSON Schema *type_str*."""
+    if type_str == "integer":
+        # bool is a subclass of int in Python; reject it for integer params.
+        return isinstance(value, int) and not isinstance(value, bool)
+    py_types = _SCHEMA_PY_TYPES.get(type_str)
+    if py_types is None:
+        return True  # unknown type — don't block dispatch
+    return isinstance(value, py_types)
+
+
 def resolve_underlying_call(
     args: Dict[str, Any],
     config: Optional[ToolSearchConfig] = None,
@@ -979,6 +1049,7 @@ __all__ = [
     "dispatch_tool_describe",
     "dispatch_tool_search",
     "resolve_underlying_call",
+    "validate_tool_args",
     "scoped_deferrable_names",
     "clear_describe_cache",
 ]

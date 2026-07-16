@@ -119,7 +119,9 @@ def _error_text(error: Any) -> str:
     return " ".join(str(part) for part in parts if part is not None).lower()
 
 
-def is_zai_coding_overload_error(*, base_url: str | None, model: str | None, error: Any) -> bool:
+def is_zai_coding_overload_error(
+    *, base_url: str | None, model: str | None, error: Any
+) -> bool:
     """Return True for Z.AI Coding Plan transient overload 429s.
 
     The coding-plan endpoint reports overload as HTTP 429 with body code 1305
@@ -168,10 +170,14 @@ def adaptive_rate_limit_backoff(
     base_delay = _ZAI_CODING_OVERLOAD_LONG_BACKOFF[idx]
     # A smaller jitter ratio keeps long waits readable while still avoiding
     # synchronized retry storms across concurrent Hermes sessions.
-    return jittered_backoff(1, base_delay=base_delay, max_delay=base_delay, jitter_ratio=0.2), "zai_coding_overload_long"
+    return jittered_backoff(
+        1, base_delay=base_delay, max_delay=base_delay, jitter_ratio=0.2
+    ), "zai_coding_overload_long"
 
 
-def zai_coding_overload_retry_ceiling(short_attempts: int = _ZAI_CODING_OVERLOAD_SHORT_ATTEMPTS) -> int:
+def zai_coding_overload_retry_ceiling(
+    short_attempts: int = _ZAI_CODING_OVERLOAD_SHORT_ATTEMPTS,
+) -> int:
     """Retry-loop ceiling needed for the full Z.AI overload backoff schedule.
 
     The adaptive policy runs ``short_attempts`` short retries, then walks the
@@ -186,3 +192,59 @@ def zai_coding_overload_retry_ceiling(short_attempts: int = _ZAI_CODING_OVERLOAD
     value for Z.AI Coding overload 429s so the 30/60/90/120s waits run.
     """
     return short_attempts + len(_ZAI_CODING_OVERLOAD_LONG_BACKOFF) + 1
+
+
+# ── Provider-agnostic overload backoff (#1040) ──────────────────────────
+#
+# 503/529 overload errors are classified as ``FailoverReason.overloaded`` for
+# ALL providers, but the adaptive long-backoff schedule above was Z.AI-specific
+# (``is_zai_coding_overload_error``).  Non-Z.AI providers got only the default
+# short exponential (2s → 4s → 8s → … capped at 60s) and gave up after the
+# normal ``max_retries``, never reaching the longer waits that let a genuinely
+# overloaded provider recover.  This generalises the same two-tier shape —
+# short retries then progressively longer waits with jitter — to every
+# provider, so a single-provider user (no fallback chain) doesn't hammer a
+# 503ing endpoint with rapid retries and then abort.  Users with a fallback
+# chain still fail over after 2 consecutive overloads (the existing circuit
+# breaker in conversation_loop.py), unchanged.
+_OVERLOAD_LONG_BACKOFF = (20.0, 40.0, 60.0, 90.0, 120.0)
+_OVERLOAD_SHORT_ATTEMPTS = 2
+
+
+def adaptive_overload_backoff(
+    attempt: int,
+    *,
+    default_wait: float,
+    short_attempts: int = _OVERLOAD_SHORT_ATTEMPTS,
+) -> tuple[float, str | None]:
+    """Provider-agnostic jittered backoff for 503/529 overload errors (#1040).
+
+    Mirrors :func:`adaptive_rate_limit_backoff` but fires for *any* overloaded
+    error, not just Z.AI Coding 429s.  The first ``short_attempts`` retries use
+    ``default_wait`` (the normal short exponential); after that, waits walk
+    :data:`_OVERLOAD_LONG_BACKOFF` (20s → 40s → 60s → 90s → 120s, capped) with
+    light jitter, giving a genuinely overloaded provider time to recover.
+
+    ``attempt`` is 1-based.  Returns ``(wait_seconds, reason_label)``.
+    """
+    if attempt <= short_attempts:
+        return default_wait, "overload_short"
+    idx = min(attempt - short_attempts - 1, len(_OVERLOAD_LONG_BACKOFF) - 1)
+    base_delay = _OVERLOAD_LONG_BACKOFF[idx]
+    return (
+        jittered_backoff(
+            1, base_delay=base_delay, max_delay=base_delay, jitter_ratio=0.2
+        ),
+        "overload_long",
+    )
+
+
+def overload_retry_ceiling(short_attempts: int = _OVERLOAD_SHORT_ATTEMPTS) -> int:
+    """Retry-loop ceiling for the full provider-agnostic overload schedule (#1040).
+
+    Same one-past-the-final-entry rationale as
+    :func:`zai_coding_overload_retry_ceiling`: the loop's ``retry_count >=
+    ceiling`` check runs before backoff is computed, so the ceiling must
+    exceed the last long-tier index for every long wait to actually execute.
+    """
+    return short_attempts + len(_OVERLOAD_LONG_BACKOFF) + 1
