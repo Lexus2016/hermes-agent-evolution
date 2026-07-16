@@ -4497,6 +4497,21 @@ def _run_conversation_impl(
                             base_url=str(_base),
                             model=_model,
                         )
+                        # Proactive fallback suggestion (#1043): when no
+                        # fallback chain was configured (or it was exhausted),
+                        # tell the user how to set one up so future billing
+                        # errors auto-recover instead of aborting the session.
+                        if not getattr(agent, "_fallback_chain", None):
+                            agent._vprint(
+                                f"{agent.log_prefix}   💡 To avoid this in the future, "
+                                "configure a fallback provider so billing errors "
+                                "automatically switch to a backup:",
+                                force=True,
+                            )
+                            agent._vprint(
+                                f"{agent.log_prefix}      Run: hermes fallback add",
+                                force=True,
+                            )
                     elif is_rate_limited:
                         agent._emit_status(f"❌ Rate limited after {max_retries} retries — {_final_summary}")
                     else:
