@@ -3619,6 +3619,15 @@ def _run_conversation_impl(
                     _retry.consecutive_overload_hits += 1
                 else:
                     _retry.consecutive_overload_hits = 0
+                # #1142 — Track consecutive timeout errors for the timeout
+                # circuit breaker. After 2 consecutive timeouts, fail over to
+                # the next provider instead of backoff-and-retry against the
+                # same degraded endpoint. A provider timing out repeatedly
+                # won't recover within the retry window.
+                if classified.reason == FailoverReason.timeout:
+                    _retry.consecutive_timeout_hits += 1
+                else:
+                    _retry.consecutive_timeout_hits = 0
                 # Z.AI Coding Plan GLM-5.2 overload 429s classify as
                 # `overloaded` (to spare the credential pool), but `overloaded`
                 # is excluded from `is_rate_limited` — the gate for the adaptive
@@ -3648,6 +3657,14 @@ def _run_conversation_impl(
                     # than waiting for the generic transport gate.
                     or (classified.reason == FailoverReason.overloaded
                         and _retry.consecutive_overload_hits >= 2)
+                    # #1142 — Timeout circuit breaker: after 2 consecutive
+                    # timeouts from the same provider, fail over immediately
+                    # instead of backoff-and-retry against the same degraded
+                    # endpoint. 637 provider-layer timeouts dwarfed all other
+                    # errors — backoff alone (which retries the same provider)
+                    # does not reduce the signal.
+                    or (classified.reason == FailoverReason.timeout
+                        and _retry.consecutive_timeout_hits >= 2)
                 )
                 if _should_fallback and agent._fallback_index < len(agent._fallback_chain):
                     # Don't eagerly fallback if credential pool rotation may
@@ -3683,6 +3700,11 @@ def _run_conversation_impl(
                                 agent._buffer_status(
                                     "⚠️ Provider overloaded (503) — switching to fallback provider..."
                                 )
+                            elif classified.reason == FailoverReason.timeout:
+                                agent._buffer_status(
+                                    "⚠️ Provider repeatedly timing out — "
+                                    "switching to fallback provider..."
+                                )
                             else:
                                 agent._buffer_status(
                                     "⚠️ Provider unreachable — switching to fallback provider..."
@@ -3697,6 +3719,7 @@ def _run_conversation_impl(
                             _retry.primary_recovery_attempted = False
                             _retry.consecutive_rate_limit_hits = 0
                             _retry.consecutive_overload_hits = 0
+                            _retry.consecutive_timeout_hits = 0
                             continue
 
                 # ── Auth-failure provider failover ───────────────────────
