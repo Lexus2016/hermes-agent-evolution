@@ -69,6 +69,13 @@ class TurnRetryState:
     # retries on a genuinely overloaded provider (#943). Reset on successful
     # fallback or any non-overloaded response.
     consecutive_overload_hits: int = 0
+    # Consecutive timeout errors from the same provider (#1142). After 2
+    # consecutive timeouts, the loop fails over to the next provider instead
+    # of continuing backoff-and-retry against the same degraded endpoint —
+    # a provider that is timing out repeatedly won't recover within the retry
+    # window, so backoff alone just burns the retry budget. Reset on
+    # successful fallback or any non-timeout response.
+    consecutive_timeout_hits: int = 0
 
     # ── Fail-fast guard for non-retryable client errors ─────────────────
     fail_fast_attempted: bool = False
