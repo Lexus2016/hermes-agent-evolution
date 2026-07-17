@@ -805,13 +805,15 @@ def test_spiral_cap_default_is_5():
 
 
 def test_spiral_prone_tools_set():
-    """The spiral-prone set contains exactly the three tools with the highest
-    trace-miner failure frequency."""
+    """The spiral-prone set contains the tools with the highest trace-miner
+    failure frequency. Membership is the invariant; the set grows as new
+    spiral-prone tools are identified (#1141 added process)."""
     cfg = ToolCallGuardrailConfig()
     assert "terminal" in cfg.spiral_prone_tools
     assert "execute_code" in cfg.spiral_prone_tools
     assert "read_file" in cfg.spiral_prone_tools
-    assert len(cfg.spiral_prone_tools) == 3
+    assert "process" in cfg.spiral_prone_tools
+    assert len(cfg.spiral_prone_tools) >= 4
 
 
 # ── Cross-turn spiral enforcement (#1109–#1112) ─────────────────────────────
@@ -883,6 +885,19 @@ def test_cross_turn_does_not_affect_non_spiral_tools():
         controller.after_call("write_file", {"path": "x"}, '{"error":"boom"}', failed=True)
     controller.reset_for_turn()
     assert controller.before_call("write_file", {"path": "x"}).action == "allow"
+
+
+def test_cross_turn_process_spiral_cap_fires():
+    """#1141 — process is now in _SPIRAL_PRONE_TOOLS so a cross-turn process
+    failure streak should trigger the spiral-prone cap, not run uncapped."""
+    controller = ToolCallGuardrailController()
+    for _ in range(5):
+        controller.after_call("process", {"action": "poll"}, '{"error":"timeout"}', failed=True)
+    controller.reset_for_turn()
+    d = controller.before_call("process", {"action": "poll"})
+    assert d.action == "block"
+    assert d.code == "spiral_prone_tool_failure_cap"
+    assert d.fallback_directive != ""
 
 
 def test_cross_turn_blocks_with_hard_stop_disabled():

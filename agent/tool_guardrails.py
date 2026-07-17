@@ -68,7 +68,12 @@ MUTATING_TOOL_NAMES = frozenset(
 # read_file (26 failures / 10 sessions with ≥5 consecutive reads). These tools
 # get an always-on per-tool failure cap that halts regardless of
 # ``hard_stop_enabled``, mirroring the browser_failure_cap pattern.
-_SPIRAL_PRONE_TOOLS = frozenset({"terminal", "execute_code", "read_file"})
+# #1141 — process added: an 18-deep process polling spiral was observed in
+# production (11 failures, 1 session). process poll/wait loops that each
+# "succeed" but never converge on a terminal state run uncapped without this.
+_SPIRAL_PRONE_TOOLS = frozenset(
+    {"terminal", "execute_code", "read_file", "process"}
+)
 
 
 @dataclass(frozen=True)
