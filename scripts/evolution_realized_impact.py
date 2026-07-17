@@ -124,6 +124,77 @@ def record_verdict(
     )
 
 
+# ── Post-merge signal-verification gate (#1140) ────────────────────────────
+#
+# Merged fixes don't reduce their target signals because issues are closed at
+# merge, not at confirmed signal reduction. This gate lets the close loop
+# check whether a merged issue's signal was verified as dropped (or at least
+# recorded a verdict) before marking it fully resolved. If the signal is
+# flat/rising post-merge (verdict == "regressed" or "no-signal"), the gate
+# returns False so the issue stays open for a focused regression.
+
+
+def signal_verified(records: List[Dict[str, Any]], issue: int) -> bool:
+    """Whether a merged issue has a CONFIRMED signal-drop verdict.
+
+    Returns True only if the issue has a merge record AND a verdict of
+    "confirmed" (the signal dropped post-merge). Returns False if:
+    - No merge record exists (never tracked).
+    - No verdict has been recorded yet (not yet verified).
+    - The verdict is "no-signal" or "regressed" (the fix didn't help).
+
+    The close loop should NOT mark an issue as fully resolved until this
+    returns True. If it returns False after ``maturity_days``, the issue
+    should be re-examined or a regression filed.
+    """
+    for rec in reversed(records):
+        if rec.get("issue") == issue:
+            return rec.get("verdict") in VERDICTS_GOOD
+    return False
+
+
+def should_close_issue(
+    records: List[Dict[str, Any]],
+    issue: int,
+    today: str,
+    maturity_days: int = 5,
+) -> tuple[bool, str]:
+    """Gate for closing an issue after a fix PR merges.
+
+    Returns (should_close, reason). The issue should close only when:
+    - ``signal_verified`` returns True (the signal dropped), OR
+    - The merge is older than ``maturity_days`` AND no verdict exists
+      (the verification step didn't run — close with a note that it was
+      never verified, rather than leaving it open indefinitely).
+
+    If the verdict is "no-signal" or "regressed", returns (False, reason)
+    so the issue stays open for a focused regression — this is the core
+    fix for the REALIZED_IMPACT_LOW failure loop.
+    """
+    rec = None
+    for r in reversed(records):
+        if r.get("issue") == issue:
+            rec = r
+            break
+
+    if rec is None:
+        return True, "not tracked in ledger — no signal to verify"
+
+    verdict = rec.get("verdict")
+    if verdict in VERDICTS_GOOD:
+        return True, "signal confirmed dropped post-merge"
+
+    if verdict in VERDICTS_BAD:
+        return False, f"signal NOT verified — verdict: {verdict}. Keep open for regression."
+
+    # No verdict yet — check maturity
+    days_since = _days_between(rec.get("merged_at"), today)
+    if days_since is not None and days_since >= maturity_days:
+        return True, f"matured {days_since}d without verification — closing unverified"
+
+    return False, f"awaiting signal verification ({days_since or 0}d since merge, maturity={maturity_days}d)"
+
+
 def _days_between(a: Optional[str], b: Optional[str]) -> Optional[int]:
     """Whole days from ISO date ``a`` to ISO date ``b`` (both YYYY-MM-DD)."""
     if not a or not b:
