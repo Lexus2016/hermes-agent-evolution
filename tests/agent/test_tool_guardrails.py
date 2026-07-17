@@ -807,13 +807,15 @@ def test_spiral_cap_default_is_5():
 def test_spiral_prone_tools_set():
     """The spiral-prone set contains the tools with the highest trace-miner
     failure frequency. Membership is the invariant; the set grows as new
-    spiral-prone tools are identified (#1141 added process)."""
+    spiral-prone tools are identified (#1141 added process, #1143 added
+    search_files)."""
     cfg = ToolCallGuardrailConfig()
     assert "terminal" in cfg.spiral_prone_tools
     assert "execute_code" in cfg.spiral_prone_tools
     assert "read_file" in cfg.spiral_prone_tools
     assert "process" in cfg.spiral_prone_tools
-    assert len(cfg.spiral_prone_tools) >= 4
+    assert "search_files" in cfg.spiral_prone_tools
+    assert len(cfg.spiral_prone_tools) >= 5
 
 
 # ── Cross-turn spiral enforcement (#1109–#1112) ─────────────────────────────
@@ -898,6 +900,37 @@ def test_cross_turn_process_spiral_cap_fires():
     assert d.action == "block"
     assert d.code == "spiral_prone_tool_failure_cap"
     assert d.fallback_directive != ""
+
+
+def test_cross_turn_search_files_spiral_cap_fires():
+    """#1143 — search_files is now in _SPIRAL_PRONE_TOOLS so a cross-turn
+    search_files failure streak should trigger the spiral-prone cap,
+    not run uncapped as it did when 27 consecutive / 224 sessions regressed."""
+    controller = ToolCallGuardrailController()
+    for _ in range(5):
+        controller.after_call(
+            "search_files",
+            {"pattern": "*.py", "target": "content"},
+            '{"error":"no matches"}',
+            failed=True,
+        )
+    controller.reset_for_turn()
+    d = controller.before_call("search_files", {"pattern": "*.py", "target": "content"})
+    assert d.action == "block"
+    assert d.code == "spiral_prone_tool_failure_cap"
+    assert d.fallback_directive != ""
+    assert "target=files" in d.fallback_directive
+
+
+def test_search_files_fallback_directive_includes_strategy_switch():
+    """#1143 — the search_files fallback directive should guide the agent to
+    switch strategy (files mode, broader path, glob vs regex) rather than
+    just saying 'try a broader glob pattern'."""
+    from agent.tool_guardrails import _fallback_directive_for
+
+    directive = _fallback_directive_for("search_files")
+    assert "target=files" in directive
+    assert "broaden" in directive.lower()
 
 
 def test_cross_turn_blocks_with_hard_stop_disabled():
