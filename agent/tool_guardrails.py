@@ -68,7 +68,22 @@ MUTATING_TOOL_NAMES = frozenset(
 # read_file (26 failures / 10 sessions with ≥5 consecutive reads). These tools
 # get an always-on per-tool failure cap that halts regardless of
 # ``hard_stop_enabled``, mirroring the browser_failure_cap pattern.
-_SPIRAL_PRONE_TOOLS = frozenset({"terminal", "execute_code", "read_file"})
+# #1141 — process added: an 18-deep process polling spiral was observed in
+# production (11 failures, 1 session). process poll/wait loops that each
+# "succeed" but never converge on a terminal state run uncapped without this.
+# #1143 — search_files added: 27 consecutive search_files calls across 224
+# sessions (190 failures) regressed from 15/8 — the agent reformulates
+# patterns (glob vs regex, retries after empty results) without switching
+# strategy. Cap consecutive search_files calls to force a strategy switch.
+_SPIRAL_PRONE_TOOLS = frozenset(
+    {
+        "terminal",
+        "execute_code",
+        "read_file",
+        "process",
+        "search_files",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -649,7 +664,7 @@ _TOOL_FALLBACK_DIRECTIVE: dict[str, str] = {
     "execute_code": "install missing packages via terminal, or verify the interpreter/venv first",
     "web_search": "try web_extract on a known URL, or refine the query terms",
     "web_extract": "try web_search to find alternative URLs, or use the browser tool",
-    "search_files": "try a broader glob pattern, or use read_file on a known path",
+    "search_files": "no results found repeatedly — switch strategy: (a) use target=files mode instead of content, (b) broaden the directory path, (c) try a different glob pattern instead of regex, or (d) ask the user for the correct path",
     "patch": "use read_file to verify the exact text before patching, or use write_file",
     "write_file": "verify the directory exists with terminal, or use patch for targeted edits",
     "process": "use process action=list to find the correct session_id before retrying",
