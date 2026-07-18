@@ -1066,10 +1066,18 @@ def resolve_underlying_call(
     if raw_args is None:
         raw_args = {}
     if isinstance(raw_args, str):
-        try:
-            raw_args = json.loads(raw_args)
-        except json.JSONDecodeError as e:
-            return None, {}, f"tool_call 'arguments' is not valid JSON: {e}"
+        # #1173 — some providers (e.g. GLM-5.2 via OpenRouter) emit
+        # ``arguments: ""`` for no-parameter tools. An empty string is
+        # the absence of arguments, not malformed JSON; treat it as ``{}``
+        # so the underlying tool can be dispatched instead of surfacing a
+        # confusing "not valid JSON" error that the model loops on.
+        if raw_args == "":
+            raw_args = {}
+        else:
+            try:
+                raw_args = json.loads(raw_args)
+            except json.JSONDecodeError as e:
+                return None, {}, f"tool_call 'arguments' is not valid JSON: {e}"
     if not isinstance(raw_args, dict):
         return None, {}, "tool_call 'arguments' must be an object"
     if not is_deferrable_tool_name(name, config):
