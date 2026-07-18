@@ -630,6 +630,50 @@ class TestFailureClassAndDiversionHints:
         assert n is not None
         assert "placeholder" in n or "provider" in n
 
+    def test_tool_search_fallback_directive_at_cap(self):
+        # #1144: 3 consecutive tool_search calls with no tool_call → fallback
+        # directive directing the agent to broaden, tool_describe, or proceed.
+        msgs = [{"role": "user", "content": "go"}]
+        for i in range(3):
+            cid = f"c{i}"
+            msgs.append(
+                _asst("tool_search", args=json.dumps({"query": f"attempt {i}"}), call_id=cid)
+            )
+            msgs.append(_result("3 matching tools", call_id=cid))
+        n = maybe_nudge(msgs)
+        assert n is not None
+        assert "tool_search" in n
+        assert "tool_describe" in n
+        assert "tool_call" in n
+
+    def test_tool_search_below_cap_is_quiet(self):
+        # #1144: 2 consecutive tool_search calls (below cap of 3) → no nudge.
+        msgs = [{"role": "user", "content": "go"}]
+        for i in range(2):
+            cid = f"c{i}"
+            msgs.append(
+                _asst("tool_search", args=json.dumps({"query": f"attempt {i}"}), call_id=cid)
+            )
+            msgs.append(_result("3 matching tools", call_id=cid))
+        assert maybe_nudge(msgs) is None
+
+    def test_tool_search_run_breaks_on_tool_call(self):
+        # #1144: if the agent calls tool_call between tool_search calls, the run
+        # breaks and the fallback directive must NOT fire (the agent found and
+        # used a tool — that's success, not a spiral).
+        msgs = [{"role": "user", "content": "go"}]
+        # 2 tool_search calls, then a tool_call (run breaks), then 1 tool_search.
+        for i in range(2):
+            cid = f"s{i}"
+            msgs.append(_asst("tool_search", args=json.dumps({"query": f"q{i}"}), call_id=cid))
+            msgs.append(_result("3 matching tools", call_id=cid))
+        msgs.append(_asst("tool_call", args=json.dumps({"name": "some_tool"}), call_id="tc1"))
+        msgs.append(_result("tool ran ok", call_id="tc1"))
+        msgs.append(_asst("tool_search", args=json.dumps({"query": "q3"}), call_id="s3"))
+        msgs.append(_result("3 matching tools", call_id="s3"))
+        # Only 1 trailing tool_search — below the cap, no nudge.
+        assert maybe_nudge(msgs) is None
+
 
 def _distinct_run(tool, n, *, result="ok"):
     """n consecutive single-tool turns with DISTINCT arguments each (real

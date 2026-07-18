@@ -106,6 +106,15 @@ _SHORT_CIRCUIT_REPEAT_THRESHOLD = 4
 # The nudge explicitly tells it to stop searching and write the answer.
 _WEB_SEARCH_DIVERSE_QUERY_CAP = 6
 
+# #1144 — tool_search fallback directive: the agent keeps reformulating search
+# queries against the 128-tool deferred catalog without finding the right tool,
+# burning up to 9 consecutive searches. Each call "succeeds" (returns results)
+# but the agent never switches to tool_describe (for a candidate it almost has)
+# or proceeds without the deferred tool. This cap fires at 3 consecutive
+# tool_search calls with no intervening tool_call, directing the agent to
+# broaden the query, check tool_describe, or proceed without the deferred tool.
+_TOOL_SEARCH_FALLBACK_CAP = 3
+
 # Code-exploration tools whose mono-tool spiral is a STRATEGY problem, not a
 # failure (#625): 16-17 consecutive read_file calls / 14 consecutive
 # search_files calls, one file/query at a time, each succeeding — the agent
@@ -713,6 +722,26 @@ def maybe_nudge(
                 f"promising URL for depth, or report what you found and what is "
                 f"still missing instead of running another search."
             )
+
+    # #1144 — tool_search fallback directive: the agent has searched the deferred
+    # tool catalog 3+ times without invoking `tool_call` (the run would have
+    # broken if it had). Each search "succeeds" but the right tool isn't surfacing.
+    # Direct it to (a) broaden the query, (b) check `tool_describe` on a candidate
+    # it almost found, or (c) proceed without the deferred tool rather than keep
+    # reformulating. Mirrors the web_search diverse-query cap pattern.
+    if tool == "tool_search" and count >= _TOOL_SEARCH_FALLBACK_CAP:
+        return (
+            f"[loop-guard] You have called `tool_search` {count} times without "
+            f"invoking `tool_call` — the right deferred tool is not surfacing. "
+            f"STOP reformulating the same kind of query. Try one of: "
+            f"(a) broaden the query to a category (e.g. \"github\", \"browser\", "
+            f"\"file\") and scan the results; "
+            f"(b) if a candidate name is close, call `tool_describe` on it to see "
+            f"its full parameter schema before deciding; "
+            f"(c) proceed without the deferred tool — the core tools (terminal, "
+            f"read_file, patch, search_files) may already cover the task. "
+            f"Do not run another `tool_search` with a near-identical keyword query."
+        )
 
     if count >= repeat_threshold:
         # Build diversity score for the nudge.

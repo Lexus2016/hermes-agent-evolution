@@ -116,6 +116,20 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
    - Be honest: a `no-signal`/`regressed` verdict on the agent's OWN past change is
      exactly the feedback that stops blind feature-piling (analysis reads it and
      shifts to consolidation). Confirming uselessly to look good defeats the loop.
+   - **Signal-verification gate (#1140)** — after recording a verdict, consult the
+     gate to decide whether the issue should stay closed or be re-opened. GitHub
+     auto-closes issues at merge via `Closes #N`, but a `no-signal`/`regressed`
+     verdict means the fix did NOT deliver — re-open it for a focused regression:
+     ```bash
+     # exit 0 = may stay closed; exit 1 = re-open (bad verdict or awaiting verification)
+     python3 scripts/evolution_realized_impact.py check-close <#> --today "$TODAY" --maturity-days 5
+     if [ $? -ne 0 ]; then
+       gh issue reopen <#> --repo Lexus2016/hermes-agent-evolution \
+         --comment "Post-merge signal verification FAILED — re-opening for regression."
+     fi
+     ```
+     This is the close-loop wire-in: the issue is only resolved once
+     `should_close_issue()` agrees, not merely because GitHub auto-closed it.
 
 ## Creating issues
 
