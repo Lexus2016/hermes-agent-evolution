@@ -785,6 +785,16 @@ def dispatch_tool_search(args: Dict[str, Any],
     _, deferrable = classify_tools(current_tool_defs, config)
     catalog = build_catalog(deferrable)
     hits = search_catalog(catalog, query, limit=limit)
+    # #1137 — compositional skill routing: optional listwise reranking over the
+    # BM25 top-k. Config-gated via ``skill_routing.listwise_rerank`` (off by
+    # default -> hits pass through in BM25 order). Imported lazily so tool_search
+    # has no hard dependency on the agent package at import time.
+    try:
+        from agent.skill_routing import maybe_rerank_hits
+
+        hits = maybe_rerank_hits(query, hits)
+    except Exception:
+        pass
     result: Dict[str, Any] = {
         "query": query,
         "total_available": len(catalog),

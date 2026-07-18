@@ -438,6 +438,22 @@ recheck_suppression:
   min_confidence: 0.85
 
 # =============================================================================
+# Compositional Skill Routing (#1137 — SAD + listwise reranking)
+# =============================================================================
+# Two composable levers over the on-demand tool_search retrieval path:
+#   listwise_rerank — reorder the BM25 top-k candidates by a listwise relevance
+#                     signal (name-token coverage + query overlap) before
+#                     returning them; a strict reordering, never a drop.
+#   sad             — Skill-Aware Decomposition: re-decompose the request using
+#                     the returned candidate names/descriptions as anchors
+#                     (LLM-driven; see agent.skill_routing.sad_redecompose).
+# Both OFF by default -> tool_search behaves identically (BM25 order preserved).
+skill_routing:
+  listwise_rerank: false
+  sad: false
+  rerank_top_k: 10
+
+# =============================================================================
 # Context Compression (Auto-shrinks long conversations)
 # =============================================================================
 # When conversation approaches model's context limit, middle turns are
