@@ -467,6 +467,22 @@ task_decoupling:
   min_task_chars: 280
 
 # =============================================================================
+# Architecture Router (#1139 — single-agent vs centralized multi-agent selector)
+# =============================================================================
+# Pre-flight that classifies each task (decomposability / tool density /
+# sequentiality) and RECORDS the recommended execution architecture
+# (single-agent / centralized orchestrator / plan-and-execute) to a telemetry
+# sink for calibration — following Google's agent-scaling study (arXiv:2512.08296).
+# Observation-only: it logs a recommendation, it does NOT change how the turn
+# executes. Guardrails: low classifier confidence -> single-agent; workers capped
+# to contain error amplification. OFF by default.
+architecture_router:
+  enabled: false
+  confidence_threshold: 0.5
+  max_workers_cap: 4
+  high_tool_density: 16
+
+# =============================================================================
 # Context Compression (Auto-shrinks long conversations)
 # =============================================================================
 # When conversation approaches model's context limit, middle turns are

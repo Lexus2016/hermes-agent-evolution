@@ -846,6 +846,33 @@ def _run_conversation_impl(
     except Exception:
         agent._subgoal_dag = None
 
+    # #1139 — architecture router pre-flight. Config-gated (off by default):
+    # classifies the task (decomposability / tool density / sequentiality) and
+    # records the recommended architecture (single-agent / centralized
+    # orchestrator / plan-and-execute) to a telemetry sink for calibration —
+    # WITHOUT changing how this turn executes. Stores the decision on
+    # ``agent._architecture_route`` for callers/telemetry. Never raises.
+    agent._architecture_route = None
+    try:
+        from agent.architecture_router import (
+            RouterTelemetry,
+            load_router_config,
+            maybe_route,
+        )
+
+        _ar_cfg = load_router_config()
+        if _ar_cfg.enabled:
+            if getattr(agent, "_architecture_router_telemetry", None) is None:
+                agent._architecture_router_telemetry = RouterTelemetry()
+            _ar_task = user_message if isinstance(user_message, str) else str(user_message)
+            agent._architecture_route = maybe_route(
+                _ar_task,
+                config=_ar_cfg,
+                telemetry=agent._architecture_router_telemetry,
+            )
+    except Exception:
+        agent._architecture_route = None
+
     # Main conversation loop counters (pure locals consumed by the loop below).
     api_call_count = 0
     final_response = None
