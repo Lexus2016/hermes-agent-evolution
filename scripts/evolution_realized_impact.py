@@ -124,6 +124,77 @@ def record_verdict(
     )
 
 
+# ── Post-merge signal-verification gate (#1140) ────────────────────────────
+# Recovered from PR #1148 (closed unmerged — the functions were defined but
+# never called). This module now also exposes a ``check-close`` CLI subcommand
+# (see main()) so the introspection skill can invoke the gate right after
+# recording a verdict and act on it — that wiring makes the gate live, not
+# dead code. A flat/rising signal post-merge keeps the issue open for a
+# focused regression rather than silently closing it.
+
+
+def signal_verified(records: List[Dict[str, Any]], issue: int) -> bool:
+    """Whether a merged issue has a CONFIRMED signal-drop verdict.
+
+    Returns True only if the issue has a merge record AND a verdict of
+    "confirmed" (the signal dropped post-merge). Returns False if no merge
+    record exists, no verdict has been recorded yet, or the verdict is
+    "no-signal" / "regressed" (the fix didn't help).
+    """
+    for rec in reversed(records):
+        if rec.get("issue") == issue:
+            return rec.get("verdict") in VERDICTS_GOOD
+    return False
+
+
+def should_close_issue(
+    records: List[Dict[str, Any]],
+    issue: int,
+    today: str,
+    maturity_days: int = 5,
+) -> tuple:
+    """Gate for closing an issue after a fix PR merges.
+
+    Returns ``(should_close, reason)``. The issue should close only when:
+    - ``signal_verified`` returns True (the signal dropped), OR
+    - the merge is older than ``maturity_days`` AND no verdict exists (the
+      verification step didn't run — close with a note that it was never
+      verified, rather than leaving it open indefinitely).
+
+    If the verdict is "no-signal" or "regressed", returns ``(False, reason)``
+    so the issue stays open for a focused regression — this is the core fix
+    for the REALIZED_IMPACT_LOW failure loop.
+    """
+    rec = None
+    for r in reversed(records):
+        if r.get("issue") == issue:
+            rec = r
+            break
+
+    if rec is None:
+        return True, "not tracked in ledger — no signal to verify"
+
+    verdict = rec.get("verdict")
+    if verdict in VERDICTS_GOOD:
+        return True, "signal confirmed dropped post-merge"
+
+    if verdict in VERDICTS_BAD:
+        return (
+            False,
+            f"signal NOT verified — verdict: {verdict}. Keep open for regression.",
+        )
+
+    # No verdict yet — check maturity.
+    days_since = _days_between(rec.get("merged_at"), today)
+    if days_since is not None and days_since >= maturity_days:
+        return True, f"matured {days_since}d without verification — closing unverified"
+
+    return (
+        False,
+        f"awaiting signal verification ({days_since or 0}d since merge, maturity={maturity_days}d)",
+    )
+
+
 def _days_between(a: Optional[str], b: Optional[str]) -> Optional[int]:
     """Whole days from ISO date ``a`` to ISO date ``b`` (both YYYY-MM-DD)."""
     if not a or not b:
@@ -270,6 +341,31 @@ def main(argv: List[str]) -> int:
         record_verdict(ledger_file, issue, verdict, verified_at, note)
         print(f"[realized-impact] recorded verdict for issue #{issue}")
         return 0
+
+    # Subcommand: check the close-loop gate for an issue (#1140).
+    # Invoked by the introspection skill right after record-verdict so the
+    # close loop consults the realized-impact signal before allowing the
+    # issue to be marked resolved. Prints ``CLOSE`` or ``HOLD`` + the reason
+    # and exits 0 when the issue may close, 1 when it must stay open.
+    if args and args[0] == "check-close":
+        try:
+            issue = int(args[1])
+            today = args[2] if len(args) > 2 else None
+        except (IndexError, ValueError):
+            print(
+                "usage: evolution_realized_impact.py check-close <issue> [<YYYY-MM-DD>]",
+                file=sys.stderr,
+            )
+            return 2
+        if not today:
+            from datetime import datetime, timezone
+
+            today = datetime.now(timezone.utc).date().isoformat()
+        records = load_ledger(ledger_file)
+        should, reason = should_close_issue(records, issue, today)
+        verdict = "CLOSE" if should else "HOLD"
+        print(f"[realized-impact] #{issue} {verdict}: {reason}")
+        return 0 if should else 1
 
     last = 30
     if "--last" in args:

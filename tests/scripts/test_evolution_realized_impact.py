@@ -12,6 +12,8 @@ from evolution_realized_impact import (  # noqa: E402
     load_ledger,
     record_merge,
     record_verdict,
+    should_close_issue,
+    signal_verified,
 )
 
 
@@ -193,3 +195,87 @@ class TestIntegration:
         assert recs[0]["verdict"] == "confirmed"
         assert recs[0]["target"] == "target"
         assert recs[0]["predicted_impact"] == 0.8
+
+
+class TestSignalVerifiedGate:
+    def test_confirmed_verdict_is_verified(self):
+        recs = [_merge(1, "2026-06-01") | _verdict(1, "confirmed")]
+        assert signal_verified(recs, 1) is True
+
+    def test_no_signal_not_verified(self):
+        recs = [_merge(1, "2026-06-01") | _verdict(1, "no-signal")]
+        assert signal_verified(recs, 1) is False
+
+    def test_regressed_not_verified(self):
+        recs = [_merge(1, "2026-06-01") | _verdict(1, "regressed")]
+        assert signal_verified(recs, 1) is False
+
+    def test_no_verdict_yet_not_verified(self):
+        recs = [_merge(1, "2026-06-01")]
+        assert signal_verified(recs, 1) is False
+
+    def test_latest_verdict_wins(self):
+        recs = [
+            _merge(1, "2026-06-01"),
+            _verdict(1, "confirmed", verified_at="2026-06-10"),
+            _verdict(1, "regressed", verified_at="2026-06-15"),
+        ]
+        assert signal_verified(recs, 1) is False
+
+
+class TestShouldCloseIssue:
+    def test_confirmed_closes(self):
+        recs = [_merge(1, "2026-06-01") | _verdict(1, "confirmed")]
+        should, reason = should_close_issue(recs, 1, "2026-06-17")
+        assert should is True and "confirmed" in reason
+
+    def test_regressed_blocks_close(self):
+        recs = [_merge(1, "2026-06-01") | _verdict(1, "regressed")]
+        should, reason = should_close_issue(recs, 1, "2026-06-17")
+        assert should is False and "regressed" in reason
+
+    def test_no_signal_blocks_close(self):
+        recs = [_merge(1, "2026-06-01") | _verdict(1, "no-signal")]
+        should, reason = should_close_issue(recs, 1, "2026-06-17")
+        assert should is False and "no-signal" in reason
+
+    def test_not_tracked_closes(self):
+        should, reason = should_close_issue([_merge(2, "2026-06-01")], 1, "2026-06-17")
+        assert should is True and "not tracked" in reason
+
+    def test_recent_unverified_awaits(self):
+        recs = [_merge(1, "2026-06-15")]
+        should, reason = should_close_issue(recs, 1, "2026-06-17", maturity_days=5)
+        assert should is False and "awaiting" in reason.lower()
+
+    def test_matured_unverified_closes(self):
+        recs = [_merge(1, "2026-06-01")]
+        should, reason = should_close_issue(recs, 1, "2026-06-17", maturity_days=5)
+        assert should is True and "matured" in reason.lower()
+
+
+_PROG = "evolution_realized_impact.py"  # mod.main() takes sys.argv shape: [prog, subcmd, ...]
+
+
+class TestCheckCloseCli:
+    def test_check_close_hold_returns_nonzero(self, tmp_path, monkeypatch, capsys):
+        import evolution_realized_impact as mod
+
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
+        f = tmp_path / "realized" / "ledger.jsonl"
+        record_merge(f, 42, "2026-06-01", 0.8, "spiral")
+        record_verdict(f, 42, "regressed", "2026-06-10", "worse")
+        rc = mod.main([_PROG, "check-close", "42", "2026-06-17"])
+        out = capsys.readouterr().out
+        assert rc == 1 and "HOLD" in out and "regressed" in out
+
+    def test_check_close_close_returns_zero(self, tmp_path, monkeypatch, capsys):
+        import evolution_realized_impact as mod
+
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
+        f = tmp_path / "realized" / "ledger.jsonl"
+        record_merge(f, 42, "2026-06-01", 0.8, "spiral")
+        record_verdict(f, 42, "confirmed", "2026-06-10", "dropped")
+        rc = mod.main([_PROG, "check-close", "42", "2026-06-17"])
+        out = capsys.readouterr().out
+        assert rc == 0 and "CLOSE" in out and "confirmed" in out
