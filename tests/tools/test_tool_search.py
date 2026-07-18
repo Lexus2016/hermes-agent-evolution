@@ -532,6 +532,25 @@ class TestBridgeDispatch:
         assert err is not None
         assert "JSON" in err
 
+    def test_resolve_underlying_call_treats_empty_string_args_as_empty_dict(self):
+        """#1173 — some providers (e.g. GLM-5.2 via OpenRouter) emit
+        ``arguments: ""`` for no-parameter tools. An empty string is not
+        malformed JSON that should be rejected; it is the absence of
+        arguments and must resolve to ``{}`` so the underlying tool can
+        be dispatched. Previously this hit ``json.loads("")`` and surfaced
+        a confusing "not valid JSON" error to the model, which then
+        looped on the same call."""
+        from tools.tool_search import resolve_underlying_call
+        name, args, err = resolve_underlying_call({
+            "name": "fake_no_params_tool",
+            "arguments": "",
+        })
+        # The empty string is accepted as {} — the only error, if any,
+        # is the (expected) deferrability classification failure, never
+        # a JSON parse error.
+        assert "not valid JSON" not in (err or "")
+        assert args == {}
+
     def test_resolve_underlying_call_rejects_recursion(self):
         """tool_call cannot invoke tool_call itself."""
         from tools.tool_search import resolve_underlying_call, TOOL_CALL_NAME
