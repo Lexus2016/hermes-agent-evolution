@@ -1378,6 +1378,17 @@ def init_agent(
         )
     except Exception as _tlg_err:
         _ra().logger.warning("Tool loop guardrail config ignored: %s", _tlg_err)
+    # #1027 — recovery strategy dispatcher gate. OFF by default: the
+    # ``_append_guardrail_observation`` seam only appends a structured recovery
+    # directive to a failed tool result when this flag is truthy, so the default
+    # behavior is unchanged. Reads ``tool_failure_recovery.enabled`` from config.
+    agent._failure_recovery_enabled = False
+    try:
+        _tfr_cfg = _agent_cfg.get("tool_failure_recovery", {})
+        if isinstance(_tfr_cfg, dict):
+            agent._failure_recovery_enabled = bool(_tfr_cfg.get("enabled", False))
+    except Exception as _tfr_err:
+        _ra().logger.warning("Tool failure recovery config ignored: %s", _tfr_err)
     # Cache only the derived auxiliary compression context override that is
     # needed later by the startup feasibility check.  Avoid exposing a
     # broad pseudo-public config object on the agent instance.

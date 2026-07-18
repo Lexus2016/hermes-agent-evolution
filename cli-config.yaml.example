@@ -386,6 +386,20 @@ tool_loop_guardrails:
     idempotent_no_progress: 5
 
 # =============================================================================
+# Tool Failure Recovery (#1027 — PALADIN-style structured recovery)
+# =============================================================================
+# When a tool call fails, append ONE structured recovery directive to the tool
+# result (retry / retry_with_backoff / fix_arguments / verify_target /
+# switch_tool / surface_blocker / escalate) so the agent takes a targeted next
+# step instead of blindly retrying the same call. Builds on the cross-tool
+# failure classifier; escalation is monotone (repeated failures give way to a
+# tool switch, then a surfaced blocker) so a directive never sustains a spiral.
+#
+# OFF by default: when disabled, failed tool results are byte-for-byte unchanged.
+tool_failure_recovery:
+  enabled: false
+
+# =============================================================================
 # Context Compression (Auto-shrinks long conversations)
 # =============================================================================
 # When conversation approaches model's context limit, middle turns are

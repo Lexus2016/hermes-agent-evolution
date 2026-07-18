@@ -6195,6 +6195,24 @@ class AIAgent:
             function_result = append_toolguard_guidance(function_result, decision)
         if decision.should_halt:
             self._set_tool_guardrail_halt(decision)
+        # #1027 — recovery strategy dispatcher. Config-gated OFF by default: when
+        # ``tool_failure_recovery.enabled`` is unset the branch never runs, so the
+        # tool result is byte-for-byte unchanged (no behavior change, no prompt
+        # drift). When enabled, a failed result gains one structured recovery
+        # directive (retry/backoff/switch/fix/verify/surface) so the agent takes a
+        # targeted next step instead of blindly retrying.
+        if failed and getattr(self, "_failure_recovery_enabled", False):
+            from tools.recovery_strategy_dispatcher import (
+                maybe_append_recovery_guidance,
+            )
+
+            function_result = maybe_append_recovery_guidance(
+                function_result,
+                tool_name,
+                failed=True,
+                enabled=True,
+                consecutive_count=decision.count,
+            )
         return function_result
 
     def _guardrail_block_result(self, decision: ToolGuardrailDecision) -> str:
