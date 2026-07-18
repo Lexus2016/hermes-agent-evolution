@@ -18,6 +18,7 @@ from agent.tool_result_classification import file_mutation_result_landed
 
 if TYPE_CHECKING:  # avoid a circular import; policy_interceptors imports this module
     from agent.policy_interceptors import PolicyInterceptorRegistry
+    from agent.recheck_suppression import RecheckController
 
 
 IDEMPOTENT_TOOL_NAMES = frozenset(
@@ -297,9 +298,14 @@ class ToolCallGuardrailController:
         self,
         config: ToolCallGuardrailConfig | None = None,
         policy_registry: "PolicyInterceptorRegistry | None" = None,
+        recheck_controller: "RecheckController | None" = None,
     ):
         self.config = config or ToolCallGuardrailConfig()
         self.policy_registry = policy_registry
+        # #1041 — optional recheck-suppression controller. When present and
+        # enabled it can suppress a single redundant read-only recheck in
+        # ``before_call``; None (the default) is a full no-op.
+        self.recheck_controller = recheck_controller
         # Cross-turn failure streaks — NOT reset by reset_for_turn so that
         # one-failing-call-per-turn spirals (the common pattern: the model
         # calls the same failing tool once per API turn) accumulate across
@@ -313,6 +319,9 @@ class ToolCallGuardrailController:
         self._same_tool_failure_counts: dict[str, int] = {}
         self._no_progress: dict[ToolCallSignature, tuple[str, int]] = {}
         self._halt_decision: ToolGuardrailDecision | None = None
+        # #1041 — last executed call, for immediate-recheck detection.
+        self._last_signature: ToolCallSignature | None = None
+        self._last_call_succeeded: bool = False
         if self.policy_registry is not None:
             self.policy_registry.reset_for_turn()
 
@@ -376,6 +385,43 @@ class ToolCallGuardrailController:
             self._halt_decision = decision
             return decision
 
+        # #1041 — recheck suppression. Config-gated via ``recheck_controller``
+        # (None/disabled by default -> skipped). Suppresses a single immediate
+        # identical repeat of a successful read-only call as a redundant
+        # self-verification, returning a non-halting ``suppress`` decision
+        # (allows_execution False, should_halt False) so the one call is skipped
+        # but the turn continues. Every idempotent-call decision is logged for
+        # calibration.
+        if (
+            self.recheck_controller is not None
+            and self.recheck_controller.enabled
+            and self._is_idempotent(tool_name)
+        ):
+            is_immediate_repeat = (
+                self._last_signature is not None
+                and signature == self._last_signature
+                and self._last_call_succeeded
+            )
+            suppress, _result = self.recheck_controller.decide(
+                tool_name,
+                is_idempotent=True,
+                is_immediate_repeat=is_immediate_repeat,
+                prior_succeeded=self._last_call_succeeded,
+            )
+            if suppress:
+                return ToolGuardrailDecision(
+                    action="suppress",
+                    code="recheck_suppressed",
+                    message=(
+                        f"Suppressed {tool_name}: this read-only call is an immediate "
+                        "repeat of one that just succeeded with identical arguments. "
+                        "Reuse the previous result instead of re-verifying it."
+                    ),
+                    tool_name=tool_name,
+                    count=0,
+                    signature=signature,
+                )
+
         if not self.config.hard_stop_enabled:
             return ToolGuardrailDecision(tool_name=tool_name, signature=signature)
 
@@ -430,6 +476,11 @@ class ToolCallGuardrailController:
         signature = ToolCallSignature.from_call(tool_name, args)
         if failed is None:
             failed, _ = classify_tool_failure(tool_name, result)
+
+        # #1041 — record the last executed call so the next before_call can
+        # detect an immediate identical recheck of a successful read-only call.
+        self._last_signature = signature
+        self._last_call_succeeded = not failed
 
         # Feed the per-turn observation ledger so ordering-aware policy
         # interceptors (e.g. read-before-write) can see prior calls.

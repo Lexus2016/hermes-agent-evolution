@@ -425,6 +425,19 @@ failure_diagnosis:
   mode: off
 
 # =============================================================================
+# Recheck Suppression (#1041 — suppress redundant self-verification)
+# =============================================================================
+# When a read-only call (read_file, search_files, …) is issued again immediately
+# after it just succeeded with identical arguments — a redundant self-check with
+# nothing changed in between — suppress the repeat and reuse the prior result,
+# saving tokens. Conservative: only immediate identical repeats of successful
+# idempotent calls are suppressed; mutating tools are never touched. Every
+# decision is logged in-memory for calibration. OFF by default.
+recheck_suppression:
+  enabled: false
+  min_confidence: 0.85
+
+# =============================================================================
 # Context Compression (Auto-shrinks long conversations)
 # =============================================================================
 # When conversation approaches model's context limit, middle turns are
