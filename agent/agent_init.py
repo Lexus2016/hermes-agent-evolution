@@ -1370,11 +1370,19 @@ def init_agent(
         _policy_registry = build_registry_from_config(
             _agent_cfg.get("policy_interceptors", {})
         )
+        # #1041 — recheck-suppression controller (off by default). Passed to the
+        # guardrail so before_call can suppress a single redundant read-only
+        # recheck when ``recheck_suppression.enabled`` is set.
+        from agent.recheck_suppression import RecheckController
+        _recheck_controller = RecheckController.from_mapping(
+            _agent_cfg.get("recheck_suppression", {})
+        )
         agent._tool_guardrails = ToolCallGuardrailController(
             ToolCallGuardrailConfig.from_mapping(
                 _agent_cfg.get("tool_loop_guardrails", {})
             ),
             policy_registry=_policy_registry,
+            recheck_controller=_recheck_controller,
         )
     except Exception as _tlg_err:
         _ra().logger.warning("Tool loop guardrail config ignored: %s", _tlg_err)
