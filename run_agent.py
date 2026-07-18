@@ -6213,6 +6213,26 @@ class AIAgent:
                 enabled=True,
                 consecutive_count=decision.count,
             )
+        # #1029/#1030 — multi-hypothesis failure diagnosis. Config-gated via
+        # ``failure_diagnosis.mode`` (off | reflect | multi-hypothesis); OFF by
+        # default so the branch never runs and the result is unchanged. When
+        # active, a failed result gains a ranked list of hypotheses about WHY it
+        # failed (demoting hypotheses already tried this session, #1030) so the
+        # agent weighs alternatives before retrying.
+        if failed and getattr(self, "_failure_diagnosis_mode", "off") != "off":
+            from agent.failure_diagnosis import maybe_append_diagnosis
+
+            _sig = decision.signature
+            _key = _sig.args_hash if _sig is not None else tool_name
+            function_result = maybe_append_diagnosis(
+                function_result,
+                tool_name,
+                failed=True,
+                mode=self._failure_diagnosis_mode,
+                consecutive_count=decision.count,
+                history=getattr(self, "_hypothesis_history", None),
+                history_key=f"{tool_name}:{_key}",
+            )
         return function_result
 
     def _guardrail_block_result(self, decision: ToolGuardrailDecision) -> str:

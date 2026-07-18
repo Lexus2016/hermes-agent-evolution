@@ -1400,6 +1400,26 @@ def init_agent(
             agent._plan_feasibility_enabled = bool(_pf_cfg.get("enabled", False))
     except Exception as _pf_err:
         _ra().logger.warning("Plan feasibility config ignored: %s", _pf_err)
+    # #1029/#1030 — multi-hypothesis failure diagnosis. Config-gated via
+    # ``failure_diagnosis.mode`` (off | reflect | multi-hypothesis); default off
+    # so ``_append_guardrail_observation`` leaves failed results unchanged. When
+    # not off, a per-session HypothesisHistory is armed so repeated failures
+    # surface fresh hypotheses (#1030).
+    agent._failure_diagnosis_mode = "off"
+    agent._hypothesis_history = None
+    try:
+        _fd_cfg = _agent_cfg.get("failure_diagnosis", {})
+        if isinstance(_fd_cfg, dict):
+            _mode = str(_fd_cfg.get("mode", "off")).strip().lower()
+            if _mode not in {"off", "reflect", "multi-hypothesis", "multi_hypothesis"}:
+                _mode = "off"
+            agent._failure_diagnosis_mode = _mode
+            if _mode != "off":
+                from agent.failure_diagnosis import HypothesisHistory
+
+                agent._hypothesis_history = HypothesisHistory()
+    except Exception as _fd_err:
+        _ra().logger.warning("Failure diagnosis config ignored: %s", _fd_err)
     # Cache only the derived auxiliary compression context override that is
     # needed later by the startup feasibility check.  Avoid exposing a
     # broad pseudo-public config object on the agent instance.

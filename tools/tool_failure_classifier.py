@@ -386,3 +386,20 @@ def classify_tool_failure(
 
     text = "\n".join(part for part in (error, stdout, stderr) if part)
     return _classify_text(text, tool_type)
+
+
+def matched_categories(text: str) -> list[ToolFailureCategory]:
+    """Return every category whose pattern matches ``text``, in rule order (deduped).
+
+    Unlike :func:`classify_tool_failure` (first match wins → one category), this
+    surfaces ALL plausible categories so a multi-hypothesis diagnosis (#1029) can
+    rank them. Custom rules are checked before the built-ins, matching the
+    resolution order of ``_classify_text``.
+    """
+    seen: list[ToolFailureCategory] = []
+    if not text:
+        return seen
+    for rule in (*_CUSTOM_RULES, *_BUILTIN_RULES):
+        if rule.category not in seen and rule.pattern.search(text):
+            seen.append(rule.category)
+    return seen

@@ -412,6 +412,19 @@ plan_feasibility:
   enabled: false
 
 # =============================================================================
+# Failure Diagnosis (#1029/#1030 — SAGE-style multi-hypothesis attribution)
+# =============================================================================
+# When a tool call fails, append a ranked list of hypotheses about WHY it failed
+# (derived from the same cross-tool classifier the recovery dispatcher uses) so
+# the agent weighs alternatives before retrying. Hypotheses already surfaced this
+# session are demoted so repeats propose fresh explanations (#1030).
+#   off              — no diagnosis (default; failed results unchanged)
+#   reflect          — append only the single best hypothesis
+#   multi-hypothesis — append the full ranked list
+failure_diagnosis:
+  mode: off
+
+# =============================================================================
 # Context Compression (Auto-shrinks long conversations)
 # =============================================================================
 # When conversation approaches model's context limit, middle turns are
