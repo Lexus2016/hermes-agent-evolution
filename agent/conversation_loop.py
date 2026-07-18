@@ -825,6 +825,27 @@ def _run_conversation_impl(
     _plugin_user_context = _ctx.plugin_user_context
     _ext_prefetch_cache = _ctx.ext_prefetch_cache
 
+    # #1138 — task-decoupled planning pre-flight. Config-gated (off by default)
+    # and additionally scoped to long-horizon tasks by a trigger heuristic. When
+    # active it decomposes the task into a sub-goal DAG (with scoped contexts +
+    # confined replanning available to a delegating executor) and stores it on
+    # ``agent._subgoal_dag``; when off it is a pure no-op that never touches the
+    # turn. Never raises.
+    agent._subgoal_dag = None
+    try:
+        from agent.task_decoupling import (
+            decompose_task,
+            load_task_decoupling_config,
+            should_decouple,
+        )
+
+        _td_cfg = load_task_decoupling_config()
+        _td_task = user_message if isinstance(user_message, str) else str(user_message)
+        if should_decouple(_td_task, _td_cfg):
+            agent._subgoal_dag = decompose_task(_td_task)
+    except Exception:
+        agent._subgoal_dag = None
+
     # Main conversation loop counters (pure locals consumed by the loop below).
     api_call_count = 0
     final_response = None

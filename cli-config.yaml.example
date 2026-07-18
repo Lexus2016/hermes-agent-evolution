@@ -454,6 +454,19 @@ skill_routing:
   rerank_top_k: 10
 
 # =============================================================================
+# Task-Decoupled Planning (#1138 — TDP sub-goal DAG with scoped contexts)
+# =============================================================================
+# For long-horizon tasks, decompose the task into a DAG of sub-goals with
+# explicit dependencies and execute each with a SCOPED context (its inputs +
+# its dependency sub-goals' outputs only) instead of one monotonically growing
+# context. A sub-goal failure triggers confined replanning (only that node is
+# revised). OFF by default; a trigger heuristic (min_task_chars) keeps short
+# tasks on the linear loop even when enabled.
+task_decoupling:
+  enabled: false
+  min_task_chars: 280
+
+# =============================================================================
 # Context Compression (Auto-shrinks long conversations)
 # =============================================================================
 # When conversation approaches model's context limit, middle turns are
