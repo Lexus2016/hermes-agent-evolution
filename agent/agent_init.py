@@ -1389,6 +1389,17 @@ def init_agent(
             agent._failure_recovery_enabled = bool(_tfr_cfg.get("enabled", False))
     except Exception as _tfr_err:
         _ra().logger.warning("Tool failure recovery config ignored: %s", _tfr_err)
+    # #1032 — plan feasibility gate. OFF by default and additionally scoped to
+    # plan mode: ``_maybe_activate_plan_mode`` validates a freshly built plan
+    # only when this flag is set. Reads ``plan_feasibility.enabled`` from config.
+    agent._plan_feasibility_enabled = False
+    agent._plan_feasibility_report = None
+    try:
+        _pf_cfg = _agent_cfg.get("plan_feasibility", {})
+        if isinstance(_pf_cfg, dict):
+            agent._plan_feasibility_enabled = bool(_pf_cfg.get("enabled", False))
+    except Exception as _pf_err:
+        _ra().logger.warning("Plan feasibility config ignored: %s", _pf_err)
     # Cache only the derived auxiliary compression context override that is
     # needed later by the startup feasibility check.  Avoid exposing a
     # broad pseudo-public config object on the agent instance.

@@ -6331,6 +6331,20 @@ class AIAgent:
 
         if plan is None:
             return
+        # #1032 — plan feasibility gate. Runs only inside plan mode (already
+        # opt-in) AND when plan_feasibility.enabled is set: validates the freshly
+        # built plan before any of its steps drive a tool call and records
+        # structured per-step feedback on plan.metadata['feasibility'] for a
+        # revision pass. Off by default -> the plan is left exactly as built.
+        if getattr(self, "_plan_feasibility_enabled", False):
+            try:
+                from agent.plan_feasibility import maybe_validate_plan
+
+                self._plan_feasibility_report = maybe_validate_plan(
+                    plan, enabled=True
+                )
+            except Exception:
+                self._plan_feasibility_report = None
         self._active_plan = plan
         # Re-arm emission so the freshly built plan prints before this run's
         # first tool dispatch, and reset the progress cursor for the new plan.

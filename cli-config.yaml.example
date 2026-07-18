@@ -400,6 +400,18 @@ tool_failure_recovery:
   enabled: false
 
 # =============================================================================
+# Plan Feasibility Gate (#1032 — PIVOT-style pre-execution validation)
+# =============================================================================
+# Only active when plan mode is on (plan_mode: true). Before a freshly built
+# plan's steps drive any tool call, each step's declared intent is validated for
+# feasibility (referenced files exist, referenced tools are available). Blockers
+# are recorded as structured per-step feedback on the plan for a revision pass.
+# Conservative: only definitively-violated preconditions are flagged; anything
+# unparseable is "uncertain", never a blocker. OFF by default.
+plan_feasibility:
+  enabled: false
+
+# =============================================================================
 # Context Compression (Auto-shrinks long conversations)
 # =============================================================================
 # When conversation approaches model's context limit, middle turns are
