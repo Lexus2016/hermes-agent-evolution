@@ -54,6 +54,39 @@ BRIDGE_TOOL_NAMES = frozenset({TOOL_SEARCH_NAME, TOOL_DESCRIBE_NAME, TOOL_CALL_N
 # underestimating, which is the safer default.
 CHARS_PER_TOKEN = 4.0
 
+# ── #1144 — consecutive-tool_search streak tracking ───────────────────────
+# Per-session count of ``tool_search`` calls with no intervening ``tool_call``.
+# When the model keeps reformulating queries but never invokes a discovered
+# tool, ``dispatch_tool_search`` appends a ``fallback_directive`` once the
+# streak crosses ``ToolSearchConfig.search_streak_threshold``. The counter
+# resets on any ``tool_call``. Keyed by session_id; a None session_id is not
+# tracked (keeps pure-function tests that pass no session_id unaffected).
+_SEARCH_STREAK: Dict[str, int] = {}
+
+
+def note_tool_search(session_id: Optional[str]) -> int:
+    """Increment the consecutive-search streak for ``session_id``; return it."""
+    if not session_id:
+        return 0
+    _SEARCH_STREAK[session_id] = _SEARCH_STREAK.get(session_id, 0) + 1
+    return _SEARCH_STREAK[session_id]
+
+
+def reset_search_streak(session_id: Optional[str]) -> None:
+    """Reset the streak — call when the model invokes a discovered tool."""
+    if session_id and session_id in _SEARCH_STREAK:
+        _SEARCH_STREAK[session_id] = 0
+
+
+def _fallback_directive(streak: int) -> str:
+    """The nudge appended to a ``tool_search`` result when the streak is high."""
+    return (
+        f"You have run tool_search {streak} times in a row without calling a "
+        "discovered tool. Try one of: (a) broaden the query (more general terms), "
+        "(b) call tool_describe on a likely candidate to confirm it does what you "
+        "need, or (c) proceed without the deferred tool if the core tools suffice."
+    )
+
 
 # ---------------------------------------------------------------------------
 # Configuration plumbing
@@ -73,6 +106,11 @@ class ToolSearchConfig:
     # toolset name appears here. See ``effective_core_tool_names`` for how
     # this subtracts opted-in core tools from the never-defer set.
     defer_core_toolsets: frozenset[str] = frozenset()
+    # #1144 — after this many consecutive ``tool_search`` calls with no
+    # intervening ``tool_call``, append a fallback directive to the result
+    # nudging the model to broaden the query, check tool_describe, or proceed
+    # without the deferred tool. 0 disables the guard.
+    search_streak_threshold: int = 3
 
     @classmethod
     def from_raw(cls, raw: Any) -> "ToolSearchConfig":
@@ -110,6 +148,7 @@ class ToolSearchConfig:
         max_search_limit = max(1, min(50, _safe_int(raw.get("max_search_limit"), 20)))
         search_default_limit = max(1, min(max_search_limit,
                                           _safe_int(raw.get("search_default_limit"), 5)))
+        streak_threshold = max(0, min(20, _safe_int(raw.get("search_streak_threshold"), 3)))
 
         return cls(
             enabled=enabled,
@@ -117,6 +156,7 @@ class ToolSearchConfig:
             search_default_limit=search_default_limit,
             max_search_limit=max_search_limit,
             defer_core_toolsets=_parse_toolset_list(raw.get("defer_core_toolsets")),
+            search_streak_threshold=streak_threshold,
         )
 
 
@@ -727,7 +767,8 @@ def _format_search_hit(entry: CatalogEntry) -> Dict[str, Any]:
 def dispatch_tool_search(args: Dict[str, Any],
                          *,
                          current_tool_defs: List[Dict[str, Any]],
-                         config: Optional[ToolSearchConfig] = None) -> str:
+                         config: Optional[ToolSearchConfig] = None,
+                         session_id: Optional[str] = None) -> str:
     """Execute the ``tool_search`` bridge tool. Returns a JSON string."""
     if config is None:
         config = load_config()
@@ -744,11 +785,18 @@ def dispatch_tool_search(args: Dict[str, Any],
     _, deferrable = classify_tools(current_tool_defs, config)
     catalog = build_catalog(deferrable)
     hits = search_catalog(catalog, query, limit=limit)
-    return json.dumps({
+    result: Dict[str, Any] = {
         "query": query,
         "total_available": len(catalog),
         "matches": [_format_search_hit(h) for h in hits],
-    }, ensure_ascii=False)
+    }
+    # #1144 — nudge the model after N consecutive searches with no tool_call.
+    threshold = config.search_streak_threshold
+    if threshold and threshold > 0:
+        streak = note_tool_search(session_id)
+        if streak >= threshold:
+            result["fallback_directive"] = _fallback_directive(streak)
+    return json.dumps(result, ensure_ascii=False)
 
 
 def _fuzzy_tool_names(query: str, available: List[str], limit: int = 3) -> List[str]:

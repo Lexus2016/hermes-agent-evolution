@@ -543,6 +543,73 @@ class TestBridgeDispatch:
         assert "bridge tool" in err.lower()
 
 
+class TestSearchStreakGuard:
+    """#1144 — fallback directive after N consecutive searches with no tool_call."""
+
+    def _cfg(self, threshold: int):
+        from tools.tool_search import ToolSearchConfig
+        return ToolSearchConfig(enabled="on", threshold_pct=10.0,
+                                search_default_limit=5, max_search_limit=20,
+                                search_streak_threshold=threshold)
+
+    def _search(self, sid, threshold=3):
+        from tools.tool_search import dispatch_tool_search
+        return json.loads(dispatch_tool_search(
+            {"query": "github"},
+            current_tool_defs=[_td("github_create_issue", "Create issue")],
+            config=self._cfg(threshold), session_id=sid))
+
+    def test_no_directive_below_threshold(self):
+        import tools.tool_search as ts
+        ts._SEARCH_STREAK.clear()
+        out = self._search("sess-A", threshold=3)
+        assert "fallback_directive" not in out  # streak=1 < 3
+
+    def test_directive_at_threshold(self):
+        import tools.tool_search as ts
+        ts._SEARCH_STREAK.clear()
+        self._search("sess-B", threshold=3)
+        self._search("sess-B", threshold=3)
+        out = self._search("sess-B", threshold=3)  # streak=3
+        assert "fallback_directive" in out
+        assert "3 times" in out["fallback_directive"]
+
+    def test_reset_on_tool_call_clears_streak(self):
+        import tools.tool_search as ts
+        ts._SEARCH_STREAK.clear()
+        self._search("sess-C", threshold=3)
+        self._search("sess-C", threshold=3)
+        ts.reset_search_streak("sess-C")  # model invoked a discovered tool
+        out = self._search("sess-C", threshold=3)  # streak=1 again
+        assert "fallback_directive" not in out
+
+    def test_no_session_id_not_tracked(self):
+        import tools.tool_search as ts
+        ts._SEARCH_STREAK.clear()
+        out = self._search(None, threshold=3)  # pure-function path
+        assert "fallback_directive" not in out
+        assert ts._SEARCH_STREAK == {}
+
+    def test_threshold_zero_disables_guard(self):
+        import tools.tool_search as ts
+        ts._SEARCH_STREAK.clear()
+        out = None
+        for _ in range(5):
+            out = self._search("sess-D", threshold=0)
+        assert "fallback_directive" not in out
+
+    def test_sessions_tracked_independently(self):
+        import tools.tool_search as ts
+        ts._SEARCH_STREAK.clear()
+        self._search("sess-E", threshold=3)
+        self._search("sess-F", threshold=3)
+        self._search("sess-F", threshold=3)
+        out_e = self._search("sess-E", threshold=3)  # E streak=2
+        out_f = self._search("sess-F", threshold=3)  # F streak=3
+        assert "fallback_directive" not in out_e
+        assert "fallback_directive" in out_f
+
+
 # ---------------------------------------------------------------------------
 # End-to-end via the real handle_function_call (smoke test).
 # ---------------------------------------------------------------------------

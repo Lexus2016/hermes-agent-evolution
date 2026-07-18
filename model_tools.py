@@ -1125,7 +1125,8 @@ def handle_function_call(
             current_defs = []
         if function_name == _ts_mod.TOOL_SEARCH_NAME:
             return _ts_mod.dispatch_tool_search(function_args or {},
-                                                current_tool_defs=current_defs)
+                                                current_tool_defs=current_defs,
+                                                session_id=session_id)
         if function_name == _ts_mod.TOOL_DESCRIBE_NAME:
             return _ts_mod.dispatch_tool_describe(function_args or {},
                                                   current_tool_defs=current_defs)
@@ -1155,6 +1156,9 @@ def handle_function_call(
             _ok, _err = _ts_mod.validate_tool_args(underlying_name, underlying_args, _schema)
             if not _ok:
                 return json.dumps({"error": _err}, ensure_ascii=False)
+            # #1144 — the model invoked a discovered tool, so reset the
+            # consecutive-search streak (the search loop converged).
+            _ts_mod.reset_search_streak(session_id)
             # Recurse with the underlying tool. All hooks fire against the
             # real tool name. The bridge is invisible to hooks by design.
             return handle_function_call(

@@ -2982,6 +2982,11 @@ DEFAULT_CONFIG = {
             "search_default_limit": 5,
             # Hard upper bound the model can request via ``limit``. Range 1..50.
             "max_search_limit": 20,
+            # #1144 — after this many consecutive tool_search calls with no
+            # intervening tool_call, append a fallback directive nudging the
+            # model to broaden the query, check tool_describe, or proceed
+            # without the deferred tool. 0 disables. Range 0..20.
+            "search_streak_threshold": 3,
         },
     },
     # Logging — controls file logging to ~/.hermes/logs/.
