@@ -1067,11 +1067,15 @@ def resolve_underlying_call(
         raw_args = {}
     if isinstance(raw_args, str):
         # #1173 — some providers (e.g. GLM-5.2 via OpenRouter) emit
-        # ``arguments: ""`` for no-parameter tools. An empty string is
-        # the absence of arguments, not malformed JSON; treat it as ``{}``
-        # so the underlying tool can be dispatched instead of surfacing a
-        # confusing "not valid JSON" error that the model loops on.
-        if raw_args == "":
+        # ``arguments: ""`` for no-parameter tools. An empty (or
+        # whitespace-only, e.g. ``" "`` / ``"\n"`` from tokenization
+        # quirks) string is the absence of arguments, not malformed JSON;
+        # treat it as ``{}`` so the underlying tool can be dispatched
+        # instead of surfacing a confusing "not valid JSON" error that
+        # the model loops on. ``json.loads`` also trims surrounding
+        # whitespace around a real value, so this only widens the
+        # genuinely-empty case.
+        if raw_args.strip() == "":
             raw_args = {}
         else:
             try:

@@ -551,7 +551,24 @@ class TestBridgeDispatch:
         assert "not valid JSON" not in (err or "")
         assert args == {}
 
-    def test_resolve_underlying_call_rejects_recursion(self):
+    @pytest.mark.parametrize("blank", ["", " ", "   ", "\n", "\t", " \t\n "])
+    def test_resolve_underlying_call_treats_whitespace_only_args_as_empty_dict(
+        self, blank
+    ):
+        """Follow-up to #1173 — providers (and intermediary gateways) can
+        emit not just ``""`` but whitespace-only ``arguments`` (a stray
+        space or newline from tokenization). These are equally the absence
+        of arguments and must resolve to ``{}``, never a JSON parse error
+        that the model loops on. ``json.loads`` trims whitespace around a
+        real value, so accepting whitespace-only cannot mask a valid
+        payload."""
+        from tools.tool_search import resolve_underlying_call
+        name, args, err = resolve_underlying_call({
+            "name": "fake_no_params_tool",
+            "arguments": blank,
+        })
+        assert "not valid JSON" not in (err or "")
+        assert args == {}
         """tool_call cannot invoke tool_call itself."""
         from tools.tool_search import resolve_underlying_call, TOOL_CALL_NAME
         name, args, err = resolve_underlying_call({
