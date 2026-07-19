@@ -42,8 +42,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, Future
@@ -250,23 +252,57 @@ def _run_one_file(
     orphan onto PID 1. This outer timeout exists only to
     bound a pathologically slow or hung file as a whole.
     """
-    cmd = [sys.executable, "-m", "pytest", str(file), *pytest_args]
-    
+    # Give each per-file pytest subprocess its own --basetemp. Without this,
+    # every parallel subprocess falls back to the shared default
+    # ``/tmp/pytest-of-<user>/`` root, where pytest's "keep the last few
+    # numbered dirs" retention GC runs on session start and rmtree's OTHER
+    # live subprocesses' basetemp out from under them — a race that surfaces
+    # as flaky ``FileNotFoundError: .../pytest-of-<user>/pytest-N`` at fixture
+    # setup (e.g. the pytest_asyncio tmp_path fixture) with no relation to the
+    # code under test. A unique basetemp per subprocess removes the shared
+    # parent entirely, so no subprocess can delete another's temp dir.
+    # Respect an explicit user-supplied --basetemp (don't second-guess it).
+    own_basetemp: str | None = None
+    if not any(
+        a == "--basetemp" or a.startswith("--basetemp=") for a in pytest_args
+    ):
+        # Prefix deliberately avoids the substrings "hermes"/"gateway": this
+        # basetemp path is passed as a subprocess argument inside tests, and
+        # conftest.py's live-system guard blocks any subprocess whose command
+        # string contains "hermes"/"gateway" alongside a process-killer token
+        # (e.g. a test that greps for the literal "skill"). A neutral prefix
+        # keeps the injected path behaviourally identical to pytest's default
+        # ``pytest-of-<user>`` location.
+        own_basetemp = tempfile.mkdtemp(prefix="pytest-rtp-")
+    basetemp_args = ["--basetemp", own_basetemp] if own_basetemp else []
+    cmd = [sys.executable, "-m", "pytest", str(file), *basetemp_args, *pytest_args]
+
+    def _reclaim_basetemp() -> None:
+        # Idempotent (ignore_errors); safe to call on any exit path.
+        if own_basetemp:
+            shutil.rmtree(own_basetemp, ignore_errors=True)
+
     subproc_start = time.monotonic()
     # launch the pytest process
-    proc = subprocess.Popen(
-        cmd,
-        cwd=repo_root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        env=os.environ,
-        # POSIX: place the child at the head of its own process group so
-        # _kill_tree can SIGKILL the group atomically.
-        # Windows: this maps to CREATE_NEW_PROCESS_GROUP in CPython 3.12+;
-        # _kill_tree handles the Windows path via taskkill /F /T.
-        start_new_session=True,
-    )
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=os.environ,
+            # POSIX: place the child at the head of its own process group so
+            # _kill_tree can SIGKILL the group atomically.
+            # Windows: this maps to CREATE_NEW_PROCESS_GROUP in CPython 3.12+;
+            # _kill_tree handles the Windows path via taskkill /F /T.
+            start_new_session=True,
+        )
+    except BaseException:
+        # Popen failed before we have a process to manage — reclaim the
+        # basetemp we created above, then propagate.
+        _reclaim_basetemp()
+        raise
 
     # Capture the pgid NOW, before the leader can exit and be reaped. Once
     # the leader is reaped, os.getpgid(proc.pid) raises ProcessLookupError
@@ -297,6 +333,7 @@ def _run_one_file(
         # KeyboardInterrupt / runner crash — make sure no zombie
         # grandchildren outlive us.
         _kill_tree(proc, pgid=pgid)
+        _reclaim_basetemp()
         raise
     else:
         # Happy path: pytest exited on its own. Kill the group anyway in
@@ -344,6 +381,12 @@ def _run_one_file(
         rc = 0
     summary = _parse_pytest_summary(output)
     subproc_wall = time.monotonic() - subproc_start
+    # Reclaim the per-subprocess basetemp. This covers the normal and
+    # timeout paths; the two BaseException handlers above (Popen failure
+    # and mid-run interrupt) reclaim before re-raising. CI runners are
+    # ephemeral, but local runs would otherwise accumulate one tree per
+    # file per invocation.
+    _reclaim_basetemp()
     return file, rc, output, summary, subproc_wall
 
 
