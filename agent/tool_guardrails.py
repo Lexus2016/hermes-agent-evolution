@@ -76,6 +76,13 @@ MUTATING_TOOL_NAMES = frozenset(
 # sessions (190 failures) regressed from 15/8 — the agent reformulates
 # patterns (glob vs regex, retries after empty results) without switching
 # strategy. Cap consecutive search_files calls to force a strategy switch.
+# #1185/#1186/#1187 — deferred-tool loading chain + memory added:
+# tool_call (168 failures / 21 sessions, 13-deep spirals), memory
+# (94 failures / 21 sessions, 11-deep, regressed 10x from #1135/#1136),
+# tool_describe (59 failures, the search→describe→call middle step). These
+# had no circuit breaker — the agent blind-retried the same failing call up
+# to 13 consecutive times with no fallback. Extending the existing cap covers
+# the whole deferred-tool chain consistently with the core tools.
 _SPIRAL_PRONE_TOOLS = frozenset(
     {
         "terminal",
@@ -83,6 +90,9 @@ _SPIRAL_PRONE_TOOLS = frozenset(
         "read_file",
         "process",
         "search_files",
+        "tool_call",
+        "tool_describe",
+        "memory",
     }
 )
 
@@ -734,6 +744,21 @@ _TOOL_FALLBACK_DIRECTIVE: dict[str, str] = {
     "browser_click": "re-run browser_snapshot to refresh element refs, or extract the page text with web_extract instead of retrying the same ref",
     "browser_type": "re-run browser_snapshot to refresh element refs, or extract the page text with web_extract instead of retrying the same ref",
     "browser_console": "the JS eval failed deterministically; read values via browser_snapshot or extract the page with web_extract instead of re-evaluating",
+    # #1185 — tool_call (deferred-tool invocation) failures spiral because the
+    # agent retries the same failing deferred call (wrong args schema, tool
+    # unavailable, provider rejection) instead of switching strategy. Route
+    # to a search/describe refresh or a core tool rather than blind-retrying.
+    "tool_call": "do not retry the same deferred tool with the same args — run tool_search for an alternative, use tool_describe to validate the schema first, or invoke a core tool (terminal/read_file/search_files) instead",
+    # #1187 — tool_describe is the middle step of the search→describe→call
+    # chain; when it fails the agent has no schema to invoke the deferred tool.
+    # Re-running tool_search refreshes the catalog; retrying the same name is
+    # deterministic and won't recover.
+    "tool_describe": "the schema lookup is not resolving — re-run tool_search to refresh the catalog, verify the exact tool name/spelling from the search results, and do not keep describing the same failing name",
+    # #1186 — memory failures (94/21 sessions, 11-deep) regressed from
+    # #1135/#1136. The store may be busy/locked (transient) or genuinely
+    # failed; blind retries don't recover. Distinguish transient from hard
+    # failure, retry once if busy, else skip-and-continue.
+    "memory": "memory operation failed repeatedly — distinguish busy/locked (transient, retry once) from genuine failure (non-retryable); if not transient, continue without that memory access and log the unmet persistence need",
 }
 
 # #745 — generic fallback for any browser_* tool not explicitly listed above.

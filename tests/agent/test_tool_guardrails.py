@@ -945,3 +945,113 @@ def test_cross_turn_blocks_with_hard_stop_disabled():
     d = controller.before_call("execute_code", {"code": "x"})
     assert d.action == "block"
     assert d.code == "spiral_prone_tool_failure_cap"
+
+
+def test_cross_turn_tool_call_spiral_cap_fires():
+    """#1185 — tool_call is now in _SPIRAL_PRONE_TOOLS so a cross-turn
+    tool_call failure streak should trigger the spiral-prone cap, not run
+    uncapped as it did when 168 failures / 21 sessions / 13-deep spirals
+    regressed. The deferred-tool invocation chain had no circuit breaker."""
+    controller = ToolCallGuardrailController()
+    for _ in range(5):
+        controller.after_call(
+            "tool_call",
+            {"name": "some_mcp_tool", "arguments": "{}"},
+            '{"error":"tool unavailable"}',
+            failed=True,
+        )
+    controller.reset_for_turn()
+    d = controller.before_call(
+        "tool_call", {"name": "some_mcp_tool", "arguments": "{}"}
+    )
+    assert d.action == "block"
+    assert d.code == "spiral_prone_tool_failure_cap"
+    assert d.fallback_directive != ""
+    assert "tool_search" in d.fallback_directive
+
+
+def test_cross_turn_memory_spiral_cap_fires():
+    """#1186 — memory is now in _SPIRAL_PRONE_TOOLS so a cross-turn memory
+    failure streak should trigger the spiral-prone cap, not run uncapped as
+    it did when 94 failures / 21 sessions / 11-deep regressed from the 10x
+    that triggered #1135/#1136. Memory operations had no circuit breaker."""
+    controller = ToolCallGuardrailController()
+    for _ in range(5):
+        controller.after_call(
+            "memory",
+            {"action": "store", "content": "x"},
+            '{"error":"store locked"}',
+            failed=True,
+        )
+    controller.reset_for_turn()
+    d = controller.before_call("memory", {"action": "store", "content": "x"})
+    assert d.action == "block"
+    assert d.code == "spiral_prone_tool_failure_cap"
+    assert d.fallback_directive != ""
+
+
+def test_cross_turn_tool_describe_spiral_cap_fires():
+    """#1187 — tool_describe is now in _SPIRAL_PRONE_TOOLS so a cross-turn
+    tool_describe failure streak should trigger the spiral-prone cap. This
+    is the middle step of the search→describe→call deferred-tool chain; when
+    it fails 59 times the agent had no schema to invoke deferred tools and
+    no breaker to stop the spiral."""
+    controller = ToolCallGuardrailController()
+    for _ in range(5):
+        controller.after_call(
+            "tool_describe",
+            {"name": "stale_tool_name"},
+            '{"error":"not in catalog"}',
+            failed=True,
+        )
+    controller.reset_for_turn()
+    d = controller.before_call("tool_describe", {"name": "stale_tool_name"})
+    assert d.action == "block"
+    assert d.code == "spiral_prone_tool_failure_cap"
+    assert d.fallback_directive != ""
+    assert "tool_search" in d.fallback_directive
+
+
+def test_spiral_prone_tools_includes_deferred_tool_chain_and_memory():
+    """#1185/#1186/#1187 — tool_call, tool_describe, and memory are now in
+    _SPIRAL_PRONE_TOOLS alongside the original five, covering the whole
+    deferred-tool loading chain (search→describe→call) plus memory."""
+    cfg = ToolCallGuardrailConfig()
+    assert "terminal" in cfg.spiral_prone_tools
+    assert "execute_code" in cfg.spiral_prone_tools
+    assert "read_file" in cfg.spiral_prone_tools
+    assert "process" in cfg.spiral_prone_tools
+    assert "search_files" in cfg.spiral_prone_tools
+    assert "tool_call" in cfg.spiral_prone_tools
+    assert "tool_describe" in cfg.spiral_prone_tools
+    assert "memory" in cfg.spiral_prone_tools
+    assert len(cfg.spiral_prone_tools) >= 8
+
+
+def test_tool_call_fallback_directive_routes_to_search():
+    """#1185 — the tool_call fallback directive should route the agent to
+    tool_search / tool_describe / a core tool, not 'retry the same call'."""
+    from agent.tool_guardrails import _fallback_directive_for
+
+    directive = _fallback_directive_for("tool_call")
+    assert "tool_search" in directive
+    assert "tool_describe" in directive
+
+
+def test_tool_describe_fallback_directive_routes_to_search_refresh():
+    """#1187 — the tool_describe fallback directive should tell the agent to
+    re-run tool_search to refresh the catalog rather than re-describing the
+    same failing name."""
+    from agent.tool_guardrails import _fallback_directive_for
+
+    directive = _fallback_directive_for("tool_describe")
+    assert "tool_search" in directive
+
+
+def test_memory_fallback_directive_distinguishes_transient_from_hard():
+    """#1186 — the memory fallback directive should distinguish busy/locked
+    (transient, retry once) from genuine failure (skip-and-continue)."""
+    from agent.tool_guardrails import _fallback_directive_for
+
+    directive = _fallback_directive_for("memory")
+    assert "busy" in directive.lower() or "transient" in directive.lower()
