@@ -923,6 +923,100 @@ def interrupt_for_session(
     return count
 
 
+def wait_for_session_delegations(
+    parent_session_id: str,
+    deadline_seconds: float = 1200.0,
+    poll_interval: float = 5.0,
+    on_interrupt: Optional[Callable[[int], None]] = None,
+) -> Dict[str, Any]:
+    """Wait for async delegations owned by *parent_session_id* to finish.
+
+    Called by the cron scheduler after the agent's ``run_conversation`` returns
+    (or the inactivity timeout fires) but BEFORE the cron thread pool is shut
+    down. Without this barrier, background subagents dispatched via
+    ``delegate_task(background=true)`` are still running on the daemon executor
+    when the cron session tears down — their completion events are orphaned and
+    the artifacts they produced are lost (issue #1200).
+
+    Polls ``active_count``-style records every *poll_interval* seconds until
+    either all matching delegations leave the ``running`` state or *deadline_seconds*
+    elapses. If the deadline expires, remaining delegations are interrupted via
+    ``interrupt_for_session`` (they still emit a completion event with
+    ``status='interrupted'``) and a warning is logged.
+
+    Returns a dict with:
+        ``waited``   — how many running delegations were found at call time
+        ``completed``— how many finished on their own before the deadline
+        ``interrupted``— how many were force-interrupted at the deadline
+        ``timed_out``— True if the deadline expired
+    """
+    import time as _time
+
+    def _running_for_session() -> List[Dict[str, Any]]:
+        with _records_lock:
+            return [
+                r for r in _records.values()
+                if r.get("status") in {"running", "finalizing"}
+                and str(r.get("parent_session_id") or "") == parent_session_id
+            ]
+
+    initial = _running_for_session()
+    waited = len(initial)
+    if waited == 0:
+        return {
+            "waited": 0,
+            "completed": 0,
+            "interrupted": 0,
+            "timed_out": False,
+        }
+
+    logger.info(
+        "Draining %d async delegation(s) for cron session %s (deadline %.0fs)",
+        waited, parent_session_id, deadline_seconds,
+    )
+
+    deadline = _time.monotonic() + deadline_seconds
+    completed = 0
+    timed_out = False
+
+    while True:
+        remaining = _running_for_session()
+        if not remaining:
+            completed = waited
+            break
+        if _time.monotonic() >= deadline:
+            timed_out = True
+            break
+        _time.sleep(poll_interval)
+
+    interrupted = 0
+    if timed_out:
+        still_running = _running_for_session()
+        if still_running:
+            interrupted = interrupt_for_session(
+                parent_session_id=parent_session_id,
+                reason="cron_session_drain_deadline",
+            )
+            logger.warning(
+                "Cron drain deadline (%.0fs) expired for session %s: "
+                "%d delegation(s) still running, interrupted %d",
+                deadline_seconds, parent_session_id,
+                len(still_running), interrupted,
+            )
+            if on_interrupt:
+                try:
+                    on_interrupt(interrupted)
+                except Exception:
+                    logger.debug("on_interrupt callback raised", exc_info=True)
+
+    return {
+        "waited": waited,
+        "completed": completed,
+        "interrupted": interrupted,
+        "timed_out": timed_out,
+    }
+
+
 def _reset_for_tests() -> None:
     """Test-only: clear all state and tear down the executor."""
     global _executor, _executor_max_workers
