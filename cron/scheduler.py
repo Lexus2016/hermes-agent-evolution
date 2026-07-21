@@ -4096,23 +4096,33 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
         # Run the agent with an *inactivity*-based timeout: the job can run
         # for hours if it's actively calling tools / receiving stream tokens,
         # but a hung API call or stuck tool with no activity for the configured
-        # duration is caught and killed.  Default 600s (10 min inactivity);
-        # override via HERMES_CRON_TIMEOUT env var.  0 = unlimited.
+        # duration is caught and killed.  Default 900s (15 min inactivity);
+        # override via HERMES_CRON_TIMEOUT env var or
+        # cron.inactivity_timeout_seconds in config.yaml.  0 = unlimited.
         #
         # Uses the agent's built-in activity tracker (updated by
         # _touch_activity() on every tool call, API call, and stream delta).
+        _cron_default_timeout = 900.0
+        try:
+            _cfg_for_timeout = load_config() or {}
+            _cron_cfg_for_timeout = _cfg_for_timeout.get("cron", {}) if isinstance(_cfg_for_timeout, dict) else {}
+            _configured_timeout = _cron_cfg_for_timeout.get("inactivity_timeout_seconds")
+            if _configured_timeout is not None:
+                _cron_default_timeout = float(_configured_timeout)
+        except Exception:
+            pass
         _raw_cron_timeout = os.getenv("HERMES_CRON_TIMEOUT", "").strip()
         if _raw_cron_timeout:
             try:
                 _cron_timeout = float(_raw_cron_timeout)
             except (ValueError, TypeError):
                 logger.warning(
-                    "Invalid HERMES_CRON_TIMEOUT=%r; using default 600s",
-                    _raw_cron_timeout,
+                    "Invalid HERMES_CRON_TIMEOUT=%r; using default %.0fs",
+                    _raw_cron_timeout, _cron_default_timeout,
                 )
-                _cron_timeout = 600.0
+                _cron_timeout = _cron_default_timeout
         else:
-            _cron_timeout = 600.0
+            _cron_timeout = _cron_default_timeout
         _cron_inactivity_limit = _cron_timeout if _cron_timeout > 0 else None
         _POLL_INTERVAL = 5.0
         # Keep the one-shot run_claim fresh while the run is alive (#62002):
@@ -4216,6 +4226,43 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
             _cron_pool.shutdown(wait=False, cancel_futures=True)
             raise
         finally:
+            # Drain barrier (issue #1200): wait for background delegations
+            # spawned by this cron session to complete before tearing down.
+            # Without this, subagents dispatched via delegate_task(background=true)
+            # are still running on the daemon executor when the cron session
+            # ends, orphaning their completion events and losing artifacts.
+            try:
+                _drain_seconds = 1200.0
+                try:
+                    _drain_cfg = load_config() or {}
+                    _drain_cron_cfg = _drain_cfg.get("cron", {}) if isinstance(_drain_cfg, dict) else {}
+                    _configured_drain = _drain_cron_cfg.get("delegation_drain_seconds")
+                    if _configured_drain is not None:
+                        _drain_seconds = float(_configured_drain)
+                except Exception:
+                    pass
+                _raw_drain = os.getenv("HERMES_CRON_DELEGATION_DRAIN_SECONDS", "").strip()
+                if _raw_drain:
+                    try:
+                        _drain_seconds = float(_raw_drain)
+                    except (ValueError, TypeError):
+                        pass
+                if _drain_seconds > 0:
+                    from tools.async_delegation import wait_for_session_delegations
+                    _drain_result = wait_for_session_delegations(
+                        parent_session_id=_cron_session_id,
+                        deadline_seconds=_drain_seconds,
+                        poll_interval=_POLL_INTERVAL,
+                    )
+                    if _drain_result.get("waited", 0) > 0:
+                        logger.info(
+                            "Cron session %s delegation drain: %s",
+                            _cron_session_id, _drain_result,
+                        )
+            except Exception:
+                logger.debug(
+                    "Delegation drain for cron session %s failed", _cron_session_id, exc_info=True,
+                )
             _cron_pool.shutdown(wait=False, cancel_futures=True)
 
         if _inactivity_timeout:

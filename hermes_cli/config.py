@@ -2879,6 +2879,27 @@ DEFAULT_CONFIG = {
         # wedges the job's dispatch guard forever. Also overridable via
         # HERMES_CRON_SESSION_DB_TIMEOUT env var. 0 = unlimited (skip the bound).
         "session_db_timeout_seconds": 10,
+        # Drain barrier for background delegations after the agent run (issue
+        # #1200). When a cron agent dispatches subagents via
+        # delegate_task(background=true), those subagents run on a daemon
+        # executor that outlives the agent's own run_conversation thread. Without
+        # a drain step, the cron session tears down (inactivity timeout or normal
+        # completion) while subagents are still running, orphaning their
+        # completion events and losing artifacts. This sets how long (seconds) the
+        # scheduler waits for pending delegations matching the cron session_id
+        # before force-interrupting them. 0 = no drain (legacy behavior). Default
+        # 1200s (20 min) matches the in-tool heartbeat stale ceiling so legit
+        # long-running subagents get time to finish. Also overridable via
+        # HERMES_CRON_DELEGATION_DRAIN_SECONDS env var.
+        "delegation_drain_seconds": 1200,
+        # Inactivity timeout (seconds) for cron agent sessions. The agent can run
+        # for hours if actively calling tools, but a hung API call or stuck tool
+        # with no activity for this duration triggers termination. Default 900s
+        # (15 min) — raised from the legacy 600s because implementation subagents
+        # that the agent dispatches and waits on legitimately need more wall time.
+        # Also overridable via HERMES_CRON_TIMEOUT env var (which takes
+        # precedence). 0 = unlimited (no inactivity watchdog).
+        "inactivity_timeout_seconds": 900,
     },
     # Kanban multi-agent coordination — controls the dispatcher loop that
     # spawns workers for ready tasks. The dispatcher ticks every N seconds
