@@ -288,6 +288,16 @@ def classify_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str
             if data.get("success") is False and "exceed the limit" in data.get("error", ""):
                 return True, " [full]"
 
+    # #1188 — mirror the bot_detection_warning check from _detect_tool_failure
+    # so the fallback classifier never disagrees with the production path.
+    data = safe_json_loads(result)
+    if (
+        isinstance(data, dict)
+        and data.get("success") is True
+        and isinstance(data.get("bot_detection_warning"), str)
+    ):
+        return True, " [bot detection]"
+
     lower = result[:500].lower()
     if '"error"' in lower or '"failed"' in lower or result.startswith("Error"):
         return True, " [error]"
@@ -624,8 +634,20 @@ class ToolCallGuardrailController:
 
         self._exact_failure_counts.pop(signature, None)
         self._same_tool_failure_counts.pop(tool_name, None)
-        # A success breaks the cross-turn failure streak too.
-        self._cross_turn_tool_failure_counts.pop(tool_name, None)
+        # #1188 — decay (decrement) the cross-turn streak instead of clearing
+        # it. A single success does NOT prove the browser backend recovered:
+        # intermittent successes (navigating to a different, fast-loading
+        # page between failing attempts) kept the old pop() from ever
+        # reaching the cap, allowing 15-deep spirals. Decay by 1 per success
+        # so a genuinely recovered backend (several successes in a row)
+        # drains the streak back to 0, but a failure/success/failure pattern
+        # still accumulates toward the cap and eventually halts.
+        if tool_name in self._cross_turn_tool_failure_counts:
+            current = self._cross_turn_tool_failure_counts[tool_name]
+            if current <= 1:
+                self._cross_turn_tool_failure_counts.pop(tool_name, None)
+            else:
+                self._cross_turn_tool_failure_counts[tool_name] = current - 1
 
         if not self._is_idempotent(tool_name):
             self._no_progress.pop(signature, None)

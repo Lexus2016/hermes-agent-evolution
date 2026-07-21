@@ -552,6 +552,40 @@ def test_browser_cap_can_be_disabled():
     assert controller.halt_decision is None
 
 
+def test_bot_detection_warning_classified_as_failure():
+    """#1188 — browser_navigate returns success=True with bot_detection_warning
+    when it lands on a Cloudflare/captcha page.  _detect_tool_failure must
+    classify this as a failure so the guardrail cap can fire."""
+    from agent.display import _detect_tool_failure
+    result = '{"success": true, "url": "https://x", "title": "Just a moment...", "bot_detection_warning": "blocked"}'
+    is_error, suffix = _detect_tool_failure("browser_navigate", result)
+    assert is_error
+    assert "bot detection" in suffix
+
+
+def test_bot_detection_spiral_halts_at_cap():
+    """#1188 — consecutive bot-detection 'successes' must hit the cap at 3,
+    not spiral to 15 like the regression."""
+    from agent.display import _detect_tool_failure
+    controller = ToolCallGuardrailController()
+    halted = False
+    for i in range(5):
+        bc = controller.before_call("browser_navigate", {"url": "https://x"})
+        if not bc.allows_execution:
+            halted = True
+            break
+        result = '{"success": true, "bot_detection_warning": "blocked"}'
+        is_error, _ = _detect_tool_failure("browser_navigate", result)
+        decision = controller.after_call(
+            "browser_navigate", {"url": "https://x"}, result, failed=is_error
+        )
+        if decision.should_halt:
+            halted = True
+            break
+        controller.reset_for_turn()
+    assert halted
+
+
 def test_browser_cap_leaves_native_tool_hard_stop_semantics_unchanged():
     """The always-on browser cap must not leak into non-spiral-prone native
     tools: with hard_stop OFF, a non-spiral same-tool failure spiral still
@@ -568,20 +602,43 @@ def test_browser_cap_leaves_native_tool_hard_stop_semantics_unchanged():
     assert controller.halt_decision is None
 
 
-def test_browser_cap_success_resets_streak():
-    """A successful browser call clears the failure streak, so the cap only
-    fires on a genuine consecutive spiral."""
+def test_browser_cap_success_decays_streak():
+    """A successful browser call decays (not resets) the cross-turn failure
+    streak by 1 (#1188).  Two failures + one success + two more failures
+    still reaches the cap because the streak decayed 2→1→2→3, not 2→0→1→2.
+    Multiple consecutive successes drain the streak back to 0 so a
+    genuinely recovered backend is not penalized."""
     controller = ToolCallGuardrailController()
     controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
     controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
-    # A success resets the same-tool failure count.
+    # A success decays the cross-turn streak by 1 (2→1), not resets to 0.
     controller.after_call("browser_navigate", {"url": "u"}, '{"success": true}', failed=False)
-    # Two more failures should NOT reach the cap (streak restarted at 1, 2).
+    # Two more failures: streak goes 1→2→3, so the second one hits the cap.
     d1 = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
     d2 = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
     assert d1.action != "halt"
-    assert d2.action != "halt"
-    assert controller.halt_decision is None
+    assert d2.action == "halt"
+    assert d2.code == "browser_tool_failure_cap"
+    # The cap fires at count=3 (the decayed streak: 2→1→2→3).
+    assert d2.count == 3
+
+
+def test_browser_cap_consecutive_successes_drain_streak():
+    """Multiple consecutive successes drain the cross-turn streak to 0 so a
+    genuinely recovered browser backend is not penalized (#1188)."""
+    controller = ToolCallGuardrailController()
+    # Two failures → streak=2
+    controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    assert controller._cross_turn_tool_failure_counts.get("browser_navigate", 0) == 2
+    # Two successes → streak decays 2→1→0 (removed from dict)
+    controller.after_call("browser_navigate", {"url": "u"}, '{"success": true}', failed=False)
+    assert controller._cross_turn_tool_failure_counts.get("browser_navigate", 0) == 1
+    controller.after_call("browser_navigate", {"url": "u"}, '{"success": true}', failed=False)
+    assert controller._cross_turn_tool_failure_counts.get("browser_navigate", 0) == 0
+    # A subsequent failure starts a fresh streak at 1, not continuing from 0.
+    d = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    assert d.action != "halt"
 
 
 def test_browser_cap_reset_for_turn_clears_streak():
@@ -731,19 +788,34 @@ def test_spiral_cap_can_be_disabled():
     assert controller.halt_decision is None
 
 
-def test_spiral_cap_success_resets_streak():
-    """A successful terminal call clears the failure streak, so the cap only
-    fires on a genuine consecutive spiral."""
+def test_spiral_cap_success_decays_streak():
+    """A successful terminal call decays (not resets) the cross-turn failure
+    streak by 1 (#1188).  With spiral_failure_cap=5, four failures + one
+    success leaves streak=4; the 5th failure (streak 4→5) hits the cap.
+    Multiple consecutive successes drain the streak fully."""
     controller = ToolCallGuardrailController()
+    cap = controller.config.spiral_failure_cap  # default 5
     for _ in range(4):
         controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
-    # A success resets the same-tool failure count.
+    # Cross-turn streak is now 4.
+    assert controller._cross_turn_tool_failure_counts.get("terminal", 0) == 4
+    # A success decays the streak by 1 (4→3), not resets to 0.
     controller.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
-    # Four more failures should NOT reach the cap (streak restarted at 1-4).
-    for _ in range(4):
-        d = controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
-        assert d.action != "halt"
-    assert controller.halt_decision is None
+    assert controller._cross_turn_tool_failure_counts.get("terminal", 0) == 3
+    # Two more failures bring the streak to 5, hitting the cap.
+    controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+    assert controller._cross_turn_tool_failure_counts.get("terminal", 0) == 4
+    d = controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+    assert d.action == "halt"
+    assert d.code == "spiral_prone_tool_failure_cap"
+    # Drain with enough consecutive successes to reach 0.
+    controller2 = ToolCallGuardrailController()
+    for _ in range(cap):
+        controller2.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+    assert controller2._cross_turn_tool_failure_counts.get("terminal", 0) == cap
+    for _ in range(cap):
+        controller2.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
+    assert controller2._cross_turn_tool_failure_counts.get("terminal", 0) == 0
 
 
 def test_spiral_cap_reset_for_turn_clears_streak():
