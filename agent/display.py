@@ -1256,6 +1256,19 @@ def _detect_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str]
         if err and (data.get("success") is False or "error" in data):
             return True, f" [{_trim_error(str(err))}]"
 
+    # #1188 — browser_navigate can "succeed" at the browser level while landing
+    # on a bot-detection / Cloudflare / captcha page.  The result carries
+    # success=True and no "error" key, so the checks above miss it; without this
+    # the guardrail counter never increments and the model retries 15× against a
+    # blocked page that will never load.  Treat a bot_detection_warning as a
+    # non-progressing failure so the browser_failure_cap can fire.
+    if (
+        isinstance(data, dict)
+        and data.get("success") is True
+        and isinstance(data.get("bot_detection_warning"), str)
+    ):
+        return True, " [bot detection]"
+
     # Generic heuristic for non-terminal tools
     # Multimodal tool results (dicts with _multimodal=True) are not strings —
     # treat them as successes since failures would be JSON-encoded strings.
