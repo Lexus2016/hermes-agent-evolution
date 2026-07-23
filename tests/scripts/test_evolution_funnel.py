@@ -457,3 +457,33 @@ class TestMergedFromGitHub:
         (repo / ".git").mkdir(parents=True)
         monkeypatch.setenv("EVOLUTION_REPO_DIR", str(repo))
         assert ef._resolve_repo_dir() == repo
+
+    def test_mock_ratio_from_integration_report(self, tmp_path):
+        """#1210: the funnel carries the integration stage's mock_ratio signal."""
+        d = "2026-07-23"
+        _write(
+            tmp_path / "integration" / f"{d}.json",
+            {"merged": [{"pr": 1}], "skipped": [], "mock_ratio": 0.45},
+        )
+        r = compute_funnel(tmp_path, d)
+        assert r["mock_ratio"] == 0.45
+
+    def test_mock_ratio_none_when_absent(self, tmp_path):
+        """When the integration report has no mock_ratio, it stays None."""
+        d = "2026-07-23"
+        _write(
+            tmp_path / "integration" / f"{d}.json",
+            {"merged": [], "skipped": []},
+        )
+        r = compute_funnel(tmp_path, d)
+        assert r["mock_ratio"] is None
+
+    def test_mock_ratio_none_when_malformed(self, tmp_path):
+        """Malformed mock_ratio value degrades to None, not a crash."""
+        d = "2026-07-23"
+        _write(
+            tmp_path / "integration" / f"{d}.json",
+            {"merged": [], "skipped": [], "mock_ratio": "not-a-number"},
+        )
+        r = compute_funnel(tmp_path, d)
+        assert r["mock_ratio"] is None
