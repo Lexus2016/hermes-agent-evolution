@@ -32,6 +32,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 # Default cap on total changed lines (additions + deletions) for an unattended
@@ -132,12 +133,53 @@ def check_merge_policy(
     return out
 
 
+def check_merge_policy_with_quality(
+    files: Sequence[Dict[str, Any]],
+    max_lines: int = DEFAULT_MAX_LINES,
+    high_risk_globs: Sequence[str] = HIGH_RISK_GLOBS,
+    mock_ratio_threshold: float = 0.30,
+    test_contents: Optional[Dict[str, str]] = None,
+) -> List[str]:
+    """Extended merge policy: diff-size + high-risk + test-quality gates (#1209, #1210).
+
+    Runs the original :func:`check_merge_policy` (diff-size cap + high-risk
+    path blocklist) and then appends test-quality violations from
+    :func:`evolution_test_quality_gate.check_test_quality` (mock-ratio gate
+    + fabricated-reproduction detection).
+
+    ``test_contents`` — optional map of test file path → content for
+    fabricated-reproduction detection.  When None, only the mock-ratio
+    gate runs (fabrication detection requires file content).  This keeps
+    the gate fail-open when file content is unavailable (e.g., the gh API
+    path that only returns file metadata).
+    """
+    violations = check_merge_policy(
+        files, max_lines=max_lines, high_risk_globs=high_risk_globs
+    )
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from evolution_test_quality_gate import check_test_quality  # noqa: E402
+
+        violations.extend(
+            check_test_quality(
+                files,
+                test_contents=test_contents,
+                mock_ratio_threshold=mock_ratio_threshold,
+            )
+        )
+    except ImportError:
+        pass  # fail-open: if the quality gate module is unavailable, skip it
+    return violations
+
+
 def _run(cmd: List[str]) -> Tuple[int, str, str]:
     p = subprocess.run(cmd, capture_output=True, text=True)
     return p.returncode, p.stdout, p.stderr
 
 
-def _pr_files(pr: int, repo: Optional[str], runner: Callable[[List[str]], Tuple[int, str, str]]) -> Optional[List[Dict[str, Any]]]:
+def _pr_files(
+    pr: int, repo: Optional[str], runner: Callable[[List[str]], Tuple[int, str, str]]
+) -> Optional[List[Dict[str, Any]]]:
     cmd = ["gh", "pr", "view", str(pr), "--json", "files"]
     if repo:
         cmd += ["--repo", repo]
@@ -150,7 +192,9 @@ def _pr_files(pr: int, repo: Optional[str], runner: Callable[[List[str]], Tuple[
         return None
 
 
-def _pr_head_sha(pr: int, repo: Optional[str], runner: Callable[[List[str]], Tuple[int, str, str]]) -> Optional[str]:
+def _pr_head_sha(
+    pr: int, repo: Optional[str], runner: Callable[[List[str]], Tuple[int, str, str]]
+) -> Optional[str]:
     cmd = ["gh", "pr", "view", str(pr), "--json", "headRefOid"]
     if repo:
         cmd += ["--repo", repo]
@@ -166,10 +210,16 @@ def _pr_head_sha(pr: int, repo: Optional[str], runner: Callable[[List[str]], Tup
 def main(argv: List[str]) -> int:
     args = argv[1:]
     if "--pr" not in args:
-        print("usage: evolution_merge_gate.py --pr N [--merge] [--method squash] [--repo O/R]")
+        print(
+            "usage: evolution_merge_gate.py --pr N [--merge] [--method squash] [--repo O/R]"
+        )
         return 2
     pr = int(args[args.index("--pr") + 1])
-    repo = args[args.index("--repo") + 1] if "--repo" in args else os.environ.get("EVOLUTION_REPO_SLUG")
+    repo = (
+        args[args.index("--repo") + 1]
+        if "--repo" in args
+        else os.environ.get("EVOLUTION_REPO_SLUG")
+    )
     method = args[args.index("--method") + 1] if "--method" in args else "squash"
     do_merge = "--merge" in args
     try:
@@ -180,7 +230,9 @@ def main(argv: List[str]) -> int:
     runner = _run
     files = _pr_files(pr, repo, runner)
     if files is None:
-        print(f"[merge-gate] could not read PR #{pr} files (gh error) — refusing to merge")
+        print(
+            f"[merge-gate] could not read PR #{pr} files (gh error) — refusing to merge"
+        )
         return 1
 
     violations = check_merge_policy(files, max_lines=max_lines)
@@ -202,11 +254,21 @@ def main(argv: List[str]) -> int:
     # policy check and the merge fails with 409 instead of landing unreviewed.
     slug = repo or os.environ.get("EVOLUTION_REPO_SLUG", "")
     api = f"repos/{slug}/pulls/{pr}/merge"
-    code, out, err = runner(
-        ["gh", "api", "--method", "PUT", api, "-f", f"sha={head}", "-f", f"merge_method={method}"]
-    )
+    code, out, err = runner([
+        "gh",
+        "api",
+        "--method",
+        "PUT",
+        api,
+        "-f",
+        f"sha={head}",
+        "-f",
+        f"merge_method={method}",
+    ])
     if code != 0:
-        print(f"[merge-gate] atomic merge of PR #{pr} FAILED (head moved or merge error): {err.strip().splitlines()[0] if err.strip() else 'see gh output'}")
+        print(
+            f"[merge-gate] atomic merge of PR #{pr} FAILED (head moved or merge error): {err.strip().splitlines()[0] if err.strip() else 'see gh output'}"
+        )
         return 1
     print(f"[merge-gate] PR #{pr} merged atomically at {head[:9]} ({method})")
     return 0

@@ -7,11 +7,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_merge_gate import check_merge_policy  # noqa: E402
+from evolution_merge_gate import check_merge_policy, check_merge_policy_with_quality  # noqa: E402
 
 
-def _f(path, additions=1, deletions=0):
-    return {"path": path, "additions": additions, "deletions": deletions}
+def _f(path, additions=1, deletions=0, patch=None):
+    f = {"path": path, "additions": additions, "deletions": deletions}
+    if patch is not None:
+        f["patch"] = patch
+    return f
 
 
 class TestCheckMergePolicy:
@@ -30,14 +33,22 @@ class TestCheckMergePolicy:
 
     def test_custom_max_lines(self):
         files = [_f("a.py", 30, 0)]
-        assert any("DIFF_TOO_LARGE" in x for x in check_merge_policy(files, max_lines=10))
+        assert any(
+            "DIFF_TOO_LARGE" in x for x in check_merge_policy(files, max_lines=10)
+        )
 
     def test_workflow_path_is_high_risk(self):
         v = check_merge_policy([_f(".github/workflows/tests.yml", 2, 1)])
         assert any("HIGH_RISK_PATH" in x for x in v)
 
     def test_lockfiles_and_manifests_are_high_risk(self):
-        for p in ("uv.lock", "package-lock.json", "pyproject.toml", "requirements.txt", "flake.lock"):
+        for p in (
+            "uv.lock",
+            "package-lock.json",
+            "pyproject.toml",
+            "requirements.txt",
+            "flake.lock",
+        ):
             v = check_merge_policy([_f(p, 3, 1)])
             assert any("HIGH_RISK_PATH" in x for x in v), p
 
@@ -46,7 +57,11 @@ class TestCheckMergePolicy:
         assert any("HIGH_RISK_PATH" in x for x in v)
 
     def test_own_enforcement_machinery_is_high_risk(self):
-        for p in ("tools/approval.py", "scripts/evolution_merge_gate.py", "scripts/register_evolution_cron.py"):
+        for p in (
+            "tools/approval.py",
+            "scripts/evolution_merge_gate.py",
+            "scripts/register_evolution_cron.py",
+        ):
             v = check_merge_policy([_f(p, 3, 1)])
             assert any("HIGH_RISK_PATH" in x for x in v), p
 
@@ -80,3 +95,48 @@ class TestCheckMergePolicy:
             _f("agent/feature.py", 60, 10),
         ]
         assert check_merge_policy(files) == []
+
+
+class TestCheckMergePolicyWithQuality:
+    """Tests for the extended merge policy with test-quality gates (#1209, #1210)."""
+
+    def test_clean_pr_passes_quality_gate(self):
+        files = [_f("scripts/foo.py", 30, 5), _f("tests/test_foo.py", 20, 0)]
+        assert check_merge_policy_with_quality(files) == []
+
+    def test_high_mock_ratio_blocked(self):
+        mock_patch = "+from unittest.mock import MagicMock\n+mock = MagicMock()\n"
+        files = [
+            _f("tests/test_a.py", 10, patch=mock_patch),
+            _f("tests/test_b.py", 10, patch=mock_patch),
+        ]
+        violations = check_merge_policy_with_quality(files)
+        assert any("HIGH_MOCK_RATIO" in v for v in violations)
+
+    def test_fabricated_reproduction_blocked(self):
+        content = (
+            "def test_fab():\n"
+            "    mock = MagicMock()\n"
+            "    mock.return_value = 42\n"
+            "    assert mock.return_value\n"
+        )
+        files = [_f("tests/test_fab.py", 10)]
+        violations = check_merge_policy_with_quality(
+            files, test_contents={"tests/test_fab.py": content}
+        )
+        assert any("FABRICATED_REPRODUCTION" in v for v in violations)
+
+    def test_diff_too_large_and_mock_ratio_both_reported(self):
+        mock_patch = "+from unittest.mock import MagicMock\n"
+        files = [
+            _f("tests/test_a.py", 150, 60, patch=mock_patch),
+        ]
+        violations = check_merge_policy_with_quality(files)
+        assert any("DIFF_TOO_LARGE" in v for v in violations)
+        assert any("HIGH_MOCK_RATIO" in v for v in violations)
+
+    def test_backward_compatible_without_quality_import(self):
+        """When test_contents is None and no mock patches, only policy checks run."""
+        files = [_f("scripts/foo.py", 30, 5), _f("tests/test_foo.py", 20, 0)]
+        violations = check_merge_policy_with_quality(files, test_contents=None)
+        assert violations == []

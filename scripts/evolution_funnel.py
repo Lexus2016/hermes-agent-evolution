@@ -111,6 +111,18 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
                 issues_path,
             )
 
+    # Test-quality signal (#1210): the integration stage may record the
+    # mean mock-ratio across PRs it processed this cycle.  When absent
+    # (older reports or no test changes), it stays None — the health
+    # metrics treat None as "not applicable" rather than 0.
+    mock_ratio_raw = integration.get("mock_ratio")
+    mock_ratio_value = None
+    if mock_ratio_raw is not None:
+        try:
+            mock_ratio_value = round(float(mock_ratio_raw), 4)
+        except (TypeError, ValueError):
+            mock_ratio_value = None
+
     return {
         "date": date,
         # inflow
@@ -127,6 +139,8 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
         # outflow
         "merged": len(merged) if isinstance(merged, list) else 0,
         "skipped": len(skipped) if isinstance(skipped, list) else 0,
+        # test-quality (#1210) — longitudinal mock-ratio trend
+        "mock_ratio": mock_ratio_value,
     }
 
 
