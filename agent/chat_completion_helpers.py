@@ -1434,10 +1434,18 @@ def try_activate_fallback(
                     "Retry-After"
                 )
             _cooldown = 60.0
+            # Billing exhaustion (403/402 credits depleted) is a permanent
+            # failure for that provider until the account is topped up — a
+            # 60-second cooldown causes the agent to retry the same dead
+            # provider every minute, producing the 61x recurrence pattern
+            # documented in #1231. Use a 1-hour cooldown so the provider
+            # stays blocked and subsequent calls go to the fallback chain.
+            if reason == FailoverReason.billing:
+                _cooldown = 3600.0
             if _retry_after_raw:
                 _parsed = extract_retry_after_seconds(_retry_after_raw)
                 if _parsed is not None:
-                    _cooldown = max(1.0, _parsed)
+                    _cooldown = max(_cooldown, _parsed)
             _until = time.monotonic() + _cooldown
             agent._rate_limited_until = _until
             _provider_cooldowns = getattr(agent, "_rate_limited_providers", None)
