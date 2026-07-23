@@ -584,6 +584,20 @@ def main(argv: list[str]) -> int:
     except Exception:
         pass
 
+    # Trajectory logger wiring (#1215) — record a trajectory entry for this
+    # funnel cycle so downstream analysis can detect suspicious action-sequence
+    # patterns (#1203 increment 1).
+    try:
+        from evolution_trajectory_logger import TrajectoryLog
+
+        traj = TrajectoryLog(session_id="funnel", date=date)
+        traj.add_tool_call(
+            "evolution_funnel", {"date": date}, result=record, status="success"
+        )
+        traj.save(evolution_dir / "trajectories")
+    except Exception:
+        pass
+
     # Deterministic no_agent job: empty stdout = silent/healthy. Print a compact
     # one-liner only so the run log shows what was recorded.
     print(
