@@ -656,6 +656,26 @@ def main(argv: list[str]) -> int:
     except Exception:
         pass
 
+    # Tool-memory store wiring (#1218) — record funnel-cycle tool
+    # capability/failure data so the ToolAtlas (#1178 increment 1) has a
+    # live consumer writing records each cycle.
+    try:
+        from evolution_tool_memory import load_store
+
+        store = load_store(evolution_dir / "tool-memory")
+        store.verify(
+            "evolution_funnel", capability="per-cycle funnel metrics aggregation"
+        )
+        if record.get("merged", 0) == 0 and record.get("selected", 0) > 0:
+            store.record_failure(
+                "evolution_funnel",
+                scenario="selected issues but none merged this cycle",
+                error="merged=0",
+            )
+        store.save_record("evolution_funnel")
+    except Exception:
+        pass
+
     # Deterministic no_agent job: empty stdout = silent/healthy. Print a compact
     # one-liner only so the run log shows what was recorded.
     print(
