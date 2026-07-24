@@ -1789,11 +1789,21 @@ class ShellFileOperations(FileOperations):
         # introspection data where the agent accidentally submitted a
         # no-op edit and then wasted turns retrying.
         if _strategy == "identical":
+            # #1258 — Return success, not an error. A no-op edit is NOT a
+            # failure: the file content is already in the desired state.
+            # Returning error= here caused downstream failure detection
+            # (file_mutation_result_landed checks data.get("error") at
+            # tool_result_classification.py:34, and classify_tool_failure
+            # checks '"error"' in the result) to flag this as a failure,
+            # inflating the patch failure count and triggering unnecessary
+            # retry spirals. With success=True and no error key, the result
+            # is correctly classified as a landed no-op.
             return PatchResult(
-                error=(
+                success=True,
+                structured_error=(
                     "old_string and new_string are identical — no changes "
                     "needed. The file content is already in the desired state."
-                )
+                ),
             )
 
         if error or match_count == 0:

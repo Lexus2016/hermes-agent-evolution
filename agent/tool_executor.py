@@ -894,6 +894,24 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
                     function_result,
                     failed=is_error,
                 )
+            else:
+                # #1242 — Record guardrail-blocked calls as failures in the
+                # cross-turn counter. Without this, the counter freezes at the
+                # cap value once blocking starts, and reset_for_turn clears
+                # _halt_decision each turn — so the block fires but the count
+                # never grows further. Calling after_call here keeps the
+                # streak alive so the before_call block continues to fire
+                # immediately on subsequent turns without needing 5 fresh
+                # failures to re-accumulate.
+                try:
+                    agent._tool_guardrails.after_call(
+                        function_name,
+                        function_args,
+                        function_result,
+                        failed=True,
+                    )
+                except Exception:
+                    pass
 
             if is_error:
                 _err_text = _multimodal_text_summary(function_result)
@@ -1623,6 +1641,22 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
             result_preview = function_result if agent.verbose_logging else (
                 function_result[:200] if len(function_result) > 200 else function_result
             )
+        elif _guardrail_block_decision is not None:
+            # #1242 — Record guardrail-blocked calls as failures in the
+            # cross-turn counter (sequential path). Same rationale as the
+            # concurrent path: without this, the counter freezes at the cap
+            # value once blocking starts. Calling after_call keeps the
+            # streak alive so before_call continues to block immediately
+            # on subsequent turns.
+            try:
+                agent._tool_guardrails.after_call(
+                    function_name,
+                    function_args,
+                    function_result,
+                    failed=True,
+                )
+            except Exception:
+                pass
         if _is_error_result:
             logger.warning("Tool %s returned error (%.2fs): %s", function_name, tool_duration, result_preview)
         else:

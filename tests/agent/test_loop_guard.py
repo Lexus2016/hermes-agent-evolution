@@ -750,12 +750,17 @@ class TestMaybeRefusalNudge:
         ]
         assert maybe_refusal_nudge(msgs) is None
 
-    def test_already_nudged_returns_none(self):
+    def test_already_nudged_still_detects(self):
+        """#1243 — already_nudged=True no longer suppresses detection.
+        The caller handles escalation; we still return the nudge so the
+        caller can build the escalated directive."""
         msgs = [
             {"role": "user", "content": "do the thing"},
             _asst_text("I can't help with that."),
         ]
-        assert maybe_refusal_nudge(msgs, already_nudged=True) is None
+        nudge = maybe_refusal_nudge(msgs, already_nudged=True)
+        assert nudge is not None
+        assert "over_refusal" in nudge
 
     def test_no_assistant_message_returns_none(self):
         msgs = [

@@ -884,7 +884,7 @@ def _run_conversation_impl(
     truncated_response_parts: List[str] = []
     compression_attempts = 0
     _turn_exit_reason = "unknown"  # Diagnostic: why the loop ended
-    agent._refusal_nudged_this_turn = False  # Reset per-turn (#975)
+    agent._refusal_nudge_count = 0  # Reset per-turn (#975/#1243)
     # Last composed answer intentionally held back by a verification gate. If
     # that continuation consumes the remaining budget, this is the best
     # user-facing result available; it must not be confused with error or
@@ -3665,8 +3665,24 @@ def _run_conversation_impl(
                 # generic transport retry_count >= 2 gate.
                 if classified.reason == FailoverReason.overloaded:
                     _retry.consecutive_overload_hits += 1
+                    # #1205 — Cross-turn overload streak on the agent instance.
+                    # The per-turn _retry counter resets each outer turn, so a
+                    # provider that is persistently overloaded across turns
+                    # never accumulates past 2 within a single retry loop.
+                    # Persist a cross-turn streak on the agent (like
+                    # _consecutive_stale_streams) so the fallback gate sees
+                    # the true cumulative overload count.
+                    agent._cross_turn_overload_hits = getattr(
+                        agent, "_cross_turn_overload_hits", 0
+                    ) + 1
                 else:
                     _retry.consecutive_overload_hits = 0
+                    # #1205 — decay cross-turn streak on non-overloaded
+                    # responses. A single success doesn't prove full recovery
+                    # (intermittent 503s), but several successes drain it.
+                    _ct_oh = getattr(agent, "_cross_turn_overload_hits", 0)
+                    if _ct_oh > 0:
+                        agent._cross_turn_overload_hits = max(0, _ct_oh - 1)
                 # #1142 — Track consecutive timeout errors for the timeout
                 # circuit breaker. After 2 consecutive timeouts, fail over to
                 # the next provider instead of backoff-and-retry against the
@@ -3705,6 +3721,14 @@ def _run_conversation_impl(
                     # than waiting for the generic transport gate.
                     or (classified.reason == FailoverReason.overloaded
                         and _retry.consecutive_overload_hits >= 2)
+                    # #1205 — Cross-turn overload breaker: if the provider has
+                    # been overloaded across multiple turns (cumulative streak
+                    # >= 3), fail over even if the per-turn counter hasn't hit
+                    # 2 yet this turn. This catches persistent overload that
+                    # resets per turn and would otherwise burn the full 8-retry
+                    # budget each turn without triggering fallback.
+                    or (classified.reason == FailoverReason.overloaded
+                        and getattr(agent, "_cross_turn_overload_hits", 0) >= 3)
                     # #1142 — Timeout circuit breaker: after 2 consecutive
                     # timeouts from the same provider, fail over immediately
                     # instead of backoff-and-retry against the same degraded
@@ -6093,22 +6117,45 @@ def _run_conversation_impl(
                     final_response = None
                     continue
 
-                # ── Refusal recovery nudge (#975) ───────────────────
+                # ── Refusal recovery nudge (#975/#1243) ───────────────
                 # If the final text response contains refusal language
                 # ("I can't", "I don't have access", etc.), give the model
-                # one chance to course-correct before accepting the refusal.
-                # Mirrors the tool-spiral nudge pattern but for text-only
-                # responses.  Only fires once per turn to avoid spamming.
-                if not getattr(agent, "_refusal_nudged_this_turn", False):
+                # escalating chances to course-correct before accepting the
+                # refusal. Mirrors the tool-spiral nudge pattern but for
+                # text-only responses.
+                #
+                # #1243 — Multi-shot escalation replaces the single-shot
+                # boolean. The old code fired one advisory nudge per turn,
+                # then silently accepted the second refusal as the final
+                # answer. The new counter allows:
+                #   1st refusal: advisory nudge (current behavior)
+                #   2nd refusal: directive nudge (stronger language)
+                #   3rd refusal: accept with a structured explanation
+                #     appended so the user sees the refusal was flagged
+                _refusal_count = getattr(agent, "_refusal_nudge_count", 0)
+                if _refusal_count < 2:
                     try:
                         _refusal_nudge = _loop_guard.maybe_refusal_nudge(
                             messages,
-                            already_nudged=False,
+                            already_nudged=_refusal_count > 0,
                         )
                     except Exception:
                         _refusal_nudge = None
                     if _refusal_nudge:
-                        agent._refusal_nudged_this_turn = True
+                        agent._refusal_nudge_count = _refusal_count + 1
+                        # #1243 — Escalate the nudge language on the 2nd
+                        # refusal to a directive rather than advisory.
+                        if _refusal_count >= 1:
+                            _refusal_nudge = (
+                                "[loop-guard] REFUSAL ESCALATION: The model "
+                                "has refused twice. This is likely an "
+                                "over-refusal — re-check available tools and "
+                                "skills with `hermes tools` or check the "
+                                "skill list, then use the available "
+                                "capability directly. Do NOT repeat the "
+                                "refusal. Take concrete action or explain "
+                                "specifically what is needed to proceed."
+                            )
                         final_msg["finish_reason"] = "refusal_nudge"
                         final_msg["_refusal_nudge_synthetic"] = True
                         messages.append(final_msg)
@@ -6119,7 +6166,9 @@ def _run_conversation_impl(
                         })
                         agent._session_messages = messages
                         logger.debug(
-                            "refusal nudge issued: %s", _refusal_nudge[:80]
+                            "refusal nudge issued (attempt %d): %s",
+                            _refusal_count + 1,
+                            _refusal_nudge[:80],
                         )
                         continue
 

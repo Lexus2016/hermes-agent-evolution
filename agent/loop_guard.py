@@ -927,14 +927,17 @@ def maybe_refusal_nudge(
     Called from the conversation loop when the assistant produces a text-only
     response (no tool calls).  If the text matches refusal patterns, a
     taxonomy-specific recovery nudge is returned for injection as a user
-    message — giving the model one chance to course-correct before the
+    message — giving the model a chance to course-correct before the
     refusal is accepted as the final answer.
 
-    ``already_nudged`` prevents double-nudging the same refusal (the caller
-    tracks this, mirroring the tool-spiral nudge pattern).
+    #1243 — ``already_nudged`` no longer suppresses the nudge entirely.
+    The caller now passes ``already_nudged=True`` on the 2nd refusal to
+    get the same detection (the caller handles escalation language).
     """
     if already_nudged:
-        return None
+        # #1243 — Still detect; the caller builds the escalated directive.
+        # We just need to confirm the last message is still a refusal.
+        pass
     # Find the last assistant message with text content
     last_assistant_text = None
     for msg in reversed(messages):
