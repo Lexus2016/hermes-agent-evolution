@@ -40,7 +40,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -181,13 +181,50 @@ def fetch_pr_details(
 # ---------------------------------------------------------------------------
 
 
+# --- Untrusted-input screen for PR titles ---------------------------------
+# ANY GitHub user can open a PR, and its title is persisted verbatim into
+# postmortem-rules.json, which the autonomous analysis stage ingests. So a title
+# is untrusted text on a path that reaches an LLM prompt. Screen it with the SAME
+# narrow shapes evolution_extract.py rejects: zero-width/bidi hidden characters
+# and instruction-injection-shaped payloads. Deliberately narrow + anchored to
+# known attack shapes to avoid false positives on legitimate technical titles.
+_WHITESPACE_RE = re.compile(r"\s+")
+_HIDDEN_CHARS_RE = re.compile(r"[​‌‍⁠﻿‪-‮]")
+_INJECTION_PATTERNS: Tuple[re.Pattern, ...] = (
+    re.compile(r"ignore\s+(?:all\s+)?previous\s+instructions", re.IGNORECASE),
+    re.compile(r"disregard\s+(?:all\s+)?(?:previous|prior|above)", re.IGNORECASE),
+    re.compile(r"^\s*(?:system|assistant|developer)\s*:", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"<\s*/?\s*(?:system|assistant|tool)\s*>", re.IGNORECASE),
+)
+
+# Marker written in place of a title that fails the screen — keeps the rule's
+# structural signal (a PR was closed; source_pr + reason still recorded) without
+# persisting the attacker-controlled payload.
+_REDACTED_TITLE = "(title omitted — failed content screen)"
+
+
+def _title_is_unsafe(title: str) -> bool:
+    """True if a PR title carries hidden/bidi characters or an instruction-
+    injection-shaped payload (screened on the RAW title, before normalization)."""
+    t = title or ""
+    if _HIDDEN_CHARS_RE.search(t):
+        return True
+    return any(p.search(t) for p in _INJECTION_PATTERNS)
+
+
 def _extract_pattern(pr: Dict[str, Any]) -> str:
     """Extract a human-readable pattern description from a PR's title + labels.
 
     This is a deterministic heuristic — we use the PR title as the base and
-    prefix with the label category when available.
+    prefix with the label category when available. The title is UNTRUSTED
+    (any GitHub user can open a PR): it is screened and redacted if it carries
+    hidden characters or injection-shaped text before it is persisted.
     """
-    title = (pr.get("title") or "").strip()
+    raw_title = pr.get("title") or ""
+    if _title_is_unsafe(raw_title):
+        title = _REDACTED_TITLE
+    else:
+        title = _WHITESPACE_RE.sub(" ", raw_title).strip()
     labels = [lbl.get("name", "") for lbl in (pr.get("labels") or [])]
 
     # Build a category prefix from labels
