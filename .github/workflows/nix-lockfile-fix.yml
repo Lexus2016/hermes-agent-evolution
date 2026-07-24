@@ -56,7 +56,7 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           ref: main
           token: ${{ steps.app-token.outputs.token }}
@@ -176,6 +176,26 @@ jobs:
               repo: context.repo.repo,
               pull_number: Number(prNumber),
             });
+
+            // SECURITY: this privileged job checks out the PR head and executes
+            // its code (`uses: ./.github/actions/nix-setup`, `nix run .#…`) with
+            // a contents:write token + CACHIX secret. Running FORK code here is a
+            // confused-deputy: the checkbox authenticates the CLICKER, not the
+            // code. A same-repo branch PR is authored by someone who already has
+            // push access, so running it is no escalation; a fork PR is attacker-
+            // controlled. Refuse anything whose head is not this exact repo (a
+            // deleted/absent head repo also fails closed).
+            if (!pr.head.repo || pr.head.repo.full_name !== pr.base.repo.full_name) {
+              core.setFailed(
+                `Refusing to run the lockfile fix on a fork PR head ` +
+                `(${pr.head.repo ? pr.head.repo.full_name : 'deleted head repo'}) — ` +
+                `it would execute untrusted code with repo-write credentials. ` +
+                `Push the branch to ${pr.base.repo.full_name} or apply the fix ` +
+                `manually.`
+              );
+              return;
+            }
+
             core.setOutput('ref', pr.head.ref);
             core.setOutput('repo', pr.head.repo.name);
             core.setOutput('owner', pr.head.repo.owner.login);
@@ -195,7 +215,7 @@ jobs:
 
             Triggered by @${{ github.actor }} — [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: ${{ steps.resolve.outputs.owner }}/${{ steps.resolve.outputs.repo }}
           ref: ${{ steps.resolve.outputs.ref }}

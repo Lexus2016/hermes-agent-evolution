@@ -26,8 +26,9 @@ jobs:
   build:
     name: Build distribution 📦
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
           # On workflow_dispatch, check out the confirmed tag.
@@ -43,7 +44,7 @@ jobs:
           fi
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: '3.13'
 
@@ -51,15 +52,29 @@ jobs:
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: '22'
 
       - name: Build web dashboard
-        run: cd web && npm ci && npm run build
+        uses: ./.github/actions/retry
+        with:
+          command: npm ci
+          working-directory: web
+
+      - name: Compile web dashboard
+        run: npm run build
+        working-directory: web
 
       - name: Build TUI bundle
-        run: cd ui-tui && npm ci && npm run build
+        uses: ./.github/actions/retry
+        with:
+          command: npm ci
+          working-directory: ui-tui
+
+      - name: Compile TUI bundle
+        run: npm run build
+        working-directory: ui-tui
 
       - name: Bundle TUI into hermes_cli
         run: |
@@ -90,6 +105,7 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment:
       name: pypi
       url: https://pypi.org/p/hermes-agent
@@ -104,7 +120,7 @@ jobs:
           path: dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247  # v1.14.1
         with:
           skip-existing: true
 
@@ -115,6 +131,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     needs: publish
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write   # attach assets to the existing release
       id-token: write   # sigstore signing
@@ -128,7 +145,7 @@ jobs:
 
       - name: Wait for GitHub Release to exist
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.AUTOFIX_BOT_PAT }}
         # release.py creates the GitHub Release after pushing the tag,
         # but this workflow starts from the tag push — wait for it.
         run: |
@@ -154,7 +171,7 @@ jobs:
       - name: Attach signed artifacts to GitHub Release
         if: env.skip_sign != 'true'
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.AUTOFIX_BOT_PAT }}
         # release.py already created the GitHub Release — just upload
         # the Sigstore signatures alongside the existing assets.
         run: >-

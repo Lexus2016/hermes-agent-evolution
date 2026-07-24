@@ -118,3 +118,53 @@ def test_no_gh_no_token_does_not_wake(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()  # deliberately empty: no gh, no curl
     assert not _wakes(_run_gate(tmp_path, bin_dir))
+
+
+def test_curl_fallback_keeps_token_off_argv(tmp_path: Path) -> None:
+    """Security invariant: on the curl fallback path the token must reach curl
+    via stdin (-H @-), never as a command-line argument (visible in `ps` /
+    /proc/<pid>/cmdline). We install a fake `curl` that records its argv and
+    stdin, run the gate with only a token in the env (no gh), and assert the
+    token appears in stdin but NOT in argv.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()  # no gh → forces the curl fallback
+    argv_log = tmp_path / "curl_argv.log"
+    stdin_log = tmp_path / "curl_stdin.log"
+    token = "SENTINEL_secret_pat_zzz"
+
+    curl = bin_dir / "curl"
+    curl.write_text(
+        "#!/bin/bash\n"
+        # Record argv (printf is a builtin — works with the isolated PATH).
+        f'printf "%s\\n" "$@" > "{argv_log}"\n'
+        # Capture ALL of stdin using a bash builtin (no external `cat`, which is
+        # not on the isolated PATH). `read -d ""` reads until NUL == whole stdin.
+        f'IFS= read -r -d "" _in\n'
+        f'printf "%s" "$_in" > "{stdin_log}"\n'
+        # Emulate GitHub returning a repo object with push access.
+        "printf '%s' '{\"permissions\":{\"push\":true}}'\n"
+        "exit 0\n"
+    )
+    curl.chmod(curl.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    home = tmp_path / "hermes_home"
+    home.mkdir(exist_ok=True)
+    env = {
+        "PATH": str(bin_dir),
+        "HERMES_HOME": str(home),
+        "GITHUB_EVOLUTION_REPO": "Owner/repo",
+        "GITHUB_PRIVATE_TOKEN": token,
+    }
+    proc = subprocess.run([BASH, str(GATE)], capture_output=True, text=True, env=env)
+    assert proc.returncode == 0, proc.stderr
+
+    # The gate still works (push:true → wake).
+    assert _wakes(proc.stdout.strip().splitlines()[-1])
+    argv = argv_log.read_text()
+    # Sanity: the fake curl actually ran (non-vacuous assertion below).
+    assert "@-" in argv, "fake curl did not run / -H @- missing"
+    # The token must NOT be on the command line…
+    assert token not in argv, "token leaked into curl argv (ps-visible)"
+    # …but it MUST have been delivered via stdin.
+    assert token in stdin_log.read_text()

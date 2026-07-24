@@ -111,6 +111,18 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
                 issues_path,
             )
 
+    # Test-quality signal (#1210): the integration stage may record the
+    # mean mock-ratio across PRs it processed this cycle.  When absent
+    # (older reports or no test changes), it stays None — the health
+    # metrics treat None as "not applicable" rather than 0.
+    mock_ratio_raw = integration.get("mock_ratio")
+    mock_ratio_value = None
+    if mock_ratio_raw is not None:
+        try:
+            mock_ratio_value = round(float(mock_ratio_raw), 4)
+        except (TypeError, ValueError):
+            mock_ratio_value = None
+
     return {
         "date": date,
         # inflow
@@ -127,6 +139,8 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
         # outflow
         "merged": len(merged) if isinstance(merged, list) else 0,
         "skipped": len(skipped) if isinstance(skipped, list) else 0,
+        # test-quality (#1210) — longitudinal mock-ratio trend
+        "mock_ratio": mock_ratio_value,
     }
 
 
@@ -595,6 +609,84 @@ def main(argv: list[str]) -> int:
             "evolution_funnel", {"date": date}, result=record, status="success"
         )
         traj.save(evolution_dir / "trajectories")
+    except Exception:
+        pass
+
+    # MAS-FIRE coordination fault-injection wiring (#1211) — run the fault
+    # injection suite each cycle as a periodic coordination health check so
+    # the harness is exercised from within the pipeline, not just standalone.
+    try:
+        from evolution_mas_fire import run_fault_suite
+
+        _results = run_fault_suite()
+        _summary = {
+            "total": len(_results),
+            "detected": sum(1 for r in _results if r.detected),
+            "silently_used": sum(1 for r in _results if not r.detected),
+        }
+        (evolution_dir / "mas-fire").mkdir(parents=True, exist_ok=True)
+        (evolution_dir / "mas-fire" / f"{date}.json").write_text(
+            json.dumps(_summary, indent=2, sort_keys=True), encoding="utf-8"
+        )
+    except Exception:
+        pass
+
+    # CFG/DFG graph extraction wiring (#1221) — extract control/data-flow
+    # graphs for changed Python files so the IFG monitor (#1180 increment 1)
+    # has a live consumer producing graph data each cycle.
+    try:
+        from evolution_graph_extract import extract_graph
+
+        _repo_dir = _resolve_repo_dir()
+        if _repo_dir is not None:
+            import subprocess as _sp
+
+            _diff = _sp.run(
+                [
+                    "git",
+                    "-C",
+                    str(_repo_dir),
+                    "diff",
+                    "--name-only",
+                    "HEAD~1",
+                    "HEAD",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            _py_files = [
+                str(_repo_dir / f)
+                for f in _diff.stdout.splitlines()
+                if f.endswith(".py") and (_repo_dir / f).is_file()
+            ]
+            if _py_files:
+                _graphs = extract_graph(_py_files[:10])
+                (evolution_dir / "graphs").mkdir(parents=True, exist_ok=True)
+                (evolution_dir / "graphs" / f"{date}.json").write_text(
+                    json.dumps(_graphs, indent=2, sort_keys=True), encoding="utf-8"
+                )
+    except Exception:
+        pass
+
+    # Tool-memory store wiring (#1218) — record funnel-cycle tool
+    # capability/failure data so the ToolAtlas (#1178 increment 1) has a
+    # live consumer writing records each cycle.
+    try:
+        from evolution_tool_memory import load_store
+
+        store = load_store(evolution_dir / "tool-memory")
+        store.verify(
+            "evolution_funnel", capability="per-cycle funnel metrics aggregation"
+        )
+        if record.get("merged", 0) == 0 and record.get("selected", 0) > 0:
+            store.record_failure(
+                "evolution_funnel",
+                scenario="selected issues but none merged this cycle",
+                error="merged=0",
+            )
+        store.save_record("evolution_funnel")
     except Exception:
         pass
 

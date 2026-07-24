@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # need full history for merge-base + worktree
 
@@ -127,7 +127,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -153,10 +153,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v5
         with:
           python-version: "3.11"
 
@@ -176,11 +176,15 @@ jobs:
     timeout-minutes: 2
     steps:
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Require ci-reviewed label
         id: label-check
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Read-only label lookup. Use the built-in GITHUB_TOKEN (present and
+          # read-only on forks) so the gate works on fork PRs; fall back to it
+          # when AUTOFIX_BOT_PAT is empty. `|| true` degrades an API blip to
+          # "label absent" rather than hard-failing the step.
+          GH_TOKEN: ${{ secrets.AUTOFIX_BOT_PAT || github.token }}
         run: |
           set -euo pipefail
           PR="${{ github.event.pull_request.number }}"
@@ -200,7 +204,7 @@ jobs:
       - name: Post or update review warning
         if: steps.label-check.outputs.reviewed != 'true' && github.event.pull_request.head.repo.fork != true
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUTOFIX_BOT_PAT || github.token }}
         run: |
           set -euo pipefail
           PR="${{ github.event.pull_request.number }}"
@@ -248,7 +252,7 @@ jobs:
       - name: Update previous warning to passed
         if: steps.label-check.outputs.reviewed == 'true' && github.event.pull_request.head.repo.fork != true
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUTOFIX_BOT_PAT || github.token }}
         run: |
           set -euo pipefail
           PR="${{ github.event.pull_request.number }}"

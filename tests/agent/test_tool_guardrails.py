@@ -1127,3 +1127,24 @@ def test_memory_fallback_directive_distinguishes_transient_from_hard():
 
     directive = _fallback_directive_for("memory")
     assert "busy" in directive.lower() or "transient" in directive.lower()
+
+
+def test_after_call_survives_lone_surrogates_in_result_and_args():
+    # Scraped web/social text can contain unpaired UTF-16 surrogates (e.g. the
+    # first half of a mathematical-bold pair, '\ud835'). str.encode('utf-8')
+    # rejects them, and the result hasher crashed the whole conversation loop
+    # (live outage: "Outer loop error in API call #34 ... surrogates not
+    # allowed"). Weird text must never take down the loop.
+    controller = ToolCallGuardrailController(
+        ToolCallGuardrailConfig(hard_stop_enabled=True, exact_failure_block_after=2, no_progress_block_after=2)
+    )
+    dirty = "price \ud835 update"
+
+    decision = controller.after_call("web_search", {"query": dirty}, dirty, failed=False)
+    assert decision.action in {"allow", "warn"}
+
+    # hashing stays deterministic: the same dirty failure twice still trips
+    # the exact-failure guard, proving the hash is stable across calls
+    controller.after_call("web_search", {"query": dirty}, '{"error":"\ud835 boom"}', failed=True)
+    controller.after_call("web_search", {"query": dirty}, '{"error":"\ud835 boom"}', failed=True)
+    assert controller.before_call("web_search", {"query": dirty}).action == "block"

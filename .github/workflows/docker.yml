@@ -54,7 +54,7 @@ jobs:
       digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       # The image build + smoke test + integration tests run ONLY on
       # push-to-main and release — never on PRs. They are the heaviest jobs
@@ -201,7 +201,7 @@ jobs:
       digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       # arm64 build runs only on push-to-main and release (see build-amd64).
       - name: Set up Docker Buildx
@@ -332,15 +332,23 @@ jobs:
             args+=("${IMAGE_NAME}@sha256:${digest_file}")
           done
           if [ "${{ github.event_name }}" = "release" ]; then
-            docker buildx imagetools create \
-              -t "${IMAGE_NAME}:${RELEASE_TAG}" \
-              "${args[@]}"
+            tags=(-t "${IMAGE_NAME}:${RELEASE_TAG}")
           else
-            docker buildx imagetools create \
-              -t "${IMAGE_NAME}:main" \
-              -t "${IMAGE_NAME}:latest" \
-              "${args[@]}"
+            tags=(-t "${IMAGE_NAME}:main" -t "${IMAGE_NAME}:latest")
           fi
+          # Retry: Docker Hub API + just-pushed digest eventual consistency
+          # can transiently fail the create; the operation is idempotent.
+          for i in 1 2 3; do
+            if docker buildx imagetools create "${tags[@]}" "${args[@]}"; then
+              break
+            fi
+            if [ "$i" = 3 ]; then
+              echo "::error::imagetools create failed after 3 attempts"
+              exit 1
+            fi
+            echo "::warning::imagetools create failed (attempt $i); retrying in 20s"
+            sleep 20
+          done
 
       - name: Inspect image
         env:
