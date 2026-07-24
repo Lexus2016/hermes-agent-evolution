@@ -617,6 +617,45 @@ def main(argv: list[str]) -> int:
     except Exception:
         pass
 
+    # CFG/DFG graph extraction wiring (#1221) — extract control/data-flow
+    # graphs for changed Python files so the IFG monitor (#1180 increment 1)
+    # has a live consumer producing graph data each cycle.
+    try:
+        from evolution_graph_extract import extract_graph
+
+        _repo_dir = _resolve_repo_dir()
+        if _repo_dir is not None:
+            import subprocess as _sp
+
+            _diff = _sp.run(
+                [
+                    "git",
+                    "-C",
+                    str(_repo_dir),
+                    "diff",
+                    "--name-only",
+                    "HEAD~1",
+                    "HEAD",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            _py_files = [
+                str(_repo_dir / f)
+                for f in _diff.stdout.splitlines()
+                if f.endswith(".py") and (_repo_dir / f).is_file()
+            ]
+            if _py_files:
+                _graphs = extract_graph(_py_files[:10])
+                (evolution_dir / "graphs").mkdir(parents=True, exist_ok=True)
+                (evolution_dir / "graphs" / f"{date}.json").write_text(
+                    json.dumps(_graphs, indent=2, sort_keys=True), encoding="utf-8"
+                )
+    except Exception:
+        pass
+
     # Deterministic no_agent job: empty stdout = silent/healthy. Print a compact
     # one-liner only so the run log shows what was recorded.
     print(
