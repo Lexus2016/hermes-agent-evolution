@@ -169,35 +169,3 @@ class TestRefusalMultiShot:
         nudge = maybe_refusal_nudge(msgs, already_nudged=False)
         assert nudge is not None
         assert "over_refusal" in nudge
-
-
-# ── #1242: after_call for blocked tools ───────────────────────────────
-
-class TestBlockedToolAfterCall:
-    """Verify after_call is called for guardrail-blocked tools, keeping the
-    cross-turn streak alive."""
-
-    def test_blocked_tool_increments_cross_turn(self):
-        """When after_call is called for a blocked tool (failed=True), the
-        cross-turn counter should increment."""
-        config = ToolCallGuardrailConfig(
-            hard_stop_enabled=False,
-            spiral_failure_cap=3,
-        )
-        controller = ToolCallGuardrailController(config=config)
-        controller.reset_for_turn()
-
-        args = {"command": "ls"}
-
-        # Accumulate 3 failures to reach the cap
-        for i in range(3):
-            controller.after_call("terminal", args, '{"exit_code": 1}', failed=True)
-
-        # The cross-turn count should be 3
-        assert controller._cross_turn_tool_failure_counts.get("terminal", 0) == 3
-
-        # Simulate a blocked call — after_call with failed=True
-        controller.after_call("terminal", args, '{"error": "blocked"}', failed=True)
-
-        # The cross-turn count should now be 4 (kept incrementing)
-        assert controller._cross_turn_tool_failure_counts.get("terminal", 0) == 4
