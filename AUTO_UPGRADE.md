@@ -38,8 +38,9 @@ every platform, with built-in backup and rollback.
 - It is fork-aware: because our fork has its own commits, the built-in
   "sync from upstream" step **skips** to preserve our changes
   (it never overwrites evolution with the original).
-- It takes a pre-update snapshot and **rolls back automatically** if the update
-  fails.
+- It takes a pre-update snapshot and **rolls back automatically** if the pulled
+  code fails to load (a critical-path file no longer parses) — a bootability
+  guard, not a check that the change itself is correct or intended.
 
 So the whole job is: **point `origin` at the fork, then run `hermes update`.**
 
@@ -194,10 +195,12 @@ PR (so CI + the safety gate run), not on the server. This is the
 
 ## ↩️ Rollback
 
-`hermes update` snapshots before applying and rolls back automatically on
-failure. For a manual rollback it prints the exact `git reset --hard <pre-sha>`
-command; data in `~/.hermes` is independent of code and is not changed by code
-updates.
+`hermes update` snapshots before applying and rolls back automatically if the
+update leaves the CLI unbootable (a critical-path file fails to parse). It does
+NOT verify that a syntactically-valid change is otherwise correct or intended —
+the auto-update trusts whatever lands on the fork's `main`. For a manual
+rollback it prints the exact `git reset --hard <pre-sha>` command; data in
+`~/.hermes` is independent of code and is not changed by code updates.
 
 ---
 

@@ -238,6 +238,11 @@ def _build_provider_env_blocklist() -> frozenset:
         "HERMES_DASHBOARD_SESSION_TOKEN",
         "GATEWAY_ALLOWED_USERS",
         "GH_TOKEN",
+        # Evolution-fork GitHub credentials — also enumerated in the blocklist so
+        # the _make_run_env terminal path (which consults only this blocklist, not
+        # _ALWAYS_STRIP_KEYS) strips them too. Mirrors GH_TOKEN, which lives in both.
+        "GITHUB_PRIVATE_TOKEN",
+        "GITHUB_EVOLUTION_TOKEN",
         "GITHUB_APP_ID",
         "GITHUB_APP_PRIVATE_KEY_PATH",
         "GITHUB_APP_INSTALLATION_ID",
@@ -437,6 +442,12 @@ _ALWAYS_STRIP_KEYS: frozenset[str] = frozenset({
     # GitHub auth
     "GH_TOKEN",
     "GITHUB_TOKEN",
+    # Evolution-fork GitHub credentials: GITHUB_PRIVATE_TOKEN selects PRIVATE
+    # mode (merge + modify_code), GITHUB_EVOLUTION_TOKEN is the bot PAT. Both are
+    # higher-privilege than GITHUB_TOKEN and must never reach a spawned
+    # subprocess (prompt-injection / dependency exfil), same as GH_TOKEN above.
+    "GITHUB_PRIVATE_TOKEN",
+    "GITHUB_EVOLUTION_TOKEN",
     "GITHUB_APP_ID",
     "GITHUB_APP_PRIVATE_KEY_PATH",
     "GITHUB_APP_INSTALLATION_ID",

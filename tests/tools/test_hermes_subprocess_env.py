@@ -121,6 +121,28 @@ class TestTierInvariants:
     def test_tier1_covers_github_auth(self):
         assert {"GH_TOKEN", "GITHUB_TOKEN"} <= _ALWAYS_STRIP_KEYS
 
+    def test_tier1_covers_evolution_github_tokens(self):
+        # Fork-added higher-privilege GitHub credentials must be stripped like
+        # GITHUB_TOKEN: GITHUB_PRIVATE_TOKEN selects PRIVATE mode (merge/push),
+        # GITHUB_EVOLUTION_TOKEN is the bot PAT.
+        assert {"GITHUB_PRIVATE_TOKEN", "GITHUB_EVOLUTION_TOKEN"} <= _ALWAYS_STRIP_KEYS
+
+    def test_make_run_env_strips_evolution_github_tokens(self):
+        # The interactive-terminal path uses _make_run_env(), which consults the
+        # provider blocklist (NOT _ALWAYS_STRIP_KEYS). Regression for the leak
+        # where the two fork GitHub tokens survived into the terminal subprocess.
+        from tools.environments.local import _make_run_env
+
+        src = {
+            "GITHUB_TOKEN": "s-pub",
+            "GITHUB_PRIVATE_TOKEN": "s-priv",
+            "GITHUB_EVOLUTION_TOKEN": "s-bot",
+            "PATH": os.environ.get("PATH", ""),
+        }
+        env = _make_run_env(src)
+        for k in ("GITHUB_TOKEN", "GITHUB_PRIVATE_TOKEN", "GITHUB_EVOLUTION_TOKEN"):
+            assert k not in env, f"{k} leaked into terminal subprocess env via _make_run_env"
+
     def test_tier1_covers_infra_secrets(self):
         assert {"MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "DAYTONA_API_KEY"} <= _ALWAYS_STRIP_KEYS
 

@@ -191,8 +191,9 @@ gh pr list --repo "$REPO" --state open --limit 50 \
    bounds how much agent code lands on `main` per cycle; the per-PR review is what
    guards quality, not a low ceiling.
 
-4. **Merge** (squash). `--admin` is required because branch protection mandates
-   review; the owner token authorizes it.
+4. **Merge** (squash) — ONLY via the deterministic gate below; it is the sole
+   sanctioned merge path. Branch protection still applies: a code-owner-gated PR
+   will be refused by GitHub (correct — leave it for human review).
 
    **Merge via the deterministic gate — it enforces the self-merge policy AND
    closes the review→merge race.** `gh pr merge` lands the branch HEAD, so a
@@ -211,9 +212,12 @@ python3 scripts/evolution_merge_gate.py --pr <N> --repo "$REPO" --merge --method
    NOT merge blind. If the head moved, re-run the 2a code review + dead-code grep
    against the FULL current diff and retry; if the policy blocked it (oversized /
    infra / dependency change), leave it for human review and record why in the
-   report. Only fall back to `gh pr merge <N> --repo "$REPO" --squash --admin` for
-   a PR the gate has already cleared but could not merge for an unrelated gh
-   reason.
+   report. If the gate CLEARED the PR but the merge failed for an unrelated
+   gh/network reason, RE-RUN the gate command above — it re-checks policy and
+   re-merges atomically. NEVER bypass the gate with a raw
+   `gh pr merge <N> --admin`: that skips the diff-cap + high-risk-path checks AND
+   the atomic-SHA protection, and is exactly the unattended self-merge of
+   unreviewed/oversized/infrastructure changes this gate exists to stop.
 
 4a. **Continue or close — keep multi-phase `roadmap` issues moving (don't let them
     stall at slice 1).** A PR that carries `Closes #NN` auto-closes its issue on

@@ -72,6 +72,23 @@ HIGH_RISK_GLOBS: Tuple[str, ...] = (
     "tools/approval.py",
     "scripts/evolution_merge_gate.py",
     "scripts/register_evolution_cron.py",
+    # The rest of the autonomous self-modification machinery: the per-stage job
+    # definitions (their prompts CARRY the safety instructions — incl. this
+    # gate's own invocation and the merge limits), the orchestrator, and every
+    # other deterministic gate plus the wake-gate. An unattended self-merge here
+    # could weaken the loop's own guardrails on the next auto-deploy — same
+    # rationale as the three files above.
+    "cron/evolution/*.yaml",
+    "scripts/evolution_orchestrator.py",
+    "scripts/evolution_*_gate.py",
+    "scripts/evolution_*_gate.sh",
+    # The integration skill IS the self-merge safety procedure (it decides when
+    # this gate is invoked and how a PR is merged). Editing it unattended could
+    # remove the agent's own merge guardrails, so it needs human review — same
+    # class as evolution_merge_gate.py. The OTHER evolution skills are NOT here:
+    # the loop is designed to self-improve those (that path stays gated by
+    # CODEOWNERS/branch-protection only).
+    "skills/evolution/evolution-integration/SKILL.md",
 )
 
 
@@ -137,30 +154,42 @@ def _run(cmd: List[str]) -> Tuple[int, str, str]:
     return p.returncode, p.stdout, p.stderr
 
 
-def _pr_files(pr: int, repo: Optional[str], runner: Callable[[List[str]], Tuple[int, str, str]]) -> Optional[List[Dict[str, Any]]]:
-    cmd = ["gh", "pr", "view", str(pr), "--json", "files"]
+def _pr_snapshot(
+    pr: int,
+    repo: Optional[str],
+    runner: Callable[[List[str]], Tuple[int, str, str]],
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    """Fetch the PR's changed files AND head SHA in ONE ``gh`` call.
+
+    Returning both from a single snapshot is what makes the merge atomic: the
+    policy is checked against the files of exactly the commit that will be
+    merged, closing the review→merge race that two separate ``gh`` reads (files
+    first, head later) leave open — a push landing between them would otherwise
+    be merged with a SHA whose diff was never reviewed.
+
+    Returns ``(files, head)``. Fails CLOSED — ``(None, None)`` on a gh error, non-
+    JSON output, or a response that does not carry a proper ``files`` LIST. A
+    missing ``files`` key is an unreadable PR, NOT "an empty, therefore safe,
+    diff": the caller refuses to merge. ``head`` is ``None`` only when the files
+    were readable but the SHA was absent.
+    """
+    cmd = ["gh", "pr", "view", str(pr), "--json", "files,headRefOid"]
     if repo:
         cmd += ["--repo", repo]
     code, out, _ = runner(cmd)
     if code != 0:
-        return None
+        return None, None
     try:
-        return json.loads(out).get("files") or []
+        data = json.loads(out)
     except ValueError:
-        return None
-
-
-def _pr_head_sha(pr: int, repo: Optional[str], runner: Callable[[List[str]], Tuple[int, str, str]]) -> Optional[str]:
-    cmd = ["gh", "pr", "view", str(pr), "--json", "headRefOid"]
-    if repo:
-        cmd += ["--repo", repo]
-    code, out, _ = runner(cmd)
-    if code != 0:
-        return None
-    try:
-        return json.loads(out).get("headRefOid")
-    except ValueError:
-        return None
+        return None, None
+    if not isinstance(data, dict) or not isinstance(data.get("files"), list):
+        return None, None
+    files = data["files"]
+    head = data.get("headRefOid")
+    if not isinstance(head, str) or not head:
+        return files, None
+    return files, head
 
 
 def main(argv: List[str]) -> int:
@@ -178,9 +207,11 @@ def main(argv: List[str]) -> int:
         max_lines = DEFAULT_MAX_LINES
 
     runner = _run
-    files = _pr_files(pr, repo, runner)
+    # One snapshot: the files we review and the SHA we merge come from the SAME
+    # gh read, so the policy is checked against exactly the commit that lands.
+    files, head = _pr_snapshot(pr, repo, runner)
     if files is None:
-        print(f"[merge-gate] could not read PR #{pr} files (gh error) — refusing to merge")
+        print(f"[merge-gate] could not read PR #{pr} files (gh error / malformed response) — refusing to merge")
         return 1
 
     violations = check_merge_policy(files, max_lines=max_lines)
@@ -194,12 +225,12 @@ def main(argv: List[str]) -> int:
     if not do_merge:
         return 0
 
-    head = _pr_head_sha(pr, repo, runner)
     if not head:
         print(f"[merge-gate] could not resolve PR #{pr} head SHA — refusing to merge")
         return 1
-    # Atomic merge: pass the reviewed head SHA so a concurrent push between the
-    # policy check and the merge fails with 409 instead of landing unreviewed.
+    # Atomic merge: the head SHA came from the SAME snapshot as the reviewed
+    # files, so passing it to the merge API means a concurrent push landed since
+    # the read → 409 abort, instead of merging a diff the policy never saw.
     slug = repo or os.environ.get("EVOLUTION_REPO_SLUG", "")
     api = f"repos/{slug}/pulls/{pr}/merge"
     code, out, err = runner(

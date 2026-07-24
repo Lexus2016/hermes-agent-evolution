@@ -47,7 +47,13 @@ fi
 if [ "$ok" = "0" ] && [ -n "${GITHUB_PRIVATE_TOKEN:-}${GITHUB_TOKEN:-}" ]; then
     _tok="${GITHUB_PRIVATE_TOKEN:-$GITHUB_TOKEN}"
     if command -v curl >/dev/null 2>&1; then
-        perms="$(curl -fsS -H "Authorization: Bearer ${_tok}" \
+        # Feed the token to curl via stdin (-H @-), NEVER as an argv header: a
+        # command-line header is visible to any local user through `ps` /
+        # /proc/<pid>/cmdline for the request's lifetime, and this runs on a
+        # cron schedule. Only the non-secret Accept header + URL stay on argv.
+        # (Mirrors setup_evolution_bot.sh, which keeps its token off the CLI.)
+        perms="$(printf 'Authorization: Bearer %s\n' "$_tok" \
+            | curl -fsS -H @- \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/$REPO" 2>/dev/null)"
         _has_write "$perms" && ok=1

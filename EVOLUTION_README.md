@@ -200,13 +200,21 @@ judgement**:
    `lint.yml`. Red tests = merge blocked.
 3. **Critical-path protection.** `.github/CODEOWNERS` requires owner review for
    PRs touching self-update, the scheduler, CI, or evolution skills.
-4. **Auto-update pulls only CI-protected `main`** — the official `hermes update`
-   (origin = our fork) updates onto code that has already passed the gate.
+4. **Auto-update pulls the fork's `main`** — the official `hermes update`
+   (origin = our fork) fast-forwards onto whatever is on `main`. That is "code
+   that already passed the gate" **only if branch protection is enabled** (next
+   section) so nothing reaches `main` without CI + code-owner review; without
+   that manual step the auto-update trusts `main` as-is (the only client-side
+   check is that critical files still parse — see SECURITY_EVOLUTION.md).
 
 ### Enable branch protection (REQUIRED)
 
 Without branch protection, "PR-only" is just an instruction the LLM could
 bypass. The repository owner enables enforcement:
+
+> **One command:** `scripts/enable_branch_protection.sh` — run it as the repo
+> owner (needs an admin token). Idempotent; it applies exactly the config below.
+> Do it by hand instead if you prefer:
 
 ```bash
 gh api -X PUT repos/Lexus2016/hermes-agent-evolution/branches/main/protection \
