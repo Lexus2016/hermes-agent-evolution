@@ -261,3 +261,66 @@ class TestMainWiring:
         rc = emg.main(["x", "--pr", "999"])
         assert rc == 0
         assert called["quality"], "main() must call check_merge_policy_with_quality"
+
+
+# ── #1246: fail-closed on quality-gate import + live fabrication check ──────
+
+class TestQualityGateFailClosed:
+    """#1246: the test-quality gate is a self-merge safety control. If its
+    module can't be imported, the merge must be BLOCKED, not silently allowed."""
+
+    def test_import_failure_blocks_merge(self, monkeypatch):
+        import types as _types
+        import evolution_merge_gate as emg
+
+        # Simulate a broken deploy: module present but missing check_test_quality
+        broken = _types.ModuleType("evolution_test_quality_gate")
+        monkeypatch.setitem(sys.modules, "evolution_test_quality_gate", broken)
+
+        violations = emg.check_merge_policy_with_quality([_f("scripts/foo.py", 10, 0)])
+        assert any("TEST_QUALITY_GATE_UNAVAILABLE" in v for v in violations), violations
+
+
+class TestFetchTestContents:
+    """#1246: main() folds changed test-file contents (at the reviewed head SHA)
+    into the gate so the fabricated-reproduction check runs on the live path."""
+
+    def _runner(self, mapping):
+        def runner(cmd):
+            url = cmd[2] if len(cmd) > 2 else ""
+            for key, (code, content) in mapping.items():
+                if key in url:
+                    return code, content, ""
+            return 1, "", "not found"
+        return runner
+
+    def test_fetches_and_decodes_test_files_only(self):
+        import base64 as _b64
+        import evolution_merge_gate as emg
+
+        content = "def test_x():\n    assert True\n"
+        enc = _b64.b64encode(content.encode()).decode()
+        runner = self._runner({"tests/test_x.py": (0, enc)})
+        files = [_f("tests/test_x.py", 5, 0), _f("scripts/foo.py", 3, 0)]
+        out = emg._fetch_test_contents(files, "deadbeef", "O/r", runner)
+        assert out == {"tests/test_x.py": content}  # non-test file skipped
+
+    def test_no_head_or_slug_returns_empty(self):
+        import evolution_merge_gate as emg
+        runner = self._runner({})
+        assert emg._fetch_test_contents([_f("tests/test_x.py")], None, "O/r", runner) == {}
+        assert emg._fetch_test_contents([_f("tests/test_x.py")], "sha", "", runner) == {}
+
+    def test_gh_error_is_best_effort_omit(self):
+        import evolution_merge_gate as emg
+        runner = self._runner({})  # every fetch returns code 1
+        out = emg._fetch_test_contents([_f("tests/test_x.py")], "sha", "O/r", runner)
+        assert out == {}
+
+    def test_looks_like_test_predicate(self):
+        import evolution_merge_gate as emg
+        assert emg._looks_like_test("tests/test_a.py")
+        assert emg._looks_like_test("pkg/tests/test_b.py")
+        assert emg._looks_like_test("foo/test_c.py")
+        assert emg._looks_like_test("foo/d_test.py")
+        assert not emg._looks_like_test("scripts/foo.py")
