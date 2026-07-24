@@ -45,6 +45,7 @@ ACP_REGISTRY_MANIFEST = REPO_ROOT / "acp_registry" / "agent.json"
 
 # Auto-extracted from noreply emails + manual overrides
 AUTHOR_MAP = {
+    "evolution@hermes-agent.nousresearch.com": "Da-Mikey",  # PR #1181 (ci: auto-label PRs by title/body)
     "lexus@cdzv.com": "Lexus2016",  # repo owner (evolution fork maintenance PRs)
     "Burgunthy@users.noreply.github.com": "Burgunthy",  # PR #20096 salvage (gateway: profile-based routing for inbound messages)
     "75556242+webtecnica@users.noreply.github.com": "webtecnica",  # PR #63360 salvage (nous: restore inference-api base_url)

@@ -1,0 +1,47 @@
+name: PR Auto-Label
+on:
+  pull_request_target:
+    types: [opened, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  auto-label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v7.0.1
+        with:
+          script: |
+            const labels = [];
+
+            const title = context.payload.pull_request.title.toLowerCase();
+            const body = (context.payload.pull_request.body || '').toLowerCase();
+
+            // Priority: fix > bug > improvement > feature > docs
+            if (/^fix/i.test(title)) labels.push('fix');
+            else if (/\b(bug|fix|regression|broken|error|crash|fail)\b/.test(title + ' ' + body)) labels.push('bug');
+            else if (/^feat/i.test(title) || /\b(feature|add|new|implement)\b/.test(title)) labels.push('feature');
+            else if (/^(docs?|chore|refactor|test|style|perf)/i.test(title)) {
+              const type = title.match(/^(docs?|chore|refactor|test|style|perf)/i)[1];
+              const map = { doc: 'documentation', docs: 'documentation', chore: 'enhancement',
+                            refactor: 'enhancement', test: 'enhancement', style: 'enhancement', perf: 'performance' };
+              labels.push(map[type] || 'enhancement');
+            }
+            else if (/\b(improve|update|upgrade|bump)\b/.test(title)) labels.push('improvement');
+            else labels.push('enhancement');
+
+            // Security/introspection signals
+            if (/\b(security|vuln|cve|injection|xss)\b/.test(title + ' ' + body)) labels.push('security');
+            if (/\b(introspection|session.?audit)\b/.test(title + ' ' + body)) labels.push('introspection');
+
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: labels
+              });
+              console.log(`Applied labels: ${labels.join(', ')}`);
+            }
