@@ -93,6 +93,15 @@ _SPIRAL_PRONE_TOOLS = frozenset(
         "tool_call",
         "tool_describe",
         "memory",
+        # #1258 — patch tool failures: 255 failures in 7d. Patch failures are
+        # deterministic (no-match, ambiguous, identical-edit) — the model
+        # retries the same stale old_string without re-reading the file. The
+        # fallback directive ("use read_file to verify the exact text before
+        # patching, or use write_file") is already defined at line 751.
+        # Adding patch here activates the always-on spiral_failure_cap (default
+        # 5) that halts the turn regardless of hard_stop_enabled, bounding the
+        # retry spiral and forcing a strategy switch.
+        "patch",
     }
 )
 

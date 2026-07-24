@@ -71,7 +71,12 @@ class TestIdenticalStrings:
             ops._detect_line_ending = lambda s: None
             ops.write_file = lambda p, c: type("W", (), {"error": None})()
             r = ops.patch_replace(fp, "def foo():", "def foo():")
-            assert "identical" in r.error.lower() and "no changes" in r.error.lower()
+            # #1258 — identical-edit now returns success=True (not an error).
+            # The no-op message is in structured_error, not error.
+            assert r.success is True
+            assert r.error is None
+            assert r.structured_error is not None
+            assert "identical" in r.structured_error.lower() and "no changes" in r.structured_error.lower()
         finally:
             os.unlink(fp)
 
