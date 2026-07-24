@@ -438,6 +438,40 @@ class TestCmdUpdateBranchFallback:
         captured = capsys.readouterr()
         assert "Already up to date!" in captured.out
 
+    @patch("subprocess.run")
+    def test_diverged_fork_skips_upstream_main_automerge(self, mock_run, capsys):
+        """A fork diverged from upstream/main (ahead AND behind) must NOT
+        auto-merge bleeding-edge upstream/main — this fork tracks upstream
+        RELEASE tags via its dedicated release-sync process. The update must
+        skip the merge (never run ``git merge upstream/main``) and explain why.
+        Regression for the daily conflict-abort noise after release-tracking
+        landed (upstream/main is ~1000 commits ahead and always conflicts).
+        """
+        from pathlib import Path
+
+        from hermes_cli import main as hm
+
+        calls = []
+
+        def _run(cmd, **kwargs):
+            calls.append(" ".join(str(c) for c in cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        mock_run.side_effect = _run
+
+        # origin_ahead=503 AND upstream_ahead=995 → diverged.
+        with patch.object(hm, "_has_upstream_remote", return_value=True), patch.object(
+            hm, "_count_commits_between", side_effect=[503, 995]
+        ):
+            hm._sync_with_upstream_if_needed(["git"], Path("/tmp/fork"))
+
+        assert not any(
+            "merge" in c and "upstream/main" in c for c in calls
+        ), f"must not auto-merge upstream/main: {calls}"
+        out = capsys.readouterr().out
+        assert "Skipping upstream/main auto-merge" in out
+        assert "503 commit(s) not on upstream" in out
+
     @patch("shutil.which")
     @patch("subprocess.run")
     def test_update_refreshes_repo_and_tui_node_dependencies(
