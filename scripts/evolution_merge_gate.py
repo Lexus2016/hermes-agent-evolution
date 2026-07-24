@@ -27,6 +27,7 @@ unit-testable; the gh/network calls live only in the CLI shell.
 
 from __future__ import annotations
 
+import base64
 import fnmatch
 import json
 import os
@@ -164,11 +165,11 @@ def check_merge_policy_with_quality(
     :func:`evolution_test_quality_gate.check_test_quality` (mock-ratio gate
     + fabricated-reproduction detection).
 
-    ``test_contents`` — optional map of test file path → content for
-    fabricated-reproduction detection.  When None, only the mock-ratio
-    gate runs (fabrication detection requires file content).  This keeps
-    the gate fail-open when file content is unavailable (e.g., the gh API
-    path that only returns file metadata).
+    ``test_contents`` — map of test file path → full content for
+    fabricated-reproduction detection.  When empty/None the fabrication check
+    has nothing to scan (the mock-ratio gate, which only needs file metadata,
+    still runs); ``main()`` populates it from the reviewed head SHA so the
+    fabrication check is LIVE on the real merge path (#1246).
     """
     violations = check_merge_policy(
         files, max_lines=max_lines, high_risk_globs=high_risk_globs
@@ -176,16 +177,26 @@ def check_merge_policy_with_quality(
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from evolution_test_quality_gate import check_test_quality  # noqa: E402
-
-        violations.extend(
-            check_test_quality(
-                files,
-                test_contents=test_contents,
-                mock_ratio_threshold=mock_ratio_threshold,
-            )
-        )
     except ImportError:
-        pass  # fail-open: if the quality gate module is unavailable, skip it
+        # Fail CLOSED (#1246): the test-quality gate is a self-merge SAFETY
+        # control. If its module can't be imported we cannot verify test
+        # quality — block the unattended merge rather than silently proceeding
+        # unguarded. The module lives beside this one in scripts/ and is copied
+        # to every profile by register_evolution_cron.py, so a failed import
+        # means a broken deploy, which SHOULD stop autonomous self-merge.
+        violations.append(
+            "TEST_QUALITY_GATE_UNAVAILABLE: evolution_test_quality_gate could not "
+            "be imported — cannot verify test quality; refusing unattended "
+            "self-merge (fix the deploy or merge with human review)"
+        )
+        return violations
+    violations.extend(
+        check_test_quality(
+            files,
+            test_contents=test_contents,
+            mock_ratio_threshold=mock_ratio_threshold,
+        )
+    )
     return violations
 
 
@@ -232,6 +243,54 @@ def _pr_snapshot(
     return files, head
 
 
+def _looks_like_test(path: str) -> bool:
+    """Cheap test-file predicate (no dependency on the quality-gate module,
+    which may be unavailable). Matches ``tests/`` dirs and ``test_*`` /
+    ``*_test`` Python files."""
+    base = path.rsplit("/", 1)[-1]
+    return (
+        path.startswith("tests/")
+        or "/tests/" in path
+        or base.startswith("test_")
+        or base.endswith("_test.py")
+    )
+
+
+def _fetch_test_contents(
+    files: Sequence[Dict[str, Any]],
+    head: Optional[str],
+    slug: str,
+    runner: Callable[[List[str]], Tuple[int, str, str]],
+) -> Dict[str, str]:
+    """Fetch the FULL content of each changed test file at the reviewed head SHA
+    so the fabricated-reproduction check runs on the LIVE merge path (#1246).
+
+    Pinned to ``head`` — an immutable commit SHA from the SAME snapshot as the
+    reviewed files — so this preserves the atomic review→merge invariant: the
+    fabrication check reads exactly the bytes that will be merged, never a moving
+    ref. Best-effort per file: a file that can't be fetched is omitted (the
+    fabrication check degrades to what it could read; the mock-ratio gate needs
+    no content and is unaffected).
+    """
+    contents: Dict[str, str] = {}
+    if not head or not slug:
+        return contents
+    for f in files:
+        path = f.get("path") if isinstance(f, dict) else None
+        if not path or not _looks_like_test(path):
+            continue
+        code, out, _ = runner(
+            ["gh", "api", f"repos/{slug}/contents/{path}?ref={head}", "--jq", ".content"]
+        )
+        if code != 0 or not out.strip():
+            continue
+        try:
+            contents[path] = base64.b64decode(out).decode("utf-8", errors="replace")
+        except (ValueError, UnicodeError):
+            continue
+    return contents
+
+
 def main(argv: List[str]) -> int:
     args = argv[1:]
     if "--pr" not in args:
@@ -260,7 +319,14 @@ def main(argv: List[str]) -> int:
         print(f"[merge-gate] could not read PR #{pr} files (gh error / malformed response) — refusing to merge")
         return 1
 
-    violations = check_merge_policy_with_quality(files, max_lines=max_lines)
+    # Fetch changed test-file contents at the reviewed head SHA so the
+    # fabricated-reproduction check runs on the LIVE merge path (#1246) — pinned
+    # to the same immutable SHA that will merge, so no atomicity is lost.
+    slug = repo or os.environ.get("EVOLUTION_REPO_SLUG", "")
+    test_contents = _fetch_test_contents(files, head, slug, runner)
+    violations = check_merge_policy_with_quality(
+        files, max_lines=max_lines, test_contents=test_contents
+    )
     if violations:
         print(f"[merge-gate] PR #{pr} BLOCKED from autonomous self-merge:")
         for v in violations:
