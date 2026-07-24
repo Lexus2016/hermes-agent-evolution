@@ -3848,9 +3848,19 @@ def _run_conversation_impl(
                     # pool can't help when the *upstream* model (DeepSeek,
                     # etc.) is throttling OpenRouter, so always fall back to a
                     # different model regardless of pool state.
+                    # #1264 — Billing/quota exhaustion is account-level, not
+                    # credential-level.  Rotating credentials on the same
+                    # exhausted account won't help — the quota is per-account,
+                    # not per-key.  Bypass the pool check for billing so the
+                    # fallback chain is always attempted immediately instead
+                    # of burning a rotation that will also 403.
                     _is_upstream = classified.reason == FailoverReason.upstream_rate_limit
+                    _skip_pool_check = (
+                        _is_upstream
+                        or classified.reason == FailoverReason.billing
+                    )
                     pool_may_recover = (
-                        False if _is_upstream
+                        False if _skip_pool_check
                         else _ra()._pool_may_recover_from_rate_limit(
                             agent._credential_pool,
                         )
@@ -3901,6 +3911,25 @@ def _run_conversation_impl(
                             # _consecutive_stale_streams reset on provider swap.
                             agent._cross_turn_overload_hits = 0
                             continue
+
+                # #1263 — When the overload breaker trips but no fallback is
+                # activated (no chain configured, chain exhausted, or pool
+                # rotation preferred), the code falls through to backoff/retry
+                # silently.  Emit a clear status so the agent/user can
+                # distinguish "backing off" from "permanently failed".
+                if (
+                    classified.reason == FailoverReason.overloaded
+                    and (
+                        _retry.consecutive_overload_hits >= 2
+                        or getattr(agent, "_cross_turn_overload_hits", 0) >= 3
+                    )
+                ):
+                    agent._buffer_status(
+                        "⚠️ Provider overloaded (503) — circuit breaker "
+                        "tripped, no fallback activated. Backing off with "
+                        "extended delay; the provider may recover. "
+                        "Configure a fallback provider to auto-recover."
+                    )
 
                 # ── Auth-failure provider failover ───────────────────────
                 # A 401/403 that survives the per-provider credential-refresh
@@ -4698,6 +4727,7 @@ def _run_conversation_impl(
                         "completed": False,
                         "failed": True,
                         "error": _nonretryable_summary,
+                        "failure_reason": classified.reason.value,
                     }
 
                 if retry_count >= max_retries:
@@ -6363,6 +6393,9 @@ def _run_conversation_impl(
                         _refusal_nudge = None
                     if _refusal_nudge:
                         agent._refusal_nudge_count = _refusal_count + 1
+                        agent._session_refusal_count = getattr(
+                            agent, "_session_refusal_count", 0
+                        ) + 1
                         # #1243 — Escalate the nudge language on the 2nd
                         # refusal to a directive rather than advisory.
                         if _refusal_count >= 1:
@@ -6390,6 +6423,36 @@ def _run_conversation_impl(
                             _refusal_count + 1,
                             _refusal_nudge[:80],
                         )
+                        continue
+
+                # #1265 — Per-session refusal escalation.  When refusals keep
+                # recurring across turns (session count >= threshold), the
+                # per-turn nudge alone is not enough.  Inject a strategy-
+                # change directive suggesting concrete alternatives:
+                # different tool, delegation, smaller steps, or explicit
+                # capability gap explanation.
+                _session_refusals = getattr(agent, "_session_refusal_count", 0)
+                if _refusal_count >= 2 and _session_refusals >= 4:
+                    try:
+                        _still_refusing = _loop_guard.maybe_refusal_nudge(
+                            messages, already_nudged=True,
+                        )
+                    except Exception:
+                        _still_refusing = None
+                    if _still_refusing:
+                        agent._session_refusal_count = _session_refusals + 1
+                        _escalation = (
+                            "[loop-guard] REPEATED REFUSALS: "
+                            f"{_session_refusals + 1} refusals this session. "
+                            "Per-turn nudge not working. Try: different "
+                            "tool, delegate, smaller steps, or explain the "
+                            "gap. Do NOT repeat — take concrete action."
+                        )
+                        final_msg["finish_reason"] = "refusal_nudge"
+                        final_msg["_refusal_nudge_synthetic"] = True
+                        messages.append(final_msg)
+                        messages.append({"role": "user", "content": _escalation, "_refusal_nudge_synthetic": True})
+                        agent._session_messages = messages
                         continue
 
                 messages.append(final_msg)
