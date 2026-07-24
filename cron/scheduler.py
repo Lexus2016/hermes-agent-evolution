@@ -2582,21 +2582,23 @@ def _run_job_script(script_path: str) -> tuple[bool, str]:
                 "encoding": "utf-8",
                 "errors": "replace",
             }
-        # Apply the (upstream) Windows venv/pythonpath overlay onto our
-        # profile-built run_env base before sanitizing/handing it to the script.
-        run_env.update(env_overlay)
+        # Sanitize FIRST — strip provider secrets from our profile-built run_env
+        # (HERMES_HOME, profile HOME, non-provider .env config) per upstream
+        # SECURITY.md §2.3: cron scripts must NOT inherit Hermes provider env
+        # (anti-exfiltration). Our no_agent scripts (evolution_watchdog/funnel)
+        # don't read provider keys from env, so this is safe. THEN re-apply the
+        # (upstream) Windows venv/pythonpath overlay: VIRTUAL_ENV / PYTHONPATH are
+        # non-secret venv routing the script needs to import its deps, and the
+        # sanitizer would otherwise drop them.
+        _script_env = _sanitize_subprocess_env(run_env)
+        _script_env.update(env_overlay)
         result = subprocess.run(
             argv,
             capture_output=True,
             text=True,
             timeout=script_timeout,
             cwd=str(path.parent),
-            # Start from our profile-built run_env (HERMES_HOME, profile HOME,
-            # non-provider .env config) then strip provider secrets per upstream
-            # SECURITY.md §2.3: cron scripts must NOT inherit Hermes provider env
-            # (anti-exfiltration). Our no_agent scripts (evolution_watchdog/funnel)
-            # don't read provider keys from env, so this is safe.
-            env=_sanitize_subprocess_env(run_env),
+            env=_script_env,
             **popen_kwargs,
         )
         stdout = (result.stdout or "").strip()
@@ -5120,14 +5122,30 @@ def tick(
                     with _running_lock:
                         _running_job_ids.discard(j["id"])
 
-            # NOTE: upstream v2026.7.20 wraps this submit() in a try/except that
-            # releases the in-flight claim + finish_execution() on dispatch
-            # failure, keyed on an `_interpreter_shutting_down()` helper. The
-            # fork never adopted that helper (0 occurrences across this module,
-            # and every other upstream call site resolved to the fork's code in
-            # this merge), so importing only the handler here would NameError on
-            # the failure path. Keep the fork's simple dispatch.
-            return pool.submit(_run_and_release)
+            # Dispatch to the pool. A submit() that raises (executor rejected /
+            # interpreter shutting down) must not leave the in-flight claim stuck
+            # or the attempt open: release the running-guard, and finish the
+            # execution as a failed dispatch. Interpreter finalization ("cannot
+            # schedule new futures after interpreter shutdown") is a benign
+            # shutdown race — release the guard and exit quietly without recording
+            # a spurious failed attempt. (Fork adaptation of upstream v2026.7.20's
+            # dispatch-failure guard, inlined without its _interpreter_shutting_down
+            # helper, which the fork never adopted.)
+            try:
+                return pool.submit(_run_and_release)
+            except Exception as submit_exc:
+                with _running_lock:
+                    _running_job_ids.discard(job_id)
+                if isinstance(submit_exc, RuntimeError) and (
+                    "cannot schedule new futures" in str(submit_exc)
+                ):
+                    return None
+                finish_execution(
+                    execution["id"],
+                    success=False,
+                    error=f"Executor dispatch failed: {submit_exc}",
+                )
+                return None
 
         # Sequential pass for env-mutating (workdir) jobs.
         # Queued to a persistent single-thread pool so they run one at a time
