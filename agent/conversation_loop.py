@@ -2819,6 +2819,17 @@ def _run_conversation_impl(
                         )
                 
                 _retry.has_retried_429 = False  # Reset on success
+                # #1205 — Clear the cross-turn overload streak on a genuinely
+                # successful API call. A real response (bytes back) proves the
+                # provider is no longer overloaded, so the persistent-overload
+                # breaker must not carry a stale streak into future turns and
+                # eager-fail-over a recovered provider. Without this, transient
+                # 503s that each recover after one backoff still accumulate the
+                # streak across a long healthy session until it crosses the
+                # >=3 breaker and thrashes providers. Mirrors how
+                # _consecutive_stale_streams resets when a call completes.
+                if getattr(agent, "_cross_turn_overload_hits", 0):
+                    agent._cross_turn_overload_hits = 0
                 # Note: don't clear the retry buffer here — an "API call
                 # success" only means we got bytes back, not that we got
                 # usable content. Empty responses still loop through the
@@ -3882,6 +3893,13 @@ def _run_conversation_impl(
                             _retry.consecutive_rate_limit_hits = 0
                             _retry.consecutive_overload_hits = 0
                             _retry.consecutive_timeout_hits = 0
+                            # #1205 — The cross-turn overload streak measured the
+                            # PREVIOUS provider; after failover the new provider
+                            # starts fresh. Not clearing it let a stale streak
+                            # trip the breaker on the new provider's first single
+                            # 503, thrashing through the fallback chain. Mirrors
+                            # _consecutive_stale_streams reset on provider swap.
+                            agent._cross_turn_overload_hits = 0
                             continue
 
                 # ── Auth-failure provider failover ───────────────────────
