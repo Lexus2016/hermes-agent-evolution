@@ -598,6 +598,25 @@ def main(argv: list[str]) -> int:
     except Exception:
         pass
 
+    # MAS-FIRE coordination fault-injection wiring (#1211) — run the fault
+    # injection suite each cycle as a periodic coordination health check so
+    # the harness is exercised from within the pipeline, not just standalone.
+    try:
+        from evolution_mas_fire import run_fault_suite
+
+        _results = run_fault_suite()
+        _summary = {
+            "total": len(_results),
+            "detected": sum(1 for r in _results if r.detected),
+            "silently_used": sum(1 for r in _results if not r.detected),
+        }
+        (evolution_dir / "mas-fire").mkdir(parents=True, exist_ok=True)
+        (evolution_dir / "mas-fire" / f"{date}.json").write_text(
+            json.dumps(_summary, indent=2, sort_keys=True), encoding="utf-8"
+        )
+    except Exception:
+        pass
+
     # Deterministic no_agent job: empty stdout = silent/healthy. Print a compact
     # one-liner only so the run log shows what was recorded.
     print(
