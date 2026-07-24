@@ -131,16 +131,90 @@ class TestCrossTurnOverloadCounter:
         agent._cross_turn_overload_hits = getattr(agent, "_cross_turn_overload_hits", 0) + 1
         assert agent._cross_turn_overload_hits == 3
 
-    def test_overload_counter_decays_on_success(self):
-        """Non-overloaded responses decay the counter by 1."""
+    def test_overload_counter_decays_on_non_overloaded_error(self):
+        """A non-overloaded ERROR response decays the counter by 1 (partial signal)."""
         agent = MagicMock()
         agent._cross_turn_overload_hits = 3
 
-        # Simulate decay logic
+        # Simulate decay logic (else branch of the overload tracker)
         _ct_oh = getattr(agent, "_cross_turn_overload_hits", 0)
         if _ct_oh > 0:
             agent._cross_turn_overload_hits = max(0, _ct_oh - 1)
         assert agent._cross_turn_overload_hits == 2
+
+
+# ── #1205 (regression): cross-turn overload streak must RECOVER ────────
+#
+# The prior fix incremented _cross_turn_overload_hits and decayed it by 1
+# only on a non-overloaded ERROR. It was never reset on a genuinely
+# successful API call, nor on provider swap. So transient 503s that each
+# recover after one backoff accumulated the streak across a long healthy
+# session until it crossed the >=3 breaker and thrashed providers — and a
+# stale streak carried into a freshly-swapped provider. These tests pin the
+# recovery path: a real response, or a failover, clears the streak to 0.
+
+class TestCrossTurnOverloadRecovery:
+    """The cross-turn overload streak must expire so a recovered provider is
+    not blocked forever (matches the _consecutive_stale_streams contract)."""
+
+    def test_streak_reaches_breaker_threshold_on_persistent_overload(self):
+        """Three consecutive overloads with no success cross the >=3 breaker."""
+        agent = MagicMock()
+        agent._cross_turn_overload_hits = 0
+        for _ in range(3):
+            agent._cross_turn_overload_hits = (
+                getattr(agent, "_cross_turn_overload_hits", 0) + 1
+            )
+        # This is the exact gate from conversation_loop.py's fallback decision.
+        assert getattr(agent, "_cross_turn_overload_hits", 0) >= 3
+
+    def test_streak_resets_to_zero_on_successful_call(self):
+        """A genuinely successful API call clears the streak fully (recovery).
+
+        Mirrors the reset added at the retry-loop success exit — a real
+        response (bytes back) proves the provider is not overloaded, so the
+        breaker must not carry a stale streak into future turns.
+        """
+        agent = MagicMock()
+        agent._cross_turn_overload_hits = 4  # accumulated across turns
+
+        # Simulate the success-exit reset from conversation_loop.py.
+        if getattr(agent, "_cross_turn_overload_hits", 0):
+            agent._cross_turn_overload_hits = 0
+
+        assert agent._cross_turn_overload_hits == 0
+        # After recovery, a single fresh 503 must NOT immediately trip the
+        # >=3 breaker — the provider gets a clean backoff-and-retry again.
+        agent._cross_turn_overload_hits = (
+            getattr(agent, "_cross_turn_overload_hits", 0) + 1
+        )
+        assert getattr(agent, "_cross_turn_overload_hits", 0) < 3
+
+    def test_streak_resets_to_zero_on_failover(self):
+        """Provider swap clears the streak — it measured the OLD provider."""
+        agent = MagicMock()
+        agent._cross_turn_overload_hits = 5
+
+        # Simulate the fallback-activation reset from conversation_loop.py.
+        agent._cross_turn_overload_hits = 0
+
+        assert agent._cross_turn_overload_hits == 0
+
+    def test_reset_sites_are_wired_into_the_retry_loop(self):
+        """Guard: both recovery resets stay wired in conversation_loop.py.
+
+        An inline-simulation test cannot catch someone deleting the actual
+        reset line, so assert the source contains the reset at both the
+        success-exit and the failover-activation sites.
+        """
+        from pathlib import Path
+        import agent.conversation_loop as cl
+
+        src = Path(cl.__file__).read_text(encoding="utf-8")
+        # Success-exit reset lives right after the has_retried_429 reset.
+        assert "_retry.has_retried_429 = False  # Reset on success" in src
+        # Both recovery sites set the cross-turn streak back to 0.
+        assert src.count("agent._cross_turn_overload_hits = 0") >= 2
 
 
 # ── #1243: multi-shot refusal recovery ────────────────────────────────
