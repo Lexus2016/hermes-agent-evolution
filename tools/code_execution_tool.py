@@ -1685,6 +1685,22 @@ def execute_code(
             # Surface stderr in output so the LLM sees the traceback
             if stderr_text:
                 result["output"] = stdout_text + "\n--- stderr ---\n" + stderr_text
+            # When a package is missing, append the actionable suggestion to
+            # the output field so the LLM sees it immediately (the suggestion
+            # is also in the JSON dict, but models often only read "output").
+            # This prevents the 6-deep ModuleNotFoundError spiral where the
+            # agent retries the same import repeatedly instead of installing
+            # the package. Use terminal() to install, NOT execute_code.
+            if diag.get("classification") == "missing_package":
+                pkg = diag.get("missing_package", "")
+                result["output"] += (
+                    f"\n\n⚠ Missing package '{pkg}' in the execute_code sandbox. "
+                    f"The execute_code subprocess uses a separate Python interpreter "
+                    f"({_child_python}) that may not share the main runtime's packages. "
+                    f"Use the **terminal** tool to install it before rerunning:\n"
+                    f"  uv pip install --python={_child_python} {pkg}\n"
+                    f"Then retry the script."
+                )
 
         return json.dumps(result, ensure_ascii=False)
 
