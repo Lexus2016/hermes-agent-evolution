@@ -690,6 +690,65 @@ def main(argv: list[str]) -> int:
     except Exception:
         pass
 
+    # Selective memory addition gate (#1270) — evaluate the pipeline's own
+    # artifacts (research reports, implementation logs) against the quality +
+    # history-based-deletion gate from the ACL 2026 memory-management paper.
+    # The funnel is the natural call site: it has the cycle's analysis report
+    # (selected proposals with impact scores) and runs every cycle. Lazy import;
+    # never let it break the funnel job.
+    try:
+        from evolution_memory_gate import evaluate as _memory_gate_evaluate
+
+        # Load the analysis report to get the selected proposals with their
+        # impact scores — these are the potential memory records the gate
+        # evaluates for admission to long-term storage.
+        _analysis = _load_json(evolution_dir / "analysis" / f"{date}.json")
+        _selected_list: list = []
+        if isinstance(_analysis, dict):
+            _selected_list = _analysis.get("selected_for_implementation") or []
+        _mg_records = []
+        for _sel in _selected_list if isinstance(_selected_list, list) else []:
+            if not isinstance(_sel, dict):
+                continue
+            try:
+                _issue_n = int(_sel.get("issue_number", 0))
+                _impact = float(_sel.get("impact_score", 0.0))
+            except (TypeError, ValueError):
+                continue
+            _mg_records.append({
+                "record_id": f"issue-{_issue_n}",
+                "quality_score": _impact,
+                "content_summary": _sel.get("title", ""),
+                "source_stage": "analysis",
+            })
+        _mg_payload = {
+            "records": _mg_records,
+            "quality_threshold": 0.5,
+            "quarantined_ids": [],
+            "retrieval_log": [],
+            "deletion": {"min_retrievals": 3, "utility_threshold": 0.4},
+            "misaligned": {"min_retrievals": 2, "outcome_threshold": 0.3},
+        }
+        _mg_report = _memory_gate_evaluate(_mg_payload)
+        (evolution_dir / "memory-gate").mkdir(parents=True, exist_ok=True)
+        (evolution_dir / "memory-gate" / f"{date}.json").write_text(
+            json.dumps(_mg_report, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        _mg_summary = _mg_report.get("summary", {})
+        if (
+            _mg_summary.get("rejected", 0) > 0
+            or _mg_summary.get("deletion_candidates", 0) > 0
+        ):
+            logger.info(
+                "memory-gate[%s]: admitted=%d rejected=%d deletion_candidates=%d",
+                date,
+                _mg_summary.get("admitted", 0),
+                _mg_summary.get("rejected", 0),
+                _mg_summary.get("deletion_candidates", 0),
+            )
+    except Exception as _mg_exc:
+        logger.warning("Memory gate failed (non-fatal): %s", _mg_exc)
+
     # Deterministic no_agent job: empty stdout = silent/healthy. Print a compact
     # one-liner only so the run log shows what was recorded.
     print(

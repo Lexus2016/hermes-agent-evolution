@@ -138,3 +138,13 @@ UNtrusted input (indirect prompt injection), and this chain can reach code, so:
 Upstream: `evolution-research` (which hands off a research sub-task). Downstream:
 `scripts/evolution_evaluator.py` (scores the collected candidates) and the #301
 optimizer loop (which iterates on the evaluator's verdict).
+
+### Selective memory addition gate (#1270)
+
+The funnel (`scripts/evolution_funnel.py`) runs the selective memory gate each
+cycle via `scripts/evolution_memory_gate.py`. The gate evaluates the cycle's
+selected proposals as potential memory records — refusing to admit artifacts
+below the quality threshold and flagging history-based deletion candidates
+(records retrieved multiple times with poor downstream utility). Results land
+in `evolution/memory-gate/<date>.json`. The gate runs as part of the existing
+funnel cron (`cron/evolution/funnel.yaml`), so no separate cron entry is needed.
