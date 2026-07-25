@@ -690,6 +690,51 @@ def main(argv: list[str]) -> int:
     except Exception:
         pass
 
+    # Tool-use competency diagnostic rubric (#1268) — score the cycle's
+    # tool-call traces across five MCP-Atlas dimensions (discovery,
+    # parameterization, syntax, error recovery, efficiency). The funnel is the
+    # natural call site: trajectory logs are already written each cycle to the
+    # trajectories/ dir. This scans for the cycle's trajectory files, converts
+    # entries to the rubric's ToolCall format, and scores them. Lazy import;
+    # never let it break the funnel job.
+    try:
+        from evolution_tooluse_rubric import evaluate as _rubric_evaluate
+
+        _traj_dir = evolution_dir / "trajectories"
+        _rubric_calls: list[dict[str, Any]] = []
+        if _traj_dir.is_dir():
+            for _tf in sorted(_traj_dir.glob(f"{date}*.json")):
+                _tdata = _load_json(_tf)
+                if not isinstance(_tdata, dict):
+                    continue
+                for _entry in _tdata.get("entries", []):
+                    if not isinstance(_entry, dict):
+                        continue
+                    _status = str(_entry.get("result_status", ""))
+                    _rubric_calls.append({
+                        "tool": str(_entry.get("tool", "")),
+                        "args": _entry.get("args_summary", {}),
+                        "succeeded": _status not in ("failure", "error"),
+                        "error": ""
+                        if _status not in ("failure", "error")
+                        else str(_entry.get("result_summary", "")),
+                        "turn": 0,
+                    })
+        _rubric_report = _rubric_evaluate({"calls": _rubric_calls})
+        (evolution_dir / "tooluse-rubric").mkdir(parents=True, exist_ok=True)
+        (evolution_dir / "tooluse-rubric" / f"{date}.json").write_text(
+            json.dumps(_rubric_report, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        _overall = _rubric_report.get("scores", {}).get("overall", 1.0)
+        if _overall < 0.6:
+            logger.warning(
+                "tooluse-rubric[%s]: overall competency %.3f — below 0.6 threshold",
+                date,
+                _overall,
+            )
+    except Exception as _rubric_exc:
+        logger.warning("Tool-use rubric failed (non-fatal): %s", _rubric_exc)
+
     # Deterministic no_agent job: empty stdout = silent/healthy. Print a compact
     # one-liner only so the run log shows what was recorded.
     print(

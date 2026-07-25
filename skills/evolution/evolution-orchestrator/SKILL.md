@@ -138,3 +138,13 @@ UNtrusted input (indirect prompt injection), and this chain can reach code, so:
 Upstream: `evolution-research` (which hands off a research sub-task). Downstream:
 `scripts/evolution_evaluator.py` (scores the collected candidates) and the #301
 optimizer loop (which iterates on the evaluator's verdict).
+
+### Tool-use competency diagnostic rubric (#1268)
+
+The funnel (`scripts/evolution_funnel.py`) runs the tool-use competency rubric
+each cycle via `scripts/evolution_tooluse_rubric.py`. The rubric scores the
+cycle's tool-call traces (from `evolution/trajectories/`) across five MCP-Atlas
+dimensions: discovery, parameterization, syntax, error recovery, and efficiency.
+Results land in `evolution/tooluse-rubric/<date>.json`; low competency scores are
+logged as warnings. The rubric runs as part of the existing funnel cron
+(`cron/evolution/funnel.yaml`), so no separate cron entry is needed.
