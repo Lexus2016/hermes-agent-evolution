@@ -690,6 +690,89 @@ def main(argv: list[str]) -> int:
     except Exception:
         pass
 
+    # Adversarial evaluator floor test (#1267) — run the null-agent baseline
+    # against the pipeline's own trusted metrics each cycle so any metric a
+    # no-op / empty-patch / random / injection / state-tampering agent can pass
+    # is flagged as untrustworthy before analysis acts on it. The funnel is the
+    # natural call site: it already aggregates metrics.jsonl per-cycle and has
+    # access to every stage's output. Lazy import; never let it break the job.
+    try:
+        from evolution_adversarial_floor_test import evaluate as _floor_test_evaluate
+
+        _ft_payload = {
+            # The pipeline's trusted metrics with their adversarial floor
+            # parameters.  ``kind`` controls which null strategy can game them:
+            #   submission_count — an empty-patch agent beats it (FieldWorkArena
+            #     "validate() only checks the last message" failure)
+            #   binary — chance level is 0.5 of ceiling (random-agent floor)
+            #   continuous — floor=0, ceiling=1 (ratio/count metrics)
+            "metrics": [
+                {
+                    "name": "merge_success",
+                    "floor": 0.0,
+                    "ceiling": 1.0,
+                    "kind": "binary",
+                    # The funnel counts GitHub-merged PRs (authoritative), so a
+                    # no-op / empty-patch agent cannot inflate it.
+                    "uses_llm_judge": False,
+                    "judge_delimits_agent_content": True,
+                    "evaluator_shares_agent_writes": False,
+                },
+                {
+                    "name": "selection_count",
+                    "floor": 0.0,
+                    "ceiling": 1.0,
+                    "kind": "submission_count",
+                    # A metric that counts proposals submitted, not accepted — an
+                    # empty-patch / spam agent beats it. This is intentionally
+                    # flagged as gameable so analysis does not trust raw volume.
+                    "uses_llm_judge": False,
+                    "judge_delimits_agent_content": True,
+                    "evaluator_shares_agent_writes": False,
+                },
+                {
+                    "name": "reject_rate",
+                    "floor": 0.0,
+                    "ceiling": 1.0,
+                    "kind": "continuous",
+                    "uses_llm_judge": False,
+                    "judge_delimits_agent_content": True,
+                    "evaluator_shares_agent_writes": False,
+                },
+                {
+                    "name": "mock_ratio",
+                    "floor": 0.0,
+                    "ceiling": 1.0,
+                    "kind": "continuous",
+                    "uses_llm_judge": False,
+                    "judge_delimits_agent_content": True,
+                    "evaluator_shares_agent_writes": False,
+                },
+            ],
+            # Evaluator-isolation check: the merge verifier (integration stage)
+            # runs in a separate subagent/context from the implementer.  The
+            # funnel is the merge-verification observer, NOT the implementer.
+            "isolation": {
+                "verifier_context": "evolution-integration",
+                "implementer_context": "evolution-implementation",
+            },
+        }
+        _ft_report = _floor_test_evaluate(_ft_payload)
+        (evolution_dir / "floor-test").mkdir(parents=True, exist_ok=True)
+        (evolution_dir / "floor-test" / f"{date}.json").write_text(
+            json.dumps(_ft_report, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        if not _ft_report.get("all_passed", True):
+            _failed = _ft_report.get("failed_metrics", [])
+            logger.warning(
+                "floor-test[%s]: %d metric(s) failed the null-agent baseline: %s",
+                date,
+                len(_failed),
+                ", ".join(_failed) if _failed else "(unknown)",
+            )
+    except Exception as _ft_exc:
+        logger.warning("Floor test failed (non-fatal): %s", _ft_exc)
+
     # Deterministic no_agent job: empty stdout = silent/healthy. Print a compact
     # one-liner only so the run log shows what was recorded.
     print(

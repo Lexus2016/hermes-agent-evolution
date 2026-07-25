@@ -138,3 +138,15 @@ UNtrusted input (indirect prompt injection), and this chain can reach code, so:
 Upstream: `evolution-research` (which hands off a research sub-task). Downstream:
 `scripts/evolution_evaluator.py` (scores the collected candidates) and the #301
 optimizer loop (which iterates on the evaluator's verdict).
+
+### Adversarial floor test (#1267)
+
+The funnel (`scripts/evolution_funnel.py`) runs the adversarial evaluator floor
+test each cycle via `scripts/evolution_adversarial_floor_test.py`. For every
+metric the pipeline trusts, the floor test runs a null-agent baseline (no-op,
+empty-patch, random, prompt-injection, state-tampering) and asserts the score is
+at the floor — a metric a null agent can pass is not a metric, it is a
+vulnerability. Results land in `evolution/floor-test/<date>.json`; failing
+metrics are logged as a warning so `evolution-analysis` knows which metrics to
+discount. The floor test runs as part of the existing funnel cron
+(`cron/evolution/funnel.yaml`), so no separate cron entry is needed.
