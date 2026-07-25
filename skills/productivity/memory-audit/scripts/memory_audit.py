@@ -36,7 +36,7 @@ from typing import List, Optional, Tuple
 # is a standalone script (it runs via cron, not inside the agent), so it
 # reads no config. The caller can override via CLI flags.  If you changed
 # your memory limits in config.yaml, pass them explicitly.
-DEFAULT_MEMORY_CHAR_LIMIT = 2200
+DEFAULT_MEMORY_CHAR_LIMIT = 8000
 DEFAULT_USER_CHAR_LIMIT = 1375
 
 # ── Secret detection ───────────────────────────────────────────────────
