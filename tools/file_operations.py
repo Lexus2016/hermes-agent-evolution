@@ -1736,6 +1736,42 @@ class ShellFileOperations(FileOperations):
     # PATCH Implementation (Replace Mode)
     # =========================================================================
 
+    def _diagnose_read_failure(self, path: str) -> str:
+        """Build a distinct, classifiable error for a patch read failure.
+
+        ``patch_replace`` reads the target via ``cat <path> 2>/dev/null``,
+        which discards *why* the read failed. Before #1326, every miss
+        (missing file, directory, permission error) collapsed to the same
+        generic ``"Failed to read file: {path}"`` string. That classifies
+        as ``read_error`` (never ``not_found``), so the agent never
+        learned that ``write_file`` — not ``patch`` — is the right tool
+        to create a missing file. File-not-found was the dominant
+        patch-failure class (68% of patch errors). This probe runs ONLY
+        after a failed read (happy path unchanged) and produces a
+        ``classify_file_error``-friendly message carrying a create-on-miss
+        hint when the file is absent.
+        """
+        esc = self._escape_shell_arg(path)
+        # Does the path exist at all?  ``-e`` follows symlinks; combined
+        # with ``-d`` below it cleanly separates missing / directory /
+        # unreadable-file.
+        exists = self._exec(f"test -e {esc} && echo yes || echo no")
+        if (exists.stdout or "").strip() == "no":
+            # Reuse the rich not-found suggestion (similar files / nearest
+            # ancestor listing) so the message classifies as ``not_found``
+            # and tells the agent how to recover.
+            suggest = self._suggest_similar_files(path).error
+            return suggest or f"File not found: {path}"
+        # Path exists but cat failed — is it a directory?
+        is_dir = self._exec(f"test -d {esc} && echo yes || echo no")
+        if (is_dir.stdout or "").strip() == "yes":
+            return f"Cannot patch a directory: {path} is a directory, not a file."
+        # Exists and is a regular file — most likely a permission error.
+        return (
+            f"Permission denied reading file: {path}. Check read permissions "
+            f"before retrying — do not repeat the same patch blindly."
+        )
+
     def patch_replace(
         self, path: str, old_string: str, new_string: str, replace_all: bool = False
     ) -> PatchResult:
@@ -1764,7 +1800,19 @@ class ShellFileOperations(FileOperations):
         read_result = self._exec(read_cmd)
 
         if read_result.exit_code != 0:
-            return PatchResult(error=f"Failed to read file: {path}")
+            # #1326 — The old ``cat ... 2>/dev/null`` swallowed the reason
+            # the read failed, so a missing file, a directory, and a
+            # permission error all produced the identical generic
+            # "Failed to read file: {path}". That string classifies as
+            # ``read_error`` (never ``not_found``), so the agent never
+            # learned that ``write_file`` is the right tool to create the
+            # file — it kept retrying patch against a non-existent path.
+            # File-not-found was the dominant patch-failure class (68%
+            # of patch errors across recent sessions). Probe the reason
+            # here so the error classifies distinctly and carries a
+            # create-on-miss hint. The happy path (file exists) is
+            # unchanged: these probes only run on failure.
+            return PatchResult(error=self._diagnose_read_failure(path))
 
         content = read_result.stdout
         # Strip a leading UTF-8 BOM before matching so the fuzzy matcher and
