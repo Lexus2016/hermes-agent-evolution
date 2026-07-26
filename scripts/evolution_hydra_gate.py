@@ -149,9 +149,70 @@ def _check_halt(evo_dir: Path) -> Tuple[bool, Path]:
         return False, halt_file
 
 
+# Verdicts that mark a dispatched stage pair as fully adjudicated for the day —
+# re-evaluating such a pair every tick is a no-op that wastes orchestrator wake-ups
+# (#1305: integration→upstream-sync fired 20+ false-positive wake-ups/day).
+_TERMINAL_VERDICTS = frozenset({"STEADY_STATE", "CONSUMED"})
+
+
+def _dispatch_ledger_path(evo_dir: Path) -> Path:
+    """Path to today's hydra dispatch ledger (jsonl), one JSON object per line.
+
+    The orchestrator appends a record per dispatch tick; each record carries at
+    least ``stage`` (the dispatched stage), ``verdict`` (STEADY_STATE / CONSUMED /
+    ...) and a timestamp. The ledger is optional — when absent we fall back to
+    the raw-mtime freshness logic.
+    """
+    return evo_dir / f"hydra-dispatch-{_today()}.jsonl"
+
+
+def _load_terminal_verdicts(evo_dir: Path) -> Dict[str, str]:
+    """Return a mapping ``"up→down" -> verdict`` for every pipeline pair that the
+    orchestrator already adjudicated with a terminal verdict today.
+
+    Reads ``hydra-dispatch-<date>.jsonl``. Each line is a JSON object shaped like
+    ``{"stage": "integration→upstream-sync", "verdict": "STEADY_STATE", ...}`` or
+    ``{"edge": "integration→upstream-sync", ...}``. Lines that do not parse or
+    lack a verdict are skipped silently — the gate must fail OPEN (wake) rather
+    than crash, and a malformed ledger line is not grounds to skip a real wake.
+    """
+    ledger = _dispatch_ledger_path(evo_dir)
+    terminal: Dict[str, str] = {}
+    try:
+        with ledger.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                verdict = rec.get("verdict")
+                if verdict not in _TERMINAL_VERDICTS:
+                    continue
+                # Accept either ``stage`` or ``edge`` as the pair key.
+                pair = rec.get("stage") or rec.get("edge") or rec.get("pair")
+                if not pair:
+                    continue
+                terminal[pair] = verdict
+    except FileNotFoundError:
+        pass
+    except OSError:
+        # Unreadable ledger → treat as empty (fail open).
+        pass
+    return terminal
+
+
 def _check_pool(evo_dir: Path) -> Dict[str, bool]:
     """Check all upstream→downstream pairs for staleness. Returns per-pair
-    freshness map."""
+    freshness map.
+
+    A pair that the orchestrator already resolved to a terminal verdict
+    (``STEADY_STATE`` / ``CONSUMED``) today is suppressed — it is a no-op to
+    re-dispatch it, and re-evaluating it produced 20+ false-positive wake-ups per
+    day (#1305).
+    """
     # Upstream → downstream pairs in the evolution pipeline
     pairs = [
         ("research", "issues"),  # new findings → need issues
@@ -162,10 +223,17 @@ def _check_pool(evo_dir: Path) -> Dict[str, bool]:
         ("integration", "upstream-sync"),  # new merges → need sync
     ]
 
+    terminal_verdicts = _load_terminal_verdicts(evo_dir)
+
     results: Dict[str, bool] = {}
     for up, down in pairs:
+        pair_key = f"{up}→{down}"
+        if pair_key in terminal_verdicts:
+            # Already adjudicated today with a terminal verdict — do not wake.
+            results[pair_key] = False
+            continue
         fresh = _has_upstream_freshness(evo_dir, up, down)
-        results[f"{up}→{down}"] = fresh
+        results[pair_key] = fresh
     return results
 
 
