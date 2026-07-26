@@ -32,8 +32,8 @@ class FakeBackend:
         ))
         return {"status": "PENDING", "event_id": "evt-test-123"}
 
-    def update(self, memory_id, text):
-        self.captured.append(("update", memory_id, text))
+    def update(self, memory_id, text, *, metadata=None):
+        self.captured.append(("update", memory_id, text, {"metadata": metadata}))
         return {"result": "Memory updated.", "memory_id": memory_id}
 
     def delete(self, memory_id):
@@ -134,8 +134,16 @@ class TestMem0UpdateDelete:
         result = json.loads(provider.handle_tool_call(
             "mem0_update", {"memory_id": "mem-1", "text": "updated fact"}
         ))
-        assert backend.captured[0][1] == "mem-1"
-        assert backend.captured[0][2] == "updated fact"
+        # Supersession path (#1289): mem0_update now stamps the old row with
+        # valid_until (via update metadata) AND appends a fresh entry (via
+        # add with supersedes pointer). captured[0] is the update call.
+        update_call = backend.captured[0]
+        assert update_call[0] == "update"
+        assert update_call[1] == "mem-1"
+        assert update_call[2] == "updated fact"
+        # metadata kwarg carries the valid_until supersession stamp.
+        assert update_call[3]["metadata"] is not None
+        assert "valid_until" in update_call[3]["metadata"]
         assert result["result"] == "Memory updated."
         assert result["memory_id"] == "mem-1"
 
@@ -179,7 +187,7 @@ class TestMem0ErrorHandling:
 
     def test_update_404_no_circuit_breaker(self, monkeypatch):
         backend = FakeBackend()
-        backend.update = lambda mid, text: (_ for _ in ()).throw(Exception("404 Not Found"))
+        backend.update = lambda mid, text, *, metadata=None: (_ for _ in ()).throw(Exception("404 Not Found"))
         provider = self._make_provider(monkeypatch, backend)
         result = json.loads(provider.handle_tool_call(
             "mem0_update", {"memory_id": "bad-id", "text": "x"}
@@ -202,7 +210,7 @@ class TestMem0ErrorHandling:
         class ValidationError(Exception):
             pass
         backend = FakeBackend()
-        backend.update = lambda mid, text: (_ for _ in ()).throw(
+        backend.update = lambda mid, text, *, metadata=None: (_ for _ in ()).throw(
             ValidationError('{"error":"memory_id should be a valid UUID"}')
         )
         provider = self._make_provider(monkeypatch, backend)
@@ -228,7 +236,7 @@ class TestMem0ErrorHandling:
 
     def test_update_5xx_trips_circuit_breaker(self, monkeypatch):
         backend = FakeBackend()
-        backend.update = lambda mid, text: (_ for _ in ()).throw(Exception("500 Internal Server Error"))
+        backend.update = lambda mid, text, *, metadata=None: (_ for _ in ()).throw(Exception("500 Internal Server Error"))
         provider = self._make_provider(monkeypatch, backend)
         provider.handle_tool_call("mem0_update", {"memory_id": "mem-1", "text": "x"})
         assert provider._consecutive_failures == 1
@@ -519,7 +527,11 @@ class TestMem0WriteMetadata:
         provider = self._make_provider("telegram")
         provider.handle_tool_call("mem0_add", {"content": "user likes dark mode"})
         call = provider._backend.captured[-1]
-        assert call[2]["metadata"] == {"channel": "telegram"}
+        # _write_metadata layers temporal validity fields (#1289) on top of
+        # the channel tag; assert the channel survives the merge rather than
+        # freezing the exact dict (which now also carries valid_from).
+        assert call[2]["metadata"]["channel"] == "telegram"
+        assert "valid_from" in call[2]["metadata"]
 
     def test_sync_turn_passes_channel_metadata(self):
         provider = self._make_provider("discord")
@@ -529,7 +541,7 @@ class TestMem0WriteMetadata:
             provider._sync_thread.join(timeout=5.0)
         adds = [c for c in provider._backend.captured if c[0] == "add"]
         assert adds, "expected an add call from sync_turn"
-        assert adds[-1][2]["metadata"] == {"channel": "discord"}
+        assert adds[-1][2]["metadata"]["channel"] == "discord"
 
 
 class _SentinelBackend:
