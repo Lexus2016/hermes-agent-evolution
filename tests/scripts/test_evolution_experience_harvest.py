@@ -805,3 +805,89 @@ class TestLock:
         assert rc == 0
         assert "another bank operation is running" in capsys.readouterr().out
         assert _entries() == []
+
+
+class TestImportFallback:
+    """The cron installs this script into HERMES_HOME/scripts where the
+    ``evolution`` namespace package is absent.  The import must degrade
+    gracefully (issue #1304) rather than crashing every tick with
+    ``ModuleNotFoundError``.
+    """
+
+    def _reload_with_evolution_blocked(self, tmp_path, monkeypatch):
+        """Reload ``evolution_experience_harvest`` with the ``evolution``
+        import blocked, returning the reloaded module with the fallback
+        ``ErrorClassifier`` active.
+
+        Patches ``builtins.__import__`` to raise ``ImportError`` for the
+        ``evolution`` package — the exact failure the installed cron sees —
+        then reloads.  A finalizer restores the real ``ErrorClassifier`` by
+        reloading once more with the import unblocked, so sibling tests are
+        unaffected.
+        """
+        import builtins
+        import importlib
+        from unittest import mock
+
+        real_import = builtins.__import__
+
+        def blocking_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "evolution" or name.startswith("evolution."):
+                raise ImportError(f"No module named '{name.split('.')[0]}'")
+            return real_import(name, globals, locals, fromlist, level)
+
+        removed = {
+            name: sys.modules.pop(name)
+            for name in list(sys.modules)
+            if name == "evolution" or name.startswith("evolution.")
+        }
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        with mock.patch("builtins.__import__", side_effect=blocking_import):
+            reloaded = importlib.reload(eh)
+
+        def _restore():
+            sys.modules.update(removed)
+            try:
+                importlib.reload(eh)
+            except Exception:
+                pass
+
+        reloaded._restore_fn = _restore  # type: ignore[attr-defined]
+        return reloaded
+
+    def test_fallback_classifier_returns_unknown(self, tmp_path, monkeypatch):
+        reloaded = self._reload_with_evolution_blocked(tmp_path, monkeypatch)
+        try:
+            category = reloaded.ErrorClassifier().classify("Connection refused")
+            assert category.value == "unknown"
+        finally:
+            reloaded._restore_fn()
+
+    def test_harvest_runs_with_fallback_classifier(self, tmp_path, monkeypatch):
+        """A full harvest pass must not raise even when only the fallback
+        classifier is available — entries are still emitted with
+        ``failure_category='unknown'``."""
+        reloaded = self._reload_with_evolution_blocked(tmp_path, monkeypatch)
+        try:
+            db, db_path = _make_db(tmp_path)
+            _add_session(
+                db,
+                "s-err",
+                [
+                    _user(),
+                    {
+                        "role": "tool",
+                        "content": "Error: connection refused",
+                        "tool_name": "web_search",
+                    },
+                    _assistant("I apologize, but I encountered an error."),
+                ],
+            )
+            db.close()
+            summary = reloaded.run_harvest(db_path=db_path, now=NOW)
+            assert summary["entries_appended"] == 1
+            entries = _entries()
+            assert entries
+            assert entries[-1].failure_category == "unknown"
+        finally:
+            reloaded._restore_fn()
