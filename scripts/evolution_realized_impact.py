@@ -90,17 +90,25 @@ def record_merge(
     merged_at: str,
     predicted_impact: float,
     target: str,
+    baseline_failure_rate: Optional[Dict[str, float]] = None,
 ) -> None:
-    """Record a merge event in the realized-impact ledger."""
-    append_ledger_record(
-        ledger_file,
-        {
-            "issue": issue,
-            "merged_at": merged_at,
-            "predicted_impact": predicted_impact,
-            "target": target,
-        },
-    )
+    """Record a merge event in the realized-impact ledger.
+
+    ``baseline_failure_rate`` (#1324) captures the per-tool failure rate at
+    merge time (``{tool: failures_per_session}``) so a later verdict can compare
+    the post-merge rate against it — not against the raw count, which grows
+    with session volume and produces false regressions.  Omitted on legacy
+    records (treated as "no baseline — fall back to raw-count comparison").
+    """
+    record: Dict[str, Any] = {
+        "issue": issue,
+        "merged_at": merged_at,
+        "predicted_impact": predicted_impact,
+        "target": target,
+    }
+    if baseline_failure_rate is not None:
+        record["baseline_failure_rate"] = baseline_failure_rate
+    append_ledger_record(ledger_file, record)
 
 
 def record_verdict(
@@ -131,6 +139,65 @@ def record_verdict(
 # recording a verdict and act on it — that wiring makes the gate live, not
 # dead code. A flat/rising signal post-merge keeps the issue open for a
 # focused regression rather than silently closing it.
+
+# Regression threshold for the session-normalized rate comparison (#1324).
+# A verdict should flip to ``regressed`` ONLY if the per-session failure rate
+# increased by more than this fraction relative to the baseline, not merely
+# because the raw count rose with the session denominator.
+REGRESSION_RATE_THRESHOLD = 0.20
+
+
+def compare_failure_rate(
+    baseline: Optional[Dict[str, float]],
+    current: Dict[str, float],
+    threshold: float = REGRESSION_RATE_THRESHOLD,
+) -> Dict[str, Any]:
+    """Session-normalized failure-rate comparison (#1324).
+
+    Replaces the raw-count comparison that produced false ``regressed``
+    verdicts whenever the session volume grew.  Returns a per-tool verdict:
+
+    * ``improved``  — current rate is LOWER than baseline (the fix helped).
+    * ``flat``      — rate within ±``threshold`` of baseline (no real change).
+    * ``regressed`` — current rate exceeds baseline by more than ``threshold``
+      (a genuine regression, not a denominator artifact).
+
+    When ``baseline`` is None (legacy merge record, pre-#1324) or empty, every
+    tool is reported as ``no-baseline`` so callers know to fall back to raw
+    counts for that issue rather than guessing.  Tools present in ``current``
+    but absent from ``baseline`` are ``new`` (no comparison possible).
+    """
+    results: Dict[str, Dict[str, Any]] = {}
+    if not baseline:
+        for tool, rate in current.items():
+            results[tool] = {"verdict": "no-baseline", "current_rate": rate}
+        return {"per_tool": results, "any_regressed": False}
+
+    for tool, current_rate in current.items():
+        base_rate = baseline.get(tool)
+        if base_rate is None or base_rate == 0:
+            verdict = "new" if tool not in baseline else "improved-or-new"
+            results[tool] = {
+                "verdict": verdict,
+                "baseline_rate": base_rate,
+                "current_rate": current_rate,
+            }
+            continue
+        delta = (current_rate - base_rate) / base_rate  # signed fraction
+        if delta > threshold:
+            v = "regressed"
+        elif delta < -threshold:
+            v = "improved"
+        else:
+            v = "flat"
+        results[tool] = {
+            "verdict": v,
+            "baseline_rate": base_rate,
+            "current_rate": current_rate,
+            "delta_pct": round(delta, 4),
+        }
+    any_regressed = any(r["verdict"] == "regressed" for r in results.values())
+    return {"per_tool": results, "any_regressed": any_regressed}
 
 
 def signal_verified(records: List[Dict[str, Any]], issue: int) -> bool:
@@ -316,11 +383,33 @@ def main(argv: List[str]) -> int:
         except (IndexError, ValueError):
             print(
                 "usage: evolution_realized_impact.py record-merge "
-                "<issue> <YYYY-MM-DD> <predicted_impact> <target>",
+                "<issue> <YYYY-MM-DD> <predicted_impact> <target> "
+                "[baseline_failure_rate_json]",
                 file=sys.stderr,
             )
             return 2
-        record_merge(ledger_file, issue, merged_at, predicted, target)
+        baseline_failure_rate = None
+        if len(args) > 5:
+            # Optional #1324: per-tool baseline rates as JSON
+            # (e.g. '{"terminal": 0.12, "read_file": 0.05}').
+            try:
+                baseline_failure_rate = json.loads(args[5])
+                if not isinstance(baseline_failure_rate, dict):
+                    raise ValueError("baseline must be a JSON object")
+            except (json.JSONDecodeError, ValueError) as exc:
+                print(
+                    f"[realized-impact] WARNING: ignoring invalid baseline "
+                    f"failure rate JSON: {exc}",
+                    file=sys.stderr,
+                )
+        record_merge(
+            ledger_file,
+            issue,
+            merged_at,
+            predicted,
+            target,
+            baseline_failure_rate=baseline_failure_rate,
+        )
         print(f"[realized-impact] recorded merge for issue #{issue}")
         return 0
 
@@ -341,6 +430,40 @@ def main(argv: List[str]) -> int:
         record_verdict(ledger_file, issue, verdict, verified_at, note)
         print(f"[realized-impact] recorded verdict for issue #{issue}")
         return 0
+
+    # Subcommand: compare session-normalized failure rates (#1324).
+    # Given an issue and the current digest's per-tool failure rates (JSON),
+    # compare against the baseline stored at merge time.  Prints per-tool
+    # verdicts and exits 0 if no tool regressed, 1 if any tool did.
+    if args and args[0] == "compare-rate":
+        try:
+            issue = int(args[1])
+            current_json = args[2]
+        except (IndexError, ValueError):
+            print(
+                "usage: evolution_realized_impact.py compare-rate "
+                "<issue> <current_rates_json>",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            current = json.loads(current_json)
+            if not isinstance(current, dict):
+                raise ValueError("current rates must be a JSON object")
+        except (json.JSONDecodeError, ValueError) as exc:
+            print(
+                f"[realized-impact] invalid current rates JSON: {exc}", file=sys.stderr
+            )
+            return 2
+        records = load_ledger(ledger_file)
+        baseline = None
+        for rec in reversed(records):
+            if rec.get("issue") == issue:
+                baseline = rec.get("baseline_failure_rate")
+                break
+        result = compare_failure_rate(baseline, current)
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 1 if result["any_regressed"] else 0
 
     # Subcommand: check the close-loop gate for an issue (#1140).
     # Invoked by the introspection skill right after record-verdict so the

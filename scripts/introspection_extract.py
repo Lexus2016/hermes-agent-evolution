@@ -397,14 +397,42 @@ def build_digest(
                     scanned += 1
                     _aggregate(_state_db_session_signals(msgs))
 
+    # ── Session-normalized failure rates (#1324) ────────────────────────────
+    # The raw ``tool_failures`` count grows whenever the session volume grows
+    # (more sessions → more failures even at a flat per-session rate).  Comparing
+    # raw counts across digest windows therefore produces false "regressed"
+    # verdicts.  Emit a per-tool ``failure_rate`` (failures / sessions_scanned)
+    # alongside the raw count so downstream consumers (realized-impact loop) can
+    # compare apples-to-apples.  Guard against zero sessions.
+    _sessions = max(scanned, 1)
+    tool_failures_by_rate = {
+        tool: round(count / _sessions, 4) for tool, count in failures.items()
+    }
+    # Also normalize the per-session spiral-depth so it is comparable across
+    # windows of different size (#1324 — same root cause).
+    repeated_rate = {
+        tool: {
+            "max_consecutive": info["max_consecutive"],
+            "sessions": info["sessions"],
+            "sessions_per_total": round(info["sessions"] / _sessions, 4),
+        }
+        for tool, info in repeated.items()
+    }
+
     return {
         "window_days": window_days,
         "sessions_scanned": scanned,
         "signals": {
             "tool_failures": dict(failures.most_common()),
+            # NEW (#1324): per-session rate so growing session volume no longer
+            # masquerades as a regression.  Failure rate = failures / sessions.
+            "tool_failure_rates": tool_failures_by_rate,
             "timeouts": timeouts,
+            "timeouts_per_session": round(timeouts / _sessions, 4),
             "refusals_or_access_denied": refusals,
+            "refusals_per_session": round(refusals / _sessions, 4),
             "repeated_tool_runs": repeated,
+            "repeated_tool_runs_normalized": repeated_rate,
             "provider_errors": dict(provider_errors.most_common()),
             "models_used": dict(models.most_common()),
         },
