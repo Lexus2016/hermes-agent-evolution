@@ -903,3 +903,101 @@ class _DeletedTestGitBaselineCheck:
     helper is restored or replaced.
     """
     pass
+
+
+# =========================================================================
+# #1326 — patch_replace file-not-found preflight
+# =========================================================================
+# Before #1326, ``cat <path> 2>/dev/null`` swallowed WHY the read failed, so
+# every miss (missing file / directory / permission error) collapsed to the
+# identical generic "Failed to read file: {path}". That string classifies as
+# ``read_error`` (never ``not_found``), so the agent never learned that
+# ``write_file`` — not ``patch`` — is the right tool to create the missing
+# file. File-not-found was the dominant patch-failure class (68% of errors).
+# These tests pin the new distinct-classification behavior.
+
+
+class TestPatchReplaceReadFailureClassification:
+    """patch_replace must distinguish missing-file / directory / permission
+    read failures and surface a create-on-miss hint, not a generic error."""
+
+    def test_missing_file_classifies_as_not_found(self, mock_env):
+        """A patch against a non-existent path must produce an error that
+        ``classify_file_error`` maps to ``not_found`` (with a write_file
+        recovery hint), NOT the old generic ``read_error``."""
+        target = "/tmp/does_not_exist_xyz_1326.py"
+
+        def side_effect(command, **kwargs):
+            # The initial ``cat <path> 2>/dev/null`` fails (file absent).
+            if command.startswith("cat ") and target in command:
+                return {"output": "", "returncode": 1}
+            # _diagnose_read_failure: ``test -e <path>`` → no (file absent).
+            if command.startswith("test -e ") and target in command:
+                return {"output": "no\n", "returncode": 0}
+            # _suggest_similar_files lists the parent dir — empty here.
+            if command.startswith("ls -1 "):
+                return {"output": "", "returncode": 1}
+            return {"output": "", "returncode": 0}
+
+        mock_env.execute.side_effect = side_effect
+        ops = ShellFileOperations(mock_env)
+        result = ops.patch_replace(target, "old", "new")
+        assert result.error is not None
+        # The message must carry "not found" so classify_file_error returns
+        # error_class="not_found" (not "read_error").
+        assert "not found" in result.error.lower()
+        d = result.to_dict()
+        assert d["error_class"] == "not_found"
+        # Recovery must steer the agent toward write_file (create-on-miss).
+        assert "write_file" in d["recovery"]
+
+    def test_directory_target_returns_clear_error(self, mock_env):
+        """Patching a directory must report 'is a directory', not a generic
+        read failure or a misleading 'not found'."""
+        target = "/tmp/some_dir_1326"
+
+        def side_effect(command, **kwargs):
+            # cat on a directory fails (EISDIR).
+            if command.startswith("cat ") and target in command:
+                return {"output": "", "returncode": 1}
+            # _diagnose_read_failure: path exists.
+            if command.startswith("test -e ") and target in command:
+                return {"output": "yes\n", "returncode": 0}
+            # ... and is a directory.
+            if command.startswith("test -d ") and target in command:
+                return {"output": "yes\n", "returncode": 0}
+            return {"output": "", "returncode": 0}
+
+        mock_env.execute.side_effect = side_effect
+        ops = ShellFileOperations(mock_env)
+        result = ops.patch_replace(target, "old", "new")
+        assert result.error is not None
+        assert "directory" in result.error.lower()
+        # Must NOT be classified as a plain read_error.
+        d = result.to_dict()
+        assert d["error_class"] != "read_error"
+
+    def test_permission_denied_classifies_distinctly(self, mock_env):
+        """A readable-path-but-unreadable-file failure should not collapse
+        to 'not found'; it should mention permissions."""
+        target = "/tmp/locked_1326.py"
+
+        def side_effect(command, **kwargs):
+            # cat fails (permission denied), but the file IS present.
+            if command.startswith("cat ") and target in command:
+                return {"output": "", "returncode": 1}
+            # _diagnose_read_failure: exists → yes.
+            if command.startswith("test -e ") and target in command:
+                return {"output": "yes\n", "returncode": 0}
+            # ... not a directory.
+            if command.startswith("test -d ") and target in command:
+                return {"output": "no\n", "returncode": 0}
+            return {"output": "", "returncode": 0}
+
+        mock_env.execute.side_effect = side_effect
+        ops = ShellFileOperations(mock_env)
+        result = ops.patch_replace(target, "old", "new")
+        assert result.error is not None
+        assert "permission" in result.error.lower()
+        # Distinct from the old generic "Failed to read file".
+        assert "failed to read file" != result.error.strip().lower()
