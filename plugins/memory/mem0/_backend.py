@@ -26,7 +26,7 @@ class Mem0Backend(ABC):
         ...
 
     @abstractmethod
-    def update(self, memory_id: str, text: str) -> dict:
+    def update(self, memory_id: str, text: str, *, metadata: dict | None = None) -> dict:
         ...
 
     @abstractmethod
@@ -71,7 +71,11 @@ class PlatformBackend(Mem0Backend):
             kwargs["metadata"] = metadata
         return self._client.add(messages, **kwargs)
 
-    def update(self, memory_id: str, text: str) -> dict:
+    def update(self, memory_id: str, text: str, *, metadata: dict | None = None) -> dict:
+        # Mem0 Platform's update() does not accept arbitrary metadata on the
+        # public client today; supersession metadata is attached on the next
+        # add() rather than patched onto the old row. We still accept the kwarg
+        # so callers (and tests) pass it through uniformly.
         self._client.update(memory_id=memory_id, text=text)
         return {"result": "Memory updated.", "memory_id": memory_id}
 
@@ -138,8 +142,11 @@ class SelfHostedBackend(Mem0Backend):
             body["metadata"] = metadata
         return self._json("POST", "/memories", json=body)
 
-    def update(self, memory_id: str, text: str) -> dict:
-        self._json("PUT", f"/memories/{memory_id}", json={"text": text})
+    def update(self, memory_id: str, text: str, *, metadata: dict | None = None) -> dict:
+        body: dict[str, Any] = {"text": text}
+        if metadata:
+            body["metadata"] = metadata
+        self._json("PUT", f"/memories/{memory_id}", json=body)
         return {"result": "Memory updated.", "memory_id": memory_id}
 
     def delete(self, memory_id: str) -> dict:
@@ -287,8 +294,19 @@ class OSSBackend(Mem0Backend):
             kwargs["metadata"] = metadata
         return self._memory.add(messages, **kwargs)
 
-    def update(self, memory_id: str, text: str) -> dict:
-        self._memory.update(memory_id, data=text)
+    def update(self, memory_id: str, text: str, *, metadata: dict | None = None) -> dict:
+        # OSS Memory.update supports a `metadata` kwarg to patch the stored
+        # metadata dict. When supplied, merge temporal fields (issue #1289)
+        # onto the existing metadata rather than replacing it wholesale.
+        if metadata:
+            try:
+                self._memory.update(memory_id, data=text, metadata=metadata)
+            except TypeError:
+                # Older OSS versions don't accept metadata on update — fall
+                # back to text-only and let the supersession land on the next add.
+                self._memory.update(memory_id, data=text)
+        else:
+            self._memory.update(memory_id, data=text)
         return {"result": "Memory updated.", "memory_id": memory_id}
 
     def delete(self, memory_id: str) -> dict:
