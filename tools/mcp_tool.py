@@ -1016,6 +1016,80 @@ class NonMcpEndpointError(ConnectionError):
     """
 
 
+class MissingMcpCommandError(NonMcpEndpointError):
+    """Raised when a stdio MCP server's command is not on PATH and not a valid
+    absolute path — a permanent, non-retryable misconfiguration.
+
+    This is the pre-flight guard for #1297: a missing binary (e.g.
+    ``turbo-memory-mcp``) has zero chance of spawning, so retrying it
+    ``_MAX_INITIAL_CONNECT_RETRIES`` times × every revival cycle only produces a
+    storm of identical ``FileNotFoundError`` tracebacks (observed at 189
+    failures/scan) and drowns real errors in the log. Failing fast with ONE
+    actionable message is strictly better.
+
+    Subclasses :class:`NonMcpEndpointError` so the existing non-retryable catch
+    in the reconnect loop (``except NonMcpEndpointError``) reports the server
+    failed immediately instead of entering backoff.
+    """
+
+
+def _ensure_stdio_command_resolvable(
+    server_name: str, command: str, env: dict | None
+) -> None:
+    """Pre-flight check that a stdio MCP ``command`` can actually be spawned.
+
+    Raises :class:`MissingMcpCommandError` (non-retryable) if the command is a
+    bare name not found on the subprocess PATH, or an absolute/relative path
+    that does not exist. Raises nothing when the command looks resolvable.
+
+    Rationale (#1297): ``_resolve_stdio_command`` only does PATH/dir-candidate
+    fallback for ``npx``/``npm``/``node``. Any OTHER missing binary passes
+    through unresolved and fails at ``execvp`` time inside the MCP SDK's
+    ``stdio_client`` with ``FileNotFoundError`` — which the reconnect loop treats
+    as a retryable connection error and re-attempts, producing the retry storm.
+    """
+    resolved = os.path.expanduser(str(command).strip())
+    if not resolved:
+        raise MissingMcpCommandError(
+            f"MCP server '{server_name}' has an empty 'command'"
+        )
+
+    # Absolute or relative path with a separator: must exist + be executable.
+    # We don't require a separator-less name to exist here (shutil.which handles
+    # that below against the subprocess PATH), but a path WITH a separator that
+    # the user wrote literally must point at a real file.
+    if os.sep in resolved or (os.altsep and os.altsep in resolved):
+        if not os.path.isfile(resolved):
+            raise MissingMcpCommandError(
+                f"MCP server '{server_name}': command not found at "
+                f"'{resolved}'. The path does not exist. "
+                f"Fix: install the binary or correct the 'command' in your "
+                f"mcp_servers config."
+            )
+        if not os.access(resolved, os.X_OK):
+            raise MissingMcpCommandError(
+                f"MCP server '{server_name}': command '{resolved}' is not "
+                f"executable. Fix: chmod +x '{resolved}' or correct the path."
+            )
+        return
+
+    # Bare command name: must be discoverable on the subprocess PATH.
+    # ``env`` is the resolved env (_build_safe_env output) whose PATH reflects
+    # what the subprocess will actually see.
+    path_arg = (env or {}).get("PATH") if isinstance(env, dict) else None
+    if not shutil.which(resolved, path=path_arg):
+        raise MissingMcpCommandError(
+            f"MCP server '{server_name}': command '{resolved}' not found on "
+            f"PATH. The binary is not installed (or not on the subprocess "
+            f"PATH). This is non-retryable — every spawn attempt fails "
+            f"identically. Fix: install '{resolved}' (e.g. for "
+            f"turbo-memory-mcp: `uv tool install "
+            f"git+https://github.com/Lexus2016/turbo_quant_memory`) or remove "
+            f"the '{server_name}' entry from your mcp_servers config if you no "
+            f"longer use it."
+        )
+
+
 def _validate_remote_mcp_url(server_name: str, url: Any) -> str:
     """Return the URL as a string if it's a valid http(s) remote MCP URL.
 
@@ -2300,6 +2374,16 @@ class MCPServerTask:
 
         safe_env = _build_safe_env(user_env)
         command, safe_env = _resolve_stdio_command(command, safe_env)
+
+        # Pre-flight: if the command did not resolve to an executable on PATH
+        # (or an absolute path that exists), fail ONCE with a clean, actionable,
+        # NON-retryable error instead of letting FileNotFoundError bubble through
+        # the reconnect loop's 3 initial retries × N revival cycles (#1297).
+        # ``_resolve_stdio_command`` only does PATH/dir-candidate fallback for
+        # npx/npm/node; any OTHER missing binary (e.g. ``turbo-memory-mcp``)
+        # remains a bare name here. A bare name that ``shutil.which`` cannot find
+        # has no chance of spawning successfully, so there is nothing to retry.
+        _ensure_stdio_command_resolvable(self.name, command, safe_env)
 
         # Check package against OSV malware database before spawning.
         # Run off the event loop (the urllib HTTPS call is blocking) and bound

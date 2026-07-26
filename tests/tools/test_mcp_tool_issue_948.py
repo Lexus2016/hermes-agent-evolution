@@ -219,3 +219,125 @@ def test_run_stdio_malware_check_times_out_fail_open():
         assert elapsed < 1.0, f"startup did not fail-open promptly ({elapsed:.1f}s)"
 
     asyncio.run(_test())
+
+
+# ---------------------------------------------------------------------------
+# #1297: pre-flight guard — a missing stdio command must fail ONCE with a
+# non-retryable error, not bubble FileNotFoundError through the reconnect
+# retry loop (3 retries × N revival cycles = the observed 189-failure/scan
+# storm). The guard is exercised directly here; the integration (it stops the
+# retry loop because MissingMcpCommandError subclasses NonMcpEndpointError,
+# which the reconnect loop catches-and-exits on) is covered by inspection of
+# the loop's `except NonMcpEndpointError` branch.
+# ---------------------------------------------------------------------------
+
+import pytest  # noqa: E402
+
+from tools.mcp_tool import (  # noqa: E402
+    MissingMcpCommandError,
+    _ensure_stdio_command_resolvable,
+)
+
+
+def test_preflight_raises_for_missing_bare_command():
+    """A bare command name not on PATH → MissingMcpCommandError (non-retryable),
+    naming the command and giving an install hint. This is the turbo-memory-mcp
+    case from #1297."""
+    with patch("tools.mcp_tool.shutil.which", return_value=None):
+        with pytest.raises(MissingMcpCommandError) as exc_info:
+            _ensure_stdio_command_resolvable(
+                "tqmemory", "turbo-memory-mcp", {"PATH": "/usr/bin"}
+            )
+    msg = str(exc_info.value)
+    assert "turbo-memory-mcp" in msg
+    assert "not found on PATH" in msg
+    # Actionable install hint must be present.
+    assert "install" in msg.lower()
+
+
+def test_preflight_raises_for_nonexistent_absolute_path():
+    """An absolute path that does not exist → MissingMcpCommandError with a
+    'path does not exist' message (distinct from the PATH case)."""
+    with patch("tools.mcp_tool.os.path.isfile", return_value=False):
+        with pytest.raises(MissingMcpCommandError) as exc_info:
+            _ensure_stdio_command_resolvable(
+                "srv", "/opt/does-not-exist/bin", {"PATH": "/usr/bin"}
+            )
+    assert "does not exist" in str(exc_info.value)
+
+
+def test_preflight_raises_for_non_executable_path(tmp_path):
+    """An existing-but-not-executable file → MissingMcpCommandError (chmod
+    hint). Prevents a confusing PermissionError retry storm."""
+    f = tmp_path / "server"
+    f.write_text("#!/bin/sh\n", encoding="utf-8")
+    f.chmod(0o644)  # not executable
+    with patch("tools.mcp_tool.os.access", return_value=False):
+        with pytest.raises(MissingMcpCommandError) as exc_info:
+            _ensure_stdio_command_resolvable("srv", str(f), {"PATH": "/usr/bin"})
+    assert "not executable" in str(exc_info.value)
+
+
+def test_preflight_raises_for_empty_command():
+    with pytest.raises(MissingMcpCommandError) as exc_info:
+        _ensure_stdio_command_resolvable("srv", "", {"PATH": "/usr/bin"})
+    assert "empty" in str(exc_info.value).lower()
+
+
+def test_preflight_passes_for_bare_command_on_path():
+    """A bare command found via shutil.which → no exception (server proceeds
+    to spawn). The common healthy case must not be blocked."""
+    with patch(
+        "tools.mcp_tool.shutil.which",
+        return_value="/usr/local/bin/turbo-memory-mcp",
+    ):
+        # Should not raise.
+        _ensure_stdio_command_resolvable(
+            "tqmemory", "turbo-memory-mcp", {"PATH": "/usr/local/bin"}
+        )
+
+
+def test_preflight_passes_for_existing_executable_absolute_path(tmp_path):
+    """An absolute path pointing at a real executable file → no exception."""
+    f = tmp_path / "server"
+    f.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    f.chmod(0o755)
+    _ensure_stdio_command_resolvable("srv", str(f), {"PATH": "/usr/bin"})
+
+
+def test_preflight_missing_command_is_non_retryable_subclass():
+    """MissingMcpCommandError MUST subclass NonMcpEndpointError so the
+    reconnect loop's `except NonMcpEndpointError` branch exits cleanly instead
+    of retrying. This is the invariant that converts the retry storm into one
+    clean failure — if it ever breaks, #1297 regresses."""
+    from tools.mcp_tool import NonMcpEndpointError
+
+    assert issubclass(MissingMcpCommandError, NonMcpEndpointError)
+    # And NonMcpEndpointError is itself a ConnectionError (the reconnect loop's
+    # broad-catch semantics) — verify the chain end-to-end.
+    assert issubclass(MissingMcpCommandError, ConnectionError)
+
+
+def test_preflight_uses_subprocess_env_path_not_process_path():
+    """The pre-flight must resolve against the SUBPROCESS env's PATH (what the
+    child will actually see), not the Hermes process's PATH. A binary present
+    in the subprocess PATH but not the process PATH must pass; a binary absent
+    from the subprocess PATH must fail even if the process PATH has it."""
+    # Subprocess PATH includes /opt/special where the binary lives; the fake
+    # which() returns a hit only for that path → should pass.
+    def _which(cmd, path=None):
+        if path and "/opt/special" in path:
+            return "/opt/special/" + cmd
+        return None
+
+    with patch("tools.mcp_tool.shutil.which", side_effect=_which):
+        # Passes with the subprocess PATH that includes /opt/special.
+        _ensure_stdio_command_resolvable(
+            "srv", "special-bin", {"PATH": "/opt/special:/usr/bin"}
+        )
+        # Fails when the subprocess PATH omits /opt/special, even though the
+        # process PATH (not consulted) might have it.
+        with pytest.raises(MissingMcpCommandError):
+            _ensure_stdio_command_resolvable(
+                "srv", "special-bin", {"PATH": "/usr/bin"}
+            )
