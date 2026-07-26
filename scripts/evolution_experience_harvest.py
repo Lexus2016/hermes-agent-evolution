@@ -57,7 +57,14 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Add the scripts/ dir (sibling-script imports like evolution_experience_distill)
+# AND the repo root (parent of scripts/) so the `evolution` namespace package
+# resolves when the script is run in-repo from any cwd.  When the script is
+# installed into HERMES_HOME/scripts (outside the repo), `evolution` is not
+# present — the graceful fallback below keeps the harvest running instead of
+# crashing every cron tick (mirrors evolution_watchdog.py's ImportError fallback).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.display import _detect_tool_failure  # noqa: E402
 from agent.experience_bank import (  # noqa: E402
@@ -69,7 +76,35 @@ from agent.experience_bank import (  # noqa: E402
     iter_entries,
     set_harvest_state,
 )
-from evolution.lib.root_cause_diagnosis import ErrorClassifier  # noqa: E402
+
+try:
+    from evolution.lib.root_cause_diagnosis import ErrorClassifier  # noqa: E402
+except ImportError:
+    import enum  # noqa: E402
+
+    class _FallbackFailureCategory(enum.Enum):
+        """Minimal stand-in for FailureCategory when `evolution` is absent."""
+
+        UNKNOWN = "unknown"
+
+    class ErrorClassifier:  # type: ignore[no-redef]
+        """Degraded fallback used when the `evolution` package is unavailable.
+
+        ``classify`` always returns ``UNKNOWN`` so the harvest still emits
+        valid entries (``failure_category="unknown"``) and distillation can
+        proceed, instead of the cron failing every tick with
+        ``ModuleNotFoundError``.  See GitHub issue #1304.
+        """
+
+        def classify(self, content: str):  # noqa: D401, ARG002
+            return _FallbackFailureCategory.UNKNOWN
+
+    print(
+        "[experience-harvest] evolution.lib.root_cause_diagnosis unavailable "
+        "— using UNKNOWN fallback (run from the repo root or install the "
+        "evolution package for full failure classification).",
+        file=sys.stderr,
+    )
 from hermes_constants import get_hermes_home  # noqa: E402
 
 # ---------------------------------------------------------------------------
