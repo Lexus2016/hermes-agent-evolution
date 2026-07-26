@@ -110,6 +110,55 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
+# --------------------------------------------------------------------------- #
+# Suppress pydantic ValidationError traceback storm from non-JSON MCP stdout  #
+# (#1298: 300 occurrences/scan, ~3300 lines of noise in errors.log).          #
+# --------------------------------------------------------------------------- #
+# The MCP SDK's ``stdout_reader`` (mcp/client/stdio/__init__.py) calls
+# ``logger.exception("Failed to parse JSONRPC message from server")`` for every
+# stdout line that is not valid JSON-RPC. A misconfigured / failing MCP server
+# (e.g. a missing binary that prints CLI usage text to stdout) produces dozens
+# of these per connection attempt, each emitting a full ~11-line pydantic
+# ``ValidationError`` traceback at ERROR level — drowning real signal.
+#
+# This filter demotes that specific, known-noisy message to DEBUG and strips the
+# exc_info traceback so it no longer pollutes errors.log. The parse failure
+# itself is harmless (the SDK skips the line and keeps reading); we only lose
+# the traceback verbosity, not the information that a parse failure happened.
+_MCP_STDIO_LOGGER = "mcp.client.stdio"
+_MCP_JSONRPC_PARSE_MSG = "Failed to parse JSONRPC message from server"
+
+
+class _SuppressNonJsonStdoutTraceback(logging.Filter):
+    """Demote the SDK's JSONRPC-parse-error log to DEBUG + drop its traceback.
+
+    ``logging.Filter`` runs before the record reaches handlers, so we can edit
+    the record in place: lower its level and clear ``exc_info`` (which is what
+    ``logger.exception`` uses to emit the traceback). Genuine, unrelated ERROR
+    logs from the same logger pass through unchanged.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
+        if record.getMessage() == _MCP_JSONRPC_PARSE_MSG:
+            record.levelno = logging.DEBUG
+            record.levelname = "DEBUG"
+            record.exc_info = None
+            record.exc_text = None
+        return True
+
+
+def _install_mcp_stdout_noise_filter() -> None:
+    """Attach the suppression filter to the MCP stdio logger (idempotent)."""
+    mcp_logger = logging.getLogger(_MCP_STDIO_LOGGER)
+    # Avoid stacking duplicate filters across re-imports / test reloads.
+    for existing in mcp_logger.filters:
+        if isinstance(existing, _SuppressNonJsonStdoutTraceback):
+            return
+    mcp_logger.addFilter(_SuppressNonJsonStdoutTraceback())
+
+
+_install_mcp_stdout_noise_filter()
+
 # Upper bound for the OSV malware preflight during stdio MCP startup. The
 # check makes a blocking urllib HTTPS call whose own timeout can fail to
 # interrupt a stalled SSL handshake, which froze the asyncio event loop and
