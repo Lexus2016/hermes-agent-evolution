@@ -108,6 +108,77 @@ _REFUSAL_RE = re.compile(
 _REPEAT_THRESHOLD = 5  # same tool >=N consecutive in a session is a "repeated run"
 
 
+# ── Failure-reason sub-classifier (#1325) ──────────────────────────────────
+# The digest attributed failures by tool but not by reason, so a fix that
+# addressed one failure mode (e.g. file-not-found) could not be distinguished
+# from a regression in another mode (e.g. timeout) on the same tool — causing a
+# fix→regress→refile treadmill on terminal/read_file/patch/tool_call. We now
+# sub-classify each failed result into a reason bucket and emit
+# ``tool_failures_by_reason: {tool: {reason: count}}`` so issues and verdicts
+# can be scoped to the actual failure mode. Reuses the keyword classifier from
+# evolution/lib/root_cause_diagnosis.py (no LLM); falls back to "other" when
+# the classifier module is unavailable (e.g. minimal installs without the
+# evolution lib on the path).
+
+_FAILURE_REASON_OTHER = "other"
+_failure_classifier = None  # lazily initialised
+
+
+def _get_failure_classifier():
+    """Lazily import ErrorClassifier; return None if unavailable."""
+    global _failure_classifier
+    if _failure_classifier is not None:
+        return _failure_classifier
+    try:
+        # evolution/lib/ is a sibling of scripts/ under the repo root.
+        lib_path = Path(__file__).resolve().parent.parent / "evolution" / "lib"
+        if str(lib_path) not in sys.path:
+            sys.path.insert(0, str(lib_path))
+        from root_cause_diagnosis import ErrorClassifier  # type: ignore[import-untyped]
+        _failure_classifier = ErrorClassifier()
+    except Exception:
+        _failure_classifier = False  # sentinel: tried and failed
+    return _failure_classifier if _failure_classifier is not False else None
+
+
+def _classify_failure_reason(content: Any) -> str:
+    """Classify a failed tool result's content into a reason bucket.
+
+    Extracts the error text from the result envelope (``error`` field, or the
+    full content string) and runs the keyword classifier. Returns a short
+    reason label (``"not_found"``, ``"permission"``, ``"timeout"``, etc.) or
+    ``"other"`` when no pattern matches or the classifier is unavailable.
+    """
+    text = ""
+    if isinstance(content, (str, bytes)):
+        text = content.decode("utf-8", "replace") if isinstance(content, bytes) else content
+        # Try to pull the error field out of a JSON envelope for sharper matching
+        stripped = text.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                data = json.loads(stripped)
+                if isinstance(data, dict):
+                    err = data.get("error")
+                    if isinstance(err, str) and err:
+                        text = err
+                    elif isinstance(err, dict):
+                        text = str(err.get("message") or err)
+                    # terminal exit_code non-zero: use output/error fields
+                    out = data.get("output")
+                    if isinstance(out, str) and not text:
+                        text = out
+            except ValueError:
+                pass
+    clf = _get_failure_classifier()
+    if clf is None or not text:
+        return _FAILURE_REASON_OTHER
+    try:
+        category = clf.classify(text)
+        return category.value  # e.g. "not_found", "timeout", "permission"
+    except Exception:
+        return _FAILURE_REASON_OTHER
+
+
 def _iter_lines(path: Path):
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -211,6 +282,7 @@ def scan_messages(messages) -> Dict[str, Any]:
     all formats yield the identical digest.
     """
     tool_failures: Counter = Counter()
+    tool_failures_by_reason: Dict[str, Counter] = {}  # tool -> {reason: count} (#1325)
     timeouts = 0
     refusals = 0
     id_to_tool: Dict[str, str] = {}
@@ -251,12 +323,17 @@ def scan_messages(messages) -> Dict[str, Any]:
             failed = _tool_result_failed(content)
             if failed:
                 tool_failures[tool] += 1
+                reason = _classify_failure_reason(content)
+                tool_failures_by_reason.setdefault(tool, Counter())[reason] += 1
             if failed and isinstance(content, str) and _TIMEOUT_RE.search(content):
                 timeouts += 1
 
     repeated = {t: n for t, n in max_runs.items() if n >= _REPEAT_THRESHOLD}
     return {
         "tool_failures": dict(tool_failures),
+        "tool_failures_by_reason": {
+            tool: dict(reasons) for tool, reasons in tool_failures_by_reason.items()
+        },
         "timeouts": timeouts,
         "refusals": refusals,
         "repeated_tool_runs": repeated,
@@ -321,6 +398,7 @@ def build_digest(
     now = now if now is not None else time.time()
     cutoff = now - window_days * 86400
     failures: Counter = Counter()
+    by_reason: Dict[str, Counter] = {}  # tool -> {reason: count} aggregated (#1325)
     timeouts = 0
     refusals = 0
     provider_errors: Counter = Counter()
@@ -331,6 +409,14 @@ def build_digest(
     def _aggregate(s: Dict[str, Any]) -> None:
         nonlocal timeouts, refusals
         failures.update(s.get("tool_failures", {}))
+        # Merge per-tool reason counts (#1325). Sessions without the key
+        # (pre-#1325 extracts or sessions with no failures) contribute nothing.
+        for tool, reasons in s.get("tool_failures_by_reason", {}).items():
+            if not isinstance(reasons, dict):
+                continue
+            tgt = by_reason.setdefault(tool, Counter())
+            for reason, cnt in reasons.items():
+                tgt[reason] += cnt
         timeouts += s.get("timeouts", 0)
         refusals += s.get("refusals", 0)
         provider_errors.update(s.get("provider_errors", {}))
@@ -397,11 +483,29 @@ def build_digest(
                     scanned += 1
                     _aggregate(_state_db_session_signals(msgs))
 
+    # Per-tool failure RATE (failures / sessions_scanned), additive alongside
+    # the raw count (#1324). As session volume grows cycle-over-cycle, the raw
+    # count rises proportionally even when per-session rate holds or improves,
+    # so a raw-count comparison flips a stable/improving tool to "regressed".
+    # The rate normalizes that out. Raw counts are retained for back-compat.
+    if scanned > 0:
+        tool_failure_rate = {
+            tool: round(count / scanned, 4)
+            for tool, count in failures.most_common()
+        }
+    else:
+        tool_failure_rate = {}
+
     return {
         "window_days": window_days,
         "sessions_scanned": scanned,
         "signals": {
             "tool_failures": dict(failures.most_common()),
+            "tool_failure_rate": tool_failure_rate,
+            "tool_failures_by_reason": {
+                tool: dict(reasons.most_common())
+                for tool, reasons in by_reason.items()
+            },
             "timeouts": timeouts,
             "refusals_or_access_denied": refusals,
             "repeated_tool_runs": repeated,

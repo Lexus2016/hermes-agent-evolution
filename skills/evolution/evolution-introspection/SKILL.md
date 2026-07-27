@@ -51,12 +51,14 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
    ```bash
    python scripts/introspection_extract.py --days=7
    ```
-   Work from THAT digest (a few KB) — it gives tool_failures per tool, timeouts,
-   refusals/access-denials, and repeated-tool-runs per session. Only if the
-   digest is genuinely insufficient for a specific pattern should you read a
-   single targeted session (and even then, summarize locally; never paste raw
-   text). This both bounds context (unbounded → ~2-5k tokens) and keeps private
-   text out of the model entirely (complements the PII gate #82).
+   Work from THAT digest (a few KB) — it gives tool_failures per tool,
+   **tool_failure_rate** (per-session, #1324), **tool_failures_by_reason** (per
+   tool per reason, #1325), timeouts, refusals/access-denials, and
+   repeated-tool-runs per session. Only if the digest is genuinely insufficient
+   for a specific pattern should you read a single targeted session (and even
+   then, summarize locally; never paste raw text). This both bounds context
+   (unbounded → ~2-5k tokens) and keeps private text out of the model entirely
+   (complements the PII gate #82).
 
 2. **Detect problem signals** (non-exhaustive):
    - **Tool failures** — a tool returned an error / non-zero / exception,
@@ -106,16 +108,47 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
    - For each, judge from the real sessions since its merge: did the `target`
      problem RECUR (the fix didn't hold)? is the merged capability actually used?
      did the friction it targeted disappear?
-   - Record ONE verdict per such issue via the deterministic helper:
-     ```bash
-     python3 scripts/evolution_realized_impact.py record-verdict \
-       <#> "<confirmed|no-signal|regressed>" "<YYYY-MM-DD>" "<one line of session evidence>"
-     ```
-     — `confirmed` = problem gone / change used; `no-signal` = no evidence it
-     changed anything; `regressed` = problem recurred or got worse.
-   - Be honest: a `no-signal`/`regressed` verdict on the agent's OWN past change is
-     exactly the feedback that stops blind feature-piling (analysis reads it and
-     shifts to consolidation). Confirming uselessly to look good defeats the loop.
+
+   **Compare RATES, not raw counts (#1324).** The raw `tool_failures` count grows
+   with session volume — 168 failures over 21 sessions (8.0/session) becomes 298
+   over 42 sessions (7.1/session = IMPROVED), but a raw-count comparison calls it
+   "regressed" because 298 > 168. This produced false-regression verdicts on at
+   least 4 issues (#1189, #1199, #970, #974). The digest now emits
+   `tool_failure_rate` (failures / sessions_scanned); compare THAT instead. When
+   the merge record carries `baseline_tool_failure_rate`, use the deterministic
+   helper for a clean verdict:
+   ```bash
+   # current_rate_json = the tool_failure_rate dict from the current digest
+   python3 scripts/evolution_realized_impact.py compare-rate <#> "$RATE_JSON"
+   # Returns JSON: {tools: {tool: {baseline, current, verdict}}, any_regressed, ...}
+   # verdict per tool: improved | stable | regressed | new | gone
+   ```
+   A tool is "regressed" only if its per-session rate increased >20%. If
+   `baseline_tool_failure_rate` is absent (old merge record), record the current
+   rate as the baseline for next cycle and judge manually from the rate.
+
+   **File and verify at the REASON level (#1325).** The digest now emits
+   `tool_failures_by_reason: {tool: {reason: count}}` (not_found, permission,
+   timeout, resource_limit, validation, syntax_error, network, other). A fix
+   that addressed one failure mode (e.g. file-not-found on `read_file`) cannot
+   be confirmed by a tool-level drop if a DIFFERENT reason (e.g. timeout) rose.
+   Scope the verdict to the specific reason the fix targeted:
+   - If the target reason's count/rate dropped → `confirmed`.
+   - If a different reason on the same tool rose → file a NEW issue for that
+     reason (don't re-file the original — it was a different failure mode).
+   - Surface the top reason in issue titles (e.g. "terminal: timeout failures"
+     not just "terminal failures") so the fix→regress→refile treadmill breaks.
+
+   Record ONE verdict per such issue via the deterministic helper:
+   ```bash
+   python3 scripts/evolution_realized_impact.py record-verdict \
+     <#> "<confirmed|no-signal|regressed>" "<YYYY-MM-DD>" "<one line of session evidence>"
+   ```
+   — `confirmed` = problem gone / change used; `no-signal` = no evidence it
+   changed anything; `regressed` = problem recurred or got worse.
+   Be honest: a `no-signal`/`regressed` verdict on the agent's OWN past change is
+   exactly the feedback that stops blind feature-piling (analysis reads it and
+   shifts to consolidation). Confirming uselessly to look good defeats the loop.
    - **Consult the close-loop gate (#1140) right after recording the verdict.** A
      merged fix that did NOT drop its signal must not stay silently closed. Invoke
      the gate so the close loop acts on the verdict; on a HOLD (no-signal/regressed)

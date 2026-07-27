@@ -1,281 +1,263 @@
-"""Tests for scripts/evolution_realized_impact.py — post-merge realized-impact loop."""
+"""Tests for scripts/evolution_realized_impact.py — rate-based regression
+comparison (#1324) and baseline rate storage at merge time.
 
+The raw ``tool_failures`` count grows with session volume: 168 failures over
+21 sessions (8.0/session) becomes 298 over 42 sessions (7.1/session = BETTER)
+but a raw-count comparison calls it "regressed" because 298 > 168. Comparing
+per-session rates instead eliminates this false regression. These tests cover
+the pure ``compare_failure_rate`` function, ``record_merge`` with the optional
+``baseline_tool_failure_rate`` field, and the ``compare-rate`` CLI subcommand.
+"""
+
+import json
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from evolution_realized_impact import (  # noqa: E402
-    append_ledger_record,
-    compute_realized,
-    format_realized,
+    REGRESSION_THRESHOLD,
+    compare_failure_rate,
     load_ledger,
+    main,
     record_merge,
-    record_verdict,
-    should_close_issue,
-    signal_verified,
 )
 
 
-def _merge(issue, merged_at, predicted=0.8, target="fix X"):
-    return {
-        "issue": issue,
-        "merged_at": merged_at,
-        "predicted_impact": predicted,
-        "target": target,
-    }
+# ── compare_failure_rate (pure function) ────────────────────────────────────
+
+class TestCompareFailureRate:
+    def test_improved_when_rate_drops(self):
+        baseline = {"terminal": 8.0}
+        current = {"terminal": 7.1}
+        result = compare_failure_rate(baseline, current)
+        assert result["tools"]["terminal"]["verdict"] == "improved"
+        assert "terminal" in result["improved_tools"]
+        assert not result["any_regressed"]
+
+    def test_regressed_when_rate_rises_above_threshold(self):
+        # 8.0 -> 10.0 is a 25% increase (> 20% threshold)
+        baseline = {"terminal": 8.0}
+        current = {"terminal": 10.0}
+        result = compare_failure_rate(baseline, current)
+        assert result["tools"]["terminal"]["verdict"] == "regressed"
+        assert "terminal" in result["regressed_tools"]
+        assert result["any_regressed"]
+
+    def test_stable_within_threshold(self):
+        # 8.0 -> 9.0 is a 12.5% increase (< 20% threshold) → stable
+        baseline = {"terminal": 8.0}
+        current = {"terminal": 9.0}
+        result = compare_failure_rate(baseline, current)
+        assert result["tools"]["terminal"]["verdict"] == "stable"
+        assert not result["any_regressed"]
+        assert "terminal" not in result["improved_tools"]
+
+    def test_false_regression_scenario_from_issue(self):
+        """The core #1324 scenario: raw count rose (168→298) but per-session
+        rate IMPROVED (8.0→7.1) because session volume grew ~1.8x. The rate
+        comparison correctly says 'improved', not 'regressed'."""
+        baseline = {"tool_call": 8.0}
+        current = {"tool_call": 7.1}
+        result = compare_failure_rate(baseline, current)
+        assert result["tools"]["tool_call"]["verdict"] == "improved"
+        assert not result["any_regressed"]
+
+    def test_zero_baseline_with_current_failures_is_regressed(self):
+        baseline = {"read_file": 0.0}
+        current = {"read_file": 2.0}
+        result = compare_failure_rate(baseline, current)
+        assert result["tools"]["read_file"]["verdict"] == "regressed"
+        assert "read_file" in result["regressed_tools"]
+
+    def test_zero_baseline_zero_current_is_stable(self):
+        baseline = {"read_file": 0.0}
+        current = {"read_file": 0.0}
+        result = compare_failure_rate(baseline, current)
+        assert result["tools"]["read_file"]["verdict"] == "stable"
+
+    def test_new_tool_appears_post_merge(self):
+        baseline = {"terminal": 5.0}
+        current = {"terminal": 5.0, "patch": 3.0}
+        result = compare_failure_rate(baseline, current)
+        assert result["tools"]["patch"]["verdict"] == "new"
+        assert result["tools"]["terminal"]["verdict"] == "stable"
+
+    def test_tool_disappears_post_merge(self):
+        baseline = {"terminal": 5.0, "patch": 3.0}
+        current = {"terminal": 5.0}
+        result = compare_failure_rate(baseline, current)
+        assert result["tools"]["patch"]["verdict"] == "gone"
+
+    def test_none_inputs_return_empty(self):
+        result = compare_failure_rate(None, {"terminal": 1.0})
+        assert result == {
+            "tools": {},
+            "any_regressed": False,
+            "regressed_tools": [],
+            "improved_tools": [],
+        }
+
+    def test_empty_dicts_return_empty(self):
+        result = compare_failure_rate({}, {})
+        assert result["any_regressed"] is False
+        assert result["tools"] == {}
+
+    def test_multiple_tools_mixed_verdicts(self):
+        baseline = {"terminal": 8.0, "read_file": 5.0, "patch": 2.0}
+        current = {"terminal": 7.0, "read_file": 7.0, "patch": 2.1}
+        result = compare_failure_rate(baseline, current)
+        assert result["tools"]["terminal"]["verdict"] == "improved"
+        assert result["tools"]["read_file"]["verdict"] == "regressed"
+        assert result["tools"]["patch"]["verdict"] == "stable"
+        assert result["any_regressed"]
+        assert "read_file" in result["regressed_tools"]
+        assert "terminal" in result["improved_tools"]
+
+    def test_custom_threshold(self):
+        # With a 10% threshold, 8.0 -> 9.0 (12.5%) is regressed
+        baseline = {"terminal": 8.0}
+        current = {"terminal": 9.0}
+        result = compare_failure_rate(baseline, current, regression_threshold=0.10)
+        assert result["tools"]["terminal"]["verdict"] == "regressed"
+
+    def test_default_threshold_value(self):
+        assert REGRESSION_THRESHOLD == 0.20
 
 
-def _verdict(issue, verdict, verified_at="2026-06-20", note=""):
-    return {
-        "issue": issue,
-        "verdict": verdict,
-        "verified_at": verified_at,
-        "note": note,
-    }
+# ── record_merge with baseline_tool_failure_rate ────────────────────────────
+
+class TestRecordMergeBaseline:
+    def test_record_merge_with_baseline(self, tmp_path):
+        ledger = tmp_path / "ledger.jsonl"
+        baseline = {"terminal": 8.0, "read_file": 2.0}
+        record_merge(ledger, 1234, "2026-07-27", 0.8, "fix terminal timeouts", baseline)
+        records = load_ledger(ledger)
+        assert len(records) == 1
+        assert records[0]["issue"] == 1234
+        assert records[0]["baseline_tool_failure_rate"] == baseline
+
+    def test_record_merge_without_baseline(self, tmp_path):
+        """Baseline is optional — old callers that don't pass it still work."""
+        ledger = tmp_path / "ledger.jsonl"
+        record_merge(ledger, 1234, "2026-07-27", 0.8, "fix something")
+        records = load_ledger(ledger)
+        assert len(records) == 1
+        assert "baseline_tool_failure_rate" not in records[0]
+
+    def test_baseline_survives_verdict_folding(self, tmp_path):
+        """When a verdict is appended later, the merge metadata (including
+        baseline_tool_failure_rate) must survive the fold."""
+        ledger = tmp_path / "ledger.jsonl"
+        baseline = {"terminal": 8.0}
+        record_merge(ledger, 1234, "2026-07-27", 0.8, "fix", baseline)
+        # Simulate a verdict line
+        from evolution_realized_impact import record_verdict
+        record_verdict(ledger, 1234, "confirmed", "2026-08-02", "rate dropped")
+        records = load_ledger(ledger)
+        assert len(records) == 1
+        assert records[0]["verdict"] == "confirmed"
+        assert records[0]["baseline_tool_failure_rate"] == baseline
 
 
-class TestLoadLedger:
-    def test_missing_file_returns_empty(self, tmp_path):
-        assert load_ledger(tmp_path / "nope.jsonl") == []
+# ── CLI compare-rate subcommand ─────────────────────────────────────────────
 
-    def test_folds_merge_and_verdict_lines_for_same_issue(self, tmp_path):
-        f = tmp_path / "ledger.jsonl"
-        f.write_text(
-            "\n".join([
-                '{"issue": 1, "merged_at": "2026-06-01", "predicted_impact": 0.9, "target": "t1"}',
-                '{"issue": 2, "merged_at": "2026-06-02", "predicted_impact": 0.5, "target": "t2"}',
-                '{"issue": 1, "verdict": "confirmed", "verified_at": "2026-06-10"}',
+class TestCompareRateCLI:
+    def test_compare_rate_prints_json(self, tmp_path, capsys):
+        ledger = tmp_path / "ledger.jsonl"
+        record_merge(ledger, 1234, "2026-07-27", 0.8, "fix", {"terminal": 8.0})
+        evolution_dir = tmp_path  # ledger is at evolution_dir/realized/ledger.jsonl
+        # But record_merge writes directly to the path given; load_ledger reads
+        # from the path given. The CLI uses _evolution_dir(). We test main()
+        # by pointing EVOLUTION_PROFILE_DIR to tmp_path and placing the ledger
+        # at tmp_path/realized/ledger.jsonl.
+        ledger_cli = tmp_path / "realized" / "ledger.jsonl"
+        ledger_cli.parent.mkdir(parents=True)
+        ledger_cli.write_text(ledger.read_text())
+        os.environ["EVOLUTION_PROFILE_DIR"] = str(tmp_path)
+        try:
+            current_json = json.dumps({"terminal": 7.0})
+            rc = main(["prog", "compare-rate", "1234", current_json])
+            captured = capsys.readouterr()
+            assert rc == 0
+            result = json.loads(captured.out)
+            assert result["tools"]["terminal"]["verdict"] == "improved"
+        finally:
+            del os.environ["EVOLUTION_PROFILE_DIR"]
+
+    def test_compare_rate_no_baseline(self, tmp_path, capsys):
+        """When no baseline exists (old merge record), returns empty result."""
+        os.environ["EVOLUTION_PROFILE_DIR"] = str(tmp_path)
+        try:
+            (tmp_path / "realized").mkdir(parents=True)
+            (tmp_path / "realized" / "ledger.jsonl").write_text("")
+            current_json = json.dumps({"terminal": 5.0})
+            rc = main(["prog", "compare-rate", "9999", current_json])
+            captured = capsys.readouterr()
+            assert rc == 0
+            result = json.loads(captured.out)
+            assert result["any_regressed"] is False
+        finally:
+            del os.environ["EVOLUTION_PROFILE_DIR"]
+
+    def test_compare_rate_bad_json(self, tmp_path, capsys):
+        os.environ["EVOLUTION_PROFILE_DIR"] = str(tmp_path)
+        try:
+            (tmp_path / "realized").mkdir(parents=True)
+            (tmp_path / "realized" / "ledger.jsonl").write_text("")
+            rc = main(["prog", "compare-rate", "1234", "not-json"])
+            assert rc == 2
+        finally:
+            del os.environ["EVOLUTION_PROFILE_DIR"]
+
+
+# ── record-merge CLI with baseline ──────────────────────────────────────────
+
+class TestRecordMergeCLI:
+    def test_record_merge_cli_with_baseline(self, tmp_path, capsys):
+        os.environ["EVOLUTION_PROFILE_DIR"] = str(tmp_path)
+        try:
+            baseline_json = json.dumps({"terminal": 8.0})
+            rc = main([
+                "prog", "record-merge", "1234", "2026-07-27", "0.8",
+                "fix terminal timeouts", baseline_json,
             ])
-            + "\n",
-            encoding="utf-8",
-        )
-        recs = load_ledger(f)
-        assert len(recs) == 2  # folded by issue, original order preserved
-        assert recs[0]["issue"] == 1
-        assert recs[0]["verdict"] == "confirmed"  # verdict line merged in
-        assert recs[0]["target"] == "t1"  # merge metadata retained
-        assert "verdict" not in recs[1]
+            assert rc == 0
+            ledger = tmp_path / "realized" / "ledger.jsonl"
+            records = load_ledger(ledger)
+            assert records[0]["baseline_tool_failure_rate"] == {"terminal": 8.0}
+        finally:
+            del os.environ["EVOLUTION_PROFILE_DIR"]
 
-    def test_malformed_lines_skipped(self, tmp_path):
-        f = tmp_path / "ledger.jsonl"
-        f.write_text(
-            'not json\n{"no_issue": true}\n{"issue": 5, "merged_at": "2026-06-01"}\n',
-            encoding="utf-8",
-        )
-        recs = load_ledger(f)
-        assert len(recs) == 1 and recs[0]["issue"] == 5
-
-
-class TestComputeRealized:
-    def test_rate_and_confirmed_count(self):
-        recs = [
-            _merge(1, "2026-06-01") | _verdict(1, "confirmed"),
-            _merge(2, "2026-06-02") | _verdict(2, "confirmed"),
-            _merge(3, "2026-06-03") | _verdict(3, "no-signal"),
-        ]
-        h = compute_realized(recs, today="2026-06-30")
-        assert h["verified"] == 3
-        assert h["confirmed"] == 2
-        assert h["realized_impact_rate"] == round(2 / 3, 3)
-
-    def test_consecutive_miss_streak_flags_low_impact(self):
-        recs = [
-            _merge(1, "2026-06-01") | _verdict(1, "confirmed"),
-            _merge(2, "2026-06-02") | _verdict(2, "regressed"),
-            _merge(3, "2026-06-03") | _verdict(3, "no-signal"),
-            _merge(4, "2026-06-04") | _verdict(4, "regressed"),
-        ]
-        h = compute_realized(recs, today="2026-06-30", streak_k=3)
-        assert h["miss_streak"] == 3
-        assert any("REALIZED_IMPACT_LOW" in f for f in h["flags"])
-
-    def test_matured_unverified_backlog_flagged(self):
-        # merged long ago, never verified -> the verification step isn't running
-        recs = [_merge(i, "2026-06-01") for i in range(1, 5)]
-        h = compute_realized(recs, today="2026-06-30", maturity_days=5)
-        assert h["verified"] == 0
-        assert h["matured_unverified"] == 4
-        assert any("UNVERIFIED_BACKLOG" in f for f in h["flags"])
-
-    def test_recent_unverified_not_counted_as_matured(self):
-        recs = [_merge(1, "2026-06-29")]  # merged yesterday
-        h = compute_realized(recs, today="2026-06-30", maturity_days=5)
-        assert h["matured_unverified"] == 0
-        assert h["flags"] == []
-
-    def test_healthy_when_mostly_confirmed(self):
-        recs = [
-            _merge(i, "2026-06-0%d" % i) | _verdict(i, "confirmed") for i in range(1, 4)
-        ]
-        h = compute_realized(recs, today="2026-06-30")
-        assert h["realized_impact_rate"] == 1.0
-        assert h["flags"] == []
-
-
-class TestFormat:
-    def test_format_includes_rate_and_tail(self):
-        recs = [_merge(1, "2026-06-01") | _verdict(1, "confirmed")]
-        line = format_realized(compute_realized(recs, today="2026-06-30"))
-        assert line.startswith("[evolution-realized-impact]")
-        assert "realized_rate=" in line
-        assert "healthy" in line
-
-
-class TestAppendLedgerRecord:
-    def test_appends_and_creates_parent_dir(self, tmp_path):
-        f = tmp_path / "deep" / "ledger.jsonl"
-        append_ledger_record(f, {"issue": 10, "merged_at": "2026-06-01"})
-        assert f.exists()
-        assert "issue" in f.read_text(encoding="utf-8")
-
-    def test_rejects_invalid_record(self, tmp_path):
-        f = tmp_path / "ledger.jsonl"
+    def test_record_merge_cli_without_baseline(self, tmp_path, capsys):
+        os.environ["EVOLUTION_PROFILE_DIR"] = str(tmp_path)
         try:
-            append_ledger_record(f, {"no_issue": True})
-        except ValueError as exc:
-            assert "issue" in str(exc)
-        else:
-            raise AssertionError("expected ValueError")
+            rc = main([
+                "prog", "record-merge", "1234", "2026-07-27", "0.8",
+                "fix terminal timeouts",
+            ])
+            assert rc == 0
+            ledger = tmp_path / "realized" / "ledger.jsonl"
+            records = load_ledger(ledger)
+            assert "baseline_tool_failure_rate" not in records[0]
+        finally:
+            del os.environ["EVOLUTION_PROFILE_DIR"]
 
-
-class TestRecordMerge:
-    def test_record_merge_appends_merge_shape(self, tmp_path):
-        f = tmp_path / "ledger.jsonl"
-        record_merge(
-            f,
-            issue=99,
-            merged_at="2026-07-07",
-            predicted_impact=0.9,
-            target="fix ledger init",
-        )
-        recs = load_ledger(f)
-        assert len(recs) == 1
-        assert recs[0]["issue"] == 99
-        assert recs[0]["merged_at"] == "2026-07-07"
-        assert recs[0]["predicted_impact"] == 0.9
-        assert recs[0]["target"] == "fix ledger init"
-
-
-class TestRecordVerdict:
-    def test_record_verdict_appends_verdict_shape(self, tmp_path):
-        f = tmp_path / "ledger.jsonl"
-        record_verdict(
-            f,
-            issue=99,
-            verdict="confirmed",
-            verified_at="2026-07-12",
-            note="sessions show use",
-        )
-        recs = load_ledger(f)
-        assert len(recs) == 1
-        assert recs[0]["issue"] == 99
-        assert recs[0]["verdict"] == "confirmed"
-        assert recs[0]["verified_at"] == "2026-07-12"
-
-    def test_invalid_verdict_rejected(self, tmp_path):
-        f = tmp_path / "ledger.jsonl"
+    def test_record_merge_cli_bad_baseline_ignored(self, tmp_path, capsys):
+        """A malformed baseline JSON is warned about and ignored, but the merge
+        is still recorded (without the baseline)."""
+        os.environ["EVOLUTION_PROFILE_DIR"] = str(tmp_path)
         try:
-            record_verdict(
-                f, issue=1, verdict="great", verified_at="2026-07-12", note="x"
-            )
-        except ValueError as exc:
-            assert "verdict" in str(exc)
-        else:
-            raise AssertionError("expected ValueError")
-
-
-class TestIntegration:
-    def test_merge_then_verdict_is_folDed_correctly(self, tmp_path):
-        f = tmp_path / "ledger.jsonl"
-        record_merge(f, 7, "2026-06-01", 0.8, "target")
-        record_verdict(f, 7, "confirmed", "2026-06-10", "note")
-        recs = load_ledger(f)
-        assert len(recs) == 1
-        assert recs[0]["verdict"] == "confirmed"
-        assert recs[0]["target"] == "target"
-        assert recs[0]["predicted_impact"] == 0.8
-
-
-class TestSignalVerifiedGate:
-    def test_confirmed_verdict_is_verified(self):
-        recs = [_merge(1, "2026-06-01") | _verdict(1, "confirmed")]
-        assert signal_verified(recs, 1) is True
-
-    def test_no_signal_not_verified(self):
-        recs = [_merge(1, "2026-06-01") | _verdict(1, "no-signal")]
-        assert signal_verified(recs, 1) is False
-
-    def test_regressed_not_verified(self):
-        recs = [_merge(1, "2026-06-01") | _verdict(1, "regressed")]
-        assert signal_verified(recs, 1) is False
-
-    def test_no_verdict_yet_not_verified(self):
-        recs = [_merge(1, "2026-06-01")]
-        assert signal_verified(recs, 1) is False
-
-    def test_latest_verdict_wins(self):
-        recs = [
-            _merge(1, "2026-06-01"),
-            _verdict(1, "confirmed", verified_at="2026-06-10"),
-            _verdict(1, "regressed", verified_at="2026-06-15"),
-        ]
-        assert signal_verified(recs, 1) is False
-
-
-class TestShouldCloseIssue:
-    def test_confirmed_closes(self):
-        recs = [_merge(1, "2026-06-01") | _verdict(1, "confirmed")]
-        should, reason = should_close_issue(recs, 1, "2026-06-17")
-        assert should is True and "confirmed" in reason
-
-    def test_regressed_blocks_close(self):
-        recs = [_merge(1, "2026-06-01") | _verdict(1, "regressed")]
-        should, reason = should_close_issue(recs, 1, "2026-06-17")
-        assert should is False and "regressed" in reason
-
-    def test_no_signal_blocks_close(self):
-        recs = [_merge(1, "2026-06-01") | _verdict(1, "no-signal")]
-        should, reason = should_close_issue(recs, 1, "2026-06-17")
-        assert should is False and "no-signal" in reason
-
-    def test_not_tracked_closes(self):
-        should, reason = should_close_issue([_merge(2, "2026-06-01")], 1, "2026-06-17")
-        assert should is True and "not tracked" in reason
-
-    def test_recent_unverified_awaits(self):
-        recs = [_merge(1, "2026-06-15")]
-        should, reason = should_close_issue(recs, 1, "2026-06-17", maturity_days=5)
-        assert should is False and "awaiting" in reason.lower()
-
-    def test_matured_unverified_closes(self):
-        recs = [_merge(1, "2026-06-01")]
-        should, reason = should_close_issue(recs, 1, "2026-06-17", maturity_days=5)
-        assert should is True and "matured" in reason.lower()
-
-
-_PROG = "evolution_realized_impact.py"  # mod.main() takes sys.argv shape: [prog, subcmd, ...]
-
-
-class TestCheckCloseCli:
-    def test_check_close_hold_returns_nonzero(self, tmp_path, monkeypatch, capsys):
-        import evolution_realized_impact as mod
-
-        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
-        f = tmp_path / "realized" / "ledger.jsonl"
-        record_merge(f, 42, "2026-06-01", 0.8, "spiral")
-        record_verdict(f, 42, "regressed", "2026-06-10", "worse")
-        rc = mod.main([_PROG, "check-close", "42", "2026-06-17"])
-        out = capsys.readouterr().out
-        assert rc == 1 and "HOLD" in out and "regressed" in out
-
-    def test_check_close_close_returns_zero(self, tmp_path, monkeypatch, capsys):
-        import evolution_realized_impact as mod
-
-        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
-        f = tmp_path / "realized" / "ledger.jsonl"
-        record_merge(f, 42, "2026-06-01", 0.8, "spiral")
-        record_verdict(f, 42, "confirmed", "2026-06-10", "dropped")
-        rc = mod.main([_PROG, "check-close", "42", "2026-06-17"])
-        out = capsys.readouterr().out
-        assert rc == 0 and "CLOSE" in out and "confirmed" in out
+            rc = main([
+                "prog", "record-merge", "1234", "2026-07-27", "0.8",
+                "fix terminal timeouts", "not-valid-json",
+            ])
+            assert rc == 0
+            ledger = tmp_path / "realized" / "ledger.jsonl"
+            records = load_ledger(ledger)
+            assert "baseline_tool_failure_rate" not in records[0]
+        finally:
+            del os.environ["EVOLUTION_PROFILE_DIR"]

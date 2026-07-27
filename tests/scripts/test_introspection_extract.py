@@ -225,6 +225,72 @@ class TestBuildDigest:
         assert d["sessions_scanned"] == 0
 
 
+class TestFailureRateNormalization:
+    """#1324 — tool_failures is a raw count; as session volume grows the raw
+    count rises proportionally even when per-session rate holds/improves, so a
+    raw-count comparison flips a stable tool to "regressed". The digest now
+    emits per-tool ``tool_failure_rate`` (= count / sessions_scanned) alongside
+    the raw count. Raw counts must be preserved for back-compat."""
+
+    def test_rate_is_count_divided_by_sessions(self, tmp_path):
+        # 3 terminal failures across 2 sessions -> rate 1.5
+        for n, fails in (("a", 2), ("b", 1)):
+            lines = []
+            for i in range(fails):
+                lines += [_asst("terminal", f"{n}{i}"), _tool(f"{n}{i}", _term(exit_code=1))]
+            _session(tmp_path, n, lines)
+        d = build_digest(tmp_path, window_days=7)
+        assert d["sessions_scanned"] == 2
+        assert d["signals"]["tool_failures"] == {"terminal": 3}
+        assert d["signals"]["tool_failure_rate"] == {"terminal": 1.5}
+
+    def test_raw_counts_preserved(self, tmp_path):
+        # The rate is additive; the raw count key/value must be unchanged.
+        _session(
+            tmp_path, "s1", [_asst("read_file", "c1"), _tool("c1", _fail("nf"))]
+        )
+        d = build_digest(tmp_path, window_days=7)
+        assert d["signals"]["tool_failures"] == {"read_file": 1}
+        assert d["signals"]["tool_failure_rate"] == {"read_file": 1.0}
+
+    def test_false_regression_exposed_by_rate(self, tmp_path):
+        """The core #1324 scenario. Tool X improved per-session (8.0 -> 7.1
+        failures/session) but raw count rose (168 -> 298) because session
+        volume grew ~1.8x. The raw count says 'regressed'; the rate says
+        'improved'. Rate is the correct signal."""
+        # Cycle A: 168 failures over 21 sessions -> rate 8.0
+        dir_a = tmp_path / "a"
+        dir_a.mkdir()
+        for s in range(21):
+            lines = []
+            for i in range(8):
+                lines += [_asst("terminal", f"c{i}"), _tool(f"c{i}", _term(exit_code=1))]
+            _session(dir_a, f"s{s}", lines)
+        da = build_digest(dir_a, window_days=7)
+        # Cycle B: 298 failures over ~42 sessions -> rate 7.1
+        dir_b = tmp_path / "b"
+        dir_b.mkdir()
+        for s in range(42):
+            lines = []
+            for i in range(7):
+                lines += [_asst("terminal", f"c{i}"), _tool(f"c{i}", _term(exit_code=1))]
+            _session(dir_b, f"s{s}", lines)
+        db = build_digest(dir_b, window_days=7)
+        # Raw count REGRESSED (rose), but per-session rate IMPROVED (fell).
+        assert da["signals"]["tool_failures"]["terminal"] == 168
+        assert db["signals"]["tool_failures"]["terminal"] == 294
+        assert db["signals"]["tool_failures"]["terminal"] > da["signals"]["tool_failures"]["terminal"]
+        assert db["signals"]["tool_failure_rate"]["terminal"] < da["signals"]["tool_failure_rate"]["terminal"]
+        assert da["signals"]["tool_failure_rate"]["terminal"] == 8.0
+        assert db["signals"]["tool_failure_rate"]["terminal"] == 7.0
+
+    def test_no_sessions_no_division_by_zero(self, tmp_path):
+        d = build_digest(tmp_path, window_days=7)
+        assert d["sessions_scanned"] == 0
+        assert d["signals"]["tool_failures"] == {}
+        assert d["signals"]["tool_failure_rate"] == {}
+
+
 def _dump(
     tmp_path, name, messages, *, session_id, model="glm-5.2", error=None, age_days=0
 ):
@@ -570,3 +636,107 @@ class TestStateDB:
             "read_file": 1,
             "patch": 1,
         }
+
+
+class TestFailuresByReason:
+    """#1325 — the digest attributed failures by tool but not by reason, so a
+    fix that addressed one failure mode (file-not-found) could not be
+    distinguished from a regression in another mode (timeout) on the same tool.
+    The digest now emits ``tool_failures_by_reason: {tool: {reason: count}}``."""
+
+    def test_not_found_classified(self, tmp_path):
+        p = _session(
+            tmp_path,
+            "s1",
+            [_asst("read_file", "c1"), _tool("c1", _fail("no such file or directory"))],
+        )
+        s = scan_session(p)
+        assert s["tool_failures"] == {"read_file": 1}
+        reasons = s["tool_failures_by_reason"]
+        assert "read_file" in reasons
+        # The classifier maps "no such file" → not_found
+        assert reasons["read_file"].get("not_found", 0) >= 1
+
+    def test_permission_classified(self, tmp_path):
+        p = _session(
+            tmp_path,
+            "s1",
+            [_asst("terminal", "c1"), _tool("c1", _term(error="permission denied", exit_code=1))],
+        )
+        s = scan_session(p)
+        reasons = s["tool_failures_by_reason"]
+        assert "terminal" in reasons
+        assert reasons["terminal"].get("permission", 0) >= 1
+
+    def test_timeout_classified(self, tmp_path):
+        p = _session(
+            tmp_path,
+            "s1",
+            [_asst("terminal", "c1"), _tool("c1", _term(error="Connection timed out", exit_code=1))],
+        )
+        s = scan_session(p)
+        reasons = s["tool_failures_by_reason"]
+        assert "terminal" in reasons
+        assert reasons["terminal"].get("timeout", 0) >= 1
+
+    def test_multiple_reasons_same_tool(self, tmp_path):
+        """A tool can have failures in MULTIPLE reason buckets — the fix→regress
+        treadmill happens when a fix for one reason is masked by a regression
+        in another reason on the same tool."""
+        p = _session(
+            tmp_path,
+            "s1",
+            [
+                _asst("terminal", "c1"),
+                _tool("c1", _term(error="permission denied", exit_code=1)),
+                _asst("terminal", "c2"),
+                _tool("c2", _term(error="Connection timed out", exit_code=1)),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures"] == {"terminal": 2}
+        reasons = s["tool_failures_by_reason"]["terminal"]
+        assert reasons.get("permission", 0) >= 1
+        assert reasons.get("timeout", 0) >= 1
+
+    def test_no_failures_no_reasons(self, tmp_path):
+        p = _session(
+            tmp_path,
+            "s1",
+            [_asst("read_file", "c1"), _tool("c1", _ok(content="hello world"))],
+        )
+        s = scan_session(p)
+        assert s["tool_failures"] == {}
+        assert s["tool_failures_by_reason"] == {}
+
+    def test_other_bucket_for_unclassified(self, tmp_path):
+        """Failures that match no known pattern fall into 'other'."""
+        p = _session(
+            tmp_path,
+            "s1",
+            [_asst("terminal", "c1"), _tool("c1", _term(error="weird unknown glitch", exit_code=1))],
+        )
+        s = scan_session(p)
+        reasons = s["tool_failures_by_reason"]
+        assert "terminal" in reasons
+        # Either a known category matched or it's "other" — but it must be present
+        assert sum(reasons["terminal"].values()) == 1
+
+    def test_digest_aggregates_reasons_across_sessions(self, tmp_path):
+        # Two sessions with read_file failures of different reasons
+        _session(
+            tmp_path,
+            "a",
+            [_asst("read_file", "c1"), _tool("c1", _fail("no such file"))],
+        )
+        _session(
+            tmp_path,
+            "b",
+            [_asst("read_file", "c2"), _tool("c2", _fail("access denied"))],
+        )
+        d = build_digest(tmp_path, window_days=7)
+        assert d["sessions_scanned"] == 2
+        assert d["signals"]["tool_failures"] == {"read_file": 2}
+        reasons = d["signals"]["tool_failures_by_reason"]["read_file"]
+        assert reasons.get("not_found", 0) >= 1
+        assert reasons.get("permission", 0) >= 1

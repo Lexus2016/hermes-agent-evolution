@@ -313,12 +313,21 @@ PROFILE_SKILLS="${HERMES_HOME:-$HOME/.hermes}/skills/evolution"
    the deterministic helper to append one line to
    `~/.hermes/evolution/realized/ledger.jsonl`:
 ```bash
+# Capture the current tool_failure_rate as the baseline (#1324) so the
+# post-merge verification compares per-session RATES, not raw counts (which
+# grow with session volume and produce false "regressed" verdicts).
+RATE_BASELINE=$(python3 scripts/introspection_extract.py --days=7 \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d.get('signals',{}).get('tool_failure_rate',{})))")
 python3 scripts/evolution_realized_impact.py record-merge \
   <#> "<YYYY-MM-DD>" "<the issue's analysis impact 0..1>" \
-  "<one line: the concrete problem this was meant to fix>"
+  "<one line: the concrete problem this was meant to fix>" \
+  "$RATE_BASELINE"
 ```
    `predicted_impact` is the impact the analysis stage assigned the issue; `target`
-   is what "done" means for it. introspection later appends a `verdict` line for
+   is what "done" means for it. The optional 5th arg is the `tool_failure_rate`
+   dict from the current digest, stored as `baseline_tool_failure_rate` so the
+   introspection skill can use `compare-rate` later for a deterministic
+   rate-based verdict (#1324). introspection then appends a `verdict` line for
    the same issue once it has matured. NEVER omit this — an unrecorded merge is
    an unmeasured one.
 
