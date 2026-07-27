@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
+    from evolution.lib.stage_gate import decide as _gate_decide
     from evolution.lib.stage_result import StageResult
 
     _HAS_STAGE_RESULT = True
@@ -179,6 +180,17 @@ def run_local_triage(evolution_dir: Path) -> dict:
         envelope = stage_result.to_dict()
         envelope.pop("result", None)
         output["stage_result"] = envelope
+
+        # Consume the tuple through the Accept/Refine/Restart gate (#1339).
+        # Advisory at this boundary: local triage is a read-only pre-pass whose
+        # output the analysis stage consumes, so the gate records which branch
+        # the boundary lands in rather than aborting the pass. Confidence 50
+        # (evidence present, no LLM verification) sits below the conservative
+        # default of 70, so a triage run with sidecars lands in `refine` and one
+        # with none lands in `restart` — both surfaced for the next stage to act
+        # on instead of being silently treated as a confident result.
+        decision = _gate_decide(stage_result)
+        output["stage_gate"] = decision.to_dict()
     return output
 
 
@@ -224,6 +236,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Sidecars read: {', '.join(output['sidecars_read'].keys())}")
     print(f"  Selected: {len(output['selected_for_implementation'])} issues")
     print(f"  Effort budget: {output['effort_budget']}")
+    gate = output.get("stage_gate")
+    if gate:
+        print(
+            f"[stage-gate] {gate['stage']}: {gate['branch'].upper()} "
+            f"(confidence={gate['confidence']}, threshold={gate['threshold']}) — {gate['reason']}"
+        )
     return 0
 
 
