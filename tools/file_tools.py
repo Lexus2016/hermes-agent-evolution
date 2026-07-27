@@ -2216,6 +2216,39 @@ def search_tool(
                     m.content = redact_sensitive_text(m.content, file_read=True)
         result_dict = result.to_dict(densify=True)
 
+        # ── Empty-result spiral detection (#1372) ─────────────────────
+        # search_files returns {"total_count": 0} with no error key on a
+        # successful-but-empty search. The tool_guardrails spiral_failure_cap
+        # only counts errors, so diverse-query spirals (where the agent
+        # reformulates the query each time and gets empty each time) slip
+        # through — the regression of #1149. Track cumulative empty results
+        # per session and inject a directive when they pile up.
+        if result_dict.get("total_count", 0) == 0 and not result_dict.get("error"):
+            with _read_tracker_lock:
+                td = _read_tracker.setdefault(
+                    task_id,
+                    {"last_key": None, "consecutive": 0, "read_history": set()},
+                )
+                td["empty_searches"] = td.get("empty_searches", 0) + 1
+                _es = td["empty_searches"]
+            if _es >= 3:
+                result_dict.setdefault(
+                    "_search_directive",
+                    (
+                        f"search_files has returned 0 results {_es} times. "
+                        "Your queries are not matching anything. SWITCH STRATEGY: "
+                        "(a) use search_files target='files' with a glob like '*.py', "
+                        "(b) call repo_map for a structural overview, or "
+                        "(c) read_file on a known path instead of searching."
+                    ),
+                )
+        elif result_dict.get("total_count", 0) > 0:
+            # Successful search with results — reset the empty counter.
+            with _read_tracker_lock:
+                td = _read_tracker.get(task_id)
+                if td is not None:
+                    td["empty_searches"] = 0
+
         if omitted:
             result_dict["_omitted"] = (
                 f"{omitted} result(s) omitted because they target credential, "
