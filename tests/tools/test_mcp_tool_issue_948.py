@@ -1,11 +1,18 @@
 import asyncio
 import os
+import stat
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
-from tools.mcp_tool import MCPServerTask, _format_connect_error, _resolve_stdio_command, _MCP_AVAILABLE
+from tools.mcp_tool import (
+    MCPServerTask,
+    _format_connect_error,
+    _resolve_stdio_command,
+    _MCP_AVAILABLE,
+)
 
 # Ensure the mcp module symbols exist for patching even when the SDK isn't installed
 if not _MCP_AVAILABLE:
@@ -219,3 +226,104 @@ def test_run_stdio_malware_check_times_out_fail_open():
         assert elapsed < 1.0, f"startup did not fail-open promptly ({elapsed:.1f}s)"
 
     asyncio.run(_test())
+
+
+# ---------------------------------------------------------------------------
+# Pre-flight command resolver tests (#1297)
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureStdioCommandResolvable:
+    """Cover the pre-flight guard added for #1297.
+
+    ``_ensure_stdio_command_resolvable`` runs in ``_run_stdio`` right after
+    ``_resolve_stdio_command`` and raises a NON-retryable
+    :class:`MissingMcpCommandError` (subclass of
+    :class:`NonMcpEndpointError`) when the configured command binary is
+    absent, collapsing the 189-failure/scan retry storm for missing binaries
+    like ``turbo-memory-mcp``.
+    """
+
+    def test_missing_bare_command_raises(self):
+        """A bare name not on the SUBPROCESS PATH must raise."""
+        from tools.mcp_tool import (
+            MissingMcpCommandError,
+            _ensure_stdio_command_resolvable,
+        )
+
+        env = {"PATH": "/nonexistent-dir-948"}
+        with pytest.raises(MissingMcpCommandError, match="turbo-memory-mcp"):
+            _ensure_stdio_command_resolvable("turbo-memory-mcp", env)
+
+    def test_bad_absolute_path_raises(self, tmp_path):
+        """An absolute path that doesn't exist must raise."""
+        from tools.mcp_tool import (
+            MissingMcpCommandError,
+            _ensure_stdio_command_resolvable,
+        )
+
+        missing = tmp_path / "definitely-not-here-948"
+        env = {"PATH": os.environ.get("PATH", "")}
+        with pytest.raises(MissingMcpCommandError, match="does not exist"):
+            _ensure_stdio_command_resolvable(str(missing), env)
+
+    def test_non_executable_file_raises(self, tmp_path):
+        """A regular (non-executable) file at an absolute path must raise."""
+        from tools.mcp_tool import (
+            MissingMcpCommandError,
+            _ensure_stdio_command_resolvable,
+        )
+
+        non_exec = tmp_path / "not-executable-948"
+        non_exec.write_text("#!/bin/sh\n")
+        non_exec.chmod(0o644)
+        assert not os.access(str(non_exec), os.X_OK)
+        env = {"PATH": os.environ.get("PATH", "")}
+        with pytest.raises(MissingMcpCommandError, match="not executable"):
+            _ensure_stdio_command_resolvable(str(non_exec), env)
+
+    def test_empty_command_raises(self):
+        """An empty/whitespace command is a programming error -> ValueError."""
+        from tools.mcp_tool import _ensure_stdio_command_resolvable
+
+        with pytest.raises(ValueError):
+            _ensure_stdio_command_resolvable("", {"PATH": "/usr/bin"})
+        with pytest.raises(ValueError):
+            _ensure_stdio_command_resolvable("   ", {"PATH": "/usr/bin"})
+
+    def test_healthy_pass_through_no_exception(self):
+        """A resolvable bare command (on PATH) must pass through cleanly."""
+        from tools.mcp_tool import _ensure_stdio_command_resolvable
+
+        env = {"PATH": os.environ.get("PATH", "")}
+        # Should NOT raise.
+        _ensure_stdio_command_resolvable("python3", env)
+
+    def test_executable_absolute_path_passes(self, tmp_path):
+        """An executable file at an absolute path must pass through cleanly."""
+        from tools.mcp_tool import _ensure_stdio_command_resolvable
+
+        exec_file = tmp_path / "my-mcp-server-948"
+        exec_file.write_text("#!/bin/sh\n")
+        exec_file.chmod(
+            stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH
+        )
+        env = {"PATH": os.environ.get("PATH", "")}
+        # Should NOT raise.
+        _ensure_stdio_command_resolvable(str(exec_file), env)
+
+    def test_missing_command_error_subclasses_non_mcp_endpoint_error(self):
+        """MissingMcpCommandError must be caught as NonMcpEndpointError so the
+        reconnect loop treats it as a clean, non-retryable exit."""
+        from tools.mcp_tool import (
+            MissingMcpCommandError,
+            NonMcpEndpointError,
+            _ensure_stdio_command_resolvable,
+        )
+
+        assert issubclass(MissingMcpCommandError, NonMcpEndpointError)
+        env = {"PATH": "/nonexistent-dir-948"}
+        with pytest.raises(NonMcpEndpointError):
+            _ensure_stdio_command_resolvable("no-such-binary-948", env)
+        with pytest.raises(ConnectionError):
+            _ensure_stdio_command_resolvable("no-such-binary-948", env)

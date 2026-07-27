@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from evolution_realized_impact import (  # noqa: E402
     append_ledger_record,
+    classify_verdict_by_rate,
     compute_realized,
     format_realized,
     load_ledger,
@@ -279,3 +280,68 @@ class TestCheckCloseCli:
         rc = mod.main([_PROG, "check-close", "42", "2026-06-17"])
         out = capsys.readouterr().out
         assert rc == 0 and "CLOSE" in out and "confirmed" in out
+
+
+class TestClassifyVerdictByRate:
+    def test_rate_flat_or_down_is_confirmed(self):
+        # 298/42 (7.10) vs 168/21 (8.00) — the issue's concrete example: improved.
+        assert classify_verdict_by_rate(8.0, 7.1) == "confirmed"
+
+    def test_rate_up_beyond_threshold_is_regressed(self):
+        # >20% relative increase flips to regressed.
+        assert classify_verdict_by_rate(5.0, 7.0) == "regressed"  # +40%
+
+    def test_rate_up_within_threshold_is_confirmed(self):
+        assert classify_verdict_by_rate(5.0, 5.9) == "confirmed"  # +18%
+
+    def test_missing_rates_no_signal(self):
+        assert classify_verdict_by_rate(None, 5.0) == "no-signal"
+        assert classify_verdict_by_rate(5.0, None) == "no-signal"
+
+    def test_zero_baseline_up_is_regressed(self):
+        assert classify_verdict_by_rate(0.0, 1.0) == "regressed"
+
+
+class TestRateNormalizedCloseGate:
+    def _recs(self, baseline):
+        return [
+            {"issue": 1, "merged_at": "2026-06-01", "baseline_failure_rate": baseline}
+            | _verdict(1, "regressed")
+        ]
+
+    def test_volume_only_increase_allows_close(self):
+        # Raw count grew, but rate held/fell -> close (not a real regression).
+        recs = self._recs(baseline=8.0)
+        should, reason = should_close_issue(
+            recs, 1, "2026-06-17", current_failure_rate=7.1
+        )
+        assert should is True and "#1324" in reason
+
+    def test_real_rate_increase_blocks_close(self):
+        recs = self._recs(baseline=5.0)
+        should, reason = should_close_issue(
+            recs, 1, "2026-06-17", current_failure_rate=7.0
+        )
+        assert should is False and "regressed" in reason
+
+    def test_no_baseline_falls_back_to_verdict(self):
+        # Legacy record without baseline_failure_rate: regressed still blocks.
+        recs = [{"issue": 1, "merged_at": "2026-06-01"} | _verdict(1, "regressed")]
+        should, reason = should_close_issue(
+            recs, 1, "2026-06-17", current_failure_rate=7.0
+        )
+        assert should is False
+
+
+class TestRecordMergeBaseline:
+    def test_baseline_failure_rate_stored(self, tmp_path):
+        f = tmp_path / "ledger.jsonl"
+        record_merge(f, 5, "2026-06-01", 0.8, "fix", baseline_failure_rate=3.5)
+        recs = load_ledger(f)
+        assert recs[0]["baseline_failure_rate"] == 3.5
+
+    def test_baseline_omitted_keeps_legacy_shape(self, tmp_path):
+        f = tmp_path / "ledger.jsonl"
+        record_merge(f, 5, "2026-06-01", 0.8, "fix")
+        recs = load_ledger(f)
+        assert "baseline_failure_rate" not in recs[0]
