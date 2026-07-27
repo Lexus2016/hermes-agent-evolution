@@ -155,21 +155,30 @@ def run_local_triage(evolution_dir: Path) -> dict:
     }
 
     # Emit a StageResult at this boundary (AREX #1338 slice A).
-    # The tuple is additive — it wraps the same output dict and records the
-    # sidecar paths as evidence pointers.  A confidence of 50 signals "we have
-    # data but no LLM verification"; a higher value can be self-assessed later.
+    #
+    # The envelope is attached to the same dict it describes, so its ``result``
+    # field is dropped here: keeping it would make output["stage_result"]
+    # ["result"] point back at output, and json.dumps raises
+    # "Circular reference detected" on exactly that. Dropping it also avoids
+    # serializing the whole triage payload twice. The rest of the tuple —
+    # evidence pointers, confidence, stage, timestamp — is what a consumer of
+    # this boundary actually needs; the result itself is the document it is
+    # attached to.
+    #
     # Skipped when the evolution package is not importable (see the import
-    # guard above) — the triage output itself is the contract.
+    # guard above) — the triage output is the contract, this is telemetry.
     if _HAS_STAGE_RESULT:
         evidence = list(output["sidecars_read"].values())
         stage_result = StageResult.wrap(
-            result=output,
+            result=None,
             evidence_pointers=[p for p in evidence if p],
             confidence=50,
             stage="local_triage",
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
-        output["stage_result"] = stage_result.to_dict()
+        envelope = stage_result.to_dict()
+        envelope.pop("result", None)
+        output["stage_result"] = envelope
     return output
 
 

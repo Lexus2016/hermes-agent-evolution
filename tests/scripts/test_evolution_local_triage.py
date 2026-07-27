@@ -152,3 +152,24 @@ def test_read_sidecar_md(tmp_path):
     f.write_text("# Research report\n\nContent here.")
     result = _read_sidecar(f)
     assert result["char_count"] > 0
+
+def test_output_is_json_serializable_with_stage_result(tmp_path):
+    """The triage output must survive json.dumps with the StageResult envelope
+    attached (#1338 slice A).
+
+    The envelope describes the very dict it is attached to, so carrying its
+    ``result`` field would make output["stage_result"]["result"] point back at
+    output — and json.dumps raises "Circular reference detected" on that. The
+    gate swallows the failure (`|| true`), so the only visible symptom is a
+    missing analysis file; this asserts serializability directly.
+    """
+    evolution_dir = tmp_path / "evolution"
+    evolution_dir.mkdir()
+    output = run_local_triage(evolution_dir)
+
+    encoded = json.dumps(output, indent=2, ensure_ascii=False)
+    assert json.loads(encoded) == output
+
+    if "stage_result" in output:
+        assert "result" not in output["stage_result"]
+        assert output["stage_result"]["stage"] == "local_triage"
