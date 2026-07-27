@@ -90,17 +90,23 @@ def record_merge(
     merged_at: str,
     predicted_impact: float,
     target: str,
+    baseline_failure_rate: Optional[float] = None,
 ) -> None:
-    """Record a merge event in the realized-impact ledger."""
-    append_ledger_record(
-        ledger_file,
-        {
-            "issue": issue,
-            "merged_at": merged_at,
-            "predicted_impact": predicted_impact,
-            "target": target,
-        },
-    )
+    """Record a merge event in the realized-impact ledger.
+
+    ``baseline_failure_rate`` (failures/session at merge time) is stored so later
+    verdicts compare apples-to-apples rates, not raw counts that grow with
+    session volume (#1324). Omitted/None keeps legacy records working.
+    """
+    rec: Dict[str, Any] = {
+        "issue": issue,
+        "merged_at": merged_at,
+        "predicted_impact": predicted_impact,
+        "target": target,
+    }
+    if baseline_failure_rate is not None:
+        rec["baseline_failure_rate"] = baseline_failure_rate
+    append_ledger_record(ledger_file, rec)
 
 
 def record_verdict(
@@ -122,6 +128,29 @@ def record_verdict(
             "note": note,
         },
     )
+
+
+def classify_verdict_by_rate(
+    baseline_rate: Optional[float],
+    current_rate: Optional[float],
+    regression_threshold: float = 0.20,
+) -> str:
+    """Rate-normalized verdict so growing session volume can't fake a regression.
+
+    Returns ``"regressed"`` only if the per-session failure rate rose by more
+    than ``regression_threshold`` (default 20%) over the baseline — NOT merely
+    because the raw count grew with the session denominator (#1324). Returns
+    ``"confirmed"`` when the rate fell or held, and ``"no-signal"`` when either
+    rate is missing (caller must still record a verdict; it just isn't forced to
+    ``regressed`` by volume alone).
+    """
+    if baseline_rate is None or current_rate is None:
+        return "no-signal"
+    # Relative change vs baseline; treat a zero baseline as "improved if not up".
+    if baseline_rate <= 0:
+        return "confirmed" if current_rate <= 0 else "regressed"
+    rel_delta = (current_rate - baseline_rate) / baseline_rate
+    return "regressed" if rel_delta > regression_threshold else "confirmed"
 
 
 # ── Post-merge signal-verification gate (#1140) ────────────────────────────
@@ -152,6 +181,8 @@ def should_close_issue(
     issue: int,
     today: str,
     maturity_days: int = 5,
+    current_failure_rate: Optional[float] = None,
+    regression_threshold: float = 0.20,
 ) -> tuple:
     """Gate for closing an issue after a fix PR merges.
 
@@ -164,6 +195,13 @@ def should_close_issue(
     If the verdict is "no-signal" or "regressed", returns ``(False, reason)``
     so the issue stays open for a focused regression — this is the core fix
     for the REALIZED_IMPACT_LOW failure loop.
+
+    Rate normalization (#1324): when a ``current_failure_rate`` is supplied and
+    the merge record stored a ``baseline_failure_rate``, a recorded ``regressed``
+    verdict is re-checked against the *rate* delta — if the rate did NOT rise
+    beyond ``regression_threshold``, the raw-count regression is treated as a
+    false alarm and the issue may close. This stops growing session volume from
+    forcing false HOLDs.
     """
     rec = None
     for r in reversed(records):
@@ -177,6 +215,27 @@ def should_close_issue(
     verdict = rec.get("verdict")
     if verdict in VERDICTS_GOOD:
         return True, "signal confirmed dropped post-merge"
+
+    # Rate-normalization override: a "regressed" verdict from a raw-count
+    # comparison is a false alarm if the per-session rate held or fell (#1324).
+    if (
+        verdict == "regressed"
+        and current_failure_rate is not None
+        and rec.get("baseline_failure_rate") is not None
+    ):
+        rate_verdict = classify_verdict_by_rate(
+            rec.get("baseline_failure_rate"),
+            current_failure_rate,
+            regression_threshold=regression_threshold,
+        )
+        if rate_verdict != "regressed":
+            return (
+                True,
+                "regressed verdict re-checked by rate: per-session failure rate "
+                f"{current_failure_rate:.4f} vs baseline "
+                f"{rec['baseline_failure_rate']:.4f} — volume-only increase, "
+                "not a real regression (#1324)",
+            )
 
     if verdict in VERDICTS_BAD:
         return (
@@ -320,7 +379,14 @@ def main(argv: List[str]) -> int:
                 file=sys.stderr,
             )
             return 2
-        record_merge(ledger_file, issue, merged_at, predicted, target)
+        baseline_rate = None
+        # Optional 6th positional arg: baseline failures/session at merge (#1324).
+        if len(args) > 5:
+            try:
+                baseline_rate = float(args[5])
+            except ValueError:
+                baseline_rate = None
+        record_merge(ledger_file, issue, merged_at, predicted, target, baseline_rate)
         print(f"[realized-impact] recorded merge for issue #{issue}")
         return 0
 
@@ -361,8 +427,21 @@ def main(argv: List[str]) -> int:
             from datetime import datetime, timezone
 
             today = datetime.now(timezone.utc).date().isoformat()
+        # Optional --current-rate <rate>: current per-session failure rate for the
+        # rate-normalization override (#1324). Enables re-checking a "regressed"
+        # verdict against the stored baseline rate instead of raw counts.
+        current_rate = None
+        if "--current-rate" in args:
+            i = args.index("--current-rate")
+            if i + 1 < len(args):
+                try:
+                    current_rate = float(args[i + 1])
+                except ValueError:
+                    current_rate = None
         records = load_ledger(ledger_file)
-        should, reason = should_close_issue(records, issue, today)
+        should, reason = should_close_issue(
+            records, issue, today, current_failure_rate=current_rate
+        )
         verdict = "CLOSE" if should else "HOLD"
         print(f"[realized-impact] #{issue} {verdict}: {reason}")
         return 0 if should else 1

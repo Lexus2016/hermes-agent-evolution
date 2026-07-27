@@ -397,11 +397,26 @@ def build_digest(
                     scanned += 1
                     _aggregate(_state_db_session_signals(msgs))
 
+    # Normalize raw counts by session volume so growing volume does not inflate
+    # the absolute failure counts (issue #1324 — false "regressed" verdicts).
+    # Rate = failures[tool] / sessions_scanned (0 when nothing scanned).
+    tool_failures = dict(failures.most_common())
+    failure_rate = {
+        tool: (count / scanned if scanned else 0.0)
+        for tool, count in tool_failures.items()
+    }
+    spiral_depth_per_session = {
+        tool: round((meta["max_consecutive"] / scanned if scanned else 0.0), 4)
+        for tool, meta in repeated.items()
+    }
+
     return {
         "window_days": window_days,
         "sessions_scanned": scanned,
         "signals": {
-            "tool_failures": dict(failures.most_common()),
+            "tool_failures": tool_failures,
+            "failure_rate": failure_rate,
+            "spiral_depth_per_session": spiral_depth_per_session,
             "timeouts": timeouts,
             "refusals_or_access_denied": refusals,
             "repeated_tool_runs": repeated,
