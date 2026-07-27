@@ -512,28 +512,33 @@ def detect_dead_end_loop(
             signatures[key] += 1
             sig_to_tool[key] = name
 
-    # Find the most-repeated identical call.
     if not signatures:
         return None
-    top_key, top_count = signatures.most_common(1)[0]
+
+    # Gate on the signature the agent is issuing RIGHT NOW, and on ITS OWN count.
+    #
+    # Two separate requirements, and both matter:
+    #
+    # * Liveness — counting across the whole window would flag a run the agent
+    #   has already moved on from: 5x terminal followed by a read_file, or 8x
+    #   terminal followed by a text reply, are treated as progress everywhere
+    #   else in this module (see TestRunBoundaries). A turn calling several
+    #   DIFFERENT tools at once is varied work, so it does not count either.
+    #
+    # * Its own count, NOT the window's most-repeated one. Ranking by
+    #   ``most_common`` and then requiring that winner to be live silently
+    #   disabled the detector whenever the agent alternated between two stuck
+    #   calls: with `pytest` and `ruff` each re-issued four times, the counter
+    #   returns `pytest` (insertion order breaks the tie), the latest turn is
+    #   `ruff`, the two do not match, and a textbook dead end went unreported.
+    key = _last_call_signature(scan)
+    if key is None:
+        return None
+    top_count = signatures.get(key, 0)
     if top_count < _DEAD_END_REPEAT_THRESHOLD:
         return None
 
-    # The repeated signature must be what the agent is doing RIGHT NOW.
-    #
-    # Counting across the whole window would flag a run the agent has already
-    # moved on from: 5x terminal followed by a read_file, or 8x terminal
-    # followed by a text reply, are treated as progress everywhere else in this
-    # module (see TestRunBoundaries) — the agent broke the pattern by itself and
-    # needs no nudge. Only when the latest tool turn re-issues the repeated
-    # signature is the loop still live.
-    #
-    # A turn calling several DIFFERENT tools at once is varied work, not a
-    # spiral, so it does not count as a live re-issue either.
-    if _last_call_signature(scan) != top_key:
-        return None
-
-    tool = sig_to_tool[top_key]
+    tool = sig_to_tool[key]
     return (
         f"[loop-guard] DEAD-END DETECTED (#1312): You have re-issued `{tool}` "
         f"with the SAME arguments {top_count} times. This is a dead-end loop, "

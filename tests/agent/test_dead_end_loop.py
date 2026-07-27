@@ -146,3 +146,44 @@ class TestDetectDeadEndLoop:
         # ARE within the last 60 messages and should trigger.
         result = detect_dead_end_loop(msgs)
         assert result is not None
+
+
+class TestAlternatingCallsAreStillDeadEnds:
+    """Two stuck calls alternating is a dead end, not variety.
+
+    Regression for a defect found in review: the check ranked the window by
+    `most_common` and then required THAT winner to be the live one. With two
+    signatures re-issued four times each, the counter returns the first-inserted
+    on a tie while the latest turn is the other — they never matched, and a
+    textbook dead end went unreported. The gate is now on the live signature's
+    OWN count.
+    """
+
+    @staticmethod
+    def _alternating(n: int) -> list[dict]:
+        msgs: list[dict] = []
+        for i in range(n):
+            msgs.append(_make_tool_call("terminal", '{"command": "pytest"}', f"a{i}"))
+            msgs.append(_make_tool_result(f"a{i}", "FAIL"))
+            msgs.append(_make_tool_call("terminal", '{"command": "ruff check"}', f"b{i}"))
+            msgs.append(_make_tool_result(f"b{i}", "FAIL"))
+        return msgs
+
+    def test_alternating_pair_at_threshold_fires(self):
+        result = detect_dead_end_loop(self._alternating(4))
+        assert result is not None
+        assert "4 times" in result
+
+    def test_alternating_pair_below_threshold_is_quiet(self):
+        assert detect_dead_end_loop(self._alternating(3)) is None
+
+    def test_fires_on_the_live_signature_not_the_most_common(self):
+        """The nudge must describe the call being re-issued now."""
+        msgs = self._alternating(3)
+        # one extra `ruff` so it is BOTH the live call and above threshold,
+        # while `pytest` sits one below.
+        msgs.append(_make_tool_call("terminal", '{"command": "ruff check"}', "z"))
+        msgs.append(_make_tool_result("z", "FAIL"))
+        result = detect_dead_end_loop(msgs)
+        assert result is not None
+        assert "4 times" in result
