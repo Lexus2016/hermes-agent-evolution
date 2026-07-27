@@ -787,6 +787,56 @@ def _resolve_stdio_command(command: str, env: dict) -> tuple[str, dict]:
     return resolved_command, resolved_env
 
 
+def _ensure_stdio_command_resolvable(command: str, env: dict) -> None:
+    """Pre-flight: raise if *command* cannot be resolved/executed at spawn.
+
+    Run in :meth:`MCPServerTask._run_stdio` right after
+    :func:`_resolve_stdio_command`, before any subprocess is forked, so that a
+    missing binary fails fast with an actionable, NON-retryable
+    :class:`MissingMcpCommandError` instead of entering the reconnect-backoff
+    loop (which used to retry 189 times/scan for ``turbo-memory-mcp``).
+
+    Resolution mirrors the rules the subprocess will actually use: the
+    *subprocess* env's ``PATH`` (``env["PATH"]``), not the Hermes process
+    PATH, so the check is honest about what ``execvp`` will see.
+
+    - Absolute / relative path containing ``os.sep``: must be an existing
+      executable file, else :class:`MissingMcpCommandError`.
+    - Bare name: resolved via :func:`shutil.which` against ``env["PATH"]``;
+      unresolved names raise :class:`MissingMcpCommandError`.
+    - Empty / whitespace-only command: :class:`ValueError` (a programming
+      error, not a missing-binary error).
+    """
+    cmd = str(command or "").strip()
+    if not cmd:
+        raise ValueError("stdio MCP command is empty")
+
+    path_env = (env or {}).get("PATH")
+
+    if os.sep in cmd:
+        # Absolute or explicit relative path — check the file directly.
+        if not os.path.isfile(cmd):
+            raise MissingMcpCommandError(
+                f"stdio MCP command not found: {cmd!r} does not exist. "
+                f"Check the path or install the server binary."
+            )
+        if not os.access(cmd, os.X_OK):
+            raise MissingMcpCommandError(
+                f"stdio MCP command not executable: {cmd!r}. "
+                f"Ensure the file has execute permission (chmod +x)."
+            )
+        return
+
+    # Bare name — resolve against the SUBPROCESS PATH (not ours).
+    resolved = shutil.which(cmd, path=path_env)
+    if resolved is None:
+        raise MissingMcpCommandError(
+            f"stdio MCP command not found on PATH: {cmd!r}. "
+            f"Install the server (e.g. `npm i -g {cmd}`) or add its directory "
+            f"to the server's env.PATH."
+        )
+
+
 def _wrap_command_with_watchdog(command: str, args: list) -> tuple[str, list]:
     """Wrap a stdio MCP server command in the parent-death watchdog supervisor.
 
@@ -1062,6 +1112,18 @@ class NonMcpEndpointError(ConnectionError):
 
     Subclasses :class:`ConnectionError` so callers that only catch the broad
     class still treat it as a connection problem.
+    """
+
+
+class MissingMcpCommandError(NonMcpEndpointError):
+    """Raised when a stdio MCP command binary cannot be resolved at spawn time.
+
+    This is a non-retryable condition: if the binary isn't on the subprocess
+    ``PATH`` (or the absolute path doesn't exist), no amount of reconnect
+    backoff will make it appear.  Subclassing :class:`NonMcpEndpointError`
+    means the reconnect loop already treats it as a clean, non-retryable exit,
+    collapsing what used to be a 189-failure/scan retry storm (e.g.
+    ``turbo-memory-mcp`` missing from ``PATH``) into one actionable error.
     """
 
 
@@ -2349,6 +2411,7 @@ class MCPServerTask:
 
         safe_env = _build_safe_env(user_env)
         command, safe_env = _resolve_stdio_command(command, safe_env)
+        _ensure_stdio_command_resolvable(command, safe_env)
 
         # Check package against OSV malware database before spawning.
         # Run off the event loop (the urllib HTTPS call is blocking) and bound
