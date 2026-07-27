@@ -39,6 +39,7 @@ from agent.prompt_builder import (
     OPENAI_MODEL_EXECUTION_GUIDANCE,
     PARALLEL_TOOL_CALL_GUIDANCE,
     PLATFORM_HINTS,
+    RECOVERY_BEFORE_REFUSAL_GUIDANCE,
     SESSION_SEARCH_GUIDANCE,
     SKILLS_GUIDANCE,
     STEER_CHANNEL_NOTE,
@@ -220,6 +221,14 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # acting, audit and rate your own work after. Always on — static text, scoped
     # to non-trivial work, so it raises quality without slowing simple replies.
     stable_parts.append(DELIBERATE_WORK_GUIDANCE)
+
+    # Recovery-before-refusal guidance (#1356): steer the model toward
+    # proposing alternative tool paths before issuing a soft-capability
+    # refusal.  Always on — static text, scoped to tool-bearing sessions
+    # so non-tool platforms (e.g. bare API) don't pay the token cost.
+    if agent.valid_tool_names:
+        stable_parts.append(RECOVERY_BEFORE_REFUSAL_GUIDANCE)
+
     # Universal parallel-tool-call guidance.  Tells the model to batch
     # independent tool calls into one assistant turn rather than emitting one
     # call per turn — the runtime already runs independent calls concurrently
