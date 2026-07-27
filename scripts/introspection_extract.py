@@ -23,6 +23,12 @@ Signals extracted:
   * tool_failures  — tool results that look like failures, attributed to the
     tool (via tool_call_id -> name from the preceding assistant turn). Reuses
     agent.loop_guard's failure markers for consistency.
+  * tool_failures_by_reason — sub-classifies each failure by reason (#1325):
+    {tool: {reason: count}} using a small no-LLM taxonomy (file-not-found,
+    permission-denied, timeout, quota-billing, parse-error, no-match,
+    non-zero-exit, other). Stops the fix→regress→refile treadmill where a
+    fix for one sub-cause gets credited/blamed for unrelated sub-causes of
+    the same tool.
   * timeouts       — results mentioning timeout / timed out.
   * refusals       — assistant text expressing "I can't / no access / denied".
   * repeated_tool_runs — same tool called many times consecutively (the spiral
@@ -51,6 +57,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from hermes_constants import get_hermes_home
 
 
+def _parse_envelope(content: Any) -> Optional[dict]:
+    """Parse a tool-result JSON envelope, returning the dict or None (#347).
+
+    Non-JSON / plain-string bodies return None (no authoritative status). This
+    is the shared parse step used by both the failure classifier and the
+    failure-reason sub-classifier (#1325).
+    """
+    data = content
+    if isinstance(data, (str, bytes)):
+        text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
+        stripped = text.strip()
+        if not (stripped.startswith("{") and stripped.endswith("}")):
+            return None  # not a JSON envelope → no authoritative status → don't guess
+        try:
+            data = json.loads(stripped)
+        except ValueError:
+            return None
+    return data if isinstance(data, dict) else None
+
+
 def _tool_result_failed(content: Any) -> bool:
     """Structural failure classifier for a tool result (issue #347).
 
@@ -75,17 +101,8 @@ def _tool_result_failed(content: Any) -> bool:
     a few genuinely-plain-string failures (rare; tools emit JSON envelopes) for
     eliminating the false-positive flood, exactly as the issue prescribes.
     """
-    data = content
-    if isinstance(data, (str, bytes)):
-        text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
-        stripped = text.strip()
-        if not (stripped.startswith("{") and stripped.endswith("}")):
-            return False  # not a JSON envelope → no authoritative status → don't guess
-        try:
-            data = json.loads(stripped)
-        except ValueError:
-            return False
-    if not isinstance(data, dict):
+    data = _parse_envelope(content)
+    if data is None:
         return False
     if "exit_code" in data:
         try:
@@ -98,6 +115,48 @@ def _tool_result_failed(content: Any) -> bool:
         if ok_key in data:
             return not bool(data[ok_key])
     return False
+
+
+# --- failure-reason sub-classifier (#1325) ----------------------------------
+# The aggregate tool_failures counter lumps every failure mode for a tool into
+# one bucket.  When one sub-cause is fixed but another appears, the tool-level
+# count barely moves, hiding real progress (fix→regress→refile treadmill).
+# Keyword checks run ONLY on error/output/stderr STATUS fields of a KNOWN
+# failure — never on successful output — so #347's false-positive guard holds.
+# fmt: off
+_FAILURE_REASON_RULES: list[tuple[str, re.Pattern]] = [
+    ("file-not-found", re.compile(r"\b(no such file|file not found|does not exist|not found)\b", re.IGNORECASE)),
+    ("permission-denied", re.compile(r"\b(permission denied|access denied|forbidden|eperm|eacces)\b", re.IGNORECASE)),
+    ("timeout", re.compile(r"\b(timed out|timeout|deadline exceeded)\b", re.IGNORECASE)),
+    ("quota-billing", re.compile(r"\b(quota|billing|insufficient|payment|429|rate.?limit)\b", re.IGNORECASE)),
+    ("parse-error", re.compile(r"\b(json|parse|syntax|decode).*?(error|invalid|failed)|unexpected (token|eof)\b", re.IGNORECASE)),
+    ("no-match", re.compile(r"\b(no match|nothing to|not found.*patch|hunk.*failed|context.*mismatch)\b", re.IGNORECASE)),
+]
+# fmt: on
+
+
+def _classify_failure_reason(content: Any) -> str:
+    """Return a failure-reason label for a KNOWN failure envelope (#1325).
+
+    Inspects only the ``error``, ``output``, ``stderr`` status fields of the
+    parsed envelope (never arbitrary returned content, so #347 is preserved).
+    Returns the first matching taxonomy label, or ``"non-zero-exit"`` when the
+    failure was signalled solely by a non-zero ``exit_code``, or ``"other"``.
+    """
+    data = _parse_envelope(content)
+    if data is None:
+        return "other"
+    blob = " ".join(
+        str(data.get(k, ""))
+        for k in ("error", "output", "stderr", "message")
+        if isinstance(data.get(k), (str, int, float))
+    )
+    for reason, pat in _FAILURE_REASON_RULES:
+        if pat.search(blob):
+            return reason
+    if "exit_code" in data:
+        return "non-zero-exit"
+    return "other"
 
 
 _TIMEOUT_RE = re.compile(r"\b(timed out|timeout)\b", re.IGNORECASE)
@@ -211,6 +270,7 @@ def scan_messages(messages) -> Dict[str, Any]:
     all formats yield the identical digest.
     """
     tool_failures: Counter = Counter()
+    tool_failures_by_reason: Dict[str, Counter] = {}  # tool -> {reason: count} (#1325)
     timeouts = 0
     refusals = 0
     id_to_tool: Dict[str, str] = {}
@@ -251,12 +311,17 @@ def scan_messages(messages) -> Dict[str, Any]:
             failed = _tool_result_failed(content)
             if failed:
                 tool_failures[tool] += 1
+                reason = _classify_failure_reason(content)
+                tool_failures_by_reason.setdefault(tool, Counter())[reason] += 1
             if failed and isinstance(content, str) and _TIMEOUT_RE.search(content):
                 timeouts += 1
 
     repeated = {t: n for t, n in max_runs.items() if n >= _REPEAT_THRESHOLD}
     return {
         "tool_failures": dict(tool_failures),
+        "tool_failures_by_reason": {
+            t: dict(rc) for t, rc in tool_failures_by_reason.items()
+        },
         "timeouts": timeouts,
         "refusals": refusals,
         "repeated_tool_runs": repeated,
@@ -321,6 +386,7 @@ def build_digest(
     now = now if now is not None else time.time()
     cutoff = now - window_days * 86400
     failures: Counter = Counter()
+    failures_by_reason: Dict[str, Counter] = {}  # tool -> {reason: count} (#1325)
     timeouts = 0
     refusals = 0
     provider_errors: Counter = Counter()
@@ -331,6 +397,8 @@ def build_digest(
     def _aggregate(s: Dict[str, Any]) -> None:
         nonlocal timeouts, refusals
         failures.update(s.get("tool_failures", {}))
+        for tool, reasons in s.get("tool_failures_by_reason", {}).items():
+            failures_by_reason.setdefault(tool, Counter()).update(reasons)
         timeouts += s.get("timeouts", 0)
         refusals += s.get("refusals", 0)
         provider_errors.update(s.get("provider_errors", {}))
@@ -402,6 +470,9 @@ def build_digest(
         "sessions_scanned": scanned,
         "signals": {
             "tool_failures": dict(failures.most_common()),
+            "tool_failures_by_reason": {
+                t: dict(rc.most_common()) for t, rc in failures_by_reason.items()
+            },
             "timeouts": timeouts,
             "refusals_or_access_denied": refusals,
             "repeated_tool_runs": repeated,

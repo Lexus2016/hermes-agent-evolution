@@ -16,7 +16,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from introspection_extract import build_digest, scan_session  # noqa: E402
+from introspection_extract import (  # noqa: E402
+    _classify_failure_reason,
+    build_digest,
+    scan_session,
+)
 
 
 def _session(tmp_path, name, lines, *, age_days=0):
@@ -189,6 +193,118 @@ class TestScanSession:
         # A genuine failure is counted, but the digest carries only counts/tool
         # names — never the raw content/error text.
         assert s["tool_failures"] == {"terminal": 1}
+        assert secret not in json.dumps(s)
+
+
+class TestFailureReasonAttribution:
+    """#1325 — failures must be sub-classified by reason, not just tool, so a
+    fix for one sub-cause isn't credited/blamed for unrelated sub-causes of the
+    same tool (the fix→regress→refile treadmill)."""
+
+    def test_classifier_taxonomy(self):
+        cases = {
+            "no such file or directory": "file-not-found",
+            "File not found in repo": "file-not-found",
+            "permission denied": "permission-denied",
+            "access denied by policy": "permission-denied",
+            "request timed out after 120s": "timeout",
+            "rate limit exceeded (429)": "quota-billing",
+            "quota exceeded": "quota-billing",
+            "json decode error: unexpected token": "parse-error",
+            "JSON parse failed": "parse-error",
+            "no match: nothing to replace": "no-match",
+            "hunk failed at line 5": "no-match",
+        }
+        for text, expected in cases.items():
+            assert _classify_failure_reason(_fail(text)) == expected, text
+        # pure non-zero exit, no recognisable text → non-zero-exit
+        assert _classify_failure_reason(_term("", exit_code=127)) == "non-zero-exit"
+        # error with unrecognised text → other
+        assert _classify_failure_reason(_fail("something weird")) == "other"
+
+    def test_scan_session_attributes_by_reason(self, tmp_path):
+        """terminal has TWO distinct failure modes in one session; the digest
+        must separate them so fixing one doesn't mask the other (#1325)."""
+        p = _session(
+            tmp_path,
+            "s1",
+            [
+                {"role": "session_meta"},
+                _asst("terminal", "c1"),
+                _tool("c1", _term("bash: foo: command not found", exit_code=127)),
+                _asst("terminal", "c2"),
+                _tool("c2", _term("", exit_code=1, error="permission denied")),
+                _asst("read_file", "c3"),
+                _tool("c3", _fail("no such file or directory")),
+            ],
+        )
+        s = scan_session(p)
+        # aggregate still works
+        assert s["tool_failures"] == {"terminal": 2, "read_file": 1}
+        # reason breakdown separates the two terminal modes — "command not found"
+        # matches the file-not-found taxonomy rule, "permission denied" matches
+        # the permission-denied rule.  Before #1325 both were lumped as
+        # "terminal: 2" — now they're distinguishable.
+        assert s["tool_failures_by_reason"]["terminal"] == {
+            "file-not-found": 1,
+            "permission-denied": 1,
+        }
+        assert s["tool_failures_by_reason"]["read_file"] == {"file-not-found": 1}
+
+    def test_successful_results_never_classified(self, tmp_path):
+        """#347 must still hold: successful output mentioning marker words
+        must NOT appear in tool_failures_by_reason."""
+        p = _session(
+            tmp_path,
+            "fp",
+            [
+                _asst("read_file", "c1"),
+                _tool("c1", _ok(content="page says HTTP 404; permission denied docs")),
+                _asst("terminal", "c2"),
+                _tool("c2", _term("grep: timed out handling", exit_code=0)),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures"] == {}
+        assert s.get("tool_failures_by_reason", {}) == {}
+
+    def test_digest_aggregates_by_reason_across_sessions(self, tmp_path):
+        _session(
+            tmp_path,
+            "s1",
+            [
+                _asst("read_file", "c1"),
+                _tool("c1", _fail("no such file or directory")),
+            ],
+        )
+        _session(
+            tmp_path,
+            "s2",
+            [
+                _asst("read_file", "c2"),
+                _tool("c2", _fail("request timed out after 30s")),
+            ],
+        )
+        d = build_digest(tmp_path, window_days=7)
+        assert d["signals"]["tool_failures"] == {"read_file": 2}
+        # Two distinct sub-causes — fixing one must not credit the other (#1325)
+        assert d["signals"]["tool_failures_by_reason"]["read_file"] == {
+            "file-not-found": 1,
+            "timeout": 1,
+        }
+
+    def test_no_raw_text_in_reason_breakdown(self, tmp_path):
+        secret = "SECRET <REDACTED:email:db677acc382bd26bb3a00162f3e668d3>"
+        p = _session(
+            tmp_path,
+            "s1",
+            [
+                _asst("read_file", "c1"),
+                _tool("c1", _fail(f"no such file: {secret}")),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures_by_reason"]["read_file"] == {"file-not-found": 1}
         assert secret not in json.dumps(s)
 
 
