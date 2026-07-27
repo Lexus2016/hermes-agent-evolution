@@ -34,7 +34,9 @@ rest of ``evolution/lib``.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from evolution.lib.stage_result import StageResult
@@ -44,8 +46,14 @@ __all__ = [
     "REFINE",
     "RESTART",
     "DEFAULT_CONFIDENCE_THRESHOLD",
+    "RESTART_RATE_ALERT_THRESHOLD",
     "GateDecision",
     "decide",
+    "record_decision",
+    "load_decisions",
+    "compute_gate_rates",
+    "gate_flags",
+    "format_gate_rates",
 ]
 
 ACCEPT = "accept"
@@ -54,6 +62,13 @@ RESTART = "restart"
 
 #: Conservative default τ.  See module docstring on the 50-confidence interaction.
 DEFAULT_CONFIDENCE_THRESHOLD = 70
+
+#: A boundary restarting more than this share of the time is mis-tuned, not
+#: merely unlucky — the τ is too high for the confidence that boundary can
+#: realistically self-assess, or the stage genuinely has no evidence to work
+#: with.  Either way it warrants investigation rather than silent looping
+#: (#1340).
+RESTART_RATE_ALERT_THRESHOLD = 0.25
 
 
 @dataclass
@@ -175,3 +190,103 @@ def decide(
         ),
         retained_evidence=[],
     )
+
+
+# ── Observability: per-boundary branch rates (#1340, slice C) ───────────────
+# A gate that nobody measures is a gate nobody can tune. decide() returns a
+# decision; these persist it and turn a cycle's worth of decisions into the two
+# rates the AREX loop is judged on, plus the alert flag.
+
+
+def record_decision(ledger_file: Path, decision: GateDecision) -> None:
+    """Append one gate decision to the JSONL ledger.
+
+    Never raises: this is instrumentation attached to a live pipeline boundary,
+    and losing a metrics line must not take the stage down with it.
+    """
+    try:
+        ledger_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(ledger_file, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(decision.to_dict(), sort_keys=True) + "\n")
+    except OSError:
+        pass
+
+
+def load_decisions(ledger_file: Path) -> list[dict[str, Any]]:
+    """Read the decision ledger, skipping malformed lines."""
+    if not ledger_file.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    try:
+        lines = ledger_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    for ln in lines:
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            rec = json.loads(ln)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(rec, dict) and rec.get("branch") in (ACCEPT, REFINE, RESTART):
+            out.append(rec)
+    return out
+
+
+def compute_gate_rates(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Aggregate decisions into per-boundary branch rates.
+
+    Returns ``{stage: {total, accept, refine, restart, stage_refine_rate,
+    stage_restart_rate}}``.  Rates are shares of that boundary's decisions, so
+    a boundary that ran twice is not compared on equal footing with one that ran
+    two hundred times — read ``total`` alongside the rate.
+    """
+    by_stage: dict[str, dict[str, Any]] = {}
+    for rec in records:
+        stage = rec.get("stage") or "unknown"
+        bucket = by_stage.setdefault(
+            stage, {"total": 0, ACCEPT: 0, REFINE: 0, RESTART: 0}
+        )
+        bucket["total"] += 1
+        bucket[rec["branch"]] += 1
+    for bucket in by_stage.values():
+        total = bucket["total"] or 1
+        bucket["stage_refine_rate"] = round(bucket[REFINE] / total, 4)
+        bucket["stage_restart_rate"] = round(bucket[RESTART] / total, 4)
+    return by_stage
+
+
+def gate_flags(
+    rates: dict[str, dict[str, Any]],
+    *,
+    restart_threshold: float = RESTART_RATE_ALERT_THRESHOLD,
+    min_decisions: int = 4,
+) -> list[str]:
+    """Alert flags for mis-tuned boundaries (#1340).
+
+    ``min_decisions`` guards against a single unlucky restart on a boundary that
+    has only run once reading as a 100% restart rate.
+    """
+    flags: list[str] = []
+    for stage, bucket in sorted(rates.items()):
+        if bucket["total"] < min_decisions:
+            continue
+        if bucket["stage_restart_rate"] > restart_threshold:
+            flags.append(
+                f"HIGH_STAGE_RESTART_RATE:{stage}="
+                f"{bucket['stage_restart_rate']:.0%}"
+            )
+    return flags
+
+
+def format_gate_rates(rates: dict[str, dict[str, Any]]) -> str:
+    """One-line summary per boundary for the evolution-health sidecar."""
+    if not rates:
+        return ""
+    parts = [
+        f"{stage}(n={b['total']} refine={b['stage_refine_rate']:.0%} "
+        f"restart={b['stage_restart_rate']:.0%})"
+        for stage, b in sorted(rates.items())
+    ]
+    return "[stage-gate] " + " ".join(parts)
