@@ -293,6 +293,219 @@ _TOOL_FAIL_THRESHOLD_OVERRIDE: dict[str, int] = {
 # every run (see run_warrants_cron_hard_stop).
 _POLLING_TOOLS = frozenset({"process"})
 
+# ── Semantic test-iteration loop detection (#1328) ────────────────────
+# The generic same-tool guard catches terminal called N times in a row, but a
+# test-iteration loop is a SEMANTIC pattern: the agent cycles through
+# run-test → edit → run-test → edit → run-test, each terminal call technically
+# distinct (different commands), but the TEST command repeats with failures.
+# By the time the generic repeat_threshold (4 for mutating) trips, the agent has
+# wasted 4 full edit→test cycles. This semantic check inspects the terminal
+# command arguments to detect a repeated test command pattern and nudge EARLIER
+# with test-scoping advice (narrow to the specific failing test, check the error
+# message, etc.).
+_TEST_CMD_PATTERNS = (
+    re.compile(r"\bpytest\b", re.IGNORECASE),
+    re.compile(r"\bruff\b", re.IGNORECASE),
+    re.compile(r"\bmypy\b", re.IGNORECASE),
+    re.compile(r"\bflake8\b", re.IGNORECASE),
+    re.compile(r"\bpylint\b", re.IGNORECASE),
+    re.compile(r"\bcargo\s+test\b", re.IGNORECASE),
+    re.compile(r"\bnpm\s+test\b", re.IGNORECASE),
+    re.compile(r"\byarn\s+test\b", re.IGNORECASE),
+    re.compile(r"\bgo\s+test\b", re.IGNORECASE),
+    re.compile(r"\bnose2?\b", re.IGNORECASE),
+    re.compile(r"\bjest\b", re.IGNORECASE),
+    re.compile(r"\bvitest\b", re.IGNORECASE),
+)
+
+# How many times a test/lint command must appear in trailing terminal calls
+# (regardless of intervening non-test calls) before we fire the semantic nudge.
+# Deliberately LOWER than the generic repeat_threshold (4) so the agent gets
+# test-scoping advice before wasting more cycles.
+_TEST_LOOP_THRESHOLD = 3
+
+
+def _extract_terminal_command(args: Any) -> Optional[str]:
+    """Extract the command string from a terminal tool call's arguments."""
+    if isinstance(args, str):
+        try:
+            parsed = json.loads(args)
+        except (json.JSONDecodeError, ValueError):
+            return args
+        args = parsed
+    if isinstance(args, dict):
+        cmd = args.get("command") or args.get("cmd")
+        if isinstance(cmd, str) and cmd.strip():
+            return cmd
+    return None
+
+
+def _is_test_command(command: Optional[str]) -> bool:
+    """True when the terminal command matches a recognised test/lint pattern."""
+    if not command:
+        return False
+    return any(pat.search(command) for pat in _TEST_CMD_PATTERNS)
+
+
+def detect_test_iteration_loop(
+    messages: List[Dict[str, Any]],
+) -> Optional[str]:
+    """Detect a semantic test-iteration loop in terminal tool calls (#1328).
+
+    Scans the trailing terminal tool-call turns (allowing intervening
+    non-terminal calls like patch/write_file) for a repeated test/lint command
+    pattern. If a test-command family appears >= ``_TEST_LOOP_THRESHOLD`` times
+    with at least one failure among the results, returns a nudge string with
+    test-scoping advice. Returns None when no test-iteration loop is found.
+    """
+    test_runs: List[Tuple[str, bool]] = []
+    i = len(messages) - 1
+    while i >= 0:
+        msg = messages[i]
+        if not isinstance(msg, dict):
+            i -= 1
+            continue
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            tcs = [tc for tc in msg["tool_calls"] if isinstance(tc, dict)]
+            for tc in tcs:
+                fn = tc.get("function")
+                if not isinstance(fn, dict):
+                    continue
+                name = fn.get("name")
+                if name not in ("terminal", "execute_code"):
+                    continue
+                cmd = _extract_terminal_command(fn.get("arguments"))
+                if not _is_test_command(cmd):
+                    continue
+                call_id = tc.get("id")
+                failed = False
+                for j in range(i + 1, len(messages)):
+                    tm = messages[j]
+                    if isinstance(tm, dict) and tm.get("role") == "tool":
+                        if tm.get("tool_call_id") == call_id:
+                            failed = _looks_like_failure(tm.get("content"))
+                            break
+                    elif isinstance(tm, dict) and tm.get("role") == "assistant":
+                        break
+                test_runs.append((cmd or "?", failed))
+        elif msg.get("role") == "user":
+            content = msg.get("content", "")
+            if isinstance(content, str) and "[loop-guard]" not in content:
+                break
+        i -= 1
+
+    if len(test_runs) < _TEST_LOOP_THRESHOLD:
+        return None
+    if not any(failed for _cmd, failed in test_runs):
+        return None
+
+    count = len(test_runs)
+    return (
+        f"[loop-guard] SEMANTIC TEST LOOP: You have run a test/lint command "
+        f"{count} times in this turn, with at least one failure. This is a "
+        f"test-iteration loop (#1328). STOP re-running the full test suite. "
+        f"Instead:\n"
+        f"  1. Read the ACTUAL error message from the last failing run.\n"
+        f"  2. Scope the next test run to ONLY the failing test "
+        f"(e.g. `pytest tests/test_foo.py::test_bar -x` or `ruff check "
+        f"path/to/specific_file.py`).\n"
+        f"  3. Fix the root cause before running tests again.\n"
+        f"  4. If the error is environmental, fix the environment, not the test.\n"
+        f"Do NOT run the test command again until you have addressed the "
+        f"specific failure from the last run."
+    )
+
+
+# ---------------------------------------------------------------------------
+# #1312 — Near-miss vs dead-end discriminator
+# ---------------------------------------------------------------------------
+
+# How many identical (tool, arg_hash) re-issues within the trailing window
+# before the dead-end nudge fires. 2 = "you already tried this exact call
+# and it didn't work — what is different this time?".
+_DEAD_END_REPEAT_THRESHOLD = 2
+
+# Scan at most this many trailing messages for identical re-issues.  Keeps
+# the check O(1) bounded and avoids matching calls from a different context.
+_DEAD_END_WINDOW = 60
+
+
+def detect_dead_end_loop(
+    messages: List[Dict[str, Any]],
+) -> Optional[str]:
+    """Detect an identical-argument dead-end loop across turns (#1312).
+
+    Scans the trailing ``_DEAD_END_WINDOW`` messages (allowing intervening
+    non-matching calls — the classic ``edit → test → edit → test`` cycle where
+    the *same* test command is re-issued unchanged) for tool calls whose
+    ``(tool_name, normalized_arg_hash)`` identity has already appeared at
+    least ``_DEAD_END_REPEAT_THRESHOLD`` times.
+
+    Unlike :func:`_recent_tool_runs` (which only sees a consecutive
+    single-tool run), this function looks *through* intervening calls to find
+    the dead-end pattern: the agent re-issues the exact same arguments without
+    any structural change, which means nothing new can happen.
+
+    Returns a nudge string asking for a structured
+    ``{what_changed, why_expect_different_outcome}`` justification, or None.
+    """
+    from collections import Counter
+
+    signatures: Counter[str] = Counter()
+    sig_to_tool: dict[str, str] = {}
+    scan = messages[-_DEAD_END_WINDOW:] if len(messages) > _DEAD_END_WINDOW else messages
+
+    for msg in scan:
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "assistant":
+            continue
+        tcs = msg.get("tool_calls")
+        if not tcs:
+            continue
+        for tc in tcs:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function")
+            if not isinstance(fn, dict):
+                continue
+            name = fn.get("name", "")
+            if not name:
+                continue
+            # Reuse the existing canonical-arg hash from this module.
+            arg_hash = _tool_call_arg_hash([tc])
+            if arg_hash is None:
+                continue
+            key = f"{name}::{arg_hash}"
+            signatures[key] += 1
+            sig_to_tool[key] = name
+
+    # Find the most-repeated identical call.
+    if not signatures:
+        return None
+    top_key, top_count = signatures.most_common(1)[0]
+    if top_count < _DEAD_END_REPEAT_THRESHOLD:
+        return None
+
+    tool = sig_to_tool[top_key]
+    return (
+        f"[loop-guard] DEAD-END DETECTED (#1312): You have re-issued `{tool}` "
+        f"with the SAME arguments {top_count} times. This is a dead-end loop, "
+        f"not a near-miss. Repeating identical arguments will produce the "
+        f"identical result.\n\n"
+        f"Before calling `{tool}` again, you MUST answer:\n"
+        f"  1. **what_changed_since_last_attempt** — what is structurally "
+        f"different now (a file was edited, an env var was set, a dependency "
+        f"was installed)? If nothing changed, STOP.\n"
+        f"  2. **why_expect_different_outcome** — why would the same call "
+        f"produce a different result? If it can't, choose a different "
+        f"strategy: change the arguments, use a different tool, decompose "
+        f"the problem, or report the blocker.\n"
+        f"Do NOT re-issue `{tool}` with the same arguments. Change the "
+        f"approach or state the blocker concisely."
+    )
+
+
 # Unattended cron sessions get real enforcement, not just advisory text (#624):
 # advisory nudges are routinely ignored by the model with no human present to
 # course-correct (observed: 9 warnings ignored, 65 consecutive terminal calls).
@@ -519,6 +732,9 @@ def maybe_nudge(
     """Return a nudge string if the trailing single-tool run is stuck, else None.
 
     Trigger levels (each is lower for mutating tools than idempotent):
+      0. Semantic test-iteration loop (#1328) — highest priority, fires when
+         a test/lint command has been run >= 3 times with failures, even with
+         intervening non-terminal calls (patch/write_file) between test runs.
       1. Non-retryable failure class repeated twice (highest priority, #231)
       2. Generic failures >= fail_threshold
       3. Same tool called >= repeat_threshold times in a row
@@ -528,6 +744,25 @@ def maybe_nudge(
 
     Returns None when the agent is making varied progress (not stuck).
     """
+    # #1328 — Semantic test-iteration loop detection: check this BEFORE the
+    # generic same-tool run detection. A test-iteration loop has intervening
+    # non-terminal calls (patch/write_file) between test runs, so the generic
+    # single-tool run detector would NOT see a consecutive run of terminal
+    # calls — the run would break at the patch call. This semantic check looks
+    # THROUGH intervening calls to find the test→edit→test→edit pattern.
+    _test_loop = detect_test_iteration_loop(messages)
+    if _test_loop:
+        return _test_loop
+
+    # #1312 — Dead-end loop detection: identical (tool, args) re-issued across
+    # turns, even with intervening calls between them. This is the
+    # near-miss-vs-dead-end discriminator — it fires when the agent repeats
+    # the exact same call, which is always a dead end (nothing changed → same
+    # result). Checked before the generic single-tool run detection.
+    _dead_end = detect_dead_end_loop(messages)
+    if _dead_end:
+        return _dead_end
+
     runs = _recent_tool_runs(messages)
     if not runs:
         return None
