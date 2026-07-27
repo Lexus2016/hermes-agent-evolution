@@ -315,12 +315,22 @@ PROFILE_SKILLS="${HERMES_HOME:-$HOME/.hermes}/skills/evolution"
 ```bash
 python3 scripts/evolution_realized_impact.py record-merge \
   <#> "<YYYY-MM-DD>" "<the issue's analysis impact 0..1>" \
-  "<one line: the concrete problem this was meant to fix>"
+  "<one line: the concrete problem this was meant to fix>" \
+  "<baseline_failure_rate>"
 ```
    `predicted_impact` is the impact the analysis stage assigned the issue; `target`
    is what "done" means for it. introspection later appends a `verdict` line for
    the same issue once it has matured. NEVER omit this — an unrecorded merge is
    an unmeasured one.
+
+   **The 5th argument, `baseline_failure_rate`, is optional but should always be
+   passed (#1324).** It is the current failures-per-session for the tool this
+   change targets — read `failure_rate` straight out of the latest introspection
+   digest (`python scripts/introspection_extract.py --days=7`). Recording it
+   snapshots the rate at merge time so the later verdict compares rate against
+   rate. Omit it and the verdict falls back to comparing raw counts, which rise
+   with session volume alone and manufacture false `regressed` verdicts — the
+   exact bug #1324 fixed in the scripts.
 
 ## What to NEVER merge
 

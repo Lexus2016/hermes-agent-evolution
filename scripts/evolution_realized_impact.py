@@ -375,7 +375,8 @@ def main(argv: List[str]) -> int:
         except (IndexError, ValueError):
             print(
                 "usage: evolution_realized_impact.py record-merge "
-                "<issue> <YYYY-MM-DD> <predicted_impact> <target>",
+                "<issue> <YYYY-MM-DD> <predicted_impact> <target> "
+                "[baseline_failure_rate]",
                 file=sys.stderr,
             )
             return 2
