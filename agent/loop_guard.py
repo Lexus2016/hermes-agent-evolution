@@ -421,13 +421,45 @@ def detect_test_iteration_loop(
 # ---------------------------------------------------------------------------
 
 # How many identical (tool, arg_hash) re-issues within the trailing window
-# before the dead-end nudge fires. 2 = "you already tried this exact call
-# and it didn't work — what is different this time?".
-_DEAD_END_REPEAT_THRESHOLD = 2
+# before the dead-end nudge fires. Aligned with _SHORT_CIRCUIT_REPEAT_THRESHOLD
+# and _MUTATING_REPEAT_THRESHOLD (both 4), the softest repeat thresholds in this
+# module. A lower value contradicts the module's premise that a couple of
+# repeats is normal (a retry after a transient error, a re-read after an edit),
+# and would make every "quiet below threshold" contract in test_loop_guard.py
+# unsatisfiable — this detector runs last precisely so it cannot pre-empt the
+# specific ladder, and firing earlier than that ladder would defeat it.
+_DEAD_END_REPEAT_THRESHOLD = 4
 
 # Scan at most this many trailing messages for identical re-issues.  Keeps
 # the check O(1) bounded and avoids matching calls from a different context.
 _DEAD_END_WINDOW = 60
+
+
+def _last_call_signature(scan: List[Dict[str, Any]]) -> Optional[str]:
+    """Signature of the latest tool turn, or None when the pattern was broken.
+
+    Returns None when the most recent assistant turn produced text instead of a
+    tool call (the agent stopped to reason — that is the behaviour a nudge is
+    trying to provoke, so nudging now would be backwards), or when that turn
+    called more than one tool (varied work, not a single repeated call).
+    """
+    for msg in reversed(scan):
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        tcs = [tc for tc in (msg.get("tool_calls") or []) if isinstance(tc, dict)]
+        if not tcs:
+            return None  # text reply broke the run
+        if len(tcs) != 1:
+            return None  # multi-tool turn = varied work
+        fn = tcs[0].get("function")
+        if not isinstance(fn, dict):
+            return None
+        name = fn.get("name", "")
+        arg_hash = _tool_call_arg_hash([tcs[0]])
+        if not name or arg_hash is None:
+            return None
+        return f"{name}::{arg_hash}"
+    return None
 
 
 def detect_dead_end_loop(
@@ -485,6 +517,20 @@ def detect_dead_end_loop(
         return None
     top_key, top_count = signatures.most_common(1)[0]
     if top_count < _DEAD_END_REPEAT_THRESHOLD:
+        return None
+
+    # The repeated signature must be what the agent is doing RIGHT NOW.
+    #
+    # Counting across the whole window would flag a run the agent has already
+    # moved on from: 5x terminal followed by a read_file, or 8x terminal
+    # followed by a text reply, are treated as progress everywhere else in this
+    # module (see TestRunBoundaries) — the agent broke the pattern by itself and
+    # needs no nudge. Only when the latest tool turn re-issues the repeated
+    # signature is the loop still live.
+    #
+    # A turn calling several DIFFERENT tools at once is varied work, not a
+    # spiral, so it does not count as a live re-issue either.
+    if _last_call_signature(scan) != top_key:
         return None
 
     tool = sig_to_tool[top_key]
@@ -723,6 +769,24 @@ def _tool_spiral_score(tool_name: str, count: int, base: int) -> Optional[str]:
     return None
 
 
+def _semantic_loop_nudge(messages: List[Dict[str, Any]]) -> Optional[str]:
+    """Cross-turn semantic loop checks, used as a LAST resort (#1312, #1328).
+
+    These two detectors look *through* intervening calls, so they see patterns
+    the consecutive-run detector cannot (``test → edit → test``). That same
+    breadth makes them far less specific than the targeted nudges above: the
+    same-argument short-circuit names ``offset/limit`` for a file read, the
+    failure-class branch names the dominant error class, ``_diversion_hint``
+    proposes a concrete alternative tool. Running these first would mask every
+    one of those with generic "you repeated a call" wording — which is exactly
+    what the pre-existing contracts in ``test_loop_guard.py`` and
+    ``test_loop_guard_readfile_debounce.py`` (#1092) assert must not happen.
+
+    So they run only once the specific ladder has declined to fire.
+    """
+    return detect_test_iteration_loop(messages) or detect_dead_end_loop(messages)
+
+
 def maybe_nudge(
     messages: List[Dict[str, Any]],
     *,
@@ -732,40 +796,22 @@ def maybe_nudge(
     """Return a nudge string if the trailing single-tool run is stuck, else None.
 
     Trigger levels (each is lower for mutating tools than idempotent):
-      0. Semantic test-iteration loop (#1328) — highest priority, fires when
-         a test/lint command has been run >= 3 times with failures, even with
-         intervening non-terminal calls (patch/write_file) between test runs.
       1. Non-retryable failure class repeated twice (highest priority, #231)
       2. Generic failures >= fail_threshold
       3. Same tool called >= repeat_threshold times in a row
       4. Escalated interrupt at higher counts (#432)
       5. Same *arguments* repeated for short-circuit idempotent tools
          (search_files / web_search / web_extract) >= 4 times (#467)
+      6. Last resort — cross-turn semantic loops that the consecutive-run
+         detector cannot see: test-iteration cycles (#1328) and identical-
+         argument dead ends (#1312). See :func:`_semantic_loop_nudge` for why
+         these run last rather than first.
 
     Returns None when the agent is making varied progress (not stuck).
     """
-    # #1328 — Semantic test-iteration loop detection: check this BEFORE the
-    # generic same-tool run detection. A test-iteration loop has intervening
-    # non-terminal calls (patch/write_file) between test runs, so the generic
-    # single-tool run detector would NOT see a consecutive run of terminal
-    # calls — the run would break at the patch call. This semantic check looks
-    # THROUGH intervening calls to find the test→edit→test→edit pattern.
-    _test_loop = detect_test_iteration_loop(messages)
-    if _test_loop:
-        return _test_loop
-
-    # #1312 — Dead-end loop detection: identical (tool, args) re-issued across
-    # turns, even with intervening calls between them. This is the
-    # near-miss-vs-dead-end discriminator — it fires when the agent repeats
-    # the exact same call, which is always a dead end (nothing changed → same
-    # result). Checked before the generic single-tool run detection.
-    _dead_end = detect_dead_end_loop(messages)
-    if _dead_end:
-        return _dead_end
-
     runs = _recent_tool_runs(messages)
     if not runs:
-        return None
+        return _semantic_loop_nudge(messages)
     tool = runs[0][0]
 
     # Pick thresholds based on tool category (#432).
@@ -978,7 +1024,8 @@ def maybe_nudge(
             f"{exploration_hint}"
         )
 
-    return None
+    # Nothing tool-specific fired — fall back to the cross-turn semantic checks.
+    return _semantic_loop_nudge(messages)
 
 
 def current_run_signature(messages: List[Dict[str, Any]]) -> Optional[Tuple[str, int]]:

@@ -33,8 +33,13 @@ class TestDetectDeadEndLoop:
         msgs = [_make_tool_call("terminal", '{"command": "ls"}', "1")]
         assert detect_dead_end_loop(msgs) is None
 
-    def test_identical_call_twice_triggers(self):
-        """Two identical (tool, args) = dead-end."""
+    def test_identical_call_at_threshold_triggers(self):
+        """4 identical (tool, args) re-issues = dead-end.
+
+        The threshold matches _SHORT_CIRCUIT_REPEAT_THRESHOLD /
+        _MUTATING_REPEAT_THRESHOLD; below it, loop_guard deliberately stays
+        quiet (a retry after a transient failure is normal).
+        """
         msgs = [
             _make_tool_call("terminal", '{"command": "pytest"}', "1"),
             _make_tool_result("1", "FAIL"),
@@ -42,6 +47,14 @@ class TestDetectDeadEndLoop:
             _make_tool_result("2", "ok"),
             _make_tool_call("terminal", '{"command": "pytest"}', "3"),
             _make_tool_result("3", "FAIL"),
+            _make_tool_call("patch", '{"path": "y.py"}', "4"),
+            _make_tool_result("4", "ok"),
+            _make_tool_call("terminal", '{"command": "pytest"}', "5"),
+            _make_tool_result("5", "FAIL"),
+            _make_tool_call("patch", '{"path": "z.py"}', "6"),
+            _make_tool_result("6", "ok"),
+            _make_tool_call("terminal", '{"command": "pytest"}', "7"),
+            _make_tool_result("7", "FAIL"),
         ]
         result = detect_dead_end_loop(msgs)
         assert result is not None
@@ -49,6 +62,32 @@ class TestDetectDeadEndLoop:
         assert "terminal" in result
         assert "what_changed_since_last_attempt" in result
         assert "why_expect_different_outcome" in result
+
+    def test_below_threshold_is_quiet(self):
+        """Three identical re-issues are not yet a dead end."""
+        msgs = [
+            _make_tool_call("terminal", '{"command": "pytest"}', "1"),
+            _make_tool_result("1", "FAIL"),
+            _make_tool_call("patch", '{"path": "x.py"}', "2"),
+            _make_tool_result("2", "ok"),
+            _make_tool_call("terminal", '{"command": "pytest"}', "3"),
+            _make_tool_result("3", "FAIL"),
+            _make_tool_call("patch", '{"path": "y.py"}', "4"),
+            _make_tool_result("4", "ok"),
+            _make_tool_call("terminal", '{"command": "pytest"}', "5"),
+            _make_tool_result("5", "FAIL"),
+        ]
+        assert detect_dead_end_loop(msgs) is None
+
+    def test_moved_on_to_another_tool_is_quiet(self):
+        """A repeated call the agent has already abandoned is not a live loop."""
+        msgs = []
+        for i in range(1, 6):
+            msgs.append(_make_tool_call("terminal", '{"command": "pytest"}', str(i)))
+            msgs.append(_make_tool_result(str(i), "FAIL"))
+        msgs.append(_make_tool_call("read_file", '{"path": "x.py"}', "99"))
+        msgs.append(_make_tool_result("99", "ok"))
+        assert detect_dead_end_loop(msgs) is None
 
     def test_different_args_no_trigger(self):
         """Different arguments = not a dead-end (agent is trying variations)."""
@@ -60,8 +99,8 @@ class TestDetectDeadEndLoop:
         ]
         assert detect_dead_end_loop(msgs) is None
 
-    def test_three_identical_calls_triggers(self):
-        """Three identical calls with intervening edits = dead-end."""
+    def test_four_identical_calls_report_the_count(self):
+        """Four identical calls with intervening edits = dead-end."""
         msgs = [
             _make_tool_call("terminal", '{"command": "npm test"}', "1"),
             _make_tool_result("1", "FAIL"),
@@ -73,36 +112,37 @@ class TestDetectDeadEndLoop:
             _make_tool_result("4", "ok"),
             _make_tool_call("terminal", '{"command": "npm test"}', "5"),
             _make_tool_result("5", "FAIL"),
+            _make_tool_call("patch", '{"path": "c.js"}', "6"),
+            _make_tool_result("6", "ok"),
+            _make_tool_call("terminal", '{"command": "npm test"}', "7"),
+            _make_tool_result("7", "FAIL"),
         ]
         result = detect_dead_end_loop(msgs)
         assert result is not None
-        assert "3 times" in result
+        assert "4 times" in result
 
     def test_nudge_contains_structured_justification_prompt(self):
         """The nudge must ask for structured justification (#1312 success criteria)."""
-        msgs = [
-            _make_tool_call("execute_code", '{"code": "print(1)"}', "1"),
-            _make_tool_result("1", "1"),
-            _make_tool_call("execute_code", '{"code": "print(1)"}', "2"),
-            _make_tool_result("2", "1"),
-        ]
+        msgs = []
+        for i in range(1, 5):
+            msgs.append(_make_tool_call("execute_code", '{"code": "print(1)"}', str(i)))
+            msgs.append(_make_tool_result(str(i), "1"))
         result = detect_dead_end_loop(msgs)
         assert result is not None
         assert "strategy" in result.lower() or "different approach" in result.lower()
 
     def test_window_respected(self):
         """Calls outside the window should not be counted."""
-        # Fill with 60 non-matching messages, then the identical pair
+        # Fill with 60 non-matching messages, then the identical run
         msgs = []
         for i in range(30):
             cid = str(i)
             msgs.append(_make_tool_call("read_file", f'{{"path": "f{i}.py"}}', cid))
             msgs.append(_make_tool_result(cid))
-        msgs.append(_make_tool_call("terminal", '{"command": "ls"}', "100"))
-        msgs.append(_make_tool_result("100"))
-        msgs.append(_make_tool_call("terminal", '{"command": "ls"}', "101"))
-        msgs.append(_make_tool_result("101"))
-        # With default window=60, the two identical "ls" calls at the end
+        for i in range(100, 104):
+            msgs.append(_make_tool_call("terminal", '{"command": "ls"}', str(i)))
+            msgs.append(_make_tool_result(str(i)))
+        # With default window=60, the four identical "ls" calls at the end
         # ARE within the last 60 messages and should trigger.
         result = detect_dead_end_loop(msgs)
         assert result is not None
