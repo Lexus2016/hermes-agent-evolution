@@ -1359,6 +1359,8 @@ def read_file_tool(
                 task_data["dedup_hits"] = {}
             if "read_timestamps" not in task_data:
                 task_data["read_timestamps"] = {}
+            if "read_failures" not in task_data:
+                task_data["read_failures"] = 0
             cached_mtime = task_data.get("dedup", {}).get(dedup_key)
 
         if cached_mtime is not None:
@@ -1416,6 +1418,30 @@ def read_file_tool(
         file_ops = _get_file_ops(task_id)
         result = file_ops.read_file(str(_resolved), offset, limit)
         result_dict = result.to_dict()
+
+        # ── Per-session read_file failure-rate directive (#1370) ──────
+        # read_file has the highest failure rate of any core tool (10.6%,
+        # 782 failures across 220 sessions). Root cause is path
+        # hallucination, not a tool bug. Track cumulative failures per
+        # session and inject a directive when they pile up — before the
+        # agent burns another 5 turns guessing wrong paths.
+        if result_dict.get("error") or result_dict.get("error_class"):
+            _rf = 0
+            with _read_tracker_lock:
+                task_data2 = _read_tracker.get(task_id)
+                if task_data2 is not None:
+                    task_data2["read_failures"] = task_data2.get("read_failures", 0) + 1
+                    _rf = task_data2["read_failures"]
+            if _rf >= 4:
+                result_dict.setdefault(
+                    "_rate_directive",
+                    (
+                        f"read_file has failed {_rf} times this session. "
+                        "You are likely hallucinating paths. STOP guessing — "
+                        "use search_files(target='files') or repo_map to "
+                        "discover the REAL path before reading again."
+                    ),
+                )
 
         # ── Character-count guard ─────────────────────────────────────
         # We're model-agnostic so we can't count tokens; characters are
