@@ -23,6 +23,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from evolution.lib.stage_result import StageResult
+
 # Sidecar subdirectories to scan
 _SIDECAR_DIRS = ("issues", "introspection", "research")
 
@@ -140,6 +142,20 @@ def run_local_triage(evolution_dir: Path) -> dict:
         "rejected": [],
         "selected_for_implementation": selected,
     }
+
+    # Emit a StageResult at this boundary (AREX #1338 slice A).
+    # The tuple is additive — it wraps the same output dict and records the
+    # sidecar paths as evidence pointers.  A confidence of 50 signals "we have
+    # data but no LLM verification"; a higher value can be self-assessed later.
+    evidence = list(output["sidecars_read"].values())
+    stage_result = StageResult.wrap(
+        result=output,
+        evidence_pointers=[p for p in evidence if p],
+        confidence=50,
+        stage="local_triage",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+    output["stage_result"] = stage_result.to_dict()
     return output
 
 
