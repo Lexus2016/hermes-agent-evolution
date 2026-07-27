@@ -122,14 +122,44 @@ _REFUSAL_RE = re.compile(
 # #1356 look effective when it is not, which is worse than under-counting.
 _RECOVERY_RE = re.compile(
     r"\b("
-    r"instead|alternative(ly)?|workaround|another (way|approach|option)|"
-    r"different (way|approach|path)|"
-    r"(but|however|though)[^.!?]{0,40}\b(i|we|you) (can|could|"
-    r"'ll|will|am able to)|"
-    r"what i can do|here'?s what i can|i can (still|however)"
+    r"instead[,:]? (i|we|let)|alternatively[,:]? (i|we|let)|"
+    r"workaround|another (way|approach|option)|different (way|approach|path)|"
+    r"(but|however|though)[^.!?]{0,40}\b(i|we) (can|could|'ll|will|am able to)|"
+    r"what i can do|here'?s what i can|i can (still|however)|"
+    r"let me (try|use|write|search|run)|i'?ll (try|use|write|search|run)"
     r")\b",
     re.IGNORECASE,
 )
+
+# Two shapes match the pivot above but are NOT the agent taking another path,
+# and counting them would make #1356 look effective precisely when it failed:
+#
+#   * DEFLECTION — the work is handed back to the human ("however you can try
+#     it yourself", "instead, please contact support"). The pivot clause is
+#     therefore first-person only above; this vetoes the rest.
+#   * EXPLANATION — the agent offers to describe the problem rather than solve
+#     it ("but I can tell you why it failed"). An explanation is not an
+#     alternative path to the goal.
+#
+# Vetoing beats narrowing the recovery pattern: the shapes are open-ended, and
+# under-counting a real recovery is far cheaper than reporting a refusal rate
+# that improves whenever the agent gets more polite about giving up.
+_NON_RECOVERY_RE = re.compile(
+    r"\b("
+    r"contact (support|your|the)|ask (your|someone|a )|"
+    r"you (can|could|should|will|may|might|'ll) |your (own|side|end)|"
+    r"(do|try|run|check) (it|this|that) yourself|manually|"
+    r"(tell|explain to|show) you (why|what|how) (it|this|that)? ?(failed|went|is|does)|"
+    r"i can (only )?(tell|explain|describe|suggest that you)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _is_recovered_refusal(text: str) -> bool:
+    """True when a refusing turn also proposes a path the AGENT will take."""
+    return bool(_RECOVERY_RE.search(text)) and not _NON_RECOVERY_RE.search(text)
+
 _REPEAT_THRESHOLD = 5  # same tool >=N consecutive in a session is a "repeated run"
 
 # --- failure-reason taxonomy (issue #1325) ----------------------------------
@@ -373,7 +403,7 @@ def scan_messages(messages) -> Dict[str, Any]:
             if isinstance(content, str) and _REFUSAL_RE.search(content):
                 refusals += 1
                 # Did the same turn also offer a way forward? (#1366)
-                if _RECOVERY_RE.search(content):
+                if _is_recovered_refusal(content):
                     refusals_recovered += 1
         elif role == "tool":
             content = obj.get("content")

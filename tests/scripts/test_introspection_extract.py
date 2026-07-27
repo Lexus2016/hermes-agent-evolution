@@ -798,3 +798,53 @@ class TestRefusalRecovery:
         """Back-compat: the recovered subset must not alter the aggregate."""
         _session(tmp_path, "a", [self._reply("I can't do X, but I can do Y instead.")])
         assert build_digest(tmp_path, window_days=7)["signals"]["refusals_or_access_denied"] == 1
+
+
+class TestRefusalRecoveryFalsePositives:
+    """Deflection and explanation are not recovery.
+
+    Regression for a defect found in review: the pivot clause allowed second
+    person, so "I can't access it, however you can try it yourself" counted as
+    a recovery. That inverts the metric — it would improve whenever the agent
+    got more polite about handing the work back, which is the exact behaviour
+    #1327 wants to eliminate.
+    """
+
+    @staticmethod
+    def _reply(text):
+        return {"role": "assistant", "content": text}
+
+    def _recovered(self, tmp_path, text, name="s"):
+        p = _session(tmp_path, name, [self._reply(text)])
+        s = scan_session(p)
+        assert s["refusals"] == 1, "fixture must actually refuse"
+        return s["refusals_with_recovery"]
+
+    def test_deflection_to_user_is_not_recovery(self, tmp_path):
+        assert self._recovered(
+            tmp_path, "I can't access that URL, however you can try visiting it yourself."
+        ) == 0
+
+    def test_deflection_to_support_is_not_recovery(self, tmp_path):
+        assert self._recovered(tmp_path, "I cannot do that. Instead, please contact support.") == 0
+
+    def test_manual_handoff_is_not_recovery(self, tmp_path):
+        assert self._recovered(
+            tmp_path, "I don't have permission. But you will need to run it manually."
+        ) == 0
+
+    def test_offering_an_explanation_is_not_recovery(self, tmp_path):
+        assert self._recovered(tmp_path, "I can't do that, but I can tell you why it failed.") == 0
+
+    def test_first_person_alternative_still_counts(self, tmp_path):
+        assert self._recovered(
+            tmp_path, "I can't use grep directly, but I can search with a regex pattern."
+        ) == 1
+
+    def test_let_me_phrasing_counts(self, tmp_path):
+        assert self._recovered(tmp_path, "I cannot do X. Let me try Y instead.") == 1
+
+    def test_ill_write_a_script_counts(self, tmp_path):
+        assert self._recovered(
+            tmp_path, "I can't call the API directly. I'll write a script via terminal."
+        ) == 1
