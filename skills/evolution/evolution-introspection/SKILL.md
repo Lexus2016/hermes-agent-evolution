@@ -59,20 +59,23 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
    text out of the model entirely (complements the PII gate #82).
 
    **Compare rates, never raw counts (#1324).** The digest also emits
-   `failure_rate` (failures ÷ sessions_scanned) and `spiral_depth_per_session`.
-   Session volume grows cycle over cycle, so a raw `tool_failures` count rises
-   even when the per-session rate holds steady or improves — comparing raw
-   counts across windows manufactures false "regressed" verdicts. Use
-   `failure_rate` for every cross-window comparison; `tool_failures` is retained
-   only for back-compat and for within-window ranking.
+   `failure_rate` and `spiral_depth_per_session`, both keyed by tool exactly
+   like `tool_failures` — `failure_rate[tool]` is that tool's failures ÷
+   `sessions_scanned`, not one number for the whole digest. Session volume grows
+   cycle over cycle, so a raw `tool_failures` count rises even when the
+   per-session rate holds steady or improves — comparing raw counts across
+   windows manufactures false "regressed" verdicts. Use `failure_rate` for every
+   cross-window comparison; `tool_failures` is retained only for back-compat and
+   for within-window ranking.
 
    **Attribute by (tool, reason), not by tool alone (#1325).** The digest emits
-   `tool_failures_by_reason` — `{tool: {reason: count}}` over the buckets
-   `file-not-found`, `permission-denied`, `timeout`, `quota`, `parse-error`,
-   `no-match`, `non-zero-exit`, `other`. A fix for `read_file:file-not-found`
-   must not be credited or blamed for `read_file:timeout`; conflating them is
-   what produced the fix→regress→refile treadmill. When filing or verifying an
-   issue about a failing tool, name the reason bucket, not just the tool.
+   `tool_failures_by_reason` — `{tool: {reason: count}}` over exactly these
+   buckets: `file-not-found`, `permission-denied`, `timeout`, `quota/billing`,
+   `parse-error`, `no-match`, `non-zero-exit`, `other`. A fix for
+   `read_file:file-not-found` must not be credited or blamed for
+   `read_file:timeout`; conflating them is what produced the fix→regress→refile
+   treadmill. When filing or verifying an issue about a failing tool, name the
+   reason bucket, not just the tool.
 
 2. **Detect problem signals** (non-exhaustive):
    - **Tool failures** — a tool returned an error / non-zero / exception,
@@ -126,10 +129,13 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
      ledger entry carries a `baseline_failure_rate` (recorded at merge time),
      compare it against the current digest's `failure_rate` for that tool rather
      than eyeballing raw `tool_failures`. `classify_verdict_by_rate()` in
-     `scripts/evolution_realized_impact.py` implements the thresholds — a rate
-     rise >20% is `regressed`, a drop >5% is `confirmed`, anything between is
-     stable. A raw count that grew purely because session volume grew is NOT a
-     regression, and calling it one re-opens issues that were actually fixed.
+     `scripts/evolution_realized_impact.py` is the reference: it returns
+     `regressed` only when the per-session rate rose more than 20% over the
+     baseline, `confirmed` otherwise (a fall, a hold, or a rise within 20%), and
+     `no-signal` when either rate is missing. There is no separate "stable"
+     verdict — the ledger has three values only. A raw count that grew purely
+     because session volume grew is NOT a regression, and calling it one
+     re-opens issues that were actually fixed.
    - Record ONE verdict per such issue via the deterministic helper:
      ```bash
      python3 scripts/evolution_realized_impact.py record-verdict \
