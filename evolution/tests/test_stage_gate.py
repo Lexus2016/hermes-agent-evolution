@@ -121,3 +121,108 @@ class TestDecisionRecord:
 
     def test_is_a_gate_decision(self):
         assert isinstance(decide(_result(90)), GateDecision)
+
+
+class TestDecisionLedger:
+    """Persisted decisions are what the per-boundary rates are computed from (#1340)."""
+
+    def test_record_and_load_round_trip(self, tmp_path):
+        from evolution.lib.stage_gate import load_decisions, record_decision
+
+        ledger = tmp_path / "stage_gate.jsonl"
+        record_decision(ledger, decide(_result(90, ["a.json"])))
+        record_decision(ledger, decide(_result(50, ["a.json"])))
+        recs = load_decisions(ledger)
+        assert [r["branch"] for r in recs] == [ACCEPT, REFINE]
+
+    def test_missing_ledger_is_empty(self, tmp_path):
+        from evolution.lib.stage_gate import load_decisions
+
+        assert load_decisions(tmp_path / "absent.jsonl") == []
+
+    def test_malformed_lines_skipped(self, tmp_path):
+        from evolution.lib.stage_gate import load_decisions, record_decision
+
+        ledger = tmp_path / "stage_gate.jsonl"
+        record_decision(ledger, decide(_result(90, ["a.json"])))
+        with open(ledger, "a", encoding="utf-8") as fh:
+            fh.write("not json\n")
+            fh.write('{"branch": "bogus"}\n')
+        assert len(load_decisions(ledger)) == 1
+
+    def test_record_never_raises_on_bad_path(self, tmp_path):
+        """Instrumentation must not take a live boundary down."""
+        from evolution.lib.stage_gate import record_decision
+
+        target = tmp_path / "file"
+        target.write_text("x", encoding="utf-8")
+        record_decision(target / "nested" / "ledger.jsonl", decide(_result(90)))
+
+
+class TestGateRates:
+    @staticmethod
+    def _recs(*branches, stage="local_triage"):
+        return [{"branch": b, "stage": stage} for b in branches]
+
+    def test_rates_per_boundary(self):
+        from evolution.lib.stage_gate import compute_gate_rates
+
+        rates = compute_gate_rates(self._recs(ACCEPT, ACCEPT, REFINE, RESTART))
+        b = rates["local_triage"]
+        assert b["total"] == 4
+        assert b["stage_refine_rate"] == 0.25
+        assert b["stage_restart_rate"] == 0.25
+
+    def test_boundaries_counted_separately(self):
+        from evolution.lib.stage_gate import compute_gate_rates
+
+        recs = self._recs(RESTART, RESTART, stage="a") + self._recs(ACCEPT, ACCEPT, stage="b")
+        rates = compute_gate_rates(recs)
+        assert rates["a"]["stage_restart_rate"] == 1.0
+        assert rates["b"]["stage_restart_rate"] == 0.0
+
+    def test_empty_records(self):
+        from evolution.lib.stage_gate import compute_gate_rates
+
+        assert compute_gate_rates([]) == {}
+
+
+class TestGateFlags:
+    @staticmethod
+    def _recs(*branches, stage="local_triage"):
+        return [{"branch": b, "stage": stage} for b in branches]
+
+    def test_high_restart_rate_flagged(self):
+        from evolution.lib.stage_gate import compute_gate_rates, gate_flags
+
+        rates = compute_gate_rates(self._recs(RESTART, RESTART, ACCEPT, ACCEPT))
+        flags = gate_flags(rates)
+        assert len(flags) == 1
+        assert flags[0].startswith("HIGH_STAGE_RESTART_RATE:local_triage")
+
+    def test_at_threshold_not_flagged(self):
+        """25% is the alert threshold — strictly above it fires."""
+        from evolution.lib.stage_gate import compute_gate_rates, gate_flags
+
+        rates = compute_gate_rates(self._recs(RESTART, ACCEPT, ACCEPT, ACCEPT))
+        assert rates["local_triage"]["stage_restart_rate"] == 0.25
+        assert gate_flags(rates) == []
+
+    def test_small_sample_not_flagged(self):
+        """One unlucky restart on a boundary that ran once is not 100% mis-tuned."""
+        from evolution.lib.stage_gate import compute_gate_rates, gate_flags
+
+        rates = compute_gate_rates(self._recs(RESTART))
+        assert gate_flags(rates) == []
+
+    def test_format_is_empty_without_rates(self):
+        from evolution.lib.stage_gate import format_gate_rates
+
+        assert format_gate_rates({}) == ""
+
+    def test_format_names_each_boundary(self):
+        from evolution.lib.stage_gate import compute_gate_rates, format_gate_rates
+
+        out = format_gate_rates(compute_gate_rates(self._recs(ACCEPT, REFINE)))
+        assert "[stage-gate]" in out
+        assert "local_triage" in out

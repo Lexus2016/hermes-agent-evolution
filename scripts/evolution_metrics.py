@@ -153,6 +153,28 @@ def compute_health(
             "HALTED: pipeline suspended — zero deliverables; clear halt-state.txt to resume"
         )
 
+    # Confidence-gate branch rates (#1340). Read from the decision ledger the
+    # gate appends to at each boundary (#1339). Surfaced as a flag rather than
+    # as an extra sidecar line on purpose: evolution_watchdog reads the WHOLE
+    # health file and alerts unless it ends in "| healthy", so an appended line
+    # would fire a permanent false alarm. Riding the existing flags list means a
+    # mis-tuned boundary reaches the owner through the channel that already
+    # works.
+    gate_rates: Dict[str, Any] = {}
+    try:
+        from evolution.lib.stage_gate import (
+            compute_gate_rates,
+            gate_flags,
+            load_decisions,
+        )
+
+        gate_rates = compute_gate_rates(
+            load_decisions(evolution_dir / "stage_gate.jsonl")
+        )
+        flags.extend(gate_flags(gate_rates))
+    except Exception:
+        gate_rates = {}
+
     return {
         "cycles_total": len(window),
         "cycles_active": len(active),
@@ -170,6 +192,7 @@ def compute_health(
         "merged_trend": _trend([_int(r, "merged") for r in active]),
         "effort_budget": effort_budget,
         "halted": halted,
+        "stage_gate_rates": gate_rates,
         "flags": flags,
     }
 
@@ -183,13 +206,22 @@ def format_health(h: Dict[str, Any]) -> str:
     # NOTE: effort_budget rides in the BODY, never the tail. evolution_watchdog
     # keys on `.endswith("| healthy")` / `| <FLAG>`, so the flags must stay the
     # last segment after the final `|`.
+    gate = ""
+    rates = h.get("stage_gate_rates") or {}
+    if rates:
+        # Same rule as effort_budget: body only, never the tail (#1340).
+        gate = " " + " ".join(
+            f"gate[{stage}]=refine {b['stage_refine_rate']:.0%}/"
+            f"restart {b['stage_restart_rate']:.0%} (n={b['total']})"
+            for stage, b in sorted(rates.items())
+        )
     return (
         f"[evolution-metrics] {h['cycles_active']}/{h['cycles_total']} active cycles: "
         f"success={_pct(h['cycle_success_rate'])} "
         f"selection_efficiency={_pct(h['selection_efficiency'])} "
         f"reject_rate={_pct(h['reject_rate'])} merged_trend={h['merged_trend']} "
         f"(created={h['issues_created']} selected={h['selected']} merged={h['merged']}) "
-        f"effort_budget={h['effort_budget']:.1f} | {tail}"
+        f"effort_budget={h['effort_budget']:.1f}{gate} | {tail}"
     )
 
 

@@ -25,6 +25,7 @@ from pathlib import Path
 
 try:
     from evolution.lib.stage_gate import decide as _gate_decide
+    from evolution.lib.stage_gate import record_decision as _gate_record
     from evolution.lib.stage_result import StageResult
 
     _HAS_STAGE_RESULT = True
@@ -191,6 +192,10 @@ def run_local_triage(evolution_dir: Path) -> dict:
         # on instead of being silently treated as a confident result.
         decision = _gate_decide(stage_result)
         output["stage_gate"] = decision.to_dict()
+        # Persist for the per-boundary rate metrics (#1340). Fire-and-forget:
+        # record_decision swallows IO errors so a metrics write can never take
+        # the triage pass down.
+        _gate_record(evolution_dir / "stage_gate.jsonl", decision)
     return output
 
 
