@@ -1491,6 +1491,28 @@ def _build_child_agent(
                 child_toolsets, parent_toolsets
             )
         child_toolsets = _strip_blocked_tools(child_toolsets)
+
+        # ── Ensure leaf children keep 'terminal' (#1369) ──────────────
+        # When explicit toolsets are given, the intersection above can
+        # drop 'terminal' even though the parent has it. Leaf subagents
+        # assigned shell-dependent tasks (git, build, test) then spiral
+        # with "I have no shell" refusals. Merge terminal back in when:
+        # (a) the role is leaf, (b) the parent had terminal, (c) terminal
+        # isn't in the explicit deny list. This is merge-not-replace: the
+        # explicit toolsets refine what the child gets, but terminal is a
+        # baseline capability every leaf needs.
+        _parent_disabled_raw = getattr(parent_agent, "disabled_toolsets", None)
+        _terminal_disabled = (
+            isinstance(_parent_disabled_raw, (list, tuple, set))
+            and "terminal" in _parent_disabled_raw
+        )
+        if (
+            effective_role == "leaf"
+            and "terminal" in expanded_parent
+            and "terminal" not in child_toolsets
+            and not _terminal_disabled
+        ):
+            child_toolsets.append("terminal")
     elif parent_agent and parent_enabled is not None:
         child_toolsets = _strip_blocked_tools(parent_enabled)
     elif parent_toolsets:
