@@ -721,3 +721,80 @@ class TestStateDB:
             "read_file": 1,
             "patch": 1,
         }
+
+
+class TestRefusalRecovery:
+    """A refusal that offers a way forward is not the failure #1327 is about.
+
+    #1356 told the agent to propose an alternative before refusing for a missing
+    capability. Counting both shapes as one number made that guidance
+    unfalsifiable — the signal could not move even if it worked (#1366).
+    """
+
+    @staticmethod
+    def _reply(text):
+        return {"role": "assistant", "content": text}
+
+    def test_bare_refusal_is_not_recovered(self, tmp_path):
+        p = _session(tmp_path, "s", [self._reply("I can't do that — there is no tool for it.")])
+        s = scan_session(p)
+        assert s["refusals"] == 1
+        assert s["refusals_with_recovery"] == 0
+
+    def test_refusal_with_alternative_is_recovered(self, tmp_path):
+        p = _session(
+            tmp_path,
+            "s",
+            [self._reply("I can't call that API directly, but I can query it with a script instead.")],
+        )
+        s = scan_session(p)
+        assert s["refusals"] == 1
+        assert s["refusals_with_recovery"] == 1
+
+    def test_however_pivot_counts(self, tmp_path):
+        p = _session(
+            tmp_path,
+            "s",
+            [self._reply("I cannot use grep. However, I can search with a regex pattern.")],
+        )
+        assert scan_session(p)["refusals_with_recovery"] == 1
+
+    def test_workaround_phrasing_counts(self, tmp_path):
+        p = _session(
+            tmp_path, "s", [self._reply("No access to the database. A workaround is to export a dump.")]
+        )
+        assert scan_session(p)["refusals_with_recovery"] == 1
+
+    def test_recovery_without_refusal_is_not_counted(self, tmp_path):
+        """The marker only means something on a turn that actually refused."""
+        p = _session(tmp_path, "s", [self._reply("Here is an alternative approach you might like.")])
+        s = scan_session(p)
+        assert s["refusals"] == 0
+        assert s["refusals_with_recovery"] == 0
+
+    def test_hedging_is_not_recovery(self, tmp_path):
+        """Conservative by design — over-matching would make #1356 look effective
+        when it is not, which is worse than under-counting."""
+        p = _session(
+            tmp_path, "s", [self._reply("I can't do that. Sorry about the inconvenience.")]
+        )
+        assert scan_session(p)["refusals_with_recovery"] == 0
+
+    def test_digest_reports_rate(self, tmp_path):
+        _session(tmp_path, "a", [self._reply("I can't do X, but I can do Y instead.")])
+        _session(tmp_path, "b", [self._reply("I can't do Z.")])
+        sig = build_digest(tmp_path, window_days=7)["signals"]
+        assert sig["refusals_or_access_denied"] == 2
+        assert sig["refusals_with_recovery"] == 1
+        assert sig["refusal_recovery_rate"] == 0.5
+
+    def test_rate_is_zero_with_no_refusals(self, tmp_path):
+        _session(tmp_path, "a", [self._reply("Done — the file is written.")])
+        sig = build_digest(tmp_path, window_days=7)["signals"]
+        assert sig["refusals_or_access_denied"] == 0
+        assert sig["refusal_recovery_rate"] == 0.0
+
+    def test_existing_refusal_count_unchanged(self, tmp_path):
+        """Back-compat: the recovered subset must not alter the aggregate."""
+        _session(tmp_path, "a", [self._reply("I can't do X, but I can do Y instead.")])
+        assert build_digest(tmp_path, window_days=7)["signals"]["refusals_or_access_denied"] == 1

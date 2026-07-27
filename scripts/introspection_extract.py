@@ -25,6 +25,10 @@ Signals extracted:
     agent.loop_guard's failure markers for consistency.
   * timeouts       — results mentioning timeout / timed out.
   * refusals       — assistant text expressing "I can't / no access / denied".
+  * refusal_recovery — the subset of those refusals that also proposed an
+    alternative path ("...but I can do X instead"), plus the resulting rate.
+    Measures whether the recovery-before-refusal guidance (#1356) is working;
+    without it a bare refusal and a recovered one are indistinguishable.
   * repeated_tool_runs — same tool called many times consecutively (the spiral
     shape loop_guard guards against), counted per session.
   * provider_errors — from request_dump error objects: ``status_code:type``
@@ -103,6 +107,27 @@ def _tool_result_failed(content: Any) -> bool:
 _TIMEOUT_RE = re.compile(r"\b(timed out|timeout)\b", re.IGNORECASE)
 _REFUSAL_RE = re.compile(
     r"\b(i can('|no)?t|cannot|no access|access denied|not permitted|don'?t have (access|permission))\b",
+    re.IGNORECASE,
+)
+
+# --- refusal-recovery detection (issue #1366, Child B of #1327) --------------
+# #1356 told the agent to propose an alternative path before refusing for a
+# missing capability. _REFUSAL_RE alone cannot tell whether it did: "I can't do
+# that" and "I can't do that directly, but I can via `terminal`" both match it,
+# so the 51/week signal could not move even if the guidance worked perfectly.
+#
+# A turn counts as RECOVERED when it refuses AND offers a concrete alternative.
+# Deliberately conservative — these are pivot phrases that introduce a different
+# path, not mere hedging. Over-matching would inflate the recovery rate and make
+# #1356 look effective when it is not, which is worse than under-counting.
+_RECOVERY_RE = re.compile(
+    r"\b("
+    r"instead|alternative(ly)?|workaround|another (way|approach|option)|"
+    r"different (way|approach|path)|"
+    r"(but|however|though)[^.!?]{0,40}\b(i|we|you) (can|could|"
+    r"'ll|will|am able to)|"
+    r"what i can do|here'?s what i can|i can (still|however)"
+    r")\b",
     re.IGNORECASE,
 )
 _REPEAT_THRESHOLD = 5  # same tool >=N consecutive in a session is a "repeated run"
@@ -314,6 +339,7 @@ def scan_messages(messages) -> Dict[str, Any]:
     ] = {}  # tool -> reason -> count (#1325)
     timeouts = 0
     refusals = 0
+    refusals_recovered = 0  # refusals that proposed an alternative (#1366)
     id_to_tool: Dict[str, str] = {}
     consec_tool = None
     consec_n = 0
@@ -346,6 +372,9 @@ def scan_messages(messages) -> Dict[str, Any]:
             content = obj.get("content")
             if isinstance(content, str) and _REFUSAL_RE.search(content):
                 refusals += 1
+                # Did the same turn also offer a way forward? (#1366)
+                if _RECOVERY_RE.search(content):
+                    refusals_recovered += 1
         elif role == "tool":
             content = obj.get("content")
             tool = id_to_tool.get(obj.get("tool_call_id"), "unknown")
@@ -371,6 +400,7 @@ def scan_messages(messages) -> Dict[str, Any]:
         "tool_failures_by_reason": tool_failures_by_reason,
         "timeouts": timeouts,
         "refusals": refusals,
+        "refusals_with_recovery": refusals_recovered,
         "repeated_tool_runs": repeated,
     }
 
@@ -438,13 +468,14 @@ def build_digest(
     ] = {}  # tool -> reason -> count (#1325)
     timeouts = 0
     refusals = 0
+    refusals_recovered = 0  # subset of refusals that offered a path forward (#1366)
     provider_errors: Counter = Counter()
     models: Counter = Counter()
     repeated: Dict[str, Dict[str, int]] = {}  # tool -> {max_consecutive, sessions}
     scanned = 0
 
     def _aggregate(s: Dict[str, Any]) -> None:
-        nonlocal timeouts, refusals
+        nonlocal timeouts, refusals, refusals_recovered
         failures.update(s.get("tool_failures", {}))
         # Sub-classified failures (#1325) — merge per-tool reason counters so
         # the digest surfaces the dominant failure mode per tool, breaking the
@@ -457,6 +488,7 @@ def build_digest(
                 bucket[reason] = bucket.get(reason, 0) + int(n)
         timeouts += s.get("timeouts", 0)
         refusals += s.get("refusals", 0)
+        refusals_recovered += s.get("refusals_with_recovery", 0)
         provider_errors.update(s.get("provider_errors", {}))
         models.update(s.get("models", {}))
         for tool, n in s.get("repeated_tool_runs", {}).items():
@@ -533,6 +565,12 @@ def build_digest(
         tool: round((meta["max_consecutive"] / scanned if scanned else 0.0), 4)
         for tool, meta in repeated.items()
     }
+    # Share of refusals that offered a way forward instead of stopping (#1366).
+    # Denominator is refusals, NOT sessions: this measures the quality of the
+    # refusals that happened, not how often the agent refuses. Both numbers
+    # matter and they move independently — refusals can fall while the recovery
+    # rate holds, or rise while recovery improves.
+    refusal_recovery_rate = round(refusals_recovered / refusals, 4) if refusals else 0.0
 
     return {
         "window_days": window_days,
@@ -544,6 +582,8 @@ def build_digest(
             "spiral_depth_per_session": spiral_depth_per_session,
             "timeouts": timeouts,
             "refusals_or_access_denied": refusals,
+            "refusals_with_recovery": refusals_recovered,
+            "refusal_recovery_rate": refusal_recovery_rate,
             "repeated_tool_runs": repeated,
             "provider_errors": dict(provider_errors.most_common()),
             "models_used": dict(models.most_common()),
