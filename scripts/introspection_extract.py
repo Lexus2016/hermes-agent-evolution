@@ -107,6 +107,104 @@ _REFUSAL_RE = re.compile(
 )
 _REPEAT_THRESHOLD = 5  # same tool >=N consecutive in a session is a "repeated run"
 
+# --- failure-reason taxonomy (issue #1325) ----------------------------------
+# Sub-classifies a *failed* tool result so the introspection loop can attribute
+# regressions to the actual failure mode, not just the tool name — fixing the
+# fix→regress→refile treadmill where a fix for ``read_file:file-not-found`` is
+# credited/blamed for ``read_file:timeout``. No LLM: keyword/field rules over the
+# structured ``error``/``exit_code``/status fields. Order matters — first hit
+# wins, so the more specific patterns precede the generic ones.
+_FILE_NOT_FOUND_RE = re.compile(
+    r"\b(no such file|not found|does not exist|cannot find|file missing|not a directory)\b",
+    re.IGNORECASE,
+)
+_PERMISSION_RE = re.compile(
+    r"\b(permission denied|access denied|not permitted|operation not permitted|forbidden|403|EACCES)\b",
+    re.IGNORECASE,
+)
+_TIMEOUT_DETAIL_RE = re.compile(
+    r"\b(timed out|timeout|deadline exceeded|ETIMEDOUT)\b", re.IGNORECASE
+)
+_QUOTA_RE = re.compile(
+    r"\b(quota|rate limit|too many requests|429|billing|insufficient|exhausted)\b",
+    re.IGNORECASE,
+)
+_PARSE_RE = re.compile(
+    r"\b(json|jsondecode|parse error|syntaxerror|valueerror|invalid json|unexpected token|unparsable)\b",
+    re.IGNORECASE,
+)
+_NO_MATCH_RE = re.compile(
+    r"\b(no match|no results?|nothing found|empty result|0 matches)\b", re.IGNORECASE
+)
+
+
+def _classify_failure_reason(content: Any) -> Optional[str]:
+    """Sub-classify a *failed* tool result into a coarse reason tag (issue #1325).
+
+    Returns ``None`` when ``content`` is NOT a failure (so callers gate on this
+    instead of separately calling ``_tool_result_failed``), otherwise one of the
+    taxonomy tags below. Classification is best-effort keyword/field matching
+    over the structured envelope only — never over raw user content — so it
+    inherits the no-raw-text contract from ``_tool_result_failed``.
+    """
+    data = content
+    if isinstance(data, (str, bytes)):
+        text = data.decode("utf-8", "replace") if isinstance(data, bytes) else data
+        stripped = text.strip()
+        if not (stripped.startswith("{") and stripped.endswith("}")):
+            return None  # not a JSON envelope → not a structural failure
+        try:
+            data = json.loads(stripped)
+        except ValueError:
+            return None
+    if not isinstance(data, dict):
+        return None
+
+    # First — is it a failure at all? Mirror _tool_result_failed exactly.
+    is_failed = False
+    if "exit_code" in data:
+        try:
+            is_failed = int(data["exit_code"]) != 0
+        except (TypeError, ValueError):
+            is_failed = False
+    elif data.get("error") or str(data.get("status", "")).lower() == "error":
+        is_failed = True
+    else:
+        for ok_key in ("success", "ok"):
+            if ok_key in data:
+                is_failed = not bool(data[ok_key])
+                break
+    if not is_failed:
+        return None
+
+    # Build the searchable text from STRUCTURED fields only — error, status,
+    # output (terminal stdout/stderr), and the file/path hints tools emit. We
+    # deliberately do NOT scan arbitrary content values; this keeps the
+    # no-raw-text contract intact while still catching the canonical failure
+    # messages tools put in error/output.
+    hints: List[str] = []
+    for key in ("error", "status", "output", "stderr", "reason"):
+        v = data.get(key)
+        if isinstance(v, str) and v:
+            hints.append(v)
+    haystack = " ".join(hints)
+
+    if _FILE_NOT_FOUND_RE.search(haystack):
+        return "file-not-found"
+    if _PERMISSION_RE.search(haystack):
+        return "permission-denied"
+    if _TIMEOUT_DETAIL_RE.search(haystack):
+        return "timeout"
+    if _QUOTA_RE.search(haystack):
+        return "quota/billing"
+    if _PARSE_RE.search(haystack):
+        return "parse-error"
+    if _NO_MATCH_RE.search(haystack):
+        return "no-match"
+    if "exit_code" in data:
+        return "non-zero-exit"
+    return "other"
+
 
 def _iter_lines(path: Path):
     try:
@@ -211,6 +309,9 @@ def scan_messages(messages) -> Dict[str, Any]:
     all formats yield the identical digest.
     """
     tool_failures: Counter = Counter()
+    tool_failures_by_reason: Dict[
+        str, Dict[str, int]
+    ] = {}  # tool -> reason -> count (#1325)
     timeouts = 0
     refusals = 0
     id_to_tool: Dict[str, str] = {}
@@ -251,12 +352,23 @@ def scan_messages(messages) -> Dict[str, Any]:
             failed = _tool_result_failed(content)
             if failed:
                 tool_failures[tool] += 1
+                # Sub-classify the failure mode so the introspection loop can
+                # attribute regressions to the actual cause (#1325) — a fix for
+                # ``read_file:file-not-found`` should not be credited for
+                # ``read_file:timeout``.
+                reason = _classify_failure_reason(content)
+                if reason is not None:
+                    tool_failures_by_reason.setdefault(tool, {})
+                    tool_failures_by_reason[tool][reason] = (
+                        tool_failures_by_reason[tool].get(reason, 0) + 1
+                    )
             if failed and isinstance(content, str) and _TIMEOUT_RE.search(content):
                 timeouts += 1
 
     repeated = {t: n for t, n in max_runs.items() if n >= _REPEAT_THRESHOLD}
     return {
         "tool_failures": dict(tool_failures),
+        "tool_failures_by_reason": tool_failures_by_reason,
         "timeouts": timeouts,
         "refusals": refusals,
         "repeated_tool_runs": repeated,
@@ -321,6 +433,9 @@ def build_digest(
     now = now if now is not None else time.time()
     cutoff = now - window_days * 86400
     failures: Counter = Counter()
+    failures_by_reason: Dict[
+        str, Dict[str, int]
+    ] = {}  # tool -> reason -> count (#1325)
     timeouts = 0
     refusals = 0
     provider_errors: Counter = Counter()
@@ -331,6 +446,15 @@ def build_digest(
     def _aggregate(s: Dict[str, Any]) -> None:
         nonlocal timeouts, refusals
         failures.update(s.get("tool_failures", {}))
+        # Sub-classified failures (#1325) — merge per-tool reason counters so
+        # the digest surfaces the dominant failure mode per tool, breaking the
+        # fix→regress→refile treadmill where one mode's fix is blamed for another.
+        for tool, reasons in s.get("tool_failures_by_reason", {}).items():
+            if not isinstance(reasons, dict):
+                continue
+            bucket = failures_by_reason.setdefault(tool, {})
+            for reason, n in reasons.items():
+                bucket[reason] = bucket.get(reason, 0) + int(n)
         timeouts += s.get("timeouts", 0)
         refusals += s.get("refusals", 0)
         provider_errors.update(s.get("provider_errors", {}))
@@ -415,6 +539,7 @@ def build_digest(
         "sessions_scanned": scanned,
         "signals": {
             "tool_failures": tool_failures,
+            "tool_failures_by_reason": failures_by_reason,
             "failure_rate": failure_rate,
             "spiral_depth_per_session": spiral_depth_per_session,
             "timeouts": timeouts,
