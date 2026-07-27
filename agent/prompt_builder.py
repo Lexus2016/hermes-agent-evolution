@@ -585,6 +585,28 @@ DELIBERATE_WORK_GUIDANCE = (
     "real results and real blockers, never a plausible-looking guess."
 )
 
+# Recovery-before-refusal guidance (#1356).  When the agent is about to say
+# "I can't do X because I don't have Y", it should first check whether an
+# existing tool can achieve the same goal via a different path and propose
+# that alternative to the user.  Only refuse if no alternative exists.
+# This reduces soft-capability refusals (plateauing at ~51/week per #1327)
+# by steering the model toward recovery paths it already has.
+# Always on — static text in the cached stable tier, scoped to tool-bearing
+# sessions.  Short on purpose: shipped in the cached system prompt to every
+# user, every session.
+RECOVERY_BEFORE_REFUSAL_GUIDANCE = (
+    "# Recovery before refusal\n"
+    "Before telling the user you cannot do something because a specific tool "
+    "or capability is missing, check whether an existing tool can achieve the "
+    "same goal via a different path. If so, propose that alternative instead of "
+    "refusing. Only refuse when no alternative path exists.\n"
+    "Examples:\n"
+    "- No `grep` tool → use `search_files` with a regex pattern.\n"
+    "- No direct database access → write a script via `terminal` that queries it.\n"
+    "- No image editor → use `terminal` to invoke ImageMagick or Python PIL.\n"
+    "The goal is to exhaust available capabilities before declining a request."
+)
+
 # Universal parallel-tool-call guidance — applied to ALL models.
 #
 # Why this matters for cost: every assistant turn resends the entire
