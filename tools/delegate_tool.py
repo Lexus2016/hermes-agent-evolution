@@ -1145,6 +1145,57 @@ def _blocked_toolsets_for_role(role: str) -> List[str]:
     )
 
 
+# ---------------------------------------------------------------------------
+# Pre-dispatch toolset/task compatibility check (#1369)
+# ---------------------------------------------------------------------------
+# Leaf subagents that arrive without `terminal` emit "I have no shell tool"
+# spirals and waste a full delegation cycle.  The root cause: the parent's
+# enabled_toolsets may not include `terminal` (platform/config narrowing),
+# and nothing checks whether the delegated goal actually needs shell access
+# before dispatch.  This static heuristic scans the goal+context for
+# shell-dependent verbs and tells _build_child_agent to auto-add `terminal`
+# when the task needs it but the resolved toolset omits it.
+
+# Verbs that strongly indicate the task requires shell/terminal access.
+# Matched as whole words (case-insensitive) against goal + context text.
+_SHELL_DEPENDENT_VERBS = frozenset(
+    {
+        "git", "gh", "build", "test", "run", "shell", "bash", "install",
+        "make", "cmake", "cargo", "npm", "yarn", "pnpm", "pip", "uv",
+        "pytest", "ruff", "mypy", "pylint", "flake8", "eslint", "tsc",
+        "docker", "kubectl", "helm", "systemctl", "service",
+        "ssh", "scp", "rsync", "curl", "wget",
+        "compile", "deploy", "lint", "format", "check",
+    }
+)
+
+
+def _goal_needs_terminal(goal: str, context: Optional[str] = None) -> bool:
+    """Return True if the task goal/context text references shell-dependent work.
+
+    Static heuristic — no LLM call.  Scans for shell-dependent verbs as whole
+    words (bounded by non-alphanumeric boundaries) in the goal and optional
+    context text.  Conservative: false positives (auto-adding `terminal` when
+    not strictly needed) are harmless because `terminal` is a core tool; false
+    negatives (missing a verb) fall back to the existing behavior where the
+    subagent may still report it lacks a shell — but the parent already had
+    that failure mode before this fix.
+    """
+    import re
+
+    text = (goal or "")
+    if context:
+        text = f"{text}\n{context}"
+    if not text:
+        return False
+    # Word-boundary match so "git" doesn't match "digit" / "fidget".
+    pattern = re.compile(
+        r"\b(" + "|".join(re.escape(v) for v in _SHELL_DEPENDENT_VERBS) + r")\b",
+        re.IGNORECASE,
+    )
+    return bool(pattern.search(text))
+
+
 def _emit_parent_console(parent_agent, line: str) -> None:
     """Emit a human-readable progress line to the parent's console.
 
@@ -1498,6 +1549,28 @@ def _build_child_agent(
     else:
         child_toolsets = _strip_blocked_tools(DEFAULT_TOOLSETS)
 
+    # ── Pre-dispatch toolset/task compatibility (#1369) ───────────────
+    # If the goal references shell-dependent verbs (git, build, test, ...)
+    # but the resolved toolset omits `terminal`, auto-add it.  Without this,
+    # leaf subagents arrive without a shell and emit "I have no shell tool"
+    # spirals, wasting a full delegation cycle.  The parent intersection
+    # already bounded the child to parent-capable toolsets, so we only add
+    # `terminal` when the parent itself can provide it (parent_toolsets has
+    # it or a composite that expands to it).  This prevents widening the
+    # child beyond the parent's real capabilities.
+    _toolset_adjusted = False
+    if _goal_needs_terminal(goal, context) and "terminal" not in child_toolsets:
+        expanded_parent = _expand_parent_toolsets(parent_toolsets)
+        if "terminal" in expanded_parent:
+            child_toolsets.append("terminal")
+            _toolset_adjusted = True
+            logger.info(
+                "delegate_task: auto-added 'terminal' toolset for task %d "
+                "(goal references shell-dependent verbs but resolved toolset "
+                "omitted it) — #1369 regression fix",
+                task_index,
+            )
+
     # Blocked tools also live inside mixed platform bundles (hermes-cli,
     # hermes-telegram, etc.) that _strip_blocked_tools must keep because they
     # carry useful tools too. Pass exact one-tool deny toolsets through to the
@@ -1780,6 +1853,9 @@ def _build_child_agent(
     child._subagent_id = subagent_id
     child._parent_subagent_id = parent_subagent_id
     child._subagent_goal = goal
+    # #1369: record whether we auto-added `terminal` so _run_single_child can
+    # surface a structured toolset_adjusted signal in the result dict.
+    child._toolset_adjusted = _toolset_adjusted
     child._parent_turn_id = getattr(parent_agent, "_current_turn_id", "") or ""
     # Stable sidebar marker: delegate subagent sessions must stay out of
     # session pickers even when a parent delete orphans them (parent_session_id
@@ -2704,6 +2780,20 @@ def _run_single_child(
         # no retry was attempted, to avoid noise on the healthy path.
         if shallow_retries:
             entry["shallow_retries"] = shallow_retries
+
+        # #1369: surface the toolset auto-adjustment so the parent agent sees
+        # a structured signal (not a free-text refusal) that `terminal` was
+        # auto-added because the goal needed shell access.  Lets the parent
+        # react with confidence instead of reading subagent apology text.
+        if getattr(child, "_toolset_adjusted", False):
+            entry["toolset_adjusted"] = {
+                "added": ["terminal"],
+                "reason": (
+                    "Goal references shell-dependent verbs but the resolved "
+                    "toolset omitted 'terminal'; auto-added to prevent a "
+                    "'no shell tool' spiral."
+                ),
+            }
 
         # Shallow-delegation detector (issue 102): a child that made ZERO
         # tool calls answered from its own head. For the dominant delegation
