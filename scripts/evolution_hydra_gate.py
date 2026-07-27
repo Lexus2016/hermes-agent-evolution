@@ -12,6 +12,13 @@ The gate checks upstream→downstream staleness for the 7 evolution stages and
 returns false (sleep) when every consumer is ahead of or equal to its producer.
 It also sleeps when ``halt-state.txt`` is present, preventing expensive LLM work
 on a broken pipeline (#770).
+
+A per-edge dispatch ledger (#1305) suppresses false-positive wake-ups: once the
+gate has dispatched for an edge on a given day, subsequent ticks on the same day
+do NOT re-fire unless the upstream stage produced NEW output (a strictly newer
+mtime) since the last dispatch. Without this ledger the raw-mtime check re-fires
+on every tick — observed at 20+ wasted orchestrator wake-ups/day on the
+integration→upstream-sync edge alone (#1305).
 """
 
 from __future__ import annotations
@@ -22,7 +29,12 @@ import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
+
+# Ledger entries older than this are pruned to keep the file bounded. Entries are
+# keyed by day, so a week of history is ample for debugging a "did the gate fire
+# today?" question without growing unbounded over months.
+_LEDGER_PRUNE_DAYS = 7
 
 
 def _hot_path() -> Path:
@@ -58,6 +70,97 @@ def _latest_output(evo_dir: Path, stage: str) -> float:
     """Return the latest mtime of any output file for this stage (today)."""
     json_path, md_path = _today_paths(evo_dir, stage)
     return max(_mtime(json_path), _mtime(md_path))
+
+
+# ---------------------------------------------------------------------------
+# Dispatch ledger (#1305) — stop false-positive re-wake-ups on the same day
+# ---------------------------------------------------------------------------
+
+
+def _ledger_path(evo_dir: Path) -> Path:
+    """Path to the per-edge dispatch ledger (a small JSON file)."""
+    return evo_dir / ".hydra-dispatch-ledger.json"
+
+
+def _read_ledger(evo_dir: Path) -> Dict[str, dict]:
+    """Load the dispatch ledger, or ``{}`` if absent / corrupt.
+
+    Schema: ``{"<edge>": {"date": "YYYY-MM-DD", "upstream_mtime": <float>,
+    "verdict": <str|None>}}``. Corrupt files are treated as empty rather than
+    raising — a corrupt ledger must never block a genuine wake-up (fail-open).
+    """
+    path = _ledger_path(evo_dir)
+    try:
+        raw = path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_ledger(evo_dir: Path, ledger: Dict[str, dict]) -> None:
+    """Persist the ledger atomically. Best-effort: a write failure is logged to
+    stderr but never raised — the ledger is an optimization, not a correctness
+    requirement, so a failed write degrades to "may re-wake once" rather than
+    crashing the gate."""
+    path = _ledger_path(evo_dir)
+    tmp = path.with_suffix(".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(ledger), encoding="utf-8")
+        tmp.replace(path)
+    except OSError as exc:
+        # Don't leave a .tmp littering the dir on a failed rename.
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        print(f"[hydra-gate] ledger write failed ({exc}) — continuing", file=sys.stderr)
+
+
+def _already_dispatched_today(evo_dir: Path, edge: str, upstream_mtime: float) -> bool:
+    """Return True if this edge was already dispatched today AND the upstream
+    stage has NOT produced newer output since that dispatch.
+
+    A NEW upstream mtime (strictly greater than the one recorded at dispatch
+    time) means genuinely fresh material arrived → re-fire. The same or older
+    mtime means the edge is a repeat of an already-adjudicated state → suppress.
+    """
+    entry = _read_ledger(evo_dir).get(edge)
+    if not isinstance(entry, dict):
+        return False
+    if entry.get("date") != _today():
+        # Stale entry from a prior day — that day's verdict doesn't carry over.
+        return False
+    recorded_mtime = entry.get("upstream_mtime")
+    if not isinstance(recorded_mtime, (int, float)):
+        return False
+    # Suppress only when upstream has not advanced since the last dispatch.
+    # A strict-newer mtime is genuine new material and must re-fire.
+    return upstream_mtime <= float(recorded_mtime)
+
+
+def _record_dispatch(evo_dir: Path, edge: str, upstream_mtime: float) -> None:
+    """Record that the gate dispatched for ``edge`` at ``upstream_mtime`` today.
+
+    Also opportunistically prunes entries older than ``_LEDGER_PRUNE_DAYS`` so
+    the file stays small over time.
+    """
+    ledger = _read_ledger(evo_dir)
+    ledger[edge] = {
+        "date": _today(),
+        "upstream_mtime": upstream_mtime,
+        "verdict": None,
+    }
+    # Prune stale entries (older than the prune window). Keep today's + the
+    # last week for debugging "did the gate already see this edge?".
+    cutoff = (datetime.now() - timedelta(days=_LEDGER_PRUNE_DAYS)).date().isoformat()
+    pruned = {
+        k: v
+        for k, v in ledger.items()
+        if isinstance(v, dict) and str(v.get("date", "")) >= cutoff
+    }
+    _write_ledger(evo_dir, pruned)
 
 
 def _has_upstream_freshness(
@@ -170,15 +273,48 @@ def _check_pool(evo_dir: Path) -> Dict[str, bool]:
 
 
 def _has_work(evo_dir: Path) -> Tuple[bool, str]:
-    """Core gate logic. Returns (has_work, reason)."""
+    """Core gate logic. Returns (has_work, reason).
+
+    Freshness edges that were already dispatched today (with no upstream
+    advancement since) are suppressed via the dispatch ledger (#1305).
+    """
     now_ts = datetime.now().timestamp()
 
     freshness = _check_pool(evo_dir)
-    fresh_pairs = [(pair, v) for pair, v in freshness.items() if v]
+    # Map edge label → upstream stage name, so we can read the upstream mtime
+    # the ledger compares against. Pairs are defined in _check_pool.
+    edge_upstream = {
+        "research→issues": "research",
+        "issues→analysis": "issues",
+        "introspection→analysis": "introspection",
+        "analysis→implementation": "analysis",
+        "implementation→integration": "implementation",
+        "integration→upstream-sync": "integration",
+    }
+    fresh_pairs = []
+    suppressed = []
+    for pair, is_fresh in freshness.items():
+        if not is_fresh:
+            continue
+        up_stage = edge_upstream.get(pair)
+        if up_stage is None:
+            # Unknown edge label — can't ledger it; fire to be safe.
+            fresh_pairs.append(pair)
+            continue
+        up_mtime = _latest_output(evo_dir, up_stage)
+        if _already_dispatched_today(evo_dir, pair, up_mtime):
+            # Already dispatched today for this exact upstream state — suppress.
+            suppressed.append(pair)
+        else:
+            fresh_pairs.append(pair)
 
     if fresh_pairs:
-        reasons = [f"{pair}" for pair, _ in fresh_pairs]
-        return True, f"fresh material: {', '.join(reasons)}"
+        # Record the dispatch for each firing edge so a same-day re-tick with
+        # no upstream advancement is suppressed next time.
+        for pair in fresh_pairs:
+            up_stage = edge_upstream[pair]
+            _record_dispatch(evo_dir, pair, _latest_output(evo_dir, up_stage))
+        return True, f"fresh material: {', '.join(fresh_pairs)}"
 
     # Time-based triggers: root stages that should run periodically even when
     # the pool is settled — they generate the material that downstream stages
@@ -218,6 +354,12 @@ def _has_work(evo_dir: Path) -> Tuple[bool, str]:
         if age_hours >= 12:
             return True, f"safety wake: {age_hours:.0f}h since last output"
 
+    if suppressed:
+        return False, (
+            "pool settled — no fresh material "
+            f"({len(suppressed)} edge(s) already dispatched today: "
+            f"{', '.join(suppressed)})"
+        )
     return False, "pool settled — no fresh material"
 
 

@@ -35,10 +35,11 @@ from __future__ import annotations
 import atexit
 import json
 import logging
+import calendar
 import os
 import threading
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from agent.memory_provider import MemoryProvider
 from tools.registry import tool_error
@@ -68,6 +69,95 @@ def _is_client_error(exc: Exception) -> bool:
         return True
     err_str = str(exc).lower()
     return "404" in err_str or "not found" in err_str or "valid uuid" in err_str
+
+
+# ---------------------------------------------------------------------------
+# Temporal metadata (issue #1289)
+#
+# Mem0 stores timestamps but has NO as-of queries and NO supersession
+# semantics; stale/superseded facts are retrieved as if current (~32-point
+# production accuracy gap, per RankSquire Memory Fidelity Curve). This slice
+# stamps every write with ``valid_from`` and tags superseded entries with
+# ``valid_until``, then filters at search time. Backend-agnostic (operates
+# purely on the ``metadata`` field). Legacy entries without temporal fields
+# are treated as ``valid_until=None`` so recall never shrinks.
+# ---------------------------------------------------------------------------
+
+_META_VALID_FROM = "valid_from"    # ISO-8601 epoch the fact became true
+_META_VALID_UNTIL = "valid_until"  # ISO-8601 epoch the fact ceased to be true
+_META_SUPERSEDES = "supersedes"    # id of the entry this one replaces
+
+
+def _now_iso() -> str:
+    """ISO-8601 UTC timestamp, second precision, ``Z`` suffix."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _temporal_metadata(existing: Optional[dict] = None,
+                       supersedes: Optional[str] = None) -> dict:
+    """Build a metadata dict carrying temporal validity fields.
+
+    Merges into ``existing`` (e.g. the channel tag from ``_write_metadata``)
+    so callers do not have to know about the temporal keys. ``valid_from`` is
+    always set to now for a fresh write; ``supersedes`` is attached only when
+    this write replaces a prior entry.
+    """
+    meta = dict(existing or {})
+    meta[_META_VALID_FROM] = _now_iso()
+    if supersedes:
+        meta[_META_SUPERSEDES] = supersedes
+    return meta
+
+
+def _is_current(entry: dict, as_of: Optional[float] = None) -> bool:
+    """True if a Mem0 search hit is non-stale and non-superseded at ``as_of``.
+
+    ``as_of`` is a POSIX epoch (``time.time()``); ``None`` means now. Entries
+    lacking temporal fields (legacy writes predating #1289) are treated as
+    current so this filter never shrinks recall for existing stores.
+
+    Supersession is encoded as ``valid_until`` on the *old* entry (set to the
+    moment it was replaced) plus a ``supersedes`` pointer on the *new* entry
+    (provenance only, not itself a filter trigger). The old entry is dropped
+    because its ``valid_until`` has elapsed; the new entry is kept.
+    """
+    meta = entry.get("metadata") or {}
+    if not isinstance(meta, dict):
+        return True
+    valid_until = meta.get(_META_VALID_UNTIL)
+    valid_from = meta.get(_META_VALID_FROM)
+    try:
+        if valid_until:
+            ts_until = _parse_iso_epoch(valid_until)
+            check = as_of if as_of is not None else time.time()
+            if ts_until is not None and check >= ts_until:
+                return False
+        if valid_from and as_of is not None:
+            ts_from = _parse_iso_epoch(valid_from)
+            if ts_from is not None and as_of < ts_from:
+                return False
+    except (ValueError, TypeError):
+        # Malformed timestamp — fail open so a single bad row does not blank recall.
+        return True
+    return True
+
+
+def _parse_iso_epoch(value: str) -> Optional[float]:
+    """Parse an ISO-8601 ``Z`` timestamp to a UTC POSIX epoch.
+
+    ``None`` on failure. Uses ``calendar.timegm`` (NOT ``time.mktime``) because
+    ``_now_iso`` writes UTC via ``time.gmtime`` — ``time.mktime`` would
+    reinterpret the struct_time in LOCAL time and silently offset the epoch by
+    the host's UTC offset, no-oping the feature on every non-UTC host (the
+    #1289 rework regression). The format is always ``...Z``, so we parse
+    directly without a ``%z`` dance.
+    """
+    if not value:
+        return None
+    try:
+        return calendar.timegm(time.strptime(value, "%Y-%m-%dT%H:%M:%SZ"))
+    except (ValueError, TypeError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +219,15 @@ SEARCH_SCHEMA = {
             "query": {"type": "string", "description": "What to search for."},
             "top_k": {"type": "integer", "description": "Max results (default: 10, max: 50)."},
             "rerank": {"type": "boolean", "description": "Rerank results for relevance (default: false, platform mode only)."},
+            "as_of": {
+                "type": "number",
+                "description": (
+                    "Optional POSIX timestamp. When set, only memories that were "
+                    "valid at that moment are returned (filters out entries that "
+                    "had not yet become true or have since been superseded). "
+                    "Defaults to now."
+                ),
+            },
         },
         "required": ["query"],
     },
@@ -376,10 +475,13 @@ class Mem0MemoryProvider(MemoryProvider):
         # cross-agent recall.
         return {"user_id": self._user_id}
 
-    def _write_metadata(self) -> Dict[str, Any]:
+    def _write_metadata(self, *, supersedes: Optional[str] = None) -> Dict[str, Any]:
         # Tag every write with the gateway channel so the dashboard can offer
         # per-channel filtered views without coupling identity to the channel.
-        return {"channel": self._channel} if self._channel else {}
+        # Layer temporal validity fields (issue #1289) on top so search-time
+        # as-of filtering and supersession can work without a schema migration.
+        base = {"channel": self._channel} if self._channel else {}
+        return _temporal_metadata(base, supersedes=supersedes)
 
     def system_prompt_block(self) -> str:
         # Mirror the precedence in _create_backend (oss > host > platform) so
@@ -541,12 +643,24 @@ class Mem0MemoryProvider(MemoryProvider):
                     rerank = rerank_raw.lower() not in ("false", "0", "no")
                 else:
                     rerank = bool(rerank_raw)
+                # as_of (issue #1289): POSIX epoch. Defaults to now. When set,
+                # filter out entries that were not yet valid or have since been
+                # superseded/expired at that point in time. Superseded entries
+                # are always filtered (they carry a `valid_until` stamp).
+                as_of_raw = args.get("as_of")
+                as_of = float(as_of_raw) if as_of_raw not in (None, "", 0) else None
                 results = self._backend.search(query, filters=self._read_filters(), top_k=top_k, rerank=rerank)
                 self._record_success()
                 if not results:
                     return json.dumps({"result": "No relevant memories found."})
+                # Apply temporal validity filter (issue #1289). Legacy entries
+                # without temporal metadata pass through unchanged.
+                filtered = [r for r in results if _is_current(r, as_of=as_of)]
                 items = [{"id": r.get("id"), "memory": r.get("memory", ""),
-                          "score": r.get("score", 0)} for r in results]
+                          "score": r.get("score", 0),
+                          "valid_from": (r.get("metadata") or {}).get(_META_VALID_FROM),
+                          "valid_until": (r.get("metadata") or {}).get(_META_VALID_UNTIL)}
+                         for r in filtered]
                 return json.dumps({"results": items, "count": len(items)})
             except Exception as e:
                 if not _is_client_error(e):
@@ -582,8 +696,30 @@ class Mem0MemoryProvider(MemoryProvider):
             if not text:
                 return tool_error("Missing required parameter: text")
             try:
-                result = self._backend.update(memory_id, text)
+                # Supersession path (issue #1289): instead of silently
+                # overwriting the old fact, stamp the old row with
+                # valid_until=now so it stops surfacing in as-of searches,
+                # and tag the new text with supersedes=old_id for provenance.
+                supersede_meta = {
+                    _META_VALID_UNTIL: _now_iso(),
+                }
+                result = self._backend.update(
+                    memory_id, text, metadata=supersede_meta,
+                )
                 self._record_success()
+                # Append a fresh entry carrying the new text + supersedes link.
+                # On backends that cannot patch old-row metadata (Platform),
+                # this add() is what actually records the temporal transition.
+                try:
+                    self._backend.add(
+                        [{"role": "user", "content": text}],
+                        user_id=self._user_id,
+                        agent_id=self._agent_id,
+                        infer=False,
+                        metadata=self._write_metadata(supersedes=memory_id),
+                    )
+                except Exception as add_err:
+                    logger.debug("Supersession add failed (non-fatal): %s", add_err)
                 return json.dumps(result)
             except Exception as e:
                 if _is_client_error(e):

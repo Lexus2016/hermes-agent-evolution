@@ -2476,6 +2476,20 @@ DEFAULT_CONFIG = {
         "write_approval": False,
         "memory_char_limit": 2200,  # ~800 tokens at 2.75 chars/token
         "user_char_limit": 1375,  # ~500 tokens at 2.75 chars/token
+        # Auto-eviction on add-overflow (issue #1283): when a bare `add`
+        # would exceed the char budget, evict the OLDEST entry (insertion
+        # order = index 0) and retry, instead of hard-rejecting and forcing
+        # the model into a multi-call read/evict/rewrite spiral. Every
+        # eviction is surfaced in the tool response (`evicted` list) + logged
+        # so nothing is dropped silently.
+        #   auto_evict_on_full   — enable the behaviour (default true).
+        #   auto_evict_keep_min  — never evict below this many entries; a
+        #                          safety floor so one giant entry can't wipe
+        #                          the store. If the add still doesn't fit at
+        #                          the floor, the existing consolidation-failure
+        #                          response is returned (graceful degradation).
+        "auto_evict_on_full": True,
+        "auto_evict_keep_min": 1,
         # External memory provider plugin (empty = built-in only).
         # Set to a provider name to activate: "openviking", "mem0",
         # "hindsight", "holographic", "retaindb", "byterover".

@@ -57,6 +57,7 @@ def get_memory_dir() -> Path:
     """Return the profile-scoped memories directory."""
     return get_hermes_home() / "memories"
 
+
 # Stable header prefixes for the system-prompt memory blocks rendered by
 # MemoryStore._render_block. Exported so compression's prompt-retention check
 # (agent/conversation_compression.py) can detect a leftover block for a
@@ -285,6 +286,8 @@ class MemoryStore:
         user_char_limit: int = 2500,
         guard: Optional[object] = None,
         allow_batch_override: bool = False,
+        auto_evict_on_full: bool = True,
+        auto_evict_keep_min: int = 1,
     ):
         self.memory_entries: List[str] = []
         self.user_entries: List[str] = []
@@ -293,6 +296,12 @@ class MemoryStore:
         # Explicit opt-in for per-call dynamic limit overrides. Default False so
         # dynamic changes cannot silently alter the configured budget (issue #517).
         self.allow_batch_override = allow_batch_override
+        # Auto-eviction on add-overflow (issue #1283): when a bare `add` would
+        # exceed the char budget, evict the OLDEST entry and retry instead of
+        # hard-rejecting. ``auto_evict_keep_min`` is a safety floor so one huge
+        # entry can't wipe the whole store. See ``_evict_to_fit``.
+        self.auto_evict_on_full = auto_evict_on_full
+        self.auto_evict_keep_min = max(0, int(auto_evict_keep_min))
         # Frozen snapshot for system prompt -- set once at load_from_disk()
         self._system_prompt_snapshot: Dict[str, str] = {"memory": "", "user": ""}
         # Optional memory-poisoning guard (issue #315). DEFAULT None: when unset,
@@ -544,6 +553,44 @@ class MemoryStore:
             return 0
         return len(ENTRY_DELIMITER.join(entries))
 
+    def _evict_to_fit(
+        self,
+        target: str,
+        new_entry: str,
+        limit: int,
+    ) -> Optional[List[str]]:
+        """Evict OLDEST entries until ``new_entry`` fits ``limit`` (issue #1283).
+
+        Returns the list of evicted DISPLAY texts (oldest-first), or ``None``
+        when the add still doesn't fit — e.g. the single new entry alone
+        exceeds the limit, or the safety floor (``auto_evict_keep_min``) was
+        reached before it fit. The caller must treat ``None`` as "give up and
+        return the consolidation-failure response" so behaviour degrades
+        gracefully to the pre-#1283 path.
+
+        Entries are stored in insertion order (a §-delimited file is
+        append-mostly), so index 0 is the oldest — that is what we evict.
+        We never evict below ``auto_evict_keep_min`` entries. Only the
+        ``memory`` target is eligible; ``user`` profile facts are scarce and
+        high-value, so they keep the manual-consolidation path.
+        """
+        if not self.auto_evict_on_full or target != "memory":
+            return None
+
+        entries = self._entries_for(target)
+        # Working copy we mutate locally; only commit back if it fits.
+        working = list(entries)
+        evicted: List[str] = []
+
+        while True:
+            candidate = working + [new_entry]
+            if len(ENTRY_DELIMITER.join(candidate)) <= limit:
+                return evicted
+            # Can't evict further without breaching the safety floor.
+            if len(working) <= self.auto_evict_keep_min:
+                return None
+            evicted.append(parse_provenance(working.pop(0))[0])
+
     def _char_limit(self, target: str, dynamic_limit: Optional[int] = None) -> int:
         """Return the effective char limit for ``target``.
 
@@ -653,6 +700,37 @@ class MemoryStore:
             new_total = len(ENTRY_DELIMITER.join(new_entries))
 
             if new_total > limit:
+                # Auto-eviction (issue #1283): try to make room by evicting
+                # the OLDEST entries instead of hard-rejecting and forcing a
+                # multi-call read/evict/rewrite spiral. ``_evict_to_fit``
+                # returns the evicted display texts (oldest-first) on success
+                # or None when the add still can't fit (giant entry, or the
+                # safety floor was reached) — in which case we fall through to
+                # the existing consolidation-failure response below.
+                evicted = self._evict_to_fit(target, stored, limit)
+                if evicted is not None:
+                    working = self._entries_for(target)
+                    # Drop as many oldest entries as were evicted, then append.
+                    del working[: len(evicted)]
+                    working.append(stored)
+                    self._set_entries(target, working)
+                    self.save_to_disk(target)
+                    logger.info(
+                        "memory auto-evicted %d oldest entr%s to fit a new add "
+                        "(target=%s)",
+                        len(evicted),
+                        "y" if len(evicted) == 1 else "ies",
+                        target,
+                    )
+                    resp = self._success_response(
+                        target,
+                        f"Entry added; auto-evicted {len(evicted)} oldest "
+                        f"entr{'y' if len(evicted) == 1 else 'ies'} to make room.",
+                    )
+                    # Surface exactly what was dropped — never silent.
+                    resp["evicted"] = evicted
+                    return resp
+
                 current = self._char_count(target)
                 return self._consolidation_failure({
                     "success": False,
@@ -740,9 +818,9 @@ class MemoryStore:
                 # If all matches are identical (exact duplicates), operate on the first one
                 unique_texts = {e for _, e in matches}
                 if len(unique_texts) > 1:
-                    previews = self._previews(
-                        [parse_provenance(e)[0] for _, e in matches]
-                    )
+                    previews = self._previews([
+                        parse_provenance(e)[0] for _, e in matches
+                    ])
                     return {
                         "success": False,
                         "error": f"Multiple entries matched '{old_text}'. Be more specific.",
@@ -810,9 +888,9 @@ class MemoryStore:
                 # If all matches are identical (exact duplicates), remove the first one
                 unique_texts = {e for _, e in matches}
                 if len(unique_texts) > 1:
-                    previews = self._previews(
-                        [parse_provenance(e)[0] for _, e in matches]
-                    )
+                    previews = self._previews([
+                        parse_provenance(e)[0] for _, e in matches
+                    ])
                     return {
                         "success": False,
                         "error": f"Multiple entries matched '{old_text}'. Be more specific.",
@@ -1072,7 +1150,9 @@ class MemoryStore:
 
                 if act == "add":
                     if not content:
-                        return self._batch_error(target, f"{pos}: content is required.", limit=limit)
+                        return self._batch_error(
+                            target, f"{pos}: content is required.", limit=limit
+                        )
                     if content in working:
                         continue  # idempotent -- skip duplicate, don't fail the batch
                     working.append(content)
@@ -1091,7 +1171,9 @@ class MemoryStore:
                     matches = [j for j, e in enumerate(working) if old_text in e]
                     if not matches:
                         return self._batch_error(
-                            target, f"{pos}: no entry matched '{old_text}'.", limit=limit
+                            target,
+                            f"{pos}: no entry matched '{old_text}'.",
+                            limit=limit,
                         )
                     if len({working[j] for j in matches}) > 1:
                         return self._batch_error(
@@ -1109,7 +1191,9 @@ class MemoryStore:
                     matches = [j for j, e in enumerate(working) if old_text in e]
                     if not matches:
                         return self._batch_error(
-                            target, f"{pos}: no entry matched '{old_text}'.", limit=limit
+                            target,
+                            f"{pos}: no entry matched '{old_text}'.",
+                            limit=limit,
                         )
                     if len({working[j] for j in matches}) > 1:
                         return self._batch_error(
@@ -1152,7 +1236,9 @@ class MemoryStore:
             target, f"Applied {len(operations)} operation(s).", limit=limit
         )
 
-    def _batch_error(self, target: str, message: str, limit: Optional[int] = None) -> Dict[str, Any]:
+    def _batch_error(
+        self, target: str, message: str, limit: Optional[int] = None
+    ) -> Dict[str, Any]:
         """Build a batch-abort error that reports live (uncommitted) state."""
         current = self._char_count(target)
         effective_limit = limit if limit is not None else self._char_limit(target)
@@ -1185,7 +1271,9 @@ class MemoryStore:
         """Truncated one-line previews of entries for error feedback."""
         return [e[:width] + ("..." if len(e) > width else "") for e in entries]
 
-    def _success_response(self, target: str, message: str = None, limit: Optional[int] = None) -> Dict[str, Any]:
+    def _success_response(
+        self, target: str, message: str = None, limit: Optional[int] = None
+    ) -> Dict[str, Any]:
         # A successful write means the consolidation loop made progress, so the
         # per-turn failure budget resets (the cap counts consecutive failures,
         # not lifetime ones within a turn) (#42405).
@@ -1193,7 +1281,11 @@ class MemoryStore:
         entries = self._entries_for(target)
         current = self._char_count(target)
         effective_limit = limit if limit is not None else self._char_limit(target)
-        pct = min(100, int((current / effective_limit) * 100)) if effective_limit > 0 else 0
+        pct = (
+            min(100, int((current / effective_limit) * 100))
+            if effective_limit > 0
+            else 0
+        )
 
         # The success response is intentionally TERMINAL: it confirms the write
         # landed and tells the model to stop. We do NOT echo the full entries
@@ -1225,7 +1317,9 @@ class MemoryStore:
         pct = min(100, int((current / limit) * 100)) if limit > 0 else 0
 
         if target == "user":
-            header = f"{MEMORY_BLOCK_HEADERS['user']} [{pct}% — {current:,}/{limit:,} chars]"
+            header = (
+                f"{MEMORY_BLOCK_HEADERS['user']} [{pct}% — {current:,}/{limit:,} chars]"
+            )
         else:
             header = f"{MEMORY_BLOCK_HEADERS['memory']} [{pct}% — {current:,}/{limit:,} chars]"
 
@@ -1617,7 +1711,9 @@ def memory_tool(
         gate_result = _apply_batch_write_gate(target, operations)
         if gate_result is not None:
             return gate_result
-        result = store.apply_batch(target, operations, memory_char_limit=memory_char_limit)
+        result = store.apply_batch(
+            target, operations, memory_char_limit=memory_char_limit
+        )
         return json.dumps(result, ensure_ascii=False)
 
     # --- Single-op path ---------------------------------------------------
@@ -1726,9 +1822,9 @@ MEMORY_SCHEMA = {
         "detail, or you learn a stable fact about their environment, conventions, or workflow. "
         "Priority: user preferences & corrections > environment facts > procedures. The best "
         "memory stops the user repeating themselves.\n\n"
-        "IF FULL: an add is rejected with the current entries shown. Reissue as ONE batch that "
-        "removes or shortens enough stale entries and adds the new one together. Or call "
-        "action='compact' first to shorten entries so the batch fits.\n\n"
+        "IF FULL: an add is auto-accepted by evicting the OLDEST entry to make room "
+        "(the evicted text is listed under `evicted` in the response, so nothing is lost silently). "
+        "Only if the new entry alone exceeds the whole budget, or the safety floor is reached, is the add rejected with the current entries shown — then reissue as ONE batch that removes or shortens enough stale entries and adds the new one together. Or call action='compact' first to shorten entries so the batch fits.\n\n"
         "TARGETS: 'user' = who the user is (name, role, preferences, style). 'memory' = your "
         "notes (environment, conventions, tool quirks, lessons).\n\n"
         "PROVENANCE (optional, on add/replace): tag where a fact came from. source_class = "

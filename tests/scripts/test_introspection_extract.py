@@ -192,6 +192,157 @@ class TestScanSession:
         assert secret not in json.dumps(s)
 
 
+class TestFailureReasonClassification:
+    """#1325 — failures are sub-classified by reason so the introspection loop
+    attributes regressions to the actual mode, not just the tool name. Stops the
+    fix→regress→refile treadmill where a fix for read_file:file-not-found is
+    credited/blamed for read_file:timeout."""
+
+    def test_file_not_found_reason(self, tmp_path):
+        p = _session(
+            tmp_path,
+            "r1",
+            [
+                _asst("read_file", "c1"),
+                _tool("c1", _fail("no such file or directory")),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures"] == {"read_file": 1}
+        assert s["tool_failures_by_reason"] == {"read_file": {"file-not-found": 1}}
+
+    def test_permission_denied_reason(self, tmp_path):
+        p = _session(
+            tmp_path,
+            "r2",
+            [
+                _asst("terminal", "c1"),
+                _tool(
+                    "c1", _term("cannot write", exit_code=1, error="permission denied")
+                ),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures_by_reason"] == {"terminal": {"permission-denied": 1}}
+
+    def test_timeout_reason(self, tmp_path):
+        p = _session(
+            tmp_path,
+            "r3",
+            [
+                _asst("terminal", "c1"),
+                _tool("c1", _term("command timed out after 30s", exit_code=124)),
+            ],
+        )
+        s = scan_session(p)
+        # exit_code=124 → failed; "timed out" in output → timeout reason
+        assert s["tool_failures_by_reason"] == {"terminal": {"timeout": 1}}
+
+    def test_non_zero_exit_fallback_reason(self, tmp_path):
+        """A failed terminal call with no recognizable keyword falls back to
+        non-zero-exit (not 'other') because exit_code is the authoritative
+        signal."""
+        p = _session(
+            tmp_path,
+            "r4",
+            [
+                _asst("terminal", "c1"),
+                _tool("c1", _term("just some output", exit_code=2)),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures_by_reason"] == {"terminal": {"non-zero-exit": 1}}
+
+    def test_other_reason_for_bare_error(self, tmp_path):
+        """A non-terminal failure with a generic error message and no keyword
+        match lands in 'other'."""
+        p = _session(
+            tmp_path,
+            "r5",
+            [
+                _asst("patch", "c1"),
+                _tool("c1", _fail("something unusual happened")),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures_by_reason"] == {"patch": {"other": 1}}
+
+    def test_no_reason_for_successful_results(self, tmp_path):
+        p = _session(
+            tmp_path,
+            "r6",
+            [
+                _asst("read_file", "c1"),
+                _tool("c1", _ok(content="page mentions 404 but call succeeded")),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures"] == {}
+        assert s["tool_failures_by_reason"] == {}
+
+    def test_distinct_reasons_for_same_tool(self, tmp_path):
+        """The core #1325 invariant: two failures of the same tool but with
+        different reasons are counted separately, so a fix for one mode is not
+        credited for the other."""
+        p = _session(
+            tmp_path,
+            "r7",
+            [
+                _asst("read_file", "c1"),
+                _tool("c1", _fail("no such file or directory")),
+                _asst("read_file", "c2"),
+                _tool("c2", _fail("operation timed out")),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures"] == {"read_file": 2}
+        assert s["tool_failures_by_reason"] == {
+            "read_file": {"file-not-found": 1, "timeout": 1}
+        }
+
+    def test_digest_aggregates_reasons_across_sessions(self, tmp_path):
+        """build_digest merges per-session reason counters into a window total."""
+        _session(
+            tmp_path,
+            "s_a",
+            [
+                _asst("read_file", "c1"),
+                _tool("c1", _fail("no such file or directory")),
+            ],
+        )
+        _session(
+            tmp_path,
+            "s_b",
+            [
+                _asst("read_file", "c1"),
+                _tool("c1", _fail("permission denied")),
+                _asst("read_file", "c2"),
+                _tool("c2", _fail("no such file or directory")),
+            ],
+        )
+        d = build_digest(tmp_path)
+        assert d["signals"]["tool_failures"] == {"read_file": 3}
+        assert d["signals"]["tool_failures_by_reason"] == {
+            "read_file": {"file-not-found": 2, "permission-denied": 1}
+        }
+
+    def test_no_raw_text_in_reason_breakdown(self, tmp_path):
+        """The reason classifier reads only structured fields; raw user content
+        must never leak into the digest."""
+        secret = "USER SECRET token <REDACTED:token:abc> in body"
+        p = _session(
+            tmp_path,
+            "r8",
+            [
+                _asst("terminal", "c1"),
+                _tool("c1", _term(secret, exit_code=1, error="non-zero exit")),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures_by_reason"] == {"terminal": {"non-zero-exit": 1}}
+        assert secret not in json.dumps(s)
+
+
 class TestBuildDigest:
     def test_window_excludes_old_sessions(self, tmp_path):
         _session(

@@ -1514,6 +1514,8 @@ def init_agent(
                     memory_char_limit=mem_config.get("memory_char_limit", 4000),
                     user_char_limit=mem_config.get("user_char_limit", 1375),
                     guard=_mem_guard,
+                    auto_evict_on_full=mem_config.get("auto_evict_on_full", True),
+                    auto_evict_keep_min=mem_config.get("auto_evict_keep_min", 1),
                 )
                 agent._memory_store.load_from_disk()
         except Exception:

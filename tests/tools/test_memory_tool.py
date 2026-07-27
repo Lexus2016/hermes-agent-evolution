@@ -529,17 +529,24 @@ class TestMemoryConsolidationGracefulDegrade:
         assert "current_entries" not in r
         assert "continue with your reply" in r["error"]
 
-    def test_add_overflow_degrades_after_cap(self, store):
+    def test_add_overflow_degrades_after_cap(self, store, tmp_path, monkeypatch):
         # Fill near the 500-char user/memory limit so add() overflows.
-        store.add("memory", "x" * 200)
-        store.add("memory", "y" * 200)
-        cap = store._MAX_CONSOLIDATION_FAILURES_PER_TURN
+        # Disable auto-eviction (issue #1283) so this exercises the original
+        # overflow -> degradation path rather than auto-evict-and-succeed.
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+        s = MemoryStore(
+            memory_char_limit=500, user_char_limit=300, auto_evict_on_full=False
+        )
+        s.load_from_disk()
+        s.add("memory", "x" * 200)
+        s.add("memory", "y" * 200)
+        cap = s._MAX_CONSOLIDATION_FAILURES_PER_TURN
         big = "z" * 200
         for _ in range(cap):
-            r = store.add("memory", big)
+            r = s.add("memory", big)
             assert r["success"] is False
             assert "retry this add" in r["error"]  # still instructs in-turn retry
-        r = store.add("memory", big)
+        r = s.add("memory", big)
         assert r["success"] is False
         assert r["done"] is True
         assert "continue with your reply" in r["error"]
@@ -548,8 +555,10 @@ class TestMemoryConsolidationGracefulDegrade:
         store.add("memory", "fact A")
         cap = store._MAX_CONSOLIDATION_FAILURES_PER_TURN
         # Interleave replace + remove failures — they share the per-turn counter.
-        actions = [lambda: store.replace("memory", "nope", "x"),
-                   lambda: store.remove("memory", "nope")]
+        actions = [
+            lambda: store.replace("memory", "nope", "x"),
+            lambda: store.remove("memory", "nope"),
+        ]
         for i in range(cap):
             assert actions[i % 2]()["success"] is False
         # cap+1th failure (any action) degrades.
@@ -754,9 +763,18 @@ class TestMemoryBatch:
         assert "stale two" not in store.memory_entries
         assert "usage" in result
 
-    def test_batch_frees_room_for_otherwise_overflowing_add(self, store):
+    def test_batch_frees_room_for_otherwise_overflowing_add(
+        self, tmp_path, monkeypatch
+    ):
         # store limit is 500 (fixture). Fill it, then a single add would
         # overflow — but a batch that removes first lands in ONE call.
+        # Disable auto-eviction (issue #1283) so the single-add overflow
+        # path that the batch is meant to solve is actually exercised.
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+        store = MemoryStore(
+            memory_char_limit=500, user_char_limit=300, auto_evict_on_full=False
+        )
+        store.load_from_disk()
         store.add("memory", "x" * 240)
         store.add("memory", "y" * 240)  # ~485 chars, near the 500 limit
         big_add = {"action": "add", "content": "z" * 200}
@@ -1132,3 +1150,108 @@ class TestLoadTimeSnapshotSanitization:
         # Block marker appears exactly once, not nested
         assert snapshot.count("[BLOCKED:") == 1
         assert "Clean fact" in snapshot
+
+
+# =========================================================================
+# Auto-eviction on add-overflow (issue #1283)
+# =========================================================================
+
+
+class TestAutoEvictOnFull:
+    """When a bare `add` would exceed the char budget, the store should evict
+    the OLDEST entry (insertion order) and accept the add, rather than
+    hard-rejecting and forcing a multi-call read/evict/rewrite spiral.
+
+    Safety contract:
+      * default ON (auto_evict_on_full=True)
+      * the evicted text is surfaced in the response (never silent)
+      * the keep-min floor prevents a giant entry from wiping the store
+      * a single entry larger than the whole budget still rejects (graceful)
+      * opt-out (auto_evict_on_full=False) restores the pre-#1283 behaviour
+      * only the 'memory' target auto-evicts; 'user' keeps manual consolidation
+    """
+
+    @pytest.fixture()
+    def full_store(self, tmp_path, monkeypatch):
+        """A memory store with three entries that nearly fill a 200-char budget."""
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+        s = MemoryStore(memory_char_limit=200, user_char_limit=200)
+        s.load_from_disk()
+        # Each entry ~60 chars so three of them (~184 chars with delimiters)
+        # genuinely approach the 200-char budget.
+        s.add("memory", "oldest fact " + "a" * 50)  # insertion order: index 0
+        s.add("memory", "middle fact " + "b" * 50)
+        s.add("memory", "recent fact " + "c" * 50)
+        return s
+
+    def test_add_evicts_oldest_and_succeeds(self, full_store):
+        result = full_store.add("memory", "brand new fact " + "d" * 50)
+        assert result["success"] is True
+        # Oldest entry was evicted to make room.
+        assert result["evicted"] == ["oldest fact " + "a" * 50]
+        # New entry landed; oldest is gone.
+        joined = "\n§\n".join(full_store.memory_entries)
+        assert ("brand new fact " + "d" * 50) in joined
+        assert ("oldest fact " + "a" * 50) not in joined
+        # Middle + recent survived.
+        assert ("middle fact " + "b" * 50) in joined
+        assert ("recent fact " + "c" * 50) in joined
+
+    def test_eviction_respects_keep_min_floor(self, tmp_path, monkeypatch):
+        # A 1-entry floor: evicting down to 1 entry then a giant add must NOT
+        # wipe the last surviving entry.
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+        s = MemoryStore(memory_char_limit=120, auto_evict_keep_min=1)
+        s.load_from_disk()
+        s.add("memory", "keep me A")
+        s.add("memory", "keep me B")
+        # An add so big it can't fit even after evicting to the floor.
+        giant = "x" * 500
+        result = s.add("memory", giant)
+        # Graceful degradation: rejected, not silently dropped.
+        assert result["success"] is False
+        assert "evicted" not in result
+        # Store untouched — the pre-existing entries survived.
+        assert len(s.memory_entries) == 2
+
+    def test_single_entry_larger_than_budget_rejects(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+        s = MemoryStore(memory_char_limit=50)
+        s.load_from_disk()
+        result = s.add("memory", "y" * 500)
+        assert result["success"] is False
+        # Falls through to the consolidation-failure shape.
+        assert "current_entries" in result
+        assert "retry" in result["error"].lower()
+
+    def test_opt_out_restores_hard_reject(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+        s = MemoryStore(memory_char_limit=100, auto_evict_on_full=False)
+        s.load_from_disk()
+        s.add("memory", "first fact " + "a" * 80)  # ~91 chars, near the 100 limit
+        # A second add big enough to overflow the remaining ~9 chars.
+        result = s.add("memory", "second fact " + "b" * 80)
+        assert result["success"] is False
+        assert "evicted" not in result
+        # Pre-#1283 consolidation guidance is shown.
+        assert "current_entries" in result
+        assert "retry" in result["error"].lower()
+
+    def test_user_target_never_auto_evicts(self, tmp_path, monkeypatch):
+        # User profile facts are scarce/high-value: keep manual consolidation.
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+        s = MemoryStore(memory_char_limit=50, user_char_limit=50)
+        s.load_from_disk()
+        s.add("user", "name: Alice")
+        result = s.add(
+            "user", "a long preference entry that would overflow this small budget"
+        )
+        assert result["success"] is False
+        assert "evicted" not in result
+
+    def test_default_on_for_new_store(self, tmp_path, monkeypatch):
+        # The default MemoryStore() should have auto-evict enabled.
+        monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
+        s = MemoryStore(memory_char_limit=100)
+        assert s.auto_evict_on_full is True
+        assert s.auto_evict_keep_min >= 1
