@@ -324,6 +324,20 @@ def finalize_turn(
         _cleanup_errors.append(f"persist_session: {_persist_err}")
         logger.error("finalize_turn: _persist_session failed: %s", _persist_err, exc_info=True)
 
+    # ── Post-turn assertion hook (#1301) ──────────────────────────────
+    # τ-bench-style outcome-fidelity grading: after the turn ends and state is
+    # persisted, evaluate the transcript against an opt-in assertion contract
+    # (``HERMES_ASSERT_CONTRACT``). Emits a structured score (DB state hash ×
+    # COMMUNICATE required substrings) so a CI/eval harness can grade runs
+    # without parsing logs. Inert unless the env var is set — production paths
+    # are untouched. See ``agent/post_turn_assertion.py``.
+    try:
+        from agent.post_turn_assertion import run_if_enabled as _run_assertion
+
+        _run_assertion(messages)
+    except Exception as _assert_err:
+        logger.debug("post-turn assertion hook failed: %s", _assert_err)
+
     # ── Turn-exit diagnostic log ─────────────────────────────────────
     # Always logged at INFO so agent.log captures WHY every turn ended.
     # When the last message is a tool result (agent was mid-work), log
