@@ -4859,10 +4859,14 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
                 "(tool subprocess was killed mid-flight)."
             )
 
-        # Persist a failure record whenever a job fails or the agent returns an
+        # Persist a failure record ONLY when a job fails or the agent returns an
         # empty response. This is the per-job audit trail that makes silent
-        # failures visible; successful runs overwrite the latest record so the
-        # digest only shows current problems.
+        # failures visible. Successful runs used to overwrite the latest record
+        # so the digest only showed current problems, but in practice this
+        # flooded failures/ with success=true records (~100 of ~109 files),
+        # making the directory useless for identifying real failures (#1390).
+        # build_cron_failure_digest() already filters on success=False, so
+        # writing success records here served no purpose.
         if not success:
             tb = traceback.format_exc() if sys.exc_info()[0] is not None else None
             try:
@@ -4883,11 +4887,6 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
                 )
             except Exception as fe:
                 logger.error("Could not save cron failure record: %s", fe)
-        else:
-            try:
-                save_job_failure(job, success=True, output=output)
-            except Exception:
-                pass
 
         # Deliver the final response to the origin/target chat.
         # If the agent responded with [SILENT], skip delivery (but

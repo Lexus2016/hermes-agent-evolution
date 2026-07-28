@@ -848,3 +848,67 @@ class TestRefusalRecoveryFalsePositives:
         assert self._recovered(
             tmp_path, "I can't call the API directly. I'll write a script via terminal."
         ) == 1
+
+
+class TestRefusalRecoveryNegationAndProximity:
+    """The two failure modes that dominated the real corpus (#1366 round 2).
+
+    Both were found by adversarial review of the first fix, which had narrowed
+    the pivot to first person but left these untouched. Together they accounted
+    for the rate falling from 0.2168 to 0.0839 on the same 143 refusals.
+    """
+
+    @staticmethod
+    def _reply(text):
+        return {"role": "assistant", "content": text}
+
+    def _recovered(self, tmp_path, text, name="s"):
+        p = _session(tmp_path, name, [self._reply(text)])
+        s = scan_session(p)
+        assert s["refusals"] == 1, "fixture must actually refuse"
+        return s["refusals_with_recovery"]
+
+    # --- negated modal inside the pivot itself ---------------------------
+    # `\b` after "can" is satisfied by the apostrophe in "can't", so the pivot
+    # clause matched inside the refusal it was supposed to follow.
+
+    def test_but_i_cant_is_not_a_pivot(self, tmp_path):
+        assert self._recovered(tmp_path, "But I can't just sit idle in a cron job.") == 0
+
+    def test_though_i_cant_is_not_a_pivot(self, tmp_path):
+        assert self._recovered(
+            tmp_path, "Though I can't promise a fix today, someone should look tomorrow."
+        ) == 0
+
+    def test_however_we_cannot_is_not_a_pivot(self, tmp_path):
+        assert self._recovered(tmp_path, "However, we cannot run the full analysis stage.") == 0
+
+    # --- proximity -------------------------------------------------------
+    # Long audit documents mention a third-party "cannot" and an unrelated
+    # "instead" pages later; both used to land in the same count.
+
+    def test_pivot_far_from_refusal_does_not_count(self, tmp_path):
+        filler = "The report continues with unrelated detail. " * 12
+        assert self._recovered(
+            tmp_path, f"I cannot read that field. {filler} Instead, we let the cache expire."
+        ) == 0
+
+    def test_pivot_close_to_refusal_counts(self, tmp_path):
+        assert self._recovered(
+            tmp_path, "I cannot read that field directly. Instead, let me parse the raw envelope."
+        ) == 1
+
+    def test_pivot_before_refusal_does_not_count(self, tmp_path):
+        """A plan followed by a refusal is not a refusal followed by a plan."""
+        assert self._recovered(
+            tmp_path, "Instead, let me check the cache. Then I hit the wall: I can't reach the API."
+        ) == 0
+
+    def test_second_refusal_in_the_message_can_still_recover(self, tmp_path):
+        """Scanning every refusal, not just the first, keeps a real pivot late
+        in a long turn visible."""
+        assert self._recovered(
+            tmp_path,
+            "I cannot reach the primary host. Checking the mirror now — that also "
+            "returned access denied, but I can fall back to the cached snapshot.",
+        ) == 1

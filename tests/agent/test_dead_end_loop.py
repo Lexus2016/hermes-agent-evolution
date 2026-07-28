@@ -187,3 +187,81 @@ class TestAlternatingCallsAreStillDeadEnds:
         result = detect_dead_end_loop(msgs)
         assert result is not None
         assert "4 times" in result
+
+
+class TestSemanticNudgeOrdering:
+    """Both cross-turn detectors must stay reachable through `maybe_nudge`.
+
+    `_semantic_loop_nudge` chains them with `or`. Test-iteration fires at 3 and
+    dead-end at 4, so running test-iteration first short-circuited before
+    dead-end could ever run for a repeated test command — silently removing
+    #1312's structured-justification nudge from exactly the `test -> edit ->
+    test` loop the issue was filed about. These tests pin the composed path, not
+    just the individual detectors: nothing in the suite exercised `maybe_nudge`
+    for this input class before.
+    """
+
+    from agent.loop_guard import maybe_nudge as _maybe_nudge_fn
+
+    # Wrapped in staticmethod so Python does not bind it as a method and pass
+    # `self` as the messages argument.
+    _maybe_nudge = staticmethod(_maybe_nudge_fn)
+
+    @staticmethod
+    def _identical_test_loop(n: int) -> list[dict]:
+        """Same test command every time, a DIFFERENT file edited between runs.
+
+        The edits must vary: an identical `patch` repeated n times is itself a
+        dead end, and would be the signature reported instead of the test.
+        """
+        msgs: list[dict] = []
+        for i in range(n):
+            msgs.append(_make_tool_call("patch", f'{{"path": "f{i}.py"}}', f"p{i}"))
+            msgs.append(_make_tool_result(f"p{i}", "ok"))
+            msgs.append(_make_tool_call("terminal", '{"command": "pytest"}', f"t{i}"))
+            msgs.append(_make_tool_result(f"t{i}", "1 failed, 2 passed in 0.31s"))
+        return msgs
+
+    @staticmethod
+    def _varying_test_loop(n: int) -> list[dict]:
+        """A DIFFERENT test command each run, with an edit in between.
+
+        The edits matter: back-to-back failing `terminal` calls trip the
+        consecutive-failure branch higher up the ladder, which is correct
+        behaviour but means the semantic fallback is never reached.
+        """
+        msgs: list[dict] = []
+        for i in range(n):
+            msgs.append(_make_tool_call("patch", f'{{"path": "f{i}.py"}}', f"p{i}"))
+            msgs.append(_make_tool_result(f"p{i}", "ok"))
+            msgs.append(
+                _make_tool_call("terminal", f'{{"command": "pytest tests/t{i}.py"}}', f"t{i}")
+            )
+            msgs.append(_make_tool_result(f"t{i}", "1 failed in 0.2s"))
+        return msgs
+
+    def test_identical_test_command_reaches_the_dead_end_nudge(self):
+        """Same arguments four deep is a dead end, not merely a test loop."""
+        nudge = self._maybe_nudge(self._identical_test_loop(4))
+        assert nudge is not None
+        assert "DEAD-END DETECTED" in nudge
+        assert "what_changed_since_last_attempt" in nudge
+
+    def test_varying_test_command_still_gets_test_scoping(self):
+        """Different arguments each run is not a dead end — the test-iteration
+        detector must still be reachable behind it."""
+        nudge = self._maybe_nudge(self._varying_test_loop(3))
+        assert nudge is not None
+        assert "SEMANTIC TEST LOOP" in nudge
+
+    def test_test_iteration_quiet_below_its_own_threshold(self):
+        """The detector had no coverage at all; pin its quiet contract too.
+
+        Asserted on the detector directly: below its threshold `maybe_nudge`
+        legitimately returns other, more specific nudges, so the composed path
+        cannot isolate this contract.
+        """
+        from agent.loop_guard import detect_test_iteration_loop
+
+        assert detect_test_iteration_loop(self._varying_test_loop(2)) is None
+        assert detect_test_iteration_loop(self._varying_test_loop(3)) is not None
