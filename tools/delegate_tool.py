@@ -1766,6 +1766,22 @@ def _build_child_agent(
         iteration_budget=None,  # fresh budget per subagent
         **child_optional_kwargs,
     )
+    # #1387 — Validate the child resolved to at least 1 tool.  If toolset
+    # resolution (intersection, blocked-tool stripping, role filtering)
+    # reduced the effective toolset to nothing, the child would launch with
+    # no tools and immediately spiral with "I have no [tool]" refusals until
+    # the turn limit.  Fail fast with a structured error naming what was
+    # requested vs. what survived so the parent can correct the delegation.
+    _child_tools = getattr(child, "valid_tool_names", None) or []
+    if not _child_tools:
+        requested_str = ", ".join(toolsets) if toolsets else "(inherited from parent)"
+        raise ValueError(
+            f"Sub-agent toolset resolved to 0 tools. "
+            f"Requested toolsets: {requested_str}. "
+            f"Effective child toolsets after filtering: {child_toolsets}. "
+            f"Check that the specified toolsets exist and are not all blocked."
+        )
+
     child._print_fn = getattr(parent_agent, "_print_fn", None)
     # Now the child exists, its session id can ride on every relayed event
     # (including the spawn_requested below — first emit happens after this).
@@ -3177,6 +3193,12 @@ def delegate_task(
                 )
                 child._live_transcript_path = str(_writer.path)
             children.append((i, t, child))
+    except ValueError as _build_err:
+        # #1387 — a child's toolset resolved to 0 tools; return a structured
+        # tool error so the parent agent sees the problem instead of
+        # propagating an unhandled exception.
+        _model_tools._last_resolved_tool_names = _parent_tool_names
+        return tool_error(str(_build_err))
     finally:
         # Authoritative restore: reset global to parent's tool names after all children built
         _model_tools._last_resolved_tool_names = _parent_tool_names
