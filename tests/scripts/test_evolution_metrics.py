@@ -184,3 +184,67 @@ class TestCohortSelectionEfficiency:
         recs = [_rec(f"d{i}", selected=10, merged=3) for i in range(5)]
         h = compute_health(recs)
         assert h["selection_efficiency"] == round(15 / 50, 3)
+
+
+class TestStageGateIntegration:
+    """The gate rates ride the health line; the watchdog contract must hold.
+
+    evolution_watchdog.check_health reads the WHOLE file and alerts unless it
+    ends in "| healthy", so where the rates sit is a correctness property, not
+    formatting taste. This had no coverage when the integration landed (#1340).
+    """
+
+    @staticmethod
+    def _ledger(evolution_dir, *branches, stage="local_triage"):
+        import json
+
+        evolution_dir.mkdir(parents=True, exist_ok=True)
+        with open(evolution_dir / "stage_gate.jsonl", "w", encoding="utf-8") as fh:
+            for b in branches:
+                fh.write(
+                    json.dumps(
+                        {
+                            "branch": b,
+                            "stage": stage,
+                            "confidence": 50,
+                            "threshold": 70,
+                            "reason": "test",
+                            "retained_evidence": [],
+                        }
+                    )
+                    + "\n"
+                )
+
+    def test_healthy_gate_keeps_the_healthy_tail(self, tmp_path):
+        d = tmp_path / "evolution"
+        self._ledger(d, "refine", "refine", "accept", "accept")
+        line = format_health(compute_health([], 30, d))
+        assert line.endswith("| healthy"), line
+        assert "gate[local_triage]" in line
+
+    def test_mistuned_gate_flags_and_breaks_the_healthy_tail(self, tmp_path):
+        d = tmp_path / "evolution"
+        self._ledger(d, "restart", "restart", "restart", "accept")
+        line = format_health(compute_health([], 30, d))
+        assert not line.endswith("| healthy")
+        assert "HIGH_STAGE_RESTART_RATE:local_triage" in line
+
+    def test_no_ledger_leaves_the_line_untouched(self, tmp_path):
+        d = tmp_path / "evolution"
+        d.mkdir(parents=True, exist_ok=True)
+        line = format_health(compute_health([], 30, d))
+        assert "gate[" not in line
+        assert line.endswith("| healthy")
+
+    def test_non_string_stage_does_not_blind_the_feature(self, tmp_path):
+        """A single bad-typed ledger line used to raise TypeError inside
+        gate_flags, which compute_health swallowed — dropping the rates AND the
+        alert while still reporting healthy."""
+        import json
+
+        d = tmp_path / "evolution"
+        self._ledger(d, "restart", "restart", "restart", "accept")
+        with open(d / "stage_gate.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"branch": "accept", "stage": 42}) + "\n")
+        line = format_health(compute_health([], 30, d))
+        assert "HIGH_STAGE_RESTART_RATE:local_triage" in line, line
