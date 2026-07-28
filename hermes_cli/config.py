@@ -2495,6 +2495,17 @@ DEFAULT_CONFIG = {
         # "hindsight", "holographic", "retaindb", "byterover".
         # Only ONE external provider is allowed at a time.
         "provider": "",
+        # Retrieval-utility logging + history-based deletion (#1480, child of #1270).
+        # Each time memory context is retrieved, the retrieval is logged with its
+        # downstream outcome (derived from friction signals). Records retrieved
+        # >= min_retrievals times with avg_utility < utility_floor become candidates
+        # for history-based deletion — the ACL 2026 memory-management paper proves
+        # this beats add-all by 22-25 points.
+        "retrieval_utility": {
+            "enabled": True,
+            "min_retrievals": 3,       # minimum retrievals before a record is eligible
+            "utility_floor": 0.5,      # average utility below which a record is eligible
+        },
     },
     # Subagent delegation — override the provider:model used by delegate_task
     # so child agents can run on a different (cheaper/faster) provider and model.

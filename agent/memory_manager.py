@@ -394,6 +394,10 @@ class MemoryManager:
             "abandoned_prefetches": 0,
             "active_tasks": 0,
         }
+        # Retrieval-utility tracking (#1480): per-turn list of (record_id,
+        # session_id) pairs logged during prefetch_all. Cleared after
+        # outcomes are recorded in sync_all.
+        self._pending_retrievals: List[tuple[str, str]] = []
 
     # -- Registration --------------------------------------------------------
 
@@ -498,6 +502,52 @@ class MemoryManager:
                 )
         return "\n\n".join(blocks)
 
+    # -- Retrieval-utility logging (#1480) -----------------------------------
+
+    def _record_retrieval_utility(
+        self, provider_name: str, query: str, *, session_id: str = ""
+    ) -> None:
+        """Log a retrieval to the utility sidecar (called from prefetch_all).
+
+        Records (provider_name, query, session_id) so that the downstream
+        outcome can be recorded later in sync_all. The record_id is the
+        provider name — granular enough to measure per-provider utility
+        without needing to parse the returned context into individual
+        records.
+        """
+        try:
+            from agent.retrieval_utility import record_retrieval
+
+            record_id = f"memory:{provider_name}"
+            self._pending_retrievals.append((record_id, session_id))
+            record_retrieval(record_id, retrieval_context=query[:200], session_id=session_id)
+        except Exception as e:
+            logger.debug("retrieval-utility logging failed (non-fatal): %s", e)
+
+    def _record_retrieval_outcomes(self, event: Optional[Any]) -> None:
+        """Record downstream outcomes for retrievals logged this turn.
+
+        Called from sync_all after score_memories produces the friction
+        signals for the turn. Uses ``event.friction_signals`` to derive a
+        coarse outcome label (helpful/neutral/harmful) and records it
+        against each pending retrieval.
+        """
+        if not self._pending_retrievals:
+            return
+        try:
+            from agent.retrieval_utility import record_outcome, derive_outcome
+
+            friction_signals = {}
+            if event is not None and hasattr(event, "friction_signals"):
+                friction_signals = event.friction_signals or {}
+            outcome = derive_outcome(friction_signals)
+            for record_id, _session_id in self._pending_retrievals:
+                record_outcome(record_id, outcome=outcome, friction_signals=friction_signals)
+        except Exception as e:
+            logger.debug("retrieval-utility outcome recording failed (non-fatal): %s", e)
+        finally:
+            self._pending_retrievals.clear()
+
     # -- Prefetch / recall ---------------------------------------------------
 
     @staticmethod
@@ -533,6 +583,12 @@ class MemoryManager:
                 result = self._prefetch_provider(provider, clean_query, session_id=session_id)
                 if result and result.strip():
                     parts.append(result)
+                    # Retrieval-utility logging (#1480): record that this
+                    # provider returned context for this query so we can
+                    # measure downstream utility at turn end.
+                    self._record_retrieval_utility(
+                        provider.name, clean_query, session_id=session_id
+                    )
             except Exception as e:
                 logger.debug(
                     "Memory provider '%s' prefetch failed (non-fatal): %s",
@@ -786,7 +842,7 @@ class MemoryManager:
         # the provider guard; this keeps the store populated even in
         # built-in-only mode without spawning the background executor.
         try:
-            self.score_memories(
+            event = self.score_memories(
                 user_content,
                 assistant_content,
                 session_id=session_id,
@@ -796,6 +852,12 @@ class MemoryManager:
             logger.debug(
                 "score_memories() failed during sync (non-fatal): %s", e
             )
+            event = None
+
+        # Retrieval-utility outcome recording (#1480): if any retrievals
+        # were logged during prefetch for this turn, record their downstream
+        # outcome derived from the friction signals we just scored.
+        self._record_retrieval_outcomes(event)
 
         providers = list(self._providers)
         if not providers:
