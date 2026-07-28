@@ -6,7 +6,7 @@ JSON file so we can measure whether a record actually helped the agent.
 Two-step pipeline:
   1. **Retrieval-utility log** — each time ``MemoryManager.prefetch_all``
      returns context, the caller logs a retrieval entry with (record_id,
-     retrieval_context, timestamp). When ``sync_all`` runs at turn end, the
+     timestamp). When ``sync_all`` runs at turn end, the
      caller records the downstream outcome (derived from friction signals:
      retries, task_failures, human_corrections) against the retrievals that
      were active for that turn.
@@ -154,7 +154,14 @@ def record_retrieval(
     *,
     session_id: str = "",
 ) -> None:
-    """Log that *record_id* was retrieved for the given context.
+    """Log that *record_id* was retrieved.
+
+    ``retrieval_context`` is ACCEPTED but NOT STORED. Utility is computed from
+    outcomes alone (see :func:`compute_utility`), so the query text was write-
+    only — never read back, and a fragment of the user's prompt on disk for no
+    downstream purpose. The parameter stays in the signature so callers need no
+    change and a future consumer can opt into storing a redacted form
+    deliberately rather than by default.
 
     Best-effort: failures log at DEBUG and return silently.
     """
@@ -165,7 +172,6 @@ def record_retrieval(
             data = load_log()
             data.setdefault("retrievals", []).append({
                 "record_id": record_id,
-                "retrieval_context": retrieval_context[:500],
                 "session_id": session_id,
                 "timestamp": _now_iso(),
                 "outcome": None,  # filled by record_outcome

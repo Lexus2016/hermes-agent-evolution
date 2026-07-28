@@ -2502,7 +2502,10 @@ DEFAULT_CONFIG = {
         # for history-based deletion — the ACL 2026 memory-management paper proves
         # this beats add-all by 22-25 points.
         "retrieval_utility": {
-            "enabled": True,
+            # Default OFF: this writes a per-retrieval record to disk for every
+            # memory/skill hit. Opt-in keeps an unasked-for on-disk trace out of
+            # ordinary sessions, matching HERMES_EVOLUTION_CAPTURE (#1363).
+            "enabled": False,
             "min_retrievals": 3,       # minimum retrievals before a record is eligible
             "utility_floor": 0.5,      # average utility below which a record is eligible
         },

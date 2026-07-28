@@ -69,7 +69,19 @@ class TestRecordAndRetrieve:
         assert len(log["retrievals"]) == 1
         entry = log["retrievals"][0]
         assert entry["record_id"] == "memory:builtin"
-        assert entry["retrieval_context"] == "user query about X"
+        assert entry["session_id"] == "s1"
+        assert entry["outcome"] is None
+
+    def test_query_text_is_not_stored(self, isolated_utility_file):
+        """The context argument is accepted but never persisted.
+
+        compute_utility scores outcomes only, so the query text was write-only
+        — a fragment of the user's prompt on disk for no downstream purpose.
+        """
+        record_retrieval("memory:builtin", "user query about X", session_id="s1")
+        entry = load_log()["retrievals"][0]
+        assert "retrieval_context" not in entry
+        assert "user query about X" not in json.dumps(entry)
         assert entry["session_id"] == "s1"
         assert entry["outcome"] is None
         assert "timestamp" in entry
