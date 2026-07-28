@@ -54,55 +54,92 @@ BRIDGE_TOOL_NAMES = frozenset({TOOL_SEARCH_NAME, TOOL_DESCRIBE_NAME, TOOL_CALL_N
 # underestimating, which is the safer default.
 CHARS_PER_TOKEN = 4.0
 
-# ── #1144 — consecutive-tool_search streak tracking ───────────────────────
+# ── #1144 / #1373 — consecutive-tool_search streak tracking ───────────────
 # Per-session count of ``tool_search`` calls with no intervening ``tool_call``.
 # When the model keeps reformulating queries but never invokes a discovered
 # tool, ``dispatch_tool_search`` appends a ``fallback_directive`` once the
 # streak crosses ``ToolSearchConfig.search_streak_threshold``. The counter
-# resets on any ``tool_call``. Keyed by session_id; a None session_id is not
-# tracked (keeps pure-function tests that pass no session_id unaffected).
+# resets on any ``tool_call``.
+#
+# #1373 — the counter used to be keyed by session_id and return 0 forever for a
+# falsy key. The production runtime reaches this via
+# ``session_id=agent.session_id or ""`` (agent_runtime_helpers + conversation
+# loop), so an unset session id arrives as the empty string ``""`` — falsy,
+# which silently disabled the whole feature (17 sessions identical to the
+# pre-merge baseline). A falsy / empty session id now falls back to a single
+# process-local default key so the feature actually fires in that environment.
+# Only an explicit ``None`` (the pure-function test path) declines to track.
 _SEARCH_STREAK: Dict[str, int] = {}
 
-#: Set once per process when a search arrives with no usable session key, so
-#: the "streak tracking is silently off" state is visible in the log exactly
-#: once instead of never (#1373).
-_STREAK_DISABLED_WARNED = False
+#: Per-session rolling list of recent tool_search queries, used to populate
+#: ``previous_queries`` in the fallback directive so the model can see it is
+#: going in circles (#1373).
+_SEARCH_QUERIES: Dict[str, List[str]] = {}
+
+#: Cap on how many previous queries we surface / retain per session.
+_PREVIOUS_QUERIES_MAX = 8
+
+#: Sentinel key used when the runtime hands us an empty session id. Using a
+#: stable, obviously-synthetic key (rather than the empty string) keeps the
+#: default-keyed streak visually distinct from a real session in debugging and
+#: keeps ``""`` out of the dict as a key.
+_DEFAULT_SESSION_KEY = "__default_session__"
 
 
-def note_tool_search(session_id: Optional[str]) -> int:
+def _streak_key(session_id: Optional[str]) -> Optional[str]:
+    """Resolve a session_id to a streak-tracking key.
+
+    Returns the session id unchanged when it is a non-empty string, a stable
+    default key when it is an empty string (the production runtime path), and
+    ``None`` only for an explicit ``None`` — which opts out of tracking
+    entirely (preserving the pure-function unit-test contract).
+    """
+    if session_id is None:
+        return None
+    if session_id == "":
+        return _DEFAULT_SESSION_KEY
+    return session_id
+
+
+def note_tool_search(session_id: Optional[str], query: str = "") -> int:
     """Increment the consecutive-search streak for ``session_id``; return it.
 
-    Returns 0 — and therefore never reaches the threshold — when there is no
-    session key to count against. That is the correct behaviour for the pure
-    unit tests that pass none, but in production it silently disables the whole
-    feature, which is how #1153 could ship, pass CI, and leave the signal it
-    targeted completely unchanged (#1373). The runtime reaches this via
-    ``session_id=agent.session_id or ""`` in ``agent_runtime_helpers``, so an
-    unset session id arrives as ``""`` — falsy, and indistinguishable here from
-    a test calling with nothing.
+    A non-empty session id is tracked under itself. An empty-string session id
+    — the value the runtime sends when ``agent.session_id`` is unset — is
+    tracked under a stable default key so the feature fires instead of
+    silently returning 0 forever (#1373). Only an explicit ``None`` opts out
+    of tracking (the pure-function unit-test path).
 
-    The counter still declines to track it; what changes is that it says so.
+    ``query`` is appended to the per-session rolling query history so the
+    fallback directive can surface ``previous_queries``.
     """
-    if not session_id:
-        global _STREAK_DISABLED_WARNED
-        if not _STREAK_DISABLED_WARNED:
-            _STREAK_DISABLED_WARNED = True
-            logger.warning(
-                "tool_search streak tracking is INACTIVE for this process: a "
-                "search arrived with no session id, so the consecutive-search "
-                "counter cannot key on anything and the fallback directive "
-                "(#1153) will never fire. Callers must pass a non-empty "
-                "session_id (see #1373)."
-            )
+    key = _streak_key(session_id)
+    if key is None:
         return 0
-    _SEARCH_STREAK[session_id] = _SEARCH_STREAK.get(session_id, 0) + 1
-    return _SEARCH_STREAK[session_id]
+    _SEARCH_STREAK[key] = _SEARCH_STREAK.get(key, 0) + 1
+    if query:
+        hist = _SEARCH_QUERIES.setdefault(key, [])
+        hist.append(query)
+        # Trim to the last N, keeping insertion order.
+        if len(hist) > _PREVIOUS_QUERIES_MAX:
+            del hist[: len(hist) - _PREVIOUS_QUERIES_MAX]
+    return _SEARCH_STREAK[key]
 
 
 def reset_search_streak(session_id: Optional[str]) -> None:
     """Reset the streak — call when the model invokes a discovered tool."""
-    if session_id and session_id in _SEARCH_STREAK:
-        _SEARCH_STREAK[session_id] = 0
+    key = _streak_key(session_id)
+    if key is not None and key in _SEARCH_STREAK:
+        _SEARCH_STREAK[key] = 0
+        _SEARCH_QUERIES.pop(key, None)
+
+
+def get_previous_queries(session_id: Optional[str]) -> List[str]:
+    """Return the rolling recent-query history for ``session_id`` (copy)."""
+    key = _streak_key(session_id)
+    if key is None:
+        return []
+    return list(_SEARCH_QUERIES.get(key, []))
 
 
 def _fallback_directive(streak: int) -> str:
@@ -138,6 +175,12 @@ class ToolSearchConfig:
     # nudging the model to broaden the query, check tool_describe, or proceed
     # without the deferred tool. 0 disables the guard.
     search_streak_threshold: int = 3
+    # #1373 — after this many consecutive ``tool_search`` calls with no
+    # ``tool_call``, also auto-invoke ``tool_describe`` on the top search hit
+    # (inline, in the result) so the model gets the full schema without another
+    # round-trip. Must be >= search_streak_threshold. 0 disables the
+    # auto-describe step (the streak-3 fallback still fires).
+    search_streak_describe_threshold: int = 5
 
     @classmethod
     def from_raw(cls, raw: Any) -> "ToolSearchConfig":
@@ -150,14 +193,26 @@ class ToolSearchConfig:
         break the agent.
         """
         if raw is True:
-            return cls(enabled="auto", threshold_pct=10.0,
-                       search_default_limit=5, max_search_limit=20)
+            return cls(
+                enabled="auto",
+                threshold_pct=10.0,
+                search_default_limit=5,
+                max_search_limit=20,
+            )
         if raw is False:
-            return cls(enabled="off", threshold_pct=10.0,
-                       search_default_limit=5, max_search_limit=20)
+            return cls(
+                enabled="off",
+                threshold_pct=10.0,
+                search_default_limit=5,
+                max_search_limit=20,
+            )
         if not isinstance(raw, dict):
-            return cls(enabled="auto", threshold_pct=10.0,
-                       search_default_limit=5, max_search_limit=20)
+            return cls(
+                enabled="auto",
+                threshold_pct=10.0,
+                search_default_limit=5,
+                max_search_limit=20,
+            )
 
         enabled_raw = str(raw.get("enabled", "auto")).strip().lower()
         if enabled_raw in ("true", "1", "yes"):
@@ -173,9 +228,15 @@ class ToolSearchConfig:
         threshold_pct = max(0.0, min(100.0, threshold_pct))
 
         max_search_limit = max(1, min(50, _safe_int(raw.get("max_search_limit"), 20)))
-        search_default_limit = max(1, min(max_search_limit,
-                                          _safe_int(raw.get("search_default_limit"), 5)))
-        streak_threshold = max(0, min(20, _safe_int(raw.get("search_streak_threshold"), 3)))
+        search_default_limit = max(
+            1, min(max_search_limit, _safe_int(raw.get("search_default_limit"), 5))
+        )
+        streak_threshold = max(
+            0, min(20, _safe_int(raw.get("search_streak_threshold"), 3))
+        )
+        describe_threshold = max(
+            0, min(20, _safe_int(raw.get("search_streak_describe_threshold"), 5))
+        )
 
         return cls(
             enabled=enabled,
@@ -184,6 +245,7 @@ class ToolSearchConfig:
             max_search_limit=max_search_limit,
             defer_core_toolsets=_parse_toolset_list(raw.get("defer_core_toolsets")),
             search_streak_threshold=streak_threshold,
+            search_streak_describe_threshold=describe_threshold,
         )
 
 
@@ -201,7 +263,11 @@ def _parse_toolset_list(value: Any) -> frozenset[str]:
         items = list(value)
     else:
         return frozenset()
-    names = {str(item).strip() for item in items if isinstance(item, str) and str(item).strip()}
+    names = {
+        str(item).strip()
+        for item in items
+        if isinstance(item, str) and str(item).strip()
+    }
     return frozenset(names)
 
 
@@ -223,6 +289,7 @@ def load_config() -> ToolSearchConfig:
     """Load tool-search config from the user config file."""
     try:
         from hermes_cli.config import load_config as _load
+
         cfg = _load() or {}
         tools_cfg = cfg.get("tools") if isinstance(cfg.get("tools"), dict) else {}
         if not isinstance(tools_cfg, dict):
@@ -246,6 +313,7 @@ def _hermes_core_tools() -> frozenset[str]:
     """
     try:
         from toolsets import _HERMES_CORE_TOOLS
+
         return frozenset(_HERMES_CORE_TOOLS)
     except Exception:
         return frozenset()
@@ -289,7 +357,9 @@ def _core_tools_in_toolsets(toolset_names: frozenset[str]) -> frozenset[str]:
     return frozenset(members & core)
 
 
-def effective_core_tool_names(config: Optional[ToolSearchConfig] = None) -> frozenset[str]:
+def effective_core_tool_names(
+    config: Optional[ToolSearchConfig] = None,
+) -> frozenset[str]:
     """Return the set of tool names that must NEVER be deferred.
 
     Starts from ``_HERMES_CORE_TOOLS`` and subtracts any core tool whose
@@ -310,7 +380,9 @@ def effective_core_tool_names(config: Optional[ToolSearchConfig] = None) -> froz
     return frozenset(core - opted_in)
 
 
-def is_deferrable_tool_name(name: str, config: Optional[ToolSearchConfig] = None) -> bool:
+def is_deferrable_tool_name(
+    name: str, config: Optional[ToolSearchConfig] = None
+) -> bool:
     """Return True if a tool with this name is *eligible* for deferral.
 
     A tool is deferrable iff it is registered with an MCP toolset prefix
@@ -340,6 +412,7 @@ def is_deferrable_tool_name(name: str, config: Optional[ToolSearchConfig] = None
     # Check registry toolset for MCP prefix.
     try:
         from tools.registry import registry
+
         entry = registry.get_entry(name)
         if entry is None:
             return False
@@ -396,7 +469,9 @@ def estimate_tokens_from_schemas(tool_defs: Iterable[Dict[str, Any]]) -> int:
     total_chars = 0
     for td in tool_defs:
         try:
-            total_chars += len(json.dumps(td, ensure_ascii=False, separators=(",", ":")))
+            total_chars += len(
+                json.dumps(td, ensure_ascii=False, separators=(",", ":"))
+            )
         except (TypeError, ValueError):
             total_chars += len(str(td))
     return int(math.ceil(total_chars / CHARS_PER_TOKEN))
@@ -468,10 +543,12 @@ def _entry_search_text(td: Dict[str, Any]) -> str:
     fn = td.get("function") or {}
     name = fn.get("name", "")
     desc = fn.get("description", "") or ""
-    params = ((fn.get("parameters") or {}).get("properties") or {})
+    params = (fn.get("parameters") or {}).get("properties") or {}
     param_names = " ".join(params.keys())
     # Break snake_case and dotted names into words for BM25.
-    name_words = name.replace("_", " ").replace(".", " ").replace("-", " ").replace(":", " ")
+    name_words = (
+        name.replace("_", " ").replace(".", " ").replace("-", " ").replace(":", " ")
+    )
     return f"{name_words} {desc} {param_names}"
 
 
@@ -479,6 +556,7 @@ def _classify_source(name: str) -> Tuple[str, str]:
     """Return (source_kind, source_name) for a registered tool name."""
     try:
         from tools.registry import registry
+
         entry = registry.get_entry(name)
         if entry is None:
             return ("other", "")
@@ -515,10 +593,16 @@ def build_catalog(tool_defs: List[Dict[str, Any]]) -> List[CatalogEntry]:
     return catalog
 
 
-def _bm25_score(query_tokens: List[str], doc_tokens: List[str],
-                doc_lengths: List[int], avg_dl: float,
-                doc_freq: Dict[str, int], n_docs: int,
-                k1: float = 1.5, b: float = 0.75) -> float:
+def _bm25_score(
+    query_tokens: List[str],
+    doc_tokens: List[str],
+    doc_lengths: List[int],
+    avg_dl: float,
+    doc_freq: Dict[str, int],
+    n_docs: int,
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> float:
     """Standard BM25 score for one query against one document.
 
     Inlined small implementation rather than adding a dependency. Performance
@@ -546,7 +630,9 @@ def _bm25_score(query_tokens: List[str], doc_tokens: List[str],
     return score
 
 
-def search_catalog(catalog: List[CatalogEntry], query: str, limit: int = 5) -> List[CatalogEntry]:
+def search_catalog(
+    catalog: List[CatalogEntry], query: str, limit: int = 5
+) -> List[CatalogEntry]:
     """Return the top-``limit`` catalog entries for ``query`` by BM25.
 
     Falls back to a stable name-substring match when BM25 yields no hits
@@ -573,8 +659,9 @@ def search_catalog(catalog: List[CatalogEntry], query: str, limit: int = 5) -> L
 
     scored: List[Tuple[float, CatalogEntry]] = []
     for entry in catalog:
-        s = _bm25_score(query_tokens, entry._tokens, doc_lengths, avg_dl,
-                        doc_freq, n_docs)
+        s = _bm25_score(
+            query_tokens, entry._tokens, doc_lengths, avg_dl, doc_freq, n_docs
+        )
         if s > 0:
             scored.append((s, entry))
 
@@ -719,8 +806,11 @@ def assemble_tool_defs(
 
     # Defensive: strip any bridge tools that may already be in the list
     # (e.g. someone called assemble twice).
-    incoming = [td for td in tool_defs
-                if (td.get("function") or {}).get("name") not in BRIDGE_TOOL_NAMES]
+    incoming = [
+        td
+        for td in tool_defs
+        if (td.get("function") or {}).get("name") not in BRIDGE_TOOL_NAMES
+    ]
 
     visible, deferrable = classify_tools(incoming, config)
     if not deferrable:
@@ -733,7 +823,9 @@ def assemble_tool_defs(
             activated=False,
             deferred_count=len(deferrable),
             deferred_tokens=deferrable_tokens,
-            threshold_tokens=int((context_length or 0) * (config.threshold_pct / 100.0)),
+            threshold_tokens=int(
+                (context_length or 0) * (config.threshold_pct / 100.0)
+            ),
         )
 
     bridge = bridge_tool_schemas(len(deferrable))
@@ -742,7 +834,10 @@ def assemble_tool_defs(
 
     logger.info(
         "tool_search activated: %d core/visible tools kept, %d deferred (~%d tokens, threshold ~%d)",
-        len(visible), len(deferrable), deferrable_tokens, threshold_tokens,
+        len(visible),
+        len(deferrable),
+        deferrable_tokens,
+        threshold_tokens,
     )
 
     return AssemblyResult(
@@ -791,11 +886,13 @@ def _format_search_hit(entry: CatalogEntry) -> Dict[str, Any]:
     }
 
 
-def dispatch_tool_search(args: Dict[str, Any],
-                         *,
-                         current_tool_defs: List[Dict[str, Any]],
-                         config: Optional[ToolSearchConfig] = None,
-                         session_id: Optional[str] = None) -> str:
+def dispatch_tool_search(
+    args: Dict[str, Any],
+    *,
+    current_tool_defs: List[Dict[str, Any]],
+    config: Optional[ToolSearchConfig] = None,
+    session_id: Optional[str] = None,
+) -> str:
     """Execute the ``tool_search`` bridge tool. Returns a JSON string."""
     if config is None:
         config = load_config()
@@ -807,7 +904,13 @@ def dispatch_tool_search(args: Dict[str, Any],
     if raw_limit is None:
         limit = config.search_default_limit
     else:
-        limit = max(1, min(config.max_search_limit, _safe_int(raw_limit, config.search_default_limit)))
+        limit = max(
+            1,
+            min(
+                config.max_search_limit,
+                _safe_int(raw_limit, config.search_default_limit),
+            ),
+        )
 
     _, deferrable = classify_tools(current_tool_defs, config)
     catalog = build_catalog(deferrable)
@@ -827,12 +930,63 @@ def dispatch_tool_search(args: Dict[str, Any],
         "total_available": len(catalog),
         "matches": [_format_search_hit(h) for h in hits],
     }
-    # #1144 — nudge the model after N consecutive searches with no tool_call.
+    # #1144 / #1373 — nudge the model after N consecutive searches with no
+    # tool_call. The counter is incremented (and the query recorded) before the
+    # threshold check. A falsy-but-non-None session id (the runtime's
+    # ``agent.session_id or ""``) is tracked under a default key so the feature
+    # actually fires instead of silently returning 0 forever (#1373).
     threshold = config.search_streak_threshold
+    describe_threshold = config.search_streak_describe_threshold
     if threshold and threshold > 0:
-        streak = note_tool_search(session_id)
+        streak = note_tool_search(session_id, query=query)
         if streak >= threshold:
+            # The core nudge.
             result["fallback_directive"] = _fallback_directive(streak)
+            # #1373 — inject the full deferrable tool list so the model can see
+            # everything available without another search, plus the recent
+            # queries so it can recognise it is going in circles.
+            result["full_tool_list"] = [
+                (td.get("function") or {}).get("name", "")
+                for td in deferrable
+                if (td.get("function") or {}).get("name")
+            ]
+            prev = get_previous_queries(session_id)
+            if prev:
+                # Drop the current query from the "previous" list.
+                result["previous_queries"] = (
+                    prev[:-1] if prev and prev[-1] == query else list(prev)
+                )
+            # #1373 — after a deeper streak, auto-describe the top hit inline so
+            # the model gets the full schema (name/description/parameters) of the
+            # most likely candidate without a separate tool_describe round-trip.
+            if (
+                describe_threshold
+                and describe_threshold > 0
+                and streak >= max(threshold, describe_threshold)
+                and hits
+            ):
+                top = hits[0]
+                # Find the full tool def for the top hit to surface its schema.
+                top_def = next(
+                    (
+                        td
+                        for td in deferrable
+                        if (td.get("function") or {}).get("name") == top.name
+                    ),
+                    None,
+                )
+                if top_def is not None:
+                    fn = top_def.get("function") or {}
+                    result["auto_describe"] = {
+                        "name": top.name,
+                        "description": fn.get("description", ""),
+                        "parameters": fn.get("parameters", {}),
+                        "note": (
+                            f"Auto-described because tool_search has been called "
+                            f"{streak} times in a row without a tool_call. If this "
+                            f"is the tool you need, call it (or tool_call) directly."
+                        ),
+                    }
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -871,10 +1025,12 @@ def _fuzzy_tool_names(query: str, available: List[str], limit: int = 3) -> List[
     return [n for n in scored if _dist(q, n) <= max(3, len(q) // 3)]
 
 
-def dispatch_tool_describe(args: Dict[str, Any],
-                           *,
-                           current_tool_defs: List[Dict[str, Any]],
-                           config: Optional[ToolSearchConfig] = None) -> str:
+def dispatch_tool_describe(
+    args: Dict[str, Any],
+    *,
+    current_tool_defs: List[Dict[str, Any]],
+    config: Optional[ToolSearchConfig] = None,
+) -> str:
     """Execute the ``tool_describe`` bridge tool. Returns a JSON string."""
     if config is None:
         config = load_config()
@@ -918,53 +1074,64 @@ def _dispatch_tool_describe_inner(
         # without a separate tool_search round-trip.
         _, deferrable = classify_tools(current_tool_defs, config)
         available_names = [
-            (td.get("function") or {}).get("name", "")
-            for td in deferrable
+            (td.get("function") or {}).get("name", "") for td in deferrable
         ]
         suggestions = _fuzzy_tool_names(name, available_names)
         if suggestions:
-            return json.dumps({
+            return json.dumps(
+                {
+                    "error": (
+                        f"'{name}' is not a deferrable tool. Did you mean one of: "
+                        f"{', '.join(suggestions)}? Use the exact name with "
+                        f"tool_describe or tool_call."
+                    ),
+                    "suggestions": suggestions,
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
                 "error": (
-                    f"'{name}' is not a deferrable tool. Did you mean one of: "
-                    f"{', '.join(suggestions)}? Use the exact name with "
-                    f"tool_describe or tool_call."
+                    f"'{name}' is not a deferrable tool. If you see it in the tools list "
+                    "already, call it directly; otherwise check the spelling against tool_search."
                 ),
-                "suggestions": suggestions,
-            }, ensure_ascii=False)
-        return json.dumps({
-            "error": (
-                f"'{name}' is not a deferrable tool. If you see it in the tools list "
-                "already, call it directly; otherwise check the spelling against tool_search."
-            ),
-        }, ensure_ascii=False)
+            },
+            ensure_ascii=False,
+        )
     _, deferrable = classify_tools(current_tool_defs, config)
     for td in deferrable:
         fn = td.get("function") or {}
         if fn.get("name") == name:
-            return json.dumps({
-                "name": name,
-                "description": fn.get("description", ""),
-                "parameters": fn.get("parameters", {}),
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "name": name,
+                    "description": fn.get("description", ""),
+                    "parameters": fn.get("parameters", {}),
+                },
+                ensure_ascii=False,
+            )
     # #978 — fuzzy name matching: suggest closest matches so the agent can
     # self-correct without a separate tool_search round-trip.
-    available_names = [
-        (td.get("function") or {}).get("name", "")
-        for td in deferrable
-    ]
+    available_names = [(td.get("function") or {}).get("name", "") for td in deferrable]
     suggestions = _fuzzy_tool_names(name, available_names)
     if suggestions:
-        return json.dumps({
-            "error": (
-                f"'{name}' is not currently available. Did you mean one of: "
-                f"{', '.join(suggestions)}? Use the exact name with tool_describe "
-                f"or tool_call."
-            ),
-            "suggestions": suggestions,
-        }, ensure_ascii=False)
-    return json.dumps({
-        "error": f"'{name}' is not currently available. Re-run tool_search to refresh.",
-    }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "error": (
+                    f"'{name}' is not currently available. Did you mean one of: "
+                    f"{', '.join(suggestions)}? Use the exact name with tool_describe "
+                    f"or tool_call."
+                ),
+                "suggestions": suggestions,
+            },
+            ensure_ascii=False,
+        )
+    return json.dumps(
+        {
+            "error": f"'{name}' is not currently available. Re-run tool_search to refresh.",
+        },
+        ensure_ascii=False,
+    )
 
 
 def scoped_deferrable_names(
@@ -1088,7 +1255,11 @@ def resolve_underlying_call(
     if not name:
         return None, {}, "tool_call requires a 'name' argument"
     if name in BRIDGE_TOOL_NAMES:
-        return None, {}, f"tool_call cannot invoke '{name}' (it is itself a bridge tool)"
+        return (
+            None,
+            {},
+            f"tool_call cannot invoke '{name}' (it is itself a bridge tool)",
+        )
     raw_args = args.get("arguments")
     if raw_args is None:
         raw_args = {}
@@ -1220,6 +1391,9 @@ __all__ = [
     "resolve_underlying_call",
     "validate_tool_args",
     "scoped_deferrable_names",
+    "get_previous_queries",
+    "note_tool_search",
+    "reset_search_streak",
     "_non_deferrable_error",
     "_CORE_TOOL_ALTERNATIVES",
     "clear_describe_cache",
