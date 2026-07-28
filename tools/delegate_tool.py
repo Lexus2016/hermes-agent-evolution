@@ -1775,6 +1775,12 @@ def _build_child_agent(
     # Stash the post-degrade role for introspection (leaf if the
     # kill switch or depth bounded the caller's requested role).
     child._delegate_role = effective_role
+    # Stash toolset resolution metadata for empty-toolset validation (#1387).
+    # The caller checks these after construction to decide whether to skip
+    # launching a toolless sub-agent.
+    child._delegate_requested_toolsets = list(toolsets) if toolsets else []
+    child._delegate_denied_toolsets = list(denied_toolsets)
+    child._delegate_resolved_toolsets = list(child_toolsets)
     # Stash subagent identity for nested-delegation event propagation and
     # for _run_single_child / interrupt_subagent to look up by id.
     child._subagent_id = subagent_id
@@ -3160,6 +3166,69 @@ def delegate_task(
                     ),
                     role=effective_role,
                 )
+            # ── Empty-toolset validation (#1387) ───────────────────────────
+            # After construction, check whether the child actually resolved
+            # to ≥1 tool.  If not, append a structured error entry to results
+            # and skip this task — do NOT launch a toolless sub-agent (it
+            # would spiral on every tool call until the turn limit).  The
+            # outer delegate_task must always return {'results': [...]}, so
+            # we append to results here rather than raising or aborting.
+            #
+            # Gate: only validate when the parent has REAL enabled_toolsets
+            # (a list/tuple/set).  In tests that use MagicMock parents
+            # without setting enabled_toolsets, the attribute is a MagicMock
+            # and the real AIAgent constructor resolves 0 tools — that's a
+            # test artifact, not a real empty-toolset scenario.
+            _parent_enabled_ts = getattr(parent_agent, "enabled_toolsets", None)
+            _child_vtools = getattr(child, "valid_tool_names", None)
+            if (
+                isinstance(_parent_enabled_ts, (list, tuple, set))
+                and isinstance(_child_vtools, (set, frozenset, list))
+                and len(_child_vtools) == 0
+            ):
+                _requested = getattr(child, "_delegate_requested_toolsets", []) or []
+                _denied = getattr(child, "_delegate_denied_toolsets", []) or []
+                if _requested:
+                    _msg = (
+                        f"Delegation toolset validation failed: requested "
+                        f"toolsets [{', '.join(_requested)}] resolved to "
+                        f"zero tools after intersecting with the parent's "
+                        f"available toolsets and removing blocked tools."
+                    )
+                    if _denied:
+                        _msg += (
+                            f" Unresolved entries: [{', '.join(_denied)}]."
+                        )
+                    _msg += (
+                        " The sub-agent would have no tools to work with."
+                        " Check that the requested toolset names are valid"
+                        " and that the parent agent has them enabled."
+                    )
+                else:
+                    _msg = (
+                        "Delegation toolset validation failed: inherited "
+                        "toolsets resolved to zero tools after removing "
+                        "blocked tools. The parent agent appears to have"
+                        " no enabled toolsets that survive filtering."
+                        " Check the parent's tools configuration."
+                    )
+                results.append({
+                    "task_index": i,
+                    "goal": t["goal"],
+                    "status": "error",
+                    "summary": None,
+                    "error": _msg,
+                    "exit_reason": "error",
+                    "api_calls": 0,
+                    "duration_seconds": 0,
+                    "_child_role": effective_role,
+                })
+                logger.warning(
+                    "Subagent %d skipped: resolved to 0 tools (requested=%s)",
+                    i,
+                    _requested or "(inherited)",
+                )
+                continue
             # Stamp the identity onto the child so _run_single_child can rebind
             # the threading.local inside the worker thread that runs it.
             child._team_identity = team_identity
@@ -3180,6 +3249,12 @@ def delegate_task(
     finally:
         # Authoritative restore: reset global to parent's tool names after all children built
         _model_tools._last_resolved_tool_names = _parent_tool_names
+
+    # If every task was skipped due to empty-toolset validation (#1387),
+    # return the error results immediately — _execute_and_aggregate would
+    # IndexError on an empty children list.
+    if not children:
+        return json.dumps({"results": results})
 
     def _execute_and_aggregate() -> dict:
         """Run all built children (1 or N), join on them, aggregate results,
