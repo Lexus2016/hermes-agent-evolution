@@ -19,13 +19,19 @@ turn's message list into the ``TrajectoryLog`` that ``evolution_trajectory_logge
 already defines and already knows how to persist under
 ``~/.hermes/evolution/trajectories/``.
 
-Privacy — why this can be on when ``save_trajectories`` is off
---------------------------------------------------------------
+Opt-in, and narrower than ``save_trajectories``
+-----------------------------------------------
 ``save_trajectories`` writes the full ShareGPT conversation, user prose
-included, which is why it is off by default and why turning it on for evolution
-would be the wrong trade. This captures **call metadata only**: tool name,
-redacted arguments (via the logger's existing ``redact_args``), a status, and a
-short result summary. No user message, no assistant prose, no file contents.
+included. This captures **call metadata only**: tool name, redacted arguments
+(via the logger's existing ``redact_args``), a status, and a short result
+summary. No user message, no assistant prose, no file contents.
+
+It is still **off by default**, behind ``HERMES_EVOLUTION_CAPTURE``. Redaction
+catches credential-shaped *keys*, not sensitive *values* in ordinary fields —
+a path with a username, an SQL string, an internal hostname all survive it — so
+writing on every turn of every interactive session unasked would be the wrong
+default even for metadata. The evolution cron stages enable it for their own
+runs, which is the behaviour the pipeline actually needs to measure.
 
 The consumers want different shapes, so the record carries the union
 -------------------------------------------------------------------
@@ -43,7 +49,10 @@ on, opaque enough to store.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
+import secrets
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -55,23 +64,88 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from evolution_trajectory_logger import TrajectoryLog  # noqa: E402
 
-__all__ = ["task_key", "extract_tool_calls", "build_trajectory_log", "capture_turn"]
+__all__ = [
+    "capture_enabled",
+    "task_key",
+    "extract_tool_calls",
+    "build_trajectory_log",
+    "capture_turn",
+]
 
 #: Result summaries are already truncated by the logger; this bounds the
 #: pre-truncation payload so a huge tool result is not held in memory twice.
 _MAX_RESULT_CHARS = 2000
 
+#: Opt-in. Default OFF.
+#
+# Even redacted, tool arguments carry paths containing usernames, SQL, code
+# snippets, internal hostnames — ``redact_args`` catches credential-shaped
+# KEYS, not sensitive VALUES in ordinary fields. Writing that to disk on every
+# turn of every interactive session, unasked and unbounded, is the wrong
+# default.
+#
+# The evolution cron stages set this for their own runs, which is where the
+# pipeline's own behaviour is what needs measuring.
+_CAPTURE_ENV = "HERMES_EVOLUTION_CAPTURE"
 
-def task_key(task_descriptor: str) -> str:
+#: Local salt for the pairing key. Without it, a bare hash of a short,
+#: templated prompt ("run the tests", "fix issue #102") is recoverable from a
+#: rainbow table by anyone who can read the store. HMAC under a host-local
+#: secret keeps the key useful for equality while making it useless off-host.
+_SALT_FILENAME = ".trajectory_key_salt"
+
+
+def capture_enabled() -> bool:
+    """True when trajectory capture is switched on for this process."""
+    return os.environ.get(_CAPTURE_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _salt(trajectory_dir: Optional[Path] = None) -> bytes:
+    """Read (or mint) the host-local salt used for the pairing key.
+
+    Kept beside the trajectories it keys, so a store copied without its salt
+    cannot have its task keys correlated against a fresh one. Falls back to a
+    process-local random salt when the file cannot be written — pairing then
+    only holds within the process, which is strictly better than emitting a
+    globally reversible hash.
+    """
+    if trajectory_dir is None:
+        from evolution_trajectory_logger import _default_trajectory_dir
+
+        trajectory_dir = _default_trajectory_dir()
+    path = Path(trajectory_dir) / _SALT_FILENAME
+    try:
+        if path.exists():
+            raw = path.read_bytes().strip()
+            if raw:
+                return raw
+        path.parent.mkdir(parents=True, exist_ok=True)
+        raw = secrets.token_hex(32).encode("ascii")
+        path.write_bytes(raw)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        return raw
+    except OSError:
+        return secrets.token_hex(32).encode("ascii")
+
+
+def task_key(task_descriptor: str, trajectory_dir: Optional[Path] = None) -> str:
     """Stable, opaque key for a task, used to pair runs of the same task.
 
-    A hash rather than the text: #1436 needs to group a failed and a successful
-    run of the *same* task, which only needs equality, while the descriptor
-    itself is user prose that must not land in the pipeline's store.
+    Salted HMAC rather than a bare hash: #1436 only needs equality to group a
+    failed and a successful run of the same task, and the descriptor is user
+    prose. A plain ``sha256(prompt)[:16]`` of a short templated instruction is
+    recoverable by dictionary attack; an HMAC under a host-local secret is not.
     """
     if not task_descriptor:
         return ""
-    return hashlib.sha256(task_descriptor.encode("utf-8", "replace")).hexdigest()[:16]
+    return hmac.new(
+        _salt(trajectory_dir),
+        task_descriptor.encode("utf-8", "replace"),
+        hashlib.sha256,
+    ).hexdigest()[:16]
 
 
 def _result_status(content: Any) -> str:
@@ -154,6 +228,7 @@ def build_trajectory_log(
     session_id: str = "",
     task_descriptor: str = "",
     completed: bool = True,
+    trajectory_dir: Optional[Path] = None,
 ) -> Optional[TrajectoryLog]:
     """Build a :class:`TrajectoryLog` from a finished turn, or None if empty.
 
@@ -167,7 +242,7 @@ def build_trajectory_log(
     log = TrajectoryLog(
         session_id=session_id or "",
         completed=bool(completed),
-        task_key=task_key(task_descriptor),
+        task_key=task_key(task_descriptor, trajectory_dir),
     )
     for call in calls:
         log.add_tool_call(
@@ -193,15 +268,21 @@ def capture_turn(
     already individually guarded (#8049) — instrumentation must not be able to
     discard a completed turn's response.
     """
+    if not capture_enabled():
+        return None
     try:
         log = build_trajectory_log(
             messages,
             session_id=session_id,
             task_descriptor=task_descriptor,
             completed=completed,
+            trajectory_dir=trajectory_dir,
         )
         if log is None:
             return None
-        return log.save(trajectory_dir)
+        # append, not save: save() overwrites, so every turn after the first
+        # would destroy the previous one and a multi-turn session would keep
+        # only its last turn.
+        return log.append(trajectory_dir)
     except Exception:
         return None

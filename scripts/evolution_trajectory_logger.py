@@ -196,6 +196,32 @@ class TrajectoryLog:
         path.write_text(self.to_json(), encoding="utf-8")
         return path
 
+    def append(self, trajectory_dir: Optional[Path] = None) -> Path:
+        """Append this log as one line to a per-session JSONL file.
+
+        :meth:`save` overwrites, which is correct for the cron stage — one
+        trajectory per stage run per day. It is wrong for a multi-turn agent
+        session: each turn would overwrite the last, so a 12-turn session
+        leaves only turn 12 on disk and the other eleven are destroyed. That
+        loses exactly the action *sequence* the consumers of #1363 want.
+
+        Appending keeps every turn. One JSON object per line, same shape
+        :meth:`to_dict` produces, so a reader can take them one at a time
+        without holding the session in memory.
+        """
+        if trajectory_dir is None:
+            trajectory_dir = _default_trajectory_dir()
+        trajectory_dir.mkdir(parents=True, exist_ok=True)
+        fname = (
+            f"{self.date}_{self.session_id}.jsonl"
+            if self.session_id
+            else f"{self.date}.jsonl"
+        )
+        path = trajectory_dir / fname
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(self.to_dict(), sort_keys=True) + "\n")
+        return path
+
     @property
     def tool_sequence(self) -> List[str]:
         return [e.tool for e in self.entries]

@@ -9,12 +9,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
+import pytest  # noqa: E402
+
 from agent.tool_call_capture import (  # noqa: E402
+    _CAPTURE_ENV,
     build_trajectory_log,
+    capture_enabled,
     capture_turn,
     extract_tool_calls,
     task_key,
 )
+
+
+@pytest.fixture
+def capture_on(monkeypatch):
+    """Capture is opt-in (#1363 review): tests that exercise it must ask."""
+    monkeypatch.setenv(_CAPTURE_ENV, "1")
 
 
 def _call(name, args, cid):
@@ -40,23 +50,41 @@ def _fail(cid):
 
 
 class TestTaskKey:
-    def test_stable_for_same_text(self):
-        assert task_key("fix the parser") == task_key("fix the parser")
+    def test_stable_for_same_text(self, tmp_path):
+        assert task_key("fix the parser", tmp_path) == task_key("fix the parser", tmp_path)
 
-    def test_differs_for_different_text(self):
-        assert task_key("fix the parser") != task_key("fix the linter")
+    def test_differs_for_different_text(self, tmp_path):
+        assert task_key("fix the parser", tmp_path) != task_key("fix the linter", tmp_path)
 
-    def test_empty_is_empty(self):
-        assert task_key("") == ""
+    def test_empty_is_empty(self, tmp_path):
+        assert task_key("", tmp_path) == ""
 
-    def test_does_not_leak_the_descriptor(self):
-        """It is a pairing key, not a record of the prompt — #1436 only needs
-        equality, and the descriptor is user prose."""
+    def test_does_not_leak_the_descriptor(self, tmp_path):
+        """A pairing key, not a record of the prompt."""
         secret = "deploy to prod with password hunter2"
-        key = task_key(secret)
+        key = task_key(secret, tmp_path)
         assert "hunter2" not in key
         assert "deploy" not in key
         assert len(key) == 16
+
+    def test_salted_per_store(self, tmp_path):
+        """A bare sha256 of a short templated prompt is recoverable from a
+        rainbow table; an HMAC under a host-local salt is not. Two stores must
+        therefore not produce the same key for the same text."""
+        a, b = tmp_path / "a", tmp_path / "b"
+        a.mkdir(); b.mkdir()
+        assert task_key("run the tests", a) != task_key("run the tests", b)
+
+    def test_salt_is_reused_within_a_store(self, tmp_path):
+        """...but pairing within one store must still work across calls."""
+        first = task_key("run the tests", tmp_path)
+        assert task_key("run the tests", tmp_path) == first
+
+    def test_salt_file_is_private(self, tmp_path):
+        task_key("x", tmp_path)
+        salt = tmp_path / ".trajectory_key_salt"
+        assert salt.exists()
+        assert oct(salt.stat().st_mode)[-3:] == "600"
 
 
 class TestExtractToolCalls:
@@ -115,12 +143,12 @@ class TestExtractToolCalls:
 
 
 class TestBuildTrajectoryLog:
-    def test_carries_outcome_and_pairing_key(self):
+    def test_carries_outcome_and_pairing_key(self, tmp_path):
         msgs = [_call("read_file", {"path": "a.py"}, "c1"), _ok("c1")]
-        log = build_trajectory_log(msgs, session_id="s1", task_descriptor="fix it", completed=True)
+        log = build_trajectory_log(msgs, session_id="s1", task_descriptor="fix it", completed=True, trajectory_dir=tmp_path)
         assert log is not None
         assert log.completed is True
-        assert log.task_key == task_key("fix it")
+        assert log.task_key == task_key("fix it", tmp_path)
         assert log.session_id == "s1"
 
     def test_failed_turn_records_completed_false(self):
@@ -130,11 +158,11 @@ class TestBuildTrajectoryLog:
         log = build_trajectory_log(msgs, completed=False)
         assert log.completed is False
 
-    def test_same_task_different_outcomes_share_a_key(self):
+    def test_same_task_different_outcomes_share_a_key(self, tmp_path):
         """This is what #1436 pairs on."""
         msgs = [_call("terminal", {}, "c1"), _ok("c1")]
-        a = build_trajectory_log(msgs, task_descriptor="same task", completed=False)
-        b = build_trajectory_log(msgs, task_descriptor="same task", completed=True)
+        a = build_trajectory_log(msgs, task_descriptor="same task", completed=False, trajectory_dir=tmp_path)
+        b = build_trajectory_log(msgs, task_descriptor="same task", completed=True, trajectory_dir=tmp_path)
         assert a.task_key == b.task_key
         assert a.completed != b.completed
 
@@ -152,32 +180,32 @@ class TestBuildTrajectoryLog:
 
 
 class TestCaptureTurn:
-    def test_writes_a_readable_trajectory(self, tmp_path):
+    def test_writes_a_readable_trajectory(self, tmp_path, capture_on):
         msgs = [_call("read_file", {"path": "a.py"}, "c1"), _ok("c1")]
         path = capture_turn(msgs, session_id="s1", task_descriptor="t", completed=True,
                             trajectory_dir=tmp_path)
         assert path is not None and path.exists()
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8").strip())
         assert data["session_id"] == "s1"
         assert data["completed"] is True
-        assert data["task_key"] == task_key("t")
+        assert data["task_key"] == task_key("t", tmp_path)
         assert [e["tool"] for e in data["entries"]] == ["read_file"]
 
-    def test_no_tool_calls_writes_nothing(self, tmp_path):
+    def test_no_tool_calls_writes_nothing(self, tmp_path, capture_on):
         assert capture_turn([{"role": "assistant", "content": "hi"}], trajectory_dir=tmp_path) is None
-        assert list(tmp_path.glob("*.json")) == []
+        assert list(tmp_path.glob("*.jsonl")) == []
 
-    def test_never_raises_on_bad_input(self, tmp_path):
+    def test_never_raises_on_bad_input(self, tmp_path, capture_on):
         assert capture_turn(None, trajectory_dir=tmp_path) is None
 
-    def test_never_raises_on_unwritable_dir(self, tmp_path):
+    def test_never_raises_on_unwritable_dir(self, tmp_path, capture_on):
         """Instrumentation must not be able to discard a completed turn."""
         blocker = tmp_path / "file"
         blocker.write_text("x", encoding="utf-8")
         msgs = [_call("read_file", {}, "c1"), _ok("c1")]
         assert capture_turn(msgs, trajectory_dir=blocker / "nested") is None
 
-    def test_no_user_prose_reaches_disk(self, tmp_path):
+    def test_no_user_prose_reaches_disk(self, tmp_path, capture_on):
         """The reason this can run while save_trajectories stays off."""
         msgs = [
             {"role": "user", "content": "my private prompt about acme corp"},
@@ -218,12 +246,68 @@ class TestLoggerBackCompat:
         assert log.completed is None, "absent must mean 'not recorded', not 'failed'"
         assert log.task_key == ""
 
-    def test_new_file_round_trips(self, tmp_path):
-        from evolution_trajectory_logger import load_trajectory
-
+    def test_new_file_round_trips(self, tmp_path, capture_on):
         msgs = [_call("read_file", {}, "c1"), _ok("c1")]
         path = capture_turn(msgs, session_id="s", task_descriptor="t", completed=False,
                             trajectory_dir=tmp_path)
-        log = load_trajectory(path)
-        assert log.completed is False
-        assert log.task_key == task_key("t")
+        line = path.read_text(encoding="utf-8").strip()
+        data = json.loads(line)
+        assert data["completed"] is False
+        assert data["task_key"] == task_key("t", tmp_path)
+
+
+class TestCaptureIsOptIn:
+    """Default OFF (#1363 review). Redaction catches credential-shaped keys,
+    not sensitive values in ordinary fields, so writing on every turn of every
+    interactive session unasked is the wrong default even for metadata."""
+
+    def test_disabled_by_default(self, tmp_path, monkeypatch):
+        monkeypatch.delenv(_CAPTURE_ENV, raising=False)
+        assert capture_enabled() is False
+        msgs = [_call("read_file", {}, "c1"), _ok("c1")]
+        assert capture_turn(msgs, trajectory_dir=tmp_path) is None
+        assert list(tmp_path.glob("*.jsonl")) == []
+
+    def test_enabled_by_env(self, tmp_path, monkeypatch):
+        for value in ("1", "true", "yes", "on", "ON"):
+            monkeypatch.setenv(_CAPTURE_ENV, value)
+            assert capture_enabled() is True, value
+
+    def test_junk_value_does_not_enable(self, monkeypatch):
+        for value in ("0", "false", "no", "", "maybe"):
+            monkeypatch.setenv(_CAPTURE_ENV, value)
+            assert capture_enabled() is False, value
+
+
+class TestMultiTurnSessionsAppend:
+    """save() overwrites; a multi-turn session would keep only its last turn.
+
+    Confirmed before the fix: three turns of one session left one file with
+    only the third turn's calls. The action *sequence* is exactly what the
+    consumers of #1363 want, so losing it defeats the feature.
+    """
+
+    def test_every_turn_is_kept(self, tmp_path, capture_on):
+        for tool, cid in (("read_file", "a"), ("patch", "b"), ("terminal", "c")):
+            capture_turn([_call(tool, {}, cid), _ok(cid)], session_id="s1",
+                         task_descriptor="t", trajectory_dir=tmp_path)
+        files = list(tmp_path.glob("*.jsonl"))
+        assert len(files) == 1
+        lines = [json.loads(x) for x in files[0].read_text(encoding="utf-8").splitlines() if x.strip()]
+        assert [line["entries"][0]["tool"] for line in lines] == ["read_file", "patch", "terminal"]
+
+    def test_separate_sessions_get_separate_files(self, tmp_path, capture_on):
+        capture_turn([_call("read_file", {}, "a"), _ok("a")], session_id="s1", trajectory_dir=tmp_path)
+        capture_turn([_call("patch", {}, "b"), _ok("b")], session_id="s2", trajectory_dir=tmp_path)
+        assert len(list(tmp_path.glob("*.jsonl"))) == 2
+
+    def test_each_line_is_independently_parseable(self, tmp_path, capture_on):
+        """A reader must be able to take one turn at a time without holding
+        the session in memory."""
+        for cid in ("a", "b"):
+            capture_turn([_call("terminal", {}, cid), _ok(cid)], session_id="s1",
+                         trajectory_dir=tmp_path)
+        path = list(tmp_path.glob("*.jsonl"))[0]
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                assert json.loads(line)["entries"]

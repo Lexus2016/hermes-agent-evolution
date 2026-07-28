@@ -224,11 +224,15 @@ def finalize_turn(
 
     # Capture the turn's TOOL CALLS for the evolution pipeline (#1363).
     #
-    # Distinct from _save_trajectory above and deliberately not gated on the
-    # same flag. That one writes the full ShareGPT conversation including user
-    # prose, which is why it defaults off; this writes call metadata only —
-    # tool name, redacted args, status, truncated result summary — so it can
-    # run without putting private text on disk.
+    # Distinct from _save_trajectory above: that writes the full ShareGPT
+    # conversation including user prose, this writes call metadata only — tool
+    # name, redacted args, status, truncated result summary.
+    #
+    # Also opt-in, behind HERMES_EVOLUTION_CAPTURE and OFF by default. Redaction
+    # catches credential-shaped keys, not sensitive values in ordinary fields
+    # (a path with a username, an SQL string, an internal hostname all survive
+    # it), so writing on every turn of every interactive session unasked would
+    # be wrong even for metadata. capture_turn() checks the flag itself.
     #
     # It exists because the pipeline had no record of what the agent actually
     # did: evolution_funnel's trajectory contains one entry naming itself.
