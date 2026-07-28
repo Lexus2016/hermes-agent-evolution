@@ -244,7 +244,16 @@ def compute_gate_rates(records: list[dict[str, Any]]) -> dict[str, dict[str, Any
     """
     by_stage: dict[str, dict[str, Any]] = {}
     for rec in records:
-        stage = rec.get("stage") or "unknown"
+        # Coerced to str so the key type is guaranteed homogeneous. A ledger
+        # line carrying a non-string stage (a second writer, a hand-edited
+        # line, a GateDecision built directly — the dataclass validates
+        # nothing) would otherwise make `sorted(rates.items())` raise
+        # TypeError in gate_flags. compute_health catches Exception broadly,
+        # so that would silently drop the rates AND the alert, reporting
+        # "healthy" while a real restart breach sat in the ledger — and the
+        # ledger is append-only and never rotated, so one bad line would
+        # blind the feature permanently.
+        stage = str(rec.get("stage") or "unknown")
         bucket = by_stage.setdefault(
             stage, {"total": 0, ACCEPT: 0, REFINE: 0, RESTART: 0}
         )

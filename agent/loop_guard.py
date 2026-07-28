@@ -788,8 +788,19 @@ def _semantic_loop_nudge(messages: List[Dict[str, Any]]) -> Optional[str]:
     ``test_loop_guard_readfile_debounce.py`` (#1092) assert must not happen.
 
     So they run only once the specific ladder has declined to fire.
+
+    Between the two, the dead-end check goes FIRST. Its threshold is 4 against
+    the test-iteration check's 3, so ordering them the other way meant a
+    repeated test command hit the test-iteration threshold one repeat earlier
+    and short-circuited — ``detect_dead_end_loop`` never ran at all for the
+    single-command ``test → edit → test`` loop that is #1312's own canonical
+    example. Trying the stricter, more specific nudge first and falling back to
+    the test-scoping one keeps both reachable: identical arguments four deep get
+    the structured ``what_changed_since_last_attempt`` demand, while a genuinely
+    varying test command (different args each run) still gets test-scoping
+    advice at three.
     """
-    return detect_test_iteration_loop(messages) or detect_dead_end_loop(messages)
+    return detect_dead_end_loop(messages) or detect_test_iteration_loop(messages)
 
 
 def maybe_nudge(
