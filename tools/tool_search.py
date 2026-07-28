@@ -1085,11 +1085,83 @@ def resolve_underlying_call(
     if not isinstance(raw_args, dict):
         return None, {}, "tool_call 'arguments' must be an object"
     if not is_deferrable_tool_name(name, config):
-        return None, {}, (
-            f"'{name}' is not a deferrable tool. If it appears in the model-facing tools "
-            "list already, call it directly instead of via tool_call."
-        )
+        return None, {}, _non_deferrable_error(name, config)
     return name, raw_args, None
+
+
+# ── #1392 — actionable error for non-deferrable tool_call attempts ───────
+# When an agent (especially in a subagent/cron context where terminal is
+# unavailable per #1307) tries to invoke a core tool via tool_call, the
+# generic "is not a deferrable tool" message gave no recovery guidance and
+# the agent retried the same pattern in a loop (57 errors/7d).  The enriched
+# message below distinguishes two cases:
+#
+# 1. The tool IS in the effective core set and should be called directly
+#    (it is in the model-visible tools array — the agent just used the wrong
+#    bridge).  Tell it to call the tool directly.
+# 2. The tool is a known core tool but NOT in the current environment's
+#    effective core set (e.g. terminal in a subagent that has no terminal
+#    toolset).  Explain that the tool is unavailable in this environment and
+#    suggest concrete alternatives so the agent changes strategy instead of
+#    retrying.
+
+# Alternatives for common core tools that subagents frequently lack.
+# Keys are lowercased tool names; values are human-readable suggestions.
+_CORE_TOOL_ALTERNATIVES: Dict[str, str] = {
+    "terminal": (
+        "terminal is not available in this environment. "
+        "Use search_files for finding files, read_file for reading file contents, "
+        "patch for editing files, write_file for creating files, or delegate_task "
+        "to spawn a subagent that has terminal access."
+    ),
+    "execute_code": (
+        "execute_code is not available in this environment. "
+        "Use delegate_task to spawn a subagent that has code execution access, "
+        "or use terminal if available."
+    ),
+    "browser_navigate": (
+        "browser_navigate is not available in this environment. "
+        "Use web_search for search queries, web_extract for fetching page content, "
+        "or delegate_task to spawn a subagent that has browser access."
+    ),
+}
+
+
+def _non_deferrable_error(name: str, config: Optional[ToolSearchConfig] = None) -> str:
+    """Build an actionable error message for a non-deferrable tool_call attempt.
+
+    The message guides the agent to the correct recovery path instead of
+    leaving it to retry the same failed pattern (#1392).
+    """
+    lower = name.lower()
+
+    # Case 2: known core tool that may be unavailable in this environment.
+    if lower in _CORE_TOOL_ALTERNATIVES:
+        # Check whether the tool is in the effective core set (i.e. visible
+        # in the current tools array).  If it is, the agent should call it
+        # directly.  If not, it's genuinely unavailable — suggest alternatives.
+        effective = effective_core_tool_names(config)
+        if name in effective:
+            return (
+                f"'{name}' is a core tool, not a deferrable tool. "
+                "Call it directly — it is already in your tools list. "
+                "Do not use tool_call for core tools."
+            )
+        # Tool is a known core tool but not in this environment's toolset.
+        return (
+            f"'{name}' is not a deferrable tool and is not available in this "
+            f"environment. {_CORE_TOOL_ALTERNATIVES[lower]}"
+        )
+
+    # Case 1: any other non-deferrable tool (visible core tool, bridge tool,
+    # or unresolvable name).  Tell the agent to call it directly if visible
+    # or check spelling.
+    return (
+        f"'{name}' is not a deferrable tool. If it appears in the model-facing tools "
+        "list already, call it directly instead of via tool_call. "
+        "If it is not in your tools list, check the spelling or use tool_search "
+        "to find available deferred tools."
+    )
 
 
 def clear_describe_cache() -> None:
@@ -1121,5 +1193,7 @@ __all__ = [
     "resolve_underlying_call",
     "validate_tool_args",
     "scoped_deferrable_names",
+    "_non_deferrable_error",
+    "_CORE_TOOL_ALTERNATIVES",
     "clear_describe_cache",
 ]
