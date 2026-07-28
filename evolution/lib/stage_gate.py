@@ -290,12 +290,21 @@ def gate_flags(
 
 
 def format_gate_rates(rates: dict[str, dict[str, Any]]) -> str:
-    """One-line summary per boundary for the evolution-health sidecar."""
+    """Per-boundary rates as they appear in the evolution-health line body.
+
+    Emitted WITHOUT a leading marker and with no trailing ``|``: the health
+    line's flags must stay the last segment after the final pipe, because
+    ``evolution_watchdog.check_health`` keys on the line ending in
+    ``| healthy``. This belongs beside ``effort_budget`` in the body, under the
+    same constraint.
+
+    Returns ``""`` for an empty mapping so the caller can concatenate it
+    unconditionally.
+    """
     if not rates:
         return ""
-    parts = [
-        f"{stage}(n={b['total']} refine={b['stage_refine_rate']:.0%} "
-        f"restart={b['stage_restart_rate']:.0%})"
+    return " ".join(
+        f"gate[{stage}]=refine {b['stage_refine_rate']:.0%}/"
+        f"restart {b['stage_restart_rate']:.0%} (n={b['total']})"
         for stage, b in sorted(rates.items())
-    ]
-    return "[stage-gate] " + " ".join(parts)
+    )
