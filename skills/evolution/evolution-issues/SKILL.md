@@ -180,13 +180,22 @@ Then create:
    local cache check above does NOT protect against a `gh issue create` that
    silently succeeds but whose response times out, so you "retry" and file a true
    duplicate (this happened — #193/#194, identical body, 13s apart, one proposal).
-   So immediately before creating, confirm no OPEN issue already has this exact
-   title; if one does, SKIP the create and just record it:
+   So immediately before creating, confirm no issue already has this exact
+   title — **including closed ones**; if one does, SKIP the create and just
+   record it:
 ```bash
 TITLE="[FEATURE] <short title>"   # right prefix per category: [FEATURE]/[FIX]/[IMPROVEMENT]/...
-existing=$(gh issue list --repo "$REPO" --state open --search "in:title $TITLE" \
-  --json number,title --jq ".[] | select(.title==\"$TITLE\") | .number" | head -1)
+existing=$(gh issue list --repo "$REPO" --state all --search "in:title $TITLE" \
+  --json number,title,state,stateReason \
+  --jq ".[] | select(.title==\"$TITLE\") | \"\(.number)\t\(.state)\t\(.stateReason)\"" | head -1)
 ```
+   **`--state all`, not `--state open` (#1470).** A rejected idea is a CLOSED
+   issue, so an open-only check cannot see it and the pipeline re-files it on the
+   next research pass — the rejection is what makes it re-fileable. Nine
+   duplicates landed in a single cycle this way (#1460-#1469 against #1287,
+   #1313, #1343, #1345, #1433-#1437), each one costing analysis another triage
+   to reach the verdict it had already reached.
+
    Create ONLY when `$existing` is empty:
 ```bash
 [ -z "$existing" ] && gh issue create \
@@ -195,6 +204,15 @@ existing=$(gh issue list --repo "$REPO" --state open --search "in:title $TITLE" 
   --label "enhancement,proposal,research-generated" \
   --body "$BODY"
 ```
+   When `$existing` is NOT empty, the third field tells you why it is closed and
+   what that means:
+
+   * **`NOT_PLANNED`** — rejected. Do NOT re-file. The focus-test verdict stands
+     until new evidence contradicts it.
+   * **`COMPLETED`** — shipped. Only file a NEW issue if you have evidence the
+     fix REGRESSED, and say so in the body, citing the digest signal. A bare
+     re-proposal of completed work is a duplicate.
+   * **`OPEN`** — as before: skip, it is already tracked.
 
    After creation, **verify that the issue actually appeared** (otherwise do not
    count it in the report): `gh issue list --repo "$REPO" --state open --limit 5`.

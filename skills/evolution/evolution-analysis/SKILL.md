@@ -167,12 +167,21 @@ gh issue view <N> --repo Lexus2016/hermes-agent-evolution --json body,comments
 
    CLOSE every rejected issue with a clear reason + the canonical `rejected`
    status label, so the backlog shows at a glance what was turned down (the
-   *why* is in the closing comment) and the same idea isn't re-proposed:
+   *why* is in the closing comment) and the same idea isn't re-proposed.
+
+   **`--reason "not planned"` is required, not cosmetic (#1470).** Closing a
+   rejection as the default `completed` tells every later reader the work was
+   DONE. The issues stage's duplicate check reads exactly that field to decide
+   whether an idea may be re-filed: `NOT_PLANNED` blocks it, `COMPLETED` allows
+   it as a possible regression. Rejections closed as `completed` are therefore
+   re-filed on the next research pass — nine landed in one cycle that way
+   (#1460-#1469). The label alone does not carry this; the state reason does.
    ```bash
    # Ensure the status label exists (idempotent), then close + label:
    gh label create rejected --color b60205 \
      --description "Not accepted by evolution — see closing comment" 2>/dev/null || true
    gh issue close <N> --repo Lexus2016/hermes-agent-evolution \
+     --reason "not planned" \
      --comment "Rejected by evolution-analysis: <already-exists|out-of-scope|harmful|duplicate> — <one-line reason>."
    gh issue edit <N> --repo Lexus2016/hermes-agent-evolution \
      --add-label rejected --remove-label needs-work 2>/dev/null || true
