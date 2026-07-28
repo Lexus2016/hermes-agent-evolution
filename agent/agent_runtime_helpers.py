@@ -2490,6 +2490,25 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
 
     def _finish_agent_tool(result: Any, observed_args: Optional[dict] = None) -> Any:
         hook_args = observed_args if isinstance(observed_args, dict) else function_args
+        # Stash the per-call duration for the turn's trajectory capture (#1442).
+        # This is the only point where it exists: the capture runs in
+        # finalize_turn, by which time nothing carries per-call timing, so
+        # without this every entry's duration_ms stays None and the
+        # failure-trajectory timestamp framework has nothing to place its
+        # t_fail / t_detect / t_recover against.
+        #
+        # A plain dict on the agent, keyed by tool_call_id, drained by the
+        # capture. Guarded because a timing that fails to record must not take
+        # the tool result down with it.
+        try:
+            if tool_call_id:
+                timings = getattr(agent, "_turn_call_timings", None)
+                if timings is None:
+                    timings = {}
+                    agent._turn_call_timings = timings
+                timings[tool_call_id] = int((time.monotonic() - tool_start_time) * 1000)
+        except Exception:
+            pass
         try:
             from model_tools import _emit_post_tool_call_hook
             _emit_post_tool_call_hook(

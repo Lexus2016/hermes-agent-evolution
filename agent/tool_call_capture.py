@@ -165,14 +165,22 @@ def _result_status(content: Any) -> str:
         return "success"
 
 
-def extract_tool_calls(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def extract_tool_calls(
+    messages: List[Dict[str, Any]],
+    timings: Optional[Dict[str, int]] = None,
+) -> List[Dict[str, Any]]:
     """Pull ``(tool, args, result)`` triples out of a finished turn's messages.
 
     Walks assistant turns for ``tool_calls`` and matches each to its ``tool``
     result by ``tool_call_id``. A call with no matching result (the turn ended
     mid-flight) is kept with a ``pending`` status rather than dropped — a call
     that never returned is itself signal for #1268's error-recovery dimension.
+
+    ``timings`` maps ``tool_call_id`` to milliseconds, collected during the turn
+    by ``agent_runtime_helpers`` — the only place per-call duration exists, since
+    by the time this runs the calls are long finished (#1442).
     """
+    timings = timings or {}
     if not isinstance(messages, list):
         return []
 
@@ -217,6 +225,7 @@ def extract_tool_calls(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     "args": args if isinstance(args, dict) else {},
                     "result": content,
                     "status": _result_status(content) if has_result else "pending",
+                    "duration_ms": timings.get(cid) if cid else None,
                 }
             )
     return calls
@@ -229,13 +238,14 @@ def build_trajectory_log(
     task_descriptor: str = "",
     completed: bool = True,
     trajectory_dir: Optional[Path] = None,
+    timings: Optional[Dict[str, int]] = None,
 ) -> Optional[TrajectoryLog]:
     """Build a :class:`TrajectoryLog` from a finished turn, or None if empty.
 
     Returns None when the turn made no tool calls: a trajectory with no actions
     tells every consumer nothing and would only dilute the store.
     """
-    calls = extract_tool_calls(messages)
+    calls = extract_tool_calls(messages, timings)
     if not calls:
         return None
 
@@ -250,6 +260,7 @@ def build_trajectory_log(
             call["args"],
             result=call["result"],
             status=call["status"],
+            duration_ms=call.get("duration_ms"),
         )
     return log
 
@@ -261,6 +272,7 @@ def capture_turn(
     task_descriptor: str = "",
     completed: bool = True,
     trajectory_dir: Optional[Path] = None,
+    timings: Optional[Dict[str, int]] = None,
 ) -> Optional[Path]:
     """Build and persist a turn's trajectory. Returns the path, or None.
 
@@ -277,6 +289,7 @@ def capture_turn(
             task_descriptor=task_descriptor,
             completed=completed,
             trajectory_dir=trajectory_dir,
+            timings=timings,
         )
         if log is None:
             return None

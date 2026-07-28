@@ -249,7 +249,12 @@ def finalize_turn(
             session_id=getattr(agent, "session_id", "") or "",
             task_descriptor=_summarize_user_message_for_log(user_message),
             completed=completed,
+            timings=getattr(agent, "_turn_call_timings", None),
         )
+        # Drained per turn so a long session cannot accumulate one entry per
+        # call for its whole lifetime.
+        if getattr(agent, "_turn_call_timings", None):
+            agent._turn_call_timings = {}
     except Exception as _capture_err:
         _cleanup_errors.append(f"tool_call_capture: {_capture_err}")
         logger.error(
