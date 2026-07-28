@@ -128,10 +128,27 @@ class TrajectoryEntry:
 class TrajectoryLog:
     """In-memory trajectory log for a single cron session."""
 
-    def __init__(self, session_id: str = "", date: str = "") -> None:
+    def __init__(
+        self,
+        session_id: str = "",
+        date: str = "",
+        completed: Optional[bool] = None,
+        task_key: str = "",
+    ) -> None:
         self.session_id = session_id
         self.date = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self.entries: List[TrajectoryEntry] = []
+        # Task-level outcome and pairing key (#1363). Both are optional so the
+        # existing cron-stage caller is unaffected, and both are omitted from
+        # to_dict() when unset so old readers see the exact shape they expect.
+        #
+        # ``completed`` is what lets #1359 tell a trajectory worth distilling a
+        # heuristic from apart from one that failed; ``task_key`` is an opaque
+        # hash of the task descriptor, which is what #1436 pairs a failed and a
+        # successful run on. A hash rather than the text because the descriptor
+        # is user prose and must not enter the pipeline's store.
+        self.completed = completed
+        self.task_key = task_key
 
     def add(self, entry: TrajectoryEntry) -> None:
         self.entries.append(entry)
@@ -149,11 +166,19 @@ class TrajectoryLog:
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "date": self.date,
             "session_id": self.session_id,
             "entries": [e.to_dict() for e in self.entries],
         }
+        # Only emitted when set, so a reader written against the pre-#1363
+        # shape sees no new keys on the cron-stage trajectories it already
+        # handles.
+        if self.completed is not None:
+            out["completed"] = bool(self.completed)
+        if self.task_key:
+            out["task_key"] = self.task_key
+        return out
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2, sort_keys=True)
@@ -202,7 +227,13 @@ def load_trajectory(path: Path) -> Optional[TrajectoryLog]:
     if not isinstance(data, dict):
         return None
     log = TrajectoryLog(
-        session_id=data.get("session_id", ""), date=data.get("date", "")
+        session_id=data.get("session_id", ""),
+        date=data.get("date", ""),
+        # Absent on pre-#1363 cron-stage trajectories; None/"" there means
+        # "not recorded", which consumers must treat differently from a
+        # recorded failure.
+        completed=data.get("completed"),
+        task_key=data.get("task_key", ""),
     )
     for ed in data.get("entries", []):
         if isinstance(ed, dict):
