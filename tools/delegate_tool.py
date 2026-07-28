@@ -1498,6 +1498,36 @@ def _build_child_agent(
     else:
         child_toolsets = _strip_blocked_tools(DEFAULT_TOOLSETS)
 
+    # ── Empty-toolset guard (#1387) ───────────────────────────────────
+    # After resolution + stripping, if the child has zero toolsets the
+    # sub-agent will have no tools to work with and will spiral on every
+    # tool call.  Fail fast with a structured error instead of launching
+    # a toolless sub-agent.  This catches both the case where explicitly
+    # requested toolsets don't intersect with the parent's, and the rare
+    # case where inherited toolsets are all stripped by _strip_blocked_tools.
+    if not child_toolsets:
+        if toolsets:
+            requested_str = ", ".join(toolsets)
+            available_str = (
+                ", ".join(sorted(parent_toolsets)) if parent_toolsets else "none"
+            )
+            raise ValueError(
+                f"Delegation toolset validation failed: requested toolsets "
+                f"[{requested_str}] resolved to zero tools after intersecting "
+                f"with parent's available toolsets [{available_str}] and "
+                f"removing blocked tools. The sub-agent would have no tools "
+                f"to work with. Check that the requested toolset names are "
+                f"valid and that the parent agent has them enabled."
+            )
+        else:
+            raise ValueError(
+                "Delegation toolset validation failed: inherited toolsets "
+                "resolved to zero tools after removing blocked tools "
+                "(delegation, clarify, memory, etc.). The parent agent "
+                "appears to have no enabled toolsets that survive "
+                "filtering. Check the parent's tools configuration."
+            )
+
     # Blocked tools also live inside mixed platform bundles (hermes-cli,
     # hermes-telegram, etc.) that _strip_blocked_tools must keep because they
     # carry useful tools too. Pass exact one-tool deny toolsets through to the
@@ -3135,31 +3165,45 @@ def delegate_task(
             if team_identity is not None:
                 child_toolsets = _ensure_team_toolset(child_toolsets, parent_agent)
             with _team_identity_scope(team_identity):
-                child = _build_child_agent(
-                    task_index=i,
-                    goal=t["goal"],
-                    context=t.get("context"),
-                    toolsets=child_toolsets,
-                    model=creds["model"],
-                    max_iterations=effective_max_iter,
-                    task_count=n_tasks,
-                    parent_agent=parent_agent,
-                    override_provider=creds["provider"],
-                    override_base_url=creds["base_url"],
-                    override_api_key=creds["api_key"],
-                    override_api_mode=creds["api_mode"],
-                    override_request_overrides=creds.get("request_overrides"),
-                    override_max_tokens=creds.get("max_output_tokens"),
-                    override_acp_command=t.get("acp_command")
-                    or acp_command
-                    or creds.get("command"),
-                    override_acp_args=(
-                        task_acp_args
-                        if task_acp_args is not None
-                        else (acp_args if acp_args is not None else creds.get("args"))
-                    ),
-                    role=effective_role,
-                )
+                try:
+                    child = _build_child_agent(
+                        task_index=i,
+                        goal=t["goal"],
+                        context=t.get("context"),
+                        toolsets=child_toolsets,
+                        model=creds["model"],
+                        max_iterations=effective_max_iter,
+                        task_count=n_tasks,
+                        parent_agent=parent_agent,
+                        override_provider=creds["provider"],
+                        override_base_url=creds["base_url"],
+                        override_api_key=creds["api_key"],
+                        override_api_mode=creds["api_mode"],
+                        override_request_overrides=creds.get("request_overrides"),
+                        override_max_tokens=creds.get("max_output_tokens"),
+                        override_acp_command=t.get("acp_command")
+                        or acp_command
+                        or creds.get("command"),
+                        override_acp_args=(
+                            task_acp_args
+                            if task_acp_args is not None
+                            else (acp_args if acp_args is not None else creds.get("args"))
+                        ),
+                        role=effective_role,
+                    )
+                except ValueError as ve:
+                    # #1387: _build_child_agent raises ValueError when the
+                    # resolved toolset is empty — fail this task with a
+                    # structured error instead of launching a toolless
+                    # sub-agent.
+                    results.append({
+                        "task_index": i,
+                        "goal": t["goal"],
+                        "status": "error",
+                        "error": str(ve),
+                        "response": None,
+                    })
+                    continue
             # Stamp the identity onto the child so _run_single_child can rebind
             # the threading.local inside the worker thread that runs it.
             child._team_identity = team_identity

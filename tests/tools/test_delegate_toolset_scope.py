@@ -6,6 +6,7 @@ parent's enabled_toolsets, it can escalate privileges by requesting
 arbitrary toolsets.
 """
 
+import pytest
 from types import SimpleNamespace
 
 from tools.delegate_tool import _strip_blocked_tools, _emit_parent_console
@@ -126,3 +127,91 @@ class TestEmitParentConsole:
         _emit_parent_console(parent, "  ✓ [3/3] non-callable guard")
         captured = capsys.readouterr()
         assert "non-callable guard" in captured.out
+
+
+class TestEmptyToolsetValidation:
+    """#1387: _build_child_agent must raise ValueError when the resolved
+    toolset is empty, instead of launching a toolless sub-agent."""
+
+    def test_empty_requested_toolsets_raises(self):
+        """Explicitly requested toolsets that don't intersect parent → ValueError."""
+        from tools.delegate_tool import _build_child_agent
+
+        parent = SimpleNamespace(
+            enabled_toolsets=["terminal", "file"],
+            disabled_toolsets=[],
+            api_key=None,
+            valid_tool_names=["terminal", "file"],
+        )
+
+        with pytest.raises(ValueError, match="resolved to zero tools"):
+            _build_child_agent(
+                task_index=0,
+                goal="test",
+                context=None,
+                toolsets=["nonexistent_toolset"],
+                model="test-model",
+                max_iterations=10,
+                task_count=1,
+                parent_agent=parent,
+            )
+
+    def test_empty_inherited_toolsets_raises(self):
+        """Inherited toolsets that are all blocked → ValueError."""
+        from tools.delegate_tool import _build_child_agent
+
+        # Parent with only blocked toolsets (all will be stripped)
+        parent = SimpleNamespace(
+            enabled_toolsets=["delegation", "clarify", "memory"],
+            disabled_toolsets=[],
+            api_key=None,
+            valid_tool_names=[],
+        )
+
+        with pytest.raises(ValueError, match="inherited toolsets"):
+            _build_child_agent(
+                task_index=0,
+                goal="test",
+                context=None,
+                toolsets=None,
+                model="test-model",
+                max_iterations=10,
+                task_count=1,
+                parent_agent=parent,
+            )
+
+    def test_nonempty_toolsets_does_not_raise(self):
+        """Valid toolsets that resolve to ≥1 tool should not raise."""
+        from tools.delegate_tool import _build_child_agent
+
+        parent = SimpleNamespace(
+            enabled_toolsets=["terminal", "file", "web"],
+            disabled_toolsets=[],
+            api_key=None,
+            valid_tool_names=["terminal", "file", "web"],
+        )
+
+        # This should NOT raise — terminal is a valid toolset
+        # We can't fully run the agent, but we verify no ValueError at
+        # the toolset validation stage by catching only that exception.
+        try:
+            _build_child_agent(
+                task_index=0,
+                goal="test",
+                context=None,
+                toolsets=["terminal"],
+                model="test-model",
+                max_iterations=10,
+                task_count=1,
+                parent_agent=parent,
+            )
+        except ValueError as ve:
+            if "toolset validation" in str(ve).lower():
+                pytest.fail(
+                    f"Should not raise for valid toolsets, got: {ve}"
+                )
+        except Exception:
+            # Other exceptions (import errors, etc.) are expected since
+            # we're not fully set up to run a real agent — the point is
+            # the toolset validation guard doesn't fire.
+            pass
