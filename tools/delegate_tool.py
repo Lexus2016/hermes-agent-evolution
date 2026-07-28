@@ -1552,6 +1552,8 @@ def _build_child_agent(
                 _seen_denied.add(t)
 
     workspace_hint = _resolve_workspace_hint(parent_agent)
+
+    # Stash denied toolsets on the child for post-build validation (#1387).
     child_prompt = _build_child_system_prompt(
         goal,
         context,
@@ -1767,6 +1769,8 @@ def _build_child_agent(
         **child_optional_kwargs,
     )
     child._print_fn = getattr(parent_agent, "_print_fn", None)
+    # Stash denied toolsets so post-build validation can name them (#1387).
+    child._denied_toolsets_for_prompt = denied_toolsets
     # Now the child exists, its session id can ride on every relayed event
     # (including the spawn_requested below — first emit happens after this).
     child_session_ref["session_id"] = getattr(child, "session_id", "") or ""
@@ -3180,6 +3184,32 @@ def delegate_task(
     finally:
         # Authoritative restore: reset global to parent's tool names after all children built
         _model_tools._last_resolved_tool_names = _parent_tool_names
+
+    # ── Pre-dispatch tool validation (#1387) ────────────────────────────
+    # After toolset resolution (parent intersection, MCP preservation,
+    # blocked-tool stripping), a child could end up with ZERO usable tools
+    # if every requested toolset was unrecognized or stripped. Launching a
+    # toolless sub-agent wastes iterations — it spirals repeating "I have no
+    # shell" until the turn limit. Fail fast with the resolved toolsets so
+    # the parent can correct the delegation request.
+    for _i, _t, _child in children:
+        _child_tools = getattr(_child, "valid_tool_names", None) or []
+        if not _child_tools:
+            _denied = getattr(_child, "_denied_toolsets_for_prompt", None) or []
+            _requested = _t.get("_requested_toolsets") or None
+            _hint = ""
+            if _denied:
+                _hint = (
+                    f" Requested but unresolved/removed: {_denied}. "
+                    f"These toolsets are not available in the parent's "
+                    f"configuration. Remove them from the delegation request "
+                    f"or enable the corresponding tools in config.yaml."
+                )
+            return tool_error(
+                "Delegation aborted: sub-agent resolved to 0 tools after "
+                "toolset filtering. A toolless sub-agent cannot accomplish "
+                f"any task.{_hint}"
+            )
 
     def _execute_and_aggregate() -> dict:
         """Run all built children (1 or N), join on them, aggregate results,
