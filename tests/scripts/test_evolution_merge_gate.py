@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from evolution_merge_gate import (  # noqa: E402
+    check_flip_gate,
     check_merge_policy,
     check_merge_policy_with_quality,
     _pr_snapshot,
@@ -86,7 +87,9 @@ class TestCheckMergePolicy:
 
     def test_integration_skill_is_high_risk_but_other_skills_are_not(self):
         # The integration skill IS the self-merge safety procedure → gated.
-        v = check_merge_policy([_f("skills/evolution/evolution-integration/SKILL.md", 5, 2)])
+        v = check_merge_policy([
+            _f("skills/evolution/evolution-integration/SKILL.md", 5, 2)
+        ])
         assert any("HIGH_RISK_PATH" in x for x in v)
         # Other evolution skills stay self-improvable (only CODEOWNERS-gated).
         for p in (
@@ -265,6 +268,7 @@ class TestMainWiring:
 
 # ── #1246: fail-closed on quality-gate import + live fabrication check ──────
 
+
 class TestQualityGateFailClosed:
     """#1246: the test-quality gate is a self-merge safety control. If its
     module can't be imported, the merge must be BLOCKED, not silently allowed."""
@@ -292,6 +296,7 @@ class TestFetchTestContents:
                 if key in url:
                     return code, content, ""
             return 1, "", "not found"
+
         return runner
 
     def test_fetches_and_decodes_test_files_only(self):
@@ -307,20 +312,131 @@ class TestFetchTestContents:
 
     def test_no_head_or_slug_returns_empty(self):
         import evolution_merge_gate as emg
+
         runner = self._runner({})
-        assert emg._fetch_test_contents([_f("tests/test_x.py")], None, "O/r", runner) == {}
-        assert emg._fetch_test_contents([_f("tests/test_x.py")], "sha", "", runner) == {}
+        assert (
+            emg._fetch_test_contents([_f("tests/test_x.py")], None, "O/r", runner) == {}
+        )
+        assert (
+            emg._fetch_test_contents([_f("tests/test_x.py")], "sha", "", runner) == {}
+        )
 
     def test_gh_error_is_best_effort_omit(self):
         import evolution_merge_gate as emg
+
         runner = self._runner({})  # every fetch returns code 1
         out = emg._fetch_test_contents([_f("tests/test_x.py")], "sha", "O/r", runner)
         assert out == {}
 
     def test_looks_like_test_predicate(self):
         import evolution_merge_gate as emg
+
         assert emg._looks_like_test("tests/test_a.py")
         assert emg._looks_like_test("pkg/tests/test_b.py")
         assert emg._looks_like_test("foo/test_c.py")
         assert emg._looks_like_test("foo/d_test.py")
         assert not emg._looks_like_test("scripts/foo.py")
+
+
+# ── #1447: flip-gate wiring into merge verification ──────────────────────────
+
+
+class TestCheckFlipGate:
+    """Tests for the flip-gate wiring (#1447, Child C of #1308).
+
+    Success criteria: P→F regression prevents merge, blocking comment names
+    specific probes, override leaves recorded reason, skills without probes
+    merge as before.
+    """
+
+    def test_no_probe_set_skips_gate(self):
+        """Skills without probe sets are unaffected — opt-in per skill."""
+        assert check_flip_gate() == []
+        assert check_flip_gate(None, None) == []
+
+    def test_regression_blocks_and_names_probes(self):
+        """P→F regression prevents merge; violation names the regressed probe."""
+        v = check_flip_gate(
+            before={"probe_a": True, "probe_b": True},
+            after={"probe_a": False, "probe_b": True},
+        )
+        assert len(v) == 1
+        assert "FLIP_GATE_BLOCK" in v[0]
+        assert "probe_a" in v[0]
+        assert "regressed: probe_a" in v[0]  # per-example table in the comment
+
+    def test_override_records_reason(self):
+        """Override path downgrades block to a recorded warning with reason."""
+        v = check_flip_gate(
+            before={"probe_a": True},
+            after={"probe_a": False},
+            override_reason="Known flaky probe, manual review approved",
+        )
+        assert "FLIP_GATE_OVERRIDE" in v[0]
+        assert "Known flaky probe, manual review approved" in v[0]
+        assert "FLIP_GATE_BLOCK" not in v[0]
+
+    def test_empty_override_does_not_downgrade(self):
+        """An empty override string does not downgrade the block."""
+        v = check_flip_gate(
+            before={"probe_a": True}, after={"probe_a": False}, override_reason=""
+        )
+        assert "FLIP_GATE_BLOCK" in v[0]
+
+
+class TestFlipGateWiringInQualityGate:
+    """Verify check_merge_policy_with_quality wires the flip gate correctly."""
+
+    def test_no_flip_gate_results_unaffected(self):
+        """Skills without probe sets merge as before (flip_gate_results=None)."""
+        files = [_f("scripts/foo.py", 30, 5), _f("tests/test_foo.py", 20, 0)]
+        assert check_merge_policy_with_quality(files, flip_gate_results=None) == []
+
+    def test_regression_prevents_merge(self):
+        """P→F regression prevents merge through the quality gate."""
+        files = [_f("scripts/foo.py", 30, 5)]
+        v = check_merge_policy_with_quality(
+            files,
+            flip_gate_results={
+                "before": {"probe_a": True},
+                "after": {"probe_a": False},
+            },
+        )
+        assert any("FLIP_GATE_BLOCK" in x for x in v)
+        assert any("probe_a" in x for x in v)
+
+    def test_override_leaves_recorded_reason(self):
+        """Override path records a reason instead of blocking."""
+        files = [_f("scripts/foo.py", 30, 5)]
+        v = check_merge_policy_with_quality(
+            files,
+            flip_gate_results={
+                "before": {"probe_a": True},
+                "after": {"probe_a": False},
+            },
+            flip_gate_override="Manual override: probe deprecated",
+        )
+        assert any("FLIP_GATE_OVERRIDE" in x for x in v)
+        assert not any("FLIP_GATE_BLOCK" in x for x in v)
+
+    def test_no_data_fails_closed(self):
+        """When flip_gate_results is provided but both sides are None, fail closed."""
+        files = [_f("scripts/foo.py", 30, 5)]
+        v = check_merge_policy_with_quality(
+            files, flip_gate_results={"before": None, "after": None}
+        )
+        assert any("FLIP_GATE_NO_DATA" in x for x in v)
+
+    def test_clean_flip_gate_with_clean_policy_passes(self):
+        """Both policy and flip gate clean → no violations."""
+        files = [_f("scripts/foo.py", 30, 5)]
+        assert (
+            check_merge_policy_with_quality(
+                files,
+                flip_gate_results={
+                    "before": {"a": True, "b": False},
+                    "after": {"a": True, "b": True},
+                },
+            )
+            == []
+        )

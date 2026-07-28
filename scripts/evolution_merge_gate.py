@@ -151,25 +151,96 @@ def check_merge_policy(
     return out
 
 
+def check_flip_gate(
+    before: Optional[Dict[str, Any]] = None,
+    after: Optional[Dict[str, Any]] = None,
+    *,
+    max_regressions: Optional[int] = None,
+    override_reason: Optional[str] = None,
+) -> List[str]:
+    """Run the example-level flip gate (#1447, Child C of #1308).
+
+    Calls :mod:`evolution_flip_gate` to classify per-probe P→F / F→P deltas
+    between a baseline (``before``) and the candidate (``after``). A 'block'
+    verdict stops the merge and names which probes regressed.
+
+    Opt-in per skill: when *both* ``before`` and ``after`` are ``None`` (the
+    skill has no probe set), the gate is skipped entirely — skills without
+    probe sets merge as before.
+
+    ``override_reason`` — when a non-empty string is supplied, a block verdict
+    is downgraded to a warning and the reason is recorded in the violation
+    list (prefixed ``FLIP_GATE_OVERRIDE:``) so the override is auditable. An
+    empty/None override does nothing — the block stands.
+    """
+    if before is None and after is None:
+        return []  # no probe set → opt-out, merge as before
+
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from evolution_flip_gate import (  # noqa: E402
+            compare_runs,
+            flip_verdict,
+            format_table,
+        )
+    except ImportError:
+        return [
+            "FLIP_GATE_UNAVAILABLE: evolution_flip_gate could not be imported "
+            "— cannot verify per-example regressions; refusing unattended "
+            "self-merge (fix the deploy or merge with human review)"
+        ]
+
+    before = before or {}
+    after = after or {}
+    table = compare_runs(before, after)
+    kwargs: Dict[str, Any] = {}
+    if max_regressions is not None:
+        kwargs["max_regressions"] = max_regressions
+    verdict = flip_verdict(table, **kwargs)
+
+    if not verdict.blocked:
+        return []
+
+    summary = format_table(table, verdict)
+    if override_reason:
+        return [
+            f"FLIP_GATE_OVERRIDE: flip-gate blocked but override applied — "
+            f"reason: {override_reason}\n{summary}"
+        ]
+    return [f"FLIP_GATE_BLOCK: {verdict.reason}\n{summary}"]
+
+
 def check_merge_policy_with_quality(
     files: Sequence[Dict[str, Any]],
     max_lines: int = DEFAULT_MAX_LINES,
     high_risk_globs: Sequence[str] = HIGH_RISK_GLOBS,
     mock_ratio_threshold: float = 0.30,
     test_contents: Optional[Dict[str, str]] = None,
+    flip_gate_results: Optional[Dict[str, Any]] = None,
+    flip_gate_override: Optional[str] = None,
 ) -> List[str]:
-    """Extended merge policy: diff-size + high-risk + test-quality gates (#1209, #1210).
+    """Extended merge policy: diff-size + high-risk + test-quality + flip gates.
 
     Runs the original :func:`check_merge_policy` (diff-size cap + high-risk
-    path blocklist) and then appends test-quality violations from
+    path blocklist), appends test-quality violations from
     :func:`evolution_test_quality_gate.check_test_quality` (mock-ratio gate
-    + fabricated-reproduction detection).
+    + fabricated-reproduction detection), and then appends flip-gate
+    violations from :func:`check_flip_gate` (#1447).
 
     ``test_contents`` — map of test file path → full content for
     fabricated-reproduction detection.  When empty/None the fabrication check
     has nothing to scan (the mock-ratio gate, which only needs file metadata,
     still runs); ``main()`` populates it from the reviewed head SHA so the
     fabrication check is LIVE on the real merge path (#1246).
+
+    ``flip_gate_results`` — optional ``{"before": {...}, "after": {...}}`
+    dict of per-probe results for the skill being promoted. When ``None``
+    (no probe set) the flip gate is skipped — skills without probe sets
+    merge as before (opt-in per skill).
+
+    ``flip_gate_override`` — optional override reason string. When supplied
+    and non-empty, a flip-gate block is downgraded to a recorded warning
+    instead of stopping the merge.
     """
     violations = check_merge_policy(
         files, max_lines=max_lines, high_risk_globs=high_risk_globs
@@ -197,6 +268,28 @@ def check_merge_policy_with_quality(
             mock_ratio_threshold=mock_ratio_threshold,
         )
     )
+    # Flip gate (#1447): per-example P→F regression check. Opt-in per skill —
+    # when flip_gate_results is None the gate is skipped entirely.
+    if flip_gate_results is not None:
+        fg_before = flip_gate_results.get("before")
+        fg_after = flip_gate_results.get("after")
+        if fg_before is None and fg_after is None:
+            # Caller opted in (provided flip_gate_results) but both sides are
+            # missing — either a load failure or an empty probe set. Fail
+            # CLOSED: cannot verify regressions → block the unattended merge.
+            violations.append(
+                "FLIP_GATE_NO_DATA: flip-gate was requested but no before/after "
+                "probe results were provided — cannot verify per-example "
+                "regressions; refusing unattended self-merge"
+            )
+        else:
+            violations.extend(
+                check_flip_gate(
+                    before=fg_before,
+                    after=fg_after,
+                    override_reason=flip_gate_override,
+                )
+            )
     return violations
 
 
@@ -279,9 +372,13 @@ def _fetch_test_contents(
         path = f.get("path") if isinstance(f, dict) else None
         if not path or not _looks_like_test(path):
             continue
-        code, out, _ = runner(
-            ["gh", "api", f"repos/{slug}/contents/{path}?ref={head}", "--jq", ".content"]
-        )
+        code, out, _ = runner([
+            "gh",
+            "api",
+            f"repos/{slug}/contents/{path}?ref={head}",
+            "--jq",
+            ".content",
+        ])
         if code != 0 or not out.strip():
             continue
         try:
@@ -291,11 +388,29 @@ def _fetch_test_contents(
     return contents
 
 
+def _load_json_file(path: str) -> Optional[Dict[str, Any]]:
+    """Load a JSON object from ``path``; return ``None`` on any error."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _arg_or_env(args: List[str], flag: str, env: str) -> Optional[str]:
+    """Read a CLI flag value, falling back to an env var."""
+    if flag in args:
+        return args[args.index(flag) + 1]
+    return os.environ.get(env)
+
+
 def main(argv: List[str]) -> int:
     args = argv[1:]
     if "--pr" not in args:
         print(
-            "usage: evolution_merge_gate.py --pr N [--merge] [--method squash] [--repo O/R]"
+            "usage: evolution_merge_gate.py --pr N [--merge] [--method squash] "
+            "[--repo O/R] [--flip-gate-before F] [--flip-gate-after F] "
+            "[--flip-gate-override REASON]"
         )
         return 2
     pr = int(args[args.index("--pr") + 1])
@@ -311,12 +426,27 @@ def main(argv: List[str]) -> int:
     except ValueError:
         max_lines = DEFAULT_MAX_LINES
 
+    # Flip-gate inputs (#1447): JSON files mapping probe id → result.
+    before_path = _arg_or_env(args, "--flip-gate-before", "EVOLUTION_FLIP_GATE_BEFORE")
+    after_path = _arg_or_env(args, "--flip-gate-after", "EVOLUTION_FLIP_GATE_AFTER")
+    flip_override = _arg_or_env(
+        args, "--flip-gate-override", "EVOLUTION_FLIP_GATE_OVERRIDE"
+    )
+    flip_gate_results: Optional[Dict[str, Any]] = None
+    if before_path or after_path:
+        flip_gate_results = {
+            "before": _load_json_file(before_path) if before_path else None,
+            "after": _load_json_file(after_path) if after_path else None,
+        }
+
     runner = _run
     # One snapshot: the files we review and the SHA we merge come from the SAME
     # gh read, so the policy is checked against exactly the commit that lands.
     files, head = _pr_snapshot(pr, repo, runner)
     if files is None:
-        print(f"[merge-gate] could not read PR #{pr} files (gh error / malformed response) — refusing to merge")
+        print(
+            f"[merge-gate] could not read PR #{pr} files (gh error / malformed response) — refusing to merge"
+        )
         return 1
 
     # Fetch changed test-file contents at the reviewed head SHA so the
@@ -325,7 +455,11 @@ def main(argv: List[str]) -> int:
     slug = repo or os.environ.get("EVOLUTION_REPO_SLUG", "")
     test_contents = _fetch_test_contents(files, head, slug, runner)
     violations = check_merge_policy_with_quality(
-        files, max_lines=max_lines, test_contents=test_contents
+        files,
+        max_lines=max_lines,
+        test_contents=test_contents,
+        flip_gate_results=flip_gate_results,
+        flip_gate_override=flip_override or None,
     )
     if violations:
         print(f"[merge-gate] PR #{pr} BLOCKED from autonomous self-merge:")
