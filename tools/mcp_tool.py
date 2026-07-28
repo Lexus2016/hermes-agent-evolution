@@ -4388,10 +4388,26 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                     res_text = getattr(getattr(block, "resource", None), "text", None)
                     if res_text:
                         error_text += str(res_text)
-                return json.dumps({
-                    "error": _sanitize_error(
-                        error_text or "MCP tool returned an error"
+                # #1393 — enrich not_found / validation errors with a recovery
+                # directive. MCP tool definitions can drift (server-side schema
+                # changes) so the cached tool schema the agent used to build
+                # arguments no longer matches. Without a directive, agents
+                # retry with slightly different arguments in a loop (19 failed
+                # sessions/7d). The directive tells them to re-check the schema.
+                error_text = error_text or "MCP tool returned an error"
+                lower_err = error_text.lower()
+                if "not_found" in lower_err or "not found" in lower_err or \
+                   "validation" in lower_err or "invalid" in lower_err:
+                    error_text = (
+                        f"{error_text}\n\n"
+                        f"Recovery: the tool definition for '{tool_name}' may have "
+                        f"changed on the MCP server. Use tool_describe or tool_search "
+                        f"to check the current schema, then retry with corrected "
+                        f"arguments. If the tool no longer exists, use tool_search "
+                        f"to find an alternative."
                     )
+                return json.dumps({
+                    "error": _sanitize_error(error_text)
                 }, ensure_ascii=False)
 
             # Collect text from content blocks. MCP tool results can also
