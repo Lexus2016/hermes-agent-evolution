@@ -88,7 +88,7 @@ class SelfHostedBackend(Mem0Backend):
     """Direct HTTP backend for a self-hosted Mem0 server (the FastAPI ``server/``).
 
     mem0.MemoryClient can't be reused for self-hosted: it is hardwired to the
-    cloud API — ``Authorization: *** auth and a ``GET /v1/ping/`` validation
+    cloud API — ``Authorization: Token`` auth and a ``GET /v1/ping/`` validation
     call in ``__init__`` that the self-hosted server does not expose (it would
     404 before any real request). This client talks to that server directly,
     using its actual contract: ``X-API-Key`` auth and the ``/memories`` /

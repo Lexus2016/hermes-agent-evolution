@@ -808,7 +808,27 @@ def _summarize_tool_result_unguarded(tool_name: str, tool_args: str, tool_conten
         goal = _str_arg(args, "goal")
         if len(goal) > 60:
             goal = goal[:57] + "..."
-        return f"[delegate_task] '{goal}' ({content_len:,} chars result)"
+        # Extract provenance: try to parse delegation result for sub-agent
+        # summaries so the compaction summary preserves evidence chains (#1388).
+        provenance_hint = ""
+        try:
+            import json as _json
+
+            parsed = _json.loads(tool_content) if tool_content else None
+            if isinstance(parsed, dict) and "results" in parsed:
+                results = parsed["results"]
+                if isinstance(results, list):
+                    summaries = []
+                    for r in results:
+                        if isinstance(r, dict):
+                            s = r.get("summary") or r.get("error") or ""
+                            if s:
+                                summaries.append(str(s)[:80])
+                    if summaries:
+                        provenance_hint = " → " + " | ".join(summaries[:3])
+        except Exception:
+            pass
+        return f"[delegate_task] '{goal}' ({content_len:,} chars result){provenance_hint}"
 
     if tool_name == "execute_code":
         code_str = _str_arg(args, "code")
@@ -2308,6 +2328,9 @@ Be specific with file paths, commands, line numbers, and results.]
 
 ## Relevant Files
 [Files read, modified, or created — with brief note on each]
+
+## Delegations Performed
+[List each sub-agent delegation that was dispatched during the compacted turns. For each entry include: the task/goal given to the sub-agent, a brief summary of what it returned or accomplished, and any key evidence pointers (file paths, PR numbers, URLs) from its output. This ensures the orchestrator knows what has already been done and does not re-delegate completed work. If none, write "None."]
 
 {HISTORICAL_REMAINING_WORK_HEADING}
 [What remains to be done — framed as STALE context for reference only. The agent must NOT resume this work unless the latest user message explicitly asks for it.]

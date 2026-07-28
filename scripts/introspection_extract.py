@@ -124,12 +124,23 @@ _RECOVERY_RE = re.compile(
     r"\b("
     r"instead[,:]? (i|we|let)|alternatively[,:]? (i|we|let)|"
     r"workaround|another (way|approach|option)|different (way|approach|path)|"
-    r"(but|however|though)[^.!?]{0,40}\b(i|we) (can|could|'ll|will|am able to)|"
+    r"(but|however|though)[^.!?]{0,40}\b(i|we) (can|could|'ll|will|am able to)"
+    r"(?!['’]?t\b)|"
     r"what i can do|here'?s what i can|i can (still|however)|"
     r"let me (try|use|write|search|run)|i'?ll (try|use|write|search|run)"
     r")\b",
     re.IGNORECASE,
 )
+
+#: How far after the refusal a pivot may sit and still be about it.
+#
+# Without a bound, the two patterns only had to appear SOMEWHERE in the same
+# message. On the real corpus that matched pairs tens of thousands of characters
+# apart — long audit and bug-report documents where "cannot" describes some
+# third-party system and an unrelated "instead"/"workaround" appears pages later.
+# A genuine pivot follows its refusal within a sentence or two.
+_RECOVERY_PROXIMITY_CHARS = 240
+
 
 # Two shapes match the pivot above but are NOT the agent taking another path,
 # and counting them would make #1356 look effective precisely when it failed:
@@ -157,7 +168,23 @@ _NON_RECOVERY_RE = re.compile(
 
 
 def _is_recovered_refusal(text: str) -> bool:
-    """True when a refusing turn also proposes a path the AGENT will take."""
+    """True when a refusing turn also proposes a path the AGENT will take.
+
+    Requires the pivot to sit within ``_RECOVERY_PROXIMITY_CHARS`` after a
+    refusal. Matching anywhere in the message was the dominant false-positive
+    source on the real corpus: long audit and bug-report documents contain a
+    "cannot" about some third-party system and an unrelated "instead" pages
+    later, and were counted as recoveries.
+
+    A pivot BEFORE any refusal does not count either — "Instead, let me check
+    the cache. I can't reach the API." is a plan followed by a refusal, not a
+    refusal followed by a plan.
+    """
+    for refusal in _REFUSAL_RE.finditer(text):
+        window = text[refusal.end() : refusal.end() + _RECOVERY_PROXIMITY_CHARS]
+        if _RECOVERY_RE.search(window) and not _NON_RECOVERY_RE.search(window):
+            return True
+    return False
     return bool(_RECOVERY_RE.search(text)) and not _NON_RECOVERY_RE.search(text)
 
 _REPEAT_THRESHOLD = 5  # same tool >=N consecutive in a session is a "repeated run"
