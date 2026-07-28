@@ -949,3 +949,85 @@ class TestDescribeCache:
         r2 = dispatch_tool_describe({"name": "nonexistent"}, current_tool_defs=defs)
         assert "error" in r2
 
+
+
+class TestSearchStreakDisabledIsVisible:
+    """A silently-inactive streak counter is how #1153 shipped without moving
+    its own signal (#1373).
+
+    `note_tool_search` returns 0 for a falsy session id, so the threshold is
+    never reached and the fallback directive never fires. That is correct for
+    the pure unit tests that pass no session id — but the runtime reaches this
+    through `session_id=agent.session_id or ""`, so an unset session arrives as
+    `""` and is indistinguishable here. It must at least be visible in the log.
+    """
+
+    def _cfg(self, threshold: int = 3):
+        from tools.tool_search import ToolSearchConfig
+
+        return ToolSearchConfig(
+            enabled="on",
+            threshold_pct=10.0,
+            search_default_limit=5,
+            max_search_limit=20,
+            search_streak_threshold=threshold,
+        )
+
+    def _search(self, sid):
+        from tools.tool_search import dispatch_tool_search
+
+        return json.loads(
+            dispatch_tool_search(
+                {"query": "github"},
+                current_tool_defs=[_td("github_create_issue", "Create issue")],
+                config=self._cfg(),
+                session_id=sid,
+            )
+        )
+
+    def test_empty_session_id_warns_once(self, caplog):
+        import logging
+
+        import tools.tool_search as ts
+
+        ts._SEARCH_STREAK.clear()
+        ts._STREAK_DISABLED_WARNED = False
+        with caplog.at_level(logging.WARNING, logger="tools.tool_search"):
+            for _ in range(5):
+                self._search("")
+        warnings = [r for r in caplog.records if "streak tracking is INACTIVE" in r.message]
+        assert len(warnings) == 1, "must warn exactly once per process, not per call"
+
+    def test_none_session_id_also_warns(self, caplog):
+        import logging
+
+        import tools.tool_search as ts
+
+        ts._SEARCH_STREAK.clear()
+        ts._STREAK_DISABLED_WARNED = False
+        with caplog.at_level(logging.WARNING, logger="tools.tool_search"):
+            self._search(None)
+        assert any("streak tracking is INACTIVE" in r.message for r in caplog.records)
+
+    def test_no_directive_without_session_however_many_searches(self):
+        """The behaviour itself is unchanged — only its visibility."""
+        import tools.tool_search as ts
+
+        ts._SEARCH_STREAK.clear()
+        ts._STREAK_DISABLED_WARNED = False
+        for _ in range(10):
+            out = self._search("")
+        assert "fallback_directive" not in out
+
+    def test_real_session_id_does_not_warn(self, caplog):
+        import logging
+
+        import tools.tool_search as ts
+
+        ts._SEARCH_STREAK.clear()
+        ts._STREAK_DISABLED_WARNED = False
+        with caplog.at_level(logging.WARNING, logger="tools.tool_search"):
+            for _ in range(3):
+                out = self._search("sess-real")
+        assert not any("streak tracking is INACTIVE" in r.message for r in caplog.records)
+        assert "fallback_directive" in out

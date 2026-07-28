@@ -63,10 +63,37 @@ CHARS_PER_TOKEN = 4.0
 # tracked (keeps pure-function tests that pass no session_id unaffected).
 _SEARCH_STREAK: Dict[str, int] = {}
 
+#: Set once per process when a search arrives with no usable session key, so
+#: the "streak tracking is silently off" state is visible in the log exactly
+#: once instead of never (#1373).
+_STREAK_DISABLED_WARNED = False
+
 
 def note_tool_search(session_id: Optional[str]) -> int:
-    """Increment the consecutive-search streak for ``session_id``; return it."""
+    """Increment the consecutive-search streak for ``session_id``; return it.
+
+    Returns 0 — and therefore never reaches the threshold — when there is no
+    session key to count against. That is the correct behaviour for the pure
+    unit tests that pass none, but in production it silently disables the whole
+    feature, which is how #1153 could ship, pass CI, and leave the signal it
+    targeted completely unchanged (#1373). The runtime reaches this via
+    ``session_id=agent.session_id or ""`` in ``agent_runtime_helpers``, so an
+    unset session id arrives as ``""`` — falsy, and indistinguishable here from
+    a test calling with nothing.
+
+    The counter still declines to track it; what changes is that it says so.
+    """
     if not session_id:
+        global _STREAK_DISABLED_WARNED
+        if not _STREAK_DISABLED_WARNED:
+            _STREAK_DISABLED_WARNED = True
+            logger.warning(
+                "tool_search streak tracking is INACTIVE for this process: a "
+                "search arrived with no session id, so the consecutive-search "
+                "counter cannot key on anything and the fallback directive "
+                "(#1153) will never fire. Callers must pass a non-empty "
+                "session_id (see #1373)."
+            )
         return 0
     _SEARCH_STREAK[session_id] = _SEARCH_STREAK.get(session_id, 0) + 1
     return _SEARCH_STREAK[session_id]
