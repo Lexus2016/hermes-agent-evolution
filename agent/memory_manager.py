@@ -359,7 +359,12 @@ class MemoryManager:
     provider is allowed.  Failures in one provider never block the other.
     """
 
-    def __init__(self, *, external_prefetch_timeout: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        *,
+        external_prefetch_timeout: Optional[float] = None,
+        retrieval_utility_enabled: bool = False,
+    ) -> None:
         self._providers: List[MemoryProvider] = []
         self._tool_to_provider: Dict[str, MemoryProvider] = {}
         self._has_external: bool = False  # True once a non-builtin provider is added
@@ -398,6 +403,9 @@ class MemoryManager:
         # session_id) pairs logged during prefetch_all. Cleared after
         # outcomes are recorded in sync_all.
         self._pending_retrievals: List[tuple[str, str]] = []
+        # Mirrors memory.retrieval_utility.enabled from config.yaml. When
+        # False (the default), no retrieval data is written to disk.
+        self._retrieval_utility_enabled: bool = retrieval_utility_enabled
 
     # -- Registration --------------------------------------------------------
 
@@ -515,6 +523,8 @@ class MemoryManager:
         without needing to parse the returned context into individual
         records.
         """
+        if not self._retrieval_utility_enabled:
+            return
         try:
             from agent.retrieval_utility import record_retrieval
 

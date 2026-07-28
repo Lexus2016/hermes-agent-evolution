@@ -55,13 +55,13 @@ def isolated_hermes_home(tmp_path, monkeypatch):
 
 
 class TestPrefetchRetrievalLogging:
-    """Verify prefetch_all logs retrievals to the sidecar."""
+    """Verify prefetch_all logs retrievals to the sidecar (opt-in)."""
 
-    def test_prefetch_logs_retrieval(self, isolated_hermes_home):
+    def test_prefetch_logs_retrieval_when_enabled(self, isolated_hermes_home):
         from agent.retrieval_utility import load_log
 
         provider = _FakeProvider("builtin", context="recalled: foo")
-        mgr = MemoryManager()
+        mgr = MemoryManager(retrieval_utility_enabled=True)
         mgr.add_provider(provider)
 
         result = mgr.prefetch_all("what is foo?", session_id="s1")
@@ -73,11 +73,24 @@ class TestPrefetchRetrievalLogging:
         assert log["retrievals"][0]["session_id"] == "s1"
         assert log["retrievals"][0]["outcome"] is None
 
+    def test_prefetch_disabled_no_log(self, isolated_hermes_home):
+        """Default (disabled) must not write any retrieval data to disk."""
+        from agent.retrieval_utility import load_log
+
+        provider = _FakeProvider("builtin", context="recalled: foo")
+        mgr = MemoryManager()  # default: retrieval_utility_enabled=False
+        mgr.add_provider(provider)
+
+        mgr.prefetch_all("what is foo?", session_id="s1")
+
+        log = load_log()
+        assert log["retrievals"] == []
+
     def test_prefetch_empty_no_log(self, isolated_hermes_home):
         from agent.retrieval_utility import load_log
 
         provider = _FakeProvider("builtin", context="")
-        mgr = MemoryManager()
+        mgr = MemoryManager(retrieval_utility_enabled=True)
         mgr.add_provider(provider)
 
         result = mgr.prefetch_all("query")
@@ -90,7 +103,7 @@ class TestPrefetchRetrievalLogging:
         from agent.retrieval_utility import load_log
 
         provider = _FakeProvider("builtin", context="ctx")
-        mgr = MemoryManager()
+        mgr = MemoryManager(retrieval_utility_enabled=True)
         mgr.add_provider(provider)
 
         # _strip_skill_scaffolding only returns None for skill invocations
@@ -110,7 +123,7 @@ class TestSyncOutcomeRecording:
         from agent.retrieval_utility import load_log
 
         provider = _FakeProvider("builtin", context="ctx")
-        mgr = MemoryManager()
+        mgr = MemoryManager(retrieval_utility_enabled=True)
         mgr.add_provider(provider)
 
         # Prefetch (creates a pending retrieval).
@@ -127,7 +140,7 @@ class TestSyncOutcomeRecording:
         from agent.retrieval_utility import load_log
 
         provider = _FakeProvider("builtin", context="ctx")
-        mgr = MemoryManager()
+        mgr = MemoryManager(retrieval_utility_enabled=True)
         mgr.add_provider(provider)
 
         mgr.prefetch_all("query", session_id="s1")
@@ -141,7 +154,7 @@ class TestSyncOutcomeRecording:
     def test_sync_with_no_pending_retrievals(self, isolated_hermes_home):
         """sync_all without a prior prefetch should not crash."""
         provider = _FakeProvider("builtin")
-        mgr = MemoryManager()
+        mgr = MemoryManager(retrieval_utility_enabled=True)
         mgr.add_provider(provider)
         mgr.sync_all("query", "answer", session_id="s1")
         # No crash, no retrievals logged.
@@ -152,7 +165,7 @@ class TestSyncOutcomeRecording:
 
     def test_pending_retrievals_cleared_after_sync(self, isolated_hermes_home):
         provider = _FakeProvider("builtin", context="ctx")
-        mgr = MemoryManager()
+        mgr = MemoryManager(retrieval_utility_enabled=True)
         mgr.add_provider(provider)
 
         mgr.prefetch_all("query", session_id="s1")
