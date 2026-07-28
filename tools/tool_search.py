@@ -1085,11 +1085,54 @@ def resolve_underlying_call(
     if not isinstance(raw_args, dict):
         return None, {}, "tool_call 'arguments' must be an object"
     if not is_deferrable_tool_name(name, config):
-        return None, {}, (
-            f"'{name}' is not a deferrable tool. If it appears in the model-facing tools "
-            "list already, call it directly instead of via tool_call."
-        )
+        return None, {}, _not_deferrable_error(name, config)
     return name, raw_args, None
+
+
+# Core-tool → non-terminal alternative mapping (#1392). When an agent in a
+# restricted context (subagent, cron) tries to invoke a core tool via
+# tool_call, suggest the appropriate alternative that IS available.
+_NON_TERMINAL_ALTERNATIVES: Dict[str, str] = {
+    "terminal": (
+        "For filesystem operations, use read_file, write_file, or search_files. "
+        "For code execution, use execute_code."
+    ),
+    "delegate_task": "Sub-agents cannot spawn further sub-agents (nesting is off).",
+    "process": "Sub-agents cannot manage background processes.",
+    "send_message": "Sub-agents cannot send messages to the user.",
+}
+
+
+def _not_deferrable_error(
+    name: str,
+    config: Optional[ToolSearchConfig] = None,
+) -> str:
+    """Build an actionable error for tool_call on a non-deferrable tool (#1392).
+
+    The previous generic message left the agent looping because it gave no
+    fallback.  Now:
+    * If the name is a known core tool (terminal, read_file, ...), tell the agent
+      to call it directly -- it is in the model-facing tools list.
+    * If the tool is commonly absent in restricted contexts (subagent, cron),
+      suggest the non-terminal alternative so the agent changes strategy.
+    """
+    is_core = name in _hermes_core_tools()
+    alt = _NON_TERMINAL_ALTERNATIVES.get(name)
+
+    parts = [f"'{name}' is not a deferrable tool."]
+    if is_core:
+        parts.append(
+            "It is a core tool -- call it directly from the tools list "
+            "instead of via tool_call."
+        )
+    else:
+        parts.append(
+            "If it appears in the model-facing tools list already, "
+            "call it directly instead of via tool_call."
+        )
+    if alt:
+        parts.append(alt)
+    return " ".join(parts)
 
 
 def clear_describe_cache() -> None:

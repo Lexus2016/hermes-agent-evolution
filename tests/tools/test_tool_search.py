@@ -715,6 +715,31 @@ class TestRegression_OpenClawCron84141:
         assert err is not None
         assert "not a deferrable" in err
 
+    def test_not_deferrable_error_for_core_tool_has_direct_hint(self):
+        """#1392 -- the error for a known core tool should say 'call it directly'
+        AND include a non-terminal fallback so the agent changes strategy."""
+        from tools.tool_search import resolve_underlying_call
+        _, _, err = resolve_underlying_call({
+            "name": "terminal",
+            "arguments": {"command": "echo hi"},
+        })
+        assert err is not None
+        assert "not a deferrable" in err
+        assert "core tool" in err
+        assert "call it directly" in err
+        assert "read_file" in err  # fallback alternative
+
+    def test_not_deferrable_error_for_unknown_tool_no_alt(self):
+        """#1392 -- unknown tools get the generic message without an alt hint."""
+        from tools.tool_search import resolve_underlying_call
+        _, _, err = resolve_underlying_call({
+            "name": "totally_made_up_tool",
+            "arguments": {},
+        })
+        assert err is not None
+        assert "not a deferrable" in err
+        assert "core tool" not in err
+
 
 class TestRegression_ToolsetScoping:
     """A restricted-toolset session must not see or invoke out-of-scope tools.
