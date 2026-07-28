@@ -106,3 +106,127 @@ def test_parked_server_self_probes_and_revives(monkeypatch, tmp_path):
             run_task.cancel()
 
     asyncio.run(_scenario())
+
+
+@pytest.mark.no_isolate
+def test_parked_server_dedup_identical_warnings(monkeypatch, tmp_path):
+    """#1391: repeated identical parked-server warnings must be deduplicated.
+
+    When a server is parked and the self-probe keeps failing with the same
+    error, only the FIRST occurrence should be WARNING; subsequent identical
+    ones should drop to DEBUG.  A different error gets a fresh WARNING.
+    """
+    import logging
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+
+    from tools import mcp_tool
+    from tools.mcp_tool import MCPServerTask
+
+    monkeypatch.setattr(mcp_tool, "_MAX_RECONNECT_RETRIES", 1)
+    monkeypatch.setattr(mcp_tool, "_PARKED_RETRY_INTERVAL", 0.05)
+
+    _real_sleep = asyncio.sleep
+
+    async def _fast_sleep(_delay, *a, **kw):
+        await _real_sleep(0)
+
+    monkeypatch.setattr(mcp_tool.asyncio, "sleep", _fast_sleep)
+
+    state = {
+        "transport_calls": 0,
+        "deregistered": 0,
+        "parked_cycles": 0,
+    }
+
+    async def _scenario():
+        class _Task(MCPServerTask):
+            def _is_http(self):
+                return False
+
+            def _deregister_tools(self):
+                state["deregistered"] += 1
+                self._registered_tool_names = []
+
+            def _register_discovered_tools_if_needed(self):
+                pass
+
+            async def _run_stdio(self, config):
+                state["transport_calls"] += 1
+                if state["transport_calls"] == 1:
+                    self.session = object()
+                    self._ready.set()
+                    self.session = None
+                    raise RuntimeError("backend outage begins")
+                # Always fail with the SAME error to trigger dedup
+                raise RuntimeError("persistent connection failure")
+
+        task = _Task("srv")
+        task._registered_tool_names = ["srv__tool"]
+
+        # Collect log records
+        records: list[logging.LogRecord] = []
+
+        class _Handler(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        handler = _Handler()
+        handler.setLevel(logging.DEBUG)
+        mcp_logger = logging.getLogger("tools.mcp_tool")
+        mcp_logger.addHandler(handler)
+        mcp_logger.setLevel(logging.DEBUG)
+        try:
+            run_task = asyncio.ensure_future(task.run({"command": "x"}))
+
+            # Let it exhaust budget (1 retry), park, and cycle a few times
+            for _ in range(300):
+                await _real_sleep(0)
+                if state["deregistered"] >= 1:
+                    break
+            assert state["deregistered"] >= 1, "server never parked"
+
+            # Let it cycle through several parked self-probes — need real
+            # wall-clock time because the parking wait uses asyncio.wait_for
+            # (event-loop monotonic clock), not asyncio.sleep, so the
+            # monkeypatched _fast_sleep does NOT accelerate it.
+            for _ in range(200):
+                await _real_sleep(0.01)
+                if state["transport_calls"] >= 6:
+                    break
+
+            task._shutdown_event.set()
+            task._reconnect_event.set()
+            try:
+                await asyncio.wait_for(run_task, timeout=15)
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                run_task.cancel()
+        finally:
+            mcp_logger.removeHandler(handler)
+
+        # Filter to WARNING-level parked-server messages
+        warning_msgs = [
+            r.getMessage()
+            for r in records
+            if r.levelno == logging.WARNING
+            and "failed after" in r.getMessage()
+            and "parking" in r.getMessage()
+        ]
+        debug_msgs = [
+            r.getMessage()
+            for r in records
+            if r.levelno == logging.DEBUG and "still parked" in r.getMessage()
+        ]
+
+        # Only ONE WARNING for the same error — dedup works
+        assert len(warning_msgs) >= 1, "expected at least one WARNING"
+        assert len(warning_msgs) == 1, (
+            f"expected exactly 1 WARNING (dedup), got {len(warning_msgs)}: "
+            f"{warning_msgs}"
+        )
+        # Subsequent identical cycles should be DEBUG
+        assert len(debug_msgs) >= 1, (
+            f"expected DEBUG-level dedup messages, got {len(debug_msgs)}"
+        )
+
+    asyncio.run(_scenario())

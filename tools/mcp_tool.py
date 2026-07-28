@@ -1910,7 +1910,7 @@ class MCPServerTask:
         "_lifecycle_started_at", "_last_tool_call_at",
         "_idle_timeout_seconds", "_max_lifetime_seconds", "_recycled_reason",
         "initialize_result", "_ping_unsupported",
-        "_reconnect_retries",
+        "_reconnect_retries", "_last_parked_error",
     )
 
     def __init__(self, name: str):
@@ -1933,6 +1933,12 @@ class MCPServerTask:
         self._elicitation: Optional[ElicitationHandler] = None
         self._registered_tool_names: list[str] = []
         self._reconnect_retries: int = 0
+        # Dedup key for parked-server warnings (#1391): when a server is parked
+        # and repeatedly fails the self-probe, the same warning would fire every
+        # _PARKED_RETRY_INTERVAL cycle.  We store the last error string and
+        # suppress identical repeats — first occurrence at WARNING, subsequent
+        # identical ones at DEBUG.
+        self._last_parked_error: Optional[str] = None
         self._auth_type: str = ""
         self._refresh_lock = asyncio.Lock()
         # MCP stdio sessions are a single JSON-RPC stream. Some servers emit
@@ -3117,6 +3123,7 @@ class MCPServerTask:
                 # a long-lived session would eventually exhaust it and
                 # permanently kill an otherwise-healthy server.
                 self._reconnect_retries = 0
+                self._last_parked_error = None  # #1391: fresh error gets fresh WARNING
                 backoff = 1.0
                 # Reset the session reference and readiness; _run_http/_run_stdio
                 # will repopulate both on successful re-entry.  Leaving
@@ -3186,6 +3193,7 @@ class MCPServerTask:
                         )
                         initial_retries = 0
                         self._reconnect_retries = 0
+                        self._last_parked_error = None  # #1391
                         backoff = 1.0
                         self._error = None
                         self._ready.clear()
@@ -3217,12 +3225,28 @@ class MCPServerTask:
 
                 self._reconnect_retries += 1
                 if self._reconnect_retries > _MAX_RECONNECT_RETRIES:
-                    logger.warning(
-                        "MCP server '%s' failed after %d reconnection attempts, "
-                        "parking; will self-probe every %ds until it recovers: %s",
-                        self.name, _MAX_RECONNECT_RETRIES,
-                        _PARKED_RETRY_INTERVAL, exc,
-                    )
+                    # Deduplicate identical parked-server warnings (#1391):
+                    # when a server is parked and the self-probe keeps failing
+                    # with the same error, only the FIRST occurrence is logged
+                    # at WARNING; subsequent identical ones drop to DEBUG so
+                    # they don't drown real errors in noise (739 duplicate
+                    # lines observed for tqmemory on startup).
+                    error_str = str(exc)
+                    if error_str == self._last_parked_error:
+                        logger.debug(
+                            "MCP server '%s' still parked (same error as "
+                            "previous cycle); will self-probe every %ds: %s",
+                            self.name, _PARKED_RETRY_INTERVAL, exc,
+                        )
+                    else:
+                        logger.warning(
+                            "MCP server '%s' failed after %d reconnection "
+                            "attempts, parking; will self-probe every %ds "
+                            "until it recovers: %s",
+                            self.name, _MAX_RECONNECT_RETRIES,
+                            _PARKED_RETRY_INTERVAL, exc,
+                        )
+                    self._last_parked_error = error_str
                     # Do NOT return — exiting the task orphans the server:
                     # nothing would ever listen for _reconnect_event again
                     # and the server would be permanently wedged for the
@@ -3247,6 +3271,11 @@ class MCPServerTask:
                         "rebuilding transport.",
                         self.name,
                     )
+                    # Note: _last_parked_error is NOT reset here — the revival
+                    # attempt will likely fail with the same error, and resetting
+                    # would cause a fresh WARNING for every cycle.  It's reset
+                    # only on successful reconnection (where _reconnect_retries
+                    # is cleared to 0).
                     # One probe attempt per wake: budget of 1 so a still-dead
                     # server parks again for another interval instead of
                     # burning 5 rapid retries each cycle.
