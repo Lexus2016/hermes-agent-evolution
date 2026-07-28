@@ -2089,6 +2089,31 @@ def _interpret_exit_code(command: str, exit_code: int) -> str | None:
     if exit_code >= 128 and exit_code in _SIGNAL_NAMES:
         return f"Process terminated by {_SIGNAL_NAMES[exit_code]}"
 
+    # Shell-level exit codes, which are about the INVOCATION rather than the
+    # program (#1452). These are command-agnostic — 127 means the shell never
+    # found anything to run, whatever the command was — so they fall through
+    # the per-command table above and previously produced no note at all.
+    #
+    # They are worth naming precisely because the failure is not in the
+    # command's logic: re-running it unchanged cannot succeed, which is the
+    # retry-spiral shape that makes terminal the dominant failure signal
+    # (#1371, 27.4% across 673 sessions). Each note therefore states the cause
+    # AND what to change, so the next attempt differs.
+    _SHELL_EXIT_HINTS = {
+        126: (
+            "Command found but not executable — check the file's permissions "
+            "(chmod +x) or whether it is a directory. Re-running unchanged "
+            "will fail identically."
+        ),
+        127: (
+            "Command not found — check the spelling, or whether the tool is "
+            "installed and on PATH. Re-running unchanged will fail "
+            "identically; try `which <cmd>` or an absolute path."
+        ),
+    }
+    if exit_code in _SHELL_EXIT_HINTS:
+        return _SHELL_EXIT_HINTS[exit_code]
+
     return None
 
 
