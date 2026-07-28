@@ -1911,6 +1911,7 @@ class MCPServerTask:
         "_idle_timeout_seconds", "_max_lifetime_seconds", "_recycled_reason",
         "initialize_result", "_ping_unsupported",
         "_reconnect_retries",
+        "_last_park_error",
     )
 
     def __init__(self, name: str):
@@ -1933,6 +1934,12 @@ class MCPServerTask:
         self._elicitation: Optional[ElicitationHandler] = None
         self._registered_tool_names: list[str] = []
         self._reconnect_retries: int = 0
+        # Tracks the last error string logged at the "parking" WARNING so that
+        # subsequent identical park-warnings are downgraded to DEBUG. Without
+        # this, a server that never recovers logs the same WARNING every
+        # _PARKED_RETRY_INTERVAL, flooding errors.log with hundreds of
+        # duplicate lines (#1391).
+        self._last_park_error: Optional[str] = None
         self._auth_type: str = ""
         self._refresh_lock = asyncio.Lock()
         # MCP stdio sessions are a single JSON-RPC stream. Some servers emit
@@ -2550,7 +2557,9 @@ class MCPServerTask:
                     # so transient prior failures do not accumulate toward
                     # permanent parking (#57604).
                     self._reconnect_retries = 0
-                    # stdio transport does not use OAuth, but we still honor
+                    # Server recovered — clear the dedup key so the next
+                    # outage logs a fresh WARNING (#1391).
+                    self._last_park_error = None
                     # _reconnect_event (e.g. future manual /mcp refresh) for
                     # consistency with _run_http.
                     return await self._wait_for_lifecycle_event()
@@ -3217,12 +3226,26 @@ class MCPServerTask:
 
                 self._reconnect_retries += 1
                 if self._reconnect_retries > _MAX_RECONNECT_RETRIES:
-                    logger.warning(
-                        "MCP server '%s' failed after %d reconnection attempts, "
-                        "parking; will self-probe every %ds until it recovers: %s",
-                        self.name, _MAX_RECONNECT_RETRIES,
-                        _PARKED_RETRY_INTERVAL, exc,
-                    )
+                    # Deduplicate the parking warning: the first time a given
+                    # error is seen it logs at WARNING; subsequent identical
+                    # errors (every _PARKED_RETRY_INTERVAL until recovery)
+                    # are downgraded to DEBUG to avoid flooding errors.log
+                    # with hundreds of identical lines (#1391).
+                    error_str = str(exc)
+                    if error_str != self._last_park_error:
+                        self._last_park_error = error_str
+                        logger.warning(
+                            "MCP server '%s' failed after %d reconnection attempts, "
+                            "parking; will self-probe every %ds until it recovers: %s",
+                            self.name, _MAX_RECONNECT_RETRIES,
+                            _PARKED_RETRY_INTERVAL, exc,
+                        )
+                    else:
+                        logger.debug(
+                            "MCP server '%s' still parked (same error as last "
+                            "probe, suppressed from WARNING): %s",
+                            self.name, exc,
+                        )
                     # Do NOT return — exiting the task orphans the server:
                     # nothing would ever listen for _reconnect_event again
                     # and the server would be permanently wedged for the
