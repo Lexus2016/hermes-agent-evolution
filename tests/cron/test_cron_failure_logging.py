@@ -117,7 +117,8 @@ def test_run_one_job_writes_failure_record_on_agent_failure(monkeypatch):
     assert latest["last_output"] == "agent output"
 
 
-def test_run_one_job_writes_success_marker(monkeypatch):
+def test_run_one_job_does_not_write_success_record(monkeypatch):
+    """#1390: successful jobs must NOT be written to failures/ directory."""
     def fake_run_job(job):
         return True, "all good", "final response", None
 
@@ -130,9 +131,9 @@ def test_run_one_job_writes_success_marker(monkeypatch):
 
     scheduler.run_one_job({"id": "j5", "name": "ok job"})
 
+    # No failure record should exist for a successful job
     latest = jobs.get_latest_failure("j5")
-    assert latest is not None
-    assert latest["success"] is True
+    assert latest is None
 
 
 def test_failure_digest_disabled_by_default(monkeypatch):

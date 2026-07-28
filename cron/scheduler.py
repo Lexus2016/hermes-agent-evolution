@@ -4883,11 +4883,12 @@ def run_one_job(job: dict, *, adapters=None, loop=None, verbose: bool = False) -
                 )
             except Exception as fe:
                 logger.error("Could not save cron failure record: %s", fe)
-        else:
-            try:
-                save_job_failure(job, success=True, output=output)
-            except Exception:
-                pass
+        # Successful jobs are NOT written to failures/ — that directory is for
+        # failure records only.  Writing success=true records there drowned real
+        # failures in noise (~100 of ~109 files were success records) and made
+        # the digest/filtering useless.  The success "marker" pattern is
+        # redundant: run_job_output already persists output and the cron DB
+        # tracks last_run_status.  Fix for #1390.
 
         # Deliver the final response to the origin/target chat.
         # If the agent responded with [SILENT], skip delivery (but
