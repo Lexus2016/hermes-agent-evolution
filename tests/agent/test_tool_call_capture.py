@@ -311,3 +311,41 @@ class TestMultiTurnSessionsAppend:
         for line in path.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 assert json.loads(line)["entries"]
+
+
+class TestPerCallTimings:
+    """duration_ms exists only during the turn (#1442).
+
+    The capture runs in finalize_turn, by which point nothing carries per-call
+    timing — so it has to be collected as calls finish and handed over. Without
+    it every entry's duration_ms is None and the failure-trajectory timestamp
+    framework has nothing to place t_fail / t_detect / t_recover against.
+    """
+
+    def test_timing_is_attached_by_call_id(self, tmp_path, capture_on):
+        msgs = [_call("terminal", {}, "c1"), _ok("c1")]
+        path = capture_turn(msgs, session_id="s", trajectory_dir=tmp_path,
+                            timings={"c1": 1234})
+        data = json.loads(path.read_text(encoding="utf-8").strip())
+        assert data["entries"][0]["duration_ms"] == 1234
+
+    def test_missing_timing_leaves_it_unset(self, tmp_path, capture_on):
+        """Absent must stay absent — a call whose duration was not recorded is
+        not a call that took zero milliseconds."""
+        msgs = [_call("terminal", {}, "c1"), _ok("c1")]
+        path = capture_turn(msgs, session_id="s", trajectory_dir=tmp_path, timings={})
+        data = json.loads(path.read_text(encoding="utf-8").strip())
+        assert "duration_ms" not in data["entries"][0]
+
+    def test_timings_map_to_the_right_calls(self, tmp_path, capture_on):
+        msgs = [_call("read_file", {}, "a"), _ok("a"),
+                _call("terminal", {}, "b"), _ok("b")]
+        path = capture_turn(msgs, session_id="s", trajectory_dir=tmp_path,
+                            timings={"a": 10, "b": 900})
+        entries = json.loads(path.read_text(encoding="utf-8").strip())["entries"]
+        by_tool = {e["tool"]: e.get("duration_ms") for e in entries}
+        assert by_tool == {"read_file": 10, "terminal": 900}
+
+    def test_extract_without_timings_still_works(self):
+        calls = extract_tool_calls([_call("read_file", {}, "c1"), _ok("c1")])
+        assert calls[0]["duration_ms"] is None
