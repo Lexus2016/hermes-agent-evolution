@@ -586,6 +586,214 @@ class TestSearchHints:
 
 
 # ---------------------------------------------------------------------------
+# #1486 — no-match enrichment for search_files
+# ---------------------------------------------------------------------------
+
+
+class TestNoMatchHint:
+    """search_files should enrich a zero-result response with what exists.
+
+    When a valid pattern matches nothing, the bare {total_count: 0} response
+    gives the agent no actionable info, causing blind retries (#1486: 95
+    file-not-found events/7d, 27-deep spirals). The fix adds a _no_match_hint
+    field listing what *does* exist in the search directory.
+    """
+
+    def setup_method(self):
+        """Clear read/search tracker between tests."""
+        from tools.file_tools import _read_tracker
+        _read_tracker.clear()
+
+    def test_build_no_match_hint_lists_entries(self, tmp_path):
+        """_build_no_match_hint returns a string listing directory entries."""
+        from tools.file_tools import _build_no_match_hint
+
+        (tmp_path / "alpha.py").touch()
+        (tmp_path / "beta.py").touch()
+        (tmp_path / "subdir").mkdir()
+
+        hint = _build_no_match_hint(str(tmp_path), "nonexistent", "content", tmp_path)
+        assert hint is not None
+        assert "matched nothing" in hint
+        assert "subdir/" in hint
+        assert "alpha.py" in hint
+        assert "beta.py" in hint
+
+    def test_build_no_match_hint_file_path(self, tmp_path):
+        """When the path is a single file, hint says to read_file directly."""
+        from tools.file_tools import _build_no_match_hint
+
+        f = tmp_path / "target.py"
+        f.touch()
+
+        hint = _build_no_match_hint(str(f), "xyz", "content", f)
+        assert hint is not None
+        assert "single file" in hint
+        assert "read_file" in hint
+
+    def test_build_no_match_hint_nonexistent_path(self):
+        """Nonexistent path returns None (path-not-found already handled elsewhere)."""
+        from tools.file_tools import _build_no_match_hint
+
+        hint = _build_no_match_hint("/nonexistent/path", "xyz", "content", None)
+        assert hint is None
+
+    def test_build_no_match_hint_empty_dir(self, tmp_path):
+        """Empty directory returns a hint saying so."""
+        from tools.file_tools import _build_no_match_hint
+
+        empty_dir = tmp_path / "empty_test_dir"
+        empty_dir.mkdir()
+
+        hint = _build_no_match_hint(str(empty_dir), "xyz", "content", empty_dir)
+        assert hint is not None
+        assert "no visible entries" in hint
+
+    def test_build_no_match_hint_files_target(self, tmp_path):
+        """File search mode hint suggests broader glob or content search."""
+        from tools.file_tools import _build_no_match_hint
+
+        (tmp_path / "alpha.py").touch()
+
+        hint = _build_no_match_hint(str(tmp_path), "nonexistent", "files", tmp_path)
+        assert hint is not None
+        assert "file search" in hint
+        assert "broader glob" in hint
+
+    def test_build_no_match_hint_content_target(self, tmp_path):
+        """Content search mode hint suggests different regex or file listing."""
+        from tools.file_tools import _build_no_match_hint
+
+        (tmp_path / "alpha.py").touch()
+
+        hint = _build_no_match_hint(str(tmp_path), "nonexistent", "content", tmp_path)
+        assert hint is not None
+        assert "content search" in hint
+        assert "different regex" in hint
+
+    def test_build_no_match_hint_hides_dotfiles(self, tmp_path):
+        """Hidden entries (starting with .) are excluded from the listing."""
+        from tools.file_tools import _build_no_match_hint
+
+        (tmp_path / ".hidden").touch()
+        (tmp_path / "visible.py").touch()
+
+        hint = _build_no_match_hint(str(tmp_path), "xyz", "content", tmp_path)
+        assert hint is not None
+        assert "visible.py" in hint
+        assert ".hidden" not in hint
+
+    @patch("tools.file_tools._get_file_ops")
+    def test_search_tool_adds_no_match_hint_on_first_miss(
+        self, mock_get, tmp_path, monkeypatch
+    ):
+        """search_tool includes _no_match_hint on the first empty result."""
+        from tools.file_tools import search_tool, _read_tracker
+
+        _read_tracker.clear()
+
+        (tmp_path / "alpha.py").touch()
+        (tmp_path / "beta.py").touch()
+
+        mock_ops = MagicMock()
+        result_obj = MagicMock()
+        result_obj.to_dict.side_effect = lambda **kw: {"total_count": 0}
+        result_obj.matches = []
+        mock_ops.search.return_value = result_obj
+        mock_get.return_value = mock_ops
+
+        monkeypatch.setattr(
+            "tools.file_tools._resolve_path_for_task",
+            lambda p, tid: tmp_path,
+        )
+
+        raw = search_tool(pattern="nonexistent", path=str(tmp_path))
+        result = json.loads(raw)
+        assert result["total_count"] == 0
+        assert "_no_match_hint" in result
+        assert "alpha.py" in result["_no_match_hint"]
+
+    @patch("tools.file_tools._get_file_ops")
+    def test_search_tool_no_hint_on_second_miss(
+        self, mock_get, tmp_path, monkeypatch
+    ):
+        """_no_match_hint only appears on the FIRST empty result, not second."""
+        from tools.file_tools import search_tool, _read_tracker
+
+        _read_tracker.clear()
+
+        mock_ops = MagicMock()
+        result_obj = MagicMock()
+        result_obj.to_dict.side_effect = lambda **kw: {"total_count": 0}
+        result_obj.matches = []
+        mock_ops.search.return_value = result_obj
+        mock_get.return_value = mock_ops
+
+        monkeypatch.setattr(
+            "tools.file_tools._resolve_path_for_task",
+            lambda p, tid: tmp_path,
+        )
+
+        raw1 = search_tool(pattern="nonexistent", path=str(tmp_path))
+        result1 = json.loads(raw1)
+        assert "_no_match_hint" in result1
+
+        raw2 = search_tool(pattern="other", path=str(tmp_path))
+        result2 = json.loads(raw2)
+        assert "_no_match_hint" not in result2
+
+    @patch("tools.file_tools._get_file_ops")
+    def test_search_tool_spiral_directive_after_3_misses(
+        self, mock_get, tmp_path, monkeypatch
+    ):
+        """After 3 consecutive empty results, _search_directive appears."""
+        from tools.file_tools import search_tool, _read_tracker
+
+        _read_tracker.clear()
+
+        mock_ops = MagicMock()
+        result_obj = MagicMock()
+        result_obj.to_dict.side_effect = lambda **kw: {"total_count": 0}
+        result_obj.matches = []
+        mock_ops.search.return_value = result_obj
+        mock_get.return_value = mock_ops
+
+        monkeypatch.setattr(
+            "tools.file_tools._resolve_path_for_task",
+            lambda p, tid: tmp_path,
+        )
+
+        for i in range(3):
+            search_tool(pattern=f"pattern_{i}", path=str(tmp_path))
+
+        raw = search_tool(pattern="pattern_3", path=str(tmp_path))
+        result = json.loads(raw)
+        assert "_search_directive" in result
+        assert "SWITCH STRATEGY" in result["_search_directive"]
+
+    @patch("tools.file_tools._get_file_ops")
+    def test_search_tool_no_hint_when_results_exist(self, mock_get):
+        """No _no_match_hint when search finds results."""
+        from tools.file_tools import search_tool, _read_tracker
+
+        _read_tracker.clear()
+
+        mock_ops = MagicMock()
+        result_obj = MagicMock()
+        result_obj.to_dict.side_effect = lambda **kw: {
+            "total_count": 2,
+            "matches": [{"path": "a.py", "line": 1, "content": "x"}],
+        }
+        result_obj.matches = []
+        mock_ops.search.return_value = result_obj
+        mock_get.return_value = mock_ops
+
+        raw = search_tool(pattern="found_something")
+        result = json.loads(raw)
+        assert "_no_match_hint" not in result
+
+
+# ---------------------------------------------------------------------------
 # PATCH_SCHEMA shape tests (issue #15524)
 # ---------------------------------------------------------------------------
 
