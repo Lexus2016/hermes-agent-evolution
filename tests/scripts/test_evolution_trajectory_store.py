@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from evolution_trajectory_store import (  # noqa: E402
     TrajectoryStore,
+    classify_by_tools,
     classify_task_type,
     extract_success_patterns,
     format_proposals,
@@ -208,3 +209,101 @@ class TestFormatProposals:
         }]
         out = format_proposals(props)
         assert "1 success pattern" in out and "run_tests" in out and "coding" in out
+
+
+class TestClassifyByTools:
+    """The #1363 capture stores no prompt text, so classification has to come
+    from what the trajectory DID (#1474)."""
+
+    def test_editing_and_executing_is_coding(self):
+        assert classify_by_tools(["read_file", "patch", "terminal"]) == "coding"
+
+    def test_browsing_without_editing_is_research(self):
+        assert classify_by_tools(["web_search", "web_extract", "read_file"]) == "research"
+
+    def test_browsing_then_editing_is_coding_not_research(self):
+        """Reading the web on the way to a change is still a change."""
+        assert classify_by_tools(["web_search", "patch"]) == "coding"
+
+    def test_reading_only_is_exploration(self):
+        assert classify_by_tools(["read_file", "search_files"]) == "exploration"
+
+    def test_shell_only_is_operations(self):
+        assert classify_by_tools(["terminal"]) == "operations"
+
+    def test_unknown_tools_are_general(self):
+        assert classify_by_tools(["something_else"]) == "general"
+
+    def test_empty_is_general(self):
+        assert classify_by_tools([]) == "general"
+
+    def test_case_insensitive(self):
+        assert classify_by_tools(["PATCH"]) == "coding"
+
+
+class TestFromCaptureDir:
+    """Reading the source that is actually written (#1474)."""
+
+    @staticmethod
+    def _write(d, session, turns):
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / f"2026-07-28_{session}.jsonl"
+        with open(p, "a", encoding="utf-8") as fh:
+            for completed, tools in turns:
+                rec = {"date": "2026-07-28", "session_id": session,
+                       "entries": [{"tool": t, "result_status": "success"} for t in tools]}
+                if completed is not None:
+                    rec["completed"] = completed
+                fh.write(json.dumps(rec) + "\n")
+        return p
+
+    def test_indexes_successful_turns(self, tmp_path):
+        self._write(tmp_path, "s1", [(True, ["read_file", "patch"])])
+        store = TrajectoryStore.from_capture_dir(tmp_path)
+        assert store.count() == 1
+        assert store.task_types() == ["coding"]
+
+    def test_failed_turns_excluded(self, tmp_path):
+        self._write(tmp_path, "s1", [(False, ["terminal"]), (True, ["patch"])])
+        assert TrajectoryStore.from_capture_dir(tmp_path).count() == 1
+
+    def test_unrecorded_outcome_excluded(self, tmp_path):
+        """`completed` is tri-state: absent means 'not recorded', which must not
+        pad a store of SUCCESSFUL trajectories."""
+        self._write(tmp_path, "s1", [(None, ["patch"])])
+        assert TrajectoryStore.from_capture_dir(tmp_path).count() == 0
+
+    def test_several_sessions_indexed_together(self, tmp_path):
+        self._write(tmp_path, "s1", [(True, ["patch"])])
+        self._write(tmp_path, "s2", [(True, ["read_file"])])
+        store = TrajectoryStore.from_capture_dir(tmp_path)
+        assert store.count() == 2
+        assert set(store.task_types()) == {"coding", "exploration"}
+
+    def test_turn_with_no_entries_skipped(self, tmp_path):
+        self._write(tmp_path, "s1", [(True, [])])
+        assert TrajectoryStore.from_capture_dir(tmp_path).count() == 0
+
+    def test_malformed_lines_skipped(self, tmp_path):
+        p = self._write(tmp_path, "s1", [(True, ["patch"])])
+        with open(p, "a", encoding="utf-8") as fh:
+            fh.write("not json\n")
+            fh.write(json.dumps({"completed": True}) + "\n")
+        assert TrajectoryStore.from_capture_dir(tmp_path).count() == 1
+
+    def test_missing_directory_is_empty(self, tmp_path):
+        assert TrajectoryStore.from_capture_dir(tmp_path / "absent").count() == 0
+
+    def test_legacy_json_files_ignored(self, tmp_path):
+        """The funnel's own <date>.json self-record is not a trajectory."""
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "2026-07-28.json").write_text(
+            json.dumps({"completed": True, "entries": [{"tool": "evolution_funnel"}]}),
+            encoding="utf-8")
+        assert TrajectoryStore.from_capture_dir(tmp_path).count() == 0
+
+    def test_patterns_extract_from_captured_runs(self, tmp_path):
+        """End to end: capture format in, proposals out."""
+        self._write(tmp_path, "s1", [(True, ["read_file", "patch"])] * 3)
+        store = TrajectoryStore.from_capture_dir(tmp_path)
+        assert extract_success_patterns(store, min_support=3)

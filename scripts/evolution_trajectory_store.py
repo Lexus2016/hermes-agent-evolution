@@ -9,17 +9,34 @@ trajectories, indexed by task type, plus an extractor that turns recurring
 successful patterns into improvement proposals (AgentTrek arXiv:2412.09605:
 synthesized successful trajectories bootstrap new capabilities).
 
-This module is that positive-signal core. It is a thin store over the EXISTING
-``trajectory_samples.jsonl`` written by ``agent.trajectory.save_trajectory`` (the
-completed-runs file; failures go to ``failed_trajectories.jsonl``). It does NOT
-capture or replay anything live — capture already exists (``save_trajectory``),
-per-step replay already exists (``agent.agent_judge.replay_trace_steps`` /
-``score_replayed_trace``, PR #324), and negative mining already exists
+This module is that positive-signal core. It does NOT capture or replay anything
+live — per-step replay already exists (``agent.agent_judge.replay_trace_steps`` /
+``score_replayed_trace``, PR #324) and negative mining already exists
 (``evolution_trace_miner``, #248). The net-new slice is: index successful
 trajectories by task type, query by type, and emit structured proposals from
 recurring successful tool patterns.
 
-Schema reused verbatim from ``save_trajectory``::
+Two sources (#1474)
+-------------------
+It was written against ``trajectory_samples.jsonl`` from
+``agent.trajectory.save_trajectory``. **Nothing writes that file**:
+``save_trajectories`` defaults to ``False`` and lands in the process CWD, so
+this module read an empty path and had no production callers — dead in both
+directions at once.
+
+Since #1363 the live source is ``~/.hermes/evolution/trajectories/*.jsonl``,
+written by ``agent/tool_call_capture.py``: one JSON object per turn, holding
+redacted call metadata plus a task-level ``completed`` outcome.
+:meth:`TrajectoryStore.from_capture_dir` reads that, and the CLI now defaults to
+it; the legacy path still works when named explicitly.
+
+The two sources classify differently by necessity. The capture stores **no
+prompt text** — the task descriptor is user prose — so :func:`classify_task_type`
+has nothing to read there and :func:`classify_by_tools` groups by what the
+trajectory actually did instead. Arguably the better signal: a run that edits
+files and executes code is coding work whether or not the request said "code".
+
+Legacy schema, reused verbatim from ``save_trajectory``::
 
     {"conversations": [ {"from": "system", "value": ...},
                         {"from": "human",  "value": <task prompt>},
@@ -141,12 +158,50 @@ def trajectory_tools(conversations: List[Dict[str, Any]]) -> List[str]:
     return tools
 
 
+def classify_by_tools(tools: List[str]) -> str:
+    """Classify a trajectory by WHAT IT DID, not by how the task was worded.
+
+    The #1363 capture stores no prompt text — deliberately, since the task
+    descriptor is user prose — so :func:`classify_task_type` has nothing to read
+    there. Classifying by the tools actually used is both possible and arguably
+    better: a task that edits files and runs tests is coding work whether or not
+    the person said the word "code".
+
+    Ordered most specific first: deployment tooling implies deployment even
+    when files were also edited, whereas an edit plus a test run without any
+    deployment tooling is coding.
+    """
+    used = {t.lower() for t in tools}
+
+    def _any(*names: str) -> bool:
+        return any(n in used for n in names)
+
+    if _any("browser_navigate", "web_search", "web_extract") and not _any(
+        "patch", "write_file"
+    ):
+        return "research"
+    if _any("patch", "write_file", "execute_code"):
+        return "coding"
+    if _any("read_file", "search_files", "repo_map"):
+        return "exploration"
+    if _any("terminal"):
+        return "operations"
+    return "general"
+
+
 class TrajectoryStore:
     """In-memory index of successful trajectories, keyed by task type.
 
-    Built from ``trajectory_samples.jsonl`` (successful runs). Each indexed
-    record is a small projection of the on-disk entry — ``task_type`` and the
-    de-duplicated set of tools used — so no raw prompt/answer text is retained
+    Two sources, one index:
+
+    * :meth:`from_jsonl` — the legacy ``trajectory_samples.jsonl`` ShareGPT
+      format written by ``agent.save_trajectories``, classified by prompt text.
+    * :meth:`from_capture_dir` — the ``*.jsonl`` records written by the #1363
+      capture, classified by tools used (see :func:`classify_by_tools`), since
+      those records carry no prompt text by design.
+
+    Each indexed record is a small projection — ``task_type`` and the
+    de-duplicated set of tools — so no raw prompt/answer text is retained
     beyond what classification needs.
     """
 
@@ -189,9 +244,53 @@ class TrajectoryStore:
             store._add(conversations)
         return store
 
+    @classmethod
+    def from_capture_dir(cls, directory: Any) -> "TrajectoryStore":
+        """Build a store from the #1363 capture directory.
+
+        Reads ``*.jsonl`` — one JSON object per turn — and indexes only turns
+        recorded as successful. ``completed`` is tri-state there: ``True`` and
+        ``False`` are recorded outcomes, and ABSENT means "not recorded" (the
+        pre-#1363 cron-stage trajectories). Absent is skipped rather than
+        assumed successful; a store of successful trajectories must not be
+        padded with runs whose outcome nobody wrote down.
+        """
+        store = cls()
+        d = Path(directory)
+        if not d.is_dir():
+            return store
+        for path in sorted(d.glob("*.jsonl")):
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                if not isinstance(rec, dict) or rec.get("completed") is not True:
+                    continue
+                entries = rec.get("entries")
+                if not isinstance(entries, list):
+                    continue
+                tools = [
+                    str(e.get("tool"))
+                    for e in entries
+                    if isinstance(e, dict) and e.get("tool")
+                ]
+                if tools:
+                    store._add_tools(tools, classify_by_tools(tools))
+        return store
+
     def _add(self, conversations: List[Dict[str, Any]]) -> None:
         task_type = classify_task_type(_first_human_prompt(conversations))
-        tools = trajectory_tools(conversations)
+        self._add_tools(trajectory_tools(conversations), task_type)
+
+    def _add_tools(self, tools: List[str], task_type: str) -> None:
         self._by_type.setdefault(task_type, []).append(
             {"tools": tools, "tool_set": frozenset(tools)}
         )
@@ -282,8 +381,23 @@ def _iter_records(store: TrajectoryStore) -> Iterator[Dict[str, Any]]:  # pragma
             yield {"task_type": task_type, **rec}
 
 
+def _default_capture_dir() -> Path:
+    """Where the #1363 capture writes, matching evolution_trajectory_logger."""
+    import os
+
+    env = os.environ.get("EVOLUTION_PROFILE_DIR", "").strip()
+    if env:
+        return Path(env) / "trajectories"
+    hh = os.environ.get("HERMES_HOME", "").strip()
+    return (
+        Path(hh) / "evolution" / "trajectories"
+        if hh
+        else Path.home() / ".hermes" / "evolution" / "trajectories"
+    )
+
+
 def main(argv: List[str]) -> int:
-    path = "trajectory_samples.jsonl"
+    path = ""
     min_support = DEFAULT_MIN_SUPPORT
     for a in argv[1:]:
         if a.startswith("--min-support="):
@@ -294,7 +408,17 @@ def main(argv: List[str]) -> int:
         elif not a.startswith("--"):
             path = a
 
-    store = TrajectoryStore.from_jsonl(path)
+    # Default to the #1363 capture directory, which is what actually gets
+    # written. The legacy trajectory_samples.jsonl is still accepted when named
+    # explicitly, but nothing writes it: agent.save_trajectories defaults off
+    # and lands in the process CWD. Reading it by default is why this module had
+    # no live source (#1474).
+    if path:
+        store = TrajectoryStore.from_jsonl(path)
+    else:
+        capture_dir = _default_capture_dir()
+        path = str(capture_dir)
+        store = TrajectoryStore.from_capture_dir(capture_dir)
     proposals = extract_success_patterns(store, min_support=min_support)
 
     payload = {
