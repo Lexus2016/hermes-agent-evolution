@@ -224,5 +224,15 @@ class TestGateFlags:
         from evolution.lib.stage_gate import compute_gate_rates, format_gate_rates
 
         out = format_gate_rates(compute_gate_rates(self._recs(ACCEPT, REFINE)))
-        assert "[stage-gate]" in out
-        assert "local_triage" in out
+        assert "gate[local_triage]" in out
+        assert "refine 50%" in out
+        assert "restart 0%" in out
+        assert "(n=2)" in out
+
+    def test_format_carries_no_pipe(self):
+        """The health line's flags must remain the last `|`-separated segment —
+        `evolution_watchdog.check_health` keys on it ending in `| healthy`."""
+        from evolution.lib.stage_gate import compute_gate_rates, format_gate_rates
+
+        out = format_gate_rates(compute_gate_rates(self._recs(ACCEPT, RESTART)))
+        assert "|" not in out

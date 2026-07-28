@@ -244,7 +244,16 @@ def compute_gate_rates(records: list[dict[str, Any]]) -> dict[str, dict[str, Any
     """
     by_stage: dict[str, dict[str, Any]] = {}
     for rec in records:
-        stage = rec.get("stage") or "unknown"
+        # Coerced to str so the key type is guaranteed homogeneous. A ledger
+        # line carrying a non-string stage (a second writer, a hand-edited
+        # line, a GateDecision built directly — the dataclass validates
+        # nothing) would otherwise make `sorted(rates.items())` raise
+        # TypeError in gate_flags. compute_health catches Exception broadly,
+        # so that would silently drop the rates AND the alert, reporting
+        # "healthy" while a real restart breach sat in the ledger — and the
+        # ledger is append-only and never rotated, so one bad line would
+        # blind the feature permanently.
+        stage = str(rec.get("stage") or "unknown")
         bucket = by_stage.setdefault(
             stage, {"total": 0, ACCEPT: 0, REFINE: 0, RESTART: 0}
         )
@@ -281,12 +290,21 @@ def gate_flags(
 
 
 def format_gate_rates(rates: dict[str, dict[str, Any]]) -> str:
-    """One-line summary per boundary for the evolution-health sidecar."""
+    """Per-boundary rates as they appear in the evolution-health line body.
+
+    Emitted WITHOUT a leading marker and with no trailing ``|``: the health
+    line's flags must stay the last segment after the final pipe, because
+    ``evolution_watchdog.check_health`` keys on the line ending in
+    ``| healthy``. This belongs beside ``effort_budget`` in the body, under the
+    same constraint.
+
+    Returns ``""`` for an empty mapping so the caller can concatenate it
+    unconditionally.
+    """
     if not rates:
         return ""
-    parts = [
-        f"{stage}(n={b['total']} refine={b['stage_refine_rate']:.0%} "
-        f"restart={b['stage_restart_rate']:.0%})"
+    return " ".join(
+        f"gate[{stage}]=refine {b['stage_refine_rate']:.0%}/"
+        f"restart {b['stage_restart_rate']:.0%} (n={b['total']})"
         for stage, b in sorted(rates.items())
-    ]
-    return "[stage-gate] " + " ".join(parts)
+    )

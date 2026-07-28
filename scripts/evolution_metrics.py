@@ -209,12 +209,17 @@ def format_health(h: Dict[str, Any]) -> str:
     gate = ""
     rates = h.get("stage_gate_rates") or {}
     if rates:
-        # Same rule as effort_budget: body only, never the tail (#1340).
-        gate = " " + " ".join(
-            f"gate[{stage}]=refine {b['stage_refine_rate']:.0%}/"
-            f"restart {b['stage_restart_rate']:.0%} (n={b['total']})"
-            for stage, b in sorted(rates.items())
-        )
+        # Rendered by stage_gate's own formatter so the shape lives next to the
+        # data that defines it. Same rule as effort_budget: body, never the
+        # tail (#1340). Lazily imported for the same reason compute_health
+        # imports it lazily — the evolution package is not always available.
+        try:
+            from evolution.lib.stage_gate import format_gate_rates
+
+            rendered = format_gate_rates(rates)
+            gate = f" {rendered}" if rendered else ""
+        except ImportError:
+            gate = ""
     return (
         f"[evolution-metrics] {h['cycles_active']}/{h['cycles_total']} active cycles: "
         f"success={_pct(h['cycle_success_rate'])} "
