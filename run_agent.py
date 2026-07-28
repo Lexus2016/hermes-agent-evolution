@@ -787,6 +787,12 @@ class AIAgent:
         if hasattr(self, "_experience_block"):
             self._experience_block = None
 
+        # Same for the ERL heuristic block (#1361): stable for a conversation,
+        # re-read at a real session boundary so a new session picks up
+        # heuristics extracted since.
+        if hasattr(self, "_erl_block"):
+            self._erl_block = None
+
         # Turn counter (added after reset_session_state was first written — #2635)
         self._user_turn_count = 0
 

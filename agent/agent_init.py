@@ -1632,10 +1632,20 @@ def init_agent(
     # are injected into the context tier at session start (once per session —
     # prompt-cache safe).  Zero token cost when the bank is empty.
     agent._experience_injection = bool(_agent_section.get("experience_injection", False))
+
+    # ERL heuristic injection toggle (#1361). Default False. When True, the
+    # top-ranked heuristics distilled from the agent's own recorded
+    # trajectories (#1359/#1360) are injected into the context tier at session
+    # start — cached per session, so prompt-cache safe. Separate flag from
+    # experience_injection: the two distil different inputs and either can run
+    # without the other.
+    agent._erl_prompt_injection = bool(_agent_section.get("erl_prompt_injection", False))
     # Session-scoped cache stored on the agent. Empty string is resolved;
     # None means the bank has not been read for this session yet.
     # Сесійний кеш на агенті: порожній рядок уже обчислено, None — ще ні.
     agent._experience_block: Optional[str] = None
+    # Same session-scoped cache for the ERL heuristic block (#1361).
+    agent._erl_block: Optional[str] = None
 
     # Local Python toolchain probe toggle.  Default True.  When False,
     # the probe is skipped entirely (no subprocess calls, no system-prompt

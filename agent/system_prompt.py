@@ -554,6 +554,46 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
         if _exp_block:
             context_parts.append(_exp_block)
 
+    # ERL heuristics distilled from the agent's own recorded trajectories
+    # (#1361, Child C of #1303; config agent.erl_prompt_injection, default
+    # False). Cached per session exactly like the experience block above, so
+    # the prompt prefix stays byte-identical across a conversation and the
+    # provider cache is never broken mid-session.
+    #
+    # Deliberately a SEPARATE block from the experience bank rather than merged
+    # into it: they distil different inputs (this reads the #1363 tool-call
+    # capture, the bank reads harvested sessions) and each carries its own
+    # config gate, so an operator can run either without the other. They are
+    # adjacent in purpose and should be reviewed together if both prove useful.
+    if getattr(agent, "_erl_prompt_injection", False):
+        _erl_block = getattr(agent, "_erl_block", None)
+        if _erl_block is None:
+            try:
+                import sys as _sys
+                from pathlib import Path as _Path
+
+                _sys.path.insert(
+                    0, str(_Path(__file__).resolve().parents[1] / "scripts")
+                )
+                from evolution_heuristic_retrieve import (
+                    format_for_injection,
+                    load_heuristics,
+                    retrieve,
+                )
+
+                _stored = load_heuristics()
+                _erl_block = (
+                    format_for_injection(retrieve("", _stored)) if _stored else ""
+                )
+            except Exception:
+                _erl_block = ""  # heuristics must never block prompt build
+            try:
+                agent._erl_block = _erl_block
+            except Exception:
+                pass
+        if _erl_block:
+            context_parts.append(_erl_block)
+
     # ── Volatile tier (changes per session/turn — never cached) ───
     volatile_parts: List[str] = []
 
