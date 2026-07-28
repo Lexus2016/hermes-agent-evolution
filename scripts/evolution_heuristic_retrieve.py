@@ -138,6 +138,22 @@ def _dedupe(heuristics: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _heuristic_id(h: Dict[str, Any]) -> str:
+    """Stable identifier for a heuristic so retrievals accumulate in the
+    utility log (#1480). Uses the dedup key (task_type, pattern) hashed to a
+    short hex — same identity as _dedupe, so repeated retrievals of the same
+    claim are counted together regardless of prose variation.
+    """
+    import hashlib
+
+    key = (
+        str(h.get("task_type", "")),
+        tuple(h.get("pattern", []) or []),
+    )
+    raw = json.dumps(key, sort_keys=True, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+
+
 def retrieve(
     task_context: str,
     heuristics: Sequence[Dict[str, Any]],
@@ -145,6 +161,8 @@ def retrieve(
     top_k: int = DEFAULT_TOP_K,
     task_type: str = "",
     judge: Optional[Judge] = None,
+    task_key: str = "",
+    evolution_dir: Optional[Path] = None,
 ) -> List[RankedHeuristic]:
     """Return the top-k heuristics for ``task_context``, best first.
 
@@ -152,6 +170,10 @@ def retrieve(
     raises — ranking falls back to the measured evidence. A judge that fails
     must degrade to ranked-by-evidence, never to empty: an injection path that
     silently returns nothing looks exactly like one with nothing to say.
+
+    When ``task_key`` is provided, each retrieved heuristic is logged to the
+    retrieval-utility store (#1480) so downstream outcome can later score it.
+    Utility logging is best-effort and never raises.
     """
     candidates = _dedupe([h for h in heuristics if isinstance(h, dict)])
     if not candidates or top_k <= 0:
@@ -171,7 +193,9 @@ def retrieve(
                 source = "evidence"
         if score is None:
             score = _evidence_score(h, task_type)
-        ranked.append(RankedHeuristic(heuristic=h, score=round(score, 4), ranked_by=source))
+        ranked.append(
+            RankedHeuristic(heuristic=h, score=round(score, 4), ranked_by=source)
+        )
 
     # Highest score first; ties broken by evidence so the order is total and
     # stable rather than dependent on dict iteration.
@@ -183,7 +207,27 @@ def retrieve(
             str(r.heuristic.get("text", "")),
         )
     )
-    return ranked[:top_k]
+    selected = ranked[:top_k]
+
+    # Log retrievals to the utility store (#1480). Best-effort, never breaks
+    # the retrieval path — instrumentation must not be able to discard a
+    # retrieval result.
+    if task_key:
+        try:
+            from evolution_retrieval_utility import log_retrieval
+
+            for r in selected:
+                log_retrieval(
+                    _heuristic_id(r.heuristic),
+                    record_type="heuristic",
+                    task_key=task_key,
+                    task_type=task_type,
+                    evolution_dir=evolution_dir,
+                )
+        except Exception:
+            pass
+
+    return selected
 
 
 def format_for_injection(ranked: Sequence[RankedHeuristic]) -> str:
@@ -243,21 +287,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     context = " ".join(a for a in args if not a.startswith("--")).strip()
     stored = load_heuristics(evolution_dir)
     if not stored:
-        print("[heuristics] none stored — run evolution_heuristic_extract first",
-              file=sys.stderr)
+        print(
+            "[heuristics] none stored — run evolution_heuristic_extract first",
+            file=sys.stderr,
+        )
         return 1
 
     ranked = retrieve(context, stored, top_k=top_k, task_type=task_type)
-    print(json.dumps(
-        {
-            "schema_version": SCHEMA_VERSION,
-            "task_type": task_type,
-            "considered": len(stored),
-            "selected": [r.to_dict() for r in ranked],
-        },
-        indent=2,
-        sort_keys=True,
-    ))
+    print(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "task_type": task_type,
+                "considered": len(stored),
+                "selected": [r.to_dict() for r in ranked],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     print(format_for_injection(ranked), file=sys.stderr)
     return 0
 

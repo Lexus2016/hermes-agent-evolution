@@ -690,6 +690,48 @@ def main(argv: list[str]) -> int:
     except Exception:
         pass
 
+    # Retrieval-utility outcome backfill (#1480) — for trajectories completed
+    # since the last cycle, propagate the task outcome back to any utility-log
+    # entries sharing the same task_key. This closes the loop: retrieval logged
+    # at task start, outcome recorded at task end, utility scored here.
+    try:
+        from evolution_retrieval_utility import update_outcome
+        from evolution_trajectory_logger import _default_trajectory_dir, load_trajectory
+
+        _traj_dir = _default_trajectory_dir()
+        if _traj_dir.is_dir():
+            _backfilled = 0
+            for _tf in sorted(_traj_dir.glob("*.jsonl")):
+                try:
+                    _lines = _tf.read_text(encoding="utf-8").splitlines()
+                except OSError:
+                    continue
+                for _line in _lines:
+                    _line = _line.strip()
+                    if not _line:
+                        continue
+                    try:
+                        _rec = json.loads(_line)
+                    except (ValueError, TypeError):
+                        continue
+                    if (
+                        isinstance(_rec, dict)
+                        and _rec.get("task_key")
+                        and _rec.get("completed") is not None
+                    ):
+                        _backfilled += update_outcome(
+                            _rec["task_key"],
+                            bool(_rec["completed"]),
+                            evolution_dir=evolution_dir,
+                        )
+            if _backfilled:
+                (evolution_dir / f"retrieval-utility-backfill-{date}.txt").write_text(
+                    f"backfilled {_backfilled} utility entries from trajectories\n",
+                    encoding="utf-8",
+                )
+    except Exception:
+        pass
+
     # Deterministic no_agent job: empty stdout = silent/healthy. Print a compact
     # one-liner only so the run log shows what was recorded.
     print(
