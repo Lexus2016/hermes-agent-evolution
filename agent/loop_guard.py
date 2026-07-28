@@ -631,9 +631,58 @@ def _failure_category(content: Any) -> Optional[str]:
     return hit[0] if hit else None
 
 
+def _structural_failure(content: str) -> Optional[bool]:
+    """Read the authoritative status out of a tool's JSON envelope (#1453).
+
+    Every Hermes tool serialises its result as a JSON envelope carrying the real
+    status: ``exit_code`` for terminal/code-exec, ``error`` / ``success`` /
+    ``status`` for the rest. Returns True/False from that field, or None when
+    the content is not a recognisable envelope — so the caller can fall back to
+    the marker scan for plain-string results.
+
+    This exists because the marker scan alone MISSES structural failures. Its
+    exit-code regex matches the prose form ``exit code: 1``; the envelope uses
+    the key ``"exit_code"``, with an underscore, which that pattern never
+    matches. So ``{"exit_code": 2}`` — an unambiguous failure — read as success
+    unless its error text happened to contain a known marker word.
+
+    That is why the guard stayed silent through runs of genuinely failing
+    terminal calls: three failures with different error wording produced one
+    recognised failure, never reaching the threshold. ``introspection_extract``
+    was fixed to read the envelope in #347; this brings the loop guard into
+    agreement, so the digest and the guard stop disagreeing about what a
+    failure is.
+    """
+    stripped = content.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return None
+    try:
+        data = json.loads(stripped)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if "exit_code" in data:
+        try:
+            return int(data["exit_code"]) != 0
+        except (TypeError, ValueError):
+            return None
+    if data.get("error") or str(data.get("status", "")).lower() == "error":
+        return True
+    for ok_key in ("success", "ok"):
+        if ok_key in data:
+            return not bool(data[ok_key])
+    return None
+
+
 def _looks_like_failure(content: Any) -> bool:
     if not isinstance(content, str) or not content:
         return False
+    # Structured status first — it is authoritative where present, and the
+    # marker scan cannot see it (#1453).
+    structural = _structural_failure(content)
+    if structural is not None:
+        return structural
     low = content.lower()
     if any(m in low for m in _FAILURE_MARKERS):
         return True

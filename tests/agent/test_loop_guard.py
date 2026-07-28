@@ -11,6 +11,7 @@ import json
 from agent.loop_guard import (
     CRON_LOOP_GUARD_HARD_STOP_THRESHOLD,
     INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD,
+    _looks_like_failure,
     current_run_signature,
     maybe_nudge,
     maybe_refusal_nudge,
@@ -806,3 +807,71 @@ class TestMaybeRefusalNudge:
         assert nudge is not None
         # Should classify the first refusal
         assert "[loop-guard]" in nudge
+
+
+class TestStructuralFailureDetection:
+    """The guard must read the tool's own status field, not guess from prose.
+
+    Its exit-code regex matches the prose form `exit code: 1`; every Hermes tool
+    serialises `"exit_code"` with an underscore, which that pattern never
+    matches. So `{"exit_code": 2}` — an unambiguous failure — read as SUCCESS
+    unless its error text happened to contain a known marker word.
+
+    Consequence: three genuinely failing terminal calls with differently-worded
+    errors produced one recognised failure and never reached the threshold, so
+    the guard stayed silent through exactly the runs it exists to catch (#1453,
+    parent #1371). introspection_extract was fixed to read the envelope in #347;
+    this keeps the two in agreement about what a failure is.
+    """
+
+    @staticmethod
+    def _terminal_run(*errors):
+        msgs = []
+        for i, err in enumerate(errors):
+            msgs.append({
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": f"c{i}", "type": "function",
+                    "function": {"name": "terminal",
+                                 "arguments": json.dumps({"command": f"cmd{i}"})},
+                }],
+            })
+            msgs.append({"role": "tool", "tool_call_id": f"c{i}",
+                         "content": json.dumps({"exit_code": 1, "error": err})})
+        return msgs
+
+    def test_envelope_exit_code_is_a_failure(self):
+        assert _looks_like_failure(json.dumps({"exit_code": 2})) is True
+
+    def test_envelope_exit_code_zero_is_not(self):
+        assert _looks_like_failure(json.dumps({"exit_code": 0})) is False
+
+    def test_error_wording_no_longer_decides(self):
+        """'cannot open' is not in the marker list, but exit_code=1 is decisive."""
+        assert _looks_like_failure(json.dumps({"exit_code": 1, "error": "cannot open"})) is True
+
+    def test_success_flag_respected(self):
+        assert _looks_like_failure(json.dumps({"success": True})) is False
+        assert _looks_like_failure(json.dumps({"success": False})) is True
+
+    def test_error_field_alone(self):
+        assert _looks_like_failure(json.dumps({"error": "boom"})) is True
+
+    def test_plain_string_still_uses_markers(self):
+        """Non-envelope results keep the old behaviour."""
+        assert _looks_like_failure("bash: error: something broke") is True
+        assert _looks_like_failure("all good here") is False
+
+    def test_malformed_json_falls_back_to_markers(self):
+        assert _looks_like_failure('{"exit_code": broken') is False
+        assert _looks_like_failure('{"oops": permission denied') is True
+
+    def test_three_differently_worded_failures_now_nudge(self):
+        """The case the guard used to miss entirely."""
+        nudge = maybe_nudge(self._terminal_run(
+            "no such file", "cannot open", "permission denied"))
+        assert nudge is not None
+        assert "terminal" in nudge
+
+    def test_a_single_failure_still_stays_quiet(self):
+        assert maybe_nudge(self._terminal_run("no such file")) is None
