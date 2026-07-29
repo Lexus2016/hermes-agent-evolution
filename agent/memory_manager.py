@@ -504,6 +504,24 @@ class MemoryManager:
 
     # -- Retrieval-utility logging (#1480) -----------------------------------
 
+    @staticmethod
+    def _retrieval_utility_enabled() -> bool:
+        """Check the ``memory.retrieval_utility.enabled`` config flag.
+
+        The flag defaults to ``False`` (opt-in).  Without this gate the
+        retrieval-utility logger writes a per-retrieval record to disk on
+        every memory hit in every session — an unasked-for on-disk trace.
+        """
+        try:
+            from hermes_cli.config import load_config_readonly
+
+            config = load_config_readonly() or {}
+            return bool(
+                (config.get("memory") or {}).get("retrieval_utility", {}).get("enabled")
+            )
+        except Exception:
+            return False
+
     def _record_retrieval_utility(
         self, provider_name: str, query: str, *, session_id: str = ""
     ) -> None:
@@ -514,7 +532,12 @@ class MemoryManager:
         provider name — granular enough to measure per-provider utility
         without needing to parse the returned context into individual
         records.
+
+        Gated behind ``memory.retrieval_utility.enabled`` (default OFF) so
+        ordinary sessions never write the sidecar.
         """
+        if not self._retrieval_utility_enabled():
+            return
         try:
             from agent.retrieval_utility import record_retrieval
 
@@ -531,8 +554,12 @@ class MemoryManager:
         signals for the turn. Uses ``event.friction_signals`` to derive a
         coarse outcome label (helpful/neutral/harmful) and records it
         against each pending retrieval.
+        Gated behind ``memory.retrieval_utility.enabled`` (default OFF).
         """
         if not self._pending_retrievals:
+            return
+        if not self._retrieval_utility_enabled():
+            self._pending_retrievals.clear()
             return
         try:
             from agent.retrieval_utility import record_outcome, derive_outcome
