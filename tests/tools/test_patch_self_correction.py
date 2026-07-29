@@ -75,6 +75,12 @@ class TestClassifyError:
     def test_none_error(self):
         assert classify_error(None, None) == "unknown"
 
+    def test_old_string_empty(self):
+        assert classify_error("old_string cannot be empty", None) == "old_string_empty"
+
+    def test_old_string_empty_variant(self):
+        assert classify_error("old_string is empty", None) == "old_string_empty"
+
 
 class TestFormatFileContextSnippet:
     def test_finds_closest_region(self):
@@ -189,6 +195,37 @@ class TestFormatStructuredError:
         )
         assert "Error type: escape_drift" in result
         assert "read_file" in result
+
+    def test_old_string_empty_includes_error_type_and_recovery(self):
+        result = format_structured_error(
+            "old_string cannot be empty",
+            0,
+            "",
+            "new",
+            "content\n",
+        )
+        assert "Error type: old_string_empty" in result
+        assert "Recovery:" in result
+        assert "non-empty old_string" in result
+
+    def test_indentation_mismatch_includes_error_type_and_recovery(self):
+        """When old_string text matches but indentation differs, the
+        structured error should classify it as indentation_mismatch (#1501).
+        """
+        content = "def foo():\n    return 1\n"
+        old_string = "def foo():\n\treturn 1"  # tab instead of 4 spaces
+        new_string = "def foo():\n    return 42"
+        result = format_structured_error(
+            "Could not find a match for old_string in the file",
+            0,
+            old_string,
+            new_string,
+            content,
+            file_path="/tmp/test.py",
+        )
+        assert "Error type: indentation_mismatch" in result
+        assert "Recovery:" in result
+        assert "indentation" in result.lower()
 
     def test_silent_on_permission_error(self):
         result = format_structured_error(
