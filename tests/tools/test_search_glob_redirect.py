@@ -42,6 +42,30 @@ class TestLooksLikeGlob:
         # [a-z]+ is a regex, not a glob — no unescaped * or ?
         assert _looks_like_glob("[a-z]+") is False
 
+    # --- #1484: lookaround / (?...) groups must NOT be flagged as globs ---
+
+    def test_negative_lookahead_not_glob(self):
+        # (?!...) is a regex negative lookahead — ? follows (, not a glob
+        assert _looks_like_glob(r"(?!foo)bar") is False
+
+    def test_positive_lookahead_not_glob(self):
+        assert _looks_like_glob(r"(?=foo)bar") is False
+
+    def test_negative_lookbehind_not_glob(self):
+        # (?<=...) is the pattern that caused 59 retries/7d per #1484
+        assert _looks_like_glob(r"(?<=foo)bar") is False
+
+    def test_positive_lookbehind_not_glob(self):
+        assert _looks_like_glob(r"(?<!foo)bar") is False
+
+    def test_non_capturing_group_not_glob(self):
+        # (?:...) is a non-capturing group — ? follows (, not a glob
+        assert _looks_like_glob(r"(?:abc)+") is False
+
+    def test_lookaround_with_quantifier_not_glob(self):
+        # Combined lookaround + .* — still a regex, not a glob
+        assert _looks_like_glob(r"(?<=\d).*") is False
+
 
 class TestHandleSearchFilesGlobRedirect:
     """Integration tests for the _handle_search_files handler redirect."""

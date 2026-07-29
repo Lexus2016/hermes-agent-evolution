@@ -2598,7 +2598,10 @@ def _looks_like_glob(pattern: str) -> bool:
                 continue
             # ``?`` in regex means "zero or one" — preceded by a
             # metacharacter it's a quantifier, not a glob wildcard.
-            if i > 0 and pattern[i - 1] in ".+*^$[":
+            # ``(`` is included so lookarounds ``(?!…)``, ``(?<=…)``,
+            # ``(?:…)`` and other ``(?…)`` groups are NOT misclassified
+            # as glob ``?`` wildcards (#1484 — caused 59 retries/7d).
+            if i > 0 and pattern[i - 1] in ".+*^$[(":
                 continue
             return True
     return False
