@@ -1084,6 +1084,8 @@ ERROR_TYPES = {
     "ambiguous": "multiple matches found — old_string is not unique",
     "identical": "old_string and new_string are identical — no change needed",
     "escape_drift": "escape-drift detected — likely tool-call serialization artifact",
+    "old_string_empty": "old_string is empty — no search target provided",
+    "indentation_mismatch": "indentation differs between old_string and file content",
     "permission": "permission denied or protected path",
     "read_failed": "could not read the file",
     "write_failed": "could not write changes to the file",
@@ -1103,6 +1105,8 @@ def classify_error(error: Optional[str], strategy: Optional[str]) -> str:
         return "identical"
     if "escape-drift" in err or "escape drift" in err:
         return "escape_drift"
+    if "old_string cannot be empty" in err or "old_string is empty" in err:
+        return "old_string_empty"
     if "found" in err and "matches" in err:
         return "ambiguous"
     if "could not find" in err or "not find a match" in err:
@@ -1201,6 +1205,53 @@ def format_structured_error(
 
     error_type = classify_error(error, strategy)
 
+    # Secondary classification: when the primary classifier returns
+    # "no_match", inspect the inputs to see if the actual cause is a
+    # narrower, more actionable sub-category. This shrinks the "other"
+    # / "unknown" bucket (#1501) by giving the model a precise reason
+    # and recovery path instead of a generic "not found".
+    if error_type == "no_match" and old_string and content:
+        old_lines = old_string.splitlines()
+        content_lines = content.splitlines()
+        if old_lines:
+            # Find the best-matching content line for the first non-blank
+            # old_string line, then compare indentation across ALL
+            # corresponding lines (the mismatch is often on a subsequent
+            # line, not the anchor line itself).
+            anchor = ""
+            anchor_old_idx = 0
+            for oi, ol in enumerate(old_lines):
+                if ol.strip():
+                    anchor = ol.strip()
+                    anchor_old_idx = oi
+                    break
+            best_idx = -1
+            best_ratio = 0.0
+            for i, cl in enumerate(content_lines):
+                ratio = SequenceMatcher(None, anchor, cl.strip()).ratio()
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_idx = i
+            if best_idx >= 0 and best_ratio >= 0.5:
+                # Check each old_string line against the corresponding
+                # content line (offset from best_idx by anchor_old_idx).
+                for oi in range(anchor_old_idx, len(old_lines)):
+                    ci = best_idx + (oi - anchor_old_idx)
+                    if ci >= len(content_lines):
+                        break
+                    ol = old_lines[oi]
+                    cl = content_lines[ci]
+                    if not ol.strip() or not cl.strip():
+                        continue
+                    # Only compare lines that are textually similar
+                    if SequenceMatcher(None, ol.strip(), cl.strip()).ratio() < 0.5:
+                        continue
+                    old_indent = _leading_whitespace(ol)
+                    content_indent = _leading_whitespace(cl)
+                    if old_indent != content_indent:
+                        error_type = "indentation_mismatch"
+                        break
+
     # Don't add structured context for non-match failures that already
     # have clear messages (permission, read/write failures).
     if error_type in ("permission", "read_failed", "write_failed", "unknown"):
@@ -1243,6 +1294,26 @@ def format_structured_error(
         sections.append(
             "Recovery: no action needed — the file is already in the "
             "desired state. Proceed with the next step."
+        )
+
+    # For old_string_empty: the model forgot to provide old_string.
+    if error_type == "old_string_empty":
+        sections.append(
+            "Recovery: provide a non-empty old_string that matches the "
+            "text to replace in the file. Use read_file to see the "
+            "current content if needed."
+        )
+
+    # For indentation_mismatch: the old_string content matches but the
+    # whitespace prefix differs — the model needs to copy the file's
+    # actual indentation.
+    if error_type == "indentation_mismatch":
+        sections.append(
+            "Recovery: the text content matches but the indentation "
+            "differs. Use read_file to see the exact whitespace (spaces "
+            "vs tabs, indent level) in the file, then update old_string "
+            "to match it precisely. Alternatively, use write_file to "
+            "replace the entire file if the region is hard to anchor."
         )
 
     # For no-match with a snippet, add a general recovery hint.

@@ -218,6 +218,20 @@ _PARSE_RE = re.compile(
 _NO_MATCH_RE = re.compile(
     r"\b(no match|no results?|nothing found|empty result|0 matches)\b", re.IGNORECASE
 )
+# Patch-specific sub-categories (#1501). These are checked BEFORE the
+# generic _NO_MATCH_RE so specific patch failures aren't swallowed by
+# the broad "no match" bucket. They match the structured diagnostic
+# text emitted by tools.fuzzy_match.format_structured_error and the
+# raw error strings from fuzzy_find_and_replace.
+_PATCH_OLD_STRING_EMPTY_RE = re.compile(
+    r"\bold_string (cannot be empty|is empty)\b", re.IGNORECASE
+)
+_PATCH_INDENTATION_MISMATCH_RE = re.compile(
+    r"\bindentation[ _-]mismatch\b|indentation differs\b", re.IGNORECASE
+)
+_PATCH_AMBIGUOUS_RE = re.compile(
+    r"\b(found \d+ matches|multiple matches found)\b", re.IGNORECASE
+)
 
 
 def _classify_failure_reason(content: Any) -> Optional[str]:
@@ -281,6 +295,12 @@ def _classify_failure_reason(content: Any) -> Optional[str]:
         return "quota/billing"
     if _PARSE_RE.search(haystack):
         return "parse-error"
+    if _PATCH_OLD_STRING_EMPTY_RE.search(haystack):
+        return "patch-old-string-empty"
+    if _PATCH_INDENTATION_MISMATCH_RE.search(haystack):
+        return "patch-indentation-mismatch"
+    if _PATCH_AMBIGUOUS_RE.search(haystack):
+        return "patch-ambiguous"
     if _NO_MATCH_RE.search(haystack):
         return "no-match"
     if "exit_code" in data:
