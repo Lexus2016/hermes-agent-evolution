@@ -57,6 +57,20 @@ def isolated_hermes_home(tmp_path, monkeypatch):
 class TestPrefetchRetrievalLogging:
     """Verify prefetch_all logs retrievals to the sidecar."""
 
+    @pytest.fixture(autouse=True)
+    def _enable_retrieval_utility(self):
+        """Existing tests assume retrieval-utility logging is ON.
+
+        The ``memory.retrieval_utility.enabled`` config flag defaults to
+        ``False`` (opt-in).  Mock it to ``True`` so the logging path is
+        exercised.  The dedicated ``TestRetrievalUtilityGate`` class below
+        tests the disabled path.
+        """
+        with patch.object(
+            MemoryManager, "_retrieval_utility_enabled", return_value=True
+        ):
+            yield
+
     def test_prefetch_logs_retrieval(self, isolated_hermes_home):
         from agent.retrieval_utility import load_log
 
@@ -105,6 +119,14 @@ class TestPrefetchRetrievalLogging:
 
 class TestSyncOutcomeRecording:
     """Verify sync_all records outcomes for pending retrievals."""
+
+    @pytest.fixture(autouse=True)
+    def _enable_retrieval_utility(self):
+        """Existing tests assume retrieval-utility logging is ON."""
+        with patch.object(
+            MemoryManager, "_retrieval_utility_enabled", return_value=True
+        ):
+            yield
 
     def test_sync_records_helpful_outcome(self, isolated_hermes_home):
         from agent.retrieval_utility import load_log
@@ -159,3 +181,53 @@ class TestSyncOutcomeRecording:
         assert len(mgr._pending_retrievals) == 1
         mgr.sync_all("query", "answer", session_id="s1")
         assert len(mgr._pending_retrievals) == 0
+
+
+class TestRetrievalUtilityGate:
+    """Verify retrieval-utility logging respects the ``enabled`` config flag.
+
+    When ``memory.retrieval_utility.enabled`` is ``False`` (the default),
+    no sidecar file should be written and no pending retrievals should
+    accumulate.
+    """
+
+    def test_disabled_no_sidecar_written(self, isolated_hermes_home):
+        """prefetch_all must not write the sidecar when disabled."""
+        from agent.retrieval_utility import load_log
+
+        provider = _FakeProvider("builtin", context="recalled: foo")
+        mgr = MemoryManager()
+        mgr.add_provider(provider)
+
+        # _retrieval_utility_enabled() defaults to False (config not set).
+        result = mgr.prefetch_all("what is foo?", session_id="s1")
+        assert "recalled: foo" in result
+
+        log = load_log()
+        assert log["retrievals"] == []
+
+    def test_disabled_no_pending_retrievals_accumulated(self, isolated_hermes_home):
+        """_pending_retrievals must stay empty when disabled."""
+        provider = _FakeProvider("builtin", context="ctx")
+        mgr = MemoryManager()
+        mgr.add_provider(provider)
+
+        mgr.prefetch_all("query", session_id="s1")
+        assert len(mgr._pending_retrievals) == 0
+
+    def test_disabled_sync_does_not_record(self, isolated_hermes_home):
+        """sync_all must not record outcomes when disabled."""
+        from agent.retrieval_utility import load_log
+
+        provider = _FakeProvider("builtin", context="ctx")
+        mgr = MemoryManager()
+        mgr.add_provider(provider)
+
+        # Even if we manually inject a pending retrieval, sync should
+        # clear it without writing to the sidecar when disabled.
+        mgr._pending_retrievals.append(("memory:builtin", "s1"))
+        mgr.sync_all("query", "answer", session_id="s1")
+        assert len(mgr._pending_retrievals) == 0
+
+        log = load_log()
+        assert log["retrievals"] == []
