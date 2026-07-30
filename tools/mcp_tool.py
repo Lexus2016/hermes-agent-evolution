@@ -159,6 +159,57 @@ def _install_mcp_stdout_noise_filter() -> None:
 
 _install_mcp_stdout_noise_filter()
 
+
+# --------------------------------------------------------------------------- #
+# MCP 2026-07-28 Stateless Transport — capability-detection shim (Slice B-1)  #
+# Issue #1511. Default OFF; zero behavioral change unless                     #
+# ``HERMES_MCP_STATELESS=1`` is set.                                          #
+# --------------------------------------------------------------------------- #
+def _detect_stateless_support(config: Optional[dict] = None) -> bool:
+    """Return True if stateless MCP transport mode is enabled.
+
+    Reads the ``HERMES_MCP_STATELESS`` environment variable (default OFF).
+    A per-server ``stateless: true`` config key may override ON, but the
+    global env flag must be truthy for any stateless path to activate —
+    this ensures the feature is opt-in and never surprises an existing
+    deployment.
+
+    Slice B-1 only wires the detection + synthesis plumbing; the actual
+    stateless RPC adapter (header injection, per-call sessions) is B-2.
+    """
+    env_enabled = bool(os.environ.get("HERMES_MCP_STATELESS", "").strip())
+    if not env_enabled:
+        return False
+    if config is not None:
+        return bool(config.get("stateless", False))
+    return True
+
+
+def synthesize_capabilities(
+    server_url: Optional[str] = None,
+    transport: str = "streamable_http",
+) -> Any:
+    """Synthesize an ``InitializeResult``-shaped object for stateless servers.
+
+    In stateless mode the ``initialize`` handshake is skipped, so the
+    capability gates at ``_advertises_tools()`` and
+    ``_select_utility_schemas()`` have no ``InitializeResult`` to read.
+    This function constructs a minimal ``SimpleNamespace`` that advertises
+    all three capability families (tools, resources, prompts) so those
+    gates keep working unchanged.
+
+    Slice B-1 returns a permissive caps object (all capabilities ON).
+    A future slice may probe ``.well-known/mcp`` or do a single
+    ``tools/list`` to narrow the advertised set.
+    """
+    caps = SimpleNamespace(
+        tools=SimpleNamespace(),
+        resources=SimpleNamespace(),
+        prompts=SimpleNamespace(),
+    )
+    return SimpleNamespace(capabilities=caps, protocolVersion="2026-07-28")
+
+
 # Upper bound for the OSV malware preflight during stdio MCP startup. The
 # check makes a blocking urllib HTTPS call whose own timeout can fail to
 # interrupt a stalled SSL handshake, which froze the asyncio event loop and
@@ -1912,6 +1963,7 @@ class MCPServerTask:
         "initialize_result", "_ping_unsupported",
         "_reconnect_retries",
         "_last_park_error",
+        "_stateless",
     )
 
     def __init__(self, name: str):
@@ -1978,6 +2030,12 @@ class MCPServerTask:
         # back to ``list_tools`` (the pre-ping probe) so we neither spam pings
         # nor reconnect-loop. Reset on each fresh transport connection.
         self._ping_unsupported: bool = False
+        # MCP 2026-07-28 stateless transport mode (Slice B-1, issue #1511).
+        # Default OFF — zero behavioral change unless ``HERMES_MCP_STATELESS=1``
+        # is set AND the per-server config has ``stateless: true``.
+        # The per-server override is applied in ``run()`` where config is
+        # available; ``__init__`` only sets the safe default.
+        self._stateless: bool = False
 
     def _is_http(self) -> bool:
         """Check if this server uses HTTP transport."""
@@ -2542,8 +2600,8 @@ class MCPServerTask:
                     connect_timeout = float(
                         config.get("connect_timeout", _DEFAULT_CONNECT_TIMEOUT)
                     )
-                    self.initialize_result = await asyncio.wait_for(
-                        session.initialize(), timeout=connect_timeout
+                    self.initialize_result = await self._initialize_or_synthesize(
+                        session, connect_timeout
                     )
                     self.session = session
                     self._mark_lifecycle_started()
@@ -2850,8 +2908,8 @@ class MCPServerTask:
                     # stdio path (#59349): an endpoint that accepts the
                     # connection but never answers ``initialize`` parks this
                     # coroutine forever on the background loop.
-                    self.initialize_result = await asyncio.wait_for(
-                        session.initialize(), timeout=float(connect_timeout)
+                    self.initialize_result = await self._initialize_or_synthesize(
+                        session, float(connect_timeout)
                     )
                     self.session = session
                     await self._discover_tools()
@@ -2867,7 +2925,6 @@ class MCPServerTask:
                             "MCP server '%s': reconnect requested — "
                             "tearing down SSE session", self.name,
                         )
-            return reason
 
         if _MCP_NEW_HTTP:
             # New API (mcp >= 1.24.0): build an explicit httpx.AsyncClient
@@ -2907,8 +2964,8 @@ class MCPServerTask:
                 ):
                     async with ClientSession(read_stream, write_stream, **sampling_kwargs) as session:
                         # Bound the handshake (#59349) — see stdio path.
-                        self.initialize_result = await asyncio.wait_for(
-                            session.initialize(), timeout=float(connect_timeout)
+                        self.initialize_result = await self._initialize_or_synthesize(
+                            session, float(connect_timeout)
                         )
                         self.session = session
                         await self._discover_tools()
@@ -2939,8 +2996,8 @@ class MCPServerTask:
             ):
                 async with ClientSession(read_stream, write_stream, **sampling_kwargs) as session:
                     # Bound the handshake (#59349) — see stdio path.
-                    self.initialize_result = await asyncio.wait_for(
-                        session.initialize(), timeout=float(connect_timeout)
+                    self.initialize_result = await self._initialize_or_synthesize(
+                        session, float(connect_timeout)
                     )
                     self.session = session
                     await self._discover_tools()
@@ -2957,6 +3014,28 @@ class MCPServerTask:
                             "tearing down legacy HTTP session", self.name,
                         )
             return reason
+
+    async def _initialize_or_synthesize(
+        self, session: Any, connect_timeout: float,
+    ) -> Any:
+        """Perform the MCP initialize handshake, or synthesize caps in stateless mode.
+
+        In stateless mode (Slice B-1, issue #1511), ``session.initialize()`` is
+        skipped and an ``InitializeResult``-shaped object is synthesized so the
+        existing capability gates (``_advertises_tools``,
+        ``_select_utility_schemas``) keep working without a live session.
+
+        Returns the ``InitializeResult`` (real or synthesized).
+        """
+        if self._stateless:
+            logger.info(
+                "MCP server '%s': stateless mode — skipping initialize() "
+                "handshake, synthesizing capabilities", self.name,
+            )
+            return synthesize_capabilities()
+        return await asyncio.wait_for(
+            session.initialize(), timeout=float(connect_timeout)
+        )
 
     async def _discover_tools(self):
         """Discover tools from the connected session.
@@ -3016,6 +3095,9 @@ class MCPServerTask:
         self._auth_type = (config.get("auth") or "").lower().strip()
         self._idle_timeout_seconds = _get_lifecycle_seconds(config, "idle_timeout_seconds")
         self._max_lifetime_seconds = _get_lifecycle_seconds(config, "max_lifetime_seconds")
+        # MCP 2026-07-28 stateless mode (Slice B-1, issue #1511).
+        # Requires both the global env flag and per-server config opt-in.
+        self._stateless = _detect_stateless_support(config)
 
         # Set up sampling handler if enabled and SDK types are available
         sampling_config = config.get("sampling", {})
