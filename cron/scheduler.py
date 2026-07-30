@@ -4342,9 +4342,26 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
                 os.environ["TERMINAL_CWD"] = _job_workdir
             return agent.run_conversation(prompt)
 
-        _cron_future = _cron_pool.submit(
-            _cron_context.run, _cron_run_reassert_workdir
-        )
+        try:
+            _cron_future = _cron_pool.submit(
+                _cron_context.run, _cron_run_reassert_workdir
+            )
+        except RuntimeError as submit_exc:
+            # Interpreter shutdown race: the Python runtime began tearing down
+            # non-daemon threads before we could schedule the job. This is a
+            # benign shutdown race (issue #1504), not a job failure — log at
+            # debug and exit without recording a spurious failed attempt.
+            if "cannot schedule new futures" in str(submit_exc):
+                logger.debug(
+                    "Job '%s': cannot schedule — interpreter shutting down",
+                    job_name,
+                )
+                _cron_pool.shutdown(wait=False, cancel_futures=True)
+                return False, "", "", "cannot schedule new futures after interpreter shutdown"
+            raise
+        except Exception:
+            _cron_pool.shutdown(wait=False, cancel_futures=True)
+            raise
         _inactivity_timeout = False
         try:
             if _cron_inactivity_limit is None:
