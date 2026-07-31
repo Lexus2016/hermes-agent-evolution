@@ -23,14 +23,15 @@ handler — and returns a structured, deterministic verdict instead of
 letting an under-specified call reach the tool at all.
 
 Design mirrors :mod:`agent.verify_policy` / :mod:`agent.policy_interceptors`
-intentionally: frozen dataclasses, a pure check function, opt-in via an
-env var / config flag (default **OFF** — see :func:`tool_arg_contract_enabled`),
-fail-open whenever the tool has no schema or the schema is malformed. Only
-``required`` presence, ``enum`` membership, and basic ``type`` matching
-(string, integer, number, boolean, array, object) are checked; this is
-deliberately narrower than full JSON Schema validation (no format/min-max/
-pattern checks). The type check mirrors :func:`tools.tool_search._check_type`
-so native tools get the same guard already available to discovered tools.
+intentionally: frozen dataclasses, a pure check function, opt-out via an
+env var / config flag (default **ON** since #1530 — see
+:func:`tool_arg_contract_enabled`), fail-open whenever the tool has no schema
+or the schema is malformed. Only ``required`` presence, ``enum`` membership,
+and basic ``type`` matching (string, integer, number, boolean, array, object)
+are checked; this is deliberately narrower than full JSON Schema validation (no
+format/min-max/pattern checks). The type check mirrors
+:func:`tools.tool_search._check_type` so native tools get the same guard
+already available to discovered tools.
 """
 
 from __future__ import annotations
@@ -243,12 +244,26 @@ _TOOL_ARG_CONTRACT_ENV = "HERMES_TOOL_ARG_CONTRACT"
 def tool_arg_contract_enabled() -> bool:
     """Whether deterministic tool-argument contract enforcement is active.
 
-    Default **OFF**. Enabled by setting ``HERMES_TOOL_ARG_CONTRACT`` to a
-    truthy value (``1``/``true``/``yes``/``on``), or via the
-    ``tool_arg_contract.enabled`` key in ``config.yaml``. Reads the env var
-    first so a session can flip it without editing config. Any failure
-    resolving config -> OFF (safe default). Mirrors
-    :func:`agent.verify_policy.verify_policy_enabled` exactly.
+    Default **ON** (issue #1530). The #1528 audit confirmed every native tool
+    ships a safe schema (``required`` arrays + ``type`` declarations), and the
+    check itself is fail-open on any schema without a structured contract
+    (no ``parameters``/``properties``/``required``), so flipping the default ON
+    only ever blocks calls that genuinely violate the schema the model was
+    given — it cannot invent a stricter contract than the tool declared.
+
+    Escape hatches (in priority order):
+
+    * ``HERMES_TOOL_ARG_CONTRACT`` env var — ``0``/``false``/``no``/``off``
+      disables; any truthy value forces ON. Read first so a session can flip
+      the gate without editing config.
+    * ``tool_arg_contract.enabled`` in ``config.yaml`` — set ``false`` to
+      disable persistently.
+
+    Any failure resolving config -> ON (the new safe default — the check is
+    fail-open, so leaving it ON is the lower-risk choice). This differs from
+    the historical default-OFF convention (and from its sibling
+    :func:`agent.verify_policy.verify_policy_enabled`, which stays OFF) because
+    #1528/#1529/#1530 made the check cheap, safe, and schema-gated.
     """
     env = os.environ.get(_TOOL_ARG_CONTRACT_ENV)
     if env is not None:
@@ -258,11 +273,11 @@ def tool_arg_contract_enabled() -> bool:
 
         cfg = _load_config() or {}
     except Exception:
-        return False
+        return True
     section = cfg.get("tool_arg_contract") if isinstance(cfg, dict) else None
     if isinstance(section, dict) and "enabled" in section:
         return bool(section.get("enabled"))
-    return False
+    return True
 
 
 __all__ = [
