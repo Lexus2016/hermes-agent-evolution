@@ -23,8 +23,9 @@ handler — and returns a structured, deterministic verdict instead of
 letting an under-specified call reach the tool at all.
 
 Design mirrors :mod:`agent.verify_policy` / :mod:`agent.policy_interceptors`
-intentionally: frozen dataclasses, a pure check function, opt-in via an
-env var / config flag (default **OFF** — see :func:`tool_arg_contract_enabled`),
+intentionally: frozen dataclasses, a pure check function, default **ON**
+since #1530 (see :func:`tool_arg_contract_enabled`), with a per-tool
+exclusion list (:func:`is_tool_excluded`) and global disable via env/config,
 fail-open whenever the tool has no schema or the schema is malformed. Only
 ``required`` presence, ``enum`` membership, and basic ``type`` matching
 (string, integer, number, boolean, array, object) are checked; this is
@@ -241,14 +242,11 @@ _TOOL_ARG_CONTRACT_ENV = "HERMES_TOOL_ARG_CONTRACT"
 
 
 def tool_arg_contract_enabled() -> bool:
-    """Whether deterministic tool-argument contract enforcement is active.
+    """Whether tool-argument contract enforcement is active.
 
-    Default **OFF**. Enabled by setting ``HERMES_TOOL_ARG_CONTRACT`` to a
-    truthy value (``1``/``true``/``yes``/``on``), or via the
-    ``tool_arg_contract.enabled`` key in ``config.yaml``. Reads the env var
-    first so a session can flip it without editing config. Any failure
-    resolving config -> OFF (safe default). Mirrors
-    :func:`agent.verify_policy.verify_policy_enabled` exactly.
+    Default **ON** since #1530 (all native tools audited safe per #1528).
+    Disable via ``HERMES_TOOL_ARG_CONTRACT=0`` env var or
+    ``tool_arg_contract.enabled: false`` in config.yaml.
     """
     env = os.environ.get(_TOOL_ARG_CONTRACT_ENV)
     if env is not None:
@@ -258,11 +256,29 @@ def tool_arg_contract_enabled() -> bool:
 
         cfg = _load_config() or {}
     except Exception:
-        return False
+        return True
     section = cfg.get("tool_arg_contract") if isinstance(cfg, dict) else None
     if isinstance(section, dict) and "enabled" in section:
         return bool(section.get("enabled"))
-    return False
+    return True
+
+
+def is_tool_excluded(tool_name: str) -> bool:
+    """Whether *tool_name* is in ``tool_arg_contract.excluded_tools``.
+
+    Returns False on any config resolution failure (no exclusion).
+    """
+    try:
+        from hermes_cli.config import load_config as _load_config
+
+        cfg = _load_config() or {}
+    except Exception:
+        return False
+    section = cfg.get("tool_arg_contract") if isinstance(cfg, dict) else None
+    if not isinstance(section, dict):
+        return False
+    excluded = section.get("excluded_tools")
+    return isinstance(excluded, (list, tuple)) and tool_name in excluded
 
 
 __all__ = [
@@ -270,4 +286,5 @@ __all__ = [
     "ArgContractOutcome",
     "check_tool_args_contract",
     "tool_arg_contract_enabled",
+    "is_tool_excluded",
 ]

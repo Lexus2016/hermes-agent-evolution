@@ -14,6 +14,7 @@ from agent.tool_arg_contract import (
     ArgContractViolation,
     check_tool_args_contract,
     tool_arg_contract_enabled,
+    is_tool_excluded,
 )
 
 
@@ -217,15 +218,15 @@ def test_missing_required_and_invalid_enum_both_reported():
     assert kinds == {"missing_required", "invalid_enum"}
 
 
-# ── enable gate (opt-in, default OFF) ────────────────────────────────────────
+# ── enable gate (default ON since #1530) ────────────────────────────────────
 
 
-def test_tool_arg_contract_disabled_by_default(monkeypatch):
+def test_tool_arg_contract_enabled_by_default(monkeypatch):
     monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
     monkeypatch.setattr(
         "hermes_cli.config.load_config", lambda *a, **k: {}, raising=False
     )
-    assert tool_arg_contract_enabled() is False
+    assert tool_arg_contract_enabled() is True
 
 
 @pytest.mark.parametrize("val", ["1", "true", "TRUE", "yes", "on"])
@@ -240,7 +241,17 @@ def test_tool_arg_contract_env_disables(monkeypatch, val):
     assert tool_arg_contract_enabled() is False
 
 
-def test_tool_arg_contract_config_enables_when_env_absent(monkeypatch):
+def test_tool_arg_contract_config_disables_when_env_absent(monkeypatch):
+    monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda *a, **k: {"tool_arg_contract": {"enabled": False}},
+        raising=False,
+    )
+    assert tool_arg_contract_enabled() is False
+
+
+def test_tool_arg_contract_config_enables_explicit(monkeypatch):
     monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
     monkeypatch.setattr(
         "hermes_cli.config.load_config",
@@ -248,6 +259,37 @@ def test_tool_arg_contract_config_enables_when_env_absent(monkeypatch):
         raising=False,
     )
     assert tool_arg_contract_enabled() is True
+
+
+def test_tool_arg_contract_enabled_on_config_failure(monkeypatch):
+    """Config can't load -> default ON (safe for audited tools)."""
+    monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError()),
+        raising=False,
+    )
+    assert tool_arg_contract_enabled() is True
+
+
+# ── per-tool exclusion (#1530) ───────────────────────────────────────────────
+
+
+def test_is_tool_excluded(monkeypatch):
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda *a, **k: {"tool_arg_contract": {"excluded_tools": ["some_tool"]}},
+        raising=False,
+    )
+    assert is_tool_excluded("some_tool") is True
+    assert is_tool_excluded("read_file") is False
+
+
+def test_is_tool_excluded_no_config(monkeypatch):
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config", lambda *a, **k: {}, raising=False
+    )
+    assert is_tool_excluded("read_file") is False
 
 
 # ── type checking (issue #1529) ──────────────────────────────────────────────

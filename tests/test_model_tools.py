@@ -1,7 +1,10 @@
 """Tests for model_tools.py — function call dispatch, agent-loop interception, legacy toolsets."""
 
 import json
+import os
 from unittest.mock import ANY, call, patch
+
+import pytest
 
 
 from model_tools import (
@@ -12,6 +15,23 @@ from model_tools import (
     _LEGACY_TOOLSET_MAP,
     TOOL_TO_TOOLSET_MAP,
 )
+
+
+@pytest.fixture(autouse=True)
+def _disable_arg_contract_non_contract_tests(request):
+    """Default OFF for non-contract tests (they use mock schemas with {"q"})."""
+    if request.cls and request.cls.__name__ == "TestArgContractEnforcement":
+        yield
+        return
+    old = os.environ.get("HERMES_TOOL_ARG_CONTRACT")
+    os.environ["HERMES_TOOL_ARG_CONTRACT"] = "0"
+    try:
+        yield
+    finally:
+        if old is not None:
+            os.environ["HERMES_TOOL_ARG_CONTRACT"] = old
+        else:
+            os.environ.pop("HERMES_TOOL_ARG_CONTRACT", None)
 
 
 # =========================================================================
@@ -31,13 +51,10 @@ class TestHandleFunctionCall:
         assert "totally_fake_tool_xyz" in result["error"]
 
     def test_exception_returns_json_error(self):
-        # Even if something goes wrong, should return valid JSON
-        result = handle_function_call("web_search", None)  # None args may cause issues
-        parsed = json.loads(result)
-        assert isinstance(parsed, dict)
-        assert "error" in parsed
-        assert len(parsed["error"]) > 0
-        assert "error" in parsed["error"].lower() or "failed" in parsed["error"].lower()
+        parsed = json.loads(handle_function_call("web_search", None))
+        assert isinstance(parsed, dict) and "error" in parsed and parsed["error"]
+        kw = parsed["error"].lower()
+        assert "error" in kw or "failed" in kw or "invalid" in kw
 
     def test_tool_hooks_receive_session_and_tool_call_ids(self):
         with (
@@ -374,35 +391,43 @@ class TestPreToolCallBlocking:
 
 class TestArgContractEnforcement:
     """handle_function_call() re-checks args against the tool's own schema
-    at the composition boundary, right before dispatch — but only when
-    agent.tool_arg_contract.tool_arg_contract_enabled() opts in (default OFF,
-    matching agent.verify_policy's gating convention)."""
+    at the composition boundary, right before dispatch — enabled by default
+    since #1530 (all native tools audited safe per #1528). Can be disabled
+    via HERMES_TOOL_ARG_CONTRACT env var or tool_arg_contract.enabled config."""
 
-    def test_disabled_by_default_lets_invalid_call_through_to_dispatch(
-        self, monkeypatch
-    ):
-        """With the feature off (the default), a call missing a required
-        arg still reaches dispatch unchanged — no new blocking behavior
-        for anyone who hasn't opted in."""
+    _REQ_PATH = {"parameters": {"properties": {"path": {"type": "string"}}, "required": ["path"]}}
+
+    def test_default_on_blocks_missing_required_arg_before_dispatch(self, monkeypatch):
+        """Default ON since #1530: missing required arg is blocked before dispatch."""
         monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
-        monkeypatch.setattr(
-            "hermes_cli.config.load_config", lambda *a, **k: {}, raising=False
-        )
-        monkeypatch.setattr(
-            "model_tools.registry.get_schema",
-            lambda name: {
-                "parameters": {
-                    "properties": {"path": {"type": "string"}},
-                    "required": ["path"],
-                }
-            },
-        )
-        monkeypatch.setattr(
-            "model_tools.registry.dispatch", lambda *a, **kw: json.dumps({"ok": True})
-        )
+        monkeypatch.setattr("hermes_cli.config.load_config", lambda *a, **k: {}, raising=False)
+        monkeypatch.setattr("model_tools.registry.get_schema", lambda name: self._REQ_PATH)
+
+        def boom(*a, **kw):
+            raise AssertionError("dispatch should not run")
+        monkeypatch.setattr("model_tools.registry.dispatch", boom)
 
         result = json.loads(handle_function_call("read_file", {}, task_id="t1"))
-        assert result == {"ok": True}
+        assert "error" in result and "path" in result["error"]
+
+    def test_disabled_lets_invalid_call_through_to_dispatch(self, monkeypatch):
+        """Explicitly disabled: missing required arg reaches dispatch."""
+        monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", "0")
+        monkeypatch.setattr("model_tools.registry.get_schema", lambda name: self._REQ_PATH)
+        monkeypatch.setattr("model_tools.registry.dispatch", lambda *a, **kw: json.dumps({"ok": True}))
+        assert json.loads(handle_function_call("read_file", {}, task_id="t1")) == {"ok": True}
+
+    def test_excluded_tool_lets_invalid_call_through_to_dispatch(self, monkeypatch):
+        """Tool in excluded_tools list: contract check skipped even when ON."""
+        monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
+        monkeypatch.setattr(
+            "hermes_cli.config.load_config",
+            lambda *a, **k: {"tool_arg_contract": {"excluded_tools": ["read_file"]}},
+            raising=False,
+        )
+        monkeypatch.setattr("model_tools.registry.get_schema", lambda name: self._REQ_PATH)
+        monkeypatch.setattr("model_tools.registry.dispatch", lambda *a, **kw: json.dumps({"ok": True}))
+        assert json.loads(handle_function_call("read_file", {}, task_id="t1")) == {"ok": True}
 
     def test_enabled_blocks_missing_required_arg_before_dispatch(self, monkeypatch):
         monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", "1")
@@ -473,25 +498,19 @@ class TestArgContractEnforcement:
         )
         assert result == {"ok": True}
 
-    def test_enabled_fires_post_tool_call_hook_with_blocked_status(self, monkeypatch):
+    def test_default_on_fires_post_tool_call_hook_with_blocked_status(self, monkeypatch):
         hook_calls = []
 
         def fake_invoke_hook(hook_name, **kwargs):
             hook_calls.append((hook_name, kwargs))
             return []
 
-        monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", "1")
+        _SCHEMA = {"parameters": {"properties": {"path": {"type": "string"}}, "required": ["path"]}}
+        monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
+        monkeypatch.setattr("hermes_cli.config.load_config", lambda *a, **k: {}, raising=False)
         monkeypatch.setattr("hermes_cli.plugins.invoke_hook", fake_invoke_hook)
         monkeypatch.setattr("hermes_cli.plugins.has_hook", lambda name: True)
-        monkeypatch.setattr(
-            "model_tools.registry.get_schema",
-            lambda name: {
-                "parameters": {
-                    "properties": {"path": {"type": "string"}},
-                    "required": ["path"],
-                }
-            },
-        )
+        monkeypatch.setattr("model_tools.registry.get_schema", lambda name: _SCHEMA)
         monkeypatch.setattr(
             "model_tools.registry.dispatch",
             lambda *a, **kw: (_ for _ in ()).throw(AssertionError("should not run")),

@@ -1270,17 +1270,16 @@ def handle_function_call(
                 pass  # file_tools may not be loaded yet
 
         # Deterministic tool-argument contract check (issue #904). Re-checks
-        # the final, post-coercion/post-middleware arguments against the
-        # tool's own registered schema (``required`` fields, ``enum``
-        # values) right at the composition boundary, before dispatch()
-        # invokes the handler. Opt-in and fail-open — see
-        # agent.tool_arg_contract for rationale and default-OFF gating.
+        # the final arguments against the tool's schema before dispatch().
+        # Default ON since #1530 (all native tools audited safe per #1528).
+        # Fail-open. Per-tool exclusion via config. See agent.tool_arg_contract.
         try:
             from agent.tool_arg_contract import (
                 check_tool_args_contract,
                 tool_arg_contract_enabled,
+                is_tool_excluded,
             )
-            if tool_arg_contract_enabled():
+            if tool_arg_contract_enabled() and not is_tool_excluded(function_name):
                 _contract_outcome = check_tool_args_contract(
                     function_name, function_args, registry.get_schema(function_name)
                 )
