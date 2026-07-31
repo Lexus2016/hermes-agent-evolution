@@ -3,6 +3,8 @@
 import json
 from unittest.mock import ANY, call, patch
 
+import pytest
+
 
 from model_tools import (
     handle_function_call,
@@ -12,6 +14,20 @@ from model_tools import (
     _LEGACY_TOOLSET_MAP,
     TOOL_TO_TOOLSET_MAP,
 )
+
+
+# This module exercises the dispatch / hook / middleware plumbing around
+# handle_function_call, not the tool_arg_contract gate itself (that has its
+# own suite in tests/agent/test_tool_arg_contract.py). Many cases here reuse
+# the real ``web_search`` schema with a mocked ``registry.dispatch`` and pass
+# ``{"q": "test"}`` — a value that pre-dates the schema's actual required
+# ``query`` field. Before #1530 the default-OFF gate tolerated that mismatch;
+# now that the gate is ON by default it would intercept these calls before
+# dispatch, derailing the hook-order assertions under test. Disable the gate
+# for this whole module so the dispatch-adjacent behavior stays the subject.
+@pytest.fixture(autouse=True)
+def _disable_arg_contract_for_dispatch_tests(monkeypatch):
+    monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", "0")
 
 
 # =========================================================================
@@ -37,7 +53,17 @@ class TestHandleFunctionCall:
         assert isinstance(parsed, dict)
         assert "error" in parsed
         assert len(parsed["error"]) > 0
-        assert "error" in parsed["error"].lower() or "failed" in parsed["error"].lower()
+        # The error is either a dispatch failure ("...failed...") or, since
+        # #1530 turned the tool_arg_contract check ON by default, a clean
+        # contract violation ("Invalid arguments for 'web_search': missing
+        # required parameter 'query'."). Both are valid JSON error envelopes.
+        msg = parsed["error"].lower()
+        assert (
+            "error" in msg
+            or "failed" in msg
+            or "invalid arguments" in msg
+            or "missing required" in msg
+        )
 
     def test_tool_hooks_receive_session_and_tool_call_ids(self):
         with (
@@ -374,20 +400,47 @@ class TestPreToolCallBlocking:
 
 class TestArgContractEnforcement:
     """handle_function_call() re-checks args against the tool's own schema
-    at the composition boundary, right before dispatch — but only when
-    agent.tool_arg_contract.tool_arg_contract_enabled() opts in (default OFF,
-    matching agent.verify_policy's gating convention)."""
+    at the composition boundary, right before dispatch. Default ON since
+    #1530 (the #1528 audit confirmed every native tool ships a safe schema),
+    with env/config escape hatches to force it OFF."""
 
-    def test_disabled_by_default_lets_invalid_call_through_to_dispatch(
+    def test_enabled_by_default_blocks_missing_required_before_dispatch(
         self, monkeypatch
     ):
-        """With the feature off (the default), a call missing a required
-        arg still reaches dispatch unchanged — no new blocking behavior
-        for anyone who hasn't opted in."""
+        """#1530: with the feature ON by default, a call missing a required
+        arg is blocked at the composition boundary — it never reaches
+        dispatch. This is the behavior flip from the historical opt-in
+        default; the gate now protects every safe-schema tool out of the
+        box."""
         monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
         monkeypatch.setattr(
             "hermes_cli.config.load_config", lambda *a, **k: {}, raising=False
         )
+        monkeypatch.setattr(
+            "model_tools.registry.get_schema",
+            lambda name: {
+                "parameters": {
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                }
+            },
+        )
+
+        def fake_dispatch(*args, **kwargs):
+            raise AssertionError("dispatch should not run when contract is violated")
+
+        monkeypatch.setattr("model_tools.registry.dispatch", fake_dispatch)
+
+        result = json.loads(handle_function_call("read_file", {}, task_id="t1"))
+        assert "error" in result
+        assert "path" in result["error"]
+
+    def test_env_disabled_lets_invalid_call_through_to_dispatch(self, monkeypatch):
+        """The HERMES_TOOL_ARG_CONTRACT env var is the session-level escape
+        hatch: setting it to a falsy value forces the check OFF so a call
+        missing a required arg reaches dispatch unchanged — matching the
+        pre-#1530 behavior for anyone who needs to opt out."""
+        monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", "0")
         monkeypatch.setattr(
             "model_tools.registry.get_schema",
             lambda name: {
