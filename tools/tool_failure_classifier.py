@@ -52,6 +52,12 @@ class ToolFailureCategory(str, Enum):
     not_found = "not_found"
     permission_denied = "permission_denied"
     rate_limited = "rate_limited"
+    # Quota/billing exhaustion on a sub-tool's paid backend (vision model,
+    # search API, etc.). Unlike ``rate_limited`` (which clears over time),
+    # quota exhaustion does NOT clear on retry — the account is out of credits
+    # or the billing plan's limit is reached. The agent must stop retrying and
+    # surface the quota state to the user (issue #1489).
+    quota_exhausted = "quota_exhausted"
     # Covers transient network failures AND local transient resource contention
     # (file/index locks, "device or resource busy"). The recovery dispatcher
     # (#1027) must not assume this always implies remote connectivity.
@@ -133,6 +139,7 @@ _CATEGORY_RETRYABLE: dict[ToolFailureCategory, bool] = {
     ToolFailureCategory.not_found: False,
     ToolFailureCategory.permission_denied: False,
     ToolFailureCategory.rate_limited: True,
+    ToolFailureCategory.quota_exhausted: False,
     ToolFailureCategory.transient_network: True,
     ToolFailureCategory.timeout: True,
     ToolFailureCategory.unexpected_output: True,
@@ -162,6 +169,12 @@ _CATEGORY_HINTS: dict[ToolFailureCategory, str] = {
     ToolFailureCategory.rate_limited: (
         "A rate limit or quota was hit. Back off and retry after a delay, or "
         "reduce request frequency."
+    ),
+    ToolFailureCategory.quota_exhausted: (
+        "The paid backend's quota or billing limit is exhausted — the account "
+        "is out of credits or has hit its plan cap. Retrying will not succeed "
+        "until quota resets or billing is resolved. Stop retrying and surface "
+        "the quota state to the user."
     ),
     ToolFailureCategory.transient_network: (
         "A transient network/resource issue occurred. A retry with backoff may "
@@ -212,15 +225,41 @@ def _rule(
 _BUILTIN_RULES: list[_Rule] = [
     # Argument-shaped "X not found" (missing required field / edit's old_string)
     # before the generic not_found rule.
-    _rule(r"(?:required|argument|parameter)\b.*\bnot found", ToolFailureCategory.invalid_arguments),
+    _rule(
+        r"(?:required|argument|parameter)\b.*\bnot found",
+        ToolFailureCategory.invalid_arguments,
+    ),
     _rule(r"old_(?:string|text)\b.*not found", ToolFailureCategory.invalid_arguments),
-    # Rate limits / quota.
+    # Quota / billing exhaustion — non-retriable (issue #1489).
+    # These MUST precede the generic rate_limited rules so a hard quota cap
+    # is not mistaken for a retriable throttle. The signal comes from sub-tool
+    # paid backends (vision models, search APIs, etc.) where the account is
+    # out of credits or has hit its billing plan limit.
+    _rule(r"quota exceeded", ToolFailureCategory.quota_exhausted),
+    _rule(
+        r"billing.*(?:exhausted|limit|exceeded|disabled|failed)",
+        ToolFailureCategory.quota_exhausted,
+    ),
+    _rule(
+        r"(?:insufficient|out of)\s+(?:credit|quota|balance)",
+        ToolFailureCategory.quota_exhausted,
+    ),
+    _rule(
+        r"no\s+credits?\s+(?:remaining|left|available)",
+        ToolFailureCategory.quota_exhausted,
+    ),
+    _rule(r"usage limit (?:exceeded|reached)", ToolFailureCategory.quota_exhausted),
+    _rule(r"\b402\b", ToolFailureCategory.quota_exhausted),
+    _rule(r"payment required", ToolFailureCategory.quota_exhausted),
+    # Rate limits / quota — retriable (clears over time).
     _rule(r"rate[ _-]?limit", ToolFailureCategory.rate_limited),
     _rule(r"\b429\b", ToolFailureCategory.rate_limited),
     _rule(r"too many requests", ToolFailureCategory.rate_limited),
-    _rule(r"quota exceeded", ToolFailureCategory.rate_limited),
     # Permission / authorization.
-    _rule(r"must be (?:logged in|authenticated|authori[sz]ed)", ToolFailureCategory.permission_denied),
+    _rule(
+        r"must be (?:logged in|authenticated|authori[sz]ed)",
+        ToolFailureCategory.permission_denied,
+    ),
     _rule(r"permission denied", ToolFailureCategory.permission_denied),
     _rule(r"operation not permitted", ToolFailureCategory.permission_denied),
     _rule(r"access denied", ToolFailureCategory.permission_denied),
@@ -247,7 +286,10 @@ _BUILTIN_RULES: list[_Rule] = [
     # before the generic not_found rule). "<component> not available" is scoped
     # to dependency-shaped nouns so missing *data* falls through to not_found.
     _rule(r"command not found", ToolFailureCategory.tool_unavailable),
-    _rule(r"not recognized as an internal or external command", ToolFailureCategory.tool_unavailable),
+    _rule(
+        r"not recognized as an internal or external command",
+        ToolFailureCategory.tool_unavailable,
+    ),
     _rule(r"unknown command", ToolFailureCategory.tool_unavailable),
     _rule(r"not connected", ToolFailureCategory.tool_unavailable),
     _rule(r"not installed", ToolFailureCategory.tool_unavailable),
@@ -284,7 +326,10 @@ _BUILTIN_RULES: list[_Rule] = [
     _rule(r"unknown mode", ToolFailureCategory.invalid_arguments),
     _rule(r"provide either", ToolFailureCategory.invalid_arguments),
     _rule(r"(?:is )?missing a\b", ToolFailureCategory.invalid_arguments),
-    _rule(r"invalid (?:argument|parameter|mode|value)", ToolFailureCategory.invalid_arguments),
+    _rule(
+        r"invalid (?:argument|parameter|mode|value)",
+        ToolFailureCategory.invalid_arguments,
+    ),
 ]
 
 # Runtime-registered rules take priority over the built-ins.
