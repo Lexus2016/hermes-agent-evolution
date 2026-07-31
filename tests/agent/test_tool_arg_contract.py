@@ -217,6 +217,136 @@ def test_missing_required_and_invalid_enum_both_reported():
     assert kinds == {"missing_required", "invalid_enum"}
 
 
+# ── type enforcement (issue #1529) ──────────────────────────────────────────
+
+
+TYPE_SCHEMA = {
+    "name": "demo",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "count": {"type": "integer"},
+            "rate": {"type": "number"},
+            "enabled": {"type": "boolean"},
+            "items": {"type": "array"},
+            "meta": {"type": "object"},
+            "mixed": {"type": ["string", "null"]},
+        },
+        "required": ["path"],
+    },
+}
+
+
+def test_type_correct_values_ok():
+    outcome = check_tool_args_contract(
+        "demo",
+        {
+            "path": "a.txt",
+            "count": 3,
+            "rate": 1.5,
+            "enabled": True,
+            "items": [1, 2],
+            "meta": {"k": "v"},
+        },
+        TYPE_SCHEMA,
+    )
+    assert outcome.ok is True
+
+
+def test_type_string_for_integer_is_mismatch():
+    outcome = check_tool_args_contract(
+        "demo", {"path": "a.txt", "count": "five"}, TYPE_SCHEMA
+    )
+    assert outcome.ok is False
+    v = outcome.violations[0]
+    assert v.kind == "type_mismatch"
+    assert v.param == "count"
+
+
+def test_type_bool_for_integer_is_mismatch():
+    """bool subclasses int but must be rejected for integer fields."""
+    outcome = check_tool_args_contract(
+        "demo", {"path": "a.txt", "count": True}, TYPE_SCHEMA
+    )
+    assert outcome.ok is False
+    assert outcome.violations[0].kind == "type_mismatch"
+
+
+@pytest.mark.parametrize("param,value", [
+    ("path", 42),         # int for string
+    ("meta", [1, 2]),     # array for object
+    ("items", "x"),       # string for array
+    ("enabled", "yes"),   # string for boolean
+])
+def test_type_mismatches(param, value):
+    outcome = check_tool_args_contract(
+        "demo", {"path": "a.txt", param: value}, TYPE_SCHEMA
+    )
+    assert outcome.ok is False
+    assert outcome.violations[0].kind == "type_mismatch"
+
+
+def test_type_union_accepts_matching_member():
+    """type: ['string','null'] accepts a string."""
+    outcome = check_tool_args_contract(
+        "demo", {"path": "a.txt", "mixed": "hello"}, TYPE_SCHEMA
+    )
+    assert outcome.ok is True
+
+
+def test_type_union_rejects_non_member():
+    outcome = check_tool_args_contract(
+        "demo", {"path": "a.txt", "mixed": 42}, TYPE_SCHEMA
+    )
+    assert outcome.ok is False
+    assert outcome.violations[0].kind == "type_mismatch"
+    assert outcome.violations[0].param == "mixed"
+
+
+def test_type_none_optional_is_ok():
+    """An optional field set to None should skip type checking."""
+    outcome = check_tool_args_contract(
+        "demo", {"path": "a.txt", "count": None}, TYPE_SCHEMA
+    )
+    assert outcome.ok is True
+
+
+def test_type_no_type_declared_is_ok():
+    """A property with no 'type' key is fail-open (no type check)."""
+    schema = {
+        "parameters": {
+            "properties": {"blob": {"description": "no type"}},
+            "required": ["blob"],
+        }
+    }
+    outcome = check_tool_args_contract("demo", {"blob": 12345}, schema)
+    assert outcome.ok is True
+
+
+def test_type_mismatch_violation_shape():
+    v = ArgContractViolation.type_mismatch("count", "five", "integer")
+    assert v.kind == "type_mismatch"
+    assert v.param == "count"
+    assert "integer" in v.detail
+    assert "str" in v.detail
+
+
+def test_type_mismatch_and_enum_both_reported():
+    """A field with both enum + type violations reports both."""
+    schema = {
+        "parameters": {
+            "properties": {
+                "mode": {"type": "string", "enum": ["a", "b"]},
+            },
+            "required": [],
+        }
+    }
+    outcome = check_tool_args_contract("demo", {"mode": 42}, schema)
+    kinds = {v.kind for v in outcome.violations}
+    assert kinds == {"type_mismatch", "invalid_enum"}
+
+
 # ── enable gate (opt-in, default OFF) ────────────────────────────────────────
 
 
