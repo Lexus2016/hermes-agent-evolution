@@ -187,6 +187,7 @@ def _is_recovered_refusal(text: str) -> bool:
     return False
     return bool(_RECOVERY_RE.search(text)) and not _NON_RECOVERY_RE.search(text)
 
+
 _REPEAT_THRESHOLD = 5  # same tool >=N consecutive in a session is a "repeated run"
 
 # --- failure-reason taxonomy (issue #1325) ----------------------------------
@@ -231,6 +232,17 @@ _PATCH_INDENTATION_MISMATCH_RE = re.compile(
 )
 _PATCH_AMBIGUOUS_RE = re.compile(
     r"\b(found \d+ matches|multiple matches found)\b", re.IGNORECASE
+)
+# #1537 — the dominant residual "other" contributor. fuzzy_find_and_replace
+# emits "Could not find a match for old_string in the file" (and file_operations
+# wraps it as "Could not find match for old_string in {path}") when NO strategy
+# succeeds. That phrasing contains none of the existing no-match keywords
+# ("no match", "nothing found", …), so 70/86 patch failures fell through to the
+# generic "other" bucket — 81% of all patch errors. Catch it explicitly here,
+# BEFORE the generic _NO_MATCH_RE, so the digest reports a named reason and the
+# model gets a concrete recovery directive instead of retrying 6×.
+_PATCH_NO_MATCH_RE = re.compile(
+    r"\bcould not find (a )?match for old_string\b", re.IGNORECASE
 )
 
 
@@ -301,6 +313,8 @@ def _classify_failure_reason(content: Any) -> Optional[str]:
         return "patch-indentation-mismatch"
     if _PATCH_AMBIGUOUS_RE.search(haystack):
         return "patch-ambiguous"
+    if _PATCH_NO_MATCH_RE.search(haystack):
+        return "patch-no-match"
     if _NO_MATCH_RE.search(haystack):
         return "no-match"
     if "exit_code" in data:

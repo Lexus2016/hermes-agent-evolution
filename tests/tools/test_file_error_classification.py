@@ -31,8 +31,27 @@ class TestClassifyFileError:
         assert klass == "patch_parse"
 
     def test_block_no_match_is_fuzzy(self):
-        klass, rec = classify_file_error("search block did not match the file content")
+        klass, rec = classify_file_error(
+            "search block did not match the file content"
+        )
         assert klass == "fuzzy_match" and "EXACT" in rec
+
+    def test_could_not_find_match_is_patch_no_match(self):
+        """#1537 — the canonical fuzzy_find_and_replace no-match message must
+        get a named error_class with a write_file directive."""
+        klass, rec = classify_file_error(
+            "Could not find a match for old_string in the file"
+        )
+        assert klass == "patch_no_match"
+        assert "write_file" in rec
+
+    def test_could_not_find_match_wrapped_variant(self):
+        """#1537 — file_operations wraps the message with the path."""
+        klass, rec = classify_file_error(
+            "Could not find match for old_string in /app/src/utils.py"
+        )
+        assert klass == "patch_no_match"
+        assert "write_file" in rec
 
     def test_ambiguous_match_is_classified(self):
         """'Found N matches' errors get a specific error_class and recovery (#976)."""

@@ -267,6 +267,41 @@ class TestFailureReasonClassification:
         s = scan_session(p)
         assert s["tool_failures_by_reason"] == {"patch": {"other": 1}}
 
+    def test_patch_no_match_reason(self, tmp_path):
+        """#1537 — the canonical fuzzy_find_and_replace no-match message must
+        classify as 'patch-no-match', NOT fall into 'other'."""
+        p = _session(
+            tmp_path,
+            "r_pnm",
+            [
+                _asst("patch", "c1"),
+                _tool(
+                    "c1",
+                    _fail("Could not find a match for old_string in the file"),
+                ),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures_by_reason"] == {"patch": {"patch-no-match": 1}}
+
+    def test_patch_no_match_reason_wrapped_variant(self, tmp_path):
+        """#1537 — file_operations wraps the message with the path."""
+        p = _session(
+            tmp_path,
+            "r_pnm2",
+            [
+                _asst("patch", "c1"),
+                _tool(
+                    "c1",
+                    _fail(
+                        "Could not find match for old_string in /app/src/utils.py"
+                    ),
+                ),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures_by_reason"] == {"patch": {"patch-no-match": 1}}
+
     def test_no_reason_for_successful_results(self, tmp_path):
         p = _session(
             tmp_path,

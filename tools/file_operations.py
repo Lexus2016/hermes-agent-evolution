@@ -200,6 +200,21 @@ def classify_file_error(
             "old_string to make it unique, or use replace_all=True if you want "
             "all occurrences replaced."
         )
+    # #1537 — the dominant "other"-bucket contributor. fuzzy_find_and_replace
+    # emits "Could not find (a )?match for old_string in {file}" when none of
+    # its match strategies succeed. This phrasing slipped past every prior
+    # branch (it's not "did not match", "no match", or "block"), landing in the
+    # generic fallback and accounting for 81% of patch failures. Route it to a
+    # named class with a strong recovery directive so the model doesn't retry
+    # the same block with whitespace variants up to 6× — re-read, fix the exact
+    # text, or switch to write_file after 2 consecutive misses.
+    if "could not find" in low and "match" in low and "old_string" in low:
+        return "patch_no_match", (
+            "old_string was not found in the file by any match strategy. "
+            "Re-read the file and copy the EXACT current text. If a second "
+            "patch attempt on the same file also fails, switch to write_file "
+            "with the full content — do NOT keep retrying patch variants."
+        )
     if (
         "did not match" in low
         or "no match" in low
@@ -810,7 +825,7 @@ LINTERS_INPROC = {
 # established, exercised pattern as an error and break it. Python source
 # keeps the existing (unchanged) post-write lint-delta *report* — still
 # visible to the caller, just not a write-blocking refusal.
-_FAIL_CLOSED_INPROC_EXTS = frozenset({'.json', '.yaml', '.yml', '.toml'})
+_FAIL_CLOSED_INPROC_EXTS = frozenset({".json", ".yaml", ".yml", ".toml"})
 
 # Max limits for read operations
 MAX_LINES = 2000
@@ -1606,7 +1621,9 @@ class ShellFileOperations(FileOperations):
         # re-adds the marker the read layer strips — see
         # ``_file_has_bom``/``_UTF8_BOM`` below.
         ext = os.path.splitext(path)[1].lower()
-        inproc_linter = LINTERS_INPROC.get(ext) if ext in _FAIL_CLOSED_INPROC_EXTS else None
+        inproc_linter = (
+            LINTERS_INPROC.get(ext) if ext in _FAIL_CLOSED_INPROC_EXTS else None
+        )
         if inproc_linter is not None:
             _ok, _lint_err = inproc_linter(content)
             if not _ok and _lint_err != "__SKIP__":
