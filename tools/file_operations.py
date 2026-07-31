@@ -1220,8 +1220,12 @@ class ShellFileOperations(FileOperations):
         stat_result = self._exec(stat_cmd)
 
         if stat_result.exit_code != 0:
-            # File not found - try to suggest similar files
-            return self._suggest_similar_files(path)
+            # #1488 — wc -c with stderr suppressed can't tell us WHY the
+            # read failed (missing file, directory, permission denied).
+            # _diagnose_read_failure probes with test -e / test -d to
+            # disambiguate, producing a classify_file_error-friendly message
+            # so the agent picks the right recovery instead of blind-retrying.
+            return ReadResult(error=self._diagnose_read_failure(path, operation="read"))
 
         stat_output = _strip_terminal_fence_leaks(stat_result.stdout)
         try:
@@ -1418,7 +1422,11 @@ class ShellFileOperations(FileOperations):
         stat_cmd = f"wc -c < {self._escape_shell_arg(path)} 2>/dev/null"
         stat_result = self._exec(stat_cmd)
         if stat_result.exit_code != 0:
-            return self._suggest_similar_files(path)
+            # #1488 — same disambiguation as read_file: wc -c with stderr
+            # suppressed can't distinguish missing / directory / permission
+            # denied. Probe the real cause so classify_file_error routes
+            # the agent to the right recovery.
+            return ReadResult(error=self._diagnose_read_failure(path, operation="read"))
         stat_output = _strip_terminal_fence_leaks(stat_result.stdout)
         try:
             file_size = int(stat_output.strip())
@@ -1736,20 +1744,23 @@ class ShellFileOperations(FileOperations):
     # PATCH Implementation (Replace Mode)
     # =========================================================================
 
-    def _diagnose_read_failure(self, path: str) -> str:
-        """Build a distinct, classifiable error for a patch read failure.
+    def _diagnose_read_failure(self, path: str, operation: str = "patch") -> str:
+        """Build a distinct, classifiable error for a failed file read.
 
-        ``patch_replace`` reads the target via ``cat <path> 2>/dev/null``,
-        which discards *why* the read failed. Before #1326, every miss
-        (missing file, directory, permission error) collapsed to the same
-        generic ``"Failed to read file: {path}"`` string. That classifies
-        as ``read_error`` (never ``not_found``), so the agent never
-        learned that ``write_file`` — not ``patch`` — is the right tool
-        to create a missing file. File-not-found was the dominant
-        patch-failure class (68% of patch errors). This probe runs ONLY
-        after a failed read (happy path unchanged) and produces a
-        ``classify_file_error``-friendly message carrying a create-on-miss
-        hint when the file is absent.
+        Both ``patch_replace`` and ``read_file`` / ``read_file_raw`` probe
+        the target via shell redirects (``cat`` / ``wc -c``) with stderr
+        suppressed, which discards *why* the read failed. Before #1326 /
+        #1488, every miss (missing file, directory, permission error)
+        collapsed to the same generic string. That classifies as
+        ``read_error`` (never ``not_found`` or ``permission``), so the
+        agent never learned the right recovery — it kept blind-retrying.
+        This probe runs ONLY after a failed read (happy path unchanged)
+        and produces a ``classify_file_error``-friendly message carrying
+        a create-on-miss hint when the file is absent.
+
+        ``operation`` ("patch" or "read") controls the wording of the
+        directory / permission messages so they stay actionable for the
+        caller that triggered the probe.
         """
         esc = self._escape_shell_arg(path)
         # Does the path exist at all?  ``-e`` follows symlinks; combined
@@ -1762,14 +1773,14 @@ class ShellFileOperations(FileOperations):
             # and tells the agent how to recover.
             suggest = self._suggest_similar_files(path).error
             return suggest or f"File not found: {path}"
-        # Path exists but cat failed — is it a directory?
+        # Path exists but the read failed — is it a directory?
         is_dir = self._exec(f"test -d {esc} && echo yes || echo no")
         if (is_dir.stdout or "").strip() == "yes":
-            return f"Cannot patch a directory: {path} is a directory, not a file."
+            return f"Cannot {operation} a directory: {path} is a directory, not a file."
         # Exists and is a regular file — most likely a permission error.
         return (
             f"Permission denied reading file: {path}. Check read permissions "
-            f"before retrying — do not repeat the same patch blindly."
+            f"before retrying — do not repeat the same {operation} blindly."
         )
 
     def patch_replace(
