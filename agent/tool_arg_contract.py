@@ -26,11 +26,11 @@ Design mirrors :mod:`agent.verify_policy` / :mod:`agent.policy_interceptors`
 intentionally: frozen dataclasses, a pure check function, opt-in via an
 env var / config flag (default **OFF** — see :func:`tool_arg_contract_enabled`),
 fail-open whenever the tool has no schema or the schema is malformed. Only
-``required`` presence and ``enum`` membership are checked; this is
-deliberately narrower than full JSON Schema validation (no type/format/
-min-max/pattern checks) — type mismatches are already handled by coercion
-in ``model_tools.coerce_tool_args``, which runs earlier in the same
-composition boundary and is intentionally forgiving rather than rejecting.
+``required`` presence, ``enum`` membership, and basic ``type`` matching
+(string, integer, number, boolean, array, object) are checked; this is
+deliberately narrower than full JSON Schema validation (no format/min-max/
+pattern checks). The type check mirrors :func:`tools.tool_search._check_type`
+so native tools get the same guard already available to discovered tools.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ from typing import Any, Mapping, Optional, Tuple
 class ArgContractViolation:
     """One concrete way a tool call's arguments failed to satisfy the schema."""
 
-    kind: str  # "missing_required" | "invalid_enum"
+    kind: str  # "missing_required" | "invalid_enum" | "type_mismatch"
     param: str
     detail: str
 
@@ -65,6 +65,16 @@ class ArgContractViolation:
             kind="invalid_enum",
             param=param,
             detail=f"'{param}'={value!r} is not one of the allowed values: {allowed_repr}",
+        )
+
+    @classmethod
+    def type_mismatch(
+        cls, param: str, value: Any, expected: str, got: str
+    ) -> "ArgContractViolation":
+        return cls(
+            kind="type_mismatch",
+            param=param,
+            detail=(f"'{param}' has wrong type: expected {expected}, got {got}"),
         )
 
 
@@ -112,6 +122,36 @@ def _allows_null(schema: Any) -> bool:
             if isinstance(variant, Mapping) and variant.get("type") == "null":
                 return True
     return False
+
+
+# Map JSON Schema type strings to Python types for validation. ``number``
+# accepts both int and float (JSON ints are a subset of floats). Mirrors
+# ``tools.tool_search._SCHEMA_PY_TYPES`` — kept local so this module stays
+# dependency-free like its siblings ``agent.verify_policy`` /
+# ``agent.policy_interceptors``.
+_SCHEMA_PY_TYPES: dict[str, tuple[type, ...]] = {
+    "string": (str,),
+    "integer": (int,),
+    "number": (int, float),
+    "boolean": (bool,),
+    "array": (list, tuple),
+    "object": (dict,),
+}
+
+
+def _check_type(value: Any, type_str: str) -> bool:
+    """Check whether *value* matches the JSON Schema *type_str*.
+
+    Returns ``True`` for unknown types (fail-open — don't block dispatch
+    on a type we don't recognize). ``bool`` is a subclass of ``int`` in
+    Python, so it is explicitly rejected for ``integer`` params.
+    """
+    if type_str == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    py_types = _SCHEMA_PY_TYPES.get(type_str)
+    if py_types is None:
+        return True  # unknown type — don't block dispatch
+    return isinstance(value, py_types)
 
 
 def check_tool_args_contract(
@@ -163,6 +203,35 @@ def check_tool_args_contract(
         if value not in allowed:
             violations.append(
                 ArgContractViolation.invalid_enum(param, value, tuple(allowed))
+            )
+
+    # Type checking — validate basic types (string, integer, number, boolean,
+    # array, object) against the schema's ``type`` declaration. Mirrors
+    # ``tools.tool_search.validate_tool_args`` for native tools. Skips
+    # params that are absent or None (null is acceptable for optional params).
+    for param, prop_schema in properties.items():
+        if param not in args or args.get(param) is None:
+            continue
+        if not isinstance(prop_schema, Mapping):
+            continue
+        declared_type = prop_schema.get("type")
+        if not declared_type:
+            continue
+        value = args.get(param)
+        if isinstance(declared_type, str):
+            type_variants = [declared_type]
+        elif isinstance(declared_type, list):
+            type_variants = declared_type
+        else:
+            continue
+        if not any(_check_type(value, t) for t in type_variants):
+            violations.append(
+                ArgContractViolation.type_mismatch(
+                    param,
+                    value,
+                    " or ".join(str(t) for t in type_variants),
+                    type(value).__name__,
+                )
             )
 
     return ArgContractOutcome(tool_name=tool_name, violations=tuple(violations))
