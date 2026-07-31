@@ -2102,6 +2102,33 @@ def patch_tool(
                     f"(3) use write_file to replace the entire file if the "
                     f"targeted region is hard to anchor."
                 )
+            elif failure_count >= 2 and is_no_match:
+                # Earlier write_file nudge (#1537). Before reaching the hard
+                # refuse threshold, surface write_file as the recommended
+                # escape on the 2nd consecutive no-match failure on the same
+                # file. The introspection evidence (70 patch-no-match
+                # failures/7d, spirals up to 6 deep) showed the model keeps
+                # retrying near-identical old_string variants past the point a
+                # full rewrite would have been faster. Putting write_file
+                # FIRST here — ahead of the "re-read / longer old_string"
+                # options — biases the model toward the reliably-terminating
+                # path before the refuse-gate has to fire.
+                #
+                # Note: deliberately NOT gated on ``not has_diagnostic`` (unlike
+                # the other branches below). The structured _diagnostic gives
+                # the model the corrected old_string to try, but it does NOT
+                # surface the consecutive-failure count or the write_file
+                # escape — both of which become the right call once the same
+                # file has missed twice in a row. The two signals are
+                # complementary, not mutually exclusive.
+                result_dict["_hint"] = (
+                    f"This is failure #{failure_count} patching {path!r} "
+                    f"with a not-found old_string. The targeted region is "
+                    f"hard to anchor with patch — switch to write_file with "
+                    f"the full intended file content now, or re-read the "
+                    f"file and copy the exact current text before retrying "
+                    f"patch. Do not retry the same old_string again."
+                )
             elif is_ambiguous and not has_diagnostic:
                 result_dict["_hint"] = (
                     "Multiple matches found. Use read_file to see the "
