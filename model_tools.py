@@ -1272,9 +1272,11 @@ def handle_function_call(
         # Deterministic tool-argument contract check (issue #904). Re-checks
         # the final, post-coercion/post-middleware arguments against the
         # tool's own registered schema (``required`` fields, ``enum``
-        # values) right at the composition boundary, before dispatch()
-        # invokes the handler. Opt-in and fail-open — see
-        # agent.tool_arg_contract for rationale and default-OFF gating.
+        # values, basic ``type`` matching) right at the composition boundary,
+        # before dispatch() invokes the handler. Default ON since #1530 (the
+        # #1528 audit confirmed every native tool ships a safe schema, and
+        # the check is fail-open on any schema without a structured contract),
+        # with env/config escape hatches — see agent.tool_arg_contract.
         try:
             from agent.tool_arg_contract import (
                 check_tool_args_contract,
