@@ -267,6 +267,27 @@ class TestFailureReasonClassification:
         s = scan_session(p)
         assert s["tool_failures_by_reason"] == {"patch": {"other": 1}}
 
+    def test_patch_no_match_classified_not_other(self, tmp_path):
+        """The dominant patch failure message — "Could not find a match for
+        old_string in the file" (tools/fuzzy_match.py) — is classified as
+        patch-no-match, NOT 'other' (#1537). Before the fix this message
+        matched no sub-category regex and 81% of patch failures (70/86 per
+        the 7d introspection window) fell into the opaque 'other' bucket,
+        hiding the dominant failure mode from the digest."""
+        p = _session(
+            tmp_path,
+            "r5b",
+            [
+                _asst("patch", "c1"),
+                _tool(
+                    "c1",
+                    _fail("Could not find a match for old_string in the file"),
+                ),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures_by_reason"] == {"patch": {"patch-no-match": 1}}
+
     def test_no_reason_for_successful_results(self, tmp_path):
         p = _session(
             tmp_path,
