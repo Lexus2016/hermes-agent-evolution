@@ -217,15 +217,18 @@ def test_missing_required_and_invalid_enum_both_reported():
     assert kinds == {"missing_required", "invalid_enum"}
 
 
-# ── enable gate (opt-in, default OFF) ────────────────────────────────────────
+# ── enable gate (default ON since #1530; env/config escape hatches) ──────────
 
 
-def test_tool_arg_contract_disabled_by_default(monkeypatch):
+def test_tool_arg_contract_enabled_by_default(monkeypatch):
+    """#1530: the contract check is ON by default for every native tool whose
+    schema was confirmed safe by the #1528 audit. A bare config (no
+    tool_arg_contract section) and no env var → ON."""
     monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
     monkeypatch.setattr(
         "hermes_cli.config.load_config", lambda *a, **k: {}, raising=False
     )
-    assert tool_arg_contract_enabled() is False
+    assert tool_arg_contract_enabled() is True
 
 
 @pytest.mark.parametrize("val", ["1", "true", "TRUE", "yes", "on"])
@@ -236,17 +239,47 @@ def test_tool_arg_contract_env_enables(monkeypatch, val):
 
 @pytest.mark.parametrize("val", ["0", "false", "no", "off", ""])
 def test_tool_arg_contract_env_disables(monkeypatch, val):
+    """The env var is the session-level escape hatch: ``0``/``false``/``no``/
+    ``off`` forces the check OFF even though the default flipped to ON in
+    #1530."""
     monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", val)
     assert tool_arg_contract_enabled() is False
 
 
-def test_tool_arg_contract_config_enables_when_env_absent(monkeypatch):
+def test_tool_arg_contract_config_disables_when_env_absent(monkeypatch):
+    """The config key is the persistent escape hatch: ``enabled: false`` in
+    config.yaml disables the check even with no env var set."""
+    monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
+    monkeypatch.setattr(
+        "hermes_cli.config.load_config",
+        lambda *a, **k: {"tool_arg_contract": {"enabled": False}},
+        raising=False,
+    )
+    assert tool_arg_contract_enabled() is False
+
+
+def test_tool_arg_contract_config_enables_explicit(monkeypatch):
+    """An explicit ``enabled: true`` config is honored and matches the new
+    default (ON) — no behavior change, but documents the affirmative path."""
     monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
     monkeypatch.setattr(
         "hermes_cli.config.load_config",
         lambda *a, **k: {"tool_arg_contract": {"enabled": True}},
         raising=False,
     )
+    assert tool_arg_contract_enabled() is True
+
+
+def test_tool_arg_contract_config_load_error_defaults_on(monkeypatch):
+    """#1530: if config can't be resolved (import error, corrupt yaml, etc.),
+    the gate falls back to ON rather than OFF — the check is fail-open, so
+    leaving it ON is the lower-risk choice."""
+    monkeypatch.delenv("HERMES_TOOL_ARG_CONTRACT", raising=False)
+
+    def _boom(*a, **k):
+        raise RuntimeError("config load failed")
+
+    monkeypatch.setattr("hermes_cli.config.load_config", _boom, raising=False)
     assert tool_arg_contract_enabled() is True
 
 
