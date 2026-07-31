@@ -1001,3 +1001,137 @@ class TestPatchReplaceReadFailureClassification:
         assert "permission" in result.error.lower()
         # Distinct from the old generic "Failed to read file".
         assert "failed to read file" != result.error.strip().lower()
+
+
+# =========================================================================
+# #1488 — read_file / read_file_raw error disambiguation
+# =========================================================================
+# Before #1488, read_file and read_file_raw used ``wc -c < path 2>/dev/null``
+# with stderr suppressed, then routed ALL non-zero exits to
+# _suggest_similar_files — which returns a "File not found" error regardless
+# of the actual cause. This meant permission-denied and directory errors were
+# misclassified as not_found, causing the agent to blind-retry instead of
+# fixing permissions or choosing a different tool. 102 failures/7d (42
+# permission-denied + 60 "other") traced to this single root cause.
+# The fix routes the failure through _diagnose_read_failure (already used by
+# patch_replace since #1326), which probes with test -e / test -d to
+# disambiguate not-found / directory / permission-denied.
+
+
+class TestReadFileErrorDisambiguation:
+    """read_file and read_file_raw must distinguish not-found, directory,
+    and permission-denied failures instead of collapsing all to 'not found'."""
+
+    def test_read_file_permission_denied_classifies_as_permission(self, mock_env):
+        """A file that exists but is unreadable must surface 'permission'
+        so classify_file_error routes to the permission recovery, not
+        not_found."""
+        target = "/tmp/locked_1488.txt"
+
+        def side_effect(command, **kwargs):
+            # wc -c fails (permission denied), stderr suppressed.
+            if command.startswith("wc -c"):
+                return {"output": "", "returncode": 1}
+            # _diagnose_read_failure: test -e → yes (file exists).
+            if command.startswith("test -e "):
+                return {"output": "yes\n", "returncode": 0}
+            # test -d → no (not a directory).
+            if command.startswith("test -d "):
+                return {"output": "no\n", "returncode": 0}
+            return {"output": "", "returncode": 0}
+
+        mock_env.execute.side_effect = side_effect
+        ops = ShellFileOperations(mock_env)
+        result = ops.read_file(target)
+        assert result.error is not None
+        assert "permission" in result.error.lower()
+        d = result.to_dict()
+        assert d["error_class"] == "permission"
+
+    def test_read_file_directory_classifies_distinctly(self, mock_env):
+        """Reading a directory must report 'directory', not 'not found'."""
+        target = "/tmp/some_dir_1488"
+
+        def side_effect(command, **kwargs):
+            if command.startswith("wc -c"):
+                return {"output": "", "returncode": 1}
+            if command.startswith("test -e "):
+                return {"output": "yes\n", "returncode": 0}
+            if command.startswith("test -d "):
+                return {"output": "yes\n", "returncode": 0}
+            return {"output": "", "returncode": 0}
+
+        mock_env.execute.side_effect = side_effect
+        ops = ShellFileOperations(mock_env)
+        result = ops.read_file(target)
+        assert result.error is not None
+        assert "directory" in result.error.lower()
+        d = result.to_dict()
+        assert d["error_class"] != "not_found"
+
+    def test_read_file_not_found_still_suggests(self, mock_env):
+        """A genuinely missing file must still get the not_found class with
+        similar-file suggestions — the old behavior is preserved for the
+        actual not-found case."""
+        target = "/tmp/missing_1488.py"
+
+        def side_effect(command, **kwargs):
+            if command.startswith("wc -c"):
+                return {"output": "", "returncode": 1}
+            # _diagnose_read_failure: test -e → no (file absent).
+            if command.startswith("test -e "):
+                return {"output": "no\n", "returncode": 0}
+            # _suggest_similar_files: ls -1 of parent dir — empty.
+            if command.startswith("ls -1 "):
+                return {"output": "", "returncode": 1}
+            return {"output": "", "returncode": 0}
+
+        mock_env.execute.side_effect = side_effect
+        ops = ShellFileOperations(mock_env)
+        result = ops.read_file(target)
+        assert result.error is not None
+        assert "not found" in result.error.lower()
+        d = result.to_dict()
+        assert d["error_class"] == "not_found"
+
+    def test_read_file_raw_permission_denied_classifies_as_permission(self, mock_env):
+        """read_file_raw must also disambiguate permission-denied."""
+        target = "/tmp/locked_raw_1488.txt"
+
+        def side_effect(command, **kwargs):
+            if command.startswith("wc -c"):
+                return {"output": "", "returncode": 1}
+            if command.startswith("test -e "):
+                return {"output": "yes\n", "returncode": 0}
+            if command.startswith("test -d "):
+                return {"output": "no\n", "returncode": 0}
+            return {"output": "", "returncode": 0}
+
+        mock_env.execute.side_effect = side_effect
+        ops = ShellFileOperations(mock_env)
+        result = ops.read_file_raw(target)
+        assert result.error is not None
+        assert "permission" in result.error.lower()
+        d = result.to_dict()
+        assert d["error_class"] == "permission"
+
+    def test_read_file_raw_directory_classifies_distinctly(self, mock_env):
+        """read_file_raw on a directory must report 'directory', not 'not found'."""
+        target = "/tmp/raw_dir_1488"
+
+        def side_effect(command, **kwargs):
+            if command.startswith("wc -c"):
+                return {"output": "", "returncode": 1}
+            if command.startswith("test -e "):
+                return {"output": "yes\n", "returncode": 0}
+            if command.startswith("test -d "):
+                return {"output": "yes\n", "returncode": 0}
+            return {"output": "", "returncode": 0}
+
+        mock_env.execute.side_effect = side_effect
+        ops = ShellFileOperations(mock_env)
+        result = ops.read_file_raw(target)
+        assert result.error is not None
+        assert "directory" in result.error.lower()
+        d = result.to_dict()
+        assert d["error_class"] != "not_found"
