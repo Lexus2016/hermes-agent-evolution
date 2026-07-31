@@ -248,3 +248,107 @@ def test_tool_arg_contract_config_enables_when_env_absent(monkeypatch):
         raising=False,
     )
     assert tool_arg_contract_enabled() is True
+
+
+# ── type checking (issue #1529) ──────────────────────────────────────────────
+
+TYPE_SCHEMA = {
+    "name": "typed_tool",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "count": {"type": "integer"},
+            "ratio": {"type": "number"},
+            "enabled": {"type": "boolean"},
+            "tags": {"type": "array"},
+            "config": {"type": "object"},
+        },
+        "required": ["name"],
+    },
+}
+
+
+def test_type_mismatch_violation_shape():
+    v = ArgContractViolation.type_mismatch("count", "x", "integer", "str")
+    assert v.kind == "type_mismatch"
+    assert v.param == "count"
+    assert "integer" in v.detail and "str" in v.detail
+
+
+def test_correct_types_are_ok():
+    outcome = check_tool_args_contract(
+        "typed_tool",
+        {"name": "t", "count": 42, "ratio": 3.14, "enabled": True,
+         "tags": ["a"], "config": {"k": "v"}},
+        TYPE_SCHEMA,
+    )
+    assert outcome.ok is True
+
+
+@pytest.mark.parametrize("param, bad_value", [
+    ("name", 123), ("count", "x"), ("count", True), ("ratio", "x"),
+    ("enabled", "yes"), ("tags", "x"), ("config", ["a"]),
+])
+def test_type_mismatch_detected(param, bad_value):
+    outcome = check_tool_args_contract(
+        "typed_tool", {"name": "ok", param: bad_value}, TYPE_SCHEMA
+    )
+    assert outcome.ok is False
+    assert outcome.violations[0].kind == "type_mismatch"
+    assert outcome.violations[0].param == param
+
+
+def test_number_accepts_int():
+    assert check_tool_args_contract("t", {"name": "ok", "ratio": 5}, TYPE_SCHEMA).ok is True
+
+
+def test_array_accepts_tuple():
+    assert check_tool_args_contract("t", {"name": "ok", "tags": ("a",)}, TYPE_SCHEMA).ok is True
+
+
+def test_type_mismatch_union_type():
+    schema = {"parameters": {"properties": {"v": {"type": ["string", "integer"]}}, "required": ["v"]}}
+    assert check_tool_args_contract("t", {"v": 5}, schema).ok is True
+    assert check_tool_args_contract("t", {"v": "hi"}, schema).ok is True
+    assert check_tool_args_contract("t", {"v": 3.14}, schema).ok is False
+
+
+def test_type_mismatch_unknown_type_is_ok():
+    schema = {"parameters": {"properties": {"v": {"type": "custom"}}, "required": ["v"]}}
+    assert check_tool_args_contract("t", {"v": "x"}, schema).ok is True
+
+
+def test_no_type_declaration_skips_type_check():
+    schema = {"parameters": {"properties": {"v": {"description": "no type"}}, "required": ["v"]}}
+    assert check_tool_args_contract("t", {"v": 12345}, schema).ok is True
+
+
+def test_none_value_skips_type_check():
+    schema = {"parameters": {"properties": {"count": {"type": "integer"}}, "required": []}}
+    assert check_tool_args_contract("t", {"count": None}, schema).ok is True
+
+
+def test_type_mismatch_and_missing_required_both_reported():
+    schema = {
+        "parameters": {
+            "properties": {"name": {"type": "string"}, "count": {"type": "integer"}},
+            "required": ["name", "count"],
+        }
+    }
+    outcome = check_tool_args_contract("t", {"count": "x"}, schema)
+    assert {v.kind for v in outcome.violations} == {"missing_required", "type_mismatch"}
+
+
+def test_type_mismatch_and_invalid_enum_both_reported():
+    schema = {
+        "parameters": {
+            "properties": {
+                "mode": {"type": "string", "enum": ["a", "b"]},
+                "count": {"type": "integer"},
+            },
+            "required": [],
+        }
+    }
+    outcome = check_tool_args_contract("t", {"mode": "c", "count": "x"}, schema)
+    assert {v.kind for v in outcome.violations} == {"invalid_enum", "type_mismatch"}
