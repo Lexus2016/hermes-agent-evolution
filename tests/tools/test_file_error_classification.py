@@ -34,6 +34,19 @@ class TestClassifyFileError:
         klass, rec = classify_file_error("search block did not match the file content")
         assert klass == "fuzzy_match" and "EXACT" in rec
 
+    def test_could_not_find_match_is_fuzzy(self):
+        """The fuzzy matcher's dominant failure message — "Could not find a
+        match for old_string in the file" — routes to fuzzy_match recovery,
+        not the generic 'error' class (#1537). Before the fix this message
+        contained neither "did not match" nor "no match", so the model got
+        the unhelpful "The operation failed. ... CHANGE the call." recovery
+        with no signal to re-read the file, driving the observed retry
+        spirals (up to 6 deep)."""
+        klass, rec = classify_file_error(
+            "Could not find a match for old_string in the file"
+        )
+        assert klass == "fuzzy_match" and ("Re-read" in rec or "EXACT" in rec)
+
     def test_ambiguous_match_is_classified(self):
         """'Found N matches' errors get a specific error_class and recovery (#976)."""
         klass, rec = classify_file_error(

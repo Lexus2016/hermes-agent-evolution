@@ -204,6 +204,14 @@ def classify_file_error(
         "did not match" in low
         or "no match" in low
         or ("match" in low and "block" in low)
+        # The fuzzy matcher's dominant failure message is "Could not find a
+        # match for old_string in the file" (#1537) — it contains neither
+        # "did not match" nor "no match", so without this arm it fell through
+        # to the generic "error" class whose recovery ("The operation failed.
+        # ... CHANGE the call.") gives the model no signal to re-read the
+        # file, driving the observed retry spirals (up to 6 deep).
+        or "could not find" in low
+        or "not find a match" in low
     ):
         return "fuzzy_match", (
             "The search block didn't match the file. Re-read the file and copy the EXACT "

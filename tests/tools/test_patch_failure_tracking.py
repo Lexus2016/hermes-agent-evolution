@@ -58,7 +58,7 @@ def fresh_tracker():
 
 
 class TestPatchFailureEscalation:
-    def test_first_two_failures_use_normal_hint(
+    def test_first_two_failures_no_hard_escalation(
         self, hermes_home, tmp_path, fresh_tracker
     ):
         from tools.file_tools import _handle_patch
@@ -78,8 +78,12 @@ class TestPatchFailureEscalation:
             )
             d = json.loads(result)
             hint = d.get("_hint", "") or ""
-            assert "failure #" not in hint, (
-                f"Escalating hint fired too early on attempt {_i + 1}: {hint!r}"
+            # The hard "PERMANENT FAILURE" escalation must not fire before the
+            # 3rd consecutive failure (#507). Note: a softer write_file nudge
+            # MAY appear on the 2nd no-match failure (#1537) — that's tested
+            # separately in test_second_consecutive_no_match_nudges_write_file.
+            assert "PERMANENT FAILURE" not in hint, (
+                f"Hard escalation fired too early on attempt {_i + 1}: {hint!r}"
             )
 
     def test_third_consecutive_failure_escalates(
@@ -112,6 +116,56 @@ class TestPatchFailureEscalation:
         assert "write_file" in last_hint, (
             "Escalating hint should mention write_file fallback"
         )
+
+    def test_second_consecutive_no_match_nudges_write_file(
+        self, hermes_home, tmp_path, fresh_tracker
+    ):
+        """On the 2nd consecutive no-match failure on the same file, the patch
+        tool surfaces a write_file-forward nudge BEFORE the hard 3rd-failure
+        refuse-gate fires (#1537). The introspection evidence showed the
+        model keeps retrying near-identical old_string variants past the
+        point a full rewrite would have been faster; surfacing write_file
+        early biases it toward the reliably-terminating path. The hint puts
+        write_file FIRST and must appear on attempt 2 but not attempt 1."""
+        from tools.file_tools import _handle_patch
+
+        target = tmp_path / "g.py"
+        target.write_text("def foo():\n    return 1\n")
+
+        # Attempt 1: generic no-match hint, no write_file-forward nudge yet.
+        result = _handle_patch(
+            {
+                "mode": "replace",
+                "path": str(target),
+                "old_string": "GHOST_ATTEMPT1_QQQ",
+                "new_string": "x",
+            },
+            task_id="esc_t1b",
+        )
+        d1 = json.loads(result)
+        hint1 = d1.get("_hint", "") or ""
+        assert "switch to write_file" not in hint1, (
+            f"write_file nudge fired too early on attempt 1: {hint1!r}"
+        )
+
+        # Attempt 2: the #1537 write_file-forward nudge now appears.
+        result = _handle_patch(
+            {
+                "mode": "replace",
+                "path": str(target),
+                "old_string": "GHOST_ATTEMPT2_QQQ",
+                "new_string": "x",
+            },
+            task_id="esc_t1b",
+        )
+        d2 = json.loads(result)
+        hint2 = d2.get("_hint", "") or ""
+        assert "failure #2" in hint2, repr(hint2)
+        assert "write_file" in hint2, (
+            f"2nd-failure nudge should recommend write_file: {hint2!r}"
+        )
+        # Must NOT yet be the hard refuse-gate message.
+        assert "PERMANENT FAILURE" not in hint2
 
     def test_success_clears_failure_counter(self, hermes_home, tmp_path, fresh_tracker):
         from tools.file_tools import _handle_patch

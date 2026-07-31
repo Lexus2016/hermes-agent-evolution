@@ -232,6 +232,19 @@ _PATCH_INDENTATION_MISMATCH_RE = re.compile(
 _PATCH_AMBIGUOUS_RE = re.compile(
     r"\b(found \d+ matches|multiple matches found)\b", re.IGNORECASE
 )
+# Patch no-match: the dominant remaining 'other' cause (#1537). The fuzzy
+# matcher's failure message is "Could not find a match for old_string in the
+# file" (tools/fuzzy_match.py), which does NOT match the generic _NO_MATCH_RE
+# (it needs literal "no match"). Without this sub-category, 81% of patch
+# failures (70/86 per the 7d introspection window) fell into the opaque
+# 'other' bucket, hiding the dominant failure mode from the digest and
+# blocking targeted fixes. Placed BEFORE _NO_MATCH_RE so the specific tag
+# wins; the message never contained "no match" anyway, but the ordering keeps
+# the precedent set by the other patch-* sub-categories.
+_PATCH_NO_MATCH_RE = re.compile(
+    r"\b(could not find a match|could not find|cannot find a match)\b",
+    re.IGNORECASE,
+)
 
 
 def _classify_failure_reason(content: Any) -> Optional[str]:
@@ -301,6 +314,8 @@ def _classify_failure_reason(content: Any) -> Optional[str]:
         return "patch-indentation-mismatch"
     if _PATCH_AMBIGUOUS_RE.search(haystack):
         return "patch-ambiguous"
+    if _PATCH_NO_MATCH_RE.search(haystack):
+        return "patch-no-match"
     if _NO_MATCH_RE.search(haystack):
         return "no-match"
     if "exit_code" in data:
