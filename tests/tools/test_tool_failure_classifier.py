@@ -123,7 +123,6 @@ class TestRateLimited:
         [
             "rate limit exceeded, retry after 30s",
             "429 Too Many Requests",
-            "quota exceeded for this API key",
         ],
     )
     def test_rate_limit_errors(self, error):
@@ -131,6 +130,40 @@ class TestRateLimited:
         assert result.category == tfc.ToolFailureCategory.rate_limited
         # Rate limits clear over time — a backoff retry can succeed.
         assert result.should_retry is True
+
+
+class TestQuotaExhausted:
+    """Quota/billing exhaustion is non-retriable (issue #1489).
+
+    Unlike ``rate_limited`` (which clears over time), quota exhaustion means
+    the account is out of credits or has hit its billing plan cap. Retrying
+    cannot succeed until quota resets or billing is resolved.
+    """
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            "quota exceeded for this API key",
+            "billing limit exceeded — upgrade your plan",
+            "insufficient credits for this request",
+            "out of quota for vision API",
+            "no credits remaining for this account",
+            "usage limit exceeded for current period",
+            "402 Payment Required",
+            "payment required to continue using this service",
+            "billing exhausted for this API key",
+        ],
+    )
+    def test_quota_exhausted_errors(self, error):
+        result = tfc.classify_tool_failure("vision_analyze", error)
+        assert result.category == tfc.ToolFailureCategory.quota_exhausted
+        assert result.should_retry is False
+
+    def test_quota_exceeded_takes_priority_over_rate_limited(self):
+        """'quota exceeded' must classify as quota_exhausted, not rate_limited."""
+        result = tfc.classify_tool_failure("search_files", "quota exceeded")
+        assert result.category == tfc.ToolFailureCategory.quota_exhausted
+        assert result.should_retry is False
 
 
 class TestTransientNetwork:

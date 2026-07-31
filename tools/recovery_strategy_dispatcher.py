@@ -83,6 +83,7 @@ _CATEGORY_STRATEGY: dict[ToolFailureCategory, RecoveryStrategy] = {
     ToolFailureCategory.not_found: RecoveryStrategy.verify_target,
     ToolFailureCategory.permission_denied: RecoveryStrategy.surface_blocker,
     ToolFailureCategory.rate_limited: RecoveryStrategy.retry_with_backoff,
+    ToolFailureCategory.quota_exhausted: RecoveryStrategy.surface_blocker,
     ToolFailureCategory.transient_network: RecoveryStrategy.retry_with_backoff,
     ToolFailureCategory.timeout: RecoveryStrategy.retry_with_backoff,
     ToolFailureCategory.unexpected_output: RecoveryStrategy.retry,
@@ -164,7 +165,7 @@ def backoff_seconds_for(consecutive_count: int) -> float:
     behavior is testable and reproducible.
     """
     exponent = max(0, int(consecutive_count))
-    delay = _BASE_BACKOFF_SECONDS * (2 ** exponent)
+    delay = _BASE_BACKOFF_SECONDS * (2**exponent)
     return float(min(delay, _MAX_BACKOFF_SECONDS))
 
 
@@ -197,7 +198,9 @@ def dispatch_recovery(
     if should_retry and strategy is RecoveryStrategy.retry_with_backoff:
         backoff = backoff_seconds_for(consecutive_count)
 
-    directive = _STRATEGY_DIRECTIVE.get(strategy, _STRATEGY_DIRECTIVE[RecoveryStrategy.surface_blocker])
+    directive = _STRATEGY_DIRECTIVE.get(
+        strategy, _STRATEGY_DIRECTIVE[RecoveryStrategy.surface_blocker]
+    )
     return RecoveryAction(
         category=category,
         strategy=strategy,

@@ -46,16 +46,27 @@ def _classification(
         (ToolFailureCategory.tool_unavailable, False, RecoveryStrategy.switch_tool),
         (ToolFailureCategory.invalid_arguments, False, RecoveryStrategy.fix_arguments),
         (ToolFailureCategory.not_found, False, RecoveryStrategy.verify_target),
-        (ToolFailureCategory.permission_denied, False, RecoveryStrategy.surface_blocker),
+        (
+            ToolFailureCategory.permission_denied,
+            False,
+            RecoveryStrategy.surface_blocker,
+        ),
         (ToolFailureCategory.rate_limited, True, RecoveryStrategy.retry_with_backoff),
-        (ToolFailureCategory.transient_network, True, RecoveryStrategy.retry_with_backoff),
+        (ToolFailureCategory.quota_exhausted, False, RecoveryStrategy.surface_blocker),
+        (
+            ToolFailureCategory.transient_network,
+            True,
+            RecoveryStrategy.retry_with_backoff,
+        ),
         (ToolFailureCategory.timeout, True, RecoveryStrategy.retry_with_backoff),
         (ToolFailureCategory.unexpected_output, True, RecoveryStrategy.retry),
         (ToolFailureCategory.persistent_error, False, RecoveryStrategy.switch_tool),
         (ToolFailureCategory.unknown, False, RecoveryStrategy.surface_blocker),
     ],
 )
-def test_dispatch_maps_every_category_to_expected_strategy(category, should_retry, expected):
+def test_dispatch_maps_every_category_to_expected_strategy(
+    category, should_retry, expected
+):
     action = dispatch_recovery(_classification(category, should_retry=should_retry))
     assert action.strategy is expected
     assert action.category is category
@@ -94,7 +105,9 @@ def test_retry_with_backoff_action_carries_backoff_seconds():
 
 
 def test_non_backoff_action_has_no_backoff():
-    action = dispatch_recovery(_classification(ToolFailureCategory.invalid_arguments, should_retry=False))
+    action = dispatch_recovery(
+        _classification(ToolFailureCategory.invalid_arguments, should_retry=False)
+    )
     assert action.backoff_seconds is None
 
 
@@ -149,18 +162,35 @@ def test_recover_from_failure_matches_direct_classification():
     assert action.category is classification.category
 
 
+def test_recover_from_failure_quota_exhausted_surfaces_blocker():
+    """Quota exhaustion classifies + dispatches to surface_blocker (issue #1489).
+
+    The agent must stop retrying and surface the quota state, not retry with
+    backoff as it would for a transient rate limit.
+    """
+    action = recover_from_failure("vision_analyze", "quota exceeded for this API key")
+    assert action.category is ToolFailureCategory.quota_exhausted
+    assert action.strategy is RecoveryStrategy.surface_blocker
+    assert action.should_retry is False
+    assert action.backoff_seconds is None
+
+
 # --- runtime seam (maybe_append_recovery_guidance) -----------------------------
 
 
 def test_seam_disabled_returns_result_unchanged():
     result = '{"error": "boom"}'
-    out = maybe_append_recovery_guidance(result, "web_search", failed=True, enabled=False)
+    out = maybe_append_recovery_guidance(
+        result, "web_search", failed=True, enabled=False
+    )
     assert out == result
 
 
 def test_seam_not_failed_returns_result_unchanged():
     result = '{"ok": true}'
-    out = maybe_append_recovery_guidance(result, "web_search", failed=False, enabled=True)
+    out = maybe_append_recovery_guidance(
+        result, "web_search", failed=False, enabled=True
+    )
     assert out == result
 
 
@@ -180,7 +210,9 @@ def test_seam_extracts_terminal_exit_code_from_json_result():
 
 
 def test_seam_never_raises_on_garbage_result():
-    out = maybe_append_recovery_guidance("\x00 not json", "terminal", failed=True, enabled=True)
+    out = maybe_append_recovery_guidance(
+        "\x00 not json", "terminal", failed=True, enabled=True
+    )
     # degrades gracefully: either unchanged or with guidance, but never raises
     assert out.startswith("\x00 not json")
 
@@ -194,10 +226,14 @@ def test_seam_none_result_is_handled():
 
 
 def test_register_strategy_overrides_category_mapping():
-    original = dispatch_recovery(_classification(ToolFailureCategory.unknown, should_retry=False)).strategy
+    original = dispatch_recovery(
+        _classification(ToolFailureCategory.unknown, should_retry=False)
+    ).strategy
     try:
         register_strategy(ToolFailureCategory.unknown, RecoveryStrategy.switch_tool)
-        action = dispatch_recovery(_classification(ToolFailureCategory.unknown, should_retry=False))
+        action = dispatch_recovery(
+            _classification(ToolFailureCategory.unknown, should_retry=False)
+        )
         assert action.strategy is RecoveryStrategy.switch_tool
     finally:
         register_strategy(ToolFailureCategory.unknown, original)
