@@ -65,6 +65,18 @@ _hermes_interactive_ctx: contextvars.ContextVar[Optional[str]] = contextvars.Con
     default=None,
 )
 
+# Subagent flag. Subagents are spawned on a ThreadPoolExecutor (delegate_tool),
+# so a process-global flag would race just like HERMES_INTERACTIVE once did. A
+# contextvar is thread/task-local: the parent's context is copied into the child
+# worker thread when it is spawned, so setting it inside _run_single_child scopes
+# the "unattended" verdict to that child only. None = unset → not a subagent.
+# Used by _is_unattended_context() to suppress pending_approval retry spirals
+# in subagent contexts where no human can approve (#1542, #1554).
+_hermes_subagent_ctx: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "hermes_subagent",
+    default=None,
+)
+
 
 def set_hermes_interactive_context(interactive: bool) -> contextvars.Token:
     """Bind interactive mode for the current context (thread or asyncio task).
@@ -245,16 +257,47 @@ def _is_gateway_approval_context() -> bool:
     return bool(_get_session_platform())
 
 
+def set_hermes_subagent_context(is_subagent: bool) -> contextvars.Token:
+    """Bind the subagent flag for the current context (#1542, #1554).
+
+    Used by ``delegate_tool._run_single_child`` so the child worker thread is
+    recognized as an unattended context. Thread/task-local, so concurrent
+    siblings and the parent are unaffected. Returns the reset token so the
+    caller can restore the prior value.
+    """
+    return _hermes_subagent_ctx.set("1" if is_subagent else "")
+
+
+def _is_subagent_context() -> bool:
+    """True when this call is inside a delegate_task subagent (#1542, #1554).
+
+    Prefers the context-local flag (set by ``_run_single_child``) and falls
+    back to the ``HERMES_SUBAGENT`` env var for callers that export it.
+    """
+    ctx_val = _hermes_subagent_ctx.get()
+    if ctx_val is not None:
+        return is_truthy_value(ctx_val)
+    return env_var_enabled("HERMES_SUBAGENT")
+
+
 def _is_unattended_context() -> bool:
     """True when no human or gateway is available to approve commands (#1542).
 
-    In cron/subagent contexts, returning ``pending_approval`` causes the agent
-    to retry the blocked command 3-4x (44% of terminal failures). Callers
-    should return a non-retryable ``blocked`` status instead.
+    Requires a POSITIVE signal of an unattended context — cron session or
+    subagent — rather than defaulting to "nobody's home" when none of
+    interactive-CLI / gateway / cron are detected. A catch-all default would
+    misfire in the non-interactive test environment (where there is no
+    interactive CLI, no gateway, and no cron session), turning every test's
+    ``pending_approval`` into a non-retryable ``blocked`` and breaking the
+    suite (#1554).
+
+    Returning ``pending_approval`` (rather than ``blocked``) in an ambiguous
+    context is safe: the worst case is a single retry, which is far cheaper
+    than wrongly blocking a command a human could have approved.
     """
     if env_var_enabled("HERMES_CRON_SESSION"):
         return True
-    return not _is_interactive_cli() and not _is_gateway_approval_context()
+    return _is_subagent_context()
 
 
 def _cron_blocked_result(desc, command, pattern_key=""):
