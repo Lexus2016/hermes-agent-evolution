@@ -2170,3 +2170,67 @@ class Test408RequestTimeout:
         assert result.should_fallback is True
         assert result.should_compress is False
 
+
+# ── HTTP 504 gateway timeout ───────────────────────────────────────────
+
+
+class Test504GatewayTimeout:
+    """HTTP 504 Gateway Timeout is the canonical provider-layer timeout for
+    gateway-fronted LLM deployments (nginx/Cloudflare/Caddy in front of
+    self-hosted Ollama / vLLM / llama.cpp, plus managed gateways like
+    OpenRouter/Tailscale hops). Before #1142 it fell through to the generic
+    5xx → server_error bucket, which is excluded from the timeout trigger
+    predicate (``classified.reason == FailoverReason.timeout``), so a 504
+    never fired the #1093 adaptive timeout backoff nor the #1142
+    consecutive-timeout circuit breaker — it got only the short exponential
+    and hammered the degraded endpoint. These tests pin the contract that
+    504 routes to ``timeout`` (retryable, NOT server_error, NOT should_compress).
+    """
+
+    def test_plain_504_is_transient_timeout(self):
+        # A bare 504 with no body must classify as timeout, not server_error.
+        e = MockAPIError("Gateway Timeout", status_code=504)
+        result = classify_api_error(e, provider="openai", model="gpt-5.5")
+        assert result.reason == FailoverReason.timeout
+        assert result.retryable is True
+        assert result.should_compress is False
+
+    def test_504_is_not_server_error(self):
+        # Falsification guard: without the dedicated 504 branch, this status
+        # would land in the generic ``500 <= status_code < 600`` bucket and
+        # be classified as server_error — which is excluded from the timeout
+        # trigger predicate, so neither the progressive backoff nor the
+        # consecutive-timeout circuit breaker would fire. This must FAIL on
+        # buggy (pre-#1142) code.
+        e = MockAPIError("504 Gateway Timeout", status_code=504)
+        result = classify_api_error(e, provider="ollama", model="llama3")
+        assert result.reason != FailoverReason.server_error
+        assert result.reason == FailoverReason.timeout
+
+    def test_504_never_auto_compresses(self):
+        # A gateway timeout is a transport/timing failure, not context
+        # overflow — it must never trigger auto-compaction.
+        for msg, body in [
+            ("Gateway Timeout", {}),
+            ("504 Gateway Time-out", {"error": {"message": "upstream timed out"}}),
+            ("Gateway Timeout", {"error": {"message": "max_tokens"}}),
+        ]:
+            e = MockAPIError(msg, status_code=504, body=body)
+            result = classify_api_error(e, provider="vllm", model="qwen3")
+            assert result.should_compress is False, msg
+            assert result.reason == FailoverReason.timeout, msg
+
+    def test_504_does_not_leak_into_503_overloaded_bucket(self):
+        # 503/529 → overloaded (retry via overload path); 504 → timeout
+        # (retry via timeout path + consecutive-timeout breaker). They are
+        # distinct recovery routes and must not be conflated — a provider
+        # genuinely overloaded (503) backs off differently than one timing
+        # out (504), and the #1142 breaker only engages on timeout.
+        e_overload = MockAPIError("Service Unavailable", status_code=503)
+        e_timeout = MockAPIError("Gateway Timeout", status_code=504)
+        r_overload = classify_api_error(e_overload, provider="x", model="y")
+        r_timeout = classify_api_error(e_timeout, provider="x", model="y")
+        assert r_overload.reason == FailoverReason.overloaded
+        assert r_timeout.reason == FailoverReason.timeout
+        assert r_overload.reason != r_timeout.reason
+
