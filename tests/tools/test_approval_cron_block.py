@@ -11,11 +11,21 @@ from unittest.mock import patch
 
 import pytest
 
-from tools.approval import _cron_blocked_result, _is_unattended_context
+from tools.approval import (
+    _cron_blocked_result,
+    _is_unattended_context,
+    _is_subagent_context,
+    set_hermes_subagent_context,
+)
 
 
 class TestIsUnattendedContext:
-    """_is_unattended_context() detects cron/non-interactive/non-gateway."""
+    """_is_unattended_context() requires a positive cron/subagent signal.
+
+    Per #1554, the function must NOT default to "nobody's home" when none of
+    interactive-CLI / gateway / cron / subagent are detected — that catch-all
+    misfires in the non-interactive test environment, breaking the suite.
+    """
 
     def test_cron_session_is_unattended(self):
         """HERMES_CRON_SESSION=1 → always unattended."""
@@ -23,16 +33,20 @@ class TestIsUnattendedContext:
             "tools.approval.env_var_enabled",
             side_effect=lambda v: v == "HERMES_CRON_SESSION",
         ):
-            assert _is_unattended_context() is True
+            with patch("tools.approval._is_subagent_context", return_value=False):
+                assert _is_unattended_context() is True
 
     def test_interactive_cli_not_unattended(self):
-        """Interactive CLI with no cron → not unattended."""
+        """Interactive CLI with no cron/subagent → not unattended."""
         with patch("tools.approval.env_var_enabled", return_value=False):
             with patch("tools.approval._is_interactive_cli", return_value=True):
                 with patch(
                     "tools.approval._is_gateway_approval_context", return_value=False
                 ):
-                    assert _is_unattended_context() is False
+                    with patch(
+                        "tools.approval._is_subagent_context", return_value=False
+                    ):
+                        assert _is_unattended_context() is False
 
     def test_gateway_not_unattended(self):
         """Gateway session → not unattended."""
@@ -41,16 +55,65 @@ class TestIsUnattendedContext:
                 with patch(
                     "tools.approval._is_gateway_approval_context", return_value=True
                 ):
-                    assert _is_unattended_context() is False
+                    with patch(
+                        "tools.approval._is_subagent_context", return_value=False
+                    ):
+                        assert _is_unattended_context() is False
 
-    def test_no_context_is_unattended(self):
-        """No interactive CLI, no gateway, no cron → unattended (subagent)."""
+    def test_no_context_is_not_unattended(self):
+        """No interactive CLI, no gateway, no cron, no subagent → NOT unattended.
+
+        This is the #1554 fix: the prior catch-all "nobody's home → unattended"
+        default misfired in the non-interactive test environment (and any
+        bare-script context), turning pending_approval into blocked and
+        breaking tests. Absent a positive cron/subagent signal, we return
+        False so callers fall back to pending_approval.
+        """
         with patch("tools.approval.env_var_enabled", return_value=False):
             with patch("tools.approval._is_interactive_cli", return_value=False):
                 with patch(
                     "tools.approval._is_gateway_approval_context", return_value=False
                 ):
-                    assert _is_unattended_context() is True
+                    with patch(
+                        "tools.approval._is_subagent_context", return_value=False
+                    ):
+                        assert _is_unattended_context() is False
+
+    def test_subagent_context_is_unattended(self):
+        """Subagent contextvar set → unattended (the real subagent path)."""
+        with patch("tools.approval.env_var_enabled", return_value=False):
+            with patch("tools.approval._is_subagent_context", return_value=True):
+                assert _is_unattended_context() is True
+
+
+class TestIsSubagentContext:
+    """_is_subagent_context() reads the contextvar, then the env var."""
+
+    def test_default_not_subagent(self):
+        """No contextvar / env var set → not a subagent."""
+        with patch("tools.approval._hermes_subagent_ctx") as ctx_mock:
+            ctx_mock.get.return_value = None
+            with patch("tools.approval.env_var_enabled", return_value=False):
+                assert _is_subagent_context() is False
+
+    def test_contextvar_set_is_subagent(self):
+        """Contextvar set to '1' by _run_single_child → subagent."""
+        token = set_hermes_subagent_context(True)
+        try:
+            assert _is_subagent_context() is True
+        finally:
+            from tools.approval import _hermes_subagent_ctx
+
+            _hermes_subagent_ctx.reset(token)
+
+    def test_contextvar_reset_clears_subagent(self):
+        """Resetting the token restores the prior (non-subagent) state."""
+        token = set_hermes_subagent_context(True)
+        from tools.approval import _hermes_subagent_ctx
+
+        _hermes_subagent_ctx.reset(token)
+        with patch("tools.approval.env_var_enabled", return_value=False):
+            assert _is_subagent_context() is False
 
 
 class TestCronBlockedResult:
