@@ -98,6 +98,65 @@ def classify(content: Any) -> Optional[Tuple[str, str]]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Payload anomaly detection (#1495 — Unfaithful Safety Refusal / USR)
+#
+# When a tool returns a broken payload (None, empty, all-null fields), the
+# model gets no explicit failure signal and may fabricate a safety/privacy
+# rationale that was never in the system prompt.  ``payload_anomaly`` checks
+# the payload *structurally* (not by error-string regex).  When an anomaly is
+# found, ``make_tool_result_message`` injects a ``[tool_error]`` signal so the
+# model knows the tool malfunctioned — eliminating the ambiguity that triggers
+# USR.
+# ---------------------------------------------------------------------------
+
+_NULL_TOKENS = frozenset({"none", "null", "nil", "{}", "[]", "error: none"})
+
+_USR_HINT_EMPTY = (
+    "The tool returned an empty/null payload — it likely malfunctioned "
+    "(not a safety/permission issue). Retry the call, try a fallback tool, "
+    "or report the malfunction. Do NOT fabricate a safety rationale."
+)
+_USR_HINT_LIST = (
+    "The tool returned an empty list — it may have found nothing or may "
+    "have malfunctioned. Broaden the query or try a different approach. "
+    "Do NOT assume a safety restriction is the cause."
+)
+_USR_HINT_MALFORMED = (
+    "The tool returned a structurally empty result (all fields null/empty) — "
+    "it likely malfunctioned. Retry the call or try a fallback tool. "
+    "Do NOT fabricate a safety rationale."
+)
+
+
+def payload_anomaly(content: Any) -> Optional[Tuple[str, str]]:
+    """Classify a structurally broken tool payload (#1495).
+
+    Returns ``(anomaly_type, recovery_hint)`` or ``None`` if structurally valid.
+    """
+    if content is None:
+        return "empty_payload", _USR_HINT_EMPTY
+    if isinstance(content, str):
+        s = content.strip()
+        if not s:
+            return "empty_payload", _USR_HINT_EMPTY
+        if s.lower() in _NULL_TOKENS:
+            return "empty_payload", _USR_HINT_EMPTY
+    if isinstance(content, list) and len(content) == 0:
+        return "empty_payload", _USR_HINT_LIST
+    if isinstance(content, dict):
+        if len(content) == 0:
+            return "empty_payload", _USR_HINT_EMPTY
+        if all(
+            v is None
+            or (isinstance(v, str) and not v.strip())
+            or (isinstance(v, (list, dict)) and len(v) == 0)
+            for v in content.values()
+        ):
+            return "malformed_payload", _USR_HINT_MALFORMED
+    return None
+
+
 def hint_for(category: str) -> Optional[str]:
     """Recovery hint for a known failure category, else None.
 
