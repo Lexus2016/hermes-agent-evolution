@@ -653,6 +653,18 @@ def build_digest(
         tool: (count / scanned if scanned else 0.0)
         for tool, count in tool_failures.items()
     }
+    # Reason-scoped rate (issue #1325 — corrected fix). PR #1336 added reason
+    # *counts* (tool_failures_by_reason) but the realized-impact gate still
+    # compared the aggregate tool rate, so a fix that eliminated one reason
+    # (e.g. read_file:file-not-found) could not register against a tool rate
+    # dominated by an UNAFFECTED reason (read_file:timeout) → "no-signal".
+    # Exposing the per-(tool,reason) rate gives the verification loop a target
+    # that moves only when the targeted reason moves, breaking the treadmill.
+    failure_rate_by_reason: Dict[str, Dict[str, float]] = {}
+    for tool, reasons in failures_by_reason.items():
+        failure_rate_by_reason[tool] = {
+            reason: (n / scanned if scanned else 0.0) for reason, n in reasons.items()
+        }
     spiral_depth_per_session = {
         tool: round((meta["max_consecutive"] / scanned if scanned else 0.0), 4)
         for tool, meta in repeated.items()
@@ -671,6 +683,7 @@ def build_digest(
             "tool_failures": tool_failures,
             "tool_failures_by_reason": failures_by_reason,
             "failure_rate": failure_rate,
+            "failure_rate_by_reason": failure_rate_by_reason,
             "spiral_depth_per_session": spiral_depth_per_session,
             "timeouts": timeouts,
             "refusals_or_access_denied": refusals,
