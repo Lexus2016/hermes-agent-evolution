@@ -101,6 +101,54 @@ def _mean(xs: Sequence[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
+def mcnemar_test(
+    candidate_pass: Mapping[str, bool],
+    incumbent_pass: Mapping[str, bool],
+) -> dict[str, Any]:
+    """Paired McNemar test for transfer significance (#1498).
+
+    Compares binary pass/fail outcomes on the SAME set of cases between a
+    candidate and an incumbent. Returns the exact two-sided p-value via the
+    binomial distribution (no scipy dependency — uses the exact test for small
+    discordant counts, normal approximation for large n).
+
+    A single-benchmark win is not transfer evidence — use this across diverse
+    benchmarks to detect transfer honestly (RSEA arXiv:2606.28374).
+    """
+    # Discordant pairs: b = cand wins, c = inc wins
+    b = sum(
+        1
+        for k in candidate_pass
+        if k in incumbent_pass and candidate_pass[k] and not incumbent_pass[k]
+    )
+    c = sum(
+        1
+        for k in candidate_pass
+        if k in incumbent_pass and not candidate_pass[k] and incumbent_pass[k]
+    )
+    n = b + c
+    if n == 0:
+        return {"b": 0, "c": 0, "p_value": 1.0, "significant": False}
+    # Exact binomial two-sided p-value for small n, normal approx for large
+    if n < 25:
+        from math import comb
+
+        # Two-sided exact: P(X <= min(b,c)) + P(X >= max(b,c)) under H0: p=0.5
+        lo, hi = min(b, c), max(b, c)
+        p = sum(comb(n, k) for k in range(lo + 1)) / (2**n)
+        p += sum(comb(n, k) for k in range(hi, n + 1)) / (2**n)
+        p = min(p, 1.0)
+    else:
+        from math import sqrt
+
+        z = (abs(b - c) - 1) / sqrt(n) if n > 0 else 0.0
+        # Two-sided normal approx
+        from math import erfc, sqrt as _sqrt
+
+        p = erfc(abs(z) / _sqrt(2))
+    return {"b": b, "c": c, "p_value": round(p, 6), "significant": p < 0.05}
+
+
 def partition_scores(
     cases: Sequence[EvalCase],
     scores: Mapping[str, float],

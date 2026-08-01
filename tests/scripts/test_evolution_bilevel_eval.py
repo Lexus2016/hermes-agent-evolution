@@ -95,3 +95,40 @@ def test_evaluate_from_payload():
     out = bl.evaluate(payload)
     assert out["decision"]["go"] is True
     assert out["budget"]["over_budget"] is False
+
+
+# ── McNemar paired test (#1498) ────────────────────────────────────────────────
+
+
+def test_mcnemar_no_discordant_pairs():
+    """All cases agree → p=1.0, not significant."""
+    r = bl.mcnemar_test({"a": True, "b": False}, {"a": True, "b": False})
+    assert r["b"] == 0 and r["c"] == 0
+    assert r["p_value"] == 1.0 and r["significant"] is False
+
+
+def test_mcnemar_strong_disagreement_significant():
+    """Candidate wins 10, incumbent wins 0 → highly significant."""
+    cand = {f"c{i}": True for i in range(10)}
+    inc = {f"c{i}": False for i in range(10)}
+    r = bl.mcnemar_test(cand, inc)
+    assert r["b"] == 10 and r["c"] == 0
+    assert r["p_value"] < 0.05 and r["significant"] is True
+
+
+def test_mcnemar_balanced_disagreement_not_significant():
+    """5 wins each way → not significant (p ~0.77 at n=10)."""
+    cand = {**{f"w{i}": True for i in range(5)}, **{f"l{i}": False for i in range(5)}}
+    inc = {**{f"w{i}": False for i in range(5)}, **{f"l{i}": True for i in range(5)}}
+    r = bl.mcnemar_test(cand, inc)
+    assert r["b"] == 5 and r["c"] == 5
+    assert r["significant"] is False
+
+
+def test_mcnemar_only_checks_discordant():
+    """Concordant pairs (both pass or both fail) don't count."""
+    cand = {"a": True, "b": True, "c": False, "d": False}
+    inc = {"a": True, "b": False, "c": False, "d": True}
+    # Only b and d are discordant: b=cand wins, d=inc wins
+    r = bl.mcnemar_test(cand, inc)
+    assert r["b"] == 1 and r["c"] == 1
