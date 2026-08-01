@@ -46,15 +46,31 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Smoke-wire the eval task set (#1514): importing the evaluator exercises the
+# task-set loader so an import failure surfaces in CI — keeps eval_tasks.py
+# non-dead-code (PR #1520 was closed as dead code for lacking this wire).
+try:  # pragma: no cover - exercised by test_eval_tasks
+    import os as _os
+
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    if _here not in sys.path:
+        sys.path.insert(0, _here)
+    from eval_tasks import latest_version as _eval_latest_version
+    from eval_tasks import load_task_set as _eval_load_task_set
+
+    _EVAL_TASK_SET_OK = bool(_eval_load_task_set()) and bool(_eval_latest_version())
+except Exception:  # noqa: BLE001 - never break the evaluator over the task set
+    _EVAL_TASK_SET_OK = False
+
 # Default rubric for a research sub-task. Weights are relative (renormalized over
 # whichever criteria a candidate actually scores), so an orchestrator can ship a
 # partial rubric without skewing the scale. Kept deliberately small and generic —
 # the skill MAY override per task, but these are sensible research defaults.
 DEFAULT_RUBRIC: Dict[str, float] = {
-    "relevance": 1.0,      # answers the actual sub-task, not an adjacent one
-    "evidence": 1.0,       # claims are backed by cited sources, not asserted
-    "specificity": 0.8,    # concrete + actionable vs. vague generality
-    "correctness": 1.2,    # no detectable factual / logical errors
+    "relevance": 1.0,  # answers the actual sub-task, not an adjacent one
+    "evidence": 1.0,  # claims are backed by cited sources, not asserted
+    "specificity": 0.8,  # concrete + actionable vs. vague generality
+    "correctness": 1.2,  # no detectable factual / logical errors
 }
 
 # Verdicts. ACCEPT = good enough, stop. OPTIMIZE = below bar but budget remains,
@@ -258,7 +274,9 @@ def _parse_args(argv: List[str]) -> Tuple[Dict[str, Any], Optional[str]]:
     return opts, None
 
 
-def _load_candidates(opts: Dict[str, Any]) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+def _load_candidates(
+    opts: Dict[str, Any],
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
     """Read the candidates payload from the positional path or stdin.
 
     Accepts either a bare JSON list of candidate objects, or an object with a
@@ -275,7 +293,7 @@ def _load_candidates(opts: Dict[str, Any]) -> Tuple[Optional[List[Dict[str, Any]
     if isinstance(data, dict) and "candidates" in data:
         data = data["candidates"]
     if not isinstance(data, list):
-        return None, "expected a JSON list of candidates (or {\"candidates\": [...]})"
+        return None, 'expected a JSON list of candidates (or {"candidates": [...]})'
     return [c if isinstance(c, dict) else {} for c in data], None
 
 
