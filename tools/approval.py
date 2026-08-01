@@ -244,6 +244,45 @@ def _is_gateway_approval_context() -> bool:
         return True
     return bool(_get_session_platform())
 
+
+def _is_unattended_context() -> bool:
+    """True when no human or gateway is available to approve commands (#1542).
+
+    In cron/subagent contexts, returning ``pending_approval`` causes the agent
+    to retry the blocked command 3-4x (44% of terminal failures). Callers
+    should return a non-retryable ``blocked`` status instead.
+
+    Requires a **positive signal** (``HERMES_CRON_SESSION`` or
+    ``HERMES_SUBAGENT``) rather than defaulting to True when nobody is
+    "home" — the catch-all default was too aggressive and broke CI test
+    environments that are non-interactive, non-gateway, and non-cron
+    (#1554).
+    """
+    if env_var_enabled("HERMES_CRON_SESSION"):
+        return True
+    if env_var_enabled("HERMES_SUBAGENT"):
+        return True
+    return False
+
+
+def _cron_blocked_result(desc, command, pattern_key=""):
+    """Build a non-retryable ``blocked`` result for cron/subagent (#1542)."""
+    return {
+        "approved": False,
+        "status": "blocked",
+        "approval_pending": False,
+        "command": command,
+        "description": desc,
+        "pattern_key": pattern_key,
+        "message": (
+            f"BLOCKED: {desc} — no user or gateway present to approve in this "
+            f"context. Do NOT retry; find an alternative approach using "
+            f"file/search tools instead of terminal, or set "
+            f"approvals.cron_mode: approve in config.yaml."
+        ),
+    }
+
+
 # Sensitive write targets that should trigger approval even when referenced
 # via shell expansions like $HOME or $HERMES_HOME, or by the resolved absolute
 # active profile home path such as /home/hermes/.hermes/config.yaml. The
@@ -3536,6 +3575,10 @@ def check_all_command_guards(command: str, env_type: str,
         # Return approval_required for backward compat. Redact secrets in the
         # user-facing copy — the raw `command` is preserved for execution and
         # the allowlist keys off pattern_key, so redaction is display-only.
+        #
+        # #1542: In unattended contexts, return non-retryable blocked.
+        if _is_unattended_context():
+            return _cron_blocked_result(combined_desc, command, pattern_key=primary_key)
         from agent.redact import redact_sensitive_text
         _disp_command = redact_sensitive_text(command)
         _disp_combined_desc = redact_sensitive_text(combined_desc)
@@ -3762,6 +3805,10 @@ def check_execute_code_guard(code: str, env_type: str,
     if notify_cb is None:
         # No gateway callback registered (e.g. ask-mode without a notifier):
         # surface a pending approval for backward compatibility.
+        #
+        # #1542: In unattended contexts, return non-retryable blocked.
+        if _is_unattended_context():
+            return _cron_blocked_result(display_description, display_command, pattern_key=pattern_key)
         pending_data = {
             "command": display_command,
             "pattern_key": pattern_key,
