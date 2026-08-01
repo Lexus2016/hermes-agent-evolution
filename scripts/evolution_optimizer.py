@@ -66,9 +66,12 @@ on ``$?`` without parsing JSON.
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # Reuse the shipped evaluator gate — scoring + the bounded ACCEPT/OPTIMIZE/
 # STOP_BUDGET verdict are NOT reimplemented here.
@@ -90,7 +93,9 @@ EXIT_UNCONVERGED = 11
 EXIT_BAD_INPUT = 2
 
 # Seam type aliases (documentation only — kept loose so stubs/lambdas slot in).
-EvaluateFn = Callable[[List[Dict[str, Any]], int], Tuple[List[Dict[str, Any]], Dict[str, Any]]]
+EvaluateFn = Callable[
+    [List[Dict[str, Any]], int], Tuple[List[Dict[str, Any]], Dict[str, Any]]
+]
 RefineFn = Callable[[Optional[Dict[str, Any]], int], List[Dict[str, Any]]]
 
 
@@ -187,7 +192,25 @@ def run_optimizer_loop(
     last_decision: Dict[str, Any] = {}
 
     while current_pass <= max_passes:
-        scored, decision = evaluate(last_candidates, current_pass)
+        # Crash-isolation (#1509): a single malformed episode (LLM call failure,
+        # parse error, network timeout) must not crash the whole loop.  Wrap
+        # evaluate/refine so failures are scored as failed passes, not exceptions
+        # that propagate and kill the pipeline run.
+        try:
+            scored, decision = evaluate(last_candidates, current_pass)
+        except Exception as exc:
+            logger.warning(
+                "evaluate() crashed on pass %d — scoring as failed pass: %s",
+                current_pass,
+                exc,
+            )
+            decision = {
+                "verdict": STOP_BUDGET,
+                "reason": f"evaluate_crashed: {exc}",
+                "best_index": None,
+                "best_score": 0.0,
+            }
+            return _result(False, current_pass, max_passes, last_candidates, decision)
         last_candidates = scored
         last_decision = decision
         verdict = decision.get("verdict")
@@ -201,7 +224,22 @@ def run_optimizer_loop(
         if current_pass >= max_passes:
             break
         best = _best_candidate(scored, decision.get("best_index"))
-        last_candidates = list(refine(best, current_pass))
+        try:
+            last_candidates = list(refine(best, current_pass))
+        except Exception as exc:
+            logger.warning(
+                "refine() crashed on pass %d — terminating loop: %s",
+                current_pass,
+                exc,
+            )
+            last_decision = {
+                **last_decision,
+                "verdict": STOP_BUDGET,
+                "reason": f"refine_crashed: {exc}",
+            }
+            return _result(
+                False, current_pass, max_passes, last_candidates, last_decision
+            )
         current_pass += 1
 
     # Fell out of the loop without a terminal ACCEPT — treat as unconverged
@@ -234,7 +272,9 @@ def _result(
 
 
 # ── CLI (non-LLM seams: score from carried ``scores``, refine is a no-op) ────────
-def _noop_refine(best: Optional[Dict[str, Any]], current_pass: int) -> List[Dict[str, Any]]:
+def _noop_refine(
+    best: Optional[Dict[str, Any]], current_pass: int
+) -> List[Dict[str, Any]]:
     """CLI refinement seam: the terminal toolset has no model to call, so the
     'refinement' is the best candidate carried forward unchanged. The loop then
     re-evaluates it (same scores → same verdict) and the pass budget terminates

@@ -269,3 +269,49 @@ class TestCli:
 
     def test_bad_numeric_flag_exit_2(self, capsys):
         assert main(["evolution_optimizer.py", "--max-passes", "lots"]) == EXIT_BAD_INPUT
+
+
+class TestCrashIsolation:
+    """Crash-isolation (#1509): a crashed evaluate/refine must not kill the
+    loop — it returns a STOP_BUDGET result, not an exception."""
+
+    def test_evaluate_crash_returns_unconverged(self):
+        def crashing_evaluate(candidates, current_pass):
+            raise RuntimeError("LLM API timeout")
+
+        out = run_optimizer_loop(
+            [{"candidate": "x", "scores": {}}],
+            evaluate=crashing_evaluate,
+            refine=_recording_refine(),
+            max_passes=3,
+        )
+        assert out["converged"] is False
+        assert out["verdict"] == STOP_BUDGET
+        assert "evaluate_crashed" in out["decision"].get("reason", "")
+
+    def test_refine_crash_returns_unconverged(self):
+        evaluate = _scripted_evaluate([_verdict(OPTIMIZE, best_index=0)])
+
+        def crashing_refine(best, current_pass):
+            raise ValueError("malformed LLM response")
+
+        out = run_optimizer_loop(
+            [{"candidate": "x", "scores": {}}],
+            evaluate=evaluate,
+            refine=crashing_refine,
+            max_passes=3,
+        )
+        assert out["converged"] is False
+        assert out["verdict"] == STOP_BUDGET
+        assert "refine_crashed" in out["decision"].get("reason", "")
+
+    def test_evaluate_crash_preserves_candidates(self):
+        cands = [{"candidate": "preserved", "scores": {}}]
+
+        def crashing_evaluate(candidates, current_pass):
+            raise RuntimeError("boom")
+
+        out = run_optimizer_loop(
+            cands, evaluate=crashing_evaluate, refine=_recording_refine(), max_passes=3
+        )
+        assert out["best_candidate"] is not None or out["decision"]["best_index"] is None
