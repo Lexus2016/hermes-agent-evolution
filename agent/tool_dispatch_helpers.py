@@ -492,6 +492,26 @@ def make_tool_result_message(
             wrapped = wrapped + diagnostic_suffix(content)
         except Exception:
             pass
+
+    # Payload anomaly detection (#1495 — USR): inject [tool_error] on broken
+    # payloads (None/empty/all-null) so the model knows the tool malfunctioned
+    # rather than fabricating a safety rationale. Always on — structural check.
+    try:
+        from agent.tool_diagnostics import payload_anomaly
+
+        anomaly = payload_anomaly(content)
+        if anomaly is not None:
+            atype, ahint = anomaly
+            sig = f"\n\n[tool_error] Broken payload (type={atype}). {ahint}"
+            if isinstance(wrapped, str):
+                wrapped += sig
+            elif isinstance(wrapped, list):
+                wrapped = list(wrapped) + [{"type": "text", "text": sig.strip()}]
+            else:
+                wrapped = str(wrapped) + sig
+    except Exception:
+        pass
+
     message = {
         "role": "tool",
         "name": name,
