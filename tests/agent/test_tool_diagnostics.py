@@ -1,6 +1,12 @@
 """Tests for agent/tool_diagnostics.py — normalized failure taxonomy (#130/#175)."""
 
-from agent.tool_diagnostics import classify, diagnostic_suffix, inline_diagnostics_enabled
+import pytest
+
+from agent.tool_diagnostics import (
+    classify,
+    diagnostic_suffix,
+    inline_diagnostics_enabled,
+)
 from agent.tool_dispatch_helpers import make_tool_result_message
 
 
@@ -16,20 +22,29 @@ class TestClassify:
 
     def test_permission(self):
         assert classify("Refusing to write to sensitive system path")[0] == "permission"
-        assert classify("error: permission denied")[0] in ("permission", "missing_command", "runtime_error")
+        assert classify("error: permission denied")[0] in (
+            "permission",
+            "missing_command",
+            "runtime_error",
+        )
 
     def test_timeout(self):
         assert classify("request timed out after 120s")[0] == "timeout"
         assert classify("ClosedResourceError: server unreachable")[0] == "timeout"
 
     def test_limit(self):
-        assert classify("value exceeds the maximum length of 2200 characters")[0] == "limit"
+        assert (
+            classify("value exceeds the maximum length of 2200 characters")[0]
+            == "limit"
+        )
 
     def test_not_found(self):
         assert classify("grep: no matches found")[0] == "not_found"
 
     def test_runtime_error_fallback(self):
-        assert classify("Traceback (most recent call last):\n  ...")[0] == "runtime_error"
+        assert (
+            classify("Traceback (most recent call last):\n  ...")[0] == "runtime_error"
+        )
         assert classify("process exited, exit code: 1")[0] == "runtime_error"
 
 
@@ -40,7 +55,12 @@ class TestInlineDiagnosticsEnabled:
 
     def test_config_true_enables(self, monkeypatch):
         monkeypatch.delenv("HERMES_DIAGNOSTICS_INLINE", raising=False)
-        assert inline_diagnostics_enabled(config={"agent": {"diagnostics": {"inline": True}}}) is True
+        assert (
+            inline_diagnostics_enabled(
+                config={"agent": {"diagnostics": {"inline": True}}}
+            )
+            is True
+        )
 
     def test_env_var_truthy_values_enable(self, monkeypatch):
         for value in ("1", "true", "True", "yes", "on"):
@@ -50,7 +70,12 @@ class TestInlineDiagnosticsEnabled:
     def test_env_var_falsy_values_disable(self, monkeypatch):
         for value in ("0", "false", "False", "no", "off"):
             monkeypatch.setenv("HERMES_DIAGNOSTICS_INLINE", value)
-            assert inline_diagnostics_enabled(config={"agent": {"diagnostics": {"inline": True}}}) is False, value
+            assert (
+                inline_diagnostics_enabled(
+                    config={"agent": {"diagnostics": {"inline": True}}}
+                )
+                is False
+            ), value
 
     def test_malformed_config_section_falls_back_to_default(self, monkeypatch):
         monkeypatch.delenv("HERMES_DIAGNOSTICS_INLINE", raising=False)
@@ -62,7 +87,8 @@ class TestInlineDiagnosticsEnabled:
         import hermes_cli.config as config_module
 
         monkeypatch.setattr(
-            config_module, "load_config_readonly",
+            config_module,
+            "load_config_readonly",
             lambda: {"agent": {"diagnostics": {"inline": True}}},
         )
         assert inline_diagnostics_enabled(config=None) is True
@@ -117,4 +143,82 @@ class TestWiredIntoToolResult:
         assert "[diagnostic] failure-class=missing_command" in msg["content"]
 
 
+class TestPayloadAnomaly:
+    """Tests for payload_anomaly — structural payload check (#1495 USR)."""
 
+    @pytest.mark.parametrize("payload", [None, "", "   \n\t  ", [], {}])
+    def test_empty_payload_types(self, payload):
+        from agent.tool_diagnostics import payload_anomaly
+
+        anomaly_type, hint = payload_anomaly(payload)
+        assert anomaly_type == "empty_payload"
+        assert "malfunctioned" in hint.lower() or "malfunction" in hint.lower()
+
+    @pytest.mark.parametrize(
+        "token", ["none", "null", "nil", "None", "NULL", "{}", "[]"]
+    )
+    def test_null_sentinel_strings(self, token):
+        from agent.tool_diagnostics import payload_anomaly
+
+        anomaly_type, _ = payload_anomaly(token)
+        assert anomaly_type == "empty_payload", f"Failed for token: {token!r}"
+
+    def test_all_null_dict_is_malformed(self):
+        from agent.tool_diagnostics import payload_anomaly
+
+        anomaly_type, hint = payload_anomaly({
+            "data": None,
+            "error": None,
+            "results": [],
+        })
+        assert anomaly_type == "malformed_payload"
+        assert "malfunctioned" in hint.lower()
+
+    def test_valid_payloads_return_none(self):
+        from agent.tool_diagnostics import payload_anomaly
+
+        assert payload_anomaly("file contents here") is None
+        assert payload_anomaly(["item1", "item2"]) is None
+        assert payload_anomaly({"status": "ok", "data": [1, 2, 3]}) is None
+        assert payload_anomaly({"data": None, "results": [1, 2]}) is None
+
+
+class TestUSRSignalInjection:
+    """Tests that broken payloads get [tool_error] in make_tool_result_message (#1495)."""
+
+    def test_none_payload_gets_tool_error(self):
+        msg = make_tool_result_message("web_search", None, "c1")
+        assert "[tool_error]" in msg["content"]
+        assert "empty_payload" in msg["content"]
+        assert "malfunctioned" in msg["content"].lower()
+
+    def test_empty_string_and_null_sentinel_get_tool_error(self):
+        for payload in ("", "null", "{}"):
+            msg = make_tool_result_message("mcp_tool", payload, "c2")
+            assert "[tool_error]" in msg["content"], f"Failed for {payload!r}"
+
+    def test_empty_list_gets_tool_error(self):
+        msg = make_tool_result_message("search_files", [], "c3")
+        content = msg["content"]
+        if isinstance(content, list):
+            content = str(content)
+        assert "[tool_error]" in content
+
+    def test_all_null_dict_gets_malformed_error(self):
+        msg = make_tool_result_message(
+            "mcp_tool", {"data": None, "error": None, "results": []}, "c6"
+        )
+        assert "[tool_error]" in msg["content"]
+        assert "malformed_payload" in msg["content"]
+
+    def test_valid_payload_no_tool_error(self):
+        msg = make_tool_result_message("read_file", "file contents here", "c4")
+        assert "[tool_error]" not in msg["content"]
+
+    def test_anomaly_signal_prevents_safety_fabrication(self, monkeypatch):
+        """Always-on (no env/config needed); explicitly tells model NOT to
+        fabricate a safety rationale — the core USR defense."""
+        monkeypatch.delenv("HERMES_DIAGNOSTICS_INLINE", raising=False)
+        msg = make_tool_result_message("web_search", None, "c8")
+        assert "[tool_error]" in msg["content"]
+        assert "NOT" in msg["content"] or "not a" in msg["content"].lower()
