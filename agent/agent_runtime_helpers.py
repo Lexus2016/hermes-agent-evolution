@@ -2652,6 +2652,20 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
     elif function_name == "delegate_task":
         def _execute(next_args: dict) -> Any:
             return _finish_agent_tool(agent._dispatch_delegate_task(next_args), next_args)
+    elif function_name == "compact_context":
+        # Agent-driven context compaction (#1568 SelfCompact). The model
+        # decides when to compact (not just the threshold trigger) and may
+        # pass a focus topic the summariser should prioritise.
+        def _execute(next_args: dict) -> Any:
+            from tools.compact_context_tool import compact_context_tool as _cc
+            return _finish_agent_tool(
+                _cc(
+                    focus_topic=next_args.get("focus_topic", ""),
+                    agent=agent,
+                    messages=messages,
+                ),
+                next_args,
+            )
     else:
         def _execute(next_args: dict) -> Any:
             return _ra().handle_function_call(

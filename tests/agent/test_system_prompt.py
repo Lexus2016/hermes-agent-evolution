@@ -145,3 +145,24 @@ class TestTelegramRichMessagesHint:
             stable = _stable_prompt(agent)
         assert "Standard Markdown is automatically converted" in stable
         assert "lean into it" not in stable
+
+
+class TestSelfCompactRubricInjection:
+    """Verify SELFCOMPACT_RUBRIC_GUIDANCE is injected only when the
+    compact_context tool is loaded (#1568)."""
+
+    def test_injected_when_tool_loaded(self):
+        agent = _make_agent(valid_tool_names=["read_file", "compact_context"])
+        stable = _stable_prompt(agent)
+        assert "Adaptive context compaction" in stable
+        assert "compact_context" in stable
+
+    def test_absent_when_tool_not_loaded(self):
+        agent = _make_agent(valid_tool_names=["read_file", "memory"])
+        stable = _stable_prompt(agent)
+        assert "Adaptive context compaction" not in stable
+
+    def test_absent_when_no_tools(self):
+        agent = _make_agent(valid_tool_names=[])
+        stable = _stable_prompt(agent)
+        assert "Adaptive context compaction" not in stable
