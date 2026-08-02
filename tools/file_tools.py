@@ -2697,6 +2697,39 @@ def _handle_search_files(args, **kw):
             ),
         })
 
+    # #1588 — when a pattern that does NOT look like a glob still fails to
+    # compile as a regex, ripgrep returns a bare parse error with no guidance,
+    # causing 59/week parse-error spirals. Pre-validate and surface the exact
+    # compile-failure reason plus a glob-vs-regex hint so the agent can fix
+    # the pattern instead of blind-retrying with a near-identical one.
+    # Guard ``file_glob``: when it is set, the caller is intentionally
+    # combining a filename filter with their pattern, so the pattern should
+    # pass through even if it happens to be a bare glob.
+    if (
+        target == "content"
+        and not args.get("file_glob")
+        and not _is_valid_regex(pattern)
+    ):
+        try:
+            re.compile(pattern)
+            compile_reason = ""
+        except re.error as exc:
+            compile_reason = str(exc)
+        return json.dumps(
+            {
+                "error": (
+                    f"Invalid regex pattern {pattern!r}: {compile_reason}.\n\n"
+                    "To fix:\n"
+                    "  - If you meant a literal string, escape regex metacharacters "
+                    "(e.g. replace '[' with '\\[', '*' with '\\*').\n"
+                    "  - If you meant a filename pattern (like '*.py'), use target='files' "
+                    "or move it to the file_glob parameter instead of the regex pattern.\n"
+                    "  - Re-run search_files with a corrected regex pattern."
+                ),
+            },
+            ensure_ascii=False,
+        )
+
     return search_tool(
         pattern=pattern,
         target=target,
