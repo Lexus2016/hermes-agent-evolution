@@ -1415,6 +1415,16 @@ class ShellFileOperations(FileOperations):
                 )
 
         error_msg = f"File not found: {path}"
+        # #1587 — the "did you mean?" suggestion MUST be inlined into the
+        # error text. The caller (_diagnose_read_failure → line ~1782) only
+        # reads ``.error``, so a suggestion left in the separate
+        # ``similar_files`` field is invisible to the agent and the 71/wk
+        # file-not-found spiral persists unchanged.
+        if similar:
+            error_msg += (
+                "\n\nDid you mean: " + ", ".join(similar) + "? "
+                "Re-run read_file with one of these paths instead of guessing."
+            )
         if hint_parts:
             error_msg += "\n\n" + "\n".join(hint_parts)
 
