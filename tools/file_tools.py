@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import posixpath
+import re
 import sys
 import tempfile
 import threading
@@ -2722,6 +2723,24 @@ def _looks_like_glob(pattern: str) -> bool:
     return False
 
 
+def _is_valid_regex(pattern: str) -> bool:
+    """Return True if *pattern* compiles as a valid Python regex.
+
+    Used to short-circuit the glob-vs-regex heuristic in
+    :func:`_handle_search_files`: the guard's only purpose (#887) is to catch
+    patterns that would cause a ripgrep *regex parse error*, and a pattern that
+    compiles cannot cause one.  Treating such a pattern as a glob is a
+    false-positive redirect (e.g. ``"verdict":\\s*null`` — the heuristic sees
+    ``*`` preceded by ``s`` because it does not track the ``\\s`` escape span,
+    yet the pattern compiles and is exactly what the caller wanted to search for).
+    """
+    try:
+        re.compile(pattern)
+        return True
+    except re.error:
+        return False
+
+
 def _handle_search_files(args, **kw):
     tid = kw.get("task_id") or "default"
     target_map = {"grep": "content", "find": "files"}
@@ -2735,14 +2754,25 @@ def _handle_search_files(args, **kw):
     # ``file_glob`` (the correct filter for content search) and search with
     # a broad regex, or switch to file-search mode when no content search
     # was intended.
-    if target == "content" and _looks_like_glob(pattern) and not args.get("file_glob"):
+    #
+    # The redirect is ONLY meaningful for patterns that would actually cause a
+    # parse error.  If ``re.compile`` accepts the pattern, ripgrep (which uses
+    # the same syntax class) will accept it too, so there is nothing to guard
+    # against — redirecting would reject a legitimate regex search (issue
+    # search_files-glob-false-positive: 12 occurrences where the heuristic
+    # flagged valid regexes like ``"verdict":\\s*null`` because it does not
+    # track escape spans such as ``\\s*``).
+    if (
+        target == "content"
+        and not args.get("file_glob")
+        and _looks_like_glob(pattern)
+        and not _is_valid_regex(pattern)
+    ):
         # If the glob contains a dot extension (``*.py``, ``*config*``), the
         # model most likely wanted to *find files by name*, not search file
         # contents.  Auto-redirect to file search — that is the correct tool
         # for the job and avoids the regex parse error entirely.
-        import json as _json
-
-        return _json.dumps({
+        return json.dumps({
             "error": (
                 f"Pattern {pattern!r} looks like a shell glob (wildcards), not a regex. "
                 f"In content-search mode the pattern is treated as a regular expression, "
