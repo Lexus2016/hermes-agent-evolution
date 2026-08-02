@@ -67,6 +67,64 @@ class TestLooksLikeGlob:
         assert _looks_like_glob(r"(?<=\d).*") is False
 
 
+class TestIsValidRegexShortCircuit:
+    """The glob guard only matters for patterns that cause a *parse error*.
+
+    A pattern that ``re.compile`` accepts cannot cause one, so
+    ``_handle_search_files`` must let it through even when the
+    ``_looks_like_glob`` heuristic flags it.  These are the
+    search_files-glob-false-positive regression cases (12 occurrences across
+    the introspection window).
+    """
+
+    @pytest.mark.parametrize("pattern", [
+        # The heuristic sees ``*`` preceded by ``s`` (it does not track the
+        # ``\s`` escape span) but the pattern compiles and is a legal regex.
+        r'"verdict":\s*null',
+        r'"head":\s*\{',
+        r'def [a-z_]+\(self.*\).*:\s*$',
+        r'"number":\s*\d{4}',
+        r'"verdict":\s*"consumed"',
+    ])
+    def test_false_positive_regex_passes_through(self, pattern):
+        """Real-world regexes the heuristic wrongly flagged as globs.
+
+        These compile cleanly and must reach the search backend, not the
+        glob-redirect error.
+        """
+        result = _handle_search_files(
+            {"pattern": pattern, "target": "content"},
+            task_id="test",
+        )
+        # Whatever search_tool returns (results or a non-glob error), it must
+        # NOT be the glob-redirect error.
+        try:
+            data = json.loads(result)
+            if "error" in data:
+                assert "glob" not in data["error"].lower(), (
+                    f"Pattern {pattern!r} is a valid regex and must not be "
+                    f"redirected as a glob"
+                )
+        except (json.JSONDecodeError, TypeError):
+            pass  # non-JSON -> went through to search_tool, which is correct
+
+    @pytest.mark.parametrize("pattern", [
+        "*.py",
+        "*config*",
+        "**/*.py",
+        "*.json",
+    ])
+    def test_uncompilable_glob_still_redirects(self, pattern):
+        """Patterns that fail ``re.compile`` (real globs) still redirect."""
+        result = _handle_search_files(
+            {"pattern": pattern, "target": "content"},
+            task_id="test",
+        )
+        data = json.loads(result)
+        assert "error" in data, f"{pattern!r} should trigger the redirect error"
+        assert "glob" in data["error"].lower()
+
+
 class TestHandleSearchFilesGlobRedirect:
     """Integration tests for the _handle_search_files handler redirect."""
 
