@@ -296,6 +296,7 @@ class PatchResult:
     # field to the tool result so the model can correct on its next
     # turn without re-reading the file.
     structured_error: Optional[str] = None
+    similar_files: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         result = {"success": self.success}
@@ -313,7 +314,7 @@ class PatchResult:
             result["lsp_diagnostics"] = self.lsp_diagnostics
         if self.error:
             result["error"] = self.error
-            hit = classify_file_error(self.error)
+            hit = classify_file_error(self.error, similar_files=self.similar_files)
             if hit:
                 result["error_class"], result["recovery"] = hit
         if self.structured_error:
@@ -443,6 +444,75 @@ def _search_stdout_and_limit(result: ExecuteResult) -> tuple[str, Optional[str]]
     if result.exit_code == 124:
         return _SEARCH_TIMEOUT_MARKER_RE.sub("", result.stdout), "search_timeout"
     return result.stdout, None
+
+
+def _enrich_search_parse_error(error_msg: str, pattern: str) -> str:
+    """Enrich a regex parse-error with actionable guidance (#1588).
+
+    When rg/grep reject a pattern (exit 2), the raw message is typically::
+
+        rg: regex parse error:
+            (?:[
+               ^
+        error: unclosed character class
+
+    or::
+
+        grep: Invalid regular expression
+
+    The agent sees "Search failed: …" but can't tell whether the fix is
+    "rewrite the regex" or "this is a glob, use target=files".  This helper:
+
+    1. Keeps the original error text (the compile-failure reason is valuable).
+    2. Detects whether the pattern looks like a **glob** (contains ``*`` or
+       ``?`` but lacks regex metacharacters like ``(``, ``[``, ``+``) and
+       appends a "use target=files" hint.
+    3. For genuine regex syntax errors, appends a "fix or simplify the regex"
+       hint.
+    """
+    base = f"Search failed: {error_msg}"
+    low = error_msg.lower()
+
+    is_parse_error = (
+        "regex parse error" in low
+        or "invalid regular expression" in low
+        or "unrecognized repeat" in low
+        or "unbalanced" in low
+        or "unclosed" in low
+        or "invalid repetition" in low
+    )
+    if not is_parse_error:
+        return base
+
+    # Heuristic: does the pattern look like a glob that the agent passed as
+    # regex? Globs use *, ?, and character classes [abc] — but NOT regex-only
+    # constructs like (), +, |, {n}, \\d, \\w, etc.  If the ONLY metacharacters
+    # are glob-style AND the pattern contains at least one of the primary
+    # glob signals (* or ?), the agent likely intended a filename search.
+    # A bare "[" or "]" without * or ? is a regex bracket, not a glob.
+    # Note: "." is excluded from regex_only_chars because it appears in
+    # every filename extension (*.py, config.yaml) and would cause false
+    # negatives for the most common glob confusion case.
+    regex_only_chars = set("()+|{}^$\\")
+    chars_in_pattern = set(pattern)
+    has_star_or_q = "*" in chars_in_pattern or "?" in chars_in_pattern
+    looks_like_glob = has_star_or_q and not (regex_only_chars & chars_in_pattern)
+
+    hints: list[str] = []
+    if looks_like_glob:
+        hints.append(
+            f"Pattern '{pattern}' looks like a filename glob, but search_files "
+            "with target='content' treats it as a regex. Use target='files' "
+            "instead (e.g. search_files(pattern='*.py', target='files'))."
+        )
+    else:
+        hints.append(
+            f"Pattern '{pattern}' is not valid regex. Fix the syntax error "
+            "above, simplify the pattern, or use a plain substring search "
+            "(regex special characters: ( ) [ ] { } + * ? | ^ $ \\ .)."
+        )
+
+    return base + "\n\n" + " ".join(hints)
 
 
 def _split_tool_diagnostics(output: str) -> tuple[str, str]:
@@ -1233,7 +1303,8 @@ class ShellFileOperations(FileOperations):
             # _diagnose_read_failure probes with test -e / test -d to
             # disambiguate, producing a classify_file_error-friendly message
             # so the agent picks the right recovery instead of blind-retrying.
-            return ReadResult(error=self._diagnose_read_failure(path, operation="read"))
+            _err, _sim = self._diagnose_read_failure(path, operation="read")
+            return ReadResult(error=_err, similar_files=_sim)
 
         stat_output = _strip_terminal_fence_leaks(stat_result.stdout)
         try:
@@ -1434,7 +1505,8 @@ class ShellFileOperations(FileOperations):
             # suppressed can't distinguish missing / directory / permission
             # denied. Probe the real cause so classify_file_error routes
             # the agent to the right recovery.
-            return ReadResult(error=self._diagnose_read_failure(path, operation="read"))
+            _err, _sim = self._diagnose_read_failure(path, operation="read")
+            return ReadResult(error=_err, similar_files=_sim)
         stat_output = _strip_terminal_fence_leaks(stat_result.stdout)
         try:
             file_size = int(stat_output.strip())
@@ -1752,7 +1824,9 @@ class ShellFileOperations(FileOperations):
     # PATCH Implementation (Replace Mode)
     # =========================================================================
 
-    def _diagnose_read_failure(self, path: str, operation: str = "patch") -> str:
+    def _diagnose_read_failure(
+        self, path: str, operation: str = "patch"
+    ) -> tuple[str, list[str]]:
         """Build a distinct, classifiable error for a failed file read.
 
         Both ``patch_replace`` and ``read_file`` / ``read_file_raw`` probe
@@ -1769,6 +1843,13 @@ class ShellFileOperations(FileOperations):
         ``operation`` ("patch" or "read") controls the wording of the
         directory / permission messages so they stay actionable for the
         caller that triggered the probe.
+
+        Returns ``(error_str, similar_files)``.  ``similar_files`` is
+        non-empty only when the path was not found and candidate matches
+        were scored — the caller can attach it to the ``ReadResult`` /
+        ``PatchResult`` so ``classify_file_error`` routes to
+        ``fuzzy_match`` (with a "Did you mean …?" recovery hint) instead
+        of the generic ``not_found`` class (#1587).
         """
         esc = self._escape_shell_arg(path)
         # Does the path exist at all?  ``-e`` follows symlinks; combined
@@ -1779,16 +1860,23 @@ class ShellFileOperations(FileOperations):
             # Reuse the rich not-found suggestion (similar files / nearest
             # ancestor listing) so the message classifies as ``not_found``
             # and tells the agent how to recover.
-            suggest = self._suggest_similar_files(path).error
-            return suggest or f"File not found: {path}"
+            suggest_result = self._suggest_similar_files(path)
+            return (
+                suggest_result.error or f"File not found: {path}",
+                list(suggest_result.similar_files),
+            )
         # Path exists but the read failed — is it a directory?
         is_dir = self._exec(f"test -d {esc} && echo yes || echo no")
         if (is_dir.stdout or "").strip() == "yes":
-            return f"Cannot {operation} a directory: {path} is a directory, not a file."
+            return (
+                f"Cannot {operation} a directory: {path} is a directory, not a file.",
+                [],
+            )
         # Exists and is a regular file — most likely a permission error.
         return (
             f"Permission denied reading file: {path}. Check read permissions "
-            f"before retrying — do not repeat the same {operation} blindly."
+            f"before retrying — do not repeat the same {operation} blindly.",
+            [],
         )
 
     def patch_replace(
@@ -1831,7 +1919,8 @@ class ShellFileOperations(FileOperations):
             # here so the error classifies distinctly and carries a
             # create-on-miss hint. The happy path (file exists) is
             # unchanged: these probes only run on failure.
-            return PatchResult(error=self._diagnose_read_failure(path))
+            _err, _sim = self._diagnose_read_failure(path)
+            return PatchResult(error=_err, similar_files=_sim)
 
         content = read_result.stdout
         # Strip a leading UTF-8 BOM before matching so the fuzzy matcher and
@@ -2685,7 +2774,8 @@ class ShellFileOperations(FileOperations):
         # usable match payload remains. Otherwise we keep the real matches.
         if result.exit_code == 2 and not payload.strip():
             error_msg = diagnostics.strip() or result.stdout.strip() or "Search error"
-            return SearchResult(error=f"Search failed: {error_msg}", total_count=0)
+            enriched = _enrich_search_parse_error(error_msg, pattern)
+            return SearchResult(error=enriched, total_count=0)
 
         # Parse the diagnostic-free payload so error text never becomes a match.
         stdout = payload
@@ -2825,7 +2915,8 @@ class ShellFileOperations(FileOperations):
         # usable match payload remains.
         if result.exit_code == 2 and not payload.strip():
             error_msg = diagnostics.strip() or result.stdout.strip() or "Search error"
-            return SearchResult(error=f"Search failed: {error_msg}", total_count=0)
+            enriched = _enrich_search_parse_error(error_msg, pattern)
+            return SearchResult(error=enriched, total_count=0)
 
         stdout = payload
         if output_mode == "files_only":
