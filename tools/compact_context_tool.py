@@ -53,7 +53,10 @@ def compact_context_tool(
     """
     if agent is None:
         return json.dumps(
-            {"success": False, "error": "compact_context is not available in this execution context."},
+            {
+                "success": False,
+                "error": "compact_context is not available in this execution context.",
+            },
             ensure_ascii=False,
         )
     if messages is None:
@@ -194,8 +197,6 @@ registry.register(
         agent=kw.get("agent"),
         messages=kw.get("messages"),
     ),
-    check_fn=lambda *a, **kw: check_compact_context_requirements(
-        agent=kw.get("agent")
-    ),
+    check_fn=lambda *a, **kw: check_compact_context_requirements(agent=kw.get("agent")),
     emoji="🗜️",
 )

@@ -1426,6 +1426,30 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
                     spinner.stop(cute_msg)
                 elif agent._should_emit_quiet_tool_messages():
                     agent._vprint(f"  {cute_msg}")
+        elif function_name == "compact_context":
+            # Agent-driven context compaction (#1568 SelfCompact). Mirrors the
+            # concurrent-path branch in agent_runtime_helpers.invoke_tool so
+            # both executors handle the same agent-runtime tool set (the
+            # post_tool_call hook must fire consistently regardless of which
+            # executor ran the tool).
+            def _execute(next_args: dict) -> Any:
+                from tools.compact_context_tool import compact_context_tool as _cc
+                return _cc(
+                    focus_topic=next_args.get("focus_topic", ""),
+                    agent=agent,
+                    messages=messages,
+                )
+            function_result, function_args = _run_agent_tool_execution_middleware(
+                agent,
+                function_name=function_name,
+                function_args=function_args,
+                effective_task_id=effective_task_id,
+                tool_call_id=getattr(tool_call, "id", "") or "",
+                execute=_execute,
+            )
+            tool_duration = time.time() - tool_start_time
+            if agent._should_emit_quiet_tool_messages():
+                agent._vprint(f"  {_get_cute_tool_message_impl('compact_context', function_args, tool_duration, result=function_result)}")
         elif agent._context_engine_tool_names and function_name in agent._context_engine_tool_names:
             # Context engine tools (lcm_grep, lcm_describe, lcm_expand, etc.)
             spinner = None
