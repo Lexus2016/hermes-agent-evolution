@@ -1197,6 +1197,25 @@ def _classify_by_status(
             )
         return result_fn(FailoverReason.overloaded, retryable=True)
 
+    # 504 Gateway Timeout — a reverse proxy (nginx, Cloudflare, Caddy, an
+    # OpenRouter/Tailscale hop) did not receive a timely response from the
+    # upstream LLM backend. This is the canonical provider-layer timeout for
+    # gateway-fronted deployments (self-hosted Ollama / vLLM / llama.cpp, and
+    # managed gateways alike), and it was falling through to the generic
+    # 5xx → server_error bucket below. server_error is excluded from the
+    # timeout trigger predicate in conversation_loop.py
+    # (``classified.reason == FailoverReason.timeout``), so a 504 never fired
+    # the #1093 adaptive timeout backoff nor the #1142 consecutive-timeout
+    # circuit breaker — it got only the short exponential (2s → 4s → 8s) and
+    # hammered the degraded endpoint. This is consistent with the 637/wk
+    # provider-layer timeout signal that did not drop after the #1100 backoff
+    # landed: the dominant gateway-timeout response shape never matched the
+    # trigger. Route 504 to ``timeout`` so the progressive backoff and the
+    # failover-after-2-consecutive breaker both engage (mirroring the 408
+    # rationale above). (#1142)
+    if status_code == 504:
+        return result_fn(FailoverReason.timeout, retryable=True)
+
     # 408 Request Timeout — a transient timing failure the server itself flags
     # as safe to retry (RFC 9110 §15.5.9), not a malformed request. Commonly
     # emitted by reverse proxies sitting in front of self-hosted backends
