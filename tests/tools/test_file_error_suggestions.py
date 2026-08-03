@@ -143,6 +143,21 @@ class TestEnrichSearchParseError:
         assert "not valid regex" in result
         assert "target='files'" not in result
 
+    def test_file_glob_set_suppresses_the_glob_redirect(self):
+        """With file_glob already set, a glob-shaped pattern is deliberate regex.
+
+        The caller is filtering filenames by file_glob and searching content
+        with the pattern, so target='files' — which cannot search content —
+        would be the wrong advice. They get the regex-syntax hint instead.
+        """
+        result = _enrich_search_parse_error(
+            "rg: regex parse error:\n    error: repetition",
+            "*.py",
+            "*.ts",
+        )
+        assert "target='files'" not in result
+        assert "not valid regex" in result
+
     def test_original_error_preserved(self):
         """The original error text must be preserved in the enriched message."""
         original = "rg: regex parse error:\n    (?:\n     ^\nerror: unclosed group"

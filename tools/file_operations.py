@@ -536,7 +536,9 @@ def _search_stdout_and_limit(result: ExecuteResult) -> tuple[str, Optional[str]]
     return result.stdout, None
 
 
-def _enrich_search_parse_error(error_msg: str, pattern: str) -> str:
+def _enrich_search_parse_error(
+    error_msg: str, pattern: str, file_glob: str = ""
+) -> str:
     """Enrich a regex parse-error with actionable guidance (#1588).
 
     When rg/grep reject a pattern (exit 2), the raw message is typically::
@@ -583,10 +585,19 @@ def _enrich_search_parse_error(error_msg: str, pattern: str) -> str:
     # Note: "." is excluded from regex_only_chars because it appears in
     # every filename extension (*.py, config.yaml) and would cause false
     # negatives for the most common glob confusion case.
+    # A caller that already passed ``file_glob`` is filtering filenames by that
+    # glob and searching content with the pattern — so a glob-shaped pattern is
+    # deliberate regex, not the target='files' confusion this hint addresses.
+    # Suggesting target='files' there would send them to a tool that cannot do
+    # what they asked.
     regex_only_chars = set("()+|{}^$\\")
     chars_in_pattern = set(pattern)
     has_star_or_q = "*" in chars_in_pattern or "?" in chars_in_pattern
-    looks_like_glob = has_star_or_q and not (regex_only_chars & chars_in_pattern)
+    looks_like_glob = (
+        has_star_or_q
+        and not (regex_only_chars & chars_in_pattern)
+        and not file_glob
+    )
 
     hints: list[str] = []
     if looks_like_glob:
@@ -2874,7 +2885,9 @@ class ShellFileOperations(FileOperations):
         # usable match payload remains. Otherwise we keep the real matches.
         if result.exit_code == 2 and not payload.strip():
             error_msg = diagnostics.strip() or result.stdout.strip() or "Search error"
-            enriched = _enrich_search_parse_error(error_msg, pattern)
+            enriched = _enrich_search_parse_error(
+                error_msg, pattern, file_glob or ""
+            )
             return SearchResult(error=enriched, total_count=0)
 
         # Parse the diagnostic-free payload so error text never becomes a match.
@@ -3015,7 +3028,9 @@ class ShellFileOperations(FileOperations):
         # usable match payload remains.
         if result.exit_code == 2 and not payload.strip():
             error_msg = diagnostics.strip() or result.stdout.strip() or "Search error"
-            enriched = _enrich_search_parse_error(error_msg, pattern)
+            enriched = _enrich_search_parse_error(
+                error_msg, pattern, file_glob or ""
+            )
             return SearchResult(error=enriched, total_count=0)
 
         stdout = payload
