@@ -78,12 +78,27 @@ from hermes_logging import set_session_context
 from tools.skill_provenance import set_current_write_origin
 from utils import base_url_host_matches, env_var_enabled
 
+# #1265 — Refusal nudge telemetry (best-effort, never breaks the loop).
+try:
+    from agent import refusal_telemetry as _refusal_telemetry
+except Exception:  # pragma: no cover - best-effort import
+    _refusal_telemetry = None
+
 logger = logging.getLogger(__name__)
 
 # Stable prefix of the local interrupt status string emitted when a turn is
 # cancelled while waiting on the provider. Surfaces (ACP, TUI) match on this
 # to treat it as cancellation metadata rather than assistant prose.
 INTERRUPT_WAITING_FOR_MODEL_PREFIX = "Operation interrupted: waiting for model response ("
+
+# ── Subagent task-spec re-grounding (#1578) ────────────────────────────
+# How many API-call iterations a subagent runs before its original goal is
+# re-injected as a user message.  Long subagent loops drift as tool results
+# fill the window; periodic re-grounding keeps the model focused.  Only
+# fires for ``platform == "subagent"`` — interactive surfaces have a human
+# to steer.  Configurable via ``agent.subagent_reground_interval`` in
+# config.yaml (see ``agent_init.py``); this constant is the fallback.
+_SUBAGENT_REGROUND_INTERVAL = 10
 
 # Modules that indicate a deterministic local processing error when they
 # appear in an exception traceback WITHOUT any API-call module. Used by the
@@ -1215,7 +1230,49 @@ def _run_conversation_impl(
         if (agent._skill_nudge_interval > 0
                 and "skill_manage" in agent.valid_tool_names):
             agent._iters_since_skill += 1
-        
+
+        # ── Task-spec re-grounding for subagents (#1578) ────────────────
+        # Subagents run unattended in long tool-calling loops with no human
+        # to course-correct.  As the message window fills with tool results,
+        # the original goal can drift out of the model's attention.  Periodically
+        # re-inject a concise reminder so the model re-grounds every
+        # ``_subagent_reground_interval`` iterations.  Only fires for
+        # ``platform == "subagent"`` — interactive sessions have a human to
+        # steer.  The reminder is a *user* message (preserving role alternation
+        # and cache validity — same pattern as the loop-guard nudge above).
+        try:
+            _platform = getattr(agent, "platform", None)
+            _rg_interval = getattr(
+                agent, "_subagent_reground_interval", _SUBAGENT_REGROUND_INTERVAL
+            )
+            if (
+                _platform == "subagent"
+                and _rg_interval > 0
+                and api_call_count > 0
+                and api_call_count % _rg_interval == 0
+            ):
+                _rg_goal = original_user_message or user_message or ""
+                if _rg_goal and isinstance(_rg_goal, str):
+                    _rg_goal = _rg_goal.strip()
+                    if len(_rg_goal) > 500:
+                        _rg_goal = _rg_goal[:500] + "…"
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            f"[task-reminder] You are a subagent working on a "
+                            f"delegated task. Your original goal (re-grounded "
+                            f"at iteration {api_call_count}): {_rg_goal}\n\n"
+                            f"Re-check: are your current tool calls advancing "
+                            f"this goal? If not, change your approach."
+                        ),
+                    })
+                    logger.debug(
+                        "subagent re-grounding nudge at iteration %d",
+                        api_call_count,
+                    )
+        except Exception as _rg_err:
+            logger.debug("re-grounding error (iteration %s): %s", api_call_count, _rg_err)
+
         # ── Pre-API-call /steer drain ──────────────────────────────────
         # If a /steer arrived during the previous API call (while the model
         # was thinking), drain it now — before we build api_messages — so
@@ -5435,6 +5492,11 @@ def _run_conversation_impl(
             
             # Check for tool calls
             if assistant_message.tool_calls:
+                # #1265 — Record transition if a nudge was just issued.
+                if _refusal_telemetry:
+                    _refusal_telemetry.record_transition_if_pending(
+                        agent, category_after="", took_action=True
+                    )
                 if not agent.quiet_mode:
                     agent._vprint(f"{agent.log_prefix}🔧 Processing {len(assistant_message.tool_calls)} tool call(s)...")
                 
@@ -6421,6 +6483,18 @@ def _run_conversation_impl(
                 #   3rd refusal: accept with a structured explanation
                 #     appended so the user sees the refusal was flagged
                 _refusal_count = getattr(agent, "_refusal_nudge_count", 0)
+                # #1265 — Record transition for the PREVIOUS nudge (if any).
+                if _refusal_telemetry and _refusal_count > 0:
+                    _after_cat = ""
+                    try:
+                        _after_cat = _loop_guard.detect_refusal_category(
+                            final_response or ""
+                        )
+                    except Exception:
+                        pass
+                    _refusal_telemetry.record_transition_if_pending(
+                        agent, category_after=_after_cat, took_action=False
+                    )
                 if _refusal_count < 2:
                     try:
                         _refusal_nudge = _loop_guard.maybe_refusal_nudge(
@@ -6434,6 +6508,19 @@ def _run_conversation_impl(
                         agent._session_refusal_count = getattr(
                             agent, "_session_refusal_count", 0
                         ) + 1
+                        # #1265 — Record nudge telemetry.
+                        _nudge_tier = "directive" if _refusal_count >= 1 else "advisory"
+                        _nudge_cat = ""
+                        try:
+                            _nudge_cat = _loop_guard.detect_refusal_category(
+                                final_response or ""
+                            )
+                        except Exception:
+                            pass
+                        if _refusal_telemetry:
+                            _refusal_telemetry.record_nudge_and_set_pending(
+                                agent, _nudge_cat, _nudge_tier, _refusal_count + 1
+                            )
                         # #1243 — Escalate the nudge language on the 2nd
                         # refusal to a directive rather than advisory.
                         if _refusal_count >= 1:
@@ -6479,6 +6566,18 @@ def _run_conversation_impl(
                         _still_refusing = None
                     if _still_refusing:
                         agent._session_refusal_count = _session_refusals + 1
+                        # #1265 — Record session-level escalation telemetry.
+                        _esc_cat = ""
+                        try:
+                            _esc_cat = _loop_guard.detect_refusal_category(
+                                final_response or ""
+                            )
+                        except Exception:
+                            pass
+                        if _refusal_telemetry:
+                            _refusal_telemetry.record_nudge_and_set_pending(
+                                agent, _esc_cat, "session", _refusal_count + 1
+                            )
                         _escalation = (
                             "[loop-guard] REPEATED REFUSALS: "
                             f"{_session_refusals + 1} refusals this session. "

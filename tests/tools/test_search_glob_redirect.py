@@ -198,3 +198,58 @@ class TestHandleSearchFilesGlobRedirect:
         data = json.loads(result)
         assert "error" in data
         assert "glob" in data["error"].lower()
+
+
+class TestInvalidRegexEnrichment:
+    """#1588 — invalid regex patterns (not globs) must return an enriched
+    error with the compile-failure reason, not a bare ripgrep parse error."""
+
+    def test_unclosed_bracket_returns_reason(self):
+        """An unclosed character class is an invalid regex, not a glob."""
+        result = _handle_search_files(
+            {"pattern": "[unclosed", "target": "content"},
+            task_id="test",
+        )
+        data = json.loads(result)
+        assert "error" in data
+        assert "Invalid regex" in data["error"]
+        # The specific re.error reason should be surfaced
+        assert "unterminated" in data["error"].lower()
+
+    def test_invalid_regex_mentions_escape_hint(self):
+        """The error should hint at escaping metacharacters."""
+        result = _handle_search_files(
+            {"pattern": "(", "target": "content"},
+            task_id="test",
+        )
+        data = json.loads(result)
+        assert "error" in data
+        assert "escape" in data["error"].lower()
+
+    def test_valid_regex_not_caught_by_enrichment(self):
+        """A valid regex must pass through to search_tool, not hit enrichment."""
+        result = _handle_search_files(
+            {"pattern": r"\bfoo\b", "target": "content"},
+            task_id="test",
+        )
+        # Should NOT contain the enrichment error
+        try:
+            data = json.loads(result)
+            if "error" in data:
+                assert "Invalid regex" not in data["error"]
+        except (json.JSONDecodeError, TypeError):
+            pass  # non-JSON -> went through to search_tool, correct
+
+    def test_invalid_regex_with_file_glob_passes_through(self):
+        """When file_glob is set, an invalid regex pattern should pass through
+        (the caller may intend a literal string combined with a filename filter)."""
+        result = _handle_search_files(
+            {"pattern": "(", "target": "content", "file_glob": "*.py"},
+            task_id="test",
+        )
+        try:
+            data = json.loads(result)
+            if "error" in data:
+                assert "Invalid regex" not in data["error"]
+        except (json.JSONDecodeError, TypeError):
+            pass

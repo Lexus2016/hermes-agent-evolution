@@ -2346,15 +2346,23 @@ def search_tool(
 
         # ── Empty-result enrichment + spiral detection (#1372, #1486) ──
         # search_files returns {"total_count": 0} with no error key on a
-        # successful-but-empty search.  When the pattern matches nothing the
-        # agent has no hint about what *does* exist, so it blind-retries or
-        # falls back to terminal directory listing — burning extra turns
-        # (#1486: 95 file-not-found events/7d, 27-deep spirals observed).
+        # successful-but-empty search. Two distinct problems are handled here.
         #
-        # Enrich the FIRST empty result with what actually exists in the
-        # search path (#1486), and keep the spiral counter (#1372) so that
-        # after 3 consecutive misses a stronger SWITCH STRATEGY directive is
-        # injected.
+        # #1486 — when the pattern matches nothing the agent has no hint about
+        # what *does* exist, so it blind-retries or falls back to a terminal
+        # directory listing, burning extra turns (95 file-not-found events/7d,
+        # 27-deep spirals observed). The FIRST empty result is enriched with
+        # what actually exists in the search path.
+        #
+        # #1372/#1149/#1589 — the tool_guardrails spiral_failure_cap only
+        # counts errors, so diverse-query spirals (the agent reformulates each
+        # time and gets empty each time) slip through. Empty results are
+        # tracked per session; at 3 an advisory directive is injected, and at
+        # 6 it escalates to a real error key so classify_tool_failure sees the
+        # failure and the cross-turn spiral_failure_cap (search_files is in
+        # _SPIRAL_PRONE_TOOLS) can accumulate and halt. The advisory alone had
+        # no teeth — 31 sessions hit 11 consecutive empty searches.
+        _SEARCH_EMPTY_HARD_CAP = 6
         if result_dict.get("total_count", 0) == 0 and not result_dict.get("error"):
             with _read_tracker_lock:
                 td = _read_tracker.setdefault(
@@ -2373,7 +2381,16 @@ def search_tool(
                 if _hint:
                     result_dict["_no_match_hint"] = _hint
 
-            if _es >= 3:
+            if _es >= _SEARCH_EMPTY_HARD_CAP:
+                result_dict["error"] = (
+                    f"search_files has returned 0 results {_es} times. Your "
+                    "queries are consistently not matching anything — this is a "
+                    "deterministic dead end. STOP searching and switch strategy: "
+                    "(a) use search_files target='files' with a glob like '*.py', "
+                    "(b) call repo_map for a structural overview, or "
+                    "(c) read_file on a known path instead of searching."
+                )
+            elif _es >= 3:
                 result_dict.setdefault(
                     "_search_directive",
                     (
@@ -2784,6 +2801,39 @@ def _handle_search_files(args, **kw):
                 f"  search_files(pattern='<your regex>', file_glob={pattern!r})"
             ),
         })
+
+    # #1588 — when a pattern that does NOT look like a glob still fails to
+    # compile as a regex, ripgrep returns a bare parse error with no guidance,
+    # causing 59/week parse-error spirals. Pre-validate and surface the exact
+    # compile-failure reason plus a glob-vs-regex hint so the agent can fix
+    # the pattern instead of blind-retrying with a near-identical one.
+    # Guard ``file_glob``: when it is set, the caller is intentionally
+    # combining a filename filter with their pattern, so the pattern should
+    # pass through even if it happens to be a bare glob.
+    if (
+        target == "content"
+        and not args.get("file_glob")
+        and not _is_valid_regex(pattern)
+    ):
+        try:
+            re.compile(pattern)
+            compile_reason = ""
+        except re.error as exc:
+            compile_reason = str(exc)
+        return json.dumps(
+            {
+                "error": (
+                    f"Invalid regex pattern {pattern!r}: {compile_reason}.\n\n"
+                    "To fix:\n"
+                    "  - If you meant a literal string, escape regex metacharacters "
+                    "(e.g. replace '[' with '\\[', '*' with '\\*').\n"
+                    "  - If you meant a filename pattern (like '*.py'), use target='files' "
+                    "or move it to the file_glob parameter instead of the regex pattern.\n"
+                    "  - Re-run search_files with a corrected regex pattern."
+                ),
+            },
+            ensure_ascii=False,
+        )
 
     return search_tool(
         pattern=pattern,

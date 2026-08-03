@@ -1602,6 +1602,21 @@ def init_agent(
     except Exception:
         pass
 
+    # Subagent task-spec re-grounding (#1578): re-inject the original goal as
+    # a user message every N iterations to counter context drift in long
+    # unattended subagent loops.  Configurable via
+    # ``agent.subagent_reground_interval`` in config.yaml; 0 disables.
+    # Only fires for ``platform == "subagent"``.
+    agent._subagent_reground_interval = 10
+    try:
+        _agent_section_rg = _agent_cfg.get("agent", {})
+        if isinstance(_agent_section_rg, dict):
+            agent._subagent_reground_interval = int(
+                _agent_section_rg.get("subagent_reground_interval", 10)
+            )
+    except Exception:
+        pass
+
     # Tool-use enforcement config: "auto" (default — matches hardcoded
     # model list), true (always), false (never), or list of substrings.
     _agent_section = _agent_cfg.get("agent", {})

@@ -79,6 +79,39 @@ _EXIT_CODE_RE = re.compile(r"exit code[:\s]+([1-9]\d*)", re.IGNORECASE)
 _NON_RETRYABLE = frozenset({"timeout", "permission", "missing_command", "limit"})
 _NONRETRY_THRESHOLD = 2
 
+# #1612 — Per-tool non-retryable failure classes. The global ``_NON_RETRYABLE``
+# set covers classes that are deterministic for EVERY tool (timeouts, permission
+# denials, missing binaries, size limits). But some classes are only
+# deterministic for specific tools: a ``not_found`` on a terminal command might
+# be a transient PATH issue (retryable), but a ``not_found`` on ``read_file``
+# for the same path is permanent — the file won't appear on retry — and a
+# ``not_found`` on ``patch`` (the anchor/file the patch targets is absent) is
+# permanent for that same anchor. These per-tool extensions are checked as a
+# UNION with the global set, so existing tools that already trip on the global
+# classes are unaffected, and tools not listed here keep their current behaviour.
+#
+# Deliberately NOT included:
+#   * ``search_files`` ``not_found`` (no matches) — a search genuinely returning
+#     no matches is legitimately retryable with a broadened/different query (the
+#     ``not_found`` recovery hint itself advises "broaden the search"), so a
+#     hard non-retryable stop would over-block legitimate absent-symbol lookups.
+#     The real search_files spiral driver is regex/glob parse errors, which
+#     classify as ``runtime_error`` and are already handled by the per-tool fail
+#     threshold (3) + repo_map diversion hint from #973.
+_NON_RETRYABLE_BY_TOOL: dict[str, frozenset[str]] = {
+    "read_file": frozenset({"not_found"}),
+    "patch": frozenset({"not_found"}),
+}
+
+
+def _is_non_retryable(tool: str, category: Optional[str]) -> bool:
+    """True when *category* is deterministic for *tool* — global or per-tool."""
+    if not category:
+        return False
+    if category in _NON_RETRYABLE:
+        return True
+    return category in _NON_RETRYABLE_BY_TOOL.get(tool, frozenset())
+
 # Idempotent tools that are especially prone to content-free repetition and that
 # the issue evidence shows spiraling with no progress even when individual calls
 # return "success". Count these as non-progress after a shorter run so the model
@@ -926,8 +959,10 @@ def maybe_nudge(
             consec_fail += 1
         else:
             break
-        # Trailing run of failures that are all the SAME deterministic class.
-        if counting_nonretry and category in _NON_RETRYABLE:
+        # Trailing run of failures that are all the SAME deterministic class
+        # (#1612 — per-tool classes like read_file/patch ``not_found`` count
+        # alongside the global set).
+        if counting_nonretry and _is_non_retryable(tool, category):
             if nonretry_class is None or category == nonretry_class:
                 nonretry_class = category
                 consec_nonretry += 1
@@ -1151,7 +1186,8 @@ def run_warrants_cron_hard_stop(messages: List[Dict[str, Any]]) -> bool:
             consec_fail += 1
         else:
             break
-        if counting_nonretry and category in _NON_RETRYABLE:
+        # #1612 — per-tool deterministic classes count too.
+        if counting_nonretry and _is_non_retryable(tool, category):
             if nonretry_class is None or category == nonretry_class:
                 nonretry_class = category
                 consec_nonretry += 1
@@ -1261,6 +1297,30 @@ def _classify_refusal(text: str) -> str:
         if pat and re.search(pat, text, re.IGNORECASE):
             return cat
     return "over_refusal"
+
+
+def detect_refusal_category(text: str) -> str:
+    """Public accessor — classify a full assistant text response.
+
+    Returns the refusal category (e.g. ``"over_refusal"``,
+    ``"true_capability_gap"``) if the text contains refusal language, or
+    an empty string ``""`` if no refusal is detected.
+
+    Used by the conversation loop (#1265) to classify the model's response
+    *after* a nudge so the transition can be recorded in the refusal
+    telemetry sidecar.
+    """
+    if not text or not text.strip():
+        return ""
+    refusals = [
+        m for m in _REFUSAL_PAT.finditer(text)
+        if not _FP_REFUSAL_PAT.match(text[m.start():m.start() + 40])
+    ]
+    if not refusals:
+        return ""
+    first = refusals[0]
+    snippet = text[first.start():first.start() + 120]
+    return _classify_refusal(snippet)
 
 
 def maybe_refusal_nudge(
