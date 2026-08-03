@@ -93,6 +93,13 @@ def test_malformed_arguments_are_rejected_without_blocking_valid_sibling(
     assert [message["tool_call_id"] for message in messages] == ["call-bad", "call-good"]
     assert len([message for message in messages if message["tool_call_id"] == "call-bad"]) == 1
 
-    assert '"error": "Invalid tool arguments"' in messages[0]["content"]
+    # The error string is now sub-classified (#1647): "(JSON parse error)",
+    # "(wrong type)", "(not a JSON object)". Assert the prefix, since which
+    # sub-class fires depends on the parametrized bad_arguments and is covered
+    # by tests/agent/test_evolution_2026_08_03.py.
+    assert '"error": "Invalid tool arguments' in messages[0]["content"]
     assert "JSON object" in messages[0]["content"]
+    # The model must be able to tell "the call never ran" from "the call ran
+    # and failed" — otherwise it cannot know whether to retry it.
+    assert "tool was not executed" in messages[0]["content"].lower()
     assert json.loads(messages[1]["content"]) == {"ok": "valid"}

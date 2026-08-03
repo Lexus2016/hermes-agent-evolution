@@ -95,9 +95,9 @@ def _parse_tool_arguments(
             {
                 "error": "Missing tool arguments",
                 "message": (
-                    "No arguments were provided. Check the tool's parameter "
-                    "schema and provide a valid JSON object with all required "
-                    "fields."
+                    "The tool was not executed. No arguments were provided. "
+                    "Check the tool's parameter schema and provide a valid "
+                    "JSON object with all required fields."
                 ),
             },
             ensure_ascii=False,
@@ -125,9 +125,10 @@ def _parse_tool_arguments(
             {
                 "error": "Invalid tool arguments (JSON parse error)",
                 "message": (
-                    f"Tool arguments could not be parsed as JSON: {exc.msg} "
-                    f"at position {exc.pos}. Provide a valid JSON object "
-                    f"with the correct field names and types for this tool."
+                    f"The tool was not executed. Its arguments could not be "
+                    f"parsed as JSON: {exc.msg} at position {exc.pos}. "
+                    f"Provide a valid JSON object with the correct field "
+                    f"names and types for this tool."
                 ),
             },
             ensure_ascii=False,
@@ -137,9 +138,10 @@ def _parse_tool_arguments(
             {
                 "error": "Invalid tool arguments (wrong type)",
                 "message": (
-                    f"Tool arguments must be a JSON string, got "
-                    f"{type(raw_arguments).__name__}. Provide a valid JSON "
-                    f"object with the correct field names for this tool."
+                    f"The tool was not executed. Its arguments must be a "
+                    f"JSON string, got {type(raw_arguments).__name__}. "
+                    f"Provide a valid JSON object with the correct field "
+                    f"names for this tool."
                 ),
             },
             ensure_ascii=False,
@@ -153,9 +155,9 @@ def _parse_tool_arguments(
         {
             "error": "Invalid tool arguments (not a JSON object)",
             "message": (
-                f"Tool arguments parsed as {type(arguments).__name__}, but "
-                f"a JSON object is required. Wrap the arguments in curly "
-                f'braces: {{"field": value}}.'
+                f"The tool was not executed. Its arguments parsed as "
+                f"{type(arguments).__name__}, but a JSON object is required. "
+                f'Wrap the arguments in curly braces: {{"field": value}}.'
             ),
         },
         ensure_ascii=False,
