@@ -78,6 +78,12 @@ from hermes_logging import set_session_context
 from tools.skill_provenance import set_current_write_origin
 from utils import base_url_host_matches, env_var_enabled
 
+# #1265 — Refusal nudge telemetry (best-effort, never breaks the loop).
+try:
+    from agent import refusal_telemetry as _refusal_telemetry
+except Exception:  # pragma: no cover - best-effort import
+    _refusal_telemetry = None
+
 logger = logging.getLogger(__name__)
 
 # Stable prefix of the local interrupt status string emitted when a turn is
@@ -5435,6 +5441,11 @@ def _run_conversation_impl(
             
             # Check for tool calls
             if assistant_message.tool_calls:
+                # #1265 — Record transition if a nudge was just issued.
+                if _refusal_telemetry:
+                    _refusal_telemetry.record_transition_if_pending(
+                        agent, category_after="", took_action=True
+                    )
                 if not agent.quiet_mode:
                     agent._vprint(f"{agent.log_prefix}🔧 Processing {len(assistant_message.tool_calls)} tool call(s)...")
                 
@@ -6421,6 +6432,18 @@ def _run_conversation_impl(
                 #   3rd refusal: accept with a structured explanation
                 #     appended so the user sees the refusal was flagged
                 _refusal_count = getattr(agent, "_refusal_nudge_count", 0)
+                # #1265 — Record transition for the PREVIOUS nudge (if any).
+                if _refusal_telemetry and _refusal_count > 0:
+                    _after_cat = ""
+                    try:
+                        _after_cat = _loop_guard.detect_refusal_category(
+                            final_response or ""
+                        )
+                    except Exception:
+                        pass
+                    _refusal_telemetry.record_transition_if_pending(
+                        agent, category_after=_after_cat, took_action=False
+                    )
                 if _refusal_count < 2:
                     try:
                         _refusal_nudge = _loop_guard.maybe_refusal_nudge(
@@ -6434,6 +6457,19 @@ def _run_conversation_impl(
                         agent._session_refusal_count = getattr(
                             agent, "_session_refusal_count", 0
                         ) + 1
+                        # #1265 — Record nudge telemetry.
+                        _nudge_tier = "directive" if _refusal_count >= 1 else "advisory"
+                        _nudge_cat = ""
+                        try:
+                            _nudge_cat = _loop_guard.detect_refusal_category(
+                                final_response or ""
+                            )
+                        except Exception:
+                            pass
+                        if _refusal_telemetry:
+                            _refusal_telemetry.record_nudge_and_set_pending(
+                                agent, _nudge_cat, _nudge_tier, _refusal_count + 1
+                            )
                         # #1243 — Escalate the nudge language on the 2nd
                         # refusal to a directive rather than advisory.
                         if _refusal_count >= 1:
@@ -6479,6 +6515,18 @@ def _run_conversation_impl(
                         _still_refusing = None
                     if _still_refusing:
                         agent._session_refusal_count = _session_refusals + 1
+                        # #1265 — Record session-level escalation telemetry.
+                        _esc_cat = ""
+                        try:
+                            _esc_cat = _loop_guard.detect_refusal_category(
+                                final_response or ""
+                            )
+                        except Exception:
+                            pass
+                        if _refusal_telemetry:
+                            _refusal_telemetry.record_nudge_and_set_pending(
+                                agent, _esc_cat, "session", _refusal_count + 1
+                            )
                         _escalation = (
                             "[loop-guard] REPEATED REFUSALS: "
                             f"{_session_refusals + 1} refusals this session. "
