@@ -76,19 +76,38 @@ _MAX_TOOL_WORKERS = 8
 _DEFAULT_CONCURRENT_TOOL_TIMEOUT_S = 420.0
 
 
-def _parse_tool_arguments(raw_arguments: Any) -> tuple[dict, Optional[str]]:
-    """Parse model-emitted arguments without repairing or coercing them."""
+def _parse_tool_arguments(
+    raw_arguments: Any, tool_name: str = ""
+) -> tuple[dict, Optional[str]]:
+    """Parse model-emitted arguments without repairing or coercing them.
+
+    Bare-string fallback for the terminal tool (#1647): models frequently emit
+    the command as a plain string (a quoted JSON string ``"ls -la"``, or an
+    unquoted ``ls -la`` that fails ``json.loads``) instead of the schema's
+    ``{"command": ...}`` object. Both shapes are mapped onto the ``command``
+    field so a well-formed command executes instead of being rejected as a
+    parse error — the terminal parse-error bucket was 285 failures/7d with no
+    way for the agent to self-correct.
+    """
+    parse_error = None
     try:
         arguments = json.loads(raw_arguments)
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError) as exc:
         arguments = None
+        parse_error = exc
     if isinstance(arguments, dict):
         return arguments, None
+    if tool_name == "terminal":
+        bare = arguments if isinstance(arguments, str) else raw_arguments
+        if isinstance(bare, str) and bare.strip():
+            return {"command": bare.strip()}, None
+    detail = f" {type(parse_error).__name__}: {parse_error}" if parse_error else ""
     return {}, json.dumps(
         {
             "error": "Invalid tool arguments",
             "message": (
-                "Tool arguments must be a valid JSON object; tool was not executed."
+                f"Tool arguments for '{tool_name or 'tool'}' must be a valid JSON "
+                f"object; tool was not executed.{detail}"
             ),
         },
         ensure_ascii=False,
@@ -364,7 +383,7 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
         function_name = tool_call.function.name
 
         function_args, malformed_args_result = _parse_tool_arguments(
-            tool_call.function.arguments
+            tool_call.function.arguments, tool_name=function_name
         )
 
         if malformed_args_result is not None:
@@ -1076,7 +1095,7 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
         function_name = tool_call.function.name
 
         function_args, malformed_args_result = _parse_tool_arguments(
-            tool_call.function.arguments
+            tool_call.function.arguments, tool_name=function_name
         )
         if malformed_args_result is not None:
             messages.append(
