@@ -91,12 +91,18 @@ def record_merge(
     predicted_impact: float,
     target: str,
     baseline_failure_rate: Optional[float] = None,
+    baseline_failure_rate_by_reason: Optional[Dict[str, float]] = None,
 ) -> None:
     """Record a merge event in the realized-impact ledger.
 
     ``baseline_failure_rate`` (failures/session at merge time) is stored so later
     verdicts compare apples-to-apples rates, not raw counts that grow with
     session volume (#1324). Omitted/None keeps legacy records working.
+
+    ``baseline_failure_rate_by_reason`` (#1325) is a finer-grained snapshot:
+    ``{reason: failures/session}`` for the specific reason the merged change
+    targets. The aggregate tool rate is dominated by unaffected reasons, so a
+    reason-scoped baseline lets the verdict detect the targeted mode's drop.
     """
     rec: Dict[str, Any] = {
         "issue": issue,
@@ -106,6 +112,8 @@ def record_merge(
     }
     if baseline_failure_rate is not None:
         rec["baseline_failure_rate"] = baseline_failure_rate
+    if baseline_failure_rate_by_reason:
+        rec["baseline_failure_rate_by_reason"] = baseline_failure_rate_by_reason
     append_ledger_record(ledger_file, rec)
 
 
@@ -182,6 +190,7 @@ def should_close_issue(
     today: str,
     maturity_days: int = 5,
     current_failure_rate: Optional[float] = None,
+    current_failure_rate_by_reason: Optional[Dict[str, float]] = None,
     regression_threshold: float = 0.20,
 ) -> tuple:
     """Gate for closing an issue after a fix PR merges.
@@ -202,6 +211,14 @@ def should_close_issue(
     beyond ``regression_threshold``, the raw-count regression is treated as a
     false alarm and the issue may close. This stops growing session volume from
     forcing false HOLDs.
+
+    Reason-scoped rate (#1325): when the merge record stored a
+    ``baseline_failure_rate_by_reason`` and a ``current_failure_rate_by_reason``
+    is supplied, each targeted reason is compared against its own baseline.
+    An aggregate tool rate is dominated by unaffected reasons, so a fix that
+    dropped one reason shows flat and re-opened the issue; reason-scoped
+    comparison sees the real drop. Verdicts are ANDed — every targeted reason
+    must improve to clear the gate; any flat/regressed reason keeps it open.
     """
     rec = None
     for r in reversed(records):
@@ -215,6 +232,48 @@ def should_close_issue(
     verdict = rec.get("verdict")
     if verdict in VERDICTS_GOOD:
         return True, "signal confirmed dropped post-merge"
+
+    # Reason-scoped override (#1325): isolates the targeted failure mode by
+    # comparing each reason against its own baseline. Runs before the aggregate
+    # branch. A fix is credited only when EVERY targeted reason's rate DROPPED by
+    # at least ``regression_threshold``; flat = no-signal = block (not "held").
+    baseline_by_reason = rec.get("baseline_failure_rate_by_reason")
+    if (
+        verdict in VERDICTS_BAD
+        and baseline_by_reason
+        and current_failure_rate_by_reason
+    ):
+        all_improved = True
+        details = []
+        for reason, base in baseline_by_reason.items():
+            cur = current_failure_rate_by_reason.get(reason)
+            if cur is None:
+                all_improved = False
+                details.append(f"{reason}: current rate missing")
+                continue
+            if base > 0:
+                rel = (cur - base) / base
+                improved = rel <= -regression_threshold
+            else:
+                # Baseline was already zero — nothing to fix; a new nonzero
+                # rate is a regression for this reason.
+                rel = 0.0
+                improved = cur <= 0
+            details.append(f"{reason} {cur:.4f} vs {base:.4f} (Δ{rel:+.0%})")
+            if not improved:
+                all_improved = False
+        if all_improved:
+            return (
+                True,
+                "verdict re-checked by reason-scoped rate (#1325): "
+                + "; ".join(details)
+                + " — every targeted reason dropped",
+            )
+        return (
+            False,
+            "reason-scoped: fix did not reduce every targeted reason (#1325): "
+            + "; ".join(details),
+        )
 
     # Rate-normalization override: a "regressed" verdict from a raw-count
     # comparison is a false alarm if the per-session rate held or fell (#1324).
