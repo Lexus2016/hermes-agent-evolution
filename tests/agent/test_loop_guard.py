@@ -87,11 +87,14 @@ class TestFailureTrigger:
         assert maybe_nudge(_run("terminal", 1, result="error: transient blip")) is None
 
     def test_idempotent_three_failures_still_quiet(self):
-        # read_file is idempotent (fail_threshold=4) — 3 failures is below threshold.
-        assert maybe_nudge(_run("read_file", 3, result="error: not found")) is None
+        # read_file is idempotent (fail_threshold=4) — 3 failures is below
+        # threshold. Uses a runtime_error (retryable) string so it exercises the
+        # generic fail path, not the #1612 deterministic not_found path (which
+        # would trip at 2 and is covered in test_loop_guard_per_tool_nonretryable.py).
+        assert maybe_nudge(_run("read_file", 3, result="error: transient read blip")) is None
 
     def test_idempotent_four_failures_nudge(self):
-        msgs = _run("read_file", 4, result="error: not found")
+        msgs = _run("read_file", 4, result="error: transient read blip")
         n = maybe_nudge(msgs)
         assert n is not None and "failed 4 times" in n
 
