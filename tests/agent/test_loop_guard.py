@@ -60,7 +60,11 @@ class TestRepeatTrigger:
         for i in range(7):
             cid = f"c{i}"
             msgs.append(
-                _asst("read_file", args=json.dumps({"path": "a.py", "offset": i * 100}), call_id=cid)
+                _asst(
+                    "read_file",
+                    args=json.dumps({"path": "a.py", "offset": i * 100}),
+                    call_id=cid,
+                )
             )
             msgs.append(_result("ok", call_id=cid))
         assert maybe_nudge(msgs) is None
@@ -87,11 +91,17 @@ class TestFailureTrigger:
         assert maybe_nudge(_run("terminal", 1, result="error: transient blip")) is None
 
     def test_idempotent_three_failures_still_quiet(self):
-        # read_file is idempotent (fail_threshold=4) — 3 failures is below threshold.
-        assert maybe_nudge(_run("read_file", 3, result="error: not found")) is None
+        # read_file is idempotent (fail_threshold=4) — 3 failures is below
+        # threshold. Uses a runtime_error (retryable) string so it exercises the
+        # generic fail path, not the #1612 deterministic not_found path (which
+        # would trip at 2 and is covered in test_loop_guard_per_tool_nonretryable.py).
+        assert (
+            maybe_nudge(_run("read_file", 3, result="error: transient read blip"))
+            is None
+        )
 
     def test_idempotent_four_failures_nudge(self):
-        msgs = _run("read_file", 4, result="error: not found")
+        msgs = _run("read_file", 4, result="error: transient read blip")
         n = maybe_nudge(msgs)
         assert n is not None and "failed 4 times" in n
 
@@ -504,9 +514,10 @@ class TestShouldInteractiveHardStop:
         """Repetitive-but-successful work: keep nudging, never hard-stop."""
         huge = INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD + 100
         for platform in ("cli", "gateway", "telegram", "discord", None, ""):
-            assert should_interactive_hard_stop(
-                platform, huge, genuine_spiral=False
-            ) is False, platform
+            assert (
+                should_interactive_hard_stop(platform, huge, genuine_spiral=False)
+                is False
+            ), platform
 
     def test_cron_platform_never_triggers_interactive_path(self):
         """Cron uses its own lower-threshold path; should_interactive_hard_stop
@@ -524,11 +535,14 @@ class TestShouldInteractiveHardStop:
         """Every non-cron platform should be eligible once the threshold is
         met for a genuine spiral."""
         for platform in ("cli", "gateway", "telegram", "discord", "web", None, ""):
-            assert should_interactive_hard_stop(
-                platform,
-                INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD,
-                genuine_spiral=True,
-            ) is True, platform
+            assert (
+                should_interactive_hard_stop(
+                    platform,
+                    INTERACTIVE_LOOP_GUARD_HARD_STOP_THRESHOLD,
+                    genuine_spiral=True,
+                )
+                is True
+            ), platform
 
     def test_zero_warnings_never_stops(self):
         assert should_interactive_hard_stop("cli", 0, genuine_spiral=True) is False
@@ -549,13 +563,17 @@ class TestFailureClassAndDiversionHints:
 
     def test_generic_fail_nudge_names_dominant_class(self):
         # "does not exist" classifies as not_found (retryable) → generic branch
-        n = maybe_nudge(self._fail_run("terminal", 2, "error: config.yaml does not exist"))
+        n = maybe_nudge(
+            self._fail_run("terminal", 2, "error: config.yaml does not exist")
+        )
         assert n is not None
         assert "not_found" in n
         assert "Re-check the path" in n
 
     def test_patch_failures_get_reread_diversion(self):
-        n = maybe_nudge(self._fail_run("patch", 2, "error: old content not found in file"))
+        n = maybe_nudge(
+            self._fail_run("patch", 2, "error: old content not found in file")
+        )
         assert n is not None
         assert "read_file" in n
 
@@ -565,7 +583,9 @@ class TestFailureClassAndDiversionHints:
         assert "session_search" in n
 
     def test_tool_call_failures_get_routing_diversion(self):
-        n = maybe_nudge(self._fail_run("tool_call", 2, "error: unknown tool 'frobnicate'"))
+        n = maybe_nudge(
+            self._fail_run("tool_call", 2, "error: unknown tool 'frobnicate'")
+        )
         assert n is not None
         assert "tool name" in n
 
@@ -582,10 +602,17 @@ class TestFailureClassAndDiversionHints:
         for i in range(8):
             cid = f"c{i}"
             msgs.append(
-                _asst("web_search", args=json.dumps({"query": f"attempt {i}"}), call_id=cid)
+                _asst(
+                    "web_search",
+                    args=json.dumps({"query": f"attempt {i}"}),
+                    call_id=cid,
+                )
             )
             msgs.append(
-                _result("<untrusted_tool_result>10 hits</untrusted_tool_result>", call_id=cid)
+                _result(
+                    "<untrusted_tool_result>10 hits</untrusted_tool_result>",
+                    call_id=cid,
+                )
             )
         n = maybe_nudge(msgs)
         assert n is not None
@@ -602,7 +629,10 @@ class TestFailureClassAndDiversionHints:
                 _asst("web_search", args=json.dumps({"query": "same"}), call_id=cid)
             )
             msgs.append(
-                _result("<untrusted_tool_result>10 hits</untrusted_tool_result>", call_id=cid)
+                _result(
+                    "<untrusted_tool_result>10 hits</untrusted_tool_result>",
+                    call_id=cid,
+                )
             )
         n = maybe_nudge(msgs)
         assert n is not None and "SAME arguments" in n
@@ -626,7 +656,9 @@ class TestFailureClassAndDiversionHints:
     def test_image_generate_failures_get_media_diversion(self):
         # #739: repeated generation failures route to a text/placeholder fallback.
         n = maybe_nudge(
-            self._fail_run("image_generate", 2, "image generation failed: provider down")
+            self._fail_run(
+                "image_generate", 2, "image generation failed: provider down"
+            )
         )
         assert n is not None
         assert "placeholder" in n or "provider" in n
@@ -669,7 +701,9 @@ class TestRunWarrantsCronHardStop:
         for i in range(6):
             cid = f"c{i}"
             cmd = "git status" if i % 2 == 0 else "git diff"
-            msgs.append(_asst("terminal", args=json.dumps({"command": cmd}), call_id=cid))
+            msgs.append(
+                _asst("terminal", args=json.dumps({"command": cmd}), call_id=cid)
+            )
             msgs.append(_result("ok", call_id=cid))
         assert run_warrants_cron_hard_stop(msgs) is False
 
@@ -781,7 +815,11 @@ class TestMaybeRefusalNudge:
         msgs = [
             {"role": "user", "content": "do the thing"},
             {"role": "assistant", "content": "I can't do that.", "role": "assistant"},
-            {"role": "assistant", "content": "(empty)", "_empty_terminal_sentinel": True},
+            {
+                "role": "assistant",
+                "content": "(empty)",
+                "_empty_terminal_sentinel": True,
+            },
         ]
         # Should find the real refusal text, not the sentinel
         nudge = maybe_refusal_nudge(msgs)
@@ -830,14 +868,22 @@ class TestStructuralFailureDetection:
         for i, err in enumerate(errors):
             msgs.append({
                 "role": "assistant",
-                "tool_calls": [{
-                    "id": f"c{i}", "type": "function",
-                    "function": {"name": "terminal",
-                                 "arguments": json.dumps({"command": f"cmd{i}"})},
-                }],
+                "tool_calls": [
+                    {
+                        "id": f"c{i}",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal",
+                            "arguments": json.dumps({"command": f"cmd{i}"}),
+                        },
+                    }
+                ],
             })
-            msgs.append({"role": "tool", "tool_call_id": f"c{i}",
-                         "content": json.dumps({"exit_code": 1, "error": err})})
+            msgs.append({
+                "role": "tool",
+                "tool_call_id": f"c{i}",
+                "content": json.dumps({"exit_code": 1, "error": err}),
+            })
         return msgs
 
     def test_envelope_exit_code_is_a_failure(self):
@@ -848,7 +894,10 @@ class TestStructuralFailureDetection:
 
     def test_error_wording_no_longer_decides(self):
         """'cannot open' is not in the marker list, but exit_code=1 is decisive."""
-        assert _looks_like_failure(json.dumps({"exit_code": 1, "error": "cannot open"})) is True
+        assert (
+            _looks_like_failure(json.dumps({"exit_code": 1, "error": "cannot open"}))
+            is True
+        )
 
     def test_success_flag_respected(self):
         assert _looks_like_failure(json.dumps({"success": True})) is False
@@ -868,8 +917,9 @@ class TestStructuralFailureDetection:
 
     def test_three_differently_worded_failures_now_nudge(self):
         """The case the guard used to miss entirely."""
-        nudge = maybe_nudge(self._terminal_run(
-            "no such file", "cannot open", "permission denied"))
+        nudge = maybe_nudge(
+            self._terminal_run("no such file", "cannot open", "permission denied")
+        )
         assert nudge is not None
         assert "terminal" in nudge
 

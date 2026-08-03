@@ -79,6 +79,44 @@ _EXIT_CODE_RE = re.compile(r"exit code[:\s]+([1-9]\d*)", re.IGNORECASE)
 _NON_RETRYABLE = frozenset({"timeout", "permission", "missing_command", "limit"})
 _NONRETRY_THRESHOLD = 2
 
+# #1612 — Per-tool non-retryable failure classes. The global ``_NON_RETRYABLE``
+# set covers classes that are deterministic for EVERY tool (timeouts, permission
+# denials, missing binaries, size limits). But some classes are only
+# deterministic for specific tools: a ``not_found`` on a terminal command might
+# be a transient PATH issue (retryable), but a ``not_found`` on ``read_file``
+# for the same path is permanent — the file won't appear on retry — and a
+# ``not_found`` on ``patch`` (the anchor/file the patch targets is absent) is
+# permanent for that same anchor. These per-tool extensions are checked as a
+# UNION with the global set, so existing tools that already trip on the global
+# classes are unaffected, and tools not listed here keep their current behaviour.
+#
+# Deliberately NOT included:
+#   * ``search_files`` ``not_found`` (no matches) — a search genuinely returning
+#     no matches is legitimately retryable with a broadened/different query (the
+#     ``not_found`` recovery hint itself advises "broaden the search"), so a
+#     hard non-retryable stop would over-block legitimate absent-symbol lookups.
+#     The real search_files spiral driver is regex/glob parse errors, which
+#     classify as ``runtime_error`` and are already handled by the per-tool fail
+#     threshold (3) + repo_map diversion hint from #973.
+#   * ``patch`` ``validation``/``runtime_error`` — "invalid old_string" currently
+#     classifies as ``runtime_error`` (via the "error:" rule), which is too broad
+#     to mark deterministic; the existing patch diversion hint already advises
+#     re-reading the target region on anchor-not-found.
+_NON_RETRYABLE_BY_TOOL: dict[str, frozenset[str]] = {
+    "read_file": frozenset({"not_found"}),
+    "patch": frozenset({"not_found"}),
+}
+
+
+def _is_non_retryable(tool: str, category: Optional[str]) -> bool:
+    """True when *category* is deterministic for *tool* — global or per-tool."""
+    if not category:
+        return False
+    if category in _NON_RETRYABLE:
+        return True
+    return category in _NON_RETRYABLE_BY_TOOL.get(tool, frozenset())
+
+
 # Idempotent tools that are especially prone to content-free repetition and that
 # the issue evidence shows spiraling with no progress even when individual calls
 # return "success". Count these as non-progress after a shorter run so the model
@@ -224,6 +262,7 @@ def _category_hint(category: Optional[str]) -> Optional[str]:
         return None
     return hint_for(category)
 
+
 # Mutating tools get LOWER thresholds than idempotent tools because a fixation
 # on mutating operations (writing files, running commands) is more costly and
 # indicates a deeper strategy problem (#432).
@@ -278,6 +317,12 @@ _IDEMPOTENT_ESCALATE_THRESHOLD = 15
 # around (switch to repo_map or read_file). Trip one call sooner than the
 # generic idempotent threshold so the agent gets the diversion hint before
 # burning another iteration on the same broken pattern.
+#
+# NOTE: read_file ``not_found`` spirals are handled by the per-tool
+# non-retryable classification (#1612) which trips at _NONRETRY_THRESHOLD
+# (2), below the generic fail threshold — no override needed here. A
+# threshold override for read_file would conflict with existing test
+# contracts that expect 3 generic (retryable) failures to stay quiet.
 _TOOL_FAIL_THRESHOLD_OVERRIDE: dict[str, int] = {
     "search_files": 3,
 }
@@ -485,7 +530,9 @@ def detect_dead_end_loop(
 
     signatures: Counter[str] = Counter()
     sig_to_tool: dict[str, str] = {}
-    scan = messages[-_DEAD_END_WINDOW:] if len(messages) > _DEAD_END_WINDOW else messages
+    scan = (
+        messages[-_DEAD_END_WINDOW:] if len(messages) > _DEAD_END_WINDOW else messages
+    )
 
     for msg in scan:
         if not isinstance(msg, dict):
@@ -926,8 +973,10 @@ def maybe_nudge(
             consec_fail += 1
         else:
             break
-        # Trailing run of failures that are all the SAME deterministic class.
-        if counting_nonretry and category in _NON_RETRYABLE:
+        # Trailing run of failures that are all the SAME deterministic class
+        # (#1612 — per-tool classes like read_file/patch ``not_found`` count
+        # alongside the global set).
+        if counting_nonretry and _is_non_retryable(tool, category):
             if nonretry_class is None or category == nonretry_class:
                 nonretry_class = category
                 consec_nonretry += 1
@@ -964,9 +1013,7 @@ def maybe_nudge(
         # surface its recovery hint (#365) so the model reacts to WHAT is
         # failing, not just that it failed. Ties resolve to the most recent
         # class (same is most-recent-first).
-        _fail_classes = [
-            c for _t, failed, c, _a in same[:consec_fail] if failed and c
-        ]
+        _fail_classes = [c for _t, failed, c, _a in same[:consec_fail] if failed and c]
         dominant = None
         if _fail_classes:
             _counts: Dict[str, int] = {}
@@ -1043,10 +1090,7 @@ def maybe_nudge(
     # catch this because the args differ. This cap fires at a lower count than
     # the generic repeat_threshold, with a nudge that explicitly directs
     # synthesis from the results already gathered.
-    if (
-        tool == "web_search"
-        and count >= _WEB_SEARCH_DIVERSE_QUERY_CAP
-    ):
+    if tool == "web_search" and count >= _WEB_SEARCH_DIVERSE_QUERY_CAP:
         arg_hashes = [r[3] for r in same if r[3] is not None]
         # Only trigger when queries are genuinely diverse (not all identical —
         # that's already handled by the same-arg branch above).
@@ -1151,7 +1195,8 @@ def run_warrants_cron_hard_stop(messages: List[Dict[str, Any]]) -> bool:
             consec_fail += 1
         else:
             break
-        if counting_nonretry and category in _NON_RETRYABLE:
+        # #1612 — per-tool deterministic classes count too.
+        if counting_nonretry and _is_non_retryable(tool, category):
             if nonretry_class is None or category == nonretry_class:
                 nonretry_class = category
                 consec_nonretry += 1
@@ -1304,14 +1349,15 @@ def maybe_refusal_nudge(
         return None
     # Detect refusal language
     refusals = [
-        m for m in _REFUSAL_PAT.finditer(last_assistant_text)
-        if not _FP_REFUSAL_PAT.match(last_assistant_text[m.start():m.start() + 40])
+        m
+        for m in _REFUSAL_PAT.finditer(last_assistant_text)
+        if not _FP_REFUSAL_PAT.match(last_assistant_text[m.start() : m.start() + 40])
     ]
     if not refusals:
         return None
     # Classify using the context around the first refusal
     first = refusals[0]
-    snippet = last_assistant_text[first.start():first.start() + 120]
+    snippet = last_assistant_text[first.start() : first.start() + 120]
     category = _classify_refusal(snippet)
     if not category:
         return None
