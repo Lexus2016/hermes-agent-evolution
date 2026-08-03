@@ -233,6 +233,93 @@ def _validate_provenance(source_class: str, trust_tier: str) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Structured memory failure decomposition (issue #1648)
+#
+# The memory tool historically returned opaque "other" errors — the dominant
+# memory failure bucket (133 failures/7d, 98% of memory failures) with no way
+# for the agent to tell a transient connection issue from a permanent schema
+# mismatch or a capacity limit. This drove blind retry spirals (up to 11
+# consecutive identical calls across 24 sessions). Every exception that
+# escapes a store operation is now tagged with a structured ``reason``
+# category plus a concrete recovery directive so the model can act instead
+# of looping. The categories align with the introspection reason taxonomy:
+#   - connection-timeout   -> transient, retry with backoff
+#   - capacity-exceeded    -> restructure/consolidate, not a plain retry
+#   - schema-mismatch      -> change the payload shape
+#   - serialization-error  -> fix the JSON/encoding
+#   - other                -> inspect, then decide
+# ---------------------------------------------------------------------------
+
+
+def _classify_memory_failure(exc: Exception) -> Dict[str, Any]:
+    """Return a structured ``{reason, recovery}`` pair for an unexpected error.
+
+    Used to enrich memory tool errors so the model gets actionable recovery
+    guidance instead of an opaque "other" message. Pure classification — never
+    raises.
+    """
+    text = f"{type(exc).__name__}: {exc}".lower()
+
+    # Transient I/O or lock contention — safe to retry with backoff.
+    if isinstance(exc, TimeoutError) or "timed out" in text:
+        return {
+            "reason": "connection-timeout",
+            "recovery": (
+                "Transient timeout/lock contention. Retry once after a short "
+                "delay; if it recurs, switch away from memory for this turn."
+            ),
+        }
+    # Serialization / encoding round-trip failures.
+    if any(k in text for k in ("json", "encode", "decode", "unicode", "utf", "serialize")):
+        return {
+            "reason": "serialization-error",
+            "recovery": (
+                "The memory payload could not be serialized/decoded. Fix the "
+                "JSON/encoding (avoid invalid unicode or malformed JSON in "
+                "content) rather than retrying identically."
+            ),
+        }
+    # Schema / argument-shape mismatches and capacity.
+    if any(k in text for k in ("schema", "argument", "parameter", "validation", "type")):
+        return {
+            "reason": "schema-mismatch",
+            "recovery": (
+                "The memory call payload does not match the expected shape. "
+                "Correct the action/content/old_text fields — a plain retry "
+                "with the same payload will fail again."
+            ),
+        }
+    if any(k in text for k in ("limit", "capacity", "full", "overflow", "too large", "exceed")):
+        return {
+            "reason": "capacity-exceeded",
+            "recovery": (
+                "Memory is at or over capacity. Consolidate: remove/replace "
+                "stale or overlapping entries (use an 'operations' batch to "
+                "free room and add in one call) instead of blindly re-adding."
+            ),
+        }
+    # Fall back to a catch-all "other" with a clear inspect-first directive.
+    return {
+        "reason": "other",
+        "recovery": (
+            "Unclassified memory failure. Inspect the exception detail below; "
+            "do not blindly retry — fix the root cause or skip memory for now."
+        ),
+    }
+
+
+def _enrich_memory_error(exc: Exception) -> str:
+    """Return a JSON error string with the failure decomposed into reason + recovery."""
+    tag = _classify_memory_failure(exc)
+    return tool_error(
+        f"Memory operation failed ({tag['reason']}): {type(exc).__name__}: {exc}. "
+        f"Recovery: {tag['recovery']}",
+        success=False,
+        reason=tag["reason"],
+    )
+
+
 def _drift_error(path: "Path", bak_path: str) -> Dict[str, Any]:
     """Build the error dict returned when external drift is detected.
 
@@ -1746,24 +1833,39 @@ def memory_tool(
     if gate_result is not None:
         return gate_result
 
-    if action == "add":
-        result = store.add(
-            target, content, source_class=source_class, trust_tier=trust_tier
-        )
+    # Dispatch against the store. Any exception that escapes a store operation
+    # is decomposed into a structured ``reason`` category + recovery directive
+    # (#1648) so the model gets actionable guidance instead of an opaque
+    # "other" error — this was the dominant memory failure bucket (98%) and
+    # drove blind retry spirals.
+    try:
+        if action == "add":
+            result = store.add(
+                target, content, source_class=source_class, trust_tier=trust_tier
+            )
 
-    elif action == "replace":
-        result = store.replace(
-            target, old_text, content, source_class=source_class, trust_tier=trust_tier
-        )
+        elif action == "replace":
+            result = store.replace(
+                target, old_text, content, source_class=source_class, trust_tier=trust_tier
+            )
 
-    elif action == "remove":
-        result = store.remove(target, old_text)
+        elif action == "remove":
+            result = store.remove(target, old_text)
 
-    else:
-        return tool_error(
-            f"Unknown action '{action}'. Use: add, replace, remove, search",
-            success=False,
+        else:
+            return tool_error(
+                f"Unknown action '{action}'. Use: add, replace, remove, search",
+                success=False,
+            )
+    except Exception as exc:
+        logger.warning(
+            "memory tool %s failed on target=%s: %s",
+            action,
+            target,
+            exc,
+            exc_info=True,
         )
+        return _enrich_memory_error(exc)
 
     return json.dumps(result, ensure_ascii=False)
 
