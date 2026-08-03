@@ -129,5 +129,8 @@ def test_real_rg_error_still_hard_fails(ops, monkeypatch):
 
     result = ops.search("[", path="/big", target="content")
 
-    assert result.error == "Search failed: rg: regex parse error:"
+    # A genuine rg parse error is still a hard failure, not a truncation. The
+    # message is enriched with recovery guidance (#1588), so assert the
+    # original rg text survives rather than pinning the exact string.
+    assert result.error.startswith("Search failed: rg: regex parse error:")
     assert result.limit_reason is None

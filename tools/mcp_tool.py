@@ -2044,6 +2044,61 @@ class MCPServerTask:
         )
         return SimpleNamespace(capabilities=caps)
 
+    async def _discover_server_capabilities(self) -> Any:
+        """Call the ``server/discover`` RPC to obtain capabilities without a session.
+
+        Introduced in the MCP 2026-07-28 finalized spec, ``server/discover``
+        returns server capabilities, tool list, and prompts without requiring
+        the ``initialize`` / ``initialized`` handshake. This is the stateless
+        replacement for the information previously obtained from the
+        ``InitializeResult`` response.
+
+        Uses the SDK's low-level ``send_request`` with a raw JSON-RPC request
+        since the SDK may not yet have a typed wrapper for ``server/discover``.
+
+        Returns a synthesized ``InitializeResult``-shaped object (same shape
+        as :meth:`synthesize_capabilities`) populated from the discover
+        response, or falls back to ``synthesize_capabilities()`` if the
+        RPC fails or is unsupported.
+
+        B-2 / #1512.
+        """
+        if self.session is None:
+            return self.synthesize_capabilities()
+        try:
+            result = await self.session.send_request(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "server/discover",
+                    "params": {},
+                    "id": 0,
+                },
+                Any,
+            )
+        except Exception:
+            # server/discover not supported → synthesize default caps
+            return self.synthesize_capabilities()
+        # If we got a real response, try to extract capabilities from it
+        if isinstance(result, dict) and "capabilities" in result:
+            return self.synthesize_capabilities(result["capabilities"])
+        return self.synthesize_capabilities()
+
+    def _get_session_id_stateless(self, _get_session_id) -> Optional[str]:
+        """Wrap ``_get_session_id`` to return ``None`` in stateless mode.
+
+        SEP-2567 removes ``Mcp-Session-Id`` from the wire protocol in
+        stateless mode. When the stateless flag is ON, this returns ``None``
+        so HTTP transports skip the session-id header entirely.
+
+        B-2 / #1512.
+        """
+        if self._stateless_enabled:
+            return None
+        try:
+            return _get_session_id()
+        except Exception:
+            return None
+
     def _is_http(self) -> bool:
         """Check if this server uses HTTP transport."""
         return "url" in self._config
