@@ -471,6 +471,66 @@ class PluginContext:
         entry = entries.get(plugin_id) or {}
         return bool(entry.get("allow_tool_override", False))
 
+    def _within_trusted_plugin_root(self) -> bool:
+        """Return True if this plugin really lives under the user profile dir.
+
+        ``source`` alone is not enough: a symlink planted inside
+        ``<HERMES_HOME>/plugins/`` is scanned as ``source="user"`` while its
+        code lives anywhere on disk. Resolve both sides and require genuine
+        containment, so the symlinked-directory vector from #1389 cannot
+        inherit profile trust.
+        """
+        raw_path = getattr(self.manifest, "path", None)
+        if not raw_path:
+            return False
+        try:
+            plugin_path = Path(raw_path).resolve(strict=True)
+            trusted_root = (get_hermes_home() / "plugins").resolve(strict=True)
+        except OSError:
+            return False
+        return plugin_path == trusted_root or trusted_root in plugin_path.parents
+
+    def _hook_trust_allowed(self) -> bool:
+        """Return True if this plugin is trusted to register hooks (#1389).
+
+        Trusted by default:
+
+        * ``bundled`` — ships inside the Hermes repo itself.
+        * ``user`` — lives under ``<HERMES_HOME>/plugins/``, the profile
+          directory #1389 designates as trusted, and is opted in by name via
+          ``plugins.enabled``. Containment is verified against the resolved
+          path, not just the source label.
+
+        Untrusted by default — ``project`` (the cloned-repo vector),
+        ``entrypoint`` (pip supply chain), and anything unknown. These need
+        an explicit opt-in::
+
+            plugins:
+              entries:
+                "project:my-plugin":
+                  allow_hooks: true
+
+        The opt-in key is deliberately ``<source>:<plugin_id>`` rather than a
+        bare plugin id: a bare id would let a project plugin that takes the
+        name of an approved one inherit its approval.
+        """
+        source = getattr(self.manifest, "source", "") or ""
+        if source == "bundled":
+            return True
+        if source == "user" and self._within_trusted_plugin_root():
+            return True
+        try:
+            from hermes_cli.config import load_config
+
+            cfg = load_config() or {}
+        except Exception:
+            # Fail closed — better to drop the hook than silently grant it.
+            return False
+        plugin_id = self.manifest.key or self.manifest.name
+        entries = (cfg.get("plugins") or {}).get("entries") or {}
+        entry = entries.get(f"{source}:{plugin_id}") or {}
+        return bool(entry.get("allow_hooks", False))
+
     # -- message injection --------------------------------------------------
 
     def inject_message(self, content: str, role: str = "user") -> bool:
@@ -1160,6 +1220,12 @@ class PluginContext:
 
         Unknown hook names produce a warning but are still stored so
         forward-compatible plugins don't break.
+
+        **Workspace-trust gate (#1389):** hooks from untrusted sources
+        (``project``, ``entrypoint``, unknown) are blocked unless approved
+        via ``allow_hooks: true`` under
+        ``plugins.entries.<source>:<plugin_id>`` in config.yaml. See
+        :meth:`_hook_trust_allowed` for the full trust model.
         """
         if hook_name not in VALID_HOOKS:
             logger.warning(
@@ -1169,8 +1235,32 @@ class PluginContext:
                 hook_name,
                 ", ".join(sorted(VALID_HOOKS)),
             )
+        source = getattr(self.manifest, "source", "") or ""
+        plugin_id = self.manifest.key or self.manifest.name
+        if not self._hook_trust_allowed():
+            logger.warning(
+                "Plugin '%s' (source='%s') hook '%s' blocked — "
+                "workspace trust required. Set "
+                "'plugins.entries.\"%s:%s\".allow_hooks: true' in config.yaml "
+                "to approve.",
+                self.manifest.name,
+                source,
+                hook_name,
+                source,
+                plugin_id,
+            )
+            return
         self._manager._hooks.setdefault(hook_name, []).append(callback)
-        logger.debug("Plugin %s registered hook: %s", self.manifest.name, hook_name)
+        # Audit trail (#1389 requirement 3): every accepted hook is recorded
+        # with the source that earned it, so an operator can reconstruct what
+        # was allowed to run and why.
+        logger.info(
+            "Hook registered: plugin='%s' hook='%s' source='%s' trust='%s'",
+            self.manifest.name,
+            hook_name,
+            source,
+            "default" if source in ("bundled", "user") else "explicit-opt-in",
+        )
 
     # -- middleware registration -------------------------------------------
 
