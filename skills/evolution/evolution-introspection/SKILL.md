@@ -69,13 +69,16 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
    for within-window ranking.
 
    **Attribute by (tool, reason), not by tool alone (#1325).** The digest emits
-   `tool_failures_by_reason` — `{tool: {reason: count}}` over exactly these
-   buckets: `file-not-found`, `permission-denied`, `timeout`, `quota/billing`,
+   `tool_failures_by_reason` — `{tool: {reason: count}}` — and the matching
+   `failure_rate_by_reason` — `{tool: {reason: failures/session}}` — over exactly
+   these buckets: `file-not-found`, `permission-denied`, `timeout`, `quota/billing`,
    `parse-error`, `no-match`, `non-zero-exit`, `other`. A fix for
    `read_file:file-not-found` must not be credited or blamed for
    `read_file:timeout`; conflating them is what produced the fix→regress→refile
    treadmill. When filing or verifying an issue about a failing tool, name the
-   reason bucket, not just the tool.
+   reason bucket, not just the tool. Use `failure_rate_by_reason` for every
+   cross-window comparison of a single reason — the aggregate tool rate is
+   dominated by the UNAFFECTED reasons and will not move.
 
 2. **Detect problem signals** (non-exhaustive):
    - **Tool failures** — a tool returned an error / non-zero / exception,
@@ -136,6 +139,17 @@ index and the `SessionDB` message store). These are real agent↔user dialogues.
      verdict — the ledger has three values only. A raw count that grew purely
      because session volume grew is NOT a regression, and calling it one
      re-opens issues that were actually fixed.
+   - **Prefer reason-scoped rates for reason-targeted fixes (#1325).** When the
+     ledger entry carries `baseline_failure_rate_by_reason` (a `{reason: rate}`
+     snapshot of the SPECIFIC reason the fix targets), compare it against the
+     current digest's `failure_rate_by_reason` for that reason, not the aggregate
+     tool rate. A fix for `read_file:file-not-found` cannot be judged against the
+     whole `read_file` rate, which is dominated by the UNAFFECTED
+     `read_file:timeout` — that was the PR #1336 gap that produced the
+     "no-signal" re-open. The reason-scoped path credits a fix only when EVERY
+     targeted reason's rate actually DROPPED (a flat reason = the fix did not
+     reduce that mode = no-signal). The aggregate tool rate is the fallback when
+     no reason baseline was recorded.
    - Record ONE verdict per such issue via the deterministic helper:
      ```bash
      python3 scripts/evolution_realized_impact.py record-verdict \
