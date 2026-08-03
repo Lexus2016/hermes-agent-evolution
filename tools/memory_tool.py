@@ -1631,6 +1631,53 @@ def _missing_old_text_error(store: "MemoryStore", target: str, action: str) -> s
     )
 
 
+def _memory_enriched_error(exc: Exception, action: str) -> str:
+    """Decompose an unclassified memory failure into a category with recovery hint.
+
+    Issue #1648: 98% of memory failures are classified as opaque 'other'.
+    This maps the underlying exception type to a concrete category + recovery
+    suggestion so the agent can act instead of blind-retrying.
+    """
+    exc_type = type(exc).__name__
+    exc_msg = str(exc)[:300]
+
+    # Classify by exception family
+    if isinstance(exc, (TimeoutError,)):
+        category = "timeout"
+        hint = (
+            "The memory file may be locked by another process. Wait a moment and retry."
+        )
+    elif isinstance(exc, (PermissionError,)):
+        category = "permission-denied"
+        hint = "Check file permissions on the memory file in ~/.hermes/memory/."
+    elif isinstance(exc, (json.JSONDecodeError, ValueError)):
+        category = "schema-mismatch"
+        hint = "The memory file is corrupted. Consider using action='search' to verify state, then retry."
+    elif isinstance(exc, (OSError, IOError)):
+        category = "io-error"
+        hint = "Disk I/O failed. Retry once; if it persists, proceed without memory persistence."
+    elif isinstance(exc, (TypeError,)):
+        category = "serialization-error"
+        hint = "The content could not be serialized. Simplify the content and retry."
+    else:
+        category = "unexpected"
+        hint = f"Unexpected error ({exc_type}). Proceed without memory persistence if this repeats."
+
+    logger.warning("memory_tool %s failed: %s: %s", action, exc_type, exc_msg)
+
+    return json.dumps(
+        {
+            "success": False,
+            "error": exc_msg,
+            "error_type": exc_type,
+            "error_category": category,
+            "recovery_hint": hint,
+            "action": action,
+        },
+        ensure_ascii=False,
+    )
+
+
 def memory_tool(
     action: str = None,
     target: str = "memory",
@@ -1747,17 +1794,30 @@ def memory_tool(
         return gate_result
 
     if action == "add":
-        result = store.add(
-            target, content, source_class=source_class, trust_tier=trust_tier
-        )
+        try:
+            result = store.add(
+                target, content, source_class=source_class, trust_tier=trust_tier
+            )
+        except Exception as exc:
+            return _memory_enriched_error(exc, "add")
 
     elif action == "replace":
-        result = store.replace(
-            target, old_text, content, source_class=source_class, trust_tier=trust_tier
-        )
+        try:
+            result = store.replace(
+                target,
+                old_text,
+                content,
+                source_class=source_class,
+                trust_tier=trust_tier,
+            )
+        except Exception as exc:
+            return _memory_enriched_error(exc, "replace")
 
     elif action == "remove":
-        result = store.remove(target, old_text)
+        try:
+            result = store.remove(target, old_text)
+        except Exception as exc:
+            return _memory_enriched_error(exc, "remove")
 
     else:
         return tool_error(
