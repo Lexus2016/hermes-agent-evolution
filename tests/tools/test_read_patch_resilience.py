@@ -54,6 +54,24 @@ class TestSuggestSimilarFilesAntiSpiral:
         r = self.ops._suggest_similar_files(str(self.tmp / "analysis" / "2026-07-11.json"))
         assert any("2026-07-10" in f for f in r.similar_files)
 
+    def test_similar_suggestion_inlined_in_error_1587(self):
+        """#1587 — the 'did you mean?' suggestion must be inlined in the
+        error text so the agent (which only reads ``.error``) actually sees
+        it, not just in the separate ``similar_files`` field."""
+        r = self.ops._suggest_similar_files(str(self.tmp / "analysis" / "2026-07-11.json"))
+        assert r.error is not None
+        # The suggestion should appear directly in the error string...
+        assert "Did you mean" in r.error
+        # ...and reference the closest existing file by name.
+        assert "2026-07-10.json" in r.error
+
+    def test_no_suggestion_when_truly_missing(self):
+        """When no similar files exist, the error must NOT contain a
+        misleading 'Did you mean' with an empty list."""
+        r = self.ops._suggest_similar_files(str(self.tmp / "analysis" / "nope.json"))
+        assert r.error is not None
+        assert "Did you mean" not in r.error
+
 class TestIdenticalStrings:
     def test_sentinel_strategy(self):
         _, c, st, err = fuzzy_find_and_replace("hello", "hello", "hello")
