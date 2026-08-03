@@ -4529,7 +4529,13 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                 try:
                     # B-2 / #1512: in stateless mode, pass inline _meta
                     # routing context instead of relying on a pinned session.
-                    _meta = server._build_stateless_meta()
+                    # Resolved defensively: the handler also runs against
+                    # duck-typed server objects that predate this method, and
+                    # a missing helper must degrade to the stateful path
+                    # (identical to what _build_stateless_meta returns when
+                    # stateless mode is off) rather than fail the whole call.
+                    _build_meta = getattr(server, "_build_stateless_meta", None)
+                    _meta = _build_meta() if callable(_build_meta) else None
                     if _meta is not None:
                         result = await server.session.call_tool(
                             tool_name, arguments=args, meta=_meta
