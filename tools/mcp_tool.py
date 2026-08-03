@@ -1912,6 +1912,7 @@ class MCPServerTask:
         "initialize_result", "_ping_unsupported",
         "_reconnect_retries",
         "_last_park_error",
+        "_stateless_enabled",
     )
 
     def __init__(self, name: str):
@@ -1978,6 +1979,49 @@ class MCPServerTask:
         # back to ``list_tools`` (the pre-ping probe) so we neither spam pings
         # nor reconnect-loop. Reset on each fresh transport connection.
         self._ping_unsupported: bool = False
+        # --- MCP 2026-07-28 stateless support (Slice B-1 / #1511) ---
+        # When HERMES_MCP_STATELESS=1, the adapter can synthesize capabilities
+        # instead of performing the initialize handshake. Default OFF — zero
+        # behavioral change unless explicitly enabled.
+        self._stateless_enabled: bool = os.environ.get(
+            "HERMES_MCP_STATELESS", ""
+        ).strip().lower() in ("1", "true", "yes", "on")
+
+    def _detect_stateless_support(self) -> bool:
+        """Whether the stateless protocol path is enabled for this server.
+
+        Currently driven solely by the ``HERMES_MCP_STATELESS`` env flag
+        (read once in ``__init__``). A future increment may add per-server
+        capability probing via ``server/discover`` RPC (B-2 / #1512).
+        """
+        return self._stateless_enabled
+
+    def synthesize_capabilities(self, capabilities_doc: Optional[dict] = None) -> Any:
+        """Build a minimal ``InitializeResult``-shaped object from a capabilities doc.
+
+        When the stateless flag is ON, the adapter skips the ``initialize``
+        handshake and instead populates ``self.initialize_result`` with this
+        synthesized object. The downstream consumers (``_advertises_tools``,
+        ``_select_utility_schemas``) only read ``.capabilities.tools``,
+        ``.capabilities.resources``, ``.capabilities.prompts`` — so a
+        ``SimpleNamespace`` mirroring that shape is sufficient.
+
+        Parameters
+        ----------
+        capabilities_doc
+            Optional dict with ``tools``, ``resources``, ``prompts`` keys
+            (each a truthy object if the capability is advertised). When
+            ``None``, defaults to advertising tools only (the common case
+            for stateless tool servers).
+        """
+        if capabilities_doc is None:
+            capabilities_doc = {"tools": True}
+        caps = SimpleNamespace(
+            tools=SimpleNamespace() if capabilities_doc.get("tools") else None,
+            resources=SimpleNamespace() if capabilities_doc.get("resources") else None,
+            prompts=SimpleNamespace() if capabilities_doc.get("prompts") else None,
+        )
+        return SimpleNamespace(capabilities=caps)
 
     def _is_http(self) -> bool:
         """Check if this server uses HTTP transport."""
@@ -2542,9 +2586,12 @@ class MCPServerTask:
                     connect_timeout = float(
                         config.get("connect_timeout", _DEFAULT_CONNECT_TIMEOUT)
                     )
-                    self.initialize_result = await asyncio.wait_for(
-                        session.initialize(), timeout=connect_timeout
-                    )
+                    if self._detect_stateless_support():
+                        self.initialize_result = self.synthesize_capabilities()
+                    else:
+                        self.initialize_result = await asyncio.wait_for(
+                            session.initialize(), timeout=connect_timeout
+                        )
                     self.session = session
                     self._mark_lifecycle_started()
                     await self._discover_tools()
@@ -2850,9 +2897,12 @@ class MCPServerTask:
                     # stdio path (#59349): an endpoint that accepts the
                     # connection but never answers ``initialize`` parks this
                     # coroutine forever on the background loop.
-                    self.initialize_result = await asyncio.wait_for(
-                        session.initialize(), timeout=float(connect_timeout)
-                    )
+                    if self._detect_stateless_support():
+                        self.initialize_result = self.synthesize_capabilities()
+                    else:
+                        self.initialize_result = await asyncio.wait_for(
+                            session.initialize(), timeout=float(connect_timeout)
+                        )
                     self.session = session
                     await self._discover_tools()
                     self._ready.set()
@@ -2907,9 +2957,12 @@ class MCPServerTask:
                 ):
                     async with ClientSession(read_stream, write_stream, **sampling_kwargs) as session:
                         # Bound the handshake (#59349) — see stdio path.
-                        self.initialize_result = await asyncio.wait_for(
-                            session.initialize(), timeout=float(connect_timeout)
-                        )
+                        if self._detect_stateless_support():
+                            self.initialize_result = self.synthesize_capabilities()
+                        else:
+                            self.initialize_result = await asyncio.wait_for(
+                                session.initialize(), timeout=float(connect_timeout)
+                            )
                         self.session = session
                         await self._discover_tools()
                         self._ready.set()
@@ -2939,9 +2992,12 @@ class MCPServerTask:
             ):
                 async with ClientSession(read_stream, write_stream, **sampling_kwargs) as session:
                     # Bound the handshake (#59349) — see stdio path.
-                    self.initialize_result = await asyncio.wait_for(
-                        session.initialize(), timeout=float(connect_timeout)
-                    )
+                    if self._detect_stateless_support():
+                        self.initialize_result = self.synthesize_capabilities()
+                    else:
+                        self.initialize_result = await asyncio.wait_for(
+                            session.initialize(), timeout=float(connect_timeout)
+                        )
                     self.session = session
                     await self._discover_tools()
                     self._ready.set()
