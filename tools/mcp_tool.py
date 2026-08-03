@@ -1996,6 +1996,27 @@ class MCPServerTask:
         """
         return self._stateless_enabled
 
+    def stateless_routing_meta(self, method: str, name: str = "") -> Optional[dict]:
+        """Inline ``_meta`` routing context for a stateless request.
+
+        In stateless mode a server holds no per-client session: each request
+        must carry its full routing context inline (per the 2026-07-28
+        stateless spec) instead of relying on a persistent ``Mcp-Session-Id``.
+        The MCP SDK surfaces this per-request routing as the ``meta`` kwarg on
+        typed request methods (e.g. ``ClientSession.call_tool(..., meta=...)``),
+        which it serializes into the request params' ``_meta`` field.
+
+        Returns ``None`` in stateful mode so call sites can pass it straight
+        through as the ``meta`` kwarg with zero behavioral change when the
+        stateless flag is OFF.
+        """
+        if not self._detect_stateless_support():
+            return None
+        meta = {"Mcp-Method": method}
+        if name:
+            meta["Mcp-Name"] = name
+        return meta
+
     def synthesize_capabilities(self, capabilities_doc: Optional[dict] = None) -> Any:
         """Build a minimal ``InitializeResult``-shaped object from a capabilities doc.
 
@@ -2061,27 +2082,6 @@ class MCPServerTask:
         if isinstance(result, dict) and "capabilities" in result:
             return self.synthesize_capabilities(result["capabilities"])
         return self.synthesize_capabilities()
-
-    def _build_stateless_meta(self) -> Optional[dict]:
-        """Build inline ``_meta`` routing context for stateless requests.
-
-        In stateless mode (SEP-2567), the ``Mcp-Session-Id`` header is removed
-        and routing context is embedded inline as ``_meta`` in each request
-        body. This helper constructs the routing dict containing the server
-        name and method, which the SDK's ``call_tool(meta=...)`` injects into
-        ``CallToolRequestParams._meta``.
-
-        Returns ``None`` when stateless mode is OFF (caller should not
-        modify the request).
-
-        B-2 / #1512.
-        """
-        if not self._stateless_enabled:
-            return None
-        return {
-            "Mcp-Name": self.name,
-            "Mcp-Method": "tools/call",
-        }
 
     def _get_session_id_stateless(self, _get_session_id) -> Optional[str]:
         """Wrap ``_get_session_id`` to return ``None`` in stateless mode.
@@ -4527,21 +4527,25 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                 # it and detect the gateway platform / session for routing.
                 server._pending_call_context = contextvars.copy_context()
                 try:
-                    # B-2 / #1512: in stateless mode, pass inline _meta
-                    # routing context instead of relying on a pinned session.
-                    # Resolved defensively: the handler also runs against
-                    # duck-typed server objects that predate this method, and
-                    # a missing helper must degrade to the stateful path
-                    # (identical to what _build_stateless_meta returns when
-                    # stateless mode is off) rather than fail the whole call.
-                    _build_meta = getattr(server, "_build_stateless_meta", None)
-                    _meta = _build_meta() if callable(_build_meta) else None
+                    # In stateless mode, carry the request routing context
+                    # inline (Mcp-Method / Mcp-Name _meta) since there is no
+                    # persistent session id. Stateful mode makes the exact
+                    # original call (no meta kwarg) — zero behavioral change.
+                    # getattr guards test fixtures that use a bare
+                    # SimpleNamespace server lacking the method.
+                    _meta_getter = getattr(server, "stateless_routing_meta", None)
+                    _meta = (
+                        _meta_getter("tools/call", tool_name)
+                        if _meta_getter is not None else None
+                    )
                     if _meta is not None:
                         result = await server.session.call_tool(
-                            tool_name, arguments=args, meta=_meta
+                            tool_name, arguments=args, meta=_meta,
                         )
                     else:
-                        result = await server.session.call_tool(tool_name, arguments=args)
+                        result = await server.session.call_tool(
+                            tool_name, arguments=args,
+                        )
                 finally:
                     server._pending_call_context = None
             # MCP CallToolResult has .content (list of content blocks) and .isError

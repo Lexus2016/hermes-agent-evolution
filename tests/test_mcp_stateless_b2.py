@@ -2,11 +2,13 @@
 """Unit tests for MCP stateless request routing (Slice B-2 / #1512).
 
 Tests cover:
-- ``_build_stateless_meta`` produces correct routing dict when flag ON, None when OFF
 - ``_get_session_id_stateless`` returns None in stateless mode, delegates when stateful
 - ``_discover_server_capabilities`` falls back to synthesize on error / no session
 - ``call_tool`` dispatch passes inline ``_meta`` when stateless
 - Stateful path is unchanged (no _meta injection)
+
+Building the routing dict itself is ``stateless_routing_meta`` (landed with
+increment 1, #1633) and is covered by tests/test_mcp_stateless_b1.py.
 """
 
 from __future__ import annotations
@@ -32,25 +34,27 @@ def _make_server(stateless: bool = False):
 
 
 # ---------------------------------------------------------------------------
-# _build_stateless_meta
+# stateless_routing_meta (the canonical builder, from increment 1)
 # ---------------------------------------------------------------------------
 
 
-class TestBuildStatelessMeta:
+class TestStatelessRoutingMetaForToolCalls:
+    """The tools/call routing context this slice dispatches with."""
+
     def test_returns_none_when_disabled(self):
         srv = _make_server(stateless=False)
-        assert srv._build_stateless_meta() is None
+        assert srv.stateless_routing_meta("tools/call", srv.name) is None
 
     def test_returns_meta_dict_when_enabled(self):
         srv = _make_server(stateless=True)
-        meta = srv._build_stateless_meta()
+        meta = srv.stateless_routing_meta("tools/call", srv.name)
         assert meta is not None
         assert meta["Mcp-Name"] == "test-server"
         assert meta["Mcp-Method"] == "tools/call"
 
     def test_meta_has_exactly_two_keys(self):
         srv = _make_server(stateless=True)
-        meta = srv._build_stateless_meta()
+        meta = srv.stateless_routing_meta("tools/call", srv.name)
         assert meta is not None
         assert set(meta.keys()) == {"Mcp-Name", "Mcp-Method"}
 
@@ -130,14 +134,14 @@ class TestDiscoverServerCapabilities:
 
 class TestCallToolStatelessMeta:
     def test_stateful_path_no_meta(self):
-        """When flag is OFF, _build_stateless_meta returns None → no meta passed."""
+        """When flag is OFF, the builder returns None → no meta passed."""
         srv = _make_server(stateless=False)
-        assert srv._build_stateless_meta() is None
+        assert srv.stateless_routing_meta("tools/call", srv.name) is None
 
     def test_stateless_path_has_meta(self):
-        """When flag is ON, _build_stateless_meta returns routing dict."""
+        """When flag is ON, the builder returns a routing dict."""
         srv = _make_server(stateless=True)
-        meta = srv._build_stateless_meta()
+        meta = srv.stateless_routing_meta("tools/call", srv.name)
         assert meta is not None
         assert "Mcp-Name" in meta
         assert "Mcp-Method" in meta
@@ -164,7 +168,7 @@ class TestStatefulPathUnchangedB2:
 
     def test_build_meta_none_in_stateful(self):
         srv = _make_server(stateless=False)
-        assert srv._build_stateless_meta() is None
+        assert srv.stateless_routing_meta("tools/call", srv.name) is None
 
     def test_discover_falls_back_in_stateful(self):
         """Even in stateful mode, discover gracefully falls back."""

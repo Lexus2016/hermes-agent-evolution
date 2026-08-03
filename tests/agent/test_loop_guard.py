@@ -146,6 +146,43 @@ class TestNonRetryableTrigger:
         # Falls through to generic fail path: 2 failures >= mutating fail_threshold=2
         assert n is not None and "failed 2 times" in n
 
+    def test_two_dead_search_providers_stop_hard(self):
+        """#1611 — a down search provider fails identically for every query.
+
+        Rewording cannot help while the backend is unreachable, so this must
+        trip the deterministic stop rather than spiral per-query.
+        """
+        n = maybe_nudge(
+            _run("search_web", 2, result="DuckDuckGo search failed (HTTP 502)")
+        )
+        assert n is not None and "non-retryable" in n and "provider_dead" in n
+
+    def test_empty_local_search_is_not_provider_dead(self):
+        """#1611 — an empty local search must not read as a dead web provider.
+
+        ``no results`` used to match the provider_dead rule, so every empty
+        ``search_files`` looked like an unreachable search backend. The two
+        need opposite recoveries: broaden the query vs. stop retrying entirely.
+        """
+        from agent.tool_diagnostics import classify
+
+        assert classify("no results found")[0] == "not_found"
+
+    def test_terminal_not_found_is_not_globally_non_retryable(self):
+        """#1611 — ``not_found`` must NOT join the global deterministic set.
+
+        A ``not_found`` from a terminal command can be a transient condition a
+        corrected retry resolves, and a search returning no matches is
+        legitimately retryable with a broader query. Permanence is per-tool, so
+        it stays in ``_NON_RETRYABLE_BY_TOOL`` (read_file, patch) — a global
+        entry would over-block. Two terminal not_founds therefore fall through
+        to the generic fail path, not the non-retryable hard stop.
+        """
+        n = maybe_nudge(
+            _run("terminal", 2, result="cat: data.csv: No such file or directory")
+        )
+        assert n is None or "non-retryable" not in n
+
 
 class TestEscalatedInterrupt:
     """#432 — mono-tool spirals beyond the repeat threshold get an escalated
