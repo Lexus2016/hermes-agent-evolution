@@ -910,7 +910,13 @@ class TestHookMode:
     def test_complete_works_from_post_tool_call_hook(self):
         from hermes_cli.plugins import PluginContext, PluginManifest, PluginManager
 
-        manifest = PluginManifest(name="hook-plugin", source="test", key="hook-plugin")
+        # source="bundled": these tests exercise ctx.llm from inside a hook,
+        # not the #1389 trust gate — they need a source allowed to register
+        # hooks at all. Gate behaviour itself is covered by
+        # tests/test_workspace_trust_hooks.py.
+        manifest = PluginManifest(
+            name="hook-plugin", source="bundled", key="hook-plugin"
+        )
         manager = PluginManager()
         ctx = PluginContext(manifest, manager)
 
@@ -966,7 +972,8 @@ class TestHookMode:
         ctx.llm.complete even if other callsites use async."""
         from hermes_cli.plugins import PluginContext, PluginManifest, PluginManager
 
-        manifest = PluginManifest(name="hook-async", source="test", key="hook-async")
+        # source="bundled" — see the note in the sibling test above.
+        manifest = PluginManifest(name="hook-async", source="bundled", key="hook-async")
         manager = PluginManager()
         ctx = PluginContext(manifest, manager)
 
