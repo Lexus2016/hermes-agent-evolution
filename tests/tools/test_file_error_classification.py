@@ -68,6 +68,74 @@ class TestClassifyFileError:
         klass, rec = classify_file_error("something inexplicable happened")
         assert klass == "error" and "CHANGE the call" in rec
 
+    # ── #1586: sub-classify the fuzzy matcher's distinctive failure strings ──
+    # These previously collapsed into the generic "error" (other) bucket, which
+    # was 87% of patch failures (68/78). Each now gets a targeted error_class
+    # and recovery so the model can correct on its next turn.
+
+    def test_escape_drift_from_raw_string(self):
+        """The fuzzy matcher's 'Escape-drift detected: ...' string now classifies
+        as escape_drift instead of the generic 'error' bucket."""
+        klass, rec = classify_file_error(
+            "Escape-drift detected: old_string and new_string contain a "
+            "literal backslash-quote sequence but the matched region does not."
+        )
+        assert klass == "escape_drift"
+        assert "backslash" in rec
+
+    def test_escape_drift_no_hyphen_variant(self):
+        klass, _ = classify_file_error("Escape drift detected in old_string")
+        assert klass == "escape_drift"
+
+    def test_old_string_empty_from_raw_string(self):
+        klass, rec = classify_file_error("old_string cannot be empty")
+        assert klass == "old_string_empty"
+        assert "non-empty" in rec
+
+    def test_old_string_empty_variant(self):
+        klass, _ = classify_file_error("old_string is empty")
+        assert klass == "old_string_empty"
+
+    def test_indentation_mismatch_promoted_from_structured_error(self):
+        """When the raw error is the generic 'Could not find a match' but the
+        structured_error diagnostic pinpointed indentation_mismatch, the class is
+        promoted to indentation_mismatch (#1586). This is the core fix: the
+        finer classification is already computed by fuzzy_match — we just surface
+        it instead of collapsing to the coarse 'fuzzy_match' bucket."""
+        klass, rec = classify_file_error(
+            "Could not find a match for old_string in the file",
+            structured_error=(
+                "Error type: indentation_mismatch — indentation differs between "
+                "old_string and file content\n\nFile: /x.py"
+            ),
+        )
+        assert klass == "indentation_mismatch"
+        assert "whitespace" in rec or "indent" in rec
+
+    def test_structured_error_ignored_when_unrelated(self):
+        """A structured_error whose label we don't promote must NOT change the
+        coarse classification — the generic fuzzy_match arm still wins."""
+        klass, _ = classify_file_error(
+            "Could not find a match for old_string in the file",
+            structured_error="Error type: no_match — old_string not found in file",
+        )
+        assert klass == "fuzzy_match"
+
+    def test_structured_error_promotes_from_tail_error_bucket(self):
+        """An otherwise-unclassifiable raw string still benefits from the
+        structured diagnostic before falling back to the catch-all 'error'."""
+        klass, _ = classify_file_error(
+            "something weird happened",
+            structured_error="Error type: escape_drift — serialization artifact",
+        )
+        assert klass == "escape_drift"
+
+    def test_no_structured_error_keeps_legacy_behavior(self):
+        """Callers that don't pass structured_error get identical behavior to
+        before — backward compatible."""
+        klass, _ = classify_file_error("Could not find a match for old_string in the file")
+        assert klass == "fuzzy_match"
+
 
 class TestResultToDict:
     def test_read_result_success_has_no_error_class(self):
