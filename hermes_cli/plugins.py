@@ -471,6 +471,27 @@ class PluginContext:
         entry = entries.get(plugin_id) or {}
         return bool(entry.get("allow_tool_override", False))
 
+    def _hook_trust_allowed(self) -> bool:
+        """Return True if this plugin is trusted to register hooks (#1389).
+
+        Mirrors ``_tool_override_allowed``: bundled plugins are trusted by
+        default; every other source requires ``allow_hooks: true`` under
+        ``plugins.entries.<plugin_id>`` in config.yaml.
+        """
+        source = getattr(self.manifest, "source", "") or ""
+        if source == "bundled":
+            return True
+        try:
+            from hermes_cli.config import load_config
+
+            cfg = load_config() or {}
+        except Exception:
+            return False
+        plugin_id = self.manifest.key or self.manifest.name
+        entries = (cfg.get("plugins") or {}).get("entries") or {}
+        entry = entries.get(plugin_id) or {}
+        return bool(entry.get("allow_hooks", False))
+
     # -- message injection --------------------------------------------------
 
     def inject_message(self, content: str, role: str = "user") -> bool:
@@ -1160,6 +1181,10 @@ class PluginContext:
 
         Unknown hook names produce a warning but are still stored so
         forward-compatible plugins don't break.
+
+        **Workspace-trust gate (#1389):** hooks from non-bundled sources
+        are blocked unless explicitly approved via ``allow_hooks: true``
+        under ``plugins.entries.<plugin_id>`` in config.yaml.
         """
         if hook_name not in VALID_HOOKS:
             logger.warning(
@@ -1169,6 +1194,16 @@ class PluginContext:
                 hook_name,
                 ", ".join(sorted(VALID_HOOKS)),
             )
+        if not self._hook_trust_allowed():
+            logger.warning(
+                "Plugin '%s' (source='%s') hook registration blocked — "
+                "workspace trust required. Set "
+                "'plugins.entries.%s.allow_hooks: true' in config.yaml to approve.",
+                self.manifest.name,
+                getattr(self.manifest, "source", ""),
+                self.manifest.key or self.manifest.name,
+            )
+            return
         self._manager._hooks.setdefault(hook_name, []).append(callback)
         logger.debug("Plugin %s registered hook: %s", self.manifest.name, hook_name)
 
