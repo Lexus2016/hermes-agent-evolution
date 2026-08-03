@@ -363,6 +363,37 @@ class TestFailureReasonClassification:
         assert s["tool_failures_by_reason"] == {"terminal": {"non-zero-exit": 1}}
         assert secret not in json.dumps(s)
 
+    def test_digest_emits_reason_scoped_rate(self, tmp_path):
+        """The corrected #1325 fix: build_digest emits a per-(tool, reason)
+        RATE, not just counts. This is the signal the realized-impact gate
+        needs to detect a fix for ONE reason against a tool rate dominated by
+        an UNAFFECTED reason (the PR #1336 gap that produced "no-signal")."""
+        _session(
+            tmp_path,
+            "s_a",
+            [
+                _asst("read_file", "c1"),
+                _tool("c1", _fail("no such file or directory")),
+            ],
+        )
+        _session(
+            tmp_path,
+            "s_b",
+            [
+                _asst("read_file", "c1"),
+                _tool("c1", _fail("permission denied")),
+            ],
+        )
+        d = build_digest(tmp_path, window_days=7)
+        assert d["sessions_scanned"] == 2
+        # Two failures across two sessions → aggregate tool rate 1.0
+        assert d["signals"]["failure_rate"] == {"read_file": 1.0}
+        # Each reason carries its own rate (0.5), so a fix for one is visible
+        # even when the other is unchanged.
+        assert d["signals"]["failure_rate_by_reason"] == {
+            "read_file": {"file-not-found": 0.5, "permission-denied": 0.5}
+        }
+
 
 class TestBuildDigest:
     def test_window_excludes_old_sessions(self, tmp_path):

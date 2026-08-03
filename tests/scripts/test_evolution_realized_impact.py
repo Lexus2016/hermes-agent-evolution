@@ -345,3 +345,96 @@ class TestRecordMergeBaseline:
         record_merge(f, 5, "2026-06-01", 0.8, "fix")
         recs = load_ledger(f)
         assert "baseline_failure_rate" not in recs[0]
+
+    def test_baseline_failure_rate_by_reason_stored(self, tmp_path):
+        f = tmp_path / "ledger.jsonl"
+        record_merge(
+            f,
+            5,
+            "2026-06-01",
+            0.8,
+            "fix",
+            baseline_failure_rate_by_reason={"read_file:file-not-found": 0.42},
+        )
+        assert load_ledger(f)[0]["baseline_failure_rate_by_reason"] == {
+            "read_file:file-not-found": 0.42
+        }
+
+
+class TestReasonScopedCloseGate:
+    """#1325 — reason-scoped verdict path.
+
+    The aggregate tool rate is dominated by unaffected reasons, so a fix that
+    dropped ONE reason registered as flat → \"no-signal\" → re-open. These prove
+    the reason-scoped path sees the real drop (flat/any-regression = block)."""
+
+    @staticmethod
+    def _recs(reason_baseline):
+        return [
+            {
+                "issue": 1,
+                "merged_at": "2026-06-01",
+                "baseline_failure_rate_by_reason": reason_baseline,
+            }
+            | _verdict(1, "regressed")
+        ]
+
+    def test_reason_dropped_allows_close(self, tmp_path):
+        recs = self._recs({"read_file:file-not-found": 0.40})
+        should, reason = should_close_issue(
+            recs,
+            1,
+            "2026-06-17",
+            current_failure_rate_by_reason={"read_file:file-not-found": 0.10},
+        )
+        assert should is True and "#1325" in reason
+
+    def test_reason_flat_blocks_close(self, tmp_path):
+        # Flat = fix did not reduce that mode = no-signal → block (not "confirmed").
+        recs = self._recs({"read_file:file-not-found": 0.40})
+        should, reason = should_close_issue(
+            recs,
+            1,
+            "2026-06-17",
+            current_failure_rate_by_reason={"read_file:file-not-found": 0.40},
+        )
+        assert should is False and "#1325" in reason
+
+    def test_reason_regressed_blocks_close(self, tmp_path):
+        recs = self._recs({"read_file:file-not-found": 0.20})
+        should, _ = should_close_issue(
+            recs,
+            1,
+            "2026-06-17",
+            current_failure_rate_by_reason={"read_file:file-not-found": 0.60},
+        )
+        assert should is False
+
+    def test_one_regressed_reason_among_many_blocks_close(self, tmp_path):
+        # AND semantics: every targeted reason must drop; one regression blocks.
+        recs = self._recs({"read_file:file-not-found": 0.40, "read_file:timeout": 0.30})
+        should, _ = should_close_issue(
+            recs,
+            1,
+            "2026-06-17",
+            current_failure_rate_by_reason={
+                "read_file:file-not-found": 0.05,
+                "read_file:timeout": 0.50,  # regressed
+            },
+        )
+        assert should is False
+
+    def test_no_reason_baseline_falls_back_to_aggregate(self, tmp_path):
+        # Legacy record: aggregate tool-rate path still applies.
+        recs = [
+            {"issue": 1, "merged_at": "2026-06-01", "baseline_failure_rate": 5.0}
+            | _verdict(1, "regressed")
+        ]
+        should, _ = should_close_issue(
+            recs,
+            1,
+            "2026-06-17",
+            current_failure_rate=2.0,
+            current_failure_rate_by_reason={"read_file:file-not-found": 0.1},
+        )
+        assert should is True  # rate fell → close via aggregate path
