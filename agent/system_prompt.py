@@ -40,6 +40,7 @@ from agent.prompt_builder import (
     PARALLEL_TOOL_CALL_GUIDANCE,
     PLATFORM_HINTS,
     RECOVERY_BEFORE_REFUSAL_GUIDANCE,
+    SELFCOMPACT_RUBRIC_GUIDANCE,
     SESSION_SEARCH_GUIDANCE,
     SKILLS_GUIDANCE,
     STEER_CHANNEL_NOTE,
@@ -246,6 +247,13 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # problem model before planning complex tasks.
     if getattr(agent, "_model_first_reasoning", False) and agent.valid_tool_names:
         stable_parts.append(MODEL_FIRST_REASONING_GUIDANCE)
+
+    # Agent-driven context compaction rubric (#1568 SelfCompact). Injected
+    # only when the compact_context tool is loaded. The rubric steers when
+    # the model fires the tool; without it the paper shows the tool is used
+    # erratically by open-weight models.
+    if "compact_context" in agent.valid_tool_names:
+        stable_parts.append(SELFCOMPACT_RUBRIC_GUIDANCE)
 
     # Tool-aware behavioral guidance: only inject when the tools are loaded
     tool_guidance = []

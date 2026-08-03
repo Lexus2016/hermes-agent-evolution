@@ -155,13 +155,26 @@ def _is_write_denied(path: str) -> bool:
 
 
 def classify_file_error(
-    error: Optional[str], *, similar_files: Optional[List[str]] = None
+    error: Optional[str],
+    *,
+    similar_files: Optional[List[str]] = None,
+    structured_error: Optional[str] = None,
 ) -> Optional[Tuple[str, str]]:
     """Map a read/patch error string to ``(error_class, recovery)`` for #216, or
     None when there is no error. Lets the model route to the right recovery —
     create the file, fix the patch text, use a different tool — instead of
     re-issuing the same failing call. Derived from the already-set ``error``
-    string so no error-producing site has to be touched."""
+    string so no error-producing site has to be touched.
+
+    ``structured_error`` is the richer diagnostic produced by
+    :func:`tools.fuzzy_match.format_structured_error` (e.g.
+    "Error type: indentation_mismatch — ..."). When the raw ``error`` string is
+    generic (the fuzzy matcher's no-match message is identical regardless of
+    the *real* cause), the structured diagnostic already carries the precise
+    sub-classification. Consulting it here decomposes the dominant "other"
+    bucket (#1586: 68/78 patch failures) into actionable sub-classes
+    (indentation_mismatch, escape_drift, old_string_empty) without touching any
+    error-producing site."""
     if not error:
         return None
     low = error.lower()
@@ -200,6 +213,20 @@ def classify_file_error(
             "old_string to make it unique, or use replace_all=True if you want "
             "all occurrences replaced."
         )
+    # ── Sub-classify the fuzzy matcher's distinctive failure strings (#1586) ──
+    # These previously fell through to the generic "error" bucket (the 'other'
+    # class that dominated patch failures). Each now gets a targeted recovery.
+    if "escape-drift" in low or "escape drift" in low:
+        return "escape_drift", (
+            "Tool-call serialization added a spurious backslash before a quote/apostrophe "
+            "in old_string/new_string. Re-read the file and pass the strings without "
+            "backslash-escaping those characters."
+        )
+    if "old_string cannot be empty" in low or "old_string is empty" in low:
+        return "old_string_empty", (
+            "old_string was empty. Provide a non-empty search block that matches the "
+            "file; use read_file to see the current content if needed."
+        )
     if (
         "did not match" in low
         or "no match" in low
@@ -213,6 +240,15 @@ def classify_file_error(
         or "could not find" in low
         or "not find a match" in low
     ):
+        # Before settling for the coarse "fuzzy_match" class, check whether the
+        # structured diagnostic already pinpointed a narrower cause (e.g.
+        # indentation_mismatch). The structured_error field is populated by
+        # patch_replace via format_structured_error and carries the real reason
+        # the match failed — promoting it here keeps the agent's recovery hint
+        # precise instead of generic (#1586).
+        finer = _class_from_structured_error(structured_error)
+        if finer:
+            return finer
         return "fuzzy_match", (
             "The search block didn't match the file. Re-read the file and copy the EXACT "
             "current text into the patch — don't retry the same block."
@@ -225,9 +261,56 @@ def classify_file_error(
         return "read_error", (
             "The read failed. Check the path/permissions; don't repeat the same call blindly."
         )
+    # Last resort: the structured diagnostic may still classify an otherwise
+    # generic message before we fall back to the catch-all "error" bucket.
+    finer = _class_from_structured_error(structured_error)
+    if finer:
+        return finer
     return "error", (
         "The operation failed. Read the message, fix the root cause, and CHANGE the call."
     )
+
+
+# Sub-class recovery hints for causes the fuzzy matcher pinpoints in its
+# structured_error field but whose raw error string is generic (#1586).
+# Keys mirror the labels emitted by tools.fuzzy_match.classify_error /
+# format_structured_error ("Error type: <key> — ...").
+_STRUCTURED_SUBCLASS_RECOVERY: Dict[str, Tuple[str, str]] = {
+    "indentation_mismatch": (
+        "indentation_mismatch",
+        "The text matches but the leading whitespace differs (spaces vs tabs, "
+        "indent level). Re-read the file and copy the EXACT indentation into "
+        "old_string, or use write_file to replace the whole region.",
+    ),
+    "escape_drift": (
+        "escape_drift",
+        "Tool-call serialization added a spurious backslash before a quote/apostrophe. "
+        "Re-read the file and pass old_string/new_string without backslash-escaping "
+        "those characters.",
+    ),
+    "old_string_empty": (
+        "old_string_empty",
+        "old_string was empty. Provide a non-empty search block; use read_file to "
+        "see the current content if needed.",
+    ),
+}
+
+
+def _class_from_structured_error(
+    structured_error: Optional[str],
+) -> Optional[Tuple[str, str]]:
+    """Extract a ``(error_class, recovery)`` from a fuzzy_match structured_error
+    string, if it advertises a known sub-class. The structured diagnostic is
+    formatted as "Error type: <key> — <desc>" (see format_structured_error), so
+    we parse the leading label and look it up. Returns None when the field is
+    absent or the label isn't one we promote (#1586)."""
+    if not structured_error:
+        return None
+    m = re.search(r"Error type:\s*([a-z_]+)", structured_error, re.IGNORECASE)
+    if not m:
+        return None
+    label = m.group(1).lower()
+    return _STRUCTURED_SUBCLASS_RECOVERY.get(label)
 
 
 @dataclass
@@ -314,7 +397,14 @@ class PatchResult:
             result["lsp_diagnostics"] = self.lsp_diagnostics
         if self.error:
             result["error"] = self.error
-            hit = classify_file_error(self.error, similar_files=self.similar_files)
+            # Both diagnostics feed the classifier: similar_files drives the
+            # fuzzy_match "did you mean" recovery (#1587), structured_error
+            # decomposes the generic patch-failure bucket (#1586).
+            hit = classify_file_error(
+                self.error,
+                similar_files=self.similar_files,
+                structured_error=self.structured_error,
+            )
             if hit:
                 result["error_class"], result["recovery"] = hit
         if self.structured_error:
@@ -1486,6 +1576,16 @@ class ShellFileOperations(FileOperations):
                 )
 
         error_msg = f"File not found: {path}"
+        # #1587 — the "did you mean?" suggestion MUST be inlined into the
+        # error text. The caller (_diagnose_read_failure → line ~1782) only
+        # reads ``.error``, so a suggestion left in the separate
+        # ``similar_files`` field is invisible to the agent and the 71/wk
+        # file-not-found spiral persists unchanged.
+        if similar:
+            error_msg += (
+                "\n\nDid you mean: " + ", ".join(similar) + "? "
+                "Re-run read_file with one of these paths instead of guessing."
+            )
         if hint_parts:
             error_msg += "\n\n" + "\n".join(hint_parts)
 

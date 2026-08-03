@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
@@ -35,7 +36,9 @@ __all__ = [
     "EvalCase",
     "CostBudget",
     "BiLevelDecision",
+    "McNemarResult",
     "partition_scores",
+    "mcnemar_test",
     "bilevel_decision",
     "evaluate",
     "main",
@@ -72,7 +75,38 @@ class CostBudget:
         return self.spent > self.max_tokens
 
     def to_dict(self) -> dict[str, Any]:
-        return {"max_tokens": self.max_tokens, "spent": self.spent, "over_budget": self.over_budget}
+        return {
+            "max_tokens": self.max_tokens,
+            "spent": self.spent,
+            "over_budget": self.over_budget,
+        }
+
+
+@dataclass(frozen=True)
+class McNemarResult:
+    """Outcome of a paired McNemar test on candidate vs incumbent per-case outcomes.
+
+    ``b`` = cases where candidate wins but incumbent loses.
+    ``c`` = cases where incumbent wins but candidate loses.
+    The two-sided p-value is derived from the chi-square approximation with a
+    continuity correction (Edwards' correction). When ``b + c == 0`` there is no
+    discordant evidence and the p-value defaults to 1.0.
+    """
+
+    b: int
+    c: int
+    statistic: float
+    p_value: float
+    significant: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "b": self.b,
+            "c": self.c,
+            "statistic": round(self.statistic, 4),
+            "p_value": round(self.p_value, 4),
+            "significant": self.significant,
+        }
 
 
 @dataclass(frozen=True)
@@ -84,6 +118,7 @@ class BiLevelDecision:
     per_class_delta: dict[str, float] = field(default_factory=dict)
     reward_hacking_suspected: bool = False
     over_budget: bool = False
+    mcnemar: McNemarResult | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -91,14 +126,78 @@ class BiLevelDecision:
             "reason": self.reason,
             "public_delta": round(self.public_delta, 4),
             "private_delta": round(self.private_delta, 4),
-            "per_class_delta": {k: round(v, 4) for k, v in self.per_class_delta.items()},
+            "per_class_delta": {
+                k: round(v, 4) for k, v in self.per_class_delta.items()
+            },
             "reward_hacking_suspected": self.reward_hacking_suspected,
             "over_budget": self.over_budget,
+            "mcnemar": self.mcnemar.to_dict() if self.mcnemar else None,
         }
 
 
 def _mean(xs: Sequence[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
+
+
+def mcnemar_test(
+    candidate_scores: Mapping[str, float],
+    incumbent_scores: Mapping[str, float],
+    *,
+    threshold: float = 0.5,
+    alpha: float = 0.05,
+) -> McNemarResult:
+    """Paired McNemar test on per-case win/loss outcomes (RSEA §5, arXiv:2606.28374).
+
+    Each case is classified as pass (score ≥ ``threshold``) or fail for both
+    candidate and incumbent. Only **discordant** pairs contribute:
+
+    - ``b`` = candidate passes, incumbent fails (candidate advantage)
+    - ``c`` = candidate fails, incumbent passes (incumbent advantage)
+
+    The exact McNemar test is used when ``b + c < 25`` (binomial two-sided
+    p-value); otherwise the chi-square approximation with Edwards' continuity
+    correction is used.
+
+    Returns a :class:`McNemarResult` with ``significant`` pre-computed against
+    ``alpha``. When ``b + c == 0`` there is no discordant evidence and the
+    p-value defaults to 1.0 (not significant).
+    """
+    common_ids = set(candidate_scores) & set(incumbent_scores)
+    b = 0  # candidate pass, incumbent fail
+    c = 0  # candidate fail, incumbent pass
+    for cid in common_ids:
+        cand_pass = float(candidate_scores[cid]) >= threshold
+        inc_pass = float(incumbent_scores[cid]) >= threshold
+        if cand_pass and not inc_pass:
+            b += 1
+        elif inc_pass and not cand_pass:
+            c += 1
+
+    n_discordant = b + c
+    if n_discordant == 0:
+        return McNemarResult(b=0, c=0, statistic=0.0, p_value=1.0, significant=False)
+
+    if n_discordant < 25:
+        # Exact binomial two-sided p-value: 2 * P(X <= min(b, c))
+        from math import comb
+
+        k = min(b, c)
+        tail = sum(comb(n_discordant, i) for i in range(k + 1)) / (2**n_discordant)
+        p_value = min(1.0, 2.0 * tail)
+        statistic = 0.0  # exact test, no chi-square stat
+    else:
+        # Chi-square with Edwards' continuity correction
+        statistic = (abs(b - c) - 1) ** 2 / n_discordant
+        # p-value from chi-square CDF with 1 dof: p = 1 - erf(sqrt(stat / 2))
+        p_value = math.erfc(math.sqrt(statistic / 2.0))
+
+    return McNemarResult(
+        b=b,
+        c=c,
+        statistic=statistic,
+        p_value=p_value,
+        significant=p_value < alpha,
+    )
 
 
 def partition_scores(
@@ -111,7 +210,9 @@ def partition_scores(
     for case in cases:
         if case.id not in scores:
             continue
-        (public if case.split is Split.public else private)[case.id] = float(scores[case.id])
+        (public if case.split is Split.public else private)[case.id] = float(
+            scores[case.id]
+        )
     return public, private
 
 
@@ -123,13 +224,17 @@ def bilevel_decision(
     *,
     min_private_gain: float = 0.0,
     max_class_regression: float = 0.0,
+    mcnemar_alpha: float = 0.05,
+    score_threshold: float = 0.5,
 ) -> BiLevelDecision:
     """Apply the bi-level go/no-go rule (higher score is better).
 
     Reject if: over budget; OR the private held-out mean does not beat the
     incumbent by ``min_private_gain``; OR the candidate beats public but regresses
     private (suspected reward-hacking); OR any task class regresses beyond
-    ``max_class_regression``.
+    ``max_class_regression``; OR a paired McNemar test fails to reach
+    significance (``mcnemar_alpha``), meaning the observed win pattern is not
+    statistically distinguishable from a tie across benchmarks.
     """
     cand_pub, cand_priv = partition_scores(cases, candidate_scores)
     inc_pub, inc_priv = partition_scores(cases, incumbent_scores)
@@ -147,24 +252,87 @@ def bilevel_decision(
         inc = [float(incumbent_scores[i]) for i in ids if i in incumbent_scores]
         per_class_delta[cls] = _mean(cand) - _mean(inc)
 
+    # Paired McNemar test across ALL cases (per RSEA §5 — multi-benchmark
+    # paired significance guards against single-benchmark flukes).
+    mcnemar = mcnemar_test(
+        candidate_scores,
+        incumbent_scores,
+        threshold=score_threshold,
+        alpha=mcnemar_alpha,
+    )
+
     reward_hacking = public_delta > 0 and private_delta < 0
     regressed_class = min(per_class_delta.values()) if per_class_delta else 0.0
 
     if budget.over_budget:
-        return BiLevelDecision(False, "over cost budget", public_delta, private_delta,
-                               per_class_delta, reward_hacking, True)
+        return BiLevelDecision(
+            False,
+            "over cost budget",
+            public_delta,
+            private_delta,
+            per_class_delta,
+            reward_hacking,
+            True,
+            mcnemar,
+        )
     if reward_hacking:
-        return BiLevelDecision(False, "beats public but regresses private — suspected reward-hacking",
-                               public_delta, private_delta, per_class_delta, True, False)
+        return BiLevelDecision(
+            False,
+            "beats public but regresses private — suspected reward-hacking",
+            public_delta,
+            private_delta,
+            per_class_delta,
+            True,
+            False,
+            mcnemar,
+        )
     if private_delta <= 0 or private_delta < min_private_gain:
-        return BiLevelDecision(False, f"private held-out gain {private_delta:.4f} below required {min_private_gain}",
-                               public_delta, private_delta, per_class_delta, False, False)
+        return BiLevelDecision(
+            False,
+            f"private held-out gain {private_delta:.4f} below required {min_private_gain}",
+            public_delta,
+            private_delta,
+            per_class_delta,
+            False,
+            False,
+            mcnemar,
+        )
     if regressed_class < -abs(max_class_regression):
         worst = min(per_class_delta, key=per_class_delta.get)
-        return BiLevelDecision(False, f"task class '{worst}' regressed ({per_class_delta[worst]:.4f}) — not generalizable",
-                               public_delta, private_delta, per_class_delta, False, False)
-    return BiLevelDecision(True, "beats incumbent on private held-out set under budget, no class regression",
-                           public_delta, private_delta, per_class_delta, False, False)
+        return BiLevelDecision(
+            False,
+            f"task class '{worst}' regressed ({per_class_delta[worst]:.4f}) — not generalizable",
+            public_delta,
+            private_delta,
+            per_class_delta,
+            False,
+            False,
+            mcnemar,
+        )
+    # McNemar gate: the mean-delta says go, but is the win *pattern*
+    # statistically significant, or could it be noise? (RSEA §5)
+    if not mcnemar.significant and mcnemar.b + mcnemar.c > 0:
+        return BiLevelDecision(
+            False,
+            f"private gain {private_delta:.4f} but McNemar not significant "
+            f"(p={mcnemar.p_value:.4f}, b={mcnemar.b}, c={mcnemar.c}) — win pattern indistinguishable from tie",
+            public_delta,
+            private_delta,
+            per_class_delta,
+            False,
+            False,
+            mcnemar,
+        )
+    return BiLevelDecision(
+        True,
+        "beats incumbent on private held-out set under budget, no class regression, McNemar significant",
+        public_delta,
+        private_delta,
+        per_class_delta,
+        False,
+        False,
+        mcnemar,
+    )
 
 
 def evaluate(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -182,13 +350,17 @@ def evaluate(payload: Mapping[str, Any]) -> dict[str, Any]:
         budget,
         min_private_gain=float(payload.get("min_private_gain", 0.0)),
         max_class_regression=float(payload.get("max_class_regression", 0.0)),
+        mcnemar_alpha=float(payload.get("mcnemar_alpha", 0.05)),
+        score_threshold=float(payload.get("score_threshold", 0.5)),
     )
     return {"decision": decision.to_dict(), "budget": budget.to_dict()}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Bi-level RSI eval decision (#1166)")
-    parser.add_argument("--payload", required=True, help="path to the eval payload JSON")
+    parser.add_argument(
+        "--payload", required=True, help="path to the eval payload JSON"
+    )
     args = parser.parse_args(argv)
     with open(args.payload, encoding="utf-8") as fh:
         payload = json.load(fh)
