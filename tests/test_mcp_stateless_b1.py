@@ -123,3 +123,47 @@ class TestStatefulPathUnchanged:
         srv = _make_server()
         srv.initialize_result = None
         assert srv._advertises_tools() is True
+
+
+class TestStatelessRoutingMeta:
+    """Inline _meta routing context (Slice B-2 / #1512)."""
+
+    def _srv(self, stateless: bool):
+        srv = _make_server()
+        srv._stateless_enabled = stateless
+        return srv
+
+    def test_none_when_stateful(self):
+        """Stateful mode must yield meta=None (zero behavioral change)."""
+        srv = self._srv(False)
+        assert srv.stateless_routing_meta("tools/call", "my_tool") is None
+
+    def test_method_and_name_when_stateless(self):
+        """Stateless mode must carry Mcp-Method + Mcp-Name inline."""
+        srv = self._srv(True)
+        meta = srv.stateless_routing_meta("tools/call", "my_tool")
+        assert meta == {"Mcp-Method": "tools/call", "Mcp-Name": "my_tool"}
+
+    def test_no_name_when_stateless(self):
+        """Name is optional; method-only meta when omitted."""
+        srv = self._srv(True)
+        assert srv.stateless_routing_meta("tools/list") == {"Mcp-Method": "tools/list"}
+
+    def test_meta_flows_into_call_tool_when_stateless(self):
+        """stateless_routing_meta result must be passed as call_tool meta=."""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        srv = self._srv(True)
+        mock_session = AsyncMock()
+        mock_session.call_tool.return_value = SimpleNamespace(
+            content=[], isError=False, structuredContent=None
+        )
+        srv.session = mock_session
+        meta = srv.stateless_routing_meta("tools/call", "echo")
+        asyncio.run(mock_session.call_tool("echo", arguments={"x": 1}, meta=meta))
+        mock_session.call_tool.assert_awaited_once_with(
+            "echo",
+            arguments={"x": 1},
+            meta={"Mcp-Method": "tools/call", "Mcp-Name": "echo"},
+        )

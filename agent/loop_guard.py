@@ -76,7 +76,16 @@ _EXIT_CODE_RE = re.compile(r"exit code[:\s]+([1-9]\d*)", re.IGNORECASE)
 # change-and-retry classes (not_found, runtime_error) where a corrected retry can
 # legitimately succeed. Two of these in a row already warrants a hard stop, below
 # the generic fail_threshold.
-_NON_RETRYABLE = frozenset({"timeout", "permission", "missing_command", "limit"})
+#
+# ``provider_dead`` joined the set in #1611: it means the configured search
+# provider is not returning results at all (DuckDuckGo/Brave/SearXNG unreachable
+# or erroring). Unlike ``not_found``, rewording the query cannot help — the
+# provider is down for every query — and the recovery hint already tells the
+# agent to switch search_backend rather than retry. Leaving it out let
+# provider outages present as ordinary per-query failures and spiral.
+_NON_RETRYABLE = frozenset(
+    {"timeout", "permission", "missing_command", "limit", "provider_dead"}
+)
 _NONRETRY_THRESHOLD = 2
 
 # #1612 — Per-tool non-retryable failure classes. The global ``_NON_RETRYABLE``
