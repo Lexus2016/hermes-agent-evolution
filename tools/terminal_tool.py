@@ -2636,16 +2636,41 @@ def terminal_tool(
                         "smart_denied": approval.get("smart_denied", False),
                         "allow_permanent": approval.get("allow_permanent", True),
                     }, ensure_ascii=False)
-                # Command was blocked
+                # Command was blocked.  In cron/subagent contexts there is no
+                # human to answer an approval prompt, so the block is final.
+                # Apply the #1542/#1590 treatment: append a "Do NOT retry"
+                # directive and steer toward approval-free alternatives
+                # (write output to a temp file then read_file it) so the agent
+                # stops retrying the same blocked command and switches strategy.
                 desc = approval.get("description", "command flagged")
                 fallback_msg = (
                     f"Command denied: {desc}. "
                     "Use the approval prompt to allow it, or rephrase the command."
                 )
+                block_error = approval.get("message", fallback_msg)
+                from tools.approval import (
+                    _is_interactive_cli,
+                    _is_gateway_approval_context,
+                )
+                _is_cron = env_var_enabled("HERMES_CRON_SESSION")
+                _is_cli_ctx = _is_interactive_cli()
+                _is_gw_ctx = _is_gateway_approval_context()
+                if _is_cron or (not _is_cli_ctx and not _is_gw_ctx):
+                    if "Do NOT retry" not in block_error:
+                        block_error = (
+                            f"{block_error} Do NOT retry this command — no "
+                            f"interactive user or gateway is present to approve "
+                            f"it in this "
+                            f"{'cron' if _is_cron else 'subagent'} context. "
+                            f"Instead, write the output to a temp file "
+                            f"(e.g. `command > /tmp/out.txt`) and read it with "
+                            f"read_file, or use file/search tools to achieve "
+                            f"the same goal without a shell pipe."
+                        )
                 return json.dumps({
                     "output": "",
                     "exit_code": -1,
-                    "error": approval.get("message", fallback_msg),
+                    "error": block_error,
                     "status": "blocked"
                 }, ensure_ascii=False)
             # Track whether approval was explicitly granted by the user

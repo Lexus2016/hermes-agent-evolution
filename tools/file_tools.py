@@ -2277,6 +2277,15 @@ def search_tool(
         # reformulates the query each time and gets empty each time) slip
         # through — the regression of #1149. Track cumulative empty results
         # per session and inject a directive when they pile up.
+        #
+        # #1589 — the directive at _es>=3 was advisory (appended text, no
+        # error key), so classify_tool_failure still saw success and the
+        # spiral_failure_cap never accumulated. 31 sessions hit 11-consecutive
+        # empty searches because the cap had no teeth. Escalate to a real
+        # error at _es>=6 so the failure is classified and the cross-turn
+        # spiral_failure_cap (search_files is in _SPIRAL_PRONE_TOOLS) can
+        # accumulate and halt.
+        _SEARCH_EMPTY_HARD_CAP = 6
         if result_dict.get("total_count", 0) == 0 and not result_dict.get("error"):
             with _read_tracker_lock:
                 td = _read_tracker.setdefault(
@@ -2285,7 +2294,16 @@ def search_tool(
                 )
                 td["empty_searches"] = td.get("empty_searches", 0) + 1
                 _es = td["empty_searches"]
-            if _es >= 3:
+            if _es >= _SEARCH_EMPTY_HARD_CAP:
+                result_dict["error"] = (
+                    f"search_files has returned 0 results {_es} times. Your "
+                    "queries are consistently not matching anything — this is a "
+                    "deterministic dead end. STOP searching and switch strategy: "
+                    "(a) use search_files target='files' with a glob like '*.py', "
+                    "(b) call repo_map for a structural overview, or "
+                    "(c) read_file on a known path instead of searching."
+                )
+            elif _es >= 3:
                 result_dict.setdefault(
                     "_search_directive",
                     (
