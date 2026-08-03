@@ -1149,6 +1149,12 @@ DEFAULT_CONFIG = {
         # (force on/off for all models), or a list of model-name substrings
         # to match (e.g. ["gpt", "codex", "gemini", "qwen"]).
         "tool_use_enforcement": "auto",
+        # Subagent task-spec re-grounding (#1578): re-inject the original
+        # delegated goal as a user message every N API-call iterations to
+        # counter context drift in long unattended subagent loops.  Only
+        # fires for platform="subagent".  0 disables (interactive sessions
+        # are unaffected — they have a human to steer).
+        "subagent_reground_interval": 10,
         # Intent-ack continuation: when the model opens a turn by narrating an
         # action it will take ("I'll go check the logs...") but emits no tool
         # call, intercept the turn-end, inject a "continue now, execute the
