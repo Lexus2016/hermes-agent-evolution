@@ -665,6 +665,26 @@ MODEL_FIRST_REASONING_GUIDANCE = (
     "a one-line answer, a simple formatting request) where it adds no value."
 )
 
+# Agent-driven context compaction rubric (#1568 SelfCompact, arXiv:2606.23525).
+# Injected only when the compact_context tool is loaded. The paper shows the
+# tool alone is used erratically by open-weight models; only the tool + this
+# rubric together elicit adaptive compaction. Short static text → stable prompt
+# prefix, no cache break.
+SELFCOMPACT_RUBRIC_GUIDANCE = (
+    "# Adaptive context compaction\n"
+    "You have a `compact_context` tool that summarises accumulated conversation "
+    "and tool history into a concise prefix, freeing context for the work still "
+    "ahead. Use it adaptively — not on a fixed schedule.\n"
+    "FIRE `compact_context` when a sub-task has just resolved and its verbose "
+    "tool outputs are no longer needed verbatim, or when the trajectory is "
+    "converging (repeated similar tool calls, diminishing new signal).\n"
+    "SUPPRESS it mid-derivation (inside a multi-step calculation or reasoning "
+    "chain), when stuck or iterating without progress, or on short "
+    "conversations where there is nothing to gain. After compaction, continue "
+    "from the summary — resolved facts are preserved; re-read a file or re-run "
+    "a search only if you need exact prior output."
+)
+
 # OpenAI GPT/Codex-specific execution guidance.  Addresses known failure modes
 # where GPT models abandon work on partial results, skip prerequisite lookups,
 # hallucinate instead of using tools, and declare "done" without verification.
