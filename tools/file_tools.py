@@ -2185,6 +2185,80 @@ def patch_tool(
         return tool_error(str(e))
 
 
+# ---------------------------------------------------------------------------
+# #1486 — no-match enrichment for search_files
+# ---------------------------------------------------------------------------
+
+
+def _build_no_match_hint(
+    path: str,
+    pattern: str,
+    target: str,
+    resolved_path: "Path | PurePosixPath | None",
+) -> "str | None":
+    """Build a hint for the agent when search_files finds zero matches.
+
+    Lists what *does* exist in the search directory so the agent can correct
+    its pattern or verify the path instead of blind-retrying.  Returns None
+    when no useful hint can be constructed (e.g. the directory doesn't exist
+    or is empty), so the caller can skip adding an empty field.
+    """
+    search_dir = resolved_path if resolved_path else Path(path)
+
+    try:
+        search_dir = Path(os.path.expanduser(str(search_dir)))
+        if not search_dir.is_dir():
+            if search_dir.exists() and search_dir.is_file():
+                return (
+                    f"Pattern {pattern!r} matched nothing in {path!r}. "
+                    "The path is a single file — verify the pattern or "
+                    "read_file the file directly."
+                )
+            return None
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+    try:
+        children = sorted(
+            search_dir.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())
+        )
+    except (OSError, PermissionError):
+        return None
+
+    _max = 10
+    dirs = [c.name + "/" for c in children if c.is_dir() and not c.name.startswith(".")]
+    files_list = [c.name for c in children if c.is_file() and not c.name.startswith(".")]
+    entries = dirs[:_max]
+    remaining = _max - len(entries)
+    if remaining > 0:
+        entries.extend(files_list[:remaining])
+
+    if not entries:
+        return (
+            f"Pattern {pattern!r} matched nothing in {path!r}. "
+            "The directory exists but contains no visible entries. "
+            "Verify the path is correct."
+        )
+
+    mode_desc = "file search" if target == "files" else "content search"
+    listing = ", ".join(entries)
+    hint = (
+        f"Pattern {pattern!r} matched nothing in {path!r} ({mode_desc}). "
+        f"Entries that DO exist in this directory: {listing}"
+    )
+    if target == "files":
+        hint += (
+            ". Try a broader glob (e.g. '*.py' instead of a specific name), "
+            "or use target='content' to search inside files."
+        )
+    else:
+        hint += (
+            ". Try a different regex pattern, or use target='files' with a "
+            "glob like '*.py' to list files first."
+        )
+    return hint
+
+
 def search_tool(
     pattern: str,
     target: str = "content",
@@ -2270,21 +2344,24 @@ def search_tool(
                     m.content = redact_sensitive_text(m.content, file_read=True)
         result_dict = result.to_dict(densify=True)
 
-        # ── Empty-result spiral detection (#1372) ─────────────────────
+        # ── Empty-result enrichment + spiral detection (#1372, #1486) ──
         # search_files returns {"total_count": 0} with no error key on a
-        # successful-but-empty search. The tool_guardrails spiral_failure_cap
-        # only counts errors, so diverse-query spirals (where the agent
-        # reformulates the query each time and gets empty each time) slip
-        # through — the regression of #1149. Track cumulative empty results
-        # per session and inject a directive when they pile up.
+        # successful-but-empty search. Two distinct problems are handled here.
         #
-        # #1589 — the directive at _es>=3 was advisory (appended text, no
-        # error key), so classify_tool_failure still saw success and the
-        # spiral_failure_cap never accumulated. 31 sessions hit 11-consecutive
-        # empty searches because the cap had no teeth. Escalate to a real
-        # error at _es>=6 so the failure is classified and the cross-turn
-        # spiral_failure_cap (search_files is in _SPIRAL_PRONE_TOOLS) can
-        # accumulate and halt.
+        # #1486 — when the pattern matches nothing the agent has no hint about
+        # what *does* exist, so it blind-retries or falls back to a terminal
+        # directory listing, burning extra turns (95 file-not-found events/7d,
+        # 27-deep spirals observed). The FIRST empty result is enriched with
+        # what actually exists in the search path.
+        #
+        # #1372/#1149/#1589 — the tool_guardrails spiral_failure_cap only
+        # counts errors, so diverse-query spirals (the agent reformulates each
+        # time and gets empty each time) slip through. Empty results are
+        # tracked per session; at 3 an advisory directive is injected, and at
+        # 6 it escalates to a real error key so classify_tool_failure sees the
+        # failure and the cross-turn spiral_failure_cap (search_files is in
+        # _SPIRAL_PRONE_TOOLS) can accumulate and halt. The advisory alone had
+        # no teeth — 31 sessions hit 11 consecutive empty searches.
         _SEARCH_EMPTY_HARD_CAP = 6
         if result_dict.get("total_count", 0) == 0 and not result_dict.get("error"):
             with _read_tracker_lock:
@@ -2294,6 +2371,16 @@ def search_tool(
                 )
                 td["empty_searches"] = td.get("empty_searches", 0) + 1
                 _es = td["empty_searches"]
+
+            # ── #1486: immediate no-match hint on the FIRST empty result ─
+            # List what *does* exist in the search directory so the agent can
+            # correct the pattern instead of blind-retrying.  Runs before the
+            # spiral directive so even the first miss gets actionable info.
+            if _es == 1:
+                _hint = _build_no_match_hint(path, pattern, target, resolved_path)
+                if _hint:
+                    result_dict["_no_match_hint"] = _hint
+
             if _es >= _SEARCH_EMPTY_HARD_CAP:
                 result_dict["error"] = (
                     f"search_files has returned 0 results {_es} times. Your "

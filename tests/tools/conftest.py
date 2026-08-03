@@ -67,3 +67,32 @@ def disable_lazy_stt_install():
     """
     with patch("tools.transcription_tools._try_lazy_install_stt", return_value=False):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_mcp_circuit_breaker():
+    """Isolate the MCP circuit-breaker state between tests.
+
+    ``tools.mcp_tool`` keeps consecutive-failure counts in module-level dicts
+    keyed by server name, and virtually every MCP test uses the same
+    ``"test-server"`` name. A test that deliberately exercises an error path
+    therefore leaves the breaker armed for whichever test runs next: once three
+    such failures accumulate, following tests get "server unreachable" instead
+    of their expected result. That made outcomes depend on file order, so the
+    same tests passed alone and failed in a suite (and passed or failed
+    depending on how CI sharded them).
+
+    Cleared before and after each test so neither inherited nor leaked state
+    can influence a result.
+    """
+    try:
+        from tools import mcp_tool
+    except Exception:  # pragma: no cover - mcp_tool import is optional here
+        yield
+        return
+
+    mcp_tool._server_error_counts.clear()
+    mcp_tool._server_breaker_opened_at.clear()
+    yield
+    mcp_tool._server_error_counts.clear()
+    mcp_tool._server_breaker_opened_at.clear()
