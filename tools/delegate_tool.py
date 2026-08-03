@@ -2341,6 +2341,14 @@ def _run_single_child(
 
         set_thread_identity(_team_identity[0], _team_identity[1])
 
+    # Mark this worker thread as a subagent so approval gating treats it as
+    # unattended (no human can approve inside a delegate_task child). Thread-
+    # local via contextvar, so the parent and concurrent siblings are
+    # unaffected. Reset in the finally block below (#1542, #1554).
+    from tools.approval import set_hermes_subagent_context
+
+    _subagent_ctx_token = set_hermes_subagent_context(True)
+
     # Get the progress callback from the child agent
     child_progress_cb = getattr(child, "tool_progress_callback", None)
 
@@ -2976,6 +2984,16 @@ def _run_single_child(
                 clear_thread_identity()
             except Exception as exc:
                 logger.debug("Failed to clear team identity: %s", exc)
+
+        # Clear the subagent contextvar binding so a recycled pool thread
+        # does not inherit "unattended" on its next, non-subagent task
+        # (#1542, #1554).
+        try:
+            from tools.approval import _hermes_subagent_ctx
+
+            _hermes_subagent_ctx.reset(_subagent_ctx_token)
+        except Exception as exc:
+            logger.debug("Failed to reset subagent context: %s", exc)
 
         # Restore the parent's tool names so the process-global is correct
         # for any subsequent execute_code calls or other consumers.

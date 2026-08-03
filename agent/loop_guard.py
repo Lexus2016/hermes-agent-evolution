@@ -1299,6 +1299,30 @@ def _classify_refusal(text: str) -> str:
     return "over_refusal"
 
 
+def detect_refusal_category(text: str) -> str:
+    """Public accessor — classify a full assistant text response.
+
+    Returns the refusal category (e.g. ``"over_refusal"``,
+    ``"true_capability_gap"``) if the text contains refusal language, or
+    an empty string ``""`` if no refusal is detected.
+
+    Used by the conversation loop (#1265) to classify the model's response
+    *after* a nudge so the transition can be recorded in the refusal
+    telemetry sidecar.
+    """
+    if not text or not text.strip():
+        return ""
+    refusals = [
+        m for m in _REFUSAL_PAT.finditer(text)
+        if not _FP_REFUSAL_PAT.match(text[m.start():m.start() + 40])
+    ]
+    if not refusals:
+        return ""
+    first = refusals[0]
+    snippet = text[first.start():first.start() + 120]
+    return _classify_refusal(snippet)
+
+
 def maybe_refusal_nudge(
     messages: List[Dict[str, Any]],
     *,
