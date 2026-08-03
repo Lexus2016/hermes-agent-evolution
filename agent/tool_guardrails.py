@@ -105,6 +105,15 @@ _SPIRAL_PRONE_TOOLS = frozenset(
     }
 )
 
+# #1585 — number of consecutive successes required before a spiral-prone
+# tool's cross-turn failure streak decays by 1. The production terminal
+# spiral is fail, diagnostic-success (pwd, ls), fail, repeating — and the
+# fallback directive actively recommends the diagnostic. With a 1-success
+# decay that pattern nets 0 per cycle and the cap is unreachable. Requiring
+# a sustained run means a single interspersed success does not drain the
+# streak, so fail/succeed/fail climbs +1 per cycle toward the cap.
+_SUCCESSES_TO_DECAY = 2
+
 
 @dataclass(frozen=True)
 class ToolCallGuardrailConfig:
@@ -341,6 +350,12 @@ class ToolCallGuardrailController:
         # turns and trigger the cap.  reset_for_turn only clears per-turn
         # bookkeeping (exact-failure, no-progress, halt_decision).
         self._cross_turn_tool_failure_counts: dict[str, int] = {}
+        # #1585 — track consecutive successes per spiral-prone tool so we
+        # only drain the failure streak after a SUSTAINED recovery (multiple
+        # successes in a row), not on a single interspersed success. Without
+        # this, the fail→diagnostic-success→fail pattern (the production
+        # spiral) nets 0 per cycle and the cap is unreachable.
+        self._cross_turn_success_streaks: dict[str, int] = {}
         self.reset_for_turn()
 
     def reset_for_turn(self) -> None:
@@ -531,6 +546,9 @@ class ToolCallGuardrailController:
             # tool batch).  Here we carry the streak forward.
             cross_turn_count = self._cross_turn_tool_failure_counts.get(tool_name, 0) + 1
             self._cross_turn_tool_failure_counts[tool_name] = cross_turn_count
+            # #1585 — a failure breaks the consecutive-success chain, so the
+            # sustained-recovery counter restarts from zero.
+            self._cross_turn_success_streaks.pop(tool_name, None)
 
             # Effective streak is the max of per-turn and cross-turn counts.
             # Within-turn spirals (5 calls in one batch) still trip the cap
@@ -651,9 +669,35 @@ class ToolCallGuardrailController:
         # so a genuinely recovered backend (several successes in a row)
         # drains the streak back to 0, but a failure/success/failure pattern
         # still accumulates toward the cap and eventually halts.
+        #
+        # #1585 — for spiral-prone tools, the simple 1-success decay was
+        # insufficient: the production terminal spiral is fail → diagnostic-
+        # success (pwd, ls — the fallback directive's own advice) → fail,
+        # which nets 0 per cycle and never reaches the cap. Now we require a
+        # SUSTAINED run of successes (_SUCCESSES_TO_DECAY, default 2) before
+        # draining the streak by 1. A single interspersed success increments
+        # the success-streak but doesn't drain the failure streak, so the
+        # fail/succeed/fail pattern nets +1 per cycle and climbs toward the
+        # cap. A genuine recovery (N consecutive successes) drains it fully.
         if tool_name in self._cross_turn_tool_failure_counts:
             current = self._cross_turn_tool_failure_counts[tool_name]
-            if current <= 1:
+            is_spiral_prone = tool_name in self.config.spiral_prone_tools
+            if is_spiral_prone:
+                succ = self._cross_turn_success_streaks.get(tool_name, 0) + 1
+                if succ >= _SUCCESSES_TO_DECAY:
+                    # Sustained recovery — drain the failure streak by 1.
+                    if current <= 1:
+                        self._cross_turn_tool_failure_counts.pop(tool_name, None)
+                    else:
+                        self._cross_turn_tool_failure_counts[tool_name] = current - 1
+                    # Reset the success streak so the next decay needs another
+                    # sustained run (not a single additional success).
+                    self._cross_turn_success_streaks.pop(tool_name, None)
+                else:
+                    # Not enough consecutive successes yet — remember the
+                    # streak but don't drain the failure count.
+                    self._cross_turn_success_streaks[tool_name] = succ
+            elif current <= 1:
                 self._cross_turn_tool_failure_counts.pop(tool_name, None)
             else:
                 self._cross_turn_tool_failure_counts[tool_name] = current - 1

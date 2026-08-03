@@ -790,16 +790,26 @@ def test_spiral_cap_can_be_disabled():
 
 def test_spiral_cap_success_decays_streak():
     """A successful terminal call decays (not resets) the cross-turn failure
-    streak by 1 (#1188).  With spiral_failure_cap=5, four failures + one
+    streak (#1188).  With spiral_failure_cap=5, four failures + one
     success leaves streak=4; the 5th failure (streak 4→5) hits the cap.
-    Multiple consecutive successes drain the streak fully."""
+    Multiple consecutive successes drain the streak fully.
+
+    #1585 — spiral-prone tools now require _SUCCESSES_TO_DECAY (2)
+    consecutive successes before draining the streak by 1, so a single
+    interspersed success (the pwd/ls diagnostic the directive recommends)
+    does not reset the accumulation."""
+    from agent.tool_guardrails import _SUCCESSES_TO_DECAY
+
     controller = ToolCallGuardrailController()
     cap = controller.config.spiral_failure_cap  # default 5
     for _ in range(4):
         controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
     # Cross-turn streak is now 4.
     assert controller._cross_turn_tool_failure_counts.get("terminal", 0) == 4
-    # A success decays the streak by 1 (4→3), not resets to 0.
+    # A SINGLE success does NOT decay (needs _SUCCESSES_TO_DECAY in a row).
+    controller.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
+    assert controller._cross_turn_tool_failure_counts.get("terminal", 0) == 4
+    # A second consecutive success drains by 1 (4→3).
     controller.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
     assert controller._cross_turn_tool_failure_counts.get("terminal", 0) == 3
     # Two more failures bring the streak to 5, hitting the cap.
@@ -809,11 +819,13 @@ def test_spiral_cap_success_decays_streak():
     assert d.action == "halt"
     assert d.code == "spiral_prone_tool_failure_cap"
     # Drain with enough consecutive successes to reach 0.
+    # Each drain-by-1 requires _SUCCESSES_TO_DECAY consecutive successes,
+    # and the success streak resets after each drain.
     controller2 = ToolCallGuardrailController()
     for _ in range(cap):
         controller2.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
     assert controller2._cross_turn_tool_failure_counts.get("terminal", 0) == cap
-    for _ in range(cap):
+    for _ in range(cap * _SUCCESSES_TO_DECAY):
         controller2.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
     assert controller2._cross_turn_tool_failure_counts.get("terminal", 0) == 0
 
@@ -837,11 +849,17 @@ def test_spiral_cap_reset_for_turn_clears_streak():
     assert d.action == "block"
     assert d.code == "spiral_prone_tool_failure_cap"
     # A success after reset clears the cross-turn streak.
+    # #1585 — spiral-prone tools require _SUCCESSES_TO_DECAY (2) consecutive
+    # successes to drain by 1. With streak=5 we need 5*2=10 successes to
+    # fully clear it.
+    from agent.tool_guardrails import _SUCCESSES_TO_DECAY
+
     controller.reset_for_turn()
-    controller.before_call("terminal", {"command": "x"})
-    d_ok = controller.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
-    assert d_ok.action == "allow"
-    controller.reset_for_turn()
+    for _ in range(5 * _SUCCESSES_TO_DECAY):
+        controller.before_call("terminal", {"command": "x"})
+        d_ok = controller.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
+        assert d_ok.action == "allow"
+        controller.reset_for_turn()
     assert controller.before_call("terminal", {"command": "x"}).action == "allow"
 
 
@@ -1148,3 +1166,65 @@ def test_after_call_survives_lone_surrogates_in_result_and_args():
     controller.after_call("web_search", {"query": dirty}, '{"error":"\ud835 boom"}', failed=True)
     controller.after_call("web_search", {"query": dirty}, '{"error":"\ud835 boom"}', failed=True)
     assert controller.before_call("web_search", {"query": dirty}).action == "block"
+
+
+# ── #1585: spiral-prone interleaving pattern ──────────────────────────────
+
+
+def test_spiral_cap_fail_success_interleaving_accumulates():
+    """#1585 — the production terminal spiral pattern is fail → diagnostic-
+    success (pwd, ls) → fail → success → ..., repeating for 25+ turns. The
+    fallback directive actively recommends the diagnostic, which succeeds
+    (exit 0) and must NOT reset the failure streak. With the old code, the
+    pop() at current<=1 dropped the streak 1→0 on every interspersed
+    success, so it never climbed past 1 and the cap (5) was unreachable.
+
+    After the fix, spiral-prone tools only decay by 1 per success (never
+    pop at <=1), so the fail/succeed/fail pattern nets +1 per cycle and
+    eventually halts.
+    """
+    controller = ToolCallGuardrailController()
+    # Simulate fail → success per turn for 10 turns (20 calls).
+    for turn in range(10):
+        controller.reset_for_turn()
+        # Failing terminal call (the real command).
+        controller.after_call(
+            "terminal", {"command": f"cmd{turn}"}, '{"exit_code":1}', failed=True
+        )
+        # Successful diagnostic (pwd, ls — the fallback directive's advice).
+        controller.after_call(
+            "terminal", {"command": "pwd"}, '{"exit_code":0}', failed=False
+        )
+    # After 10 fail/success cycles, the cross-turn streak should have
+    # accumulated well beyond 1 (each cycle nets +1: fail +1, success -1).
+    # With the old pop()-at-1 code, this was permanently stuck at 0.
+    streak = controller._cross_turn_tool_failure_counts.get("terminal", 0)
+    assert streak >= 5, (
+        f"Interleaving spiral should accumulate to >=5 after 10 cycles, "
+        f"got {streak} — the single-success reset bug (#1585) is still present"
+    )
+
+
+def test_spiral_cap_interleaving_eventually_halts():
+    """The fail/success interleaving pattern must eventually hit the cap and
+    halt — proving #1585 is fixed end-to-end."""
+    controller = ToolCallGuardrailController()
+    halted = False
+    for turn in range(20):
+        controller.reset_for_turn()
+        d_fail = controller.after_call(
+            "terminal", {"command": f"failing-cmd-{turn}"},
+            '{"exit_code":1}', failed=True,
+        )
+        if d_fail.should_halt:
+            halted = True
+            break
+        # Interspersed success between failures (the pattern that defeated
+        # the old cap).
+        controller.after_call(
+            "terminal", {"command": "pwd"}, '{"exit_code":0}', failed=False
+        )
+    assert halted, (
+        "Terminal fail/success interleaving should have halted within 20 "
+        "turns — the #1585 spiral cap must fire for this pattern"
+    )
