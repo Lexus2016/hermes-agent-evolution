@@ -57,8 +57,14 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         "or raise the relevant config limit; a near-identical retry will fail the same way.",
     ),
     (
+        # Only genuine backend-unreachable signals belong here. A bare
+        # "no results" used to match, which mislabelled every empty local
+        # search_files result as a dead web-search provider (#1611) — the two
+        # need opposite recoveries: an empty local search should be retried
+        # with a broader query, a dead provider should not be retried at all.
+        # Bare "no results" now falls through to the not_found rule below.
         re.compile(
-            r"\bno results\b|\bno results found\b|duckduckgo search failed|brave search returned http|could not reach .* search|searxng returned http",
+            r"duckduckgo search failed|brave search returned http|could not reach .* search|searxng returned http",
             re.I,
         ),
         "provider_dead",
