@@ -98,10 +98,6 @@ _NONRETRY_THRESHOLD = 2
 #     The real search_files spiral driver is regex/glob parse errors, which
 #     classify as ``runtime_error`` and are already handled by the per-tool fail
 #     threshold (3) + repo_map diversion hint from #973.
-#   * ``patch`` ``validation``/``runtime_error`` — "invalid old_string" currently
-#     classifies as ``runtime_error`` (via the "error:" rule), which is too broad
-#     to mark deterministic; the existing patch diversion hint already advises
-#     re-reading the target region on anchor-not-found.
 _NON_RETRYABLE_BY_TOOL: dict[str, frozenset[str]] = {
     "read_file": frozenset({"not_found"}),
     "patch": frozenset({"not_found"}),
@@ -115,7 +111,6 @@ def _is_non_retryable(tool: str, category: Optional[str]) -> bool:
     if category in _NON_RETRYABLE:
         return True
     return category in _NON_RETRYABLE_BY_TOOL.get(tool, frozenset())
-
 
 # Idempotent tools that are especially prone to content-free repetition and that
 # the issue evidence shows spiraling with no progress even when individual calls
@@ -262,7 +257,6 @@ def _category_hint(category: Optional[str]) -> Optional[str]:
         return None
     return hint_for(category)
 
-
 # Mutating tools get LOWER thresholds than idempotent tools because a fixation
 # on mutating operations (writing files, running commands) is more costly and
 # indicates a deeper strategy problem (#432).
@@ -317,12 +311,6 @@ _IDEMPOTENT_ESCALATE_THRESHOLD = 15
 # around (switch to repo_map or read_file). Trip one call sooner than the
 # generic idempotent threshold so the agent gets the diversion hint before
 # burning another iteration on the same broken pattern.
-#
-# NOTE: read_file ``not_found`` spirals are handled by the per-tool
-# non-retryable classification (#1612) which trips at _NONRETRY_THRESHOLD
-# (2), below the generic fail threshold — no override needed here. A
-# threshold override for read_file would conflict with existing test
-# contracts that expect 3 generic (retryable) failures to stay quiet.
 _TOOL_FAIL_THRESHOLD_OVERRIDE: dict[str, int] = {
     "search_files": 3,
 }
@@ -530,9 +518,7 @@ def detect_dead_end_loop(
 
     signatures: Counter[str] = Counter()
     sig_to_tool: dict[str, str] = {}
-    scan = (
-        messages[-_DEAD_END_WINDOW:] if len(messages) > _DEAD_END_WINDOW else messages
-    )
+    scan = messages[-_DEAD_END_WINDOW:] if len(messages) > _DEAD_END_WINDOW else messages
 
     for msg in scan:
         if not isinstance(msg, dict):
@@ -1013,7 +999,9 @@ def maybe_nudge(
         # surface its recovery hint (#365) so the model reacts to WHAT is
         # failing, not just that it failed. Ties resolve to the most recent
         # class (same is most-recent-first).
-        _fail_classes = [c for _t, failed, c, _a in same[:consec_fail] if failed and c]
+        _fail_classes = [
+            c for _t, failed, c, _a in same[:consec_fail] if failed and c
+        ]
         dominant = None
         if _fail_classes:
             _counts: Dict[str, int] = {}
@@ -1090,7 +1078,10 @@ def maybe_nudge(
     # catch this because the args differ. This cap fires at a lower count than
     # the generic repeat_threshold, with a nudge that explicitly directs
     # synthesis from the results already gathered.
-    if tool == "web_search" and count >= _WEB_SEARCH_DIVERSE_QUERY_CAP:
+    if (
+        tool == "web_search"
+        and count >= _WEB_SEARCH_DIVERSE_QUERY_CAP
+    ):
         arg_hashes = [r[3] for r in same if r[3] is not None]
         # Only trigger when queries are genuinely diverse (not all identical —
         # that's already handled by the same-arg branch above).
@@ -1349,15 +1340,14 @@ def maybe_refusal_nudge(
         return None
     # Detect refusal language
     refusals = [
-        m
-        for m in _REFUSAL_PAT.finditer(last_assistant_text)
-        if not _FP_REFUSAL_PAT.match(last_assistant_text[m.start() : m.start() + 40])
+        m for m in _REFUSAL_PAT.finditer(last_assistant_text)
+        if not _FP_REFUSAL_PAT.match(last_assistant_text[m.start():m.start() + 40])
     ]
     if not refusals:
         return None
     # Classify using the context around the first refusal
     first = refusals[0]
-    snippet = last_assistant_text[first.start() : first.start() + 120]
+    snippet = last_assistant_text[first.start():first.start() + 120]
     category = _classify_refusal(snippet)
     if not category:
         return None
