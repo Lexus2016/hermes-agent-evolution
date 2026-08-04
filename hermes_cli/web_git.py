@@ -467,8 +467,15 @@ def review_create_pr(cwd: str) -> dict:
     """Create a PR for the current branch (push first), letting gh fill title/body."""
     try:
         _review_push(cwd)
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        # Don't swallow the push failure (#1682). Previously the bare
+        # ``except RuntimeError: pass`` let gh pr create run on an un-pushed
+        # branch, which fails with an opaque GraphQL 'Head sha can't be
+        # blank'. Surface an actionable message instead.
+        raise RuntimeError(
+            f"Failed to push branch before creating PR ({exc}). "
+            f"Run 'git push' first, then retry."
+        ) from exc
     created, out = _gh(cwd, ["pr", "create", "--fill"])
     if not created:
         raise RuntimeError("gh pr create failed (is gh installed and authenticated?)")
