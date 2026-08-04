@@ -2,7 +2,7 @@ name: evolution-ci-diagnosis
 # Polls open evolution PRs for CI failures and either auto-fixes trivial ones
 # or creates focused child issues for complex failures.
 # Runs every 30 minutes; bounded at 48 runs/day by the scheduler.
-schedule: "*/30 * * * *"
+schedule: "12,42 * * * *"
 enabled: true
 mode: PRIVATE
 

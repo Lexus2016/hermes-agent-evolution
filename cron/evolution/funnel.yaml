@@ -3,7 +3,7 @@ name: evolution-funnel
 # (research 09:00 … integration 23:00) is complete, so the funnel measures a
 # settled cycle. The script computes the cycle date itself (yesterday before
 # 08:00). Off the :00/:30 marks; jitter stays < 08:00.
-schedule: "40 7 * * *"
+schedule: "25 7 * * *"
 enabled: true
 mode: PRIVATE
 
