@@ -1,5 +1,5 @@
 name: evolution-issues
-schedule: "0 12 * * *"  # Daily at 12 PM
+schedule: "45 12 * * *"  # Daily at 12:45 PM (offset from :00 so this LLM stage never collides with hydra in the same minute — issue #1673).
 enabled: true
 mode: PUBLIC
 

@@ -1,5 +1,5 @@
 name: evolution-analysis
-schedule: "0 1,5,9,13,17,21 * * *"  # Every 4h (was daily 21:00). Raises processing throughput vs ~25 issues/day generation. 21:00 slot still follows introspection (20:00). Watchdog STAGES mirrors the FIRST slot (1).
+schedule: "15 1,5,9,13,17,21 * * *"  # Every 4h at :15 (was daily 21:00; was :00). Minute offset (:15) so this LLM stage never fires in the same minute as hydra (:05/:35) or implementation (:20) — issue #1673 (HTTP 429 stampedes). Hour slots unchanged; 21:00 slot still follows introspection (20:50). Watchdog STAGES mirrors the FIRST slot hour (1).
 enabled: true
 mode: PRIVATE
 

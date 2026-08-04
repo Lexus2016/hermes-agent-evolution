@@ -1,9 +1,13 @@
 name: evolution-hydra
-# Every 30 minutes — the Hydra's many heads constantly check for fresh
-# material in the knowledge pool. The pre-check script (evolution_hydra_gate.py)
-# suppresses the LLM when there's nothing new, so this costs zero tokens on
-# the vast majority of ticks.
-schedule: "*/30 * * * *"
+# Every 30 minutes at :05/:35 — the Hydra's many heads constantly check for
+# fresh material in the knowledge pool. The pre-check script
+# (evolution_hydra_gate.py) suppresses the LLM when there's nothing new, so
+# this costs zero tokens on the vast majority of ticks.
+# Offset to :05/:35 (instead of :00/:30) so the hydra's LLM dispatch never
+# collides with the other hourly :00 LLM stages (analysis/implementation/
+# integration/research) in the same wall-clock minute — issue #1673 (HTTP 429
+# rate-limit stampedes from overlapping cron fires).
+schedule: "5,35 * * * *"
 enabled: true
 mode: PRIVATE
 
