@@ -57,6 +57,118 @@ DEFAULT_FALLBACK_KWARGS = "not slow and not docker"
 
 _LOG_DIR_TEMPLATE = "~/.hermes/evolution/pre-pr-test-results"
 
+# ── Pre-flight: branch push check (#1682) ─────────────────────────────────────
+# Before `gh pr create`, verify the current branch exists on the remote and has
+# at least one commit ahead of base. A missing/skipped push produces an opaque
+# GraphQL error ("Head sha can't be blank", "No commits between main and
+# <branch>") that aborts the implementation cycle. This check surfaces the root
+# cause (branch not pushed) *before* the PR-creation step so the agent can
+# retry the push instead of abandoning the completed work.
+
+
+@dataclass
+class PushCheckResult:
+    """Outcome of the pre-flight branch-push check (#1682)."""
+
+    __test__ = False  # not a pytest test class
+
+    ok: bool
+    message: str
+    branch: str = ""
+    base: str = "main"
+
+
+def check_branch_pushed(
+    repo_root: Path,
+    *,
+    base: str = "main",
+    remote: str = "origin",
+    runner: Optional[Callable] = None,
+) -> PushCheckResult:
+    """Verify the current branch is pushed and has commits ahead of *base*.
+
+    Pure except for subprocess IO; the runner is injectable for offline tests.
+    Returns ``PushCheckResult(ok=True)`` when the branch exists on the remote
+    and has ≥1 commit ahead of base. Otherwise returns ``ok=False`` with an
+    actionable message telling the caller to ``git push`` first — the root
+    cause of the #1682 GraphQL errors ("Head sha can't be blank" / "No commits
+    between main and <branch>").
+
+    Never raises — all git failures are caught and surfaced as ``ok=False``.
+    """
+    import subprocess as _sp
+
+    def _run(args: list[str]) -> tuple[int, str, str]:
+        if runner is not None:
+            return runner(args)
+        try:
+            proc = _sp.run(
+                args, capture_output=True, text=True, cwd=str(repo_root),
+            )
+            return proc.returncode, proc.stdout, proc.stderr
+        except Exception as exc:  # pragma: no cover — never crash the pipeline
+            return 1, "", str(exc)
+
+    # 1. Current branch name
+    rc, out, err = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    if rc != 0 or not out.strip():
+        return PushCheckResult(
+            ok=False,
+            message=f"Could not determine the current branch: {err.strip() or 'git rev-parse failed'}",
+        )
+    branch = out.strip()
+
+    # Detached HEAD — no branch to push.
+    if branch == "HEAD":
+        return PushCheckResult(
+            ok=False,
+            message="Detached HEAD — checkout a branch before creating a PR.",
+            branch=branch,
+            base=base,
+        )
+
+    # 2. Does the branch exist on the remote?
+    rc, out, err = _run(
+        ["git", "ls-remote", "--heads", remote, branch]
+    )
+    if rc != 0 or not out.strip():
+        return PushCheckResult(
+            ok=False,
+            message=(
+                f"Branch '{branch}' does not exist on remote '{remote}'. "
+                f"Run: git push -u {remote} {branch} — "
+                f"gh pr create will fail with 'Head sha can't be blank' until pushed."
+            ),
+            branch=branch,
+            base=base,
+        )
+
+    # 3. At least one commit ahead of base?
+    rc, out, err = _run(
+        ["git", "rev-list", "--count", f"{base}..{branch}"]
+    )
+    ahead = 0
+    if rc == 0 and out.strip().isdigit():
+        ahead = int(out.strip())
+    if ahead < 1:
+        return PushCheckResult(
+            ok=False,
+            message=(
+                f"Branch '{branch}' has no commits ahead of '{base}'. "
+                f"Commit your changes and push before creating a PR "
+                f"('No commits between {base} and {branch}' GraphQL error)."
+            ),
+            branch=branch,
+            base=base,
+        )
+
+    return PushCheckResult(
+        ok=True,
+        message=f"Branch '{branch}' is pushed with {ahead} commit(s) ahead of '{base}'.",
+        branch=branch,
+        base=base,
+    )
+
 # Source-root to test-root mapping: each source prefix maps to the
 # corresponding test directory prefix, so agent/... → tests/agent/...,
 # hermes_cli/... → tests/hermes_cli/..., etc.
@@ -473,6 +585,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         default=False,
         help="Stop after the first failing shard (default: run all shards)",
     )
+    parser.add_argument(
+        "--check-pushed",
+        action="store_true",
+        default=False,
+        help="Also verify the current branch is pushed with commits ahead of base "
+        "before running tests (pre-PR gate for the autonomous pipeline; default: off)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -527,6 +646,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not repo_root.exists():
         print(f"ERROR: repo root {repo_root} does not exist", file=sys.stderr)
         return 2
+
+    # ── Pre-flight: branch push check (#1682) ─────────────────────────────
+    # Opt-in via --check-pushed so the runner's primary purpose (running tests
+    # locally) is never blocked for a user testing on an un-pushed branch. The
+    # autonomous PR-creation path enables it: an un-pushed branch would fail
+    # `gh pr create` with an opaque GraphQL error ("Head sha can't be blank" /
+    # "No commits between main and <branch>") and abort the cycle; surface it
+    # now so the agent can `git push` before burning a PR attempt.
+    if args.check_pushed:
+        push = check_branch_pushed(repo_root)
+        if not push.ok:
+            print(f"\nPRE-FLIGHT FAILED: {push.message}", file=sys.stderr)
+            print(
+                f"Run `git push` for branch '{push.branch or '<current>'}' before creating a PR.",
+                file=sys.stderr,
+            )
+            return 3
 
     # Resolve log dir
     if args.log_dir:

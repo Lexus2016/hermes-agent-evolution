@@ -1023,6 +1023,37 @@ def _schema_allows_null(schema: dict | None) -> bool:
     return False
 
 
+def _split_path_list(value: str) -> Optional[List[str]]:
+    """Split a comma-separated / bracket-wrapped list of bare path-like items.
+
+    Models occasionally emit a path list as ``"a.py, b.py"`` or ``"[/a, /b]"``
+    where a native JSON array was expected (#1681). ``json.loads`` fails on
+    these because bare paths aren't quoted, so they previously fell through to
+    the caller's single-element-wrap fallback — read_file then got a literal
+    malformed string like ``"[/a, /b]"`` as a single path, producing a
+    file-not-found spiral.
+
+    Returns a list of trimmed items when the string looks like a path list
+    (≥2 comma-separated items, or a single item inside brackets), else ``None``
+    so the caller keeps its existing single-element fallback. Single-path
+    values (``"/a.py"``) return ``None`` — they must NOT be split, since a
+    path itself can contain commas rarely but the common case is a lone path.
+    """
+    if not value or not value.strip():
+        return None
+    s = value.strip()
+    # Unwrap a single bracket pair: "[/a, /b]" -> "/a, /b".
+    if s.startswith("[") and s.endswith("]"):
+        s = s[1:-1].strip()
+    items = [part.strip().strip("'\"") for part in s.split(",") if part.strip()]
+    # Only treat it as a path list when we actually split into multiple items.
+    # A lone item (single path, possibly comma-less) must stay a single string
+    # so a path that merely contains a bracket or comma is not mangled.
+    if len(items) >= 2:
+        return items
+    return None
+
+
 def _coerce_json(value: str, expected_python_type: type):
     """Parse *value* as JSON when the schema expects an array or object.
 
@@ -1052,10 +1083,23 @@ def _coerce_json(value: str, expected_python_type: type):
     try:
         parsed = json.loads(value)
     except (ValueError, TypeError) as exc:
-        # Demote to debug: the caller (coerce_tool_args) already handles
-        # the fallback by wrapping non-JSON strings in a single-element
-        # list.  Logging a warning here on every failure was the primary
-        # source of log spam — the wrap fallback is the intended path.
+        # The value isn't JSON. Before falling through to the caller's
+        # single-element-wrap fallback, try splitting a comma-separated /
+        # bracket-wrapped list of bare path-like items (#1681). Models
+        # sometimes emit ``path="a.py, b.py"`` (or ``"[/a, /b]"``) where a
+        # JSON array was expected; splitting turns it into a real batch list
+        # instead of a literal malformed path that read_file would treat as
+        # a single "File not found" spiral.
+        if expected_python_type is list:
+            items = _split_path_list(value)
+            if items is not None:
+                logger.debug(
+                    "coerce_tool_args: split comma-separated list string for expected "
+                    "type list: %r -> %r",
+                    value,
+                    items,
+                )
+                return items
         logger.debug(
             "coerce_tool_args: failed to parse string as JSON for expected type %s: %s",
             expected_python_type.__name__,

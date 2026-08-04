@@ -20,10 +20,12 @@ from evolution_pre_pr_test_runner import (  # noqa: E402
     DEFAULT_TIMEOUT,
     SRC_TO_TEST_PREFIX,
     GateReport,
+    PushCheckResult,
     TestShard,
     TestResult,
     _basename_to_test_basename,
     _resolve_test_path,
+    check_branch_pushed,
     get_fallback_shard,
     map_changed_files_to_shards,
     run_gate,
@@ -319,6 +321,75 @@ class TestDataObjects:
         assert report.results == []
         assert report.passed is False
         assert report.note == ""
+
+
+# ── Test: pre-flight branch push check (#1682) ───────────────────────────────
+
+class TestCheckBranchPushed:
+    """check_branch_pushed maps git states to actionable PushCheckResults.
+
+    The runner is injected, so these run fully offline. The invariant under
+    test: an un-pushed branch (the #1682 root cause of the 'Head sha can't be
+    blank' GraphQL error) is surfaced as ok=False with a 'git push' hint,
+    never as a silent pass.
+    """
+
+    def _fake_runner(self, commands: dict):
+        """Build a runner returning canned (rc, stdout, stderr) per command."""
+        def _run(args):
+            cmd = tuple(args)
+            if cmd in commands:
+                return commands[cmd]
+            return (1, "", "unexpected command")
+        return _run
+
+    def test_pushed_with_commits_ahead_ok(self):
+        runner = self._fake_runner({
+            ("git", "rev-parse", "--abbrev-ref", "HEAD"): (0, "evolution/x\n", ""),
+            ("git", "ls-remote", "--heads", "origin", "evolution/x"): (0, "abc123\trefs/heads/evolution/x\n", ""),
+            ("git", "rev-list", "--count", "main..evolution/x"): (0, "3\n", ""),
+        })
+        result = check_branch_pushed(Path("/repo"), runner=runner)
+        assert result.ok is True
+        assert result.branch == "evolution/x"
+        assert "3 commit" in result.message
+
+    def test_branch_not_on_remote_fails_with_push_hint(self):
+        runner = self._fake_runner({
+            ("git", "rev-parse", "--abbrev-ref", "HEAD"): (0, "evolution/x\n", ""),
+            ("git", "ls-remote", "--heads", "origin", "evolution/x"): (0, "", ""),
+        })
+        result = check_branch_pushed(Path("/repo"), runner=runner)
+        assert result.ok is False
+        assert "git push" in result.message
+        assert "Head sha can't be blank" in result.message
+
+    def test_no_commits_ahead_fails(self):
+        runner = self._fake_runner({
+            ("git", "rev-parse", "--abbrev-ref", "HEAD"): (0, "evolution/x\n", ""),
+            ("git", "ls-remote", "--heads", "origin", "evolution/x"): (0, "abc123\trefs/heads/evolution/x\n", ""),
+            ("git", "rev-list", "--count", "main..evolution/x"): (0, "0\n", ""),
+        })
+        result = check_branch_pushed(Path("/repo"), runner=runner)
+        assert result.ok is False
+        assert "no commits ahead" in result.message.lower()
+        assert "No commits between" in result.message
+
+    def test_detached_head_fails(self):
+        runner = self._fake_runner({
+            ("git", "rev-parse", "--abbrev-ref", "HEAD"): (0, "HEAD\n", ""),
+        })
+        result = check_branch_pushed(Path("/repo"), runner=runner)
+        assert result.ok is False
+        assert "detached" in result.message.lower()
+
+    def test_git_error_does_not_raise(self):
+        runner = self._fake_runner({
+            ("git", "rev-parse", "--abbrev-ref", "HEAD"): (1, "", "fatal: not a git repository"),
+        })
+        result = check_branch_pushed(Path("/repo"), runner=runner)
+        assert result.ok is False
+        assert "could not determine" in result.message.lower()
 
 
 # ── Test: SRC_TO_TEST_PREFIX shape ───────────────────────────────────────────

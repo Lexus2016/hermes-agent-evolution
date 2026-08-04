@@ -183,6 +183,13 @@ def classify_file_error(
             "The path is protected/denied and can't be elevated. Use an allowed "
             "path — do NOT retry the same one."
         )
+    if "is a directory" in low or "directory, not a file" in low:
+        return "directory", (
+            "The path is a directory, not a file — read_file expects a file. "
+            "To list or read the directory's contents, use search_files "
+            "(target='files') to find files within it; do NOT retry read_file "
+            "on the same directory path."
+        )
     if "binary file" in low:
         return "binary", (
             "This is a binary file. Don't read it as text; use a tool suited to the "

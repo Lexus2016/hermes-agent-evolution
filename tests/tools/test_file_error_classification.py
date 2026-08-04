@@ -64,6 +64,22 @@ class TestClassifyFileError:
         klass, _ = classify_file_error("Binary file - cannot display as text.")
         assert klass == "binary"
 
+    def test_directory(self):
+        """read_file on a directory yields the actionable 'directory' class (#1681)."""
+        klass, rec = classify_file_error(
+            "Cannot read a directory: /tmp/x is a directory, not a file."
+        )
+        assert klass == "directory"
+        assert "search_files" in rec
+
+    def test_directory_variant_patch(self):
+        """The patch operation variant routes to the same directory class."""
+        klass, rec = classify_file_error(
+            "Cannot patch a directory: /tmp/dir is a directory, not a file."
+        )
+        assert klass == "directory"
+        assert "search_files" in rec
+
     def test_unknown_falls_back_to_error(self):
         klass, rec = classify_file_error("something inexplicable happened")
         assert klass == "error" and "CHANGE the call" in rec

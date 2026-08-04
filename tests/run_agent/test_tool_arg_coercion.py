@@ -86,6 +86,17 @@ class TestCoerceValue:
         assert _coerce_value('["a", "b"]', "array") == ["a", "b"]
         assert _coerce_value("[1, 2, 3]", "array") == [1, 2, 3]
 
+    def test_array_type_comma_separated_path_list(self):
+        """Comma-separated bare paths are split into a list, not kept as a
+        literal malformed single path (#1681)."""
+        assert _coerce_value("a.py, b.py", "array") == ["a.py", "b.py"]
+        assert _coerce_value("[/a, /b]", "array") == ["/a", "/b"]
+
+    def test_array_type_single_path_not_split(self):
+        """A lone path must stay a single string, never mangled into a list."""
+        assert _coerce_value("/a.py", "array") == "/a.py"
+        assert _coerce_value("a,", "array") == "a,"  # single trailing comma → lone item
+
 
 
 
