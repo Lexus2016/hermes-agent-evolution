@@ -861,6 +861,34 @@ def coerce_tool_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             continue
         if not expected and not _schema_allows_null(prop_schema):
             continue
+
+        # ── Stringified-array guard for string-typed params (#1681) ──
+        # When the schema declares ``"type": "string"`` (e.g. read_file's
+        # ``path``), the model sometimes emits a stringified JSON array
+        # like ``'["path/a", "path/b"]'``. Without this guard the literal
+        # array string reaches the tool → file-not-found → retry spiral.
+        # Detect the pattern and extract the first element (the most
+        # likely intended path). Only fires for string-typed params where
+        # ``_coerce_value`` is a no-op — the array-typed branch above
+        # already handles JSON arrays on array-typed fields.
+        if (
+            expected == "string"
+            and isinstance(value, str)
+            and value.lstrip().startswith("[")
+        ):
+            extracted = _extract_first_from_stringified_array(value)
+            if extracted is not None:
+                logger.info(
+                    "coerce_tool_args: %s.%s received a stringified JSON "
+                    "array string (%.80s...) for a string-typed param — "
+                    "extracting first element.",
+                    tool_name,
+                    key,
+                    value,
+                )
+                args[key] = extracted
+                continue
+
         coerced = _coerce_value(value, expected, schema=prop_schema)
         if coerced is not value:
             args[key] = coerced
@@ -968,6 +996,35 @@ def _normalize_json_strings_for_schema(value: Any, schema: Any) -> Any:
         return out if changed else value
 
     return value
+
+
+def _extract_first_from_stringified_array(value: str) -> Optional[str]:
+    """Extract the first element from a stringified JSON array (#1681).
+
+    When the model emits a string-typed param value that is actually a
+    JSON-encoded array (e.g. ``'["path/a", "path/b"]'``), extract the
+    first string element so the tool receives a usable scalar path
+    instead of the literal array string.
+
+    Returns the first string element, or ``None`` when the value is not a
+    parseable JSON array of strings (in which case the caller leaves the
+    original value untouched).
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = json.loads(value.strip())
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, list) or not parsed:
+        return None
+    # Only unwrap arrays of strings — a list of dicts/numbers on a
+    # string-typed param is a different error and should not be silently
+    # mangled into ``str(parsed[0])``.
+    first = parsed[0]
+    if isinstance(first, str):
+        return first
+    return None
 
 
 def _coerce_value(value: str, expected_type, schema: dict | None = None):
