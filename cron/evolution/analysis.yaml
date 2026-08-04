@@ -1,5 +1,5 @@
 name: evolution-analysis
-schedule: "0 1,5,9,13,17,21 * * *"  # Every 4h (was daily 21:00). Raises processing throughput vs ~25 issues/day generation. 21:00 slot still follows introspection (20:00). Watchdog STAGES mirrors the FIRST slot (1).
+schedule: "5 1,5,9,13,17,21 * * *"  # #1673: staggered +5 min off :00 to avoid API rate-limit collisions with hydra/research/ci-diagnosis firing at the same wall-clock second.
 enabled: true
 mode: PRIVATE
 

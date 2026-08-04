@@ -1,5 +1,5 @@
 name: evolution-research
-schedule: "0 9 * * *"  # Daily at 9 AM
+schedule: "15 9 * * *"  # #1673: staggered +15 min off :00 to avoid collision with hydra (*/30) and analysis (:05) at the 09:00 boundary.
 enabled: true
 mode: PUBLIC
 
