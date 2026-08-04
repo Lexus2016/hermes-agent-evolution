@@ -77,12 +77,80 @@ class TestEvaluateCandidates:
         assert all(score == 0.0 for _, score in ranking)
 
 
+class TestEvaluateCandidatesColdStart:
+    """Cold-start trap (#1509): a first-run config's single score is not
+    representative, so it must not win a tie against a more-established config."""
+
+    def test_tie_prefers_higher_evaluation_count_over_cold_start(self):
+        # Both score the same, but candidate 1 is a cold-start first-run (count 1)
+        # while candidate 0 has run 5 times. The established config must win the
+        # tie, NOT the earlier index.
+        cands = [
+            {"evaluation_count": 5, "scores": {"relevance": 0.5}},
+            {"evaluation_count": 1, "scores": {"relevance": 0.5}},
+        ]
+        ranking = evaluate_candidates(cands)
+        assert ranking[0][0] == 0  # higher count wins, despite being index 0
+
+    def test_cold_start_loses_tie_even_when_later_index(self):
+        # Established config at index 1 beats a cold-start at index 0 on a tie —
+        # reversing the old index-first behavior so a degenerate first config
+        # cannot be credited.
+        cands = [
+            {"evaluation_count": 1, "scores": {"relevance": 0.5}},
+            {"evaluation_count": 3, "scores": {"relevance": 0.5}},
+        ]
+        ranking = evaluate_candidates(cands)
+        assert ranking[0][0] == 1
+
+    def test_counts_do_not_override_actual_score_difference(self):
+        # A cold-start config with a genuinely higher score still wins — the guard
+        # only breaks TIES, it does not veto a better result.
+        cands = [
+            {"evaluation_count": 1, "scores": {"relevance": 0.9}},
+            {"evaluation_count": 9, "scores": {"relevance": 0.5}},
+        ]
+        ranking = evaluate_candidates(cands)
+        assert ranking[0][0] == 0
+
+    def test_no_declared_counts_keeps_legacy_index_behavior(self):
+        # Existing callers (no evaluation_count anywhere) are unchanged: a tie
+        # still favors the earlier index, exactly as before #1509.
+        cands = [
+            {"scores": {"relevance": 0.5}},
+            {"scores": {"relevance": 0.5}},
+        ]
+        ranking = evaluate_candidates(cands)
+        assert ranking[0][0] == 0
+
+    def test_malformed_count_degrades_to_cold_start(self):
+        # Non-numeric count is treated as a cold-start (count 1) and loses ties.
+        cands = [
+            {"evaluation_count": "nope", "scores": {"relevance": 0.5}},
+            {"evaluation_count": 2, "scores": {"relevance": 0.5}},
+        ]
+        ranking = evaluate_candidates(cands)
+        assert ranking[0][0] == 1
+
+
 class TestDecideVerdicts:
     def _cand(self, val):
-        return {"scores": {"relevance": val, "evidence": val, "specificity": val, "correctness": val}}
+        return {
+            "scores": {
+                "relevance": val,
+                "evidence": val,
+                "specificity": val,
+                "correctness": val,
+            }
+        }
 
     def test_accept_when_best_meets_threshold(self):
-        r = decide([self._cand(0.6), self._cand(0.8)], threshold=0.75, current_pass=1, max_passes=3)
+        r = decide(
+            [self._cand(0.6), self._cand(0.8)],
+            threshold=0.75,
+            current_pass=1,
+            max_passes=3,
+        )
         assert r["verdict"] == ACCEPT
         assert r["best_index"] == 1
         assert r["best_score"] == 0.8
@@ -106,7 +174,9 @@ class TestDecideVerdicts:
         # counter up to max_passes must end in a terminal (non-OPTIMIZE) verdict.
         max_passes = 4
         verdicts = [
-            decide([self._cand(0.1)], threshold=0.9, current_pass=p, max_passes=max_passes)["verdict"]
+            decide(
+                [self._cand(0.1)], threshold=0.9, current_pass=p, max_passes=max_passes
+            )["verdict"]
             for p in range(1, max_passes + 1)
         ]
         assert verdicts[:-1] == [OPTIMIZE] * (max_passes - 1)
@@ -152,9 +222,19 @@ class TestCli:
 
     def test_accept_exit_code_and_json(self, tmp_path, capsys):
         p = tmp_path / "cands.json"
-        p.write_text(json.dumps([{"scores": {"relevance": 0.9, "evidence": 0.9,
-                                              "specificity": 0.9, "correctness": 0.9}}]),
-                     encoding="utf-8")
+        p.write_text(
+            json.dumps([
+                {
+                    "scores": {
+                        "relevance": 0.9,
+                        "evidence": 0.9,
+                        "specificity": 0.9,
+                        "correctness": 0.9,
+                    }
+                }
+            ]),
+            encoding="utf-8",
+        )
         rc = main(["evolution_evaluator.py", "--threshold", "0.75", str(p)])
         payload = json.loads(capsys.readouterr().out)
         assert rc == EXIT_ACCEPT
@@ -163,21 +243,38 @@ class TestCli:
     def test_optimize_exit_code(self, tmp_path):
         p = tmp_path / "cands.json"
         p.write_text(json.dumps([{"scores": {"relevance": 0.4}}]), encoding="utf-8")
-        rc = main(["evolution_evaluator.py", "--threshold", "0.75",
-                   "--pass", "1", "--max-passes", "3", str(p)])
+        rc = main([
+            "evolution_evaluator.py",
+            "--threshold",
+            "0.75",
+            "--pass",
+            "1",
+            "--max-passes",
+            "3",
+            str(p),
+        ])
         assert rc == EXIT_OPTIMIZE
 
     def test_stop_budget_exit_code(self, tmp_path):
         p = tmp_path / "cands.json"
         p.write_text(json.dumps([{"scores": {"relevance": 0.4}}]), encoding="utf-8")
-        rc = main(["evolution_evaluator.py", "--threshold", "0.75",
-                   "--pass", "3", "--max-passes", "3", str(p)])
+        rc = main([
+            "evolution_evaluator.py",
+            "--threshold",
+            "0.75",
+            "--pass",
+            "3",
+            "--max-passes",
+            "3",
+            str(p),
+        ])
         assert rc == EXIT_STOP_BUDGET
 
     def test_stdin_and_candidates_wrapper(self, monkeypatch, capsys):
         rc, out = self._run(
             ["evolution_evaluator.py", "--threshold", "0.5"],
-            monkeypatch, capsys,
+            monkeypatch,
+            capsys,
             stdin_text=json.dumps({"candidates": [{"scores": {"relevance": 0.9}}]}),
         )
         assert rc == EXIT_ACCEPT

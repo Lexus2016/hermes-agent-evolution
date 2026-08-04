@@ -1,5 +1,5 @@
 name: evolution-upstream-sync
-schedule: "0 8 * * *"  # checked daily 8 AM (before research 09:00); merges ONLY when upstream published a new RELEASE since last sync — most days finds BEHIND==0 and stops. Release-tracking (not upstream/main): upstream lands ~300 commits/day, so chasing main stalled the sync; a tagged release (~weekly) is a bounded, stabilized batch.
+schedule: "10 8 * * *"  # checked daily 8:10 AM (offset from :00 so this LLM stage never collides with hydra in the same minute — issue #1673; still before research 09:30); merges ONLY when upstream published a new RELEASE since last sync — most days finds BEHIND==0 and stops. Release-tracking (not upstream/main): upstream lands ~300 commits/day, so chasing main stalled the sync; a tagged release (~weekly) is a bounded, stabilized batch.
 enabled: true
 mode: PRIVATE
 

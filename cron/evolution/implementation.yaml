@@ -1,5 +1,5 @@
 name: evolution-implementation
-schedule: "0 2,6,10,14,18,22 * * *"  # Every 4h, +1h after analysis (1,5,9,...). Watchdog STAGES mirrors the FIRST slot (2).
+schedule: "20 2,6,10,14,18,22 * * *"  # Every 4h at :20, +1h after analysis (1,5,9,...). Minute offset (:20) so this LLM stage never fires in the same minute as analysis (:15) or integration (:40) — issue #1673 (HTTP 429 stampedes). Hour slots unchanged. Watchdog STAGES mirrors the FIRST slot hour (2).
 enabled: true
 mode: PRIVATE
 

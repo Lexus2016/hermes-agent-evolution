@@ -122,22 +122,60 @@ def score_candidate(scores: Dict[str, Any], rubric: Dict[str, float]) -> float:
     return num / den
 
 
+def _evaluation_count(candidate: Any) -> int:
+    """Return a candidate's declared evaluation history (number of prior runs).
+
+    Absent or non-numeric -> 1 (treated as a cold-start / first-run config).
+    The value is used only to break *ties* — see ``evaluate_candidates``.
+    """
+    if isinstance(candidate, dict):
+        raw = candidate.get("evaluation_count", 1)
+        try:
+            return max(1, int(raw))
+        except (TypeError, ValueError):
+            return 1
+    return 1
+
+
 def evaluate_candidates(
     candidates: List[Dict[str, Any]],
     rubric: Optional[Dict[str, float]] = None,
 ) -> List[Tuple[int, float]]:
     """Score every candidate, returning ``(original_index, fused_score)`` pairs
-    sorted best-first. Ties keep the earlier (lower-index) candidate first, so
-    selection is stable and an earlier worker pass is preferred on a tie."""
+    sorted best-first.
+
+    Cold-start trap (#1509): an uninitialized comparison ties deterministically
+    toward the earliest config, which in the 729-config harness study happened to
+    be a degenerate one. A first-run config's single score is NOT representative,
+    so crediting it on a tie distorts the comparison. Fix (owner-approved):
+    when candidates declare an ``evaluation_count`` (prior runs), a score tie is
+    broken in favor of the MORE-established candidate (higher count) before the
+    index fallback — a cold-start config loses ties it should not win. If NO
+    candidate declares a count (existing callers), behavior is unchanged: ties
+    keep the earlier (lower-index) candidate first.
+    """
     rubric = rubric or DEFAULT_RUBRIC
+    declared = [isinstance(c, dict) and "evaluation_count" in c for c in candidates]
+    use_history = any(declared)
     scored: List[Tuple[int, float]] = []
     for i, cand in enumerate(candidates):
         cand_scores = cand.get("scores", {}) if isinstance(cand, dict) else {}
         if not isinstance(cand_scores, dict):
             cand_scores = {}
         scored.append((i, score_candidate(cand_scores, rubric)))
-    # Sort by score desc, then original index asc (stable tie-break to earlier).
-    scored.sort(key=lambda pair: (-pair[1], pair[0]))
+    if use_history:
+        # Tie-break: higher evaluation_count (more representative) first, then
+        # original index as a stable fallback. Counts only decide EQUAL scores.
+        scored.sort(
+            key=lambda pair: (
+                -pair[1],
+                -_evaluation_count(candidates[pair[0]]),
+                pair[0],
+            )
+        )
+    else:
+        # Sort by score desc, then original index asc (stable tie-break to earlier).
+        scored.sort(key=lambda pair: (-pair[1], pair[0]))
     return scored
 
 

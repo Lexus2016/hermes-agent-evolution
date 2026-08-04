@@ -1,5 +1,5 @@
 name: evolution-research
-schedule: "0 9 * * *"  # Daily at 9 AM
+schedule: "30 9 * * *"  # Daily at 9:30 AM (offset from :00 so this LLM stage never collides with hydra/analysis in the same minute — issue #1673).
 enabled: true
 mode: PUBLIC
 

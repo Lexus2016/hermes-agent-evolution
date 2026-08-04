@@ -1,5 +1,5 @@
 name: evolution-integration
-schedule: "0 3,7,11,15,19,23 * * *"  # Every 4h, +1h after implementation (2,6,10,...) so CI settles. Watchdog STAGES mirrors the FIRST slot (3).
+schedule: "40 3,7,11,15,19,23 * * *"  # Every 4h at :40, +1h after implementation (2,6,10,...) so CI settles. Minute offset (:40) so this LLM stage never fires in the same minute as implementation (:20) — issue #1673 (HTTP 429 stampedes). Hour slots unchanged. Watchdog STAGES mirrors the FIRST slot hour (3).
 enabled: true
 mode: PRIVATE
 

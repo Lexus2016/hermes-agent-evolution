@@ -1,5 +1,5 @@
 name: evolution-introspection
-schedule: "0 20 * * *"  # Daily at 8 PM — before analysis (21:00) so findings feed it
+schedule: "50 20 * * *"  # Daily at 8:50 PM — before analysis (21:15) so findings feed it. Minute offset (:50) so this LLM stage never collides with hydra in the same minute — issue #1673.
 enabled: true
 mode: PUBLIC
 
