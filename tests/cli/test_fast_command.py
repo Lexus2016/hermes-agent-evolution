@@ -283,7 +283,7 @@ class TestAnthropicFastModeAdapter(unittest.TestCase):
         assert _FAST_MODE_BETA in kwargs["extra_headers"].get("anthropic-beta", "")
 
     def test_fast_mode_off_no_speed(self):
-        from agent.anthropic_adapter import build_anthropic_kwargs
+        from agent.anthropic_adapter import build_anthropic_kwargs, _COMPACTION_BETA
 
         kwargs = build_anthropic_kwargs(
             model="claude-opus-4-6",
@@ -295,7 +295,12 @@ class TestAnthropicFastModeAdapter(unittest.TestCase):
         )
         assert kwargs.get("extra_body", {}).get("speed") is None
         assert "speed" not in kwargs
-        assert "extra_headers" not in kwargs
+        # The fast-mode beta must NOT be present when fast mode is off.
+        beta_header = (kwargs.get("extra_headers") or {}).get("anthropic-beta", "")
+        assert "fast-mode-2026-02-01" not in beta_header
+        # Server-side compaction (default-on for native Claude 4.6+) legitimately
+        # adds its own beta header — assert that co-existence.
+        assert _COMPACTION_BETA in beta_header
 
     def test_fast_mode_skipped_for_third_party_endpoint(self):
         from agent.anthropic_adapter import build_anthropic_kwargs

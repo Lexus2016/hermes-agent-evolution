@@ -713,6 +713,20 @@ DEFAULT_CONFIG = {
     "prompt_caching": {
         "cache_ttl": "5m",
     },
+    # Anthropic server-side context compaction (compact_20260112, GA on Claude
+    # 4.6+). When enabled, Hermes sends `context_management.edits:
+    # [{"type":"compact_20260112"}]` + the `compact-2026-01-12` beta header on
+    # native-Anthropic Claude 4.6+ requests so Anthropic summarizes the
+    # conversation server-side when input tokens cross the trigger threshold
+    # (min 50K, default 150K). Applied ONLY to the genuine Anthropic provider
+    # with an adaptive-thinking (4.6+) Claude model — third-party
+    # anthropic_messages endpoints (MiniMax, Kimi, DeepSeek, Nous Portal) and
+    # older Claude families are never touched. Set `enabled: false` to opt out.
+    # `instructions` is optional custom summarization guidance sent to Claude.
+    "compaction": {
+        "enabled": True,
+        "instructions": "",
+    },
     # OpenRouter-specific settings.
     # response_cache: enable OpenRouter response caching (X-OpenRouter-Cache header).
     #   When enabled, identical requests return cached responses for free (zero billing).

@@ -340,6 +340,45 @@ _CONTEXT_1M_BETA = "context-1m-2025-08-07"
 # See https://platform.claude.com/docs/en/build-with-claude/fast-mode
 _FAST_MODE_BETA = "fast-mode-2026-02-01"
 
+# Server-side compaction beta. Enables ``context_management.edits`` with
+# ``compact_20260112`` on Claude 4.6+. Note the hyphens in the header name
+# vs the underscores in the request-body type identifier — getting this
+# wrong silently disables the feature.
+_COMPACTION_BETA = "compact-2026-01-12"
+
+# Cache of server-side compaction config (`compaction.enabled`, optional
+# `compaction.instructions`). Loaded once per process; config edits require a
+# restart to take effect — acceptable for a static feature gate + hint.
+_compaction_config_cache: Optional[tuple] = None
+_compaction_config_loaded = False
+
+
+def _compaction_config() -> tuple:
+    """Return ``(enabled, instructions)`` from the ``compaction`` config section.
+
+    ``enabled`` defaults True; a config-load failure also defaults to enabled so
+    a broken config never silently disables the feature. ``instructions`` is the
+    optional summarization hint ("" = use Anthropic's built-in summarizer).
+    """
+    global _compaction_config_cache, _compaction_config_loaded
+    if _compaction_config_loaded:
+        return _compaction_config_cache or (True, "")
+    enabled, instructions = True, ""
+    try:
+        from hermes_cli.config import load_config_readonly
+
+        section = (load_config_readonly() or {}).get("compaction")
+        if isinstance(section, dict):
+            enabled = section.get("enabled", True)
+            raw = section.get("instructions", "")
+            instructions = raw if isinstance(raw, str) else ""
+    except Exception:
+        enabled, instructions = True, ""
+    finally:
+        _compaction_config_loaded = True
+        _compaction_config_cache = (bool(enabled), instructions)
+    return _compaction_config_cache
+
 # Additional beta headers required for OAuth/subscription auth.
 # Matches what Claude Code (and pi-ai / OpenCode) send.
 _OAUTH_ONLY_BETAS = [
@@ -2917,6 +2956,38 @@ def build_anthropic_kwargs(
             betas.extend(_OAUTH_ONLY_BETAS)
         betas.append(_FAST_MODE_BETA)
         kwargs["extra_headers"] = {"anthropic-beta": ",".join(betas)}
+
+    # ── Server-side compaction (compact_20260112) ────────────────────
+    # GA on Claude 4.6+ (adaptive thinking). Anthropic summarizes the
+    # conversation server-side when input tokens cross the trigger
+    # threshold. Applied ONLY on the native Anthropic provider with a
+    # compaction-capable (adaptive-thinking, 4.6+) Claude model — third-party
+    # anthropic_messages endpoints (MiniMax, Kimi, DeepSeek, Nous Portal) and
+    # legacy manual-thinking Claude families reject the beta/parameter.
+    # Opt out via config `compaction.enabled: false`.
+    _compaction_enabled, _compaction_instructions = _compaction_config()
+    if (
+        _compaction_enabled
+        and not _is_third_party_anthropic_endpoint(base_url)
+        and _supports_adaptive_thinking(model)
+    ):
+        edit: Dict[str, Any] = {"type": "compact_20260112"}
+        if _compaction_instructions:
+            edit["instructions"] = _compaction_instructions
+        kwargs["context_management"] = {"edits": [edit]}
+        # Merge the compaction beta into the per-request header so it co-exists
+        # with fast mode / OAuth betas (per-request extra_headers override the
+        # client-level anthropic-beta header, so include ALL applicable betas).
+        existing_betas = []
+        if isinstance(kwargs.get("extra_headers"), dict):
+            _existing = kwargs["extra_headers"].get("anthropic-beta")
+            if isinstance(_existing, str) and _existing:
+                existing_betas = [b for b in _existing.split(",") if b]
+        if _COMPACTION_BETA not in existing_betas:
+            existing_betas.append(_COMPACTION_BETA)
+        kwargs.setdefault("extra_headers", {})["anthropic-beta"] = ",".join(
+            existing_betas
+        )
 
     return kwargs
 

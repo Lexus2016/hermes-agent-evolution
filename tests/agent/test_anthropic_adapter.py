@@ -1031,6 +1031,105 @@ class TestBuildAnthropicKwargs:
         assert "fast-mode-2026-02-01" not in beta_header
 
 
+class TestServerSideCompaction:
+    """Server-side compaction (compact_20260112) on native Anthropic 4.6+."""
+
+    def _build(self, model, base_url=None):
+        from agent.anthropic_adapter import build_anthropic_kwargs
+
+        return build_anthropic_kwargs(
+            model=model,
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            max_tokens=4096,
+            reasoning_config=None,
+            base_url=base_url,
+        )
+
+    def test_native_adaptive_claude_enables_compaction(self):
+        from agent.anthropic_adapter import _COMPACTION_BETA
+
+        kwargs = self._build("claude-opus-4-6")
+        assert kwargs["context_management"] == {
+            "edits": [{"type": "compact_20260112"}]
+        }
+        beta_header = (kwargs.get("extra_headers") or {}).get("anthropic-beta", "")
+        assert _COMPACTION_BETA in beta_header
+
+    def test_native_adaptive_claude_sonnet_enables_compaction(self):
+        kwargs = self._build("claude-sonnet-4-6")
+        assert kwargs["context_management"] == {
+            "edits": [{"type": "compact_20260112"}]
+        }
+
+    def test_third_party_endpoint_skips_compaction(self):
+        """MiniMax/Kimi/Foundry must not receive the Anthropic beta/param."""
+        for base_url in (
+            "https://api.minimax.io/anthropic/v1",
+            "https://api.kimi.com/coding",
+        ):
+            kwargs = self._build("claude-opus-4-6", base_url=base_url)
+            assert "context_management" not in kwargs
+            beta_header = (kwargs.get("extra_headers") or {}).get(
+                "anthropic-beta", ""
+            )
+            assert "compact-2026-01-12" not in beta_header
+
+    def test_legacy_manual_thinking_claude_skips_compaction(self):
+        """Claude 3.x / 4.5 (manual thinking) predate the compaction API."""
+        for model in ("claude-sonnet-4-5", "claude-3-5-sonnet"):
+            kwargs = self._build(model)
+            assert "context_management" not in kwargs
+
+    def test_disabled_via_config_skips_compaction(self):
+        from agent import anthropic_adapter
+
+        with patch.object(anthropic_adapter, "_compaction_config", return_value=(False, "")):
+            kwargs = self._build("claude-opus-4-6")
+        assert "context_management" not in kwargs
+        beta_header = (kwargs.get("extra_headers") or {}).get("anthropic-beta", "")
+        assert "compact-2026-01-12" not in beta_header
+
+    def test_custom_instructions_added(self):
+        from agent import anthropic_adapter
+
+        with patch.object(
+            anthropic_adapter,
+            "_compaction_config",
+            return_value=(True, "Preserve code snippets and technical decisions."),
+        ):
+            kwargs = self._build("claude-opus-4-6")
+        assert kwargs["context_management"] == {
+            "edits": [
+                {
+                    "type": "compact_20260112",
+                    "instructions": "Preserve code snippets and technical decisions.",
+                }
+            ]
+        }
+
+    def test_compaction_beta_merges_with_fast_mode_beta(self):
+        """Compaction + fast-mode beta headers must co-exist in one header."""
+        from agent.anthropic_adapter import (
+            _COMPACTION_BETA,
+            _FAST_MODE_BETA,
+            build_anthropic_kwargs,
+        )
+
+        kwargs = build_anthropic_kwargs(
+            model="claude-opus-4-6",
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            max_tokens=4096,
+            reasoning_config=None,
+            fast_mode=True,
+        )
+        assert kwargs.get("extra_body", {}).get("speed") == "fast"
+        beta_header = (kwargs.get("extra_headers") or {}).get("anthropic-beta", "")
+        assert _COMPACTION_BETA in beta_header
+        assert _FAST_MODE_BETA in beta_header
+
+
 
 
 
