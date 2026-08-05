@@ -41,6 +41,7 @@ import logging
 import os
 import re
 import asyncio
+import threading
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 import httpx  # noqa: F401 — kept at module top so tests can patch tools.web_tools.httpx
 
@@ -515,6 +516,75 @@ def _get_extract_char_limit() -> int:
     return DEFAULT_EXTRACT_CHAR_LIMIT
 
 
+# ── #1704 — consecutive web_search streak guard ────────────────────────────
+# Mirrors tool_search's streak guard (#1144/#1373): a per-session counter of
+# consecutive web_search calls with no intervening action tool. Crossing
+# ``web.search_streak_threshold`` appends a fallback_directive steering the
+# model to synthesize or change approach. Resets on any non-web_search tool.
+# Keyed by session_id; an empty-string id falls back to a default key so the
+# feature fires in the production runtime (#1373 lesson); None opts out.
+_web_search_lock = threading.Lock()
+_web_search_streak: Dict[str, int] = {}
+
+#: Sentinel key for an empty-string session id.
+_web_search_default_key = "__default_web_search_session__"
+
+#: Default consecutive-search threshold (config-overridable via web.search_streak_threshold).
+DEFAULT_WEB_SEARCH_STREAK_THRESHOLD = 5
+
+
+def _web_search_streak_key(session_id: Optional[str]) -> Optional[str]:
+    """Resolve a session_id to a web_search streak-tracking key."""
+    if session_id is None:
+        return None
+    if session_id == "":
+        return _web_search_default_key
+    return session_id
+
+
+def _get_web_search_streak_threshold() -> int:
+    """Resolve the consecutive-search threshold from config, clamped 0..20."""
+    try:
+        configured = _load_web_config().get("search_streak_threshold")
+        if configured is not None:
+            return max(0, min(int(configured), 20))
+    except (TypeError, ValueError):
+        pass
+    return DEFAULT_WEB_SEARCH_STREAK_THRESHOLD
+
+
+def note_web_search(session_id: Optional[str]) -> int:
+    """Increment the consecutive web_search streak for ``session_id``."""
+    key = _web_search_streak_key(session_id)
+    if key is None:
+        return 0
+    with _web_search_lock:
+        _web_search_streak[key] = _web_search_streak.get(key, 0) + 1
+        return _web_search_streak[key]
+
+
+def reset_web_search_streak(session_id: Optional[str]) -> None:
+    """Reset the streak — the model acted on (or abandoned) results."""
+    key = _web_search_streak_key(session_id)
+    if key is None:
+        return
+    with _web_search_lock:
+        _web_search_streak.pop(key, None)
+
+
+def _web_search_fallback_directive(streak: int) -> str:
+    """The nudge appended to a web_search result when the streak is high."""
+    return (
+        f"You have run web_search {streak} times in a row without an intervening "
+        "action. STOP re-querying and either: (a) synthesize the results you "
+        "already have into a decision or write, (b) extract a specific page "
+        "with web_extract to get full content, or (c) try a fundamentally "
+        "different approach (terminal, files, or direct action) instead of "
+        "another web search."
+    )
+
+
+
 def convert_base64_images_to_links(text: str) -> str:
     """Replace inline base64 image blobs with labeled markdown links.
 
@@ -683,7 +753,9 @@ def _ensure_web_plugins_loaded() -> None:
         logger.warning("Web plugin discovery failed (non-fatal): %s", exc)
 
 
-def web_search_tool(query: str, limit: int = 5) -> str:
+def web_search_tool(
+    query: str, limit: int = 5, session_id: Optional[str] = None
+) -> str:
     """
     Search the web for information using available search API backend.
 
@@ -795,6 +867,12 @@ def web_search_tool(query: str, limit: int = 5) -> str:
         debug_call_data["parameters"]["provider"] = response_data.get(
             "provider", provider.name if provider else None
         )
+        # #1704 — consecutive-search streak guard. Only on SUCCESSFUL searches
+        # (the spiral is repeated *successful* re-queries, not failures).
+        if not response_data.get("error") and response_data.get("success") is not False:
+            streak = note_web_search(session_id)
+            if _get_web_search_streak_threshold() > 0 and streak >= _get_web_search_streak_threshold():
+                response_data["fallback_directive"] = _web_search_fallback_directive(streak)
         result_json = json.dumps(response_data, indent=2, ensure_ascii=False)
         debug_call_data["final_response_size"] = len(result_json)
         _debug.log_call("web_search_tool", debug_call_data)
@@ -1294,7 +1372,9 @@ registry.register(
     toolset="web",
     schema=WEB_SEARCH_SCHEMA,
     handler=lambda args, **kw: web_search_tool(
-        args.get("query", ""), limit=args.get("limit", 5)
+        args.get("query", ""),
+        limit=args.get("limit", 5),
+        session_id=kw.get("session_id"),
     ),
     check_fn=check_web_api_key,
     requires_env=_web_requires_env(),

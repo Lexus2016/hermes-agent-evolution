@@ -1520,6 +1520,16 @@ def handle_function_call(
             except Exception:
                 pass  # file_tools may not be loaded yet
 
+        # #1704 — reset the web_search consecutive-search streak whenever a
+        # non-web_search tool runs (the model acted on/abandoned results).
+        if function_name != "web_search":
+            try:
+                from tools.web_tools import reset_web_search_streak
+
+                reset_web_search_streak(session_id)
+            except Exception:
+                pass  # web_tools may not be loaded yet
+
         # Deterministic tool-argument contract check (issue #904). Re-checks
         # the final, post-coercion/post-middleware arguments against the
         # tool's own registered schema (``required`` fields, ``enum``
