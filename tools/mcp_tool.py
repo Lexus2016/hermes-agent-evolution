@@ -614,6 +614,33 @@ def _is_method_not_found_error(exc: BaseException) -> bool:
     )
 
 
+def _is_unknown_prompt_error(exc: BaseException) -> str:
+    """Return the unknown prompt name if *exc* is an ``Unknown prompt`` error.
+
+    MCP servers raise ``McpError: Unknown prompt: <name>`` when ``get_prompt``
+    is called with a name that is not in the server's prompt registry. This is
+    a *recurring* agent-side mistake: the agent conflates Hermes skill names
+    (``evolution-implementation``, ``semantic_search``, …) with tqmemory MCP
+    prompt names. Surface the offending name so the error path can emit a
+    targeted hint instead of an opaque failure.
+
+    Structurally inspect ``McpError.error.message`` first, then fall back to a
+    substring match so detection survives SDK version drift and servers that
+    surface the condition as a plain exception string.
+    """
+    err = getattr(exc, "error", None)
+    msg = getattr(err, "message", None) or str(exc)
+    text = str(msg).strip().lower()
+    marker = "unknown prompt"
+    idx = text.find(marker)
+    if idx == -1:
+        return ""
+    # Grab the prompt name that follows "Unknown prompt: <name>".
+    rest = text[idx + len(marker) :].lstrip(": \t'\"")
+    name = rest.split()[0].strip("'\".,;") if rest else ""
+    return name
+
+
 # ---------------------------------------------------------------------------
 # MCP tool description content scanning
 # ---------------------------------------------------------------------------
@@ -5863,6 +5890,17 @@ def _make_get_prompt_handler(server_name: str, tool_timeout: float):
                 server_name,
                 exc,
             )
+            unknown = _is_unknown_prompt_error(exc)
+            if unknown:
+                hint = (
+                    f"MCP server '{server_name}' has no prompt named "
+                    f"'{unknown}'. This name may be a Hermes skill rather "
+                    f"than an MCP prompt — if so, load it with "
+                    f'skill_view(name="{unknown}") instead. Otherwise, '
+                    f"list available prompts with "
+                    f"{mcp_prefixed_tool_name(server_name, 'list_prompts')}."
+                )
+                return tool_error(hint)
             return tool_error(
                 _sanitize_error(
                     f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}"

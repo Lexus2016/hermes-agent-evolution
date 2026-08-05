@@ -1478,6 +1478,60 @@ class TestUtilityHandlers:
         finally:
             _servers.pop("srv", None)
 
+    def test_get_prompt_unknown_prompt_hint(self):
+        """Unknown-prompt McpError yields a targeted hint, not an opaque error."""
+        from tools.mcp_tool import _make_get_prompt_handler, _servers
+
+        mock_session = MagicMock()
+
+        async def _raise_unknown(name, arguments=None):
+            # mcp.shared.exceptions.McpError carries .error (ErrorData).
+            err = SimpleNamespace(message=f"Unknown prompt: {name}")
+            raise type(
+                "McpError",
+                (Exception,),
+                {},
+            )(f"Unknown prompt: {name}") from None
+
+        mock_session.get_prompt = AsyncMock(side_effect=_raise_unknown)
+        server = _make_mock_server("srv", session=mock_session)
+        _servers["srv"] = server
+
+        try:
+            handler = _make_get_prompt_handler("srv", 120)
+            with self._patch_mcp_loop():
+                result = handler({"name": "evolution-implementation"})
+            payload = json.loads(result)
+            assert "evolution-implementation" in payload["error"]
+            assert "skill_view" in payload["error"]
+            assert "list_prompts" in payload["error"]
+        finally:
+            _servers.pop("srv", None)
+
+    def test_get_prompt_non_unknown_error_unmodified(self):
+        """Non-unknown-prompt errors keep the original opaque formatting."""
+        from tools.mcp_tool import _make_get_prompt_handler, _servers
+
+        mock_session = MagicMock()
+
+        async def _raise_other(name, arguments=None):
+            raise RuntimeError("connection reset")
+
+        mock_session.get_prompt = AsyncMock(side_effect=_raise_other)
+        server = _make_mock_server("srv", session=mock_session)
+        _servers["srv"] = server
+
+        try:
+            handler = _make_get_prompt_handler("srv", 120)
+            with self._patch_mcp_loop():
+                result = handler({"name": "summarize"})
+            payload = json.loads(result)
+            assert "connection reset" in payload["error"]
+            assert "skill_view" not in payload["error"]
+        finally:
+            _servers.pop("srv", None)
+
+
 # ---------------------------------------------------------------------------
 # Utility tools registration in _discover_and_register_server
 # ---------------------------------------------------------------------------
