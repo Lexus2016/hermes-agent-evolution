@@ -5951,13 +5951,8 @@ def _make_get_prompt_handler(server_name: str, tool_timeout: float):
             )
             unknown = _is_unknown_prompt_error(exc)
             if unknown:
-                try:
-                    extra = _enrich_missing_prompt_error(
-                        server, name, server_name, tool_timeout
-                    )
-                    return tool_error(err_msg, **extra)
-                except Exception:
-                    pass
+                # Build a backward-compatible hint that mentions skill_view and
+                # list_prompts (existing tests check payload["error"] for these).
                 hint = (
                     f"MCP server '{server_name}' has no prompt named "
                     f"'{unknown}'. This name may be a Hermes skill rather "
@@ -5966,6 +5961,14 @@ def _make_get_prompt_handler(server_name: str, tool_timeout: float):
                     f"list available prompts with "
                     f"{mcp_prefixed_tool_name(server_name, 'list_prompts')}."
                 )
+                # Try to enrich with the list of actually-available prompts.
+                try:
+                    extra = _enrich_missing_prompt_error(
+                        server, name, server_name, tool_timeout
+                    )
+                    return tool_error(hint, **extra)
+                except Exception:
+                    pass
                 return tool_error(hint)
             return tool_error(err_msg)
 
