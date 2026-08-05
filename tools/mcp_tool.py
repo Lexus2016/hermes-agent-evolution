@@ -1239,6 +1239,8 @@ class MissingMcpCommandError(NonMcpEndpointError):
     collapsing what used to be a 189-failure/scan retry storm (e.g.
     ``turbo-memory-mcp`` missing from ``PATH``) into one actionable error.
     """
+
+
 def _unwrap_exception_group(exc: BaseException) -> BaseException:
     """Extract the root-cause exception from anyio TaskGroup wrappers.
 
@@ -3378,7 +3380,7 @@ class MCPServerTask:
                         else:
                             self.initialize_result = await asyncio.wait_for(
                                 session.initialize(), timeout=float(connect_timeout)
-                        )
+                            )
                         self.session = session
                         await self._discover_tools()
                         self._ready.set()
@@ -5824,6 +5826,60 @@ def _make_list_prompts_handler(server_name: str, tool_timeout: float):
     return _handler
 
 
+def _enrich_missing_prompt_error(
+    server, requested_name: str, server_name: str, tool_timeout: float
+) -> dict:
+    """Build enrichment fields for an ``Unknown prompt`` error (#1687).
+
+    When the MCP server rejects a prompt name, the bare error message gives the
+    agent no recovery path — it retries with other non-existent names, wasting
+    tool calls.  This helper returns a dict with:
+
+    - ``available_prompts``: the real prompt names on the server (empty list if
+      the list call itself fails).
+    - ``hint``: a recovery directive.  If *requested_name* looks like a skill
+      (contains ``-`` or ``_``), the hint suggests ``skill_view(name=...)``; this
+      covers the common case where the agent/cron confuses a skill name
+      (``evolution-implementation``, ``semantic_search``) with a prompt name.
+
+    All exceptions are swallowed — enrichment is best-effort and must never
+    mask the original error.
+    """
+    available: list[str] = []
+    try:
+
+        async def _list():
+            _mark_server_call_started(server)
+            async with server._rpc_lock:
+                all_prompts = await _paginate_full_list(
+                    server.session.list_prompts, "prompts", server_name
+                )
+            return all_prompts
+
+        prompt_objs = _run_on_mcp_loop(_list, timeout=tool_timeout)
+        for p in prompt_objs:
+            if hasattr(p, "name") and p.name:
+                available.append(p.name)
+    except Exception:
+        available = []
+
+    hint = (
+        f"Prompt '{requested_name}' was not found. "
+        f"Use list_prompts to see all available prompts."
+    )
+    # Skill-like names (dashes or underscores) are almost certainly Hermes skills,
+    # not MCP prompts — suggest skill_view to break the retry spiral (#1687).
+    if "-" in requested_name or "_" in requested_name:
+        hint = (
+            f"'{requested_name}' looks like a skill name, not a prompt name. "
+            f"Try skill_view(name='{requested_name}') instead — "
+            f"skills, not prompts, use dash/underscore names. "
+            f"Use list_prompts to see all available prompts."
+        )
+
+    return {"available_prompts": available, "hint": hint}
+
+
 def _make_get_prompt_handler(server_name: str, tool_timeout: float):
     """Return a sync handler that gets a prompt by name from an MCP server."""
 
@@ -5890,8 +5946,18 @@ def _make_get_prompt_handler(server_name: str, tool_timeout: float):
                 server_name,
                 exc,
             )
+            err_msg = _sanitize_error(
+                f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}"
+            )
             unknown = _is_unknown_prompt_error(exc)
             if unknown:
+                try:
+                    extra = _enrich_missing_prompt_error(
+                        server, name, server_name, tool_timeout
+                    )
+                    return tool_error(err_msg, **extra)
+                except Exception:
+                    pass
                 hint = (
                     f"MCP server '{server_name}' has no prompt named "
                     f"'{unknown}'. This name may be a Hermes skill rather "
@@ -5901,11 +5967,7 @@ def _make_get_prompt_handler(server_name: str, tool_timeout: float):
                     f"{mcp_prefixed_tool_name(server_name, 'list_prompts')}."
                 )
                 return tool_error(hint)
-            return tool_error(
-                _sanitize_error(
-                    f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}"
-                )
-            )
+            return tool_error(err_msg)
 
     return _handler
 
