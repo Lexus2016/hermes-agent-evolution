@@ -231,8 +231,9 @@ def classify_file_error(
         )
     if "old_string cannot be empty" in low or "old_string is empty" in low:
         return "old_string_empty", (
-            "old_string was empty. Provide a non-empty search block that matches the "
-            "file; use read_file to see the current content if needed."
+            "old_string was empty. replace mode requires a non-empty search block that matches "
+            "the file. Provide one (use read_file to see the current content), or switch to "
+            "mode='patch' for insertions. Do NOT retry with an empty old_string."
         )
     if (
         "did not match" in low
@@ -297,8 +298,9 @@ _STRUCTURED_SUBCLASS_RECOVERY: Dict[str, Tuple[str, str]] = {
     ),
     "old_string_empty": (
         "old_string_empty",
-        "old_string was empty. Provide a non-empty search block; use read_file to "
-        "see the current content if needed.",
+        "old_string was empty. replace mode requires a non-empty search block; "
+        "use read_file to see the current content, or switch to mode='patch' "
+        "for insertions. Do NOT retry with an empty old_string.",
     ),
 }
 

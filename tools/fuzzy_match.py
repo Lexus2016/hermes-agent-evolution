@@ -1322,7 +1322,8 @@ def format_structured_error(
         sections.append(
             "Recovery: provide a non-empty old_string that matches the "
             "text to replace in the file. Use read_file to see the "
-            "current content if needed."
+            "current content if needed. For insertions without replacing "
+            "existing text, use mode='patch' instead of mode='replace'."
         )
 
     # For indentation_mismatch: the old_string content matches but the

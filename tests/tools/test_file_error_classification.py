@@ -13,7 +13,9 @@ class TestClassifyFileError:
         assert classify_file_error("") is None
 
     def test_permission(self):
-        klass, rec = classify_file_error("Write denied: '/etc/x' is a protected system/credential file.")
+        klass, rec = classify_file_error(
+            "Write denied: '/etc/x' is a protected system/credential file."
+        )
         assert klass == "permission" and "allowed path" in rec
 
     def test_not_found_without_similars_routes_to_write_file(self):
@@ -22,7 +24,8 @@ class TestClassifyFileError:
 
     def test_not_found_with_similars_is_fuzzy_match(self):
         klass, rec = classify_file_error(
-            "File not found: /tmp/utils.py", similar_files=["/tmp/util.py", "/tmp/utils2.py"]
+            "File not found: /tmp/utils.py",
+            similar_files=["/tmp/util.py", "/tmp/utils2.py"],
         )
         assert klass == "fuzzy_match" and "util.py" in rec
 
@@ -57,7 +60,9 @@ class TestClassifyFileError:
         assert "replace_all" in rec or "context" in rec
 
     def test_verification(self):
-        klass, _ = classify_file_error("Post-write verification failed: could not re-read x")
+        klass, _ = classify_file_error(
+            "Post-write verification failed: could not re-read x"
+        )
         assert klass == "verification"
 
     def test_binary(self):
@@ -107,10 +112,13 @@ class TestClassifyFileError:
         klass, rec = classify_file_error("old_string cannot be empty")
         assert klass == "old_string_empty"
         assert "non-empty" in rec
+        # #1703 — recovery must mention mode='patch' as an alternative for insertions
+        assert "mode='patch'" in rec
 
     def test_old_string_empty_variant(self):
-        klass, _ = classify_file_error("old_string is empty")
+        klass, rec = classify_file_error("old_string is empty")
         assert klass == "old_string_empty"
+        assert "mode='patch'" in rec
 
     def test_indentation_mismatch_promoted_from_structured_error(self):
         """When the raw error is the generic 'Could not find a match' but the
@@ -149,7 +157,9 @@ class TestClassifyFileError:
     def test_no_structured_error_keeps_legacy_behavior(self):
         """Callers that don't pass structured_error get identical behavior to
         before — backward compatible."""
-        klass, _ = classify_file_error("Could not find a match for old_string in the file")
+        klass, _ = classify_file_error(
+            "Could not find a match for old_string in the file"
+        )
         assert klass == "fuzzy_match"
 
 

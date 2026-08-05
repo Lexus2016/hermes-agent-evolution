@@ -1964,6 +1964,35 @@ def patch_tool(
                     return tool_error("path required")
                 if old_string is None or new_string is None:
                     return tool_error("old_string and new_string required")
+                # #1703 — Catch empty-string old_string early (before it reaches
+                # fuzzy_match). The agent confuses replace-mode (which requires a
+                # non-empty old_string) with insertion. Without this early gate the
+                # error propagates without a mode=patch suggestion, and the
+                # consecutive-failure tracker never fires (it only tracks no_match /
+                # ambiguous), producing a 5-8 retry spiral.
+                if old_string == "":
+                    _resolved_1703 = _path_to_resolved.get(path) or path
+                    _fail_count_1703 = _record_patch_failure(task_id, _resolved_1703)
+                    _threshold_1703 = _get_self_correction_retries()
+                    _mode_hint = (
+                        " To INSERT new text without replacing anything, use mode='patch' "
+                        "with a V4A patch instead of mode='replace'."
+                    )
+                    if _fail_count_1703 >= 2:
+                        return tool_error(
+                            f"old_string is empty — this is a NON-RETRYABLE error "
+                            f"(failure #{_fail_count_1703} on this file). replace mode "
+                            f"REQUIRES a non-empty old_string to search for and replace. "
+                            f"Either: (1) provide a non-empty old_string matching the text "
+                            f"to replace (use read_file first), or (2) use mode='patch' "
+                            f"for insertions.{_mode_hint} Do NOT retry with an empty old_string."
+                        )
+                    return tool_error(
+                        f"old_string is empty — replace mode requires a non-empty "
+                        f"old_string to find and replace. Use read_file to see the "
+                        f"current content, then provide the exact text to replace."
+                        f"{_mode_hint}"
+                    )
                 # Hard stop: refuse further patch attempts to a file that has
                 # already exceeded the consecutive-failure threshold (#1037).
                 # Previously the code only emitted a "_hint" after the
