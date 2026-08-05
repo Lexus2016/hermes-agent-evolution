@@ -62,12 +62,14 @@ class TestThresholdAndDirective:
         )
 
         monkeypatch.setattr("tools.web_tools._load_web_config", lambda: {})
-        assert (
-            _get_web_search_streak_threshold() == DEFAULT_WEB_SEARCH_STREAK_THRESHOLD
+        assert _get_web_search_streak_threshold() == DEFAULT_WEB_SEARCH_STREAK_THRESHOLD
+        monkeypatch.setattr(
+            "tools.web_tools._load_web_config", lambda: {"search_streak_threshold": 0}
         )
-        monkeypatch.setattr("tools.web_tools._load_web_config", lambda: {"search_streak_threshold": 0})
         assert _get_web_search_streak_threshold() == 0  # 0 disables
-        monkeypatch.setattr("tools.web_tools._load_web_config", lambda: {"search_streak_threshold": 999})
+        monkeypatch.setattr(
+            "tools.web_tools._load_web_config", lambda: {"search_streak_threshold": 999}
+        )
         assert _get_web_search_streak_threshold() == 20  # clamped
 
     def test_directive_steers_to_synthesize(self):
@@ -83,7 +85,9 @@ class TestThresholdAndDirective:
         """Crossing the threshold yields a JSON-safe fallback_directive."""
         from tools import web_tools
 
-        monkeypatch.setattr("tools.web_tools._get_web_search_streak_threshold", lambda: 3)
+        monkeypatch.setattr(
+            "tools.web_tools._get_web_search_streak_threshold", lambda: 3
+        )
         web_tools._web_search_streak.clear()
         web_tools.note_web_search("sess-d")
         web_tools.note_web_search("sess-d")
@@ -91,6 +95,11 @@ class TestThresholdAndDirective:
 
         payload = {"success": True, "data": {"web": [{"url": "x"}]}}
         if web_tools._get_web_search_streak_threshold() > 0 and streak >= 3:
-            payload["fallback_directive"] = web_tools._web_search_fallback_directive(streak)
+            payload["fallback_directive"] = web_tools._web_search_fallback_directive(
+                streak
+            )
         assert "STOP re-querying" in payload["fallback_directive"]
-        assert json.loads(json.dumps(payload))["fallback_directive"] == payload["fallback_directive"]
+        assert (
+            json.loads(json.dumps(payload))["fallback_directive"]
+            == payload["fallback_directive"]
+        )
