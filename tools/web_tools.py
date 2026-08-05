@@ -102,11 +102,7 @@ from tools.tool_backend_helpers import (  # noqa: F401
     nous_tool_gateway_unavailable_message,
     prefers_gateway,
 )
-from tools.url_safety import (
-    async_is_safe_url,
-    normalize_url_for_request,
-    sensitive_query_param_name,
-)
+from tools.url_safety import async_is_safe_url, normalize_url_for_request, sensitive_query_param_name
 import sys
 
 logger = logging.getLogger(__name__)
@@ -158,7 +154,6 @@ def _load_web_config() -> dict:
     """Load the ``web:`` section from ~/.hermes/config.yaml."""
     try:
         from hermes_cli.config import load_config
-
         # ``or {}``: a present-but-null ``web:`` section (YAML ``web:`` with no
         # body) makes ``.get("web", {})`` return None, which would break every
         # caller that does ``_load_web_config().get(...)``. Honor the ``-> dict``
@@ -180,16 +175,9 @@ def _load_web_config() -> dict:
 # ``has_xai_credentials()`` (env var OR auth.json OAuth), not a registered
 # WebSearchProvider. Keep the two sets aligned by hand: if xai ever ships as
 # a registered provider, drop it here so the registry path takes over.
-_LEGACY_WEB_BACKENDS = frozenset({
-    "parallel",
-    "firecrawl",
-    "tavily",
-    "exa",
-    "searxng",
-    "brave-free",
-    "ddgs",
-    "xai",
-})
+_LEGACY_WEB_BACKENDS = frozenset(
+    {"parallel", "firecrawl", "tavily", "exa", "searxng", "brave-free", "ddgs", "xai"}
+)
 
 
 def _registered_web_provider(backend: str):
@@ -247,10 +235,7 @@ def _get_backend() -> str:
     keys manually without running setup.
     """
     configured = (_load_web_config().get("backend") or "").lower().strip()
-    if (
-        configured in _LEGACY_WEB_BACKENDS
-        or _registered_web_provider(configured) is not None
-    ):
+    if configured in _LEGACY_WEB_BACKENDS or _registered_web_provider(configured) is not None:
         return configured
 
     # Fallback for manual / legacy config — pick the highest-priority
@@ -287,9 +272,7 @@ def _get_backend() -> str:
             if provider.is_available():
                 return provider.name
         except Exception as exc:  # noqa: BLE001 — a broken provider is skipped
-            logger.debug(
-                "web provider %r.is_available() raised: %s", provider.name, exc
-            )
+            logger.debug("web provider %r.is_available() raised: %s", provider.name, exc)
 
     return "firecrawl"  # default (backward compat)
 
@@ -534,12 +517,12 @@ def _get_extract_char_limit() -> int:
 
 
 # ── #1704 — consecutive web_search streak guard ────────────────────────────
-# Mirrors tool_search's streak guard (#1144/#1373): a per-session counter of
-# consecutive web_search calls with no intervening action tool. Crossing
+# Per-session counter of consecutive web_search calls with no intervening
+# action tool (mirrors tool_search #1144/#1373). Crossing
 # ``web.search_streak_threshold`` appends a fallback_directive steering the
-# model to synthesize or change approach. Resets on any non-web_search tool.
-# Keyed by session_id; an empty-string id falls back to a default key so the
-# feature fires in the production runtime (#1373 lesson); None opts out.
+# model to synthesize or change approach; resets on any non-web_search tool.
+# Keyed by session_id; empty-string id → default key so it fires in the
+# production runtime (#1373 lesson); None opts out.
 _web_search_lock = threading.Lock()
 _web_search_streak: Dict[str, int] = {}
 
@@ -615,7 +598,6 @@ def convert_base64_images_to_links(text: str) -> str:
       ``(data:image/png;base64,AAAA...)``        -> ``[IMAGE]``
       bare ``data:image/...;base64,AAAA...``     -> ``[IMAGE]``
     """
-
     # 1. Markdown image with base64 source -> keep alt text, drop the blob.
     def _md_repl(m: "re.Match[str]") -> str:
         alt = (m.group("alt") or "").strip()
@@ -696,7 +678,7 @@ def _truncate_with_footer(
     # Snap the tail cut forward to the next newline for the same reason.
     nl = tail.find("\n")
     if 0 <= nl < tail_budget * 0.5:
-        tail = tail[nl + 1 :]
+        tail = tail[nl + 1:]
 
     total = len(content)
     stored_path = _store_full_text(url, content)
@@ -729,6 +711,7 @@ def _truncate_with_footer(
     model_text = head + "\n\n[... middle omitted — see footer ...]\n\n" + tail
     model_text += "\n" + "\n".join(footer_lines)
     return model_text, True
+
 
 
 # ─── Exa / Parallel inline helpers — moved into plugins ──────────────────────
@@ -883,8 +866,8 @@ def web_search_tool(
         debug_call_data["parameters"]["provider"] = response_data.get(
             "provider", provider.name if provider else None
         )
-        # #1704 — consecutive-search streak guard. Only on SUCCESSFUL searches
-        # (the spiral is repeated *successful* re-queries, not failures).
+        # #1704 — streak guard. Only on SUCCESSFUL searches (the spiral is
+        # repeated *successful* re-queries, not failures).
         if not response_data.get("error") and response_data.get("success") is not False:
             streak = note_web_search(session_id)
             if (
@@ -1003,7 +986,7 @@ async def web_extract_tool(
         "original_response_size": 0,
         "final_response_size": 0,
         "truncation_metrics": [],
-        "processing_applied": [],
+        "processing_applied": []
     }
 
     try:
@@ -1016,9 +999,7 @@ async def web_extract_tool(
         for index, url in zip(normalized_indices, normalized_urls):
             if not await async_is_safe_url(url):
                 ssrf_blocked[index] = {
-                    "url": url,
-                    "title": "",
-                    "content": "",
+                    "url": url, "title": "", "content": "",
                     "error": "Blocked: URL targets a private or internal network address",
                 }
             else:
@@ -1144,9 +1125,7 @@ async def web_extract_tool(
         debug_call_data["pages_extracted"] = pages_extracted
         debug_call_data["original_response_size"] = len(json.dumps(response))
 
-        effective_char_limit = (
-            char_limit if char_limit is not None else _get_extract_char_limit()
-        )
+        effective_char_limit = char_limit if char_limit is not None else _get_extract_char_limit()
         try:
             effective_char_limit = max(2000, min(int(effective_char_limit), 500_000))
         except (TypeError, ValueError):
@@ -1165,9 +1144,7 @@ async def web_extract_tool(
             if not raw_content:
                 continue
             clean = convert_base64_images_to_links(raw_content)
-            model_text, truncated = _truncate_with_footer(
-                clean, url, effective_char_limit
-            )
+            model_text, truncated = _truncate_with_footer(clean, url, effective_char_limit)
             result["content"] = model_text
             if truncated:
                 debug_call_data["pages_truncated"] += 1
@@ -1176,9 +1153,7 @@ async def web_extract_tool(
                     "original_size": len(clean),
                     "sent_size": len(model_text),
                 })
-                logger.info(
-                    "%s (truncated %d -> %d chars)", url, len(clean), len(model_text)
-                )
+                logger.info("%s (truncated %d -> %d chars)", url, len(clean), len(model_text))
             else:
                 logger.info("%s (%d chars, whole)", url, len(clean))
 
@@ -1211,7 +1186,7 @@ async def web_extract_tool(
 
         debug_call_data["final_response_size"] = len(cleaned_result)
         debug_call_data["processing_applied"].append("base64_image_conversion")
-
+        
         # Log debug information
         _debug.log_call("web_extract_tool", debug_call_data)
         _debug.save()
@@ -1279,7 +1254,6 @@ if __name__ == "__main__":
     web_available = check_web_api_key()
     tool_gateway_available = _is_tool_gateway_ready()
     from hermes_cli.config import get_env_value as _gev
-
     firecrawl_key_available = bool((_gev("FIRECRAWL_API_KEY") or "").strip())
     firecrawl_url_available = bool((_gev("FIRECRAWL_API_URL") or "").strip())
 
@@ -1299,9 +1273,7 @@ if __name__ == "__main__":
         elif backend == "ddgs":
             print("   Using DuckDuckGo via ddgs package (search only)")
         elif firecrawl_url_available:
-            print(
-                f"   Using self-hosted Firecrawl: {(_gev('FIRECRAWL_API_URL') or '').strip().rstrip('/')}"
-            )
+            print(f"   Using self-hosted Firecrawl: {(_gev('FIRECRAWL_API_URL') or '').strip().rstrip('/')}")
         elif firecrawl_key_available:
             print("   Using direct Firecrawl cloud API")
         elif tool_gateway_available:
@@ -1319,10 +1291,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     print("🛠️  Web tools ready for use!")
-    print(
-        f"   Extract char limit: {_get_extract_char_limit()} chars "
-        "(pages over this are truncated; full text stored in cache/web)"
-    )
+    print(f"   Extract char limit: {_get_extract_char_limit()} chars "
+          "(pages over this are truncated; full text stored in cache/web)")
 
     # Show debug mode status
     if _debug.active:
@@ -1344,9 +1314,7 @@ if __name__ == "__main__":
     print("  async def main():")
     print("      content = await web_extract_tool(['https://example.com'])")
     print("      # bigger budget for one call:")
-    print(
-        "      content = await web_extract_tool(['https://docs.python.org'], char_limit=40000)"
-    )
+    print("      content = await web_extract_tool(['https://docs.python.org'], char_limit=40000)")
     print("  asyncio.run(main())")
 
     print("\nDebug mode:")
@@ -1391,13 +1359,13 @@ WEB_EXTRACT_SCHEMA = {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "List of URLs to extract content from (max 5 URLs per call)",
-                "maxItems": 5,
+                "maxItems": 5
             },
             "char_limit": {
                 "type": "integer",
                 "description": "Optional per-page character budget sent back (default 15000). Pages larger than this are head+tail truncated with the full text stored to disk. Raise it when you need more of a long page inline.",
-                "minimum": 2000,
-            },
+                "minimum": 2000
+            }
         },
         "required": ["urls"],
     },
