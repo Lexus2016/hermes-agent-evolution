@@ -1751,6 +1751,18 @@ def handle_function_call(
         except Exception:
             pass
 
+        # Sanitize untrusted tool output before it re-enters model context:
+        # fence off prompt-injection patterns (ignore-prior-instructions,
+        # role tags, persona hijacks) so they are read as data. Fail-open.
+        try:
+            from agent.tool_sanitize import sanitize_tool_result
+
+            _sanitized = sanitize_tool_result(result)
+            if isinstance(_sanitized, str):
+                result = _sanitized
+        except Exception:
+            pass
+
         return result
 
     except Exception as e:
