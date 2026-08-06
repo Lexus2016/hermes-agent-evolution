@@ -1744,14 +1744,25 @@ def handle_function_call(
         # EchoLeak + agentjacking defense (#1717): neutralize remote-fetch
         # image links and fence crash/debug output before it re-enters model
         # context. Fail-open.
+        _sanitized = result
         try:
             from agent.echoleak_defense import sanitize_output
 
             _sanitized = sanitize_output(result)
-            if isinstance(_sanitized, str):
-                result = _sanitized
         except Exception:
             pass
+
+        # Sanitize untrusted tool output before it re-enters model context:
+        # fence off prompt-injection patterns (ignore-prior-instructions,
+        # role tags, persona hijacks) so they are read as data. Fail-open.
+        try:
+            from agent.tool_sanitize import sanitize_tool_result
+
+            _sanitized = sanitize_tool_result(result)
+        except Exception:
+            pass
+        if isinstance(_sanitized, str):
+            result = _sanitized
 
         return result
 
