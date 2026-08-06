@@ -1763,6 +1763,28 @@ def handle_function_call(
         except Exception:
             pass
 
+        # Structured audit event (#1718) — tool calls as immutable JSONL
+        # events (EU AI Act Art. 12).  Gated + fail-open.
+        try:
+            from agent.audit_log import EVENT_TOOL_CALL_COMPLETE, log_audit_event
+
+            _status, _err_type, _ = _tool_result_observer_fields(result)
+            log_audit_event(
+                EVENT_TOOL_CALL_COMPLETE,
+                session_id=session_id or "",
+                turn_id=turn_id or "",
+                tool_call_id=tool_call_id or "",
+                tool_name=function_name,
+                task_id=task_id or "",
+                args=function_args,
+                duration_ms=duration_ms,
+                result=result[:4000] if isinstance(result, str) else result,
+                status=_status,
+                error_type=_err_type or "",
+            )
+        except Exception:
+            pass
+
         return result
 
     except Exception as e:
