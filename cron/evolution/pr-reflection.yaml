@@ -1,0 +1,24 @@
+name: evolution-pr-reflection
+# 07:35 daily — between funnel (07:25) and watchdog (07:47). The reflection
+# mines PRs closed in the last 7 days and writes the pr-reflection.txt sidecar
+# that the analysis stage reads (6d). Settles after the integration cycle
+# finishes but before the new analysis cycle starts.
+schedule: "35 7 * * *"
+enabled: true
+mode: PRIVATE
+
+# Deterministic reflection — NO LLM agent. The script IS the job. It queries
+# recently closed PRs, classifies merge/reject outcomes, extracts patterns,
+# and writes the pr-reflection.txt sidecar. Issue #1584.
+no_agent: true
+script: evolution_pr_reflection.py
+
+# Keep on disk for the analysis stage to read; nothing delivered to channels
+# (a feedback signal is internal plumbing).
+deliver: local
+
+prompt: |
+  Deterministic PR reflection signal (no LLM). Queries recently closed PRs
+  via gh, classifies merge vs reject outcomes, extracts repeat-rejection
+  patterns, and writes evolution/pr-reflection.txt for the analysis stage.
+  See scripts/evolution_pr_reflection.py (issue #1584).

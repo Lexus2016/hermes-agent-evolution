@@ -343,6 +343,20 @@ final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + 
       alerts) but proceed.
     - healthy / missing → proceed normally.
 
+6d. **PR reflection feedback — learn from merge/reject signals (#1584).** Read
+    the sidecar `~/.hermes/evolution/pr-reflection.txt` (one
+    `[evolution-pr-reflection] …` line, refreshed by the `evolution_pr_reflection`
+    cron job; missing → treat as healthy). This is a GEPA-style reflect-and-
+    rewrite loop: it mines recently closed PRs and reports whether selections
+    landed a merge or were rejected, plus WHY. Let its patterns calibrate this
+    cycle's selection (internal plumbing — keep it OUT of any delivered report):
+    - `Low merge rate` → selection is picking low-viability issues; apply a
+      STRICHTER viability re-check before branching (step 2 of implementation).
+    - `Repeat rejection: '<reason>' (Nx)` → pre-filter issues matching this
+      rejection reason at triage so the same class of failure doesn't recur.
+    - `High merge rate` → selection is healthy, proceed normally.
+    - missing / no patterns → proceed normally.
+
 ## Orchestrator-workers evaluator-optimizer gate (research synthesis) — #230
 
 When a single issue is open-ended enough that one reasoning pass under-serves it
