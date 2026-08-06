@@ -874,7 +874,14 @@ def coerce_tool_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         if (
             expected == "string"
             and isinstance(value, str)
-            and value.lstrip().startswith("[")
+            and (
+                value.lstrip().startswith("[")
+                # #1681 — also fire on bare comma-separated path lists
+                # (``"src/a.py, src/b.py"``, no brackets). The helper's
+                # path-like guards reject non-path strings (sentences,
+                # bare words), so widening the trigger is safe.
+                or "," in value
+            )
         ):
             extracted = _extract_first_from_stringified_array(value)
             if extracted is not None:
@@ -1006,25 +1013,83 @@ def _extract_first_from_stringified_array(value: str) -> Optional[str]:
     first string element so the tool receives a usable scalar path
     instead of the literal array string.
 
+    Falls back to splitting a non-JSON bracket-wrapped or bare
+    comma-separated list of paths (e.g. ``"[path/a, path/b]"`` or
+    ``"path/a, path/b"``) — a common open-weight-model emission when it
+    intends a list but forgets the JSON quoting. Without this, the whole
+    string would reach read_file and produce a file-not-found spiral.
+
     Returns the first string element, or ``None`` when the value is not a
     parseable JSON array of strings (in which case the caller leaves the
     original value untouched).
     """
     if not isinstance(value, str):
         return None
+    stripped = value.strip()
     try:
-        parsed = json.loads(value.strip())
+        parsed = json.loads(stripped)
     except (ValueError, TypeError):
+        parsed = None
+    if isinstance(parsed, list) and parsed:
+        # Only unwrap arrays of strings — a list of dicts/numbers on a
+        # string-typed param is a different error and should not be silently
+        # mangled into ``str(parsed[0])``.
+        first = parsed[0]
+        if isinstance(first, str):
+            return first
         return None
-    if not isinstance(parsed, list) or not parsed:
+    # ── Non-JSON comma-separated list fallback (#1681) ──────────────────
+    # The JSON parse failed. Detect a bracket-wrapped or bare
+    # comma-separated list of path-like items and take the first. Only
+    # fire when the value LOOKS like a path list: it contains a comma with
+    # whitespace, and the first token is a plausible path (not a bare
+    # number/word that a genuine path string could never be). This avoids
+    # mangling legitimate single-path strings that merely contain a comma
+    # (e.g. a filename with a comma, or shell args with flags).
+    _comma_list = re.match(
+        r"^[\[\s]*(?P<first>[^,\[\]\s][^,]*?)"
+        r"\s*,\s*(?P<rest>[^\]].*?)[\]\s]*$",
+        stripped,
+        re.DOTALL,
+    )
+    if not _comma_list:
         return None
-    # Only unwrap arrays of strings — a list of dicts/numbers on a
-    # string-typed param is a different error and should not be silently
-    # mangled into ``str(parsed[0])``.
-    first = parsed[0]
-    if isinstance(first, str):
-        return first
+    first_token = _comma_list.group("first").strip()
+    rest = _comma_list.group("rest").strip()
+    # Heuristic guard: the first token must look like a path — contain a
+    # path separator or a dot-extension or be a relative path — and the
+    # rest must look like another path, not arbitrary text.
+    if _looks_like_path(first_token) and _looks_like_path_list_rest(rest):
+        logger.info(
+            "coerce_tool_args: extracted first item from comma-separated "
+            "path list (%.60s...) for a string-typed param.",
+            value,
+        )
+        return first_token
     return None
+
+
+# Path separators / extensions that mark a token as path-like (#1681).
+_PATH_SEPARATOR_RE = re.compile(r"[/\\]|[.]\w{1,10}\Z|\.\.", re.IGNORECASE)
+
+
+def _looks_like_path(token: str) -> bool:
+    """Return True when *token* looks like a filesystem path."""
+    if not token:
+        return False
+    if _PATH_SEPARATOR_RE.search(token):
+        return True
+    # A bare word that is a known shell/tool keyword is not a path.
+    if token.lower() in {"true", "false", "null", "none", "and", "or", "not"}:
+        return False
+    return len(token) >= 3
+
+
+def _looks_like_path_list_rest(rest: str) -> bool:
+    """Return True when *rest* looks like the remainder of a path list."""
+    if not rest:
+        return False
+    return _PATH_SEPARATOR_RE.search(rest) is not None
 
 
 def _coerce_value(value: str, expected_type, schema: dict | None = None):

@@ -1286,6 +1286,16 @@ def format_structured_error(
     # For no-match: show the closest matching region so the model can
     # see what's actually there and craft a corrected old_string.
     if error_type == "no_match":
+        # Surface the file's dimensions up front (#1744): when the anchor
+        # no-matches, the model needs to know the file's scale to decide
+        # whether to re-read it or switch to write_file — a path/typo-drift
+        # cue in one step instead of a blind re-read. A tiny file (few
+        # lines) is cheap to re-read fully; a large one argues for
+        # write_file or a targeted search.
+        total_lines = content.count("\n") + (1 if content else 0)
+        sections.append(
+            f"File length: {total_lines} lines, {len(content)} chars."
+        )
         snippet = _format_file_context_snippet(content, old_string, context_lines=5)
         if snippet:
             sections.append(
