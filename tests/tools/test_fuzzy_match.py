@@ -427,6 +427,34 @@ class TestFormatNoMatchHint:
         assert result == ""
 
 
+class TestFormatStructuredErrorNoMatch:
+    """Structured no-match errors surface the file's dimensions so the
+    model can decide re-read vs write_file in one step (#1744)."""
+
+    def setup_method(self):
+        from tools.fuzzy_match import format_structured_error
+        self.fmt = format_structured_error
+
+    def test_no_match_includes_file_length(self):
+        content = "def foo():\n    return 1\ndef bar():\n    return 2\n"
+        err = self.fmt(
+            "Could not find a match for old_string in the file",
+            0, "def baz():", "x", content, file_path="/tmp/x.py", strategy=None,
+        )
+        assert "File length:" in err
+        # 4 content lines + trailing newline = 5 lines, 48 chars.
+        assert "5 lines" in err
+        assert "48 chars" in err
+
+    def test_no_match_still_has_closest_region(self):
+        content = "def foo():\n    return 1\n"
+        err = self.fmt(
+            "Could not find a match for old_string in the file",
+            0, "def baz():", "x", content, strategy=None,
+        )
+        assert "Closest matching region" in err
+
+
 class TestEscapeNormalizedNewString:
     """Regression tests for unescaping common sequences in new_string when
     the matched region of the file contains real control characters.
