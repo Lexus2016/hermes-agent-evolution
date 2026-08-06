@@ -1763,6 +1763,22 @@ def handle_function_call(
         except Exception:
             pass
 
+        # EchoLeak + agentjacking defense (#1717): neutralize remote-fetch
+        # image links and fence crash/debug output before it re-enters model
+        # context. Fail-open.
+        try:
+            from agent.echoleak_defense import sanitize_output
+
+            _sanitized = sanitize_output(result)
+            if isinstance(_sanitized, str):
+                result = _sanitized
+        except Exception:
+            pass
+            if isinstance(_sanitized, str):
+                result = _sanitized
+        except Exception:
+            pass
+
         # Structured audit event (#1718) — tool calls as immutable JSONL
         # events (EU AI Act Art. 12).  Gated + fail-open.
         try:
@@ -1784,7 +1800,6 @@ def handle_function_call(
             )
         except Exception:
             pass
-
         return result
 
     except Exception as e:
@@ -1820,6 +1835,13 @@ def handle_function_call(
                 )
         except Exception:
             pass  # never let the recovery module itself cause a failure
+        # Redact secrets from the error string before it re-enters context (#1717).
+        try:
+            from agent.echoleak_defense import sanitize_error_for_context
+
+            enriched = sanitize_error_for_context(enriched)
+        except Exception:
+            pass
         return tool_error(enriched)
 
 
