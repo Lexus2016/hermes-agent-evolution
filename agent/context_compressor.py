@@ -34,6 +34,7 @@ from agent.model_metadata import (
     estimate_messages_tokens_rough,
     estimate_tokens_rough,
 )
+from agent.failed_attempt_marker import failed_attempt_indices
 from agent.redact import redact_sensitive_text
 from agent.turn_context import drop_stale_api_content
 from tools.todo_tool import TODO_INJECTION_HEADER
@@ -2757,6 +2758,18 @@ class ContextCompressor(ContextEngine):
             if modified:
                 result[idx] = {**msg, "tool_calls": new_tcs}
             return modified
+
+        # Pass 1b: Prioritise failed-attempt tool results for removal (#1580).
+        # Failed tool calls (tracebacks, non-zero exits, explicit errors)
+        # contribute contextual drag — the model re-reads the error and often
+        # retries the same approach.  Demote them *first*, even inside the
+        # pruneable region, so their bulky error output becomes a 1-line summary
+        # before the general pass runs.
+        failed_indices = set(failed_attempt_indices(result))
+        if failed_indices:
+            for i in sorted(failed_indices):
+                if i < prune_boundary:
+                    _demote_tool_result_at(i)
 
         # Pass 2: Replace old tool results with informative summaries
         for i in range(max(0, prune_boundary)):
