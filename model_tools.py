@@ -1544,11 +1544,34 @@ def handle_function_call(
             # additionally rejects any tool the session was not granted, so a
             # restricted session can never invoke an out-of-scope tool through
             # the bridge even if the catalog scoping above regressed.
+            #
+            # #1786 — effective core tools routed through the bridge are
+            # auto-dispatched via scoped_available_names (which includes
+            # core tools present in tool_defs).
             _scoped_deferrable = _ts_mod.scoped_deferrable_names(current_defs)
+            _scoped_available = _ts_mod.scoped_available_names(current_defs)
             if underlying_name not in _scoped_deferrable:
-                return tool_error(
-                    f"'{underlying_name}' is not available in this session. "
-                    "Use tool_search to find tools you can call."
+                if underlying_name not in _scoped_available:
+                    return tool_error(
+                        f"'{underlying_name}' is not available in this session. "
+                        "Use tool_search to find tools you can call."
+                    )
+                # Core tool routed through bridge — auto-dispatch (#1786).
+                _ts_mod.reset_search_streak(session_id)
+                return handle_function_call(
+                    function_name=underlying_name,
+                    function_args=underlying_args,
+                    task_id=task_id,
+                    tool_call_id=tool_call_id,
+                    session_id=session_id,
+                    user_task=user_task,
+                    enabled_tools=enabled_tools,
+                    skip_pre_tool_call_hook=skip_pre_tool_call_hook,
+                    skip_tool_request_middleware=skip_tool_request_middleware,
+                    skip_tool_execution_middleware=skip_tool_execution_middleware,
+                    tool_request_middleware_trace=list(_tool_middleware_trace),
+                    enabled_toolsets=enabled_toolsets,
+                    disabled_toolsets=disabled_toolsets,
                 )
             # Two-stage pre-execution validation. The stages catch different
             # things and the order matters.

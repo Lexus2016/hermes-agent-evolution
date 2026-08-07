@@ -4,6 +4,7 @@ When agents (especially subagents without terminal per #1307) try to invoke
 a core tool via tool_call, the error must guide recovery instead of a generic
 "not a deferrable tool" that triggers retry loops (57 errors/7d).
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -20,8 +21,7 @@ class TestNonDeferrableError:
     """Verify the error message is actionable for the agent (#1392)."""
 
     def _mock_core(self, tools: frozenset):
-        return patch("tools.tool_search.effective_core_tool_names",
-                      return_value=tools)
+        return patch("tools.tool_search.effective_core_tool_names", return_value=tools)
 
     def test_terminal_unavailable_shows_alternatives(self):
         with self._mock_core(frozenset({"read_file", "write_file", "patch"})):
@@ -67,34 +67,59 @@ class TestNonDeferrableError:
             with self._mock_core(frozenset()):
                 msg = _non_deferrable_error(tool_name)
             assert tool_name in msg and "not available" in msg
-            assert any(a in msg for a in (
-                "search_files", "read_file", "patch", "write_file",
-                "delegate_task", "web_search", "web_extract", "terminal",
-            )), f"No recovery tools in message for {tool_name}: {msg}"
+            assert any(
+                a in msg
+                for a in (
+                    "search_files",
+                    "read_file",
+                    "patch",
+                    "write_file",
+                    "delegate_task",
+                    "web_search",
+                    "web_extract",
+                    "terminal",
+                )
+            ), f"No recovery tools in message for {tool_name}: {msg}"
 
 
 class TestResolveUnderlyingCallError:
     """Integration: resolve_underlying_call returns the enriched error."""
 
-    def test_terminal_returns_enriched_error(self):
+    def test_terminal_unavailable_returns_enriched_error(self):
+        """When terminal is NOT in the effective core set AND NOT in
+        _hermes_core_tools (simulated restricted env), resolve_underlying_call
+        returns the enriched error."""
         cfg = ToolSearchConfig.from_raw({"enabled": "on"})
-        _name, _args, err = resolve_underlying_call(
-            {"name": "terminal", "arguments": {}}, cfg)
+        with patch(
+            "tools.tool_search.effective_core_tool_names",
+            return_value=frozenset({"read_file", "write_file"}),
+        ), patch(
+            "tools.tool_search._hermes_core_tools",
+            return_value=frozenset({"read_file", "write_file", "patch"}),
+        ):
+            _name, _args, err = resolve_underlying_call(
+                {"name": "terminal", "arguments": {}}, cfg
+            )
         assert err is not None
         # Must NOT be the old generic-only message.
-        assert "tool_search" in err or "not available" in err or \
-               "Call it directly" in err, f"Not enriched: {err}"
+        assert (
+            "tool_search" in err or "not available" in err or "Call it directly" in err
+        ), f"Not enriched: {err}"
 
     def test_unknown_tool_returns_error(self):
         cfg = ToolSearchConfig.from_raw({"enabled": "on"})
         _name, _args, err = resolve_underlying_call(
-            {"name": "xx_not_a_tool", "arguments": {}}, cfg)
+            {"name": "xx_not_a_tool", "arguments": {}}, cfg
+        )
         assert err is not None and "not a deferrable" in err
 
-    def test_available_core_tool_mentions_direct_call(self):
+    def test_available_core_tool_auto_dispatched(self):
+        """#1786 — a core tool in the effective core set (e.g. read_file)
+        is auto-dispatched through the bridge, not returned as an error."""
         cfg = ToolSearchConfig.from_raw({"enabled": "on"})
-        _name, _args, err = resolve_underlying_call(
-            {"name": "read_file", "arguments": {}}, cfg)
-        assert err is not None
-        assert "call it directly" in err.lower() or "Call it directly" in err or \
-               "tool_search" in err, f"Not actionable: {err}"
+        name, args, err = resolve_underlying_call(
+            {"name": "read_file", "arguments": {}}, cfg
+        )
+        assert err is None, f"read_file should be auto-dispatched, got error: {err}"
+        assert name == "read_file"
+        assert args == {}

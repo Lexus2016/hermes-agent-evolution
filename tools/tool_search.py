@@ -1435,7 +1435,22 @@ def scoped_deferrable_names(
     return frozenset(names)
 
 
-# Map JSON Schema type strings to Python types for validation. ``number``
+def scoped_available_names(
+    tool_defs: List[Dict[str, Any]],
+    config: Optional[ToolSearchConfig] = None,
+) -> frozenset[str]:
+    """Return ALL tool names in ``tool_defs``, including non-deferrable core
+    tools (#1786).  Restricted sessions still reject tools they lack because
+    those tools never appear in ``tool_defs``."""
+    names: set[str] = set()
+    for td in tool_defs:
+        name = (td.get("function") or {}).get("name", "")
+        if name:
+            names.add(name)
+    return frozenset(names)
+
+
+# Map JSON Schema type strings to Python types for validation.  ``number``
 # accepts both int and float (JSON ints are a subset of floats).
 _SCHEMA_PY_TYPES: Dict[str, Tuple[type, ...]] = {
     "string": (str,),
@@ -1503,6 +1518,8 @@ def _check_type(value: Any, type_str: str) -> bool:
     if py_types is None:
         return True  # unknown type — don't block dispatch
     return isinstance(value, py_types)
+
+
 def validate_deferred_call_args(name: str, args: Dict[str, Any]) -> Optional[str]:
     """Probe-validate ``tool_call`` arguments against the deferred tool's schema.
 
@@ -1606,6 +1623,14 @@ def resolve_underlying_call(
     if not isinstance(raw_args, dict):
         return None, {}, "tool_call 'arguments' must be an object"
     if not is_deferrable_tool_name(name, config):
+        # #1786 — when the model routes a core tool (read_file, search_files,
+        # terminal, etc.) through the tool_call bridge, the error message
+        # tells it to "call directly" but the model ignores the guidance and
+        # retries the same mis-routed call (329 failures/273 sessions).  If
+        # the tool IS in the effective core set, auto-dispatch it instead of
+        # erroring — the call is valid, it just used the wrong mechanism.
+        if name in effective_core_tool_names(config):
+            return name, raw_args, None
         return None, {}, _non_deferrable_error(name, config)
     return name, raw_args, None
 
@@ -1717,6 +1742,7 @@ __all__ = [
     "resolve_underlying_call",
     "validate_tool_args",
     "scoped_deferrable_names",
+    "scoped_available_names",
     "get_previous_queries",
     "note_tool_search",
     "reset_search_streak",

@@ -355,18 +355,21 @@ class TestCoreToolsetDeferral:
         )
         assert "parameters" in described
 
-    def test_default_config_keeps_native_tool_direct(self):
-        """The inverse of the round-trip: with no opt-in, the core tool stays
-        direct and the bridge refuses to resolve it (use it directly)."""
+    def test_default_config_auto_dispatches_core_tool(self):
+        """#1786 — with no opt-in, a core tool stays direct and the bridge
+        auto-dispatches it (returns the name + args, no error) instead of
+        forcing the model to retry with a 'not a deferrable' error."""
         from tools.tool_search import ToolSearchConfig, resolve_underlying_call
 
         cfg = ToolSearchConfig.from_raw({"enabled": "on"})
-        _name, _args, err = resolve_underlying_call(
+        name, args, err = resolve_underlying_call(
             {"name": self._DEMO_TOOL, "arguments": {}},
             cfg,
         )
-        assert err is not None
-        assert "not a deferrable" in err
+        # Core tools in the effective core set are now auto-dispatched
+        # through the bridge instead of returning an error (#1786).
+        assert err is None, f"Expected auto-dispatch, got error: {err}"
+        assert name == self._DEMO_TOOL
 
     def test_naming_non_core_toolset_is_a_noop(self):
         """Opting in a toolset with no core members changes nothing — those
@@ -889,17 +892,20 @@ class TestRegression_OpenClawCron84141:
         # deferrable tools to put behind them.
         assert "terminal" in names
 
-    def test_unwrap_rejects_core_tool_attempt(self):
-        """Even if the model tries to invoke a core tool through tool_call,
-        we reject the call and tell the model to use it directly."""
+    def test_unwrap_auto_dispatches_core_tool(self):
+        """#1786 — when the model invokes a core tool through tool_call, we
+        auto-dispatch it instead of rejecting with an error. The tool is
+        available; the model just used the wrong dispatch mechanism."""
         from tools.tool_search import resolve_underlying_call
 
-        _, _, err = resolve_underlying_call({
+        name, args, err = resolve_underlying_call({
             "name": "terminal",
             "arguments": {"command": "echo hi"},
         })
-        assert err is not None
-        assert "not a deferrable" in err
+        # Core tools in the effective core set are auto-dispatched, not rejected.
+        assert err is None, f"Expected auto-dispatch, got error: {err}"
+        assert name == "terminal"
+        assert args == {"command": "echo hi"}
 
 
 class TestRegression_ToolsetScoping:

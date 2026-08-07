@@ -361,6 +361,44 @@ def _tool_search_scoped_names(agent) -> frozenset:
     return names
 
 
+def _tool_search_available_names(agent) -> frozenset[str]:
+    """Return ALL tool names in the session's tool_defs, including core tools
+    (#1786).  Used by the ``tool_call`` unwrap to auto-dispatch core tools."""
+    try:
+        import model_tools
+        from tools import tool_search as _ts
+        from tools.registry import registry as _registry
+    except Exception:
+        return frozenset()
+
+    enabled = getattr(agent, "enabled_toolsets", None)
+    disabled = getattr(agent, "disabled_toolsets", None)
+    cache_key = (
+        getattr(_registry, "_generation", 0),
+        frozenset(enabled) if enabled is not None else None,
+        frozenset(disabled) if disabled is not None else None,
+    )
+    cache_attr = "_tool_search_available_cache"
+    cached = getattr(agent, cache_attr, None)
+    if cached is not None and cached[0] == cache_key:
+        return cached[1]
+    try:
+        scoped_defs = model_tools.get_tool_definitions(
+            enabled_toolsets=enabled,
+            disabled_toolsets=disabled,
+            quiet_mode=True,
+            skip_tool_search_assembly=True,
+        ) or []
+        names = _ts.scoped_available_names(scoped_defs)
+    except Exception:
+        names = frozenset()
+    try:
+        setattr(agent, cache_attr, (cache_key, names))
+    except Exception:
+        pass
+    return names
+
+
 @dataclass
 class _ManagedToolResult:
     result: Any
@@ -775,7 +813,8 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
             if function_name == _ts.TOOL_CALL_NAME:
                 _underlying, _underlying_args, _err = _ts.resolve_underlying_call(function_args)
                 if not _err and _underlying:
-                    if _underlying in _tool_search_scoped_names(agent):
+                    _scoped = _tool_search_scoped_names(agent)
+                    if _underlying in _scoped:
                         # Probe-validate before unwrapping (ironclaw#5149):
                         # missing required args return the parameter schema
                         # instead of dispatching into an opaque failure.
@@ -785,6 +824,15 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
                         else:
                             function_name = _underlying
                             function_args = _underlying_args
+                    elif _underlying in _tool_search_available_names(agent):
+                        # #1786 — core tool routed through the bridge.
+                        # resolve_underlying_call already confirmed it is in
+                        # the effective core set, and scoped_available_names
+                        # confirms it is in this session's tool_defs.  Unwrap
+                        # and dispatch directly — the tool is available, the
+                        # model just used the wrong dispatch mechanism.
+                        function_name = _underlying
+                        function_args = _underlying_args
                     else:
                         _ts_scope_block = (
                             f"'{_underlying}' is not available in this session. "
