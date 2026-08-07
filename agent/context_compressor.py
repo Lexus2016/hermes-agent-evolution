@@ -140,6 +140,72 @@ COMPRESSED_SUMMARY_METADATA_KEY = "_compressed_summary"
 COMPRESSED_SUMMARY_HAS_USER_TURN_KEY = "_compressed_summary_has_user_turn"
 _DB_PERSISTED_MARKER = "_db_persisted"
 
+# ---------------------------------------------------------------------------
+# Pinned-constraint mechanism (#1774 / Governance Decay, arXiv:2606.22528)
+#
+# A *pinned constraint* is a governance / safety / deployment-specific rule
+# that MUST survive every context-window rotation.  Without explicit pinning,
+# the summarizer silently drops soft rules 30-59 % of the time (Governance
+# Decay).  A message is pinned when it carries ``_pinned_constraint = True``
+# metadata OR its content contains the ``[PINNED_CONSTRAINT]`` text marker.
+#
+# Slice A (this block) defines the contract + parser only.  Slice B (#1773)
+# consumes the extracted set to re-inject anything the summarizer dropped.
+# ---------------------------------------------------------------------------
+PINNED_CONSTRAINT_METADATA_KEY = "_pinned_constraint"
+PINNED_CONSTRAINT_MARKER = "[PINNED_CONSTRAINT]"
+_PINNED_CONSTRAINT_RE = re.compile(
+    re.escape(PINNED_CONSTRAINT_MARKER)
+    + r"\s*(.*?)"                       # capture the constraint text
+    + r"\s*\[/PINNED_CONSTRAINT\]",     # closing tag
+    re.DOTALL,
+)
+
+
+def _is_pinned_constraint_message(msg: Dict[str, Any]) -> bool:
+    """Return True when *msg* carries the pinned-constraint signal."""
+    if not isinstance(msg, dict):
+        return False
+    if msg.get(PINNED_CONSTRAINT_METADATA_KEY):
+        return True
+    content = msg.get("content")
+    if isinstance(content, str) and PINNED_CONSTRAINT_MARKER in content:
+        return True
+    return False
+
+
+def _extract_pinned_constraints(messages: List[Dict[str, Any]]) -> list[str]:
+    """Extract the ordered set of pinned-constraint texts from *messages*.
+
+    Works for both pin signals: the ``_pinned_constraint`` metadata flag
+    (the whole message content becomes the constraint) and the inline
+    ``[PINNED_CONSTRAINT] … [/PINNED_CONSTRAINT]`` text marker (only the
+    tagged span is captured).  Returns de-duplicated, order-of-first-appearance.
+    """
+    constraints: list[str] = []
+    seen: set[str] = set()
+
+    def _add(text: str) -> None:
+        text = (text or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            constraints.append(text)
+
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        # Metadata-flagged messages contribute their full content.
+        if msg.get(PINNED_CONSTRAINT_METADATA_KEY):
+            if isinstance(content, str) and content.strip():
+                _add(content)
+            continue
+        # Inline text markers contribute only the tagged spans.
+        if isinstance(content, str):
+            for m in _PINNED_CONSTRAINT_RE.finditer(content):
+                _add(m.group(1))
+    return constraints
+
 _NO_USER_TASK_SENTINEL = "None. This session contains no user-authored turns."
 COMPRESSION_CONTINUATION_USER_CONTENT = (
     "Continue from the compressed conversation context above. "
