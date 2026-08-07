@@ -952,7 +952,6 @@ def _empty_old_string_error(path: str, task_id: str) -> str:
     return tool_error(msg)
 
 
-
 # Per-task bounds for the containers inside each _read_tracker[task_id].
 # A CLI session uses one stable task_id for its lifetime; without these
 # caps, a 10k-read session would accumulate ~1.5MB of dict/set state that
@@ -2853,22 +2852,25 @@ def _handle_search_files(args, **kw):
         and _looks_like_glob(pattern)
         and not _is_valid_regex(pattern)
     ):
-        # If the glob contains a dot extension (``*.py``, ``*config*``), the
-        # model most likely wanted to *find files by name*, not search file
-        # contents.  Auto-redirect to file search — that is the correct tool
-        # for the job and avoids the regex parse error entirely.
-        return json.dumps({
-            "error": (
-                f"Pattern {pattern!r} looks like a shell glob (wildcards), not a regex. "
-                f"In content-search mode the pattern is treated as a regular expression, "
-                f"so {pattern!r} causes a regex parse error.\n\n"
-                f"To find files by name, re-run with target='files':\n"
-                f"  search_files(pattern={pattern!r}, target='files')\n\n"
-                f"To search file contents but only in files matching this glob, move it to "
-                f"file_glob and use a regex pattern:\n"
-                f"  search_files(pattern='<your regex>', file_glob={pattern!r})"
-            ),
-        })
+        # The glob contains a dot extension (``*.py``, ``*config*``), so
+        # the model most likely wanted to *find files by name*, not search
+        # file contents.  Auto-redirect to file search — that is the correct
+        # tool for the job and avoids the regex parse error entirely (#1788).
+        # Previously this returned an error string, causing 227 parse-error
+        # failures across 300 sessions because the model ignored the guidance
+        # and kept retrying with the same glob.  Dispatching directly
+        # eliminates the failure entirely.
+        return search_tool(
+            pattern=pattern,
+            target="files",
+            path=args.get("path", "."),
+            file_glob=args.get("file_glob"),
+            limit=args.get("limit", 50),
+            offset=args.get("offset", 0),
+            output_mode=args.get("output_mode", "content"),
+            context=args.get("context", 0),
+            task_id=tid,
+        )
 
     # #1588 — when a pattern that does NOT look like a glob still fails to
     # compile as a regex, ripgrep returns a bare parse error with no guidance,

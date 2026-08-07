@@ -32,7 +32,9 @@ class TestLooksLikeGlob:
 
     def test_plain_regex_is_not_glob(self):
         assert _looks_like_glob("def foo") is False
-        assert _looks_like_glob("search.*") is False  # . is a regex metachar, not a glob
+        assert (
+            _looks_like_glob("search.*") is False
+        )  # . is a regex metachar, not a glob
 
     def test_empty_pattern(self):
         assert _looks_like_glob("") is False
@@ -77,15 +79,18 @@ class TestIsValidRegexShortCircuit:
     the introspection window).
     """
 
-    @pytest.mark.parametrize("pattern", [
-        # The heuristic sees ``*`` preceded by ``s`` (it does not track the
-        # ``\s`` escape span) but the pattern compiles and is a legal regex.
-        r'"verdict":\s*null',
-        r'"head":\s*\{',
-        r'def [a-z_]+\(self.*\).*:\s*$',
-        r'"number":\s*\d{4}',
-        r'"verdict":\s*"consumed"',
-    ])
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            # The heuristic sees ``*`` preceded by ``s`` (it does not track the
+            # ``\s`` escape span) but the pattern compiles and is a legal regex.
+            r'"verdict":\s*null',
+            r'"head":\s*\{',
+            r"def [a-z_]+\(self.*\).*:\s*$",
+            r'"number":\s*\d{4}',
+            r'"verdict":\s*"consumed"',
+        ],
+    )
     def test_false_positive_regex_passes_through(self, pattern):
         """Real-world regexes the heuristic wrongly flagged as globs.
 
@@ -108,38 +113,58 @@ class TestIsValidRegexShortCircuit:
         except (json.JSONDecodeError, TypeError):
             pass  # non-JSON -> went through to search_tool, which is correct
 
-    @pytest.mark.parametrize("pattern", [
-        "*.py",
-        "*config*",
-        "**/*.py",
-        "*.json",
-    ])
-    def test_uncompilable_glob_still_redirects(self, pattern):
-        """Patterns that fail ``re.compile`` (real globs) still redirect."""
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            "*.py",
+            "*config*",
+            "**/*.py",
+            "*.json",
+        ],
+    )
+    def test_uncompilable_glob_auto_redirects_to_file_search(self, pattern):
+        """Patterns that fail ``re.compile`` (real globs) are auto-redirected
+        to file-search mode and dispatched directly (#1788), not returned as
+        an error string."""
         result = _handle_search_files(
             {"pattern": pattern, "target": "content"},
             task_id="test",
         )
-        data = json.loads(result)
-        assert "error" in data, f"{pattern!r} should trigger the redirect error"
-        assert "glob" in data["error"].lower()
+        # The result is whatever search_tool returns (file list or an
+        # environment error), NOT a glob-redirect error.  An "error" key
+        # may still appear (e.g. path not found) but must not mention "glob".
+        try:
+            data = json.loads(result)
+            if "error" in data:
+                assert "glob" not in data["error"].lower(), (
+                    f"{pattern!r} should be auto-dispatched to file search, "
+                    f"not returned as a glob error"
+                )
+        except (json.JSONDecodeError, TypeError):
+            pass  # non-JSON -> went through to search_tool, which is correct
 
 
 class TestHandleSearchFilesGlobRedirect:
     """Integration tests for the _handle_search_files handler redirect."""
 
-    def test_glob_in_content_mode_returns_redirect_error(self):
-        """A glob pattern in content mode returns a helpful error, not a parse error."""
+    def test_glob_in_content_mode_auto_redirects_to_file_search(self):
+        """A glob pattern in content mode is auto-redirected to file search,
+        not returned as an error (#1788 — eliminates 227 parse-error failures)."""
         result = _handle_search_files(
             {"pattern": "*.py", "target": "content"},
             task_id="test",
         )
-        data = json.loads(result)
-        assert "error" in data
-        assert "glob" in data["error"].lower()
-        assert "target='files'" in data["error"]
-        # The error should suggest the exact fix
-        assert "file_glob" in data["error"]
+        # The result should be from search_tool (file list or environment
+        # error), NOT a glob-redirect error message.
+        try:
+            data = json.loads(result)
+            if "error" in data:
+                assert "glob" not in data["error"].lower(), (
+                    "Glob patterns should be auto-dispatched to file search, "
+                    "not returned as a glob redirect error"
+                )
+        except (json.JSONDecodeError, TypeError):
+            pass  # non-JSON -> went through to search_tool, correct
 
     def test_glob_in_files_mode_passes_through(self):
         """A glob pattern in files mode should NOT be redirected (it's the correct usage)."""
@@ -156,8 +181,9 @@ class TestHandleSearchFilesGlobRedirect:
         try:
             data = json.loads(result)
             if "error" in data:
-                assert "glob" not in data["error"].lower(), \
+                assert "glob" not in data["error"].lower(), (
                     "File-search mode should not trigger glob redirect"
+                )
         except (json.JSONDecodeError, TypeError):
             pass  # Non-JSON result is fine — means it went through to search_tool
 
@@ -170,8 +196,9 @@ class TestHandleSearchFilesGlobRedirect:
         try:
             data = json.loads(result)
             if "error" in data:
-                assert "glob" not in data["error"].lower(), \
+                assert "glob" not in data["error"].lower(), (
                     "Valid regex should not trigger glob redirect"
+                )
         except (json.JSONDecodeError, TypeError):
             pass
 
@@ -184,20 +211,30 @@ class TestHandleSearchFilesGlobRedirect:
         try:
             data = json.loads(result)
             if "error" in data:
-                assert "glob" not in data["error"].lower(), \
+                assert "glob" not in data["error"].lower(), (
                     "Pattern with file_glob set should not trigger glob redirect"
+                )
         except (json.JSONDecodeError, TypeError):
             pass
 
-    def test_grep_alias_triggers_redirect(self):
-        """The 'grep' alias for 'content' should also trigger the redirect."""
+    def test_grep_alias_auto_redirects_to_file_search(self):
+        """The 'grep' alias for 'content' should also trigger the auto-redirect
+        to file search (#1788)."""
         result = _handle_search_files(
             {"pattern": "*.json", "target": "grep"},
             task_id="test",
         )
-        data = json.loads(result)
-        assert "error" in data
-        assert "glob" in data["error"].lower()
+        # Should be dispatched to search_tool (file list or environment
+        # error), NOT a glob-redirect error.
+        try:
+            data = json.loads(result)
+            if "error" in data:
+                assert "glob" not in data["error"].lower(), (
+                    "Grep alias with glob pattern should be auto-dispatched "
+                    "to file search, not returned as a glob error"
+                )
+        except (json.JSONDecodeError, TypeError):
+            pass
 
 
 class TestInvalidRegexEnrichment:
