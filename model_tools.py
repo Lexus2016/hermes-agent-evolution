@@ -871,8 +871,25 @@ def coerce_tool_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         # likely intended path). Only fires for string-typed params where
         # ``_coerce_value`` is a no-op — the array-typed branch above
         # already handles JSON arrays on array-typed fields.
+        #
+        # #1681 regression fix: read_file's ``path`` param uses a UNION
+        # type ``["string", "array"]`` for batch-read support. The guard
+        # above checked ``expected == "string"`` only, so it NEVER fired
+        # for read_file — the stringified array sailed through as a
+        # literal string, producing the file-not-found spiral the guard
+        # was meant to prevent. We now also fire when the schema type is
+        # a list containing ``"string"`` (union type). When the union also
+        # includes ``"array"``, we parse the stringified array into a
+        # native list (the schema accepts it, and read_file's batch path
+        # handles native lists) instead of extracting only the first
+        # element — preserving the model's intent to read multiple files.
+        _expected_types = (
+            {expected} if isinstance(expected, str) else set(expected or [])
+        )
+        _accepts_string = "string" in _expected_types
+        _accepts_array = "array" in _expected_types
         if (
-            expected == "string"
+            _accepts_string
             and isinstance(value, str)
             and (
                 value.lstrip().startswith("[")
@@ -880,12 +897,28 @@ def coerce_tool_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 # (``"src/a.py, src/b.py"``, no brackets). The helper's
                 # path-like guards reject non-path strings (sentences,
                 # bare words), so widening the trigger is safe.
-                or (
-                    "," in value
-                    and _is_path_like_param(key)
-                )
+                or ("," in value and _is_path_like_param(key))
             )
         ):
+            # When the schema also accepts ``"array"``, parse the
+            # stringified array into a native list so read_file's batch
+            # path handles it — the model intended a multi-file read.
+            if _accepts_array:
+                parsed_list = _parse_stringified_array_to_list(value)
+                if parsed_list is not None:
+                    logger.info(
+                        "coerce_tool_args: %s.%s received a stringified "
+                        "array string (%.80s...) for a string|array union "
+                        "param — parsing into native list of %d items.",
+                        tool_name,
+                        key,
+                        value,
+                        len(parsed_list),
+                    )
+                    args[key] = parsed_list
+                    continue
+            # Schema is string-only (or parse failed) — extract the
+            # first element as the most likely intended single path.
             extracted = _extract_first_from_stringified_array(value)
             if extracted is not None:
                 logger.info(
@@ -1069,6 +1102,61 @@ def _extract_first_from_stringified_array(value: str) -> Optional[str]:
             value,
         )
         return first_token
+    return None
+
+
+def _parse_stringified_array_to_list(value: str) -> Optional[List[str]]:
+    """Parse a stringified JSON array or comma-separated path list into a
+    native ``list[str]`` (#1681 regression fix).
+
+    Used when the schema type is a union like ``["string", "array"]``
+    (e.g. ``read_file``'s ``path`` param) and the model emitted a
+    stringified array. Unlike :func:`_extract_first_from_stringified_array`
+    (which takes only the first element for pure-string params), this
+    preserves ALL elements so the tool's batch-read path can handle them.
+
+    Returns a list of string paths, or ``None`` when the value is not a
+    parseable array of path-like strings.
+    """
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    # ── JSON array path ──────────────────────────────────────────────
+    try:
+        parsed = json.loads(stripped)
+    except (ValueError, TypeError):
+        parsed = None
+    if isinstance(parsed, list) and parsed:
+        # Only unwrap arrays of strings — mixed types on a path param are
+        # a different error class.
+        if all(isinstance(item, str) for item in parsed):
+            return parsed
+        return None
+    # ── Non-JSON comma-separated list fallback ────────────────────────
+    # Same heuristic as _extract_first_from_stringified_array but returns
+    # ALL path-like tokens, not just the first.
+    _comma_list = re.match(
+        r"^[\[\s]*(?P<first>[^,\[\]\s][^,]*?)"
+        r"\s*,\s*(?P<rest>[^\]].*?)[\]\s]*$",
+        stripped,
+        re.DOTALL,
+    )
+    if not _comma_list:
+        return None
+    first_token = _comma_list.group("first").strip()
+    rest = _comma_list.group("rest").strip()
+    # Stricter than _looks_like_path: require an actual path separator
+    # (slash, dot-extension, or ..) — not just len >= 3 — so non-path
+    # strings like "hello, world" are NOT split into a path list.
+    if not (_PATH_SEPARATOR_RE.search(first_token) and _PATH_SEPARATOR_RE.search(rest)):
+        return None
+    # Split the full string into individual path tokens.
+    inner = stripped.strip("[] \n\t")
+    tokens = [t.strip() for t in inner.split(",")]
+    # Keep only non-empty tokens with a path separator.
+    path_tokens = [t for t in tokens if t and _PATH_SEPARATOR_RE.search(t)]
+    if len(path_tokens) >= 2:
+        return path_tokens
     return None
 
 

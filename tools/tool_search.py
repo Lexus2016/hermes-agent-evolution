@@ -950,6 +950,10 @@ def bridge_tool_schemas(
         "Invoke a deferred tool by name with the given arguments. Argument shape "
         f"matches the tool's schema (see `{TOOL_DESCRIBE_NAME}`). Policy, hooks, "
         "and approvals run exactly as for any directly-listed tool."
+        "\n\nIMPORTANT: tool_call is ONLY for deferred tools found via "
+        "tool_search. Core tools that are already in your tools list "
+        "(read_file, write_file, patch, search_files, terminal, etc.) must "
+        "be called directly — do NOT route them through tool_call."
     )
 
     return [
@@ -1675,13 +1679,23 @@ def _non_deferrable_error(name: str, config: Optional[ToolSearchConfig] = None) 
         )
 
     # Case 1: any other non-deferrable tool (visible core tool, bridge tool,
-    # or unresolvable name).  Tell the agent to call it directly if visible
-    # or check spelling.
+    # or unresolvable name).  If the tool is a known core tool that is simply
+    # not in _CORE_TOOL_ALTERNATIVES (e.g. read_file, search_files), give the
+    # same enriched "call directly" message as Case 2 (#1786).
+    effective = effective_core_tool_names(config)
+    if name in effective:
+        return (
+            f"'{name}' is a core tool, not a deferrable tool. "
+            f"Call '{name}' directly — it is already in your tools list. "
+            "Do not use tool_call for core tools."
+        )
+    # Genuinely unknown / misspelled tool — name it explicitly so the agent
+    # can correct its next attempt instead of retrying blindly.
     return (
-        f"'{name}' is not a deferrable tool. If it appears in the model-facing tools "
-        "list already, call it directly instead of via tool_call. "
-        "If it is not in your tools list, check the spelling or use tool_search "
-        "to find available deferred tools."
+        f"'{name}' is not a deferrable tool. If '{name}' appears in the "
+        "model-facing tools list already, call it directly instead of via "
+        "tool_call. If it is not in your tools list, check the spelling or "
+        "use tool_search to find available deferred tools."
     )
 
 
