@@ -179,4 +179,20 @@ def default_registry() -> MemoryDurabilityRegistry:
     return _DEFAULT_REGISTRY
 
 
+def durable_run(
+    registry: MemoryDurabilityRegistry,
+    backend_name: Optional[str],
+    fn: Callable[[], Any],
+    checkpoint_id: Optional[str] = None,
+) -> Any:
+    """Resolve ``backend_name`` from ``registry`` and run ``fn`` through it.
+
+    When ``backend_name`` is unset/unknown the no-op default is used, so the
+    callable executes immediately with zero overhead — callers that have not
+    opted in behave identically. This is the convenience entry point Slice C
+    wires into the evolution-funnel stage boundaries.
+    """
+    return registry.resolve(backend_name).run(fn, checkpoint_id=checkpoint_id)
+
+
 _DEFAULT_REGISTRY = MemoryDurabilityRegistry()
