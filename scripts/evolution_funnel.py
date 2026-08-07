@@ -25,7 +25,7 @@ import subprocess
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +46,24 @@ def _counts_by(items: list, key: str) -> Dict[str, int]:
     return dict(c)
 
 
-def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
+def compute_funnel(
+    evolution_dir: Path,
+    date: str,
+    *,
+    durability_registry: Any = None,
+    durability_backend: Optional[str] = None,
+) -> Dict[str, Any]:
     """Build the funnel record for one date from whatever stage reports exist.
 
     Every field defaults to 0 / {} so a missing stage report never crashes the
     metric — it just shows that stage produced nothing recorded that day.
+
+    When ``durability_registry`` is provided with a non-no-op
+    ``durability_backend``, each stage-report load is checkpointed via
+    ``durable_run`` so a mid-funnel crash resumes from the last completed stage
+    checkpoint instead of re-reading every report from scratch. When the
+    registry is ``None`` (the default) behavior is byte-identical to the
+    non-durable path — no opt-in, no change.
     """
 
     # Stage reports are normally dicts, but some stages write a bare LIST (e.g.
@@ -61,10 +74,31 @@ def compute_funnel(evolution_dir: Path, date: str) -> Dict[str, Any]:
     def _as_dict(x: Any) -> Dict[str, Any]:
         return x if isinstance(x, dict) else {}
 
-    issues_raw = _load_json(issues_path := evolution_dir / "issues" / f"{date}.json")
-    analysis = _as_dict(_load_json(evolution_dir / "analysis" / f"{date}.json"))
-    integration = _as_dict(_load_json(evolution_dir / "integration" / f"{date}.json"))
-    introspection_raw = _load_json(evolution_dir / "introspection" / f"{date}.json")
+    def _stage_load(stage_name: str, path: Path) -> Any:
+        """Load a stage report, checkpointing it when durability is opted in."""
+        if durability_registry is not None:
+            from agent.durability import durable_run
+
+            return durable_run(
+                durability_registry,
+                durability_backend,
+                lambda: _load_json(path),
+                checkpoint_id=f"funnel-{date}-{stage_name}",
+            )
+        return _load_json(path)
+
+    issues_raw = _stage_load(
+        "issues", issues_path := evolution_dir / "issues" / f"{date}.json"
+    )
+    analysis = _as_dict(
+        _stage_load("analysis", evolution_dir / "analysis" / f"{date}.json")
+    )
+    integration = _as_dict(
+        _stage_load("integration", evolution_dir / "integration" / f"{date}.json")
+    )
+    introspection_raw = _stage_load(
+        "introspection", evolution_dir / "introspection" / f"{date}.json"
+    )
     issues = _as_dict(issues_raw)
 
     selected = analysis.get("selected_for_implementation") or []
@@ -463,7 +497,30 @@ def main(argv: list[str]) -> int:
             )
             return 1
 
-    record = compute_funnel(evolution_dir, date)
+    # ── Durability opt-in (Slice C #1775) ──────────────────────────────────
+    # When EVOLUTION_DURABILITY_BACKEND is set (e.g. "file"), the funnel
+    # checkpoints each stage-report load so a mid-funnel crash resumes from
+    # the last completed stage instead of re-reading every report. When unset
+    # or "noop", behavior is byte-identical to the non-durable path.
+    _durability_backend_name = os.environ.get(
+        "EVOLUTION_DURABILITY_BACKEND", ""
+    ).strip()
+    _durability_registry = None
+    if _durability_backend_name and _durability_backend_name != "noop":
+        try:
+            from agent.durability import FileDurabilityBackend, MemoryDurabilityRegistry
+
+            _durability_registry = MemoryDurabilityRegistry()
+            _durability_registry.register("file", FileDurabilityBackend())
+        except Exception:
+            _durability_registry = None  # fail-open: non-durable path
+
+    record = compute_funnel(
+        evolution_dir,
+        date,
+        durability_registry=_durability_registry,
+        durability_backend=_durability_backend_name or None,
+    )
 
     # Replace the integration stage's self-reported merge count with GitHub
     # truth when available: this counts owner-reviewed merges the self-report
