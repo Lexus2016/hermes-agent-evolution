@@ -16,7 +16,9 @@ changes until a skill opts in.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional, Protocol, runtime_checkable
 
@@ -111,3 +113,48 @@ def default_registry() -> MemoryDurabilityRegistry:
 
 
 _DEFAULT_REGISTRY = MemoryDurabilityRegistry()
+
+
+@dataclass
+class DiskDurability:
+    """File-backed backend: checkpoints results to ``checkpoint_dir`` on disk.
+
+    ``run`` stores the result of ``fn`` under ``<checkpoint_dir>/<id>.json`` so
+    a later ``resume_from`` can replay it after an interruption without
+    re-executing the callable. This is the concrete backend used by Slice B's
+    E2E proof (wiring a skill to durable execution).
+    """
+
+    checkpoint_dir: str
+    name: str = "disk"
+
+    def _path(self, checkpoint_id: str) -> str:
+        return os.path.join(self.checkpoint_dir, f"{checkpoint_id}.json")
+
+    def run(self, fn, checkpoint_id=None):  # noqa: ANN001
+        if checkpoint_id is not None and os.path.exists(self._path(checkpoint_id)):
+            return self.resume_from(checkpoint_id)
+        result = fn()
+        if checkpoint_id is not None:
+            os.makedirs(self.checkpoint_dir, exist_ok=True)
+            with open(self._path(checkpoint_id), "w", encoding="utf-8") as fh:
+                json.dump(result, fh)
+        return result
+
+    def resume_from(self, checkpoint_id):
+        """Return the recorded result for ``checkpoint_id`` or ``None`` if unknown."""
+        path = self._path(checkpoint_id)
+        if not os.path.exists(path):
+            return None
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+
+
+def durable_run(registry, backend_name, fn, checkpoint_id=None):  # noqa: ANN001
+    """Opt a callable into durable execution via the named backend.
+
+    Resolves ``backend_name`` from ``registry`` (falling back to the no-op
+    default), runs ``fn`` through it, and returns the result. This is the
+    single opt-in helper skills call to make a step checkpointed/resumable.
+    """
+    return registry.resolve(backend_name).run(fn, checkpoint_id=checkpoint_id)
