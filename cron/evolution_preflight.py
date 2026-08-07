@@ -174,7 +174,13 @@ def _preflight_enabled(cfg: Optional[Any] = None) -> bool:
 def find_latest_digest(
     stage: str, hermes_home: Optional[Path] = None
 ) -> Optional[Path]:
-    """Return the most recent digest file for an evolution stage, or None."""
+    """Return the most recent digest file for an evolution stage, or None.
+
+    Digest filenames follow a sortable date-encoded convention
+    (``YYYY-MM-DD.json`` / ``.md``, optionally with ``-pass<N>`` / ``-tick<N>``
+    suffixes).  Sorting by filename instead of ``st_mtime`` avoids flaky
+    results when files are touched or copied after creation (#1767).
+    """
     if stage not in _EVOLUTION_STAGES:
         return None
     ext = _EVOLUTION_STAGES[stage]
@@ -183,7 +189,7 @@ def find_latest_digest(
         return None
     candidates = sorted(
         (p for p in stage_dir.iterdir() if p.is_file() and p.suffix == ext),
-        key=lambda p: p.stat().st_mtime,
+        key=lambda p: p.name,
         reverse=True,
     )
     return candidates[0] if candidates else None
