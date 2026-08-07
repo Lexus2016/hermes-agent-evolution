@@ -1,7 +1,11 @@
 """Tests for agent/durability.py — the composable Durability capability."""
 
+import json
+from pathlib import Path
+
 from agent.durability import (
     Durability,
+    FileDurabilityBackend,
     MemoryDurabilityRegistry,
     NoOpDurability,
 )
@@ -84,3 +88,86 @@ def test_checkpoint_resume_roundtrip():
     }
     assert backend.resume_from("cp-1") == {"step": "done"}
     assert _RecordingBackend().resume_from("cp-9") is None
+
+
+# ── FileDurabilityBackend — real filesystem checkpoint/resume (Slice B #1762) ──
+
+
+def test_file_backend_checkpoint_and_resume(tmp_path: Path):
+    """E2E: FileDurabilityBackend persists to disk and resumes from checkpoint."""
+    backend = FileDurabilityBackend(base_dir=tmp_path)
+    call_count = 0
+
+    def costly_computation():
+        nonlocal call_count
+        call_count += 1
+        return {"findings": ["a", "b"], "cycles": 3}
+
+    # First run: executes fn, writes checkpoint
+    result = backend.run(costly_computation, checkpoint_id="research-2026-08-07")
+    assert result == {"findings": ["a", "b"], "cycles": 3}
+    assert call_count == 1  # executed once
+
+    # Checkpoint file exists on disk (real filesystem, not mock)
+    cp_file = tmp_path / "research-2026-08-07.json"
+    assert cp_file.exists()
+    assert json.loads(cp_file.read_text())["findings"] == ["a", "b"]
+
+    # Resume: returns checkpointed result WITHOUT re-executing fn
+    resumed = backend.resume_from("research-2026-08-07")
+    assert resumed == {"findings": ["a", "b"], "cycles": 3}
+    assert call_count == 1  # still 1 — no re-execution
+
+    # Second run with same checkpoint_id: idempotent re-entry, skips fn
+    result2 = backend.run(costly_computation, checkpoint_id="research-2026-08-07")
+    assert result2 == {"findings": ["a", "b"], "cycles": 3}
+    assert call_count == 1  # NOT incremented — checkpoint replayed
+
+
+def test_file_backend_resume_unknown_returns_none(tmp_path: Path):
+    """resume_from a non-existent checkpoint returns None."""
+    backend = FileDurabilityBackend(base_dir=tmp_path)
+    assert backend.resume_from("does-not-exist") is None
+
+
+def test_file_backend_no_checkpoint_id_executes_directly(tmp_path: Path):
+    """Without a checkpoint_id, fn runs directly (no persistence)."""
+    backend = FileDurabilityBackend(base_dir=tmp_path)
+    calls = []
+    result = backend.run(lambda: calls.append(1) or "value")
+    assert result == "value"
+    assert calls == [1]
+    assert not (tmp_path / "None.json").exists()
+
+
+def test_file_backend_corrupted_checkpoint_recomputes(tmp_path: Path):
+    """A corrupted checkpoint file is ignored and fn recomputes."""
+    backend = FileDurabilityBackend(base_dir=tmp_path)
+    cp_file = tmp_path / "corrupt.json"
+    cp_file.write_text("NOT VALID JSON {{{{", encoding="utf-8")
+    calls = []
+    result = backend.run(lambda: calls.append(1) or {"fresh": True}, "corrupt")
+    assert result == {"fresh": True}
+    assert calls == [1]  # recomputed because checkpoint was unreadable
+
+
+def test_file_backend_path_traversal_sanitized(tmp_path: Path):
+    """Checkpoint IDs with path separators are sanitized (no traversal)."""
+    backend = FileDurabilityBackend(base_dir=tmp_path)
+    backend.run(lambda: "ok", checkpoint_id="../../etc/passwd")
+    # Should have written a sanitized file, NOT traversed directories
+    safe_files = list(tmp_path.glob("*.json"))
+    assert len(safe_files) == 1
+    assert "/" not in safe_files[0].name
+    # The file must be inside the base_dir — no directory escape happened
+    assert safe_files[0].parent.resolve() == tmp_path.resolve()
+
+
+def test_file_backend_registered_in_default_registry():
+    """FileDurabilityBackend can be registered in MemoryDurabilityRegistry."""
+    registry = MemoryDurabilityRegistry()
+    backend = FileDurabilityBackend()
+    registry.register("file", backend)
+    resolved = registry.resolve("file")
+    assert resolved is backend
+    assert resolved.name == "file"
