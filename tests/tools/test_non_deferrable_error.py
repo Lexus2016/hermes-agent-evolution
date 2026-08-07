@@ -53,7 +53,34 @@ class TestNonDeferrableError:
     def test_unknown_tool_generic_message(self):
         msg = _non_deferrable_error("xx_definitely_not_a_tool_xx")
         assert "not a deferrable tool" in msg
+        assert "xx_definitely_not_a_tool_xx" in msg
         assert "tool_search" in msg or "call it directly" in msg
+
+    def test_core_tool_not_in_alternatives_gets_call_directly(self):
+        """Core tools absent from _CORE_TOOL_ALTERNATIVES but present in the
+        effective core set must still get the enriched 'call directly' message
+        (#1786)."""
+        with self._mock_core(frozenset({"read_file", "write_file"})):
+            msg = _non_deferrable_error("read_file")
+        assert "core tool" in msg
+        assert "Call 'read_file' directly" in msg
+        assert "Do not use tool_call for core tools" in msg
+
+    def test_search_files_gets_call_directly(self):
+        """search_files is a core tool not in _CORE_TOOL_ALTERNATIVES —
+        it must get the enriched message (#1786)."""
+        with self._mock_core(frozenset({"read_file", "search_files"})):
+            msg = _non_deferrable_error("search_files")
+        assert "core tool" in msg
+        assert "Call 'search_files' directly" in msg
+
+    def test_unknown_tool_names_tool_explicitly(self):
+        """Unknown tools should still get a helpful message that names the
+        tool explicitly (#1786)."""
+        with self._mock_core(frozenset({"read_file"})):
+            msg = _non_deferrable_error("completely_bogus_tool")
+        assert "completely_bogus_tool" in msg
+        assert "not a deferrable tool" in msg
 
     def test_case_insensitive_lookup_preserves_name(self):
         with self._mock_core(frozenset({"Terminal"})):
@@ -96,5 +123,5 @@ class TestResolveUnderlyingCallError:
         _name, _args, err = resolve_underlying_call(
             {"name": "read_file", "arguments": {}}, cfg)
         assert err is not None
-        assert "call it directly" in err.lower() or "Call it directly" in err or \
-               "tool_search" in err, f"Not actionable: {err}"
+        assert "directly" in err.lower() or "tool_search" in err, \
+            f"Not actionable: {err}"
