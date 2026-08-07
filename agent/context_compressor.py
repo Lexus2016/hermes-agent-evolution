@@ -205,6 +205,68 @@ def _extract_pinned_constraints(messages: List[Dict[str, Any]]) -> list[str]:
                 _add(m.group(1))
     return constraints
 
+
+def _pinned_constraint_survives(constraint: str, compressed: List[Dict[str, Any]]) -> bool:
+    """Return True when *constraint* text is present in the compressed transcript.
+
+    Uses a case-insensitive substring match against every message's content.
+    A constraint that was paraphrased or truncated by the summarizer counts
+    as dropped — exact text preservation is the contract, because a
+    governance rule's specific wording is what enforces compliance.
+    """
+    needle = (constraint or "").strip().lower()
+    if not needle:
+        return True
+    for msg in compressed:
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        text = content if isinstance(content, str) else _content_text_for_contains(content)
+        if text and needle in text.lower():
+            return True
+    return False
+
+
+# Header prefix for re-injected pinned constraints, so they are visually
+# distinct from regular system instructions and observable in logs.
+_PINNED_CONSTRAINT_REINJECT_HEADER = "[PINNED CONSTRAINT — re-injected after context compaction]"
+
+
+def _reinject_dropped_pinned_constraints(
+    pre_compaction: List[Dict[str, Any]],
+    compressed: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Detect and re-inject pinned constraints dropped by compaction (#1773).
+
+    Called at the end of ``compress()`` after all other post-processing.
+    Snapshots the pinned-constraint set from the *pre-compaction* transcript,
+    checks which survived into *compressed*, and re-injects any that were
+    dropped — inserted right after the system prompt (position 1) as
+    ``role=\"system\"`` messages carrying the pin metadata, so they land in
+    the protected head and survive the next compaction cycle.
+
+    Returns the (possibly modified) compressed list.
+    """
+    pinned = _extract_pinned_constraints(pre_compaction)
+    if not pinned:
+        return compressed
+    dropped = [c for c in pinned if not _pinned_constraint_survives(c, compressed)]
+    if not dropped:
+        return compressed
+    logger.warning(
+        "Pinned-constraint re-injection: %d constraint(s) dropped by compaction, re-injecting.",
+        len(dropped),
+    )
+    insert_at = 1 if compressed and compressed[0].get("role") == "system" else 0
+    for constraint in reversed(dropped):  # preserve original order after insert
+        reinject_msg: Dict[str, Any] = {
+            "role": "system",
+            "content": f"{_PINNED_CONSTRAINT_REINJECT_HEADER}\n{constraint}",
+            PINNED_CONSTRAINT_METADATA_KEY: True,
+        }
+        compressed.insert(insert_at, reinject_msg)
+    return compressed
+
 _NO_USER_TASK_SENTINEL = "None. This session contains no user-authored turns."
 COMPRESSION_CONTINUATION_USER_CONTENT = (
     "Continue from the compressed conversation context above. "
@@ -5758,6 +5820,10 @@ This compaction should PRIORITISE preserving all information related to the focu
         # future copy site cannot re-leak the marker into the child-session flush.
         _strip_persistence_markers(compressed)
         self._last_compression_made_progress = True
+
+        # Governance Decay mitigation (#1773): detect pinned constraints
+        # dropped by summarization and re-inject them into the protected head.
+        compressed = _reinject_dropped_pinned_constraints(messages, compressed)
 
         return compressed
 
