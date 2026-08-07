@@ -16,8 +16,11 @@ changes until a skill opts in.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
@@ -59,6 +62,72 @@ class NoOpDurability:
 
     def resume_from(self, checkpoint_id: str) -> Any:
         return None
+
+
+@dataclass
+class FileDurabilityBackend:
+    """Real backend: checkpoints callable results to the filesystem.
+
+    Persists results as JSON under ``<hermes_home>/durability/<checkpoint_id>.json``
+    so a resumed process skips re-computation. ``run`` returns the cached result
+    when it already exists (idempotent re-entry), otherwise executes ``fn``,
+    stores the result, and returns it. ``resume_from`` reads a stored result
+    or returns ``None`` when no checkpoint exists. Fail-open: I/O errors log a
+    warning and fall back to executing ``fn`` directly (never crash the caller).
+    """
+
+    name: str = "file"
+    base_dir: Optional[Path] = None  # defaults to <hermes_home>/durability at runtime
+
+    def _resolve_dir(self) -> Path:
+        if self.base_dir is not None:
+            d = self.base_dir
+        else:
+            hh = os.environ.get("HERMES_HOME", "").strip()
+            d = (
+                Path(hh) / "durability"
+                if hh
+                else Path.home() / ".hermes" / "durability"
+            )
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def _checkpoint_path(self, checkpoint_id: str) -> Path:
+        # Sanitize: only allow alphanumeric/dash/underscore/dot in the id to
+        # prevent path traversal from an untrusted checkpoint_id.
+        safe = "".join(c for c in checkpoint_id if c.isalnum() or c in "-_.")
+        if not safe:
+            safe = "unnamed"
+        return self._resolve_dir() / f"{safe}.json"
+
+    def run(self, fn: Callable[[], Any], checkpoint_id: Optional[str] = None) -> Any:
+        if checkpoint_id is None:
+            return fn()
+        cp = self._checkpoint_path(checkpoint_id)
+        if cp.exists():
+            try:
+                return json.loads(cp.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass  # corrupted — recompute below
+        result = fn()
+        try:
+            cp.write_text(json.dumps(result), encoding="utf-8")
+        except OSError as exc:
+            logger.warning(
+                "FileDurabilityBackend: checkpoint write failed for %s: %s",
+                checkpoint_id,
+                exc,
+            )
+        return result
+
+    def resume_from(self, checkpoint_id: str) -> Any:
+        cp = self._checkpoint_path(checkpoint_id)
+        if not cp.exists():
+            return None
+        try:
+            return json.loads(cp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
 
 
 @dataclass
