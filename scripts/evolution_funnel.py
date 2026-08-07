@@ -424,6 +424,24 @@ def cycle_date(now) -> str:
     return day.isoformat()
 
 
+def _compute_funnel_durable(evolution_dir: Path, date: str) -> Dict[str, Any]:
+    """Run ``compute_funnel`` with filesystem checkpointing (Durability #1288).
+
+    If a checkpoint for this date's funnel already exists, resume from it
+    (skip re-computation after a crash mid-cycle). Otherwise compute, persist
+    the result, and return it. Falls back to direct execution if the
+    durability module is unavailable — byte-identical default behavior.
+    """
+    try:
+        from agent.durability import FileDurabilityBackend
+
+        backend = FileDurabilityBackend()
+        checkpoint_id = f"funnel-{date}"
+        return backend.run(lambda: compute_funnel(evolution_dir, date), checkpoint_id)
+    except Exception:
+        return compute_funnel(evolution_dir, date)
+
+
 def main(argv: list[str]) -> int:
     evolution_dir = Path(
         os.environ.get(
@@ -463,7 +481,7 @@ def main(argv: list[str]) -> int:
             )
             return 1
 
-    record = compute_funnel(evolution_dir, date)
+    record = _compute_funnel_durable(evolution_dir, date)
 
     # Replace the integration stage's self-reported merge count with GitHub
     # truth when available: this counts owner-reviewed merges the self-report
