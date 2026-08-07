@@ -112,6 +112,12 @@ from typing import Any, Coroutine, Dict, List, Optional
 from urllib.parse import urlparse
 
 from tools.registry import tool_error
+from agent.durability import (
+    DurabilityBackend,
+    NoOpDurability,
+    default_registry,
+)
+from agent.mcp_durability_adapter import with_durability_checkpoint
 
 logger = logging.getLogger(__name__)
 
@@ -5335,6 +5341,40 @@ def _mark_server_call_started(server: Any) -> None:
         mark_tool_call()
 
 
+def _resolve_durability_backend() -> Optional[DurabilityBackend]:
+    """Return a *real* durability backend if one is configured, else ``None``.
+
+    Fail-open: any error resolving the backend returns ``None`` (the default
+    passthrough path). A no-op backend is treated as "not configured" so the
+    handler is returned unwrapped — keeping default behavior byte-identical.
+    """
+    try:
+        backend = default_registry().resolve("file")
+    except Exception:  # pragma: no cover - defensive, never crash dispatch
+        return None
+    if isinstance(backend, NoOpDurability):
+        return None
+    return backend
+
+
+def _wrap_with_durability(
+    tool_name: str,
+    handler: Callable[..., str],
+    backend: Optional[DurabilityBackend] = None,
+) -> Callable[..., str]:
+    """Wrap an MCP tool handler with durability checkpointing.
+
+    When no real backend is active (the default — ``backend`` is ``None`` or a
+    :class:`NoOpDurability`), the handler is returned **unchanged**, so the
+    live dispatch path is byte-identical to the pre-durability behavior. Only
+    when a real backend (e.g. ``FileDurabilityBackend``) is injected does the
+    handler get wrapped with :func:`with_durability_checkpoint`.
+    """
+    if backend is None or isinstance(backend, NoOpDurability):
+        return handler
+    return with_durability_checkpoint(tool_name, handler, backend)
+
+
 def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
     """Return a sync handler that calls an MCP tool via the background loop.
 
@@ -6585,7 +6625,11 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
             "registry_name": schema["name"],
             "origin": f"tool {mcp_tool.name!r}",
             "schema": schema,
-            "handler": _make_tool_handler(name, mcp_tool.name, server.tool_timeout),
+            "handler": _wrap_with_durability(
+                schema["name"],
+                _make_tool_handler(name, mcp_tool.name, server.tool_timeout),
+                _resolve_durability_backend(),
+            ),
             "check_fn": check_fn,
         })
 
