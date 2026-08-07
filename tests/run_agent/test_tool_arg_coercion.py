@@ -167,6 +167,40 @@ class TestCoerceToolArgs:
             result = coerce_tool_args("test_tool", args)
             assert result["path"] == "[not-json-at-all"
 
+    def test_bracket_comma_path_list_extracts_first(self):
+        """#1681 — bracket-wrapped comma-separated path list (not valid
+        JSON, so json.loads fails) should still extract the first path."""
+        schema = self._mock_schema({"path": {"type": "string"}})
+        with patch("model_tools.registry.get_schema", return_value=schema):
+            args = {"path": "[path/a, path/b]"}
+            result = coerce_tool_args("test_tool", args)
+            assert result["path"] == "path/a"
+
+    def test_bare_comma_path_list_extracts_first(self):
+        """#1681 — bare comma-separated path list (no brackets) also
+        extracts the first path."""
+        schema = self._mock_schema({"path": {"type": "string"}})
+        with patch("model_tools.registry.get_schema", return_value=schema):
+            args = {"path": "src/main.py, src/utils.py"}
+            result = coerce_tool_args("test_tool", args)
+            assert result["path"] == "src/main.py"
+
+    def test_comma_in_sentence_not_mangled(self):
+        """#1681 — a normal sentence containing a comma is NOT a path list."""
+        schema = self._mock_schema({"path": {"type": "string"}})
+        with patch("model_tools.registry.get_schema", return_value=schema):
+            args = {"path": "just a comma, in a sentence"}
+            result = coerce_tool_args("test_tool", args)
+            assert result["path"] == "just a comma, in a sentence"
+
+    def test_bare_word_comma_not_path_list(self):
+        """#1681 — 'value1, value2' (no path separators in rest) untouched."""
+        schema = self._mock_schema({"path": {"type": "string"}})
+        with patch("model_tools.registry.get_schema", return_value=schema):
+            args = {"path": "value1, value2"}
+            result = coerce_tool_args("test_tool", args)
+            assert result["path"] == "value1, value2"
+
     def test_stringified_array_on_union_string_array_parsed_as_list(self):
         """Union type ['string', 'array'] — array branch fires first.
 

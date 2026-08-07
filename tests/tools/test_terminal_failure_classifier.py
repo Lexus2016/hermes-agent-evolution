@@ -117,6 +117,43 @@ class TestClassifyPersistentError:
         assert result.should_retry is False
 
 
+class TestClassifySyntaxError:
+    """Syntax errors are deterministic and must not be blind-retried (#1743)."""
+
+    def test_syntax_error_text_pattern(self):
+        """Bash 'syntax error near unexpected token' is non-retryable."""
+        result = classifier.classify_terminal_failure(
+            "if then", 2, "", "bash: syntax error near unexpected token"
+        )
+        assert result.category == classifier.FailureCategory.persistent_error
+        assert result.should_retry is False
+        assert "Syntax" in result.hint
+
+    def test_interpreter_exit_2_is_syntax(self):
+        """Python exit code 2 (interpreter) is treated as a syntax error."""
+        result = classifier.classify_terminal_failure(
+            'python3 -c "if true print(1)"', 2, "", ""
+        )
+        assert result.category == classifier.FailureCategory.persistent_error
+        assert result.should_retry is False
+        assert "Syntax" in result.hint
+
+    def test_grep_exit_2_not_syntax(self):
+        """grep exit 2 is a generic error (file-not-found), NOT a syntax
+        error — must not get the syntax hint."""
+        result = classifier.classify_terminal_failure(
+            "grep foo missing.txt", 2, "", ""
+        )
+        assert result.category == classifier.FailureCategory.unknown
+        assert "Syntax" not in result.hint
+
+    def test_syntax_error_hint_says_not_to_retry(self):
+        result = classifier.classify_terminal_failure(
+            "bash -c 'for i in; do'", 2, "", "syntax error"
+        )
+        assert "Do NOT retry" in result.hint
+
+
 class TestClassifyInformationalCommands:
     @pytest.mark.parametrize(
         "command, exit_code",

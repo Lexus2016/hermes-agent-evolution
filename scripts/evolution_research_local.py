@@ -340,6 +340,30 @@ def render_report(result: dict) -> str:
     return "\n".join(lines)
 
 
+def _today_str() -> str:
+    """UTC date string for checkpoint naming (import-safe, no hermes_time)."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _run_with_durability(evolution_dir: Path, date: str) -> dict:
+    """Run local research with filesystem checkpointing (Durability capability #1762).
+
+    If a checkpoint for today's research already exists, resume from it (skip
+    re-computation). Otherwise run the research and persist the result so a
+    resumed process (e.g. after a crash mid-cycle) picks up where it left off.
+    Falls back to direct execution if the durability module is unavailable.
+    """
+    try:
+        from agent.durability import FileDurabilityBackend
+
+        backend = FileDurabilityBackend()
+        checkpoint_id = f"local-research-{date}"
+        result = backend.run(lambda: run_local_research(evolution_dir), checkpoint_id)
+        return result
+    except Exception:
+        return run_local_research(evolution_dir)
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -368,7 +392,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: evolution directory not found: {evolution_dir}", file=sys.stderr)
         return 1
 
-    result = run_local_research(evolution_dir)
+    result = _run_with_durability(evolution_dir, _today_str())
     report = render_report(result)
 
     if args.print:

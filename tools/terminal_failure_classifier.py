@@ -45,6 +45,15 @@ _MISSING_CMD_PATTERNS = (
     re.compile(r"could not find command", re.IGNORECASE),
 )
 
+# Syntax-error patterns — shell/interpreter syntax errors are deterministic;
+# re-running the same command unchanged will fail identically (#1743).
+_SYNTAX_ERROR_PATTERNS = (
+    re.compile(r"syntax error", re.IGNORECASE),
+    re.compile(r"unexpected token", re.IGNORECASE),
+    re.compile(r"unexpected end of file", re.IGNORECASE),
+    re.compile(r"SyntaxError:", re.IGNORECASE),
+)
+
 _PERMISSION_DENIED_PATTERNS = (
     re.compile(r"permission denied", re.IGNORECASE),
     re.compile(r"operation not permitted", re.IGNORECASE),
@@ -185,6 +194,35 @@ def classify_terminal_failure(
             hint=(
                 "Permission denied. Check file permissions, run from a "
                 "directory you own, or ask the user before escalating privileges."
+            ),
+            should_retry=False,
+        )
+
+    # Syntax error — deterministic, non-retryable (#1743). Shell/interpreter
+    # syntax errors (exit code 2 from bash, SyntaxError from Python, "unexpected
+    # token" from node) reproduce identically on every run. Classify them
+    # distinctly so the agent gets a targeted "fix the command" hint instead of
+    # the generic persistent_error message that leaves it guessing.
+    #
+    # Pattern-based: NOT gated on exit_code == 2 alone, because grep/tar/diff
+    # use exit code 2 for generic errors (file-not-found, archive corruption)
+    # that are NOT syntax errors. Only fire when the output text contains a
+    # syntax-error signature, OR when exit_code == 2 AND the base command is
+    # a known interpreter (bash, python, node, …) whose exit-2 is syntax.
+    _INTERPRETER_COMMANDS = frozenset({
+        "bash", "sh", "zsh", "dash", "ksh",
+        "python", "python3", "python2",
+        "node", "ruby", "perl", "php",
+    })
+    has_syntax_text = any(p.search(text) for p in _SYNTAX_ERROR_PATTERNS)
+    if has_syntax_text or (exit_code == 2 and base_cmd in _INTERPRETER_COMMANDS):
+        return TerminalFailureClassification(
+            category=FailureCategory.persistent_error,
+            hint=(
+                "Syntax error in the command or script. Re-running unchanged "
+                "will fail identically. Fix the syntax (quoting, brackets, "
+                "operators), or use execute_code to run the corrected logic. "
+                "Do NOT retry the same command."
             ),
             should_retry=False,
         )
