@@ -880,7 +880,10 @@ def coerce_tool_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
                 # (``"src/a.py, src/b.py"``, no brackets). The helper's
                 # path-like guards reject non-path strings (sentences,
                 # bare words), so widening the trigger is safe.
-                or "," in value
+                or (
+                    "," in value
+                    and _is_path_like_param(key)
+                )
             )
         ):
             extracted = _extract_first_from_stringified_array(value)
@@ -1083,6 +1086,19 @@ def _looks_like_path(token: str) -> bool:
     if token.lower() in {"true", "false", "null", "none", "and", "or", "not"}:
         return False
     return len(token) >= 3
+
+
+_PATH_LIKE_PARAM_RE = re.compile(
+    r"path|file|url|dir|dest|src|dst|target|glob|pattern|prefix|output|input",
+    re.IGNORECASE,
+)
+
+
+def _is_path_like_param(key: str) -> bool:
+    """Return True when *key* names a param that typically holds a path/URL."""
+    if not key:
+        return False
+    return _PATH_LIKE_PARAM_RE.search(key) is not None
 
 
 def _looks_like_path_list_rest(rest: str) -> bool:

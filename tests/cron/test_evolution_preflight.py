@@ -170,8 +170,28 @@ class TestDigestFallback:
         new = stage_dir / "2026-06-23.json"
         old.write_text("old")
         new.write_text("new")
+        # Regression for #1767: touch() on both files resets mtimes to ~now,
+        # making mtime-based sorting ambiguous.  Filename-based sorting is
+        # stable regardless of mtime.
         old.touch()
         new.touch()
+        assert ep.find_latest_digest("introspection", tmp_path) == new
+
+    def test_find_latest_digest_ignores_mtime(self, tmp_path):
+        """Even when an older digest has a newer mtime, it must not win (#1767)."""
+        import os
+        import time
+
+        stage_dir = tmp_path / "evolution" / "introspection"
+        stage_dir.mkdir(parents=True)
+        old = stage_dir / "2026-06-20.json"
+        new = stage_dir / "2026-06-23.json"
+        new.write_text("new")
+        old.write_text("old")
+        # Make the older file's mtime much newer — mtime sort would pick it.
+        ts = time.time()
+        os.utime(old, (ts + 3600, ts + 3600))
+        os.utime(new, (ts, ts))
         assert ep.find_latest_digest("introspection", tmp_path) == new
 
     def test_load_digest_as_fallback(self, tmp_path):

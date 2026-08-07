@@ -201,6 +201,13 @@ class TestCoerceToolArgs:
             result = coerce_tool_args("test_tool", args)
             assert result["path"] == "value1, value2"
 
+    def test_content_param_with_commas_not_truncated(self):
+        schema = self._mock_schema({"content": {"type": "string"}})
+        with patch("model_tools.registry.get_schema", return_value=schema):
+            args = {"content": "line one, line two, line three"}
+            result = coerce_tool_args("test_tool", args)
+            assert result["content"] == "line one, line two, line three"
+
     def test_stringified_array_on_union_string_array_parsed_as_list(self):
         """Union type ['string', 'array'] — array branch fires first.
 
