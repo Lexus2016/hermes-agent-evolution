@@ -3329,7 +3329,11 @@ def terminal_tool(
                         result_dict = {
                             "output": "",
                             "exit_code": 124,
-                            "error": f"Command timed out after {effective_timeout} seconds",
+                            "error": (
+                                f"Command timed out after {effective_timeout} seconds. "
+                                "This command looks long-running — re-run with "
+                                "background=true and notify_on_complete=true."
+                            ),
                             "failure_class": classification.category.value,
                             "suggestion": classification.hint,
                             "should_retry": classification.should_retry,
