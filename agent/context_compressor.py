@@ -34,6 +34,7 @@ from agent.model_metadata import (
     estimate_messages_tokens_rough,
     estimate_tokens_rough,
 )
+from agent.failed_attempt_marker import failed_attempt_indices
 from agent.redact import redact_sensitive_text
 from agent.turn_context import drop_stale_api_content
 from tools.todo_tool import TODO_INJECTION_HEADER
@@ -204,6 +205,93 @@ def _extract_pinned_constraints(messages: List[Dict[str, Any]]) -> list[str]:
             for m in _PINNED_CONSTRAINT_RE.finditer(content):
                 _add(m.group(1))
     return constraints
+
+# ---------------------------------------------------------------------------
+# Slice B (#1773): Post-compaction validator + re-injection.
+#
+# After compression, the summarizer may silently drop a pinned constraint
+# (Governance Decay).  :func:`_pinned_constraint_survives` checks whether a
+# given constraint text is still present in the compressed output, and
+# :func:`_reinject_dropped_pinned_constraints` re-injects any that vanished
+# as a synthetic ``role="system"`` message carrying the pin metadata.
+# ---------------------------------------------------------------------------
+_PINNED_CONSTRAINT_REINJECT_HEADER = (
+    "[PINNED_CONSTRAINT] The following safety / governance constraint(s) "
+    "were pinned but were dropped during context compression. "
+    "They MUST be respected for the remainder of this conversation. [/PINNED_CONSTRAINT]"
+)
+
+
+def _pinned_constraint_survives(
+    constraint_text: str,
+    compressed_messages: List[Dict[str, Any]],
+) -> bool:
+    """Return True if *constraint_text* is still present after compaction.
+
+    Case-insensitive substring match: the summarizer may paraphrase, so an
+    exact match would produce false negatives.  If the constraint appears as
+    a substring of ANY compressed message — system, summary, or tail — it is
+    considered to have survived.
+    """
+    needle = (constraint_text or "").strip().lower()
+    if not needle:
+        return True  # vacuously present — don't re-inject empties
+    for msg in compressed_messages:
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if isinstance(content, str) and needle in content.lower():
+            return True
+    return False
+
+
+def _reinject_dropped_pinned_constraints(
+    original_messages: List[Dict[str, Any]],
+    compressed_messages: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Re-inject any pinned constraints that the summarizer dropped.
+
+    *original_messages* is the pre-compaction snapshot;
+    *compressed_messages* is the post-compaction result.  For each constraint
+    extracted from the original that does NOT survive in the compressed
+    output, a single synthetic ``role="system"`` message is inserted
+    immediately after the head (system prompt) block.  All re-injected
+    constraints are collected into one message with the pin metadata flag.
+
+    If nothing was dropped, *compressed_messages* is returned unchanged.
+    """
+    pinned = _extract_pinned_constraints(original_messages)
+    if not pinned:
+        return compressed_messages
+
+    dropped = [
+        c for c in pinned if not _pinned_constraint_survives(c, compressed_messages)
+    ]
+    if not dropped:
+        return compressed_messages
+
+    # Build the re-injection message.  The header banner makes the constraint
+    # text discoverable by the marker regex, and the metadata flag pins it so
+    # the validator catches it again on a subsequent compaction.
+    body_lines = "\n".join(f"- {c}" for c in dropped)
+    reinject_msg: Dict[str, Any] = {
+        "role": "system",
+        "content": f"{_PINNED_CONSTRAINT_REINJECT_HEADER}\n{body_lines}",
+        PINNED_CONSTRAINT_METADATA_KEY: True,
+    }
+
+    # Insert after the first message (system prompt) to keep governance rules
+    # high in the context window without disrupting the protected head.
+    if compressed_messages and compressed_messages[0].get("role") == "system":
+        result = [compressed_messages[0], reinject_msg] + compressed_messages[1:]
+    else:
+        result = [reinject_msg] + compressed_messages
+
+    for c in dropped:
+        logger.warning(
+            "Pinned constraint dropped during compression — re-injecting: %s",
+            c[:120],
+        )
+    return result
+
 
 _NO_USER_TASK_SENTINEL = "None. This session contains no user-authored turns."
 COMPRESSION_CONTINUATION_USER_CONTENT = (
@@ -2824,6 +2912,18 @@ class ContextCompressor(ContextEngine):
                 result[idx] = {**msg, "tool_calls": new_tcs}
             return modified
 
+        # Pass 1b: Prioritise failed-attempt tool results for removal (#1580).
+        # Failed tool calls (tracebacks, non-zero exits, explicit errors)
+        # contribute contextual drag — the model re-reads the error and often
+        # retries the same approach.  Demote them *first*, even inside the
+        # pruneable region, so their bulky error output becomes a 1-line summary
+        # before the general pass runs.
+        failed_indices = set(failed_attempt_indices(result))
+        if failed_indices:
+            for i in sorted(failed_indices):
+                if i < prune_boundary:
+                    _demote_tool_result_at(i)
+
         # Pass 2: Replace old tool results with informative summaries
         for i in range(max(0, prune_boundary)):
             _demote_tool_result_at(i)
@@ -5168,6 +5268,10 @@ This compaction should PRIORITISE preserving all information related to the focu
 
         display_tokens = current_tokens if current_tokens else self.last_prompt_tokens or estimate_messages_tokens_rough(messages)
 
+        # Snapshot pinned constraints BEFORE any modification so the
+        # post-compaction validator (#1773) can detect + re-inject drops.
+        _pinned_snapshot = list(messages)
+
         # Phase 1: Prune old tool results (cheap, no LLM call)
         messages, pruned_count = self._prune_old_tool_results(
             messages, protect_tail_count=self.protect_last_n,
@@ -5757,6 +5861,13 @@ This compaction should PRIORITISE preserving all information related to the focu
         # are positional; this single terminal sweep makes it structural so a
         # future copy site cannot re-leak the marker into the child-session flush.
         _strip_persistence_markers(compressed)
+
+        # Post-compaction validator (#1773): re-inject any pinned constraints
+        # that the summarizer dropped (Governance Decay mitigation).
+        compressed = _reinject_dropped_pinned_constraints(
+            _pinned_snapshot, compressed
+        )
+
         self._last_compression_made_progress = True
 
         return compressed

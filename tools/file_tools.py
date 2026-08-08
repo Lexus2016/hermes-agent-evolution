@@ -2623,7 +2623,7 @@ SEARCH_FILES_SCHEMA = {
         "properties": {
             "pattern": {
                 "type": "string",
-                "description": "Regex pattern for content search, or glob pattern (e.g., '*.py') for file search. When target='content', this is a REGEX (not a glob) — passing '*.py' here will cause a regex parse error; use file_glob to filter by filename pattern instead.",
+                "description": "Regex pattern for content search, or glob pattern (e.g., '*.py') for file search. When target='content', glob patterns are auto-converted to regex for convenience, but prefer file_glob to filter by filename.",
             },
             "target": {
                 "type": "string",
@@ -2826,6 +2826,46 @@ def _is_valid_regex(pattern: str) -> bool:
         return False
 
 
+def _glob_to_regex(glob: str) -> str:
+    """Convert a shell glob pattern to an equivalent regex (#1788).
+
+    Translates ``*`` → ``.*``, ``?`` → ``.``, and passes ``[...]`` character
+    classes through (they share syntax between glob and regex).  All other
+    regex metacharacters (``.``, ``+``, ``(``, ``)``, ``{``, ``}``, ``|``,
+    ``^``, ``$``, ``\\``) are escaped so the result is a literal-matching
+    regex.  The output is **not anchored** — callers match substrings.
+    """
+    _REGEX_META = set(".^$+{}\\|()")
+    i = 0
+    n = len(glob)
+    out: list[str] = []
+    while i < n:
+        c = glob[i]
+        if c == "*":
+            out.append(".*")
+        elif c == "?":
+            out.append(".")
+        elif c == "[":
+            j = i + 1
+            if j < n and glob[j] == "!":
+                j += 1
+            if j < n and glob[j] == "]":
+                j += 1
+            while j < n and glob[j] != "]":
+                j += 1
+            if j < n:
+                out.append(glob[i : j + 1])
+                i = j
+            else:
+                out.append("\\[")
+        elif c in _REGEX_META:
+            out.append("\\" + c)
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def _handle_search_files(args, **kw):
     tid = kw.get("task_id") or "default"
     target_map = {"grep": "content", "find": "files"}
@@ -2833,42 +2873,24 @@ def _handle_search_files(args, **kw):
     target = target_map.get(raw_target, raw_target)
     pattern = args.get("pattern", "")
 
-    # Issue #887: when the model passes a glob pattern (e.g. ``*.py``) as the
-    # regex ``pattern`` in content-search mode, ripgrep fails with a regex
-    # parse error.  Detect the glob and auto-redirect: move the glob to
-    # ``file_glob`` (the correct filter for content search) and search with
-    # a broad regex, or switch to file-search mode when no content search
-    # was intended.
+    # Issue #887 / #1788: when the model passes a glob pattern (e.g. ``*.py``)
+    # as the regex ``pattern`` in content-search mode, ripgrep fails with a
+    # regex parse error.  Instead of returning an error and forcing a retry
+    # (#1788 — 227 failures / 300 sessions, 70% glob-as-regex), we now
+    # transparently convert the glob to an equivalent regex and proceed with
+    # the search.  This prevents the error entirely and saves a round-trip.
     #
-    # The redirect is ONLY meaningful for patterns that would actually cause a
-    # parse error.  If ``re.compile`` accepts the pattern, ripgrep (which uses
-    # the same syntax class) will accept it too, so there is nothing to guard
-    # against — redirecting would reject a legitimate regex search (issue
-    # search_files-glob-false-positive: 12 occurrences where the heuristic
-    # flagged valid regexes like ``"verdict":\\s*null`` because it does not
-    # track escape spans such as ``\\s*``).
+    # The conversion is ONLY applied when the pattern would actually fail
+    # ``re.compile`` — a pattern that compiles is a legitimate regex, even if
+    # it contains glob-like metacharacters (see _is_valid_regex above for the
+    # false-positive rationale).
     if (
         target == "content"
         and not args.get("file_glob")
         and _looks_like_glob(pattern)
         and not _is_valid_regex(pattern)
     ):
-        # If the glob contains a dot extension (``*.py``, ``*config*``), the
-        # model most likely wanted to *find files by name*, not search file
-        # contents.  Auto-redirect to file search — that is the correct tool
-        # for the job and avoids the regex parse error entirely.
-        return json.dumps({
-            "error": (
-                f"Pattern {pattern!r} looks like a shell glob (wildcards), not a regex. "
-                f"In content-search mode the pattern is treated as a regular expression, "
-                f"so {pattern!r} causes a regex parse error.\n\n"
-                f"To find files by name, re-run with target='files':\n"
-                f"  search_files(pattern={pattern!r}, target='files')\n\n"
-                f"To search file contents but only in files matching this glob, move it to "
-                f"file_glob and use a regex pattern:\n"
-                f"  search_files(pattern='<your regex>', file_glob={pattern!r})"
-            ),
-        })
+        pattern = _glob_to_regex(pattern)
 
     # #1588 — when a pattern that does NOT look like a glob still fails to
     # compile as a regex, ripgrep returns a bare parse error with no guidance,
