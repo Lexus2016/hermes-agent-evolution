@@ -532,12 +532,15 @@ THREAT_PATTERNS = [
      "encryption/decryption primitives — possible SkillTrojan fragment reassembly"),
 
     # ── SkillTrojan: trigger-conditional dormant code ──
-    (r'(if|when|unless)\s+.*(?:secret|trigger|activate|payload|backdoor)',
+    # Match code-like conditionals that reference trigger/secret/payload
+    # WITH an execution verb — avoids false positives on legitimate prose
+    # like "If a clarify call returns an error, inspect the payload...".
+    (r'(?:if|when|unless)\s+\w+.*(?:secret|trigger|activate|payload|backdoor)\b.*(?:exec|run|eval|os\.|subprocess|import|compile|marshal)',
      "trigger_conditional", "medium", "injection",
-     "conditional execution referencing trigger/secret/payload — possible dormant SkillTrojan code"),
-    (r'concat|join|assemble|reconstruct|reassemble',
+     "conditional execution referencing trigger/secret/payload with code execution — possible dormant SkillTrojan code"),
+    (r'(?:concat|join|assemble|reconstruct|reassemble)\s+(?:the\s+)?(?:fragments?|payload|secret|parts?|chunks?)',
      "fragment_reassembly", "medium", "obfuscation",
-     "fragment reassembly keywords — possible SkillTrojan payload reconstruction"),
+     "fragment reassembly keywords with payload reference — possible SkillTrojan payload reconstruction"),
 ]
 
 # Structural limits for skill directories
