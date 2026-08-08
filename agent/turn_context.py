@@ -466,6 +466,15 @@ def build_turn_context(
     agent._unicode_sanitization_passes = 0
     agent._tool_guardrails.reset_for_turn()
     agent._tool_guardrail_halt_decision = None
+    # #1802 — reset the per-turn skill composition tracer so cross-skill
+    # SkillTrojan detection only checks skills loaded within the SAME turn,
+    # not accumulated across the entire session.
+    try:
+        from tools.skill_composition_tracer import reset_tracer
+
+        reset_tracer()
+    except Exception:
+        pass  # module not yet loaded or unavailable — no-op
     _reset_consol = getattr(agent._memory_store, "reset_consolidation_failures", None)
     if callable(_reset_consol):
         _reset_consol()
