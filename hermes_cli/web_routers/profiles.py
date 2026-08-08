@@ -20,7 +20,7 @@ import time  # noqa: F401
 from pathlib import Path  # noqa: F401
 from typing import Any, Dict, List, Optional, Tuple  # noqa: F401
 
-from fastapi import APIRouter, HTTPException  # noqa: F401
+from fastapi import APIRouter, HTTPException, Query  # noqa: F401
 
 from hermes_cli.web_deps import late
 from hermes_cli.web_models import (
@@ -56,8 +56,14 @@ _write_profile_model = late("_write_profile_model")
 
 @sessions_router.get("/api/profiles/sessions")
 def get_profiles_sessions(
-    limit: int = 20,
-    offset: int = 0,
+    # ``le=500`` caps the per-request page size (idea from #39200) — this
+    # endpoint fans the query out across EVERY profile's state.db, so an
+    # unbounded limit multiplies the damage. 500 (not 100) because real
+    # desktop callers use limit=200 (sessions-settings ARCHIVED_FETCH_LIMIT,
+    # command palette) and the electron remote-merge over-fetches
+    # ``limit + offset``.
+    limit: int = Query(20, ge=0, le=500),
+    offset: int = Query(0, ge=0),
     min_messages: int = 0,
     archived: str = "exclude",
     order: str = "recent",
