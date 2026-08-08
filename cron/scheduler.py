@@ -3108,6 +3108,15 @@ def _build_job_prompt(job: dict, prerun_script: Optional[tuple] = None) -> str:
                 job.get("name", job.get("id")),
                 error,
             )
+            # If the skill was blocked by the SkillTrojan/injection defense,
+            # raise CronPromptInjectionBlocked so the job is hard-stopped
+            # instead of silently running without the skill (which could
+            # mask a blocked malicious skill leaving the agent to run with
+            # no guardrails).
+            if "SkillTrojan defense" in error or "prompt injection" in error:
+                raise CronPromptInjectionBlocked(
+                    f"prompt_injection blocked in skill '{skill_name}': {error}"
+                )
             skipped.append(skill_name)
             continue
 

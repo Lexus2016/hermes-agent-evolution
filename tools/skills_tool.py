@@ -103,6 +103,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Dict, Any, List, Optional, Set, Tuple
 
 from tools.registry import registry, tool_error
+from tools.skill_composition_tracer import check_composition
 from hermes_cli.config import cfg_get
 from utils import env_var_enabled
 from agent.skill_utils import (
@@ -268,7 +269,24 @@ _INJECTION_PATTERNS: list = [
     "system prompt:",
     "<system>",
     "]]>",
+    # ── SkillTrojan patterns (ICML 2026, arXiv:2604.06811) ──
+    "you must now send",
+    "you must now post",
+    "you must now publish",
+    "reconstruct the payload",
+    "reassemble the fragments",
+    "decrypt and execute",
 ]
+
+# Allowlist for trusted skill sources that skip the injection scan.
+# Populated from SKILL_TRUSTED_SOURCES env var (comma-separated) or
+# ~/.hermes/config.yaml under skills.trusted_sources.
+_TRUSTED_SOURCES: set = set()
+
+# Populate trusted sources from env var at import time.
+_env_sources = os.getenv("SKILL_TRUSTED_SOURCES", "")
+if _env_sources:
+    _TRUSTED_SOURCES.update(s.strip() for s in _env_sources.split(",") if s.strip())
 
 
 def set_secret_capture_callback(callback) -> None:
@@ -1546,6 +1564,40 @@ def skill_view(
                 )
             logging.getLogger(__name__).warning(
                 "Skill security warning for '%s': %s", name, "; ".join(_warnings)
+            )
+            # SkillTrojan defense (#1801): block load for external skills
+            # with injection patterns, unless source is in the allowlist.
+            _is_trusted = (
+                any(ts in str(skill_md.resolve()) for ts in _TRUSTED_SOURCES)
+                if _TRUSTED_SOURCES
+                else False
+            )
+            if _injection_detected and not _is_trusted:
+                _matched = [p for p in _INJECTION_PATTERNS if p in _content_lower]
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": (
+                            f"⛔ SkillTrojan defense: skill '{name}' was blocked "
+                            f"because it contains suspicious patterns "
+                            f"({', '.join(_matched[:3])}). If this is a trusted "
+                            f"source, add it to SKILL_TRUSTED_SOURCES env var."
+                        ),
+                    },
+                    ensure_ascii=False,
+                )
+
+        # SkillTrojan defense (#1802): runtime composition trace.
+        # Checks whether the combination of skills loaded this turn
+        # reconstructs a payload across skill boundaries.
+        _composition_result = check_composition(name, content)
+        if not _composition_result.get("success", True):
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": _composition_result.get("error", ""),
+                },
+                ensure_ascii=False,
             )
 
         parsed_frontmatter: Dict[str, Any] = {}

@@ -210,6 +210,69 @@ def check_flip_gate(
     return [f"FLIP_GATE_BLOCK: {verdict.reason}\n{summary}"]
 
 
+def check_floor_gate(
+    floor_scores: Optional[Dict[str, Any]] = None,
+    pr_metrics: Optional[Dict[str, Any]] = None,
+) -> List[str]:
+    """Run the null-agent floor-test gate (#1809).
+
+    Compares the PR's aggregate metrics (``pr_metrics``, the same shape as
+    :func:`eval_baseline.summarize` produces) against the null-agent floor
+    (``floor_scores``, also a ``summarize``-shaped dict). A metric that is at
+    or below its floor blocks — the null agent achieved exactly that, so the
+    PR is no better than doing nothing (#1267).
+
+    Opt-in per repo: when ``floor_scores`` is ``None`` (no floor-scores
+    sidecar file exists) the gate is skipped entirely, matching the
+    flip-gate's opt-in pattern.
+
+    Fail-closed: when floor scores *are* available but ``pr_metrics`` is
+    ``None`` (the PR's metrics were not provided), the gate cannot verify the
+    PR clears the floor → block the unattended merge.
+    """
+    if not floor_scores:
+        return []  # no floor scores → opt-out, merge as before
+
+    if pr_metrics is None:
+        return [
+            "FLOOR_GATE_NO_PR_METRICS: floor scores exist but no PR metrics "
+            "were provided — cannot verify the PR clears the null-agent "
+            "floor; refusing unattended self-merge"
+        ]
+
+    violations: List[str] = []
+    for metric, floor in floor_scores.items():
+        try:
+            floor_val = float(floor)
+        except (TypeError, ValueError):
+            continue  # non-numeric floor → skip that metric, don't block
+        pr_val = pr_metrics.get(metric)
+        if pr_val is None:
+            # Metric in floor set but missing from PR metrics → cannot verify.
+            violations.append(
+                f"FLOOR_GATE_MISSING_METRIC: '{metric}' has a floor of "
+                f"{floor_val} but the PR metrics do not include it — cannot "
+                f"verify; refusing unattended self-merge"
+            )
+            continue
+        try:
+            pr_float = float(pr_val)
+        except (TypeError, ValueError):
+            violations.append(
+                f"FLOOR_GATE_BAD_METRIC: '{metric}' PR value is not numeric "
+                f"({pr_val!r}) — cannot verify against floor {floor_val}"
+            )
+            continue
+        # AT the floor (==) also blocks: the null agent achieved exactly this.
+        if pr_float <= floor_val:
+            violations.append(
+                f"FLOOR_GATE_BLOCK: '{metric}' = {pr_float} is at or below "
+                f"the null-agent floor of {floor_val} — the PR is no better "
+                f"than doing nothing (#1267)"
+            )
+    return violations
+
+
 def check_merge_policy_with_quality(
     files: Sequence[Dict[str, Any]],
     max_lines: int = DEFAULT_MAX_LINES,
@@ -218,14 +281,17 @@ def check_merge_policy_with_quality(
     test_contents: Optional[Dict[str, str]] = None,
     flip_gate_results: Optional[Dict[str, Any]] = None,
     flip_gate_override: Optional[str] = None,
+    floor_scores: Optional[Dict[str, Any]] = None,
+    pr_metrics: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
-    """Extended merge policy: diff-size + high-risk + test-quality + flip gates.
+    """Extended merge policy: diff-size + high-risk + test-quality + flip + floor gates.
 
     Runs the original :func:`check_merge_policy` (diff-size cap + high-risk
     path blocklist), appends test-quality violations from
     :func:`evolution_test_quality_gate.check_test_quality` (mock-ratio gate
-    + fabricated-reproduction detection), and then appends flip-gate
-    violations from :func:`check_flip_gate` (#1447).
+    + fabricated-reproduction detection), then appends flip-gate violations
+    from :func:`check_flip_gate` (#1447), and finally appends floor-gate
+    violations from :func:`check_floor_gate` (#1809).
 
     ``test_contents`` — map of test file path → full content for
     fabricated-reproduction detection.  When empty/None the fabrication check
@@ -233,7 +299,7 @@ def check_merge_policy_with_quality(
     still runs); ``main()`` populates it from the reviewed head SHA so the
     fabrication check is LIVE on the real merge path (#1246).
 
-    ``flip_gate_results`` — optional ``{"before": {...}, "after": {...}}`
+    ``flip_gate_results`` — optional ``{"before": {...}, "after": {...}}``
     dict of per-probe results for the skill being promoted. When ``None``
     (no probe set) the flip gate is skipped — skills without probe sets
     merge as before (opt-in per skill).
@@ -241,6 +307,15 @@ def check_merge_policy_with_quality(
     ``flip_gate_override`` — optional override reason string. When supplied
     and non-empty, a flip-gate block is downgraded to a recorded warning
     instead of stopping the merge.
+
+    ``floor_scores`` — optional dict of null-agent floor metrics (the output
+    of :func:`eval_baseline.summarize`). When ``None`` (no floor-scores
+    sidecar) the floor gate is skipped — opt-in per repo, same pattern as the
+    flip gate (#1809).
+
+    ``pr_metrics`` — optional dict of the PR's aggregate metrics (same shape
+    as ``floor_scores``). Required when ``floor_scores`` is provided; if
+    missing the gate fails closed.
     """
     violations = check_merge_policy(
         files, max_lines=max_lines, high_risk_globs=high_risk_globs
@@ -290,6 +365,9 @@ def check_merge_policy_with_quality(
                     override_reason=flip_gate_override,
                 )
             )
+    # Floor gate (#1809): null-agent floor-test. Opt-in per repo — when
+    # floor_scores is None the gate is skipped entirely.
+    violations.extend(check_floor_gate(floor_scores, pr_metrics))
     return violations
 
 
@@ -412,7 +490,7 @@ def main(argv: List[str]) -> int:
         print(
             "usage: evolution_merge_gate.py --pr N [--merge] [--method squash] "
             "[--repo O/R] [--flip-gate-before F] [--flip-gate-after F] "
-            "[--flip-gate-override REASON]"
+            "[--flip-gate-override REASON] [--floor-scores F] [--pr-metrics F]"
         )
         return 2
     pr = int(args[args.index("--pr") + 1])
@@ -441,6 +519,14 @@ def main(argv: List[str]) -> int:
             "after": _load_json_file(after_path) if after_path else None,
         }
 
+    # Floor-gate inputs (#1809): floor scores + PR metrics JSON files.
+    floor_path = _arg_or_env(args, "--floor-scores", "EVOLUTION_FLOOR_SCORES")
+    if not floor_path:
+        floor_path = str(Path.home() / ".hermes" / "evolution" / "floor_scores.json")
+    floor_scores = _load_json_file(floor_path) if Path(floor_path).exists() else None
+    pr_metrics_path = _arg_or_env(args, "--pr-metrics", "EVOLUTION_PR_METRICS")
+    pr_metrics = _load_json_file(pr_metrics_path) if pr_metrics_path else None
+
     runner = _run
     # One snapshot: the files we review and the SHA we merge come from the SAME
     # gh read, so the policy is checked against exactly the commit that lands.
@@ -462,6 +548,8 @@ def main(argv: List[str]) -> int:
         test_contents=test_contents,
         flip_gate_results=flip_gate_results,
         flip_gate_override=flip_override or None,
+        floor_scores=floor_scores,
+        pr_metrics=pr_metrics,
     )
     if violations:
         print(f"[merge-gate] PR #{pr} BLOCKED from autonomous self-merge:")
