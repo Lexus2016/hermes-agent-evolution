@@ -6,6 +6,7 @@ import json
 import pytest
 
 import hermes_state
+from agent.session_activity import ActivityProvenance
 from hermes_state import SCHEMA_SQL, SCHEMA_VERSION, SessionDB
 
 
@@ -73,6 +74,110 @@ def db(tmp_path):
     session_db = SessionDB(db_path=db_path)
     yield session_db
     session_db.close()
+
+
+# =========================================================================
+# Connection lifecycle
+# =========================================================================
+
+
+class TestConnectionLifecycle:
+    def test_read_only_close_never_requests_wal_checkpoint(self, tmp_path):
+        db_path = tmp_path / "state.db"
+        writable = SessionDB(db_path=db_path)
+        writable.create_session("s1", source="cli")
+        writable.close()
+
+        executed = []
+        read_only = SessionDB(db_path=db_path, read_only=True)
+        read_only._conn.set_trace_callback(executed.append)
+        read_only.close()
+
+        assert not any("wal_checkpoint" in sql.lower() for sql in executed)
+
+    def test_writable_close_retains_truncate_checkpoint(self, tmp_path):
+        db_path = tmp_path / "state.db"
+        writable = SessionDB(db_path=db_path)
+        executed = []
+        writable._conn.set_trace_callback(executed.append)
+
+        writable.close()
+
+        assert any(
+            "pragma wal_checkpoint(truncate)" == " ".join(sql.lower().split())
+            for sql in executed
+        )
+
+    def test_read_only_connection_keeps_fts_search_available(self, tmp_path):
+        db_path = tmp_path / "state.db"
+        writable = SessionDB(db_path=db_path)
+        writable.create_session("fts-read-only", source="cli")
+        writable.append_message(
+            "fts-read-only",
+            role="user",
+            content="readonlywoodpecker 大别山项目",
+        )
+        writable.close()
+
+        read_only = SessionDB(db_path=db_path, read_only=True)
+        try:
+            base_matches = read_only.search_messages("readonlywoodpecker")
+            trigram_matches = read_only.search_messages("大别山")
+        finally:
+            read_only.close()
+
+        assert [match["session_id"] for match in base_matches] == [
+            "fts-read-only"
+        ]
+        assert [match["session_id"] for match in trigram_matches] == [
+            "fts-read-only"
+        ]
+
+    def test_failed_read_only_open_does_not_leak_tracked_connection(
+        self, tmp_path
+    ):
+        """A malformed store makes the RO FTS probe raise DatabaseError.
+        The connection must be closed on that failure path: a leaked tracked
+        connection blocks _backup_db_file's raw-copy for the process
+        lifetime, so the writable heal that follows would repair WITHOUT its
+        forensic backup."""
+        import sqlite3
+
+        from hermes_cli.sqlite_safe_read import has_live_connection
+
+        db_path = tmp_path / "state.db"
+        writable = SessionDB(db_path=db_path)
+        writable.create_session("s1", source="cli")
+        writable.append_message("s1", role="user", content="leak probe")
+        writable.close()
+
+        # Corrupt sqlite_master: duplicate messages_fts definition. Any
+        # statement on a fresh connection then raises "malformed database
+        # schema" (DatabaseError, not the OperationalError the probe eats).
+        conn = sqlite3.connect(str(db_path), isolation_level=None)
+        conn.execute("PRAGMA writable_schema=ON")
+        row = conn.execute(
+            "SELECT type,name,tbl_name,rootpage,sql FROM sqlite_master "
+            "WHERE name='messages_fts'"
+        ).fetchone()
+        assert row is not None
+        conn.execute(
+            "INSERT INTO sqlite_master (type,name,tbl_name,rootpage,sql) "
+            "VALUES (?,?,?,?,?)",
+            row,
+        )
+        conn.execute("PRAGMA writable_schema=OFF")
+        conn.close()
+
+        with pytest.raises(sqlite3.DatabaseError):
+            SessionDB(db_path=db_path, read_only=True)
+
+        assert has_live_connection(db_path) is False
+
+        # The writable heal must still take its forensic backup.
+        healed = SessionDB(db_path=db_path, read_only=False)
+        healed.close()
+        assert list(tmp_path.glob("*malformed-backup*"))
 
 
 # =========================================================================
@@ -1730,6 +1835,67 @@ class TestFTS5Search:
         # the assistant message depending on FTS5 phrase matching
         assert len(results) >= 1
 
+    def test_search_fields_project_results_without_changing_default(self, db):
+        db.create_session(session_id="s1", source="cli")
+        db.append_message("s1", role="user", content="Tell me about Kubernetes")
+        db.append_message("s1", role="assistant", content="Kubernetes is an orchestrator.")
+
+        projected = db.search_messages(
+            "Kubernetes", fields=("session_id", "role", "snippet")
+        )
+        default = db.search_messages("Kubernetes")
+
+        assert len(projected) == len(default) == 2
+        assert all(set(row) == {"session_id", "role", "snippet"} for row in projected)
+        assert [
+            (row["session_id"], row["role"], row["snippet"])
+            for row in projected
+        ] == [
+            (row["session_id"], row["role"], row["snippet"])
+            for row in default
+        ]
+        assert all("context" in row and row["context"] for row in default)
+
+    def test_search_projection_skips_context_enrichment_queries(self, db):
+        db.create_session(session_id="s1", source="cli")
+        db.append_message("s1", role="user", content="before")
+        db.append_message("s1", role="assistant", content="projectionneedle")
+        db.append_message("s1", role="user", content="after")
+
+        statements = []
+        read_conn = db._get_read_conn() or db._conn
+        traced_connections = [db._conn]
+        if read_conn is not db._conn:
+            traced_connections.append(read_conn)
+        for conn in traced_connections:
+            conn.set_trace_callback(statements.append)
+
+        def context_query_count():
+            normalized = (" ".join(sql.upper().split()) for sql in statements)
+            return sum("WITH TARGET AS (" in sql for sql in normalized)
+
+        try:
+            projected = db.search_messages(
+                "projectionneedle", fields=("session_id", "snippet")
+            )
+            assert len(projected) == 1
+            assert context_query_count() == 0
+
+            full = db.search_messages(
+                "projectionneedle", fields=("session_id", "context")
+            )
+            assert len(full) == 1
+            assert full[0]["context"]
+            assert context_query_count() == 1
+
+            default = db.search_messages("projectionneedle")
+            assert len(default) == 1
+            assert default[0]["context"]
+            assert context_query_count() == 2
+        finally:
+            for conn in traced_connections:
+                conn.set_trace_callback(None)
+
     def test_sanitize_fts5_query_strips_dangerous_chars(self):
         """Unit test for _sanitize_fts5_query static method."""
         from hermes_state import SessionDB
@@ -2129,6 +2295,22 @@ class TestCounts:
         db.create_session("s3", "cli", cwd="/repo/subdir")
 
         assert db.session_count(cwd_prefix="/repo") == 2
+
+    def test_session_count_ge_empty(self, db):
+        """session_count_ge should return False for 0 sessions."""
+        assert db.session_count_ge(1) is False
+        assert db.session_count_ge(2) is False
+
+    def test_session_count_ge_at_threshold(self, db):
+        """session_count_ge should True when count >= n."""
+        db.create_session("s1", "cli")
+        assert db.session_count_ge(1) is True
+        assert db.session_count_ge(2) is False
+
+        db.create_session("s2", "telegram")
+        assert db.session_count_ge(1) is True
+        assert db.session_count_ge(2) is True
+        assert db.session_count_ge(3) is False
 
     def test_message_count_total(self, db):
         assert db.message_count() == 0
@@ -4072,6 +4254,115 @@ class TestListSessionsRich:
         sessions = db.list_sessions_rich(cwd_prefix="/repo")
         assert [session["id"] for session in sessions] == ["s2", "s1"]
 
+    def test_last_active_prefers_session_activity_heartbeat(self, db):
+        """Mid-turn agent heartbeats must advance last_active without new messages (#72016)."""
+        db.create_session("s1", "cli")
+        db.append_message("s1", "user", "hello")
+        with db._lock:
+            db._conn.execute(
+                "UPDATE messages SET timestamp=? WHERE session_id=? AND role=?",
+                (1_700_000_000.0, "s1", "user"),
+            )
+            db._conn.commit()
+
+        before = db.list_sessions_rich()[0]["last_active"]
+        heartbeat = 1_700_000_500.0
+        db.touch_session_activity(
+            "s1",
+            heartbeat,
+            description="starting API call #1",
+            provenance=ActivityProvenance.UNKNOWN,
+        )
+        after = db.list_sessions_rich()[0]["last_active"]
+        assert after == heartbeat
+        assert after > before
+
+        row = db.get_session("s1")
+        assert row["last_activity_at"] == heartbeat
+        assert row["last_activity_description"] == "starting API call #1"
+        assert row["last_activity_provenance"] == "unknown"
+
+        activity = db.get_session_activity("s1")
+        assert activity["last_activity_at"] == heartbeat
+        assert activity["last_activity_description"] == "starting API call #1"
+        assert "phase" not in activity
+
+        # Never move last_activity_at backwards.
+        db.touch_session_activity("s1", heartbeat - 100, description="ignored")
+        assert db.get_session("s1")["last_activity_at"] == heartbeat
+        assert db.get_session("s1")["last_activity_description"] == "starting API call #1"
+
+    def test_clear_session_activity_labels_keeps_timestamp(self, db):
+        """Turn-end label clear must wipe desc/provenance without moving ts."""
+        db.create_session("s1", "cli")
+        heartbeat = 1_700_000_500.0
+        db.touch_session_activity(
+            "s1",
+            heartbeat,
+            description="compressing context",
+            provenance=ActivityProvenance.AGENT_COMPRESSION,
+        )
+        row = db.get_session("s1")
+        assert row["last_activity_at"] == heartbeat
+        assert row["last_activity_description"] == "compressing context"
+        assert row["last_activity_provenance"] == "agent.compression"
+
+        db.clear_session_activity_labels("s1")
+        row = db.get_session("s1")
+        assert row["last_activity_at"] == heartbeat
+        assert row["last_activity_description"] == ""
+        assert row["last_activity_provenance"] == "unknown"
+        activity = db.get_session_activity("s1")
+        assert activity["last_activity_at"] == heartbeat
+        assert activity["last_activity_description"] == ""
+        assert activity["last_activity_provenance"] == "unknown"
+
+    def test_last_active_uses_newer_message_over_stale_heartbeat(self, db):
+        """Rate-limited heartbeats can lag message writes; last_active must take max."""
+        db.create_session("s1", "cli")
+        db.append_message("s1", "user", "hello")
+        with db._lock:
+            db._conn.execute(
+                "UPDATE messages SET timestamp=? WHERE session_id=?",
+                (1_700_000_800.0, "s1"),
+            )
+            db._conn.commit()
+        db.touch_session_activity("s1", 1_700_000_500.0, description="api")  # older than message
+        assert db.list_sessions_rich()[0]["last_active"] == 1_700_000_800.0
+
+    def test_list_gateway_sessions_last_active_uses_activity_heartbeat(self, db):
+        db.create_session(
+            "gw-1",
+            "telegram",
+            session_key="agent:main:telegram:dm:c1",
+            chat_id="c1",
+            chat_type="dm",
+        )
+        db.append_message("gw-1", "user", "ping")
+        with db._lock:
+            db._conn.execute(
+                "UPDATE messages SET timestamp=? WHERE session_id=?",
+                (1_700_000_000.0, "gw-1"),
+            )
+            db._conn.commit()
+
+        heartbeat = 1_700_000_900.0
+        db.touch_session_activity(
+            "gw-1",
+            heartbeat,
+            description="compressing context",
+        )
+        rows = db.list_gateway_sessions(active_only=True)
+        assert len(rows) == 1
+        assert rows[0]["last_active"] == heartbeat
+        activity = db.get_session_activity("gw-1")
+        assert activity["last_activity_description"] == "compressing context"
+
+    def test_order_by_last_active_surfaces_recently_touched_older_session_first(self, db):
+        t0 = 1709500000.0
+        db.create_session("old", "cli")
+        db.create_session("new", "cli")
+
     def test_preview_newlines_collapsed(self, db):
         db.create_session("s1", "cli")
         db.append_message("s1", "user", "Line one\nLine two\nLine three")
@@ -4089,6 +4380,77 @@ class TestListSessionsRich:
         sessions = db.list_sessions_rich()
         ids = [s["id"] for s in sessions]
         assert "branch" in ids, "Branch session should be visible in default list"
+
+    def test_rich_list_session_key_filter_precedes_limit(self, db):
+        lane_key = "agent:main:telegram:dm:lane"
+        db.create_session(
+            "lane_oldest", "telegram", session_key=lane_key,
+            user_id="lane-user", chat_id="lane",
+        )
+        db.create_session(
+            "lane_newest", "telegram", session_key=lane_key,
+            user_id="lane-user", chat_id="lane",
+        )
+        for i in range(60):
+            db.create_session(
+                f"foreign_{i}", "telegram",
+                session_key=f"agent:main:telegram:dm:foreign-{i}",
+                user_id=f"foreign-user-{i}", chat_id=f"foreign-{i}",
+            )
+        db.create_session(
+            "legacy_null_key", "telegram", user_id="lane-user", chat_id="lane"
+        )
+
+        sessions = db.list_sessions_rich(
+            source="telegram", session_key=lane_key, limit=2
+        )
+
+        assert [session["id"] for session in sessions] == [
+            "lane_newest", "lane_oldest",
+        ]
+
+    def test_rich_list_session_key_scopes_search_and_projects_compression(self, db):
+        lane_key = "agent:main:telegram:dm:lane"
+        db.create_session(
+            "lane_root", "telegram", session_key=lane_key,
+            user_id="lane-user", chat_id="lane",
+        )
+        db.set_session_title("lane_root", "Needle root")
+        db.end_session("lane_root", "compression")
+        db.create_session(
+            "lane_tip", "telegram", session_key=lane_key,
+            user_id="lane-user", chat_id="lane", parent_session_id="lane_root",
+        )
+        db.set_session_title("lane_tip", "Needle continuation")
+        db.append_message("lane_tip", "user", "latest lane activity")
+        db.create_session(
+            "foreign_match", "telegram",
+            session_key="agent:main:telegram:dm:foreign",
+            user_id="foreign-user", chat_id="foreign",
+        )
+        db.set_session_title("foreign_match", "Needle foreign")
+
+        sessions = db.list_sessions_rich(
+            source="telegram",
+            session_key=lane_key,
+            search_query="needle",
+            order_by_last_active=True,
+            limit=1,
+        )
+
+        assert [session["id"] for session in sessions] == ["lane_tip"]
+        assert sessions[0]["_lineage_root_id"] == "lane_root"
+
+    def test_session_key_predicate_can_use_session_key_index(self, db):
+        plan = db._conn.execute(
+            "EXPLAIN QUERY PLAN "
+            "SELECT s.id FROM sessions s WHERE s.session_key = ? "
+            "ORDER BY s.started_at DESC LIMIT 10",
+            ("agent:main:telegram:dm:lane",),
+        ).fetchall()
+
+        detail = " ".join(row[-1] for row in plan)
+        assert "idx_sessions_session_key" in detail, detail
 
     def test_delegate_subagent_marker_hides_orphaned_row(self, db):
         """``_delegate_from`` keeps delegate rows out of pickers after orphaning."""
@@ -4374,6 +4736,88 @@ class TestCompressionChainProjection:
         assert tip_row["ended_at"] is None  # tip is still live
         assert tip_row["end_reason"] is None
 
+    def test_list_projects_multiple_independent_chains_in_one_call(self, db):
+        """Two unrelated compression chains in the same page must each
+        resolve to their own tip, not get cross-mixed by the batched tip-row
+        fetch (regression test for the single-query batch in
+        _get_session_rich_rows_batch — a wrong id->row mapping there would
+        silently swap one chain's data onto the other)."""
+        import time as _time
+
+        t0 = _time.time() - 7200
+        self._build_compression_chain(db, t0)
+
+        # Second, independent chain — same shape, different ids/content.
+        db.create_session("root2", "cli")
+        db._conn.execute("UPDATE sessions SET started_at=? WHERE id=?", (t0 + 100, "root2"))
+        db.append_message("root2", "user", "second conversation start")
+        db._conn.execute(
+            "UPDATE sessions SET ended_at=?, end_reason=? WHERE id=?",
+            (t0 + 200, "compression", "root2"),
+        )
+        db.create_session("tip2", "cli", parent_session_id="root2")
+        db._conn.execute("UPDATE sessions SET started_at=? WHERE id=?", (t0 + 201, "tip2"))
+        db.append_message("tip2", "user", "second conversation continuation")
+        db.update_session_cwd("tip2", "/tmp/workspaces/second")
+        db._conn.commit()
+
+        sessions = db.list_sessions_rich(source="cli", limit=20)
+        ids = [s["id"] for s in sessions]
+        assert "root1" not in ids and "root2" not in ids
+        assert "tip1" in ids and "tip2" in ids
+
+        tip1_row = next(s for s in sessions if s["id"] == "tip1")
+        tip2_row = next(s for s in sessions if s["id"] == "tip2")
+        assert tip1_row["_lineage_root_id"] == "root1"
+        assert tip1_row["preview"].startswith("latest message")
+        assert tip2_row["_lineage_root_id"] == "root2"
+        assert tip2_row["preview"].startswith("second conversation continuation")
+        assert tip2_row["cwd"] == "/tmp/workspaces/second"
+
+    def test_list_batches_tip_row_fetch_into_one_query(self, db, monkeypatch):
+        """Projection must resolve tip rows for a whole page in one batched
+        query, not one _get_session_rich_row() call per compression root."""
+        import time as _time
+
+        t0 = _time.time() - 7200
+        self._build_compression_chain(db, t0)
+        db.create_session("root2", "cli")
+        db._conn.execute("UPDATE sessions SET started_at=? WHERE id=?", (t0 + 100, "root2"))
+        db.append_message("root2", "user", "second conversation start")
+        db._conn.execute(
+            "UPDATE sessions SET ended_at=?, end_reason=? WHERE id=?",
+            (t0 + 200, "compression", "root2"),
+        )
+        db.create_session("tip2", "cli", parent_session_id="root2")
+        db._conn.execute("UPDATE sessions SET started_at=? WHERE id=?", (t0 + 201, "tip2"))
+        db.append_message("tip2", "user", "second continuation")
+        db._conn.commit()
+
+        batch_calls = []
+        single_calls = []
+        original_batch = db._get_session_rich_rows_batch
+        original_single = db._get_session_rich_row
+
+        def counting_batch(session_ids, **kwargs):
+            batch_calls.append(list(session_ids))
+            return original_batch(session_ids, **kwargs)
+
+        def counting_single(session_id, **kwargs):
+            single_calls.append(session_id)
+            return original_single(session_id, **kwargs)
+
+        monkeypatch.setattr(db, "_get_session_rich_rows_batch", counting_batch)
+        monkeypatch.setattr(db, "_get_session_rich_row", counting_single)
+
+        sessions = db.list_sessions_rich(source="cli", limit=20)
+        assert len(sessions) >= 2  # sanity: both chains actually surfaced
+
+        # Two compression roots resolved with exactly one batched call, and
+        # zero single-row calls — not one single-row call per root.
+        assert len(batch_calls) == 1
+        assert set(batch_calls[0]) == {"tip1", "tip2"}
+        assert single_calls == []
+
     def test_list_projection_uses_tip_cwd(self, db):
         """Projected lineage rows should carry cwd from the live tip row.
 
@@ -4643,6 +5087,67 @@ class TestVacuum:
         db.append_message(session_id="s1", role="user", content="hi")
         # Should not raise, even though there's nothing significant to reclaim.
         db.vacuum()
+
+    def test_auto_maintenance_records_successful_vacuum(self, db, monkeypatch):
+        monkeypatch.setattr(db, "prune_sessions", lambda **_kwargs: 3)
+        vacuum_calls = []
+        monkeypatch.setattr(db, "vacuum", lambda: vacuum_calls.append(True))
+
+        result = db.maybe_auto_prune_and_vacuum(min_interval_hours=0)
+
+        assert result["vacuumed"] is True
+        assert vacuum_calls == [True]
+        assert db.get_meta("last_vacuum") is not None
+
+    def test_auto_maintenance_skips_recent_vacuum(self, db, monkeypatch):
+        monkeypatch.setattr(db, "prune_sessions", lambda **_kwargs: 3)
+        db.set_meta("last_vacuum", str(time.time()))
+        vacuum_calls = []
+        monkeypatch.setattr(db, "vacuum", lambda: vacuum_calls.append(True))
+
+        result = db.maybe_auto_prune_and_vacuum(
+            min_interval_hours=0,
+            min_vacuum_interval_days=30,
+        )
+
+        assert result["vacuumed"] is False
+        assert vacuum_calls == []
+
+    def test_auto_maintenance_retries_after_vacuum_interval(self, db, monkeypatch):
+        monkeypatch.setattr(db, "prune_sessions", lambda **_kwargs: 3)
+        db.set_meta("last_vacuum", str(time.time() - 31 * 86400))
+        vacuum_calls = []
+        monkeypatch.setattr(db, "vacuum", lambda: vacuum_calls.append(True))
+
+        result = db.maybe_auto_prune_and_vacuum(
+            min_interval_hours=0,
+            min_vacuum_interval_days=30,
+        )
+
+        assert result["vacuumed"] is True
+        assert vacuum_calls == [True]
+
+    def test_auto_maintenance_retries_after_failed_vacuum(self, db, monkeypatch):
+        monkeypatch.setattr(db, "prune_sessions", lambda **_kwargs: 3)
+        vacuum_calls = []
+
+        def fail_first_vacuum():
+            vacuum_calls.append(True)
+            if len(vacuum_calls) == 1:
+                raise RuntimeError("vacuum failed")
+
+        monkeypatch.setattr(db, "vacuum", fail_first_vacuum)
+
+        first = db.maybe_auto_prune_and_vacuum(min_interval_hours=0)
+
+        assert first["vacuumed"] is False
+        assert db.get_meta("last_vacuum") is None
+
+        second = db.maybe_auto_prune_and_vacuum(min_interval_hours=0)
+
+        assert second["vacuumed"] is True
+        assert vacuum_calls == [True, True]
+        assert db.get_meta("last_vacuum") is not None
 
 
 class TestOptimizeFts:
@@ -5089,6 +5594,455 @@ class TestFTS5ToolCallMigration:
             assert version == SCHEMA_VERSION
         finally:
             session_db.close()
+
+
+class TestFTSExternalContentMigration:
+    """v23 migration: inline-mode FTS tables (v11-v22) are rebuilt as
+    external-content tables, and role='tool' rows are excluded from the
+    trigram index while remaining searchable via the standard index."""
+
+    @staticmethod
+    def _build_v22_db(db_path):
+        """Build a v22-shaped DB by hand: inline FTS tables + concat triggers."""
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(SCHEMA_SQL)
+        # Replace the current (v23) FTS objects with the v22 inline shape.
+        conn.executescript("""
+            DROP TABLE IF EXISTS messages_fts;
+            DROP TABLE IF EXISTS messages_fts_trigram;
+            DROP VIEW IF EXISTS messages_fts_trigram_src;
+
+            CREATE VIRTUAL TABLE messages_fts USING fts5(content);
+            CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
+                INSERT INTO messages_fts(rowid, content) VALUES (
+                    new.id,
+                    COALESCE(new.content, '') || ' ' || COALESCE(new.tool_name, '') || ' ' || COALESCE(new.tool_calls, '')
+                );
+            END;
+
+            CREATE VIRTUAL TABLE messages_fts_trigram USING fts5(content, tokenize='trigram');
+            CREATE TRIGGER messages_fts_trigram_insert AFTER INSERT ON messages BEGIN
+                INSERT INTO messages_fts_trigram(rowid, content) VALUES (
+                    new.id,
+                    COALESCE(new.content, '') || ' ' || COALESCE(new.tool_name, '') || ' ' || COALESCE(new.tool_calls, '')
+                );
+            END;
+        """)
+        conn.execute("DELETE FROM schema_version")
+        conn.execute("INSERT INTO schema_version (version) VALUES (22)")
+        conn.execute(
+            "INSERT INTO sessions (id, source, started_at) VALUES ('s1', 'cli', ?)",
+            (time.time(),),
+        )
+        rows = [
+            ("user", "find the 大别山项目 deployment notes", None, None),
+            ("assistant", "关于大别山项目的总结在这里", None,
+             '{"function":{"name":"send_message","arguments":"{}"}}'),
+            ("tool", "TOOLBLOB " + "x" * 5000 + " 项目文件内容测试", "read_file", None),
+        ]
+        for role, content, tool_name, tool_calls in rows:
+            conn.execute(
+                "INSERT INTO messages (session_id, timestamp, role, content, tool_name, tool_calls) "
+                "VALUES ('s1', ?, ?, ?, ?, ?)",
+                (time.time(), role, content, tool_name, tool_calls),
+            )
+        conn.commit()
+        # Sanity: v22 inline tables have their own content shadow tables.
+        shadow = conn.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'messages_fts_content'"
+        ).fetchall()
+        assert shadow, "sanity: v22 inline FTS must have a content shadow table"
+        conn.close()
+
+    def test_v22_open_leaves_legacy_untouched_and_advertises(self, tmp_path):
+        """Opening a legacy v22 DB must NOT auto-migrate the FTS layout, but
+        the main schema_version DOES advance (decoupled) so future non-FTS
+        migrations aren't blocked. The inline index keeps working and the
+        opt-in flag is set."""
+        db_path = tmp_path / "v22.db"
+        self._build_v22_db(db_path)
+
+        db = SessionDB(db_path=db_path)
+        try:
+            # DECOUPLED: the main schema_version advances to current even though
+            # the FTS layout stays legacy — future migrations must not be gated
+            # behind the FTS opt-in.
+            version = db._conn.execute(
+                "SELECT version FROM schema_version"
+            ).fetchone()[0]
+            assert version == SCHEMA_VERSION, "main schema version must advance"
+            # But the FTS storage layout is NOT stamped current — it's legacy.
+            assert db.get_meta("fts_storage_version") is None
+            assert db.fts_optimize_available() is True
+            assert db.get_meta("fts_optimize_available") == "1"
+
+            # Legacy inline shape is intact (content shadow table still there).
+            assert db._conn.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'messages_fts_content'"
+            ).fetchone() is not None
+
+            # Search still works on the legacy index (no deferred rebuild).
+            assert db.fts_rebuild_status() is None
+            assert len(db.search_messages("deployment")) == 1
+            assert len(db.search_messages("send_message")) == 1  # #16751 held
+
+            # A new write is indexed live by the legacy triggers.
+            db.append_message("s1", role="user", content="AFTEROPEN token")
+            assert len(db.search_messages("AFTEROPEN")) == 1
+        finally:
+            db.close()
+
+
+
+
+
+
+    def _simulate_pre_fix_demote_crash_window(self, db):
+        """Replay the pre-fix demote crash window: trash + empty v23 schema,
+        no rebuild markers (executescript committed mid-demote before markers).
+
+        Mirrors what happened when ``_ensure_fts_schema`` ran inside
+        ``_execute_write`` and the process died before the marker writes.
+        """
+        from hermes_state import FTS_SQL, FTS_TRIGRAM_SQL
+
+        conn = db._conn
+        db._drop_fts_triggers(conn)
+        conn.execute("DROP VIEW IF EXISTS messages_fts_trigram_src")
+        had = bool(conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+            "AND name IN ('messages_fts', 'messages_fts_trigram') "
+            "AND sql LIKE 'CREATE VIRTUAL TABLE%' LIMIT 1"
+        ).fetchone())
+        assert had, "sanity: expected legacy/virtual FTS tables to demote"
+        conn.execute("PRAGMA writable_schema=ON")
+        conn.execute(
+            "DELETE FROM sqlite_master WHERE type = 'table' "
+            "AND name IN ('messages_fts', 'messages_fts_trigram') "
+            "AND sql LIKE 'CREATE VIRTUAL TABLE%'"
+        )
+        conn.execute("PRAGMA writable_schema=RESET")
+        shadows = [
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND (name LIKE 'messages_fts_%' ESCAPE '\\' "
+                "OR name LIKE 'messages_fts_trigram_%' ESCAPE '\\')"
+            ).fetchall()
+        ]
+        for sh in shadows:
+            conn.execute(f"ALTER TABLE {sh} RENAME TO fts_v22_trash_{sh}")
+        # executescript commits — empty v23 tables without markers.
+        conn.executescript(FTS_SQL)
+        try:
+            conn.executescript(FTS_TRIGRAM_SQL)
+        except sqlite3.OperationalError:
+            pass
+        # Intentionally leave fts_rebuild_* unset (the crash window).
+
+    def test_optimize_resume_after_demote_crash_window_restores_search(
+        self, tmp_path
+    ):
+        """Pre-fix: demote crash left trash + empty v23 index, no markers.
+        Re-run tore down trash and stamped optimized with docsize=0 — permanent
+        search loss for historical rows. Re-run must backfill and restore."""
+        db_path = tmp_path / "v22.db"
+        self._build_v22_db(db_path)
+
+        db = SessionDB(db_path=db_path)
+        try:
+            assert len(db.search_messages("deployment")) == 1
+            self._simulate_pre_fix_demote_crash_window(db)
+            # Crash window shape: no markers, trash present, empty index.
+            assert db.get_meta("fts_rebuild_high_water") is None
+            assert db.get_meta("fts_rebuild_progress") is None
+            assert db._has_fts_trash(db._conn) is True
+            assert db._conn.execute(
+                "SELECT COUNT(*) FROM messages_fts_docsize"
+            ).fetchone()[0] == 0
+            assert len(db.search_messages("deployment")) == 0
+
+            # Still offered (trash and/or empty-index heal).
+            assert db.fts_optimize_available() is True
+
+            result = db.optimize_fts_storage(vacuum=False)
+            assert result["ok"] is True
+            assert db.fts_rebuild_status() is None
+            assert db.fts_optimize_available() is False
+            assert db.get_meta("fts_storage_version") == str(
+                hermes_state.FTS_STORAGE_VERSION
+            )
+            assert db._conn.execute(
+                "SELECT name FROM sqlite_master WHERE name LIKE '%_v22_trash%'"
+            ).fetchall() == []
+            # Historical rows searchable again; index fully populated.
+            assert len(db.search_messages("deployment")) == 1
+            assert len(db.search_messages("TOOLBLOB")) == 1
+            n_msg = db._conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            n_fts = db._conn.execute(
+                "SELECT COUNT(*) FROM messages_fts_docsize"
+            ).fetchone()[0]
+            assert n_fts == n_msg
+            db._conn.execute(
+                "INSERT INTO messages_fts(messages_fts, rank) VALUES('integrity-check', 1)"
+            )
+        finally:
+            db.close()
+
+    def test_optimize_heals_premature_stamp_with_empty_index(self, tmp_path):
+        """Pre-fix settle could stamp fts_storage_version after tearing down
+        trash with an empty index and no markers. Re-run must clear the stamp,
+        backfill, and re-earn the layout version."""
+        db_path = tmp_path / "v22.db"
+        self._build_v22_db(db_path)
+
+        db = SessionDB(db_path=db_path)
+        try:
+            self._simulate_pre_fix_demote_crash_window(db)
+            # Simulate the bad resume: trash already gone, empty index stamped.
+            trash = [
+                r[0] for r in db._conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' "
+                    "AND name LIKE 'fts\\_v22\\_trash\\_%' ESCAPE '\\'"
+                ).fetchall()
+            ]
+            for tbl in trash:
+                db._conn.execute(f"DROP TABLE IF EXISTS {tbl}")
+            db._conn.execute(
+                "INSERT INTO state_meta (key, value) VALUES "
+                "('fts_storage_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (str(hermes_state.FTS_STORAGE_VERSION),),
+            )
+            db._conn.commit()
+
+            assert db.get_meta("fts_rebuild_high_water") is None
+            assert db._has_fts_trash(db._conn) is False
+            assert db._fts_external_index_empty_with_messages(db._conn) is True
+            # Must still be offered despite the premature stamp.
+            assert db.fts_optimize_available() is True
+            assert len(db.search_messages("deployment")) == 0
+
+            result = db.optimize_fts_storage(vacuum=False)
+            assert result["ok"] is True
+            assert len(db.search_messages("deployment")) == 1
+            assert db.get_meta("fts_storage_version") == str(
+                hermes_state.FTS_STORAGE_VERSION
+            )
+            assert db.fts_optimize_available() is False
+        finally:
+            db.close()
+
+    def test_optimize_heals_high_water_without_progress(self, tmp_path):
+        """high_water without progress used to make fts_rebuild_step return
+        False immediately (treated as finished by another process), then
+        settle stamped success while the marker remained. Re-seed progress
+        and complete the empty-index backfill."""
+        db_path = tmp_path / "v22.db"
+        self._build_v22_db(db_path)
+        db = SessionDB(db_path=db_path)
+        try:
+            self._simulate_pre_fix_demote_crash_window(db)
+            hw = db._conn.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM messages"
+            ).fetchone()[0]
+            # Orphan shape: high_water alone on an empty external index.
+            db.set_meta("fts_rebuild_high_water", str(hw))
+            db._conn.execute(
+                "DELETE FROM state_meta WHERE key = ?", ("fts_rebuild_progress",)
+            )
+            db._conn.commit()
+            assert db.get_meta("fts_rebuild_progress") is None
+            assert db.fts_optimize_available() is True
+            # Empty index: base FTS MATCH finds nothing (gap LIKE may still
+            # supplement when high_water is set — that is intentional).
+            assert db._conn.execute(
+                "SELECT COUNT(*) FROM messages_fts_docsize"
+            ).fetchone()[0] == 0
+
+            result = db.optimize_fts_storage(vacuum=False)
+            assert result["ok"] is True
+            assert db.get_meta("fts_rebuild_high_water") is None
+            assert db.get_meta("fts_rebuild_progress") is None
+            n_msg = db._conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            n_fts = db._conn.execute(
+                "SELECT COUNT(*) FROM messages_fts_docsize"
+            ).fetchone()[0]
+            assert n_fts == n_msg
+            assert len(db.search_messages("deployment")) == 1
+            assert db.fts_optimize_available() is False
+        finally:
+            db.close()
+
+    def test_repair_rebuilds_partial_index_without_duplicates(self, tmp_path):
+        """high_water without progress on a PARTIALLY indexed DB must not
+        replay the backfill from zero on top of surviving rows: the chunk
+        worker inserts its whole id range with no anti-join, so replay
+        duplicates every already-indexed row. Recovery must reset the index
+        to a known-empty surface first, then rebuild."""
+        db_path = tmp_path / "v22.db"
+        self._build_v22_db(db_path)
+        db = SessionDB(db_path=db_path)
+        try:
+            self._simulate_pre_fix_demote_crash_window(db)
+            hw = db._conn.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM messages"
+            ).fetchone()[0]
+            db.set_meta("fts_rebuild_high_water", str(hw))
+            db._conn.execute(
+                "DELETE FROM state_meta WHERE key = ?", ("fts_rebuild_progress",)
+            )
+            # Partial index: one row survived from an interrupted backfill.
+            db._conn.execute(
+                "INSERT INTO messages_fts(rowid, content, tool_name, tool_calls) "
+                "SELECT id, content, tool_name, tool_calls FROM messages "
+                "WHERE id = 1"
+            )
+            db._conn.commit()
+            assert db._conn.execute(
+                "SELECT COUNT(*) FROM messages_fts_docsize"
+            ).fetchone()[0] == 1
+
+            result = db.optimize_fts_storage(vacuum=False)
+            assert result["ok"] is True
+            n_msg = db._conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            n_fts = db._conn.execute(
+                "SELECT COUNT(*) FROM messages_fts_docsize"
+            ).fetchone()[0]
+            # Exactly one index entry per message: no replay duplicates.
+            assert n_fts == n_msg
+            assert len(db.search_messages("deployment")) == 1
+            db._conn.execute(
+                "INSERT INTO messages_fts(messages_fts, rank) VALUES('integrity-check', 1)"
+            )
+        finally:
+            db.close()
+
+    def test_repair_bookkeeping_reseeds_missing_progress(self, tmp_path):
+        """Unit: high_water without progress gets progress='0' without
+        forcing a full marker reset when a real backfill is already claimed."""
+        db = SessionDB(db_path=tmp_path / "fresh.db")
+        try:
+            db.create_session(session_id="s1", source="cli")
+            db.append_message("s1", role="user", content="bookkeeping needle")
+            db.set_meta("fts_rebuild_high_water", "42")
+            db._conn.execute(
+                "DELETE FROM state_meta WHERE key = ?", ("fts_rebuild_progress",)
+            )
+            db._conn.commit()
+            db._repair_optimize_bookkeeping()
+            assert db.get_meta("fts_rebuild_high_water") == "42"
+            assert db.get_meta("fts_rebuild_progress") == "0"
+        finally:
+            db.close()
+
+    def test_demote_writes_markers_before_empty_schema(self, tmp_path):
+        """Demote must commit rebuild markers before createscript builds the
+        empty v23 tables — so a crash between stage and ensure still leaves
+        a resumable claim rather than an unmarked empty index."""
+        db_path = tmp_path / "v22.db"
+        self._build_v22_db(db_path)
+        db = SessionDB(db_path=db_path)
+        try:
+            # Patch ensure to fail *after* the staged write commits, simulating
+            # death mid schema-create. Markers must already be durable.
+            orig_ensure = db._ensure_fts_schema
+            calls = {"n": 0}
+
+            def boom(cursor, table_name, ddl):
+                calls["n"] += 1
+                if table_name == "messages_fts":
+                    # Markers must already be on disk from the staged write.
+                    row = db._conn.execute(
+                        "SELECT value FROM state_meta "
+                        "WHERE key = 'fts_rebuild_high_water'"
+                    ).fetchone()
+                    assert row is not None, (
+                        "markers must be committed before empty v23 schema create"
+                    )
+                    progress = db._conn.execute(
+                        "SELECT value FROM state_meta "
+                        "WHERE key = 'fts_rebuild_progress'"
+                    ).fetchone()
+                    assert progress is not None and progress[0] == "0"
+                    raise sqlite3.OperationalError("simulated crash mid-ensure")
+                return orig_ensure(cursor, table_name, ddl)
+
+            db._ensure_fts_schema = boom  # type: ignore[method-assign]
+            try:
+                db._demote_legacy_fts_to_trash()
+                raise AssertionError("demote should have raised")
+            except sqlite3.OperationalError as exc:
+                assert "simulated crash" in str(exc)
+
+            # Staged demote survived: markers + trash, no successful stamp.
+            assert db.get_meta("fts_rebuild_high_water") is not None
+            assert db.get_meta("fts_rebuild_progress") == "0"
+            assert db._has_fts_trash(db._conn) is True
+            assert db.get_meta("fts_storage_version") is None
+
+            # Restore ensure and resume — full optimize completes.
+            db._ensure_fts_schema = orig_ensure  # type: ignore[method-assign]
+            result = db.optimize_fts_storage(vacuum=False)
+            assert result["ok"] is True
+            assert len(db.search_messages("deployment")) == 1
+            assert db.fts_optimize_available() is False
+        finally:
+            db.close()
+
+    def test_optimize_settle_refuses_pending_backfill(self, tmp_path):
+        """Settle must not stamp while high_water markers remain."""
+        db = SessionDB(db_path=tmp_path / "fresh.db")
+        try:
+            db.create_session(session_id="s1", source="cli")
+            db.append_message("s1", role="user", content="settle guard needle")
+            # Plant markers without going through demote.
+            db.set_meta("fts_rebuild_high_water", "1")
+            db.set_meta("fts_rebuild_progress", "0")
+            # The public contract: optimize returns ok=False when still
+            # pending. Simulate an unfinishable backfill by stubbing the
+            # chunk step to a no-op while markers stay.
+            db.fts_rebuild_step = lambda: False  # type: ignore[method-assign]
+            result = db.optimize_fts_storage(vacuum=False)
+            assert result["ok"] is False
+            assert result.get("reason") == "backfill_incomplete"
+            assert db.get_meta("fts_storage_version") is None
+            assert db.get_meta("fts_rebuild_high_water") is not None
+        finally:
+            db.close()
+
+    def test_v23_fresh_db_born_optimized(self, tmp_path):
+        """A brand-new DB is born on v23 — no legacy layout, no opt-in flag,
+        no pending rebuild."""
+        db = SessionDB(db_path=tmp_path / "fresh.db")
+        try:
+            assert db.fts_optimize_available() is False
+            assert db.fts_rebuild_status() is None
+            assert db.get_meta("fts_optimize_available") is None
+            # Already external-content: no shadow copy tables.
+            assert db._conn.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'messages_fts_content'"
+            ).fetchone() is None
+            db.create_session(session_id="s1", source="cli")
+            db.append_message("s1", role="user", content="hello fresh world")
+            assert len(db.search_messages("fresh")) == 1
+        finally:
+            db.close()
+
+
+    def test_v23_cjk_tool_role_filter_uses_like_fallback(self, tmp_path):
+        """A CJK query with role_filter=['tool'] must bypass the trigram index
+        (tool rows aren't in it) and still find matches via LIKE."""
+        db = SessionDB(db_path=tmp_path / "fresh.db")
+        try:
+            db.create_session(session_id="s1", source="cli")
+            db.append_message("s1", role="tool", content="错误日志：数据库连接超时",
+                              tool_name="terminal")
+            hits = db.search_messages("数据库连接", role_filter=["tool"])
+            assert len(hits) == 1
+            assert hits[0]["role"] == "tool"
+        finally:
+            db.close()
+
 
 
 # ---------------------------------------------------------------------------
@@ -5826,6 +6780,48 @@ class TestCompactRows:
         row = db._get_session_rich_row("s1", compact_rows=False)
         assert row["system_prompt"] == "stay"
 
+    def test_batch_compact_rows_omits_system_prompt_keeps_git_fields(self, db):
+        """_get_session_rich_rows_batch(compact_rows=True) must apply the same
+        schema-derived compact projection as the single-row path: no
+        system_prompt blob, but git_branch/git_repo_root still present."""
+        self._create(db, "s1", system_prompt="should be gone")
+        db.update_session_cwd("s1", "/tmp/w1", git_branch="main", git_repo_root="/tmp/w1")
+        rows = db._get_session_rich_rows_batch(["s1"], compact_rows=True)
+        assert set(rows) == {"s1"}
+        row = rows["s1"]
+        assert "system_prompt" not in row
+        assert row["git_branch"] == "main"
+        assert row["git_repo_root"] == "/tmp/w1"
+
+    def test_compression_tip_projection_threads_compact_rows(self, db):
+        """list_sessions_rich(compact_rows=True) must thread compact_rows
+        through the batched tip-row fetch: the projected tip row must lack
+        system_prompt but keep git metadata (guards the call site at the
+        projection loop, not just the batch helper)."""
+        import time as _time
+
+        t0 = _time.time() - 3600
+        db.create_session("rootc", "cli")
+        db._conn.execute("UPDATE sessions SET started_at=? WHERE id=?", (t0, "rootc"))
+        db.append_message("rootc", "user", "start")
+        db._conn.execute(
+            "UPDATE sessions SET ended_at=?, end_reason=? WHERE id=?",
+            (t0 + 100, "compression", "rootc"),
+        )
+        db.create_session("tipc", "cli", parent_session_id="rootc")
+        db._conn.execute("UPDATE sessions SET started_at=? WHERE id=?", (t0 + 101, "tipc"))
+        db.append_message("tipc", "user", "continuation")
+        db.update_system_prompt("tipc", "big blob " * 500)
+        db.update_session_cwd("tipc", "/tmp/w2", git_branch="dev", git_repo_root="/tmp/w2")
+        db._conn.commit()
+
+        rows = db.list_sessions_rich(source="cli", compact_rows=True)
+        tip = next(s for s in rows if s["id"] == "tipc")
+        assert tip["_lineage_root_id"] == "rootc"
+        assert "system_prompt" not in tip
+        assert tip["git_branch"] == "dev"
+        assert tip["git_repo_root"] == "/tmp/w2"
+
     def test_compact_rows_default_is_false(self, db):
         """Default behaviour (compact_rows not passed) is unchanged — full rows."""
         self._create(db, "s1", system_prompt="present")
@@ -5890,6 +6886,48 @@ class TestGetMessagesPagination:
         self._seed(db)
         messages = db.get_messages("s1")
         assert [m["content"] for m in messages] == [f"msg-{i}" for i in range(10)]
+
+
+    def test_window_query_bounded_work(self, db):
+        """Perf contract: get_messages_around must seek by index, not scan
+        the session's whole message history. Measured behaviorally via
+        SQLite progress-handler steps (behavior contracts over snapshots,
+        AGENTS.md — no EXPLAIN text). Calibrated on this seed (3000
+        messages): indexed = ~12 handler calls, unindexed full-session
+        scan = ~855. Threshold 300: >25x headroom above the indexed path,
+        ~3x below the scan. Same pattern as the loader call-count pins in
+        tests/tools/test_approval_config_readonly.py."""
+        self._seed(db, n=3000)
+        mid = db.get_messages("s1", limit=1, offset=1500)[0]["id"]
+        steps = [0]
+
+        def progress():
+            steps[0] += 1
+            return 0
+
+        db._conn.set_progress_handler(progress, 100)
+        try:
+            db.get_messages_around("s1", mid, window=20)
+        finally:
+            db._conn.set_progress_handler(None, 0)
+        assert steps[0] < 300, (
+            f"get_messages_around executed {steps[0]}x100 VM steps — the "
+            "session-history scan is back (idx_messages_session_id missing "
+            "or unused)")
+
+
+    def test_window_results_identical_with_and_without_index(self, db):
+        """The index must not change results: identical windows at probe
+        points across the session, with and without it."""
+        self._seed(db, n=500)
+        ids = [m["id"] for m in db.get_messages("s1")]
+        probes = (ids[0], ids[len(ids) // 2], ids[-1])
+        with_index = [db.get_messages_around("s1", mid, window=5)
+                      for mid in probes]
+        db._conn.execute("DROP INDEX idx_messages_session_id")
+        without_index = [db.get_messages_around("s1", mid, window=5)
+                         for mid in probes]
+        assert with_index == without_index
 
     def test_limit_pages_in_insertion_order(self, db):
         self._seed(db)
@@ -6040,3 +7078,542 @@ def test_refresh_cannot_resurrect_a_lock_already_reclaimed(db, monkeypatch):
         ("s1",),
     ).fetchone()[0]
     assert current == "holder-b"
+
+
+class TestDisplayMetadataDecoding:
+    META = {"key": "value", "nested": {"list": [1, 2]}}
+
+    def _seed(self, db):
+        db.create_session("s1", "cli")
+        db.append_message("s1", "assistant", "event", display_metadata=self.META)
+        msg = db.get_messages("s1")[0]
+        return msg["id"], msg.get("anchor_id")
+
+    @staticmethod
+    def _read(db, reader, message_id, anchor_id):
+        if reader == "get_messages":
+            return db.get_messages("s1")[0]
+        if reader == "get_messages_around":
+            return db.get_messages_around("s1", message_id, window=0)["window"][0]
+        if reader == "get_anchored_view":
+            view = db.get_anchored_view("s1", anchor_id, window=0, bookend=1)
+            return view["bookend_start"][0]
+        return db.get_messages_as_conversation("s1")[0]
+
+    READERS = ("get_messages", "get_messages_around", "get_anchored_view", "conversation")
+
+    @pytest.mark.parametrize("reader", READERS)
+    def test_every_reader_decodes_display_metadata(self, db, reader):
+        message_id, anchor_id = self._seed(db)
+        assert self._read(db, reader, message_id, anchor_id)["display_metadata"] == self.META
+
+
+    @pytest.mark.parametrize("reader", READERS)
+    @pytest.mark.parametrize("raw", ["", "{not-json", "[]", '"text"', "0"])
+    def test_every_reader_drops_unusable_display_metadata(self, db, reader, raw):
+        """Bad presentation metadata must not take the message down with it."""
+        message_id, anchor_id = self._seed(db)
+
+        def _corrupt(conn):
+            conn.execute(
+                "UPDATE messages SET display_metadata = ? WHERE id = ?",
+                (raw, message_id),
+            )
+
+        db._execute_write(_corrupt)
+        message = self._read(db, reader, message_id, anchor_id)
+        assert message.get("display_metadata") is None
+        assert message["content"] == "event"
+
+    def test_export_import_round_trip_keeps_metadata_decodable(self, db, tmp_path):
+        """The read leak used to write a permanently double-encoded row here.
+
+        ``export_session`` reads through ``get_messages``, so an undecoded
+        string went back through ``_insert_message_rows`` and got re-dumped.
+        """
+        self._seed(db)
+        blob = db.export_session("s1")
+        assert isinstance(blob["messages"][0]["display_metadata"], dict)
+
+        target = SessionDB(db_path=tmp_path / "imported.db")
+        try:
+            target.import_sessions([json.loads(json.dumps(blob))])
+            assert target.get_messages_as_conversation("s1")[0]["display_metadata"] == self.META
+            assert target.get_messages("s1")[0]["display_metadata"] == self.META
+        finally:
+            target.close()
+
+
+
+
+class TestGatewayRoutingPkHeal:
+    """Legacy gateway_routing tables (session_key-only PK) get rebuilt on open.
+
+    Early builds of the #59203 routing-index migration created gateway_routing
+    with ``session_key TEXT PRIMARY KEY`` and no ``scope`` column. The column
+    reconciler ADDs ``scope`` but cannot change the PK, so on those databases
+    every routing save failed ("ON CONFLICT clause does not match any PRIMARY
+    KEY or UNIQUE constraint" / "UNIQUE constraint failed:
+    gateway_routing.session_key") and spammed warnings on each save.
+    """
+
+    LEGACY_SQL = """
+        CREATE TABLE gateway_routing (
+            session_key TEXT PRIMARY KEY,
+            entry_json TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        , "scope" TEXT DEFAULT '')
+    """
+
+    def _make_legacy_db(self, tmp_path, rows=()):
+        db_path = tmp_path / "state.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute(self.LEGACY_SQL)
+        conn.executemany(
+            "INSERT INTO gateway_routing (scope, session_key, entry_json, updated_at) "
+            "VALUES (?, ?, ?, ?)",
+            list(rows),
+        )
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def _pk_cols(self, db):
+        rows = db._conn.execute('PRAGMA table_info("gateway_routing")').fetchall()
+        cols = sorted(
+            ((r["pk"], r["name"]) for r in rows if r["pk"]),
+        )
+        return [name for _, name in cols]
+
+    def test_legacy_pk_rebuilt_to_composite(self, tmp_path):
+        db_path = self._make_legacy_db(
+            tmp_path, rows=[("/home/u/.hermes/sessions", "agent:main:telegram:dm:1", "{}", 1.0)]
+        )
+        db = SessionDB(db_path=db_path)
+        try:
+            assert self._pk_cols(db) == ["scope", "session_key"]
+            # Existing rows survive the rebuild.
+            entries = db.load_gateway_routing_entries(scope="/home/u/.hermes/sessions")
+            assert entries == {"agent:main:telegram:dm:1": "{}"}
+        finally:
+            db.close()
+
+
+
+    def test_current_shape_left_untouched(self, tmp_path, db):
+        """A DB born with the composite PK is not rebuilt (idempotence)."""
+        db.save_gateway_routing_entry("k1", "{}", scope="s")
+        assert self._pk_cols(db) == ["scope", "session_key"]
+        # Re-running the heal is a no-op.
+        cur = db._conn.cursor()
+        db._heal_gateway_routing_pk(cur)
+        assert db.load_gateway_routing_entries(scope="s") == {"k1": "{}"}
+
+
+class TestApplyDatabasePragmas:
+    """Config-driven WAL-sizing pragma application (database: section)."""
+
+    @staticmethod
+    def _patch_cfg(monkeypatch, cfg):
+        monkeypatch.setattr(
+            "hermes_cli.config.load_config_readonly",
+            lambda: cfg,
+        )
+
+    def test_honors_wal_autocheckpoint_from_config(self, tmp_path, monkeypatch):
+        import sqlite3
+        from hermes_state import apply_database_pragmas
+
+        conn = sqlite3.connect(str(tmp_path / "pragmas.db"))
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            self._patch_cfg(monkeypatch, {"database": {"wal_autocheckpoint": 250}})
+            apply_database_pragmas(conn, db_label="test.db")
+            assert conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0] == 250
+        finally:
+            conn.close()
+
+    def test_honors_journal_size_limit_from_config(self, tmp_path, monkeypatch):
+        import sqlite3
+        from hermes_state import apply_database_pragmas
+
+        conn = sqlite3.connect(str(tmp_path / "pragmas.db"))
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            self._patch_cfg(
+                monkeypatch, {"database": {"journal_size_limit": 10485760}}
+            )
+            apply_database_pragmas(conn, db_label="test.db")
+            assert (
+                conn.execute("PRAGMA journal_size_limit").fetchone()[0] == 10485760
+            )
+        finally:
+            conn.close()
+
+    def test_noop_when_database_section_missing(self, tmp_path, monkeypatch):
+        import sqlite3
+        from hermes_state import apply_database_pragmas
+
+        conn = sqlite3.connect(str(tmp_path / "pragmas.db"))
+        try:
+            conn.execute("PRAGMA journal_mode=DELETE")
+            self._patch_cfg(monkeypatch, {})
+            apply_database_pragmas(conn, db_label="test.db")
+            assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+        finally:
+            conn.close()
+
+    def test_never_touches_journal_mode(self, tmp_path, monkeypatch):
+        """journal_mode is owned by apply_wal_with_fallback — a database:
+        journal_mode entry must NOT cause a second, unguarded mode switch."""
+        import sqlite3
+        from hermes_state import apply_database_pragmas
+
+        conn = sqlite3.connect(str(tmp_path / "pragmas.db"))
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            self._patch_cfg(monkeypatch, {"database": {"journal_mode": "delete"}})
+            apply_database_pragmas(conn, db_label="test.db")
+            assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        finally:
+            conn.close()
+
+    def test_ignores_non_integer_values(self, tmp_path, monkeypatch):
+        import sqlite3
+        from hermes_state import apply_database_pragmas
+
+        conn = sqlite3.connect(str(tmp_path / "pragmas.db"))
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            before = conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0]
+            self._patch_cfg(
+                monkeypatch, {"database": {"wal_autocheckpoint": "lots"}}
+            )
+            apply_database_pragmas(conn, db_label="test.db")
+            assert conn.execute("PRAGMA wal_autocheckpoint").fetchone()[0] == before
+        finally:
+            conn.close()
+
+    def test_ignores_non_integer_performance_values(self, tmp_path, monkeypatch):
+        """Garbage cache_size/mmap_size/temp_store values must be rejected."""
+        import sqlite3
+        from hermes_state import apply_database_pragmas
+
+        conn = sqlite3.connect(str(tmp_path / "pragmas.db"))
+        try:
+            before = {
+                name: conn.execute(f"PRAGMA {name}").fetchone()[0]
+                for name in ("cache_size", "mmap_size", "temp_store")
+            }
+            self._patch_cfg(
+                monkeypatch,
+                {
+                    "database": {
+                        "cache_size": "big",
+                        "mmap_size": [256],
+                        "temp_store": "ram please",
+                    }
+                },
+            )
+            apply_database_pragmas(conn, db_label="test.db")
+            after = {
+                name: conn.execute(f"PRAGMA {name}").fetchone()[0]
+                for name in ("cache_size", "mmap_size", "temp_store")
+            }
+            assert after == before
+        finally:
+            conn.close()
+
+
+class TestInsightsToolCallIndex:
+    """The Insights assistant tool-call scan has a predicate-aligned index.
+
+    ``InsightsEngine._get_tool_usage`` / ``_get_skill_usage`` filter messages by
+    ``role = 'assistant' AND tool_calls IS NOT NULL``.  A partial index over that
+    predicate keeps the scan off the full ``messages`` table on a large state.db.
+    """
+
+    _INDEX = "idx_messages_assistant_calls_by_session"
+
+    def _index_defn(self, conn):
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+            (self._INDEX,),
+        ).fetchone()
+        return row["sql"] if row else None
+
+    def test_index_created_on_fresh_db(self, tmp_path):
+        db = SessionDB(db_path=tmp_path / "fresh.db")
+        try:
+            sql = self._index_defn(db._conn)
+            assert sql is not None, "partial index missing on a fresh database"
+            # Partial predicate must match the queried rows exactly.
+            assert "role = 'assistant'" in sql
+            assert "tool_calls IS NOT NULL" in sql
+        finally:
+            db.close()
+
+    def test_index_created_on_existing_db(self, tmp_path):
+        """Reopening a DB that predates the index must create it (SCHEMA_SQL is
+        re-run on every open; role/tool_calls are original base columns)."""
+        db_path = tmp_path / "legacy.db"
+        db = SessionDB(db_path=db_path)
+        # Simulate a database created before the index shipped.
+        db._conn.execute(f"DROP INDEX IF EXISTS {self._INDEX}")
+        db._conn.commit()
+        assert self._index_defn(db._conn) is None
+        db.close()
+
+        db2 = SessionDB(db_path=db_path)
+        try:
+            assert self._index_defn(db2._conn) is not None, (
+                "index not recreated when reopening an existing database"
+            )
+        finally:
+            db2.close()
+
+    def test_index_predicate_is_partial(self, db):
+        """The index covers only the assistant tool-call rows Insights reads.
+
+        Query-plan coverage (that the Insights queries actually select this
+        index, for both scopes, without ANALYZE) lives with the queries in
+        tests/agent/test_insights.py.
+        """
+        sql = self._index_defn(db._conn)
+        assert sql is not None
+        assert "WHERE" in sql
+        assert "role = 'assistant'" in sql
+        assert "tool_calls IS NOT NULL" in sql
+class TestFtsRebuildFinishWithoutTrigram:
+    """An FTS index that the runtime cannot maintain must not wedge the store.
+
+    Two independent failure sites shared one root shape: code that writes to
+    ``messages_fts_trigram`` without first checking the table is actually
+    present. It is legitimately absent whenever the trigram index is
+    unavailable (SQLite build without the tokenizer), and it can also be left
+    absent by an interrupted migration or a partially-applied schema change.
+    """
+
+    @staticmethod
+    def _seed(db_path, n=60):
+        seeded = SessionDB(db_path=db_path)
+        try:
+            seeded.create_session(session_id="s1", source="cli")
+            for i in range(n):
+                seeded.append_message(
+                    "s1",
+                    role=("user" if i % 3 == 0
+                          else "assistant" if i % 3 == 1 else "tool"),
+                    content=f"sentinel payload {i} zebra",
+                )
+            high_water = seeded._conn.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM messages"
+            ).fetchone()[0]
+        finally:
+            seeded.close()
+        return high_water
+
+    def test_rebuild_finish_skips_trigram_when_unavailable(
+        self, tmp_path, monkeypatch
+    ):
+        """optimize_fts_storage() completes when the trigram index is absent.
+
+        ``fts_rebuild_step()`` already guards its backfill INSERT on
+        ``_trigram_available``; ``_fts_rebuild_finish()``'s boundary sweep did
+        not, so finishing a deferred rebuild on a trigram-less runtime raised
+        ``no such table: messages_fts_trigram`` and aborted the whole
+        optimization. The base index must still be swept and the markers
+        cleared.
+        """
+        db_path = tmp_path / "state.db"
+        high_water = self._seed(db_path)
+
+        real_connect = sqlite3.connect
+
+        def connect_without_trigram(*args, **kwargs):
+            kwargs["factory"] = _NoTrigramConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr(
+            "hermes_state.sqlite3.connect", connect_without_trigram
+        )
+        db = SessionDB(db_path=db_path)
+        try:
+            assert db._trigram_available is False
+            # A trigram-less runtime leaves no trigram index on disk.
+            db._conn.execute("DROP TABLE IF EXISTS messages_fts_trigram")
+            db._conn.commit()
+            assert db._fts_table_exists("messages_fts_trigram") is False
+
+            # Put the DB in the pending-deferred-rebuild state.
+            for key, value in (
+                ("fts_rebuild_high_water", str(high_water)),
+                ("fts_rebuild_progress", str(high_water)),
+            ):
+                db._conn.execute(
+                    "INSERT INTO state_meta (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, value),
+                )
+            db._conn.commit()
+
+            # Pre-fix this raised OperationalError("no such table: ...").
+            db._fts_rebuild_finish()
+
+            # The sweep ran to completion: markers cleared…
+            assert db.get_meta("fts_rebuild_high_water") is None
+            assert db.get_meta("fts_rebuild_progress") is None
+            # …and the base index is still usable (the fix must not disable
+            # real search to dodge the error).
+            assert db.search_messages("zebra")
+        finally:
+            db.close()
+
+    def test_optimize_fts_storage_succeeds_without_trigram(
+        self, tmp_path, monkeypatch
+    ):
+        """End-to-end: the public optimize entry point returns ok=True."""
+        db_path = tmp_path / "state.db"
+        high_water = self._seed(db_path)
+
+        real_connect = sqlite3.connect
+
+        def connect_without_trigram(*args, **kwargs):
+            kwargs["factory"] = _NoTrigramConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr(
+            "hermes_state.sqlite3.connect", connect_without_trigram
+        )
+        db = SessionDB(db_path=db_path)
+        try:
+            db._conn.execute("DROP TABLE IF EXISTS messages_fts_trigram")
+            db._conn.commit()
+            assert db._trigram_available is False
+            for key, value in (
+                ("fts_rebuild_high_water", str(high_water)),
+                ("fts_rebuild_progress", "0"),
+            ):
+                db._conn.execute(
+                    "INSERT INTO state_meta (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, value),
+                )
+            db._conn.commit()
+
+            result = db.optimize_fts_storage(vacuum=False)
+            assert result["ok"] is True
+            assert db.get_meta("fts_rebuild_high_water") is None
+            assert db.search_messages("zebra")
+        finally:
+            db.close()
+
+
+
+class TestPerformancePragmasEndToEnd:
+    """E2E guard for PR #71755: config-gated cache_size / mmap_size /
+    temp_store must reach EVERY connection type (writer, read-only
+    cross-profile attach, WAL per-thread reader) — and default installs
+    (no ``database:`` keys) must see byte-identical SQLite defaults.
+
+    NOTE: SQLite's compiled-in default for ``cache_size`` is already
+    ``-2000``, so the configured value here is ``-16000`` — a value the
+    test can actually discriminate from the default (a reverted prod
+    change must FAIL this test, not accidentally pass it).
+    """
+
+    PRAGMAS = ("cache_size", "mmap_size", "temp_store")
+    CONFIGURED = {"cache_size": -16000, "mmap_size": 1048576, "temp_store": 2}
+
+    @staticmethod
+    def _read(conn):
+        return {
+            name: conn.execute(f"PRAGMA {name}").fetchone()[0]
+            for name in ("cache_size", "mmap_size", "temp_store")
+        }
+
+    @staticmethod
+    def _sqlite_defaults(tmp_path):
+        import sqlite3
+
+        conn = sqlite3.connect(str(tmp_path / "baseline.db"))
+        try:
+            return {
+                name: conn.execute(f"PRAGMA {name}").fetchone()[0]
+                for name in ("cache_size", "mmap_size", "temp_store")
+            }
+        finally:
+            conn.close()
+
+    def _fresh_home(self, tmp_path, monkeypatch, config_text=None):
+        import hermes_state
+
+        # Local venvs may bundle a WAL-reset-vulnerable SQLite (e.g. 3.46.0),
+        # which would silently disable WAL and skip the per-thread reader
+        # path. Force WAL eligibility so _get_read_conn is truly exercised
+        # (established pattern used by the WAL tests above).
+        monkeypatch.setattr(
+            hermes_state,
+            "is_sqlite_wal_reset_vulnerable",
+            lambda version_info=None: False,
+        )
+        home = tmp_path / "hermes_home"
+        home.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        if config_text is not None:
+            (home / "config.yaml").write_text(config_text)
+        return home
+
+    def test_configured_pragmas_reach_all_connection_types(
+        self, tmp_path, monkeypatch
+    ):
+        from hermes_state import SessionDB
+
+        home = self._fresh_home(
+            tmp_path,
+            monkeypatch,
+            "database:\n"
+            "  cache_size: -16000\n"
+            "  temp_store: 2\n"
+            "  mmap_size: 1048576\n",
+        )
+        db_path = home / "state.db"
+        db = SessionDB(db_path=db_path)
+        try:
+            # Writer connection.
+            assert self._read(db._conn) == self.CONFIGURED
+            # WAL per-thread reader.
+            rconn = db._get_read_conn()
+            assert rconn is not None, "WAL reader expected on local filesystem"
+            assert self._read(rconn) == self.CONFIGURED
+        finally:
+            db.close()
+
+        # Read-only cross-profile attach.
+        ro = SessionDB(db_path=db_path, read_only=True)
+        try:
+            assert self._read(ro._conn) == self.CONFIGURED
+        finally:
+            ro.close()
+
+    def test_defaults_unchanged_without_config(self, tmp_path, monkeypatch):
+        """No database: keys in config.yaml → SQLite defaults untouched."""
+        from hermes_state import SessionDB
+
+        defaults = self._sqlite_defaults(tmp_path)
+        home = self._fresh_home(tmp_path, monkeypatch, config_text=None)
+        db_path = home / "state.db"
+        db = SessionDB(db_path=db_path)
+        try:
+            assert self._read(db._conn) == defaults
+            rconn = db._get_read_conn()
+            if rconn is not None:
+                assert self._read(rconn) == defaults
+        finally:
+            db.close()
+
+        ro = SessionDB(db_path=db_path, read_only=True)
+        try:
+            assert self._read(ro._conn) == defaults
+        finally:
+            ro.close()
