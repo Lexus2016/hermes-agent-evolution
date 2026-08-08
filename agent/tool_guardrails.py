@@ -97,6 +97,14 @@ _SPIRAL_PRONE_TOOLS = frozenset({
     # 5) that halts the turn regardless of hard_stop_enabled, bounding the
     # retry spiral and forcing a strategy switch.
     "patch",
+    # #1840 — write_file parse-error spirals: 48 failures/7d, 15-deep across
+    # 11 sessions. write_file's syntax gate refuses malformed JSON/YAML/TOML
+    # content (non-retryable — the same content will always fail), but the
+    # tool was not in the spiral-prone set so consecutive refusals never
+    # accumulated toward the cap. Adding write_file activates the always-on
+    # spiral_failure_cap so the model is forced to fix the content or switch
+    # strategies instead of blind-retrying the same malformed payload.
+    "write_file",
 })
 
 # #1585 — number of consecutive successes required before a spiral-prone

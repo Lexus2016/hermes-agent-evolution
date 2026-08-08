@@ -657,12 +657,13 @@ def test_bot_detection_spiral_halts_at_cap():
 def test_browser_cap_leaves_native_tool_hard_stop_semantics_unchanged():
     """The always-on browser cap must not leak into non-spiral-prone native
     tools: with hard_stop OFF, a non-spiral same-tool failure spiral still
-    only warns (never halts).  Note: terminal and execute_code ARE now
-    spiral-prone (see test_spiral_* below), so we use write_file here."""
+    only warns (never halts).  Note: terminal, execute_code, read_file,
+    write_file, and patch ARE now spiral-prone (see test_spiral_* below),
+    so we use send_message here."""
     controller = ToolCallGuardrailController()  # hard_stop off
     decisions = [
         controller.after_call(
-            "write_file", {"path": f"p-{i}"}, '{"error":"boom"}', failed=True
+            "send_message", {"message": f"m-{i}"}, '{"error":"boom"}', failed=True
         )
         for i in range(10)
     ]
@@ -996,12 +997,12 @@ def test_spiral_cap_reset_for_turn_clears_streak():
 
 def test_spiral_cap_does_not_affect_non_spiral_tools():
     """The spiral cap only applies to spiral-prone tools (terminal,
-    execute_code, read_file) — not to write_file, patch, etc."""
+    execute_code, read_file, write_file, patch) — not to send_message, etc."""
     controller = ToolCallGuardrailController()
     last = None
     for _ in range(10):
         last = controller.after_call(
-            "write_file", {"path": "x"}, '{"error":"boom"}', failed=True
+            "send_message", {"message": "x"}, '{"error":"boom"}', failed=True
         )
     assert last is not None
     assert last.action != "halt"
@@ -1121,14 +1122,14 @@ def test_cross_turn_browser_cap_blocks_after_reset():
 
 def test_cross_turn_does_not_affect_non_spiral_tools():
     """The cross-turn enforcement only applies to spiral-prone and browser
-    tools — not to write_file, patch, etc."""
+    tools — not to send_message, etc."""
     controller = ToolCallGuardrailController()
     for _ in range(10):
         controller.after_call(
-            "write_file", {"path": "x"}, '{"error":"boom"}', failed=True
+            "send_message", {"message": "x"}, '{"error":"boom"}', failed=True
         )
     controller.reset_for_turn()
-    assert controller.before_call("write_file", {"path": "x"}).action == "allow"
+    assert controller.before_call("send_message", {"message": "x"}).action == "allow"
 
 
 def test_cross_turn_process_spiral_cap_fires():

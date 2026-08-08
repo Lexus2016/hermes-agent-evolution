@@ -1860,7 +1860,11 @@ class ShellFileOperations(FileOperations):
                     error=(
                         f"Refusing to write '{path}': candidate content fails "
                         f"{ext} syntax validation ({_lint_err}). The file was "
-                        "NOT created or modified. Fix the content and retry."
+                        "NOT created or modified. "
+                        "Non-retryable: the same content will always fail "
+                        "validation. Fix the structural error (e.g. unbalanced "
+                        "braces, trailing commas, invalid escape sequences) "
+                        "or use a terminal heredoc to write the raw bytes."
                     )
                 )
 
