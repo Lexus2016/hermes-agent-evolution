@@ -103,6 +103,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Dict, Any, List, Optional, Set, Tuple
 
 from tools.registry import registry, tool_error
+from tools.skill_composition_tracer import check_composition
 from hermes_cli.config import cfg_get
 from utils import env_var_enabled
 from agent.skill_utils import (
@@ -1585,6 +1586,19 @@ def skill_view(
                     },
                     ensure_ascii=False,
                 )
+
+        # SkillTrojan defense (#1802): runtime composition trace.
+        # Checks whether the combination of skills loaded this turn
+        # reconstructs a payload across skill boundaries.
+        _composition_result = check_composition(name, content)
+        if not _composition_result.get("success", True):
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": _composition_result.get("error", ""),
+                },
+                ensure_ascii=False,
+            )
 
         parsed_frontmatter: Dict[str, Any] = {}
         try:

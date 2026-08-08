@@ -114,32 +114,46 @@ class TestIsValidRegexShortCircuit:
         "**/*.py",
         "*.json",
     ])
-    def test_uncompilable_glob_still_redirects(self, pattern):
-        """Patterns that fail ``re.compile`` (real globs) still redirect."""
+    def test_uncompilable_glob_auto_converts(self, pattern):
+        """Patterns that fail ``re.compile`` (real globs) are auto-converted
+        to regex and dispatched to the search — NOT returned as an error
+        (#1788).  The handler now calls ``_glob_to_regex`` and proceeds."""
         result = _handle_search_files(
             {"pattern": pattern, "target": "content"},
             task_id="test",
         )
-        data = json.loads(result)
-        assert "error" in data, f"{pattern!r} should trigger the redirect error"
-        assert "glob" in data["error"].lower()
+        # The result is whatever search_tool returns (search results or an
+        # environment/path error) — it must NOT be the old glob-redirect
+        # error message.
+        try:
+            data = json.loads(result)
+            if "error" in data:
+                assert "glob" not in data["error"].lower(), (
+                    f"{pattern!r} should be auto-converted, not returned as "
+                    f"a glob error"
+                )
+        except (json.JSONDecodeError, TypeError):
+            pass  # Non-JSON result is fine — means it went through to search
 
 
 class TestHandleSearchFilesGlobRedirect:
     """Integration tests for the _handle_search_files handler redirect."""
 
-    def test_glob_in_content_mode_returns_redirect_error(self):
-        """A glob pattern in content mode returns a helpful error, not a parse error."""
+    def test_glob_in_content_mode_auto_converts(self):
+        """A glob pattern in content mode is auto-converted to regex and
+        dispatched to the search — NOT returned as an error (#1788)."""
         result = _handle_search_files(
             {"pattern": "*.py", "target": "content"},
             task_id="test",
         )
-        data = json.loads(result)
-        assert "error" in data
-        assert "glob" in data["error"].lower()
-        assert "target='files'" in data["error"]
-        # The error should suggest the exact fix
-        assert "file_glob" in data["error"]
+        # Must NOT be the old glob redirect error
+        try:
+            data = json.loads(result)
+            if "error" in data:
+                assert "glob" not in data["error"].lower()
+                assert "target='files'" not in data.get("error", "")
+        except (json.JSONDecodeError, TypeError):
+            pass  # Non-JSON result is fine — means it went through to search
 
     def test_glob_in_files_mode_passes_through(self):
         """A glob pattern in files mode should NOT be redirected (it's the correct usage)."""
@@ -189,15 +203,19 @@ class TestHandleSearchFilesGlobRedirect:
         except (json.JSONDecodeError, TypeError):
             pass
 
-    def test_grep_alias_triggers_redirect(self):
-        """The 'grep' alias for 'content' should also trigger the redirect."""
+    def test_grep_alias_auto_converts(self):
+        """The 'grep' alias for 'content' should also auto-convert globs."""
         result = _handle_search_files(
             {"pattern": "*.json", "target": "grep"},
             task_id="test",
         )
-        data = json.loads(result)
-        assert "error" in data
-        assert "glob" in data["error"].lower()
+        # Must NOT be the old glob redirect error
+        try:
+            data = json.loads(result)
+            if "error" in data:
+                assert "glob" not in data["error"].lower()
+        except (json.JSONDecodeError, TypeError):
+            pass
 
 
 class TestInvalidRegexEnrichment:

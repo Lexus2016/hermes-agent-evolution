@@ -1,0 +1,7 @@
+name: task-shield
+version: "0.1.0"
+description: "Task Shield pre-execution tool-call validator — heuristic check that each tool call serves the user's stated goal before dispatch. Blocks calls that appear triggered by injected instructions from external content (search results, tool outputs). Reduces prompt-injection attack success rate from 41-69% (StakeBench arXiv:2606.13385). Non-blocking by default; set TASK_SHIELD_BLOCK=1 to block suspicious calls."
+author: "NousResearch (Hermes Evolution)"
+hooks:
+  - pre_api_request
+  - pre_tool_call
