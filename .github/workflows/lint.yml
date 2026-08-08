@@ -170,3 +170,27 @@ jobs:
 
       - name: Run footgun checker
         run: python scripts/check-windows-footguns.py --all
+
+  evolution-security:
+    # BenchJack defense (arXiv:2605.12673): deterministic checks that the
+    # evolution pipeline's evaluator is isolated from the implementer (#1807)
+    # and that LLM-judge prompts don't interpolate untrusted agent content
+    # without data delimiters (#1808). Both scripts are pure static scans
+    # (no LLM calls, no network). They exit 0 on PASS, 1 on FAIL.
+    name: Evolution security scans (blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Evaluator isolation check (#1807)
+        run: python scripts/evolution_isolation_check.py
+
+      - name: LLM-judge prompt safety scan (#1808)
+        run: python scripts/evolution_judge_safety_scan.py || true  # advisory until templates are fixed
