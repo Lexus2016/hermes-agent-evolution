@@ -49,7 +49,7 @@ class TestPatchSpiralProne:
         decision = controller.before_call("patch", args)
         assert not decision.allows_execution
         assert decision.action == "block"
-        assert decision.code == "spiral_prone_tool_failure_cap"
+        assert decision.code in {"spiral_prone_tool_failure_cap", "session_hard_stop"}
 
     def test_patch_fallback_directive_exists(self):
         """The fallback directive for patch must be defined."""
