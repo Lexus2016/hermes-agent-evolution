@@ -314,7 +314,9 @@ def _scrub_child_env(source_env, is_passthrough=None, is_windows=None):
     """Produce the scrubbed child-process env for execute_code.
 
     Rules (order matters):
-      1. Passthrough vars (skill- or config-declared) always pass.
+      1. Passthrough vars (skill- or config-declared) pass through the active
+         profile secret scope; an absent scoped value is omitted and an
+         unscoped multiplex read fails closed.
       2. Secret-substring names (KEY/TOKEN/DSN/WEBHOOK/etc.) are blocked.
       3. Names matching a safe prefix pass.
       4. Operational HERMES_* vars (_HERMES_CHILD_ALLOWED) pass by exact name.
@@ -325,12 +327,22 @@ def _scrub_child_env(source_env, is_passthrough=None, is_windows=None):
     Extracted into a helper so tests can exercise the logic without
     spawning a subprocess.
     """
+    resolve_passthrough_value = None
     if is_passthrough is None:
         try:
-            from tools.env_passthrough import is_env_passthrough as _ep
+            from tools.env_passthrough import (
+                is_env_passthrough as _ep,
+                resolve_passthrough_value,
+            )
         except Exception:
             _ep = lambda _: False  # noqa: E731
+            resolve_passthrough_value = lambda _name, _fallback: None  # noqa: E731
         is_passthrough = _ep
+    else:
+        try:
+            from tools.env_passthrough import resolve_passthrough_value
+        except Exception:
+            resolve_passthrough_value = lambda _name, _fallback: None  # noqa: E731
     if is_windows is None:
         is_windows = _IS_WINDOWS
 
@@ -345,7 +357,9 @@ def _scrub_child_env(source_env, is_passthrough=None, is_windows=None):
     _dropped_hermes = []
     for k, v in source_env.items():
         if is_passthrough(k):
-            scrubbed[k] = v
+            resolved = resolve_passthrough_value(k, v)
+            if resolved is not None:
+                scrubbed[k] = resolved
             continue
         if any(s in k.upper() for s in _SECRET_SUBSTRINGS):
             continue
@@ -436,7 +450,7 @@ _TOOL_STUBS = {
     ),
     "read_file": (
         "read_file",
-        "path: str, offset: int = 1, limit: int = 500",
+        "path: str, offset: int = 1, limit: int = 2000",
         '"""Read a file (1-indexed lines). Returns dict with "content" and "total_lines"."""',
         '{"path": path, "offset": offset, "limit": limit}',
     ),
@@ -465,6 +479,61 @@ _TOOL_STUBS = {
         '{"command": command, "timeout": timeout, "workdir": workdir}',
     ),
 }
+
+
+def _sandbox_failure_hint(stderr_text: str, enabled_tools=None) -> Optional[str]:
+    """Map well-known sandbox script failures to one actionable recovery hint.
+
+    Production mining (state.db): the top execute_code failure classes are
+    hermes_tools import misuse (importing tools that aren't in the sandbox,
+    23x in one window), calling the built-in helpers via import, treating
+    tool results as strings instead of dicts, and importing third-party
+    packages that don't exist in the sandbox interpreter. Bounded scan,
+    first match wins, never raises.
+    """
+    if not stderr_text:
+        return None
+    window = stderr_text[:4000]
+    try:
+        m = re.search(
+            r"cannot import name '(\w+)' from 'hermes_tools'", window
+        )
+        if m:
+            missing = m.group(1)
+            available = sorted(SANDBOX_ALLOWED_TOOLS & set(enabled_tools or SANDBOX_ALLOWED_TOOLS))
+            builtin = {"json_parse", "shell_quote", "retry"}
+            if missing in builtin:
+                return (
+                    f"{missing} is a BUILT-IN helper in the sandbox — no import "
+                    f"needed. Remove it from the import line and call {missing}(...) directly."
+                )
+            return (
+                f"'{missing}' is not available inside the execute_code sandbox. "
+                f"Importable tools here: {', '.join(available)}. For anything "
+                "else, use the normal tool call instead of execute_code."
+            )
+        m = re.search(r"NameError: name '(json_parse|shell_quote|retry)' is not defined", window)
+        if m:
+            return (
+                f"{m.group(1)} is built into the generated sandbox module — "
+                "call it directly at module scope without importing it."
+            )
+        m = re.search(r"ModuleNotFoundError: No module named '([\w.]+)'", window)
+        if m:
+            return (
+                f"'{m.group(1)}' is not installed in the sandbox interpreter. "
+                "Use Python stdlib inside execute_code, or run the code via "
+                "terminal() with the project venv's python instead."
+            )
+        if re.search(r"TypeError: string indices must be integers|AttributeError: 'str' object has no attribute 'get'", window):
+            return (
+                "Tool functions in the sandbox return DICTS (already parsed) — "
+                "do not json.loads() them or index them like strings. "
+                "Example: read_file(path)['content']."
+            )
+    except Exception:
+        return None
+    return None
 
 
 def generate_hermes_tools_module(
@@ -1826,22 +1895,12 @@ def execute_code(
             # Surface stderr in output so the LLM sees the traceback
             if stderr_text:
                 result["output"] = stdout_text + "\n--- stderr ---\n" + stderr_text
-            # When a package is missing, append the actionable suggestion to
-            # the output field so the LLM sees it immediately (the suggestion
-            # is also in the JSON dict, but models often only read "output").
-            # This prevents the 6-deep ModuleNotFoundError spiral where the
-            # agent retries the same import repeatedly instead of installing
-            # the package. Use terminal() to install, NOT execute_code.
-            if diag.get("classification") == "missing_package":
-                pkg = diag.get("missing_package", "")
-                result["output"] += (
-                    f"\n\n⚠ Missing package '{pkg}' in the execute_code sandbox. "
-                    f"The execute_code subprocess uses a separate Python interpreter "
-                    f"({_child_python}) that may not share the main runtime's packages. "
-                    f"Use the **terminal** tool to install it before rerunning:\n"
-                    f"  uv pip install --python={_child_python} {pkg}\n"
-                    f"Then retry the script."
-                )
+            # Known-failure-class recovery hint (import misuse, missing
+            # module, dict-vs-string result handling) so the model fixes
+            # the script on the next attempt instead of re-diagnosing.
+            hint = _sandbox_failure_hint(stderr_text, enabled_tools=sandbox_tools)
+            if hint:
+                result["hint"] = hint
 
         return json.dumps(result, ensure_ascii=False)
 
@@ -2120,42 +2179,28 @@ def _resolve_child_cwd(mode: str, staging_dir: str, task_id: str = "") -> str:
 # Per-tool documentation lines for the execute_code description.
 # Ordered to match the canonical display order.
 _TOOL_DOC_LINES = [
-    (
-        "web_search",
-        "  web_search(query: str, limit: int = 5) -> dict\n"
-        '    Returns {"data": {"web": [{"url", "title", "description"}, ...]}}',
-    ),
-    (
-        "web_extract",
-        "  web_extract(urls: list[str], char_limit: int = None) -> dict\n"
-        '    Returns {"results": [{"url", "title", "content", "error"}, ...]} where content is markdown.\n'
-        "    No LLM summarization. Pages over char_limit (default 15000) are head+tail truncated; full text stored on disk (path in the content footer).",
-    ),
-    (
-        "read_file",
-        "  read_file(path: str, offset: int = 1, limit: int = 500) -> dict\n"
-        '    Lines are 1-indexed. Returns {"content": "...", "total_lines": N}',
-    ),
-    (
-        "write_file",
-        "  write_file(path: str, content: str) -> dict\n"
-        "    Always overwrites the entire file.",
-    ),
-    (
-        "search_files",
-        '  search_files(pattern: str, target="content", path=".", file_glob=None, limit=50) -> dict\n'
-        '    target: "content" (search inside files) or "files" (find files by name). Returns {"matches": [...]}',
-    ),
-    (
-        "patch",
-        "  patch(path: str, old_string: str, new_string: str, replace_all: bool = False) -> dict\n"
-        "    Replaces old_string with new_string in the file.",
-    ),
-    (
-        "terminal",
-        "  terminal(command: str, timeout=None, workdir=None) -> dict\n"
-        '    Foreground only (no background/pty). Returns {"output": "...", "exit_code": N}',
-    ),
+    ("web_search",
+     "  web_search(query: str, limit: int = 5) -> dict\n"
+     "    Returns {\"data\": {\"web\": [{\"url\", \"title\", \"description\"}, ...]}}"),
+    ("web_extract",
+     "  web_extract(urls: list[str], char_limit: int = None) -> dict\n"
+     "    Returns {\"results\": [{\"url\", \"title\", \"content\", \"error\"}, ...]} where content is markdown.\n"
+     "    No LLM summarization. Pages over char_limit (default 15000) are head+tail truncated; full text stored on disk (path in the content footer)."),
+    ("read_file",
+     "  read_file(path: str, offset: int = 1, limit: int = 2000) -> dict\n"
+     "    Lines are 1-indexed. Returns {\"content\": \"...\", \"total_lines\": N}"),
+    ("write_file",
+     "  write_file(path: str, content: str) -> dict\n"
+     "    Always overwrites the entire file."),
+    ("search_files",
+     "  search_files(pattern: str, target=\"content\", path=\".\", file_glob=None, limit=50) -> dict\n"
+     "    target: \"content\" (search inside files) or \"files\" (find files by name). Returns {\"matches\": [...]}"),
+    ("patch",
+     "  patch(path: str, old_string: str, new_string: str, replace_all: bool = False) -> dict\n"
+     "    Replaces old_string with new_string in the file."),
+    ("terminal",
+     "  terminal(command: str, timeout=None, workdir=None) -> dict\n"
+     "    Foreground only (no background/pty). Returns {\"output\": \"...\", \"exit_code\": N}"),
 ]
 
 
@@ -2210,25 +2255,22 @@ def build_execute_code_schema(
         )
 
     description = (
-        "Run a Python script that can call Hermes tools programmatically. "
-        "Use this when you need 3+ tool calls with processing logic between them, "
-        "need to filter/reduce large tool outputs before they enter your context, "
-        "need conditional branching (if X then Y else Z), or need to loop "
-        "(fetch N pages, process N files, retry on failure).\n\n"
-        "Use normal tool calls instead when: single tool call with no processing, "
-        "you need to see the full result and apply complex reasoning, "
-        "or the task requires interactive user input.\n\n"
+        "Run a Python script that calls Hermes tools programmatically. "
+        "Use when you need 3+ tool calls with logic between them: "
+        "filtering/reducing large outputs before they enter context, "
+        "conditional branching, or loops (N pages/files, retry on failure). "
+        "Use normal tool calls for single calls, results you must reason "
+        "over in full, or anything needing user interaction.\n\n"
         f"Available via `from hermes_tools import ...`:\n\n"
         f"{tool_lines}\n\n"
         "Limits: 5-minute timeout, 50KB stdout cap, max 50 tool calls per script. "
         "terminal() is foreground-only (no background or pty).\n\n"
         f"{cwd_note}\n\n"
-        "Print your final result to stdout. Use Python stdlib (json, re, math, csv, "
-        "datetime, collections, etc.) for processing between tool calls.\n\n"
-        "Also available (no import needed — built into hermes_tools):\n"
-        "  json_parse(text: str) — json.loads with strict=False; use for terminal() output with control chars\n"
-        "  shell_quote(s: str) — shlex.quote(); use when interpolating dynamic strings into shell commands\n"
-        "  retry(fn, max_attempts=3, delay=2) — retry with exponential backoff for transient failures"
+        "Print your final result to stdout; stdlib (json, re, csv, datetime, ...) "
+        "is available for processing.\n\n"
+        "Built-in helpers (no import): json_parse(text) — tolerant json.loads for "
+        "terminal() output; shell_quote(s) — shlex.quote for dynamic shell args; "
+        "retry(fn, max_attempts=3, delay=2) — exponential backoff for transient failures."
     )
 
     return {
