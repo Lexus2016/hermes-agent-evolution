@@ -145,6 +145,11 @@ class ToolCallGuardrailConfig:
     # The fallback_directive is surfaced on the halt decision so the agent sees
     # a concrete alternative action. ``0`` disables the cap.
     spiral_failure_cap: int = 5
+    # #1825 — per-tool override of the spiral failure cap. Memory tools have
+    # a high false-retry rate (161 failures/7d, 11-deep spirals) and should
+    # be capped at a lower threshold (3) so the session-hard-stop fires sooner.
+    # Keys are tool names; values override spiral_failure_cap for that tool.
+    per_tool_failure_caps: dict[str, int] = field(default_factory=lambda: {"memory": 3})
     spiral_prone_tools: frozenset[str] = field(
         default_factory=lambda: _SPIRAL_PRONE_TOOLS
     )
@@ -216,6 +221,9 @@ class ToolCallGuardrailConfig:
             spiral_failure_cap=_non_negative_int(
                 data.get("spiral_failure_cap"),
                 defaults.spiral_failure_cap,
+            ),
+            per_tool_failure_caps=_merge_per_tool_caps(
+                data.get("per_tool_failure_caps"), defaults.per_tool_failure_caps
             ),
             loop_caps=LoopCapConfig.from_mapping(data.get("loop_caps")),
         )
@@ -419,6 +427,13 @@ class ToolCallGuardrailController:
         # this, the fail→diagnostic-success→fail pattern (the production
         # spiral) nets 0 per cycle and the cap is unreachable.
         self._cross_turn_success_streaks: dict[str, int] = {}
+        # #1826 — session-level permanent hard-stop set. Once a spiral-prone
+        # tool's cross-turn streak reaches the cap, the tool is added here and
+        # ALL subsequent calls are permanently blocked for the session. This is
+        # the unconditional ceiling that does NOT depend on error classification
+        # and CANNOT be decayed by interspersed successes. reset_for_turn does
+        # NOT clear this — it survives the entire session by design.
+        self._session_hard_stopped: set[str] = set()
         self.reset_for_turn()
 
     def reset_for_turn(self) -> None:
@@ -454,6 +469,38 @@ class ToolCallGuardrailController:
 
         signature = ToolCallSignature.from_call(tool_name, _coerce_args(args))
 
+        # #1826 — session-level permanent hard-stop. Once a tool has been
+        # session-hard-stopped, ALL subsequent calls are blocked unconditionally
+        # for the remainder of the session. This is the unconditional ceiling:
+        # it does not depend on error classification and cannot be bypassed by
+        # interspersed successes or reset_for_turn. This is the structural fix
+        # for the 5th recurrence of the terminal retry spiral.
+        if tool_name in self._session_hard_stopped:
+            directive = _fallback_directive_for(tool_name)
+            if (
+                _is_browser_tool(tool_name)
+                and tool_name not in self.config.spiral_prone_tools
+            ):
+                code = "browser_tool_failure_cap"
+            else:
+                code = "session_hard_stop"
+            decision = ToolGuardrailDecision(
+                action="block",
+                code=code,
+                message=(
+                    f"Blocked {tool_name}: it has been permanently halted for this "
+                    f"session after reaching the retry cap. This failure pattern is "
+                    "deterministic — retrying will not fix it. Use the fallback "
+                    "directive below."
+                ),
+                tool_name=tool_name,
+                count=self._cross_turn_tool_failure_counts.get(tool_name, 0),
+                signature=signature,
+                fallback_directive=directive,
+            )
+            self._halt_decision = decision
+            return decision
+
         # Cross-turn spiral enforcement (#1109/#1110/#1111/#1112): if the
         # same tool has been failing across turns and the cross-turn streak
         # has already reached the cap, block execution immediately — BEFORE
@@ -463,11 +510,12 @@ class ToolCallGuardrailController:
         # same failing call again.  reset_for_turn clears _halt_decision but
         # NOT _cross_turn_tool_failure_counts, so the streak survives.
         cross_turn_count = self._cross_turn_tool_failure_counts.get(tool_name, 0)
+        effective_spiral_cap = self._effective_cap_for(tool_name)
         if cross_turn_count >= 1 and (
             (
-                self.config.spiral_failure_cap >= 1
+                effective_spiral_cap >= 1
                 and tool_name in self.config.spiral_prone_tools
-                and cross_turn_count >= self.config.spiral_failure_cap
+                and cross_turn_count >= effective_spiral_cap
             )
             or (
                 self.config.browser_failure_cap >= 1
@@ -484,7 +532,7 @@ class ToolCallGuardrailController:
                 cap = self.config.browser_failure_cap
             else:
                 code = "spiral_prone_tool_failure_cap"
-                cap = self.config.spiral_failure_cap
+                cap = effective_spiral_cap
             decision = ToolGuardrailDecision(
                 action="block",
                 code=code,
@@ -652,6 +700,9 @@ class ToolCallGuardrailController:
                 and _is_browser_tool(tool_name)
                 and effective_streak >= self.config.browser_failure_cap
             ):
+                # #1826 — session-hard-stop browser tools too so they don't
+                # recur after interspersed successes on a different page.
+                self._session_hard_stopped.add(tool_name)
                 decision = ToolGuardrailDecision(
                     action="halt",
                     code="browser_tool_failure_cap",
@@ -677,17 +728,24 @@ class ToolCallGuardrailController:
             # ``hard_stop_enabled``, mirroring the browser_failure_cap pattern.
             # The fallback_directive gives the agent a concrete alternative.
             if (
-                self.config.spiral_failure_cap >= 1
+                self._effective_cap_for(tool_name) >= 1
                 and tool_name in self.config.spiral_prone_tools
-                and effective_streak >= self.config.spiral_failure_cap
+                and effective_streak >= self._effective_cap_for(tool_name)
             ):
+                # #1826 — permanently session-hard-stop this tool so subsequent
+                # turns cannot retry it. The cross-turn streak alone was
+                # insufficient because interspersed diagnostic successes (pwd,
+                # ls) decaying the streak allowed the spiral to recur across
+                # turns. The session stop is irreversible for this session.
+                self._session_hard_stopped.add(tool_name)
+                _cap = self._effective_cap_for(tool_name)
                 directive = _fallback_directive_for(tool_name)
                 decision = ToolGuardrailDecision(
                     action="halt",
                     code="spiral_prone_tool_failure_cap",
                     message=(
                         f"Stopped {tool_name}: it failed {effective_streak} times, "
-                        f"reaching the retry cap ({self.config.spiral_failure_cap}). "
+                        f"reaching the retry cap ({_cap}). "
                         "This failure pattern is deterministic — retrying the same way "
                         "will not fix it. Use the fallback directive below."
                     ),
@@ -777,7 +835,12 @@ class ToolCallGuardrailController:
         if tool_name in self._cross_turn_tool_failure_counts:
             current = self._cross_turn_tool_failure_counts[tool_name]
             is_spiral_prone = tool_name in self.config.spiral_prone_tools
-            if is_spiral_prone:
+            # #1826 — once session-hard-stopped, the streak is FROZEN. Decay
+            # would allow the tool back into the rotation and re-open the
+            # spiral. The permanent stop is the whole point.
+            if tool_name in self._session_hard_stopped:
+                pass  # no decay — session stop is irreversible
+            elif is_spiral_prone:
                 succ = self._cross_turn_success_streaks.get(tool_name, 0) + 1
                 if succ >= _SUCCESSES_TO_DECAY:
                     # Sustained recovery — drain the failure streak by 1.
@@ -833,6 +896,18 @@ class ToolCallGuardrailController:
         if tool_name in self.config.mutating_tools:
             return False
         return tool_name in self.config.idempotent_tools
+
+    def _effective_cap_for(self, tool_name: str) -> int:
+        """Return the effective spiral-failure cap for *tool_name*.
+
+        #1825 — per-tool overrides (e.g. memory=3) take precedence over the
+        default ``spiral_failure_cap`` (5). Non-spiral tools return the
+        default cap but are filtered by membership checks at call sites.
+        """
+        caps = self.config.per_tool_failure_caps
+        if tool_name in caps and caps[tool_name] >= 1:
+            return caps[tool_name]
+        return self.config.spiral_failure_cap
 
     def _check_loop_cap(
         self,
@@ -994,7 +1069,7 @@ _TOOL_FALLBACK_DIRECTIVE: dict[str, str] = {
     # #1135/#1136. The store may be busy/locked (transient) or genuinely
     # failed; blind retries don't recover. Distinguish transient from hard
     # failure, retry once if busy, else skip-and-continue.
-    "memory": "memory operation failed repeatedly — distinguish busy/locked (transient, retry once) from genuine failure (non-retryable); if not transient, continue without that memory access and log the unmet persistence need",
+    "memory": "memory operation failed repeatedly — distinguish busy/locked (transient, retry once) from genuine failure (non-retryable); if not transient, memory tools are unavailable this session — proceed without them and log the unmet persistence need",
 }
 
 # #745 — generic fallback for any browser_* tool not explicitly listed above.
@@ -1021,6 +1096,28 @@ def _fallback_directive_for(tool_name: str) -> str:
 
 def _coerce_args(args: Mapping[str, Any] | None) -> Mapping[str, Any]:
     return args if isinstance(args, Mapping) else {}
+
+
+def _merge_per_tool_caps(raw: Any, defaults: dict[str, int]) -> dict[str, int]:
+    """Parse the ``per_tool_failure_caps`` config section (#1825).
+
+    Accepts a mapping of ``{tool_name: cap}`` from config.yaml and merges it
+    over the defaults. Invalid entries (non-int, negative) are silently
+    dropped so a typo in config doesn't crash the agent loop.
+    """
+    if not isinstance(raw, Mapping):
+        return dict(defaults)
+    merged = dict(defaults)
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            continue
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed >= 1:
+            merged[key] = parsed
+    return merged
 
 
 def _result_hash(result: str | None) -> str:

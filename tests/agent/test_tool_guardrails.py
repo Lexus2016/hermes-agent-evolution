@@ -51,22 +51,20 @@ def test_default_config_is_soft_warning_only_with_hard_stop_disabled():
 
 
 def test_config_parses_nested_warn_and_hard_stop_thresholds():
-    cfg = ToolCallGuardrailConfig.from_mapping(
-        {
-            "warnings_enabled": False,
-            "hard_stop_enabled": True,
-            "warn_after": {
-                "exact_failure": 3,
-                "same_tool_failure": 4,
-                "idempotent_no_progress": 5,
-            },
-            "hard_stop_after": {
-                "exact_failure": 6,
-                "same_tool_failure": 7,
-                "idempotent_no_progress": 8,
-            },
-        }
-    )
+    cfg = ToolCallGuardrailConfig.from_mapping({
+        "warnings_enabled": False,
+        "hard_stop_enabled": True,
+        "warn_after": {
+            "exact_failure": 3,
+            "same_tool_failure": 4,
+            "idempotent_no_progress": 5,
+        },
+        "hard_stop_after": {
+            "exact_failure": 6,
+            "same_tool_failure": 7,
+            "idempotent_no_progress": 8,
+        },
+    })
 
     assert cfg.warnings_enabled is False
     assert cfg.hard_stop_enabled is True
@@ -124,7 +122,11 @@ def test_hard_stop_enabled_blocks_repeated_exact_failure_before_next_execution()
 
 def test_success_resets_exact_signature_failure_streak():
     controller = ToolCallGuardrailController(
-        ToolCallGuardrailConfig(hard_stop_enabled=True, exact_failure_block_after=2, same_tool_failure_halt_after=99)
+        ToolCallGuardrailConfig(
+            hard_stop_enabled=True,
+            exact_failure_block_after=2,
+            same_tool_failure_halt_after=99,
+        )
     )
     args = {"query": "same"}
 
@@ -153,13 +155,23 @@ def test_file_mutation_lint_error_result_is_not_a_tool_failure():
 
 def test_same_tool_varying_args_warns_by_default_without_halting():
     controller = ToolCallGuardrailController(
-        ToolCallGuardrailConfig(same_tool_failure_warn_after=2, same_tool_failure_halt_after=3)
+        ToolCallGuardrailConfig(
+            same_tool_failure_warn_after=2, same_tool_failure_halt_after=3
+        )
     )
 
-    first = controller.after_call("terminal", {"command": "cmd-1"}, '{"exit_code":1}', failed=True)
-    second = controller.after_call("terminal", {"command": "cmd-2"}, '{"exit_code":1}', failed=True)
-    third = controller.after_call("terminal", {"command": "cmd-3"}, '{"exit_code":1}', failed=True)
-    fourth = controller.after_call("terminal", {"command": "cmd-4"}, '{"exit_code":1}', failed=True)
+    first = controller.after_call(
+        "terminal", {"command": "cmd-1"}, '{"exit_code":1}', failed=True
+    )
+    second = controller.after_call(
+        "terminal", {"command": "cmd-2"}, '{"exit_code":1}', failed=True
+    )
+    third = controller.after_call(
+        "terminal", {"command": "cmd-3"}, '{"exit_code":1}', failed=True
+    )
+    fourth = controller.after_call(
+        "terminal", {"command": "cmd-4"}, '{"exit_code":1}', failed=True
+    )
 
     assert first.action == "allow"
     assert [second.action, third.action, fourth.action] == ["warn", "warn", "warn"]
@@ -181,12 +193,18 @@ def test_hard_stop_enabled_halts_same_tool_varying_args_failure_streak():
         )
     )
 
-    first = controller.after_call("terminal", {"command": "cmd-1"}, '{"exit_code":1}', failed=True)
+    first = controller.after_call(
+        "terminal", {"command": "cmd-1"}, '{"exit_code":1}', failed=True
+    )
     assert first.action == "allow"
-    second = controller.after_call("terminal", {"command": "cmd-2"}, '{"exit_code":1}', failed=True)
+    second = controller.after_call(
+        "terminal", {"command": "cmd-2"}, '{"exit_code":1}', failed=True
+    )
     assert second.action == "warn"
     assert second.code == "same_tool_failure_warning"
-    third = controller.after_call("terminal", {"command": "cmd-3"}, '{"exit_code":1}', failed=True)
+    third = controller.after_call(
+        "terminal", {"command": "cmd-3"}, '{"exit_code":1}', failed=True
+    )
     assert third.action == "halt"
     assert third.code == "same_tool_failure_halt"
     assert third.count == 3
@@ -221,7 +239,9 @@ def test_hard_stop_enabled_blocks_idempotent_no_progress_future_repeat():
     result = "same file contents"
 
     assert controller.before_call("read_file", args).action == "allow"
-    assert controller.after_call("read_file", args, result, failed=False).action == "allow"
+    assert (
+        controller.after_call("read_file", args, result, failed=False).action == "allow"
+    )
     assert controller.before_call("read_file", args).action == "allow"
     warn = controller.after_call("read_file", args, result, failed=False)
     assert warn.action == "warn"
@@ -238,18 +258,39 @@ def test_mutating_or_unknown_tools_are_not_blocked_for_repeated_identical_succes
     )
 
     for _ in range(3):
-        assert controller.before_call("write_file", {"path": "/tmp/x", "content": "x"}).action == "allow"
-        assert controller.after_call("write_file", {"path": "/tmp/x", "content": "x"}, "ok", failed=False).action == "allow"
+        assert (
+            controller.before_call(
+                "write_file", {"path": "/tmp/x", "content": "x"}
+            ).action
+            == "allow"
+        )
+        assert (
+            controller.after_call(
+                "write_file", {"path": "/tmp/x", "content": "x"}, "ok", failed=False
+            ).action
+            == "allow"
+        )
         assert controller.before_call("custom_tool", {"x": 1}).action == "allow"
-        assert controller.after_call("custom_tool", {"x": 1}, "ok", failed=False).action == "allow"
+        assert (
+            controller.after_call("custom_tool", {"x": 1}, "ok", failed=False).action
+            == "allow"
+        )
 
 
 def test_reset_for_turn_clears_bounded_guardrail_state():
     controller = ToolCallGuardrailController(
-        ToolCallGuardrailConfig(hard_stop_enabled=True, exact_failure_block_after=2, no_progress_block_after=2)
+        ToolCallGuardrailConfig(
+            hard_stop_enabled=True,
+            exact_failure_block_after=2,
+            no_progress_block_after=2,
+        )
     )
-    controller.after_call("web_search", {"query": "same"}, '{"error":"boom"}', failed=True)
-    controller.after_call("web_search", {"query": "same"}, '{"error":"boom"}', failed=True)
+    controller.after_call(
+        "web_search", {"query": "same"}, '{"error":"boom"}', failed=True
+    )
+    controller.after_call(
+        "web_search", {"query": "same"}, '{"error":"boom"}', failed=True
+    )
     controller.after_call("read_file", {"path": "/tmp/x"}, "same", failed=False)
     controller.after_call("read_file", {"path": "/tmp/x"}, "same", failed=False)
 
@@ -272,7 +313,9 @@ def test_fallback_directive_populated_on_same_tool_failure_warning():
     # read_file is idempotent (fail_threshold for same_tool = 3 by default)
     for _ in range(3):
         controller.before_call("read_file", args)
-        decision = controller.after_call("read_file", args, '{"error":"not found"}', failed=True)
+        decision = controller.after_call(
+            "read_file", args, '{"error":"not found"}', failed=True
+        )
     assert decision.action == "warn"
     assert decision.fallback_directive != ""
     assert "search_files" in decision.fallback_directive
@@ -285,7 +328,9 @@ def test_fallback_directive_populated_on_exact_failure_warning():
     # exact_failure_warn_after = 2 by default
     for _ in range(2):
         controller.before_call("web_search", args)
-        decision = controller.after_call("web_search", args, '{"error":"boom"}', failed=True)
+        decision = controller.after_call(
+            "web_search", args, '{"error":"boom"}', failed=True
+        )
     assert decision.action == "warn"
     assert decision.fallback_directive != ""
     assert "web_extract" in decision.fallback_directive
@@ -295,7 +340,9 @@ def test_fallback_directive_empty_on_allow():
     """A non-failure (allow) decision has an empty fallback_directive."""
     controller = ToolCallGuardrailController()
     controller.before_call("read_file", {"path": "/tmp/x"})
-    decision = controller.after_call("read_file", {"path": "/tmp/x"}, "content", failed=False)
+    decision = controller.after_call(
+        "read_file", {"path": "/tmp/x"}, "content", failed=False
+    )
     assert decision.action == "allow"
     assert decision.fallback_directive == ""
 
@@ -308,7 +355,9 @@ def test_fallback_directive_empty_for_unknown_tool():
     args = {"key": "val"}
     for _ in range(2):
         controller.before_call("mcp_custom_tool", args)
-        decision = controller.after_call("mcp_custom_tool", args, '{"error":"bad"}', failed=True)
+        decision = controller.after_call(
+            "mcp_custom_tool", args, '{"error":"bad"}', failed=True
+        )
     assert decision.action == "warn"
     assert decision.fallback_directive == ""
 
@@ -319,7 +368,9 @@ def test_fallback_directive_in_metadata():
     args = {"path": "/nonexistent"}
     for _ in range(3):
         controller.before_call("read_file", args)
-        decision = controller.after_call("read_file", args, '{"error":"not found"}', failed=True)
+        decision = controller.after_call(
+            "read_file", args, '{"error":"not found"}', failed=True
+        )
     assert decision.fallback_directive != ""
     meta = decision.to_metadata()
     assert "fallback_directive" in meta
@@ -327,7 +378,9 @@ def test_fallback_directive_in_metadata():
 
     # Allow decisions omit the key entirely
     controller.before_call("read_file", {"path": "/tmp/other"})
-    allow_decision = controller.after_call("read_file", {"path": "/tmp/other"}, "ok", failed=False)
+    allow_decision = controller.after_call(
+        "read_file", {"path": "/tmp/other"}, "ok", failed=False
+    )
     assert "fallback_directive" not in allow_decision.to_metadata()
 
 
@@ -341,7 +394,10 @@ def test_fallback_directive_populated_for_vision_analyze():
     for _ in range(3):
         controller.before_call("vision_analyze", args)
         decision = controller.after_call(
-            "vision_analyze", args, '{"success": false, "error": "invalid image"}', failed=True
+            "vision_analyze",
+            args,
+            '{"success": false, "error": "invalid image"}',
+            failed=True,
         )
     assert decision.action == "warn"
     assert decision.fallback_directive != ""
@@ -356,7 +412,10 @@ def test_fallback_directive_populated_for_image_generate():
     for _ in range(2):
         controller.before_call("image_generate", args)
         decision = controller.after_call(
-            "image_generate", args, '{"success": false, "error": "provider error"}', failed=True
+            "image_generate",
+            args,
+            '{"success": false, "error": "provider error"}',
+            failed=True,
         )
     assert decision.action == "warn"
     assert decision.fallback_directive != ""
@@ -532,8 +591,12 @@ def test_browser_failure_cap_applies_to_console_and_click():
 def test_browser_cap_does_not_fire_before_threshold():
     """Below the cap, browser failures only warn — the cap does not over-trigger."""
     controller = ToolCallGuardrailController()
-    first = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
-    second = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    first = controller.after_call(
+        "browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True
+    )
+    second = controller.after_call(
+        "browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True
+    )
     assert first.action == "allow"
     assert second.action == "warn"  # exact_failure_warn_after == 2
     assert controller.halt_decision is None
@@ -542,7 +605,9 @@ def test_browser_cap_does_not_fire_before_threshold():
 def test_browser_cap_can_be_disabled():
     """browser_failure_cap=0 disables the browser cap; spirals then follow the
     generic same-tool behaviour (warn-only when hard_stop is off)."""
-    controller = ToolCallGuardrailController(ToolCallGuardrailConfig(browser_failure_cap=0))
+    controller = ToolCallGuardrailController(
+        ToolCallGuardrailConfig(browser_failure_cap=0)
+    )
     decisions = [
         controller.after_call(
             "browser_navigate", {"url": f"u{i}"}, '{"error":"boom"}', failed=True
@@ -558,6 +623,7 @@ def test_bot_detection_warning_classified_as_failure():
     when it lands on a Cloudflare/captcha page.  _detect_tool_failure must
     classify this as a failure so the guardrail cap can fire."""
     from agent.display import _detect_tool_failure
+
     result = '{"success": true, "url": "https://x", "title": "Just a moment...", "bot_detection_warning": "blocked"}'
     is_error, suffix = _detect_tool_failure("browser_navigate", result)
     assert is_error
@@ -568,6 +634,7 @@ def test_bot_detection_spiral_halts_at_cap():
     """#1188 — consecutive bot-detection 'successes' must hit the cap at 3,
     not spiral to 15 like the regression."""
     from agent.display import _detect_tool_failure
+
     controller = ToolCallGuardrailController()
     halted = False
     for i in range(5):
@@ -610,13 +677,23 @@ def test_browser_cap_success_decays_streak():
     Multiple consecutive successes drain the streak back to 0 so a
     genuinely recovered backend is not penalized."""
     controller = ToolCallGuardrailController()
-    controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
-    controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    controller.after_call(
+        "browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True
+    )
+    controller.after_call(
+        "browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True
+    )
     # A success decays the cross-turn streak by 1 (2→1), not resets to 0.
-    controller.after_call("browser_navigate", {"url": "u"}, '{"success": true}', failed=False)
+    controller.after_call(
+        "browser_navigate", {"url": "u"}, '{"success": true}', failed=False
+    )
     # Two more failures: streak goes 1→2→3, so the second one hits the cap.
-    d1 = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
-    d2 = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    d1 = controller.after_call(
+        "browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True
+    )
+    d2 = controller.after_call(
+        "browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True
+    )
     assert d1.action != "halt"
     assert d2.action == "halt"
     assert d2.code == "browser_tool_failure_cap"
@@ -629,46 +706,72 @@ def test_browser_cap_consecutive_successes_drain_streak():
     genuinely recovered browser backend is not penalized (#1188)."""
     controller = ToolCallGuardrailController()
     # Two failures → streak=2
-    controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
-    controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    controller.after_call(
+        "browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True
+    )
+    controller.after_call(
+        "browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True
+    )
     assert controller._cross_turn_tool_failure_counts.get("browser_navigate", 0) == 2
     # Two successes → streak decays 2→1→0 (removed from dict)
-    controller.after_call("browser_navigate", {"url": "u"}, '{"success": true}', failed=False)
+    controller.after_call(
+        "browser_navigate", {"url": "u"}, '{"success": true}', failed=False
+    )
     assert controller._cross_turn_tool_failure_counts.get("browser_navigate", 0) == 1
-    controller.after_call("browser_navigate", {"url": "u"}, '{"success": true}', failed=False)
+    controller.after_call(
+        "browser_navigate", {"url": "u"}, '{"success": true}', failed=False
+    )
     assert controller._cross_turn_tool_failure_counts.get("browser_navigate", 0) == 0
     # A subsequent failure starts a fresh streak at 1, not continuing from 0.
-    d = controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+    d = controller.after_call(
+        "browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True
+    )
     assert d.action != "halt"
 
 
 def test_browser_cap_reset_for_turn_clears_streak():
-    """Per-turn reset clears the halt decision but NOT the cross-turn streak."""
+    """Per-turn reset clears the halt decision but NOT the cross-turn streak.
+
+    #1826 — browser tools reaching the cap are also session-hard-stopped, so
+    the before_call code stays "browser_tool_failure_cap" and successes cannot
+    drain the streak (the permanent stop is irreversible).
+    """
     controller = ToolCallGuardrailController()
     for _ in range(3):
-        controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+        controller.after_call(
+            "browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True
+        )
     assert controller.halt_decision is not None
+    assert "browser_navigate" in controller._session_hard_stopped
     controller.reset_for_turn()
     assert controller.halt_decision is None
     # The cross-turn streak persists — before_call now blocks the browser tool.
     d = controller.before_call("browser_navigate", {"url": "u"})
     assert d.action == "block"
     assert d.code == "browser_tool_failure_cap"
-    # A success after reset clears the cross-turn streak.
+    # #1826 — session stop is permanent; successes cannot drain it.
     controller.reset_for_turn()
-    controller.before_call("browser_navigate", {"url": "u"})
-    d_ok = controller.after_call("browser_navigate", {"url": "u"}, '{"ok":true}', failed=False)
-    assert d_ok.action == "allow"
+    controller.after_call("browser_navigate", {"url": "u"}, '{"ok":true}', failed=False)
     controller.reset_for_turn()
-    assert controller.before_call("browser_navigate", {"url": "u"}).action == "allow"
+    assert controller.before_call("browser_navigate", {"url": "u"}).action == "block"
 
 
 def test_browser_failure_cap_parsed_from_mapping():
     cfg = ToolCallGuardrailConfig.from_mapping({"browser_failure_cap": 5})
     assert cfg.browser_failure_cap == 5
     # 0 is honoured (disables); negative falls back to default.
-    assert ToolCallGuardrailConfig.from_mapping({"browser_failure_cap": 0}).browser_failure_cap == 0
-    assert ToolCallGuardrailConfig.from_mapping({"browser_failure_cap": -3}).browser_failure_cap == 3
+    assert (
+        ToolCallGuardrailConfig.from_mapping({
+            "browser_failure_cap": 0
+        }).browser_failure_cap
+        == 0
+    )
+    assert (
+        ToolCallGuardrailConfig.from_mapping({
+            "browser_failure_cap": -3
+        }).browser_failure_cap
+        == 3
+    )
     assert ToolCallGuardrailConfig.from_mapping({}).browser_failure_cap == 3
 
 
@@ -689,6 +792,7 @@ def test_browser_fallback_directive_for_all_browser_tools():
 
 
 # ── #974/#969/#970 — spiral-prone tool failure cap ──────────────────────
+
 
 def test_spiral_cap_halts_terminal_after_threshold():
     """Terminal failures hit the always-on spiral cap (default 5) and halt,
@@ -716,7 +820,10 @@ def test_spiral_cap_halts_terminal_after_threshold():
     assert halt.code == "spiral_prone_tool_failure_cap"
     assert halt.count == 5
     assert halt.fallback_directive != ""
-    assert "read_file" in halt.fallback_directive or "diagnostic" in halt.fallback_directive
+    assert (
+        "read_file" in halt.fallback_directive
+        or "diagnostic" in halt.fallback_directive
+    )
     assert controller.halt_decision is not None
     assert controller.halt_decision.code == "spiral_prone_tool_failure_cap"
 
@@ -768,8 +875,12 @@ def test_spiral_cap_does_not_fire_before_threshold():
     over-trigger.  Uses the same command twice so exact_failure_warn_after (2)
     fires on the second call, matching the browser cap test pattern."""
     controller = ToolCallGuardrailController()
-    first = controller.after_call("terminal", {"command": "same"}, '{"exit_code":1}', failed=True)
-    second = controller.after_call("terminal", {"command": "same"}, '{"exit_code":1}', failed=True)
+    first = controller.after_call(
+        "terminal", {"command": "same"}, '{"exit_code":1}', failed=True
+    )
+    second = controller.after_call(
+        "terminal", {"command": "same"}, '{"exit_code":1}', failed=True
+    )
     assert first.action == "allow"
     assert second.action == "warn"  # exact_failure_warn_after == 2
     assert controller.halt_decision is None
@@ -778,7 +889,9 @@ def test_spiral_cap_does_not_fire_before_threshold():
 def test_spiral_cap_can_be_disabled():
     """spiral_failure_cap=0 disables the cap; spirals then follow the generic
     same-tool behaviour (warn-only when hard_stop is off)."""
-    controller = ToolCallGuardrailController(ToolCallGuardrailConfig(spiral_failure_cap=0))
+    controller = ToolCallGuardrailController(
+        ToolCallGuardrailConfig(spiral_failure_cap=0)
+    )
     decisions = [
         controller.after_call(
             "terminal", {"command": f"cmd-{i}"}, '{"exit_code":1}', failed=True
@@ -804,7 +917,9 @@ def test_spiral_cap_success_decays_streak():
     controller = ToolCallGuardrailController()
     cap = controller.config.spiral_failure_cap  # default 5
     for _ in range(4):
-        controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+        controller.after_call(
+            "terminal", {"command": "x"}, '{"exit_code":1}', failed=True
+        )
     # Cross-turn streak is now 4.
     assert controller._cross_turn_tool_failure_counts.get("terminal", 0) == 4
     # A SINGLE success does NOT decay (needs _SUCCESSES_TO_DECAY in a row).
@@ -816,19 +931,27 @@ def test_spiral_cap_success_decays_streak():
     # Two more failures bring the streak to 5, hitting the cap.
     controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
     assert controller._cross_turn_tool_failure_counts.get("terminal", 0) == 4
-    d = controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+    d = controller.after_call(
+        "terminal", {"command": "x"}, '{"exit_code":1}', failed=True
+    )
     assert d.action == "halt"
     assert d.code == "spiral_prone_tool_failure_cap"
-    # Drain with enough consecutive successes to reach 0.
-    # Each drain-by-1 requires _SUCCESSES_TO_DECAY consecutive successes,
-    # and the success streak resets after each drain.
+    # #1826 — once the cap is hit, the tool is session-hard-stopped. Successes
+    # can no longer drain the streak (the permanent stop is irreversible).
+    assert "terminal" in controller._session_hard_stopped
     controller2 = ToolCallGuardrailController()
     for _ in range(cap):
-        controller2.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+        controller2.after_call(
+            "terminal", {"command": "x"}, '{"exit_code":1}', failed=True
+        )
     assert controller2._cross_turn_tool_failure_counts.get("terminal", 0) == cap
+    assert "terminal" in controller2._session_hard_stopped
+    # Successes do NOT drain because the session stop is permanent.
     for _ in range(cap * _SUCCESSES_TO_DECAY):
-        controller2.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
-    assert controller2._cross_turn_tool_failure_counts.get("terminal", 0) == 0
+        controller2.after_call(
+            "terminal", {"command": "x"}, '{"exit_code":0}', failed=False
+        )
+    assert controller2._cross_turn_tool_failure_counts.get("terminal", 0) == cap
 
 
 def test_spiral_cap_reset_for_turn_clears_streak():
@@ -838,30 +961,37 @@ def test_spiral_cap_reset_for_turn_clears_streak():
     accumulate (#1109–#1112).  After reset, halt_decision is cleared, but
     the next before_call for the same spiral-prone tool is blocked because
     the cross-turn streak already reached the cap.
+
+    #1826 — once the cap is hit the tool is permanently session-hard-stopped.
+    The before_call code changes to "session_hard_stop" and successes CANNOT
+    drain the streak (the permanent stop is irreversible).
     """
     controller = ToolCallGuardrailController()
     for _ in range(5):
-        controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+        controller.after_call(
+            "terminal", {"command": "x"}, '{"exit_code":1}', failed=True
+        )
     assert controller.halt_decision is not None
+    assert "terminal" in controller._session_hard_stopped
     controller.reset_for_turn()
     assert controller.halt_decision is None
-    # The cross-turn streak persists — before_call now blocks the tool.
+    # The cross-turn streak persists — before_call now blocks the tool with
+    # the session_hard_stop code (it was permanently stopped when the cap hit).
     d = controller.before_call("terminal", {"command": "x"})
     assert d.action == "block"
-    assert d.code == "spiral_prone_tool_failure_cap"
-    # A success after reset clears the cross-turn streak.
-    # #1585 — spiral-prone tools require _SUCCESSES_TO_DECAY (2) consecutive
-    # successes to drain by 1. With streak=5 we need 5*2=10 successes to
-    # fully clear it.
+    assert d.code == "session_hard_stop"
+    # Successes do NOT clear the session stop — it's permanent.
     from agent.tool_guardrails import _SUCCESSES_TO_DECAY
 
     controller.reset_for_turn()
     for _ in range(5 * _SUCCESSES_TO_DECAY):
-        controller.before_call("terminal", {"command": "x"})
-        d_ok = controller.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
-        assert d_ok.action == "allow"
+        d_ok = controller.after_call(
+            "terminal", {"command": "x"}, '{"exit_code":0}', failed=False
+        )
+        assert d_ok.action in ("allow", "warn")
         controller.reset_for_turn()
-    assert controller.before_call("terminal", {"command": "x"}).action == "allow"
+    # Still blocked — the session stop cannot be drained.
+    assert controller.before_call("terminal", {"command": "x"}).action == "block"
 
 
 def test_spiral_cap_does_not_affect_non_spiral_tools():
@@ -882,8 +1012,18 @@ def test_spiral_cap_parsed_from_mapping():
     cfg = ToolCallGuardrailConfig.from_mapping({"spiral_failure_cap": 7})
     assert cfg.spiral_failure_cap == 7
     # 0 is honoured (disables); negative falls back to default.
-    assert ToolCallGuardrailConfig.from_mapping({"spiral_failure_cap": 0}).spiral_failure_cap == 0
-    assert ToolCallGuardrailConfig.from_mapping({"spiral_failure_cap": -3}).spiral_failure_cap == 5
+    assert (
+        ToolCallGuardrailConfig.from_mapping({
+            "spiral_failure_cap": 0
+        }).spiral_failure_cap
+        == 0
+    )
+    assert (
+        ToolCallGuardrailConfig.from_mapping({
+            "spiral_failure_cap": -3
+        }).spiral_failure_cap
+        == 5
+    )
     assert ToolCallGuardrailConfig.from_mapping({}).spiral_failure_cap == 5
 
 
@@ -918,7 +1058,9 @@ def test_cross_turn_spiral_accumulates_across_resets():
     controller = ToolCallGuardrailController()
     for _ in range(4):  # 4 turns, one failing call each
         controller.before_call("terminal", {"command": "x"})
-        controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+        controller.after_call(
+            "terminal", {"command": "x"}, '{"exit_code":1}', failed=True
+        )
         controller.reset_for_turn()
     # 4 failures: not yet at cap (5), before_call should still allow
     assert controller.before_call("terminal", {"command": "x"}).action == "allow"
@@ -933,12 +1075,15 @@ def test_cross_turn_before_call_blocks_after_cap_reached():
     tool on the NEXT turn even though per-turn state was reset."""
     controller = ToolCallGuardrailController()
     for _ in range(5):
-        controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+        controller.after_call(
+            "terminal", {"command": "x"}, '{"exit_code":1}', failed=True
+        )
     controller.reset_for_turn()
-    # Next turn: before_call must block, not allow
+    # Next turn: before_call must block, not allow.
     d = controller.before_call("terminal", {"command": "x"})
     assert d.action == "block"
-    assert d.code == "spiral_prone_tool_failure_cap"
+    # #1826 — once session-hard-stopped, before_call uses the session code.
+    assert d.code == "session_hard_stop"
     assert d.fallback_directive != ""
 
 
@@ -947,7 +1092,9 @@ def test_cross_turn_success_clears_streak():
     legitimate retry-after-fix work is not blocked."""
     controller = ToolCallGuardrailController()
     for _ in range(3):
-        controller.after_call("terminal", {"command": "x"}, '{"exit_code":1}', failed=True)
+        controller.after_call(
+            "terminal", {"command": "x"}, '{"exit_code":1}', failed=True
+        )
     controller.reset_for_turn()
     # Success on next turn
     controller.before_call("terminal", {"command": "x"})
@@ -962,7 +1109,9 @@ def test_cross_turn_browser_cap_blocks_after_reset():
     before_call."""
     controller = ToolCallGuardrailController()
     for _ in range(3):
-        controller.after_call("browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True)
+        controller.after_call(
+            "browser_navigate", {"url": "u"}, '{"error":"boom"}', failed=True
+        )
     controller.reset_for_turn()
     d = controller.before_call("browser_navigate", {"url": "u"})
     assert d.action == "block"
@@ -975,7 +1124,9 @@ def test_cross_turn_does_not_affect_non_spiral_tools():
     tools — not to write_file, patch, etc."""
     controller = ToolCallGuardrailController()
     for _ in range(10):
-        controller.after_call("write_file", {"path": "x"}, '{"error":"boom"}', failed=True)
+        controller.after_call(
+            "write_file", {"path": "x"}, '{"error":"boom"}', failed=True
+        )
     controller.reset_for_turn()
     assert controller.before_call("write_file", {"path": "x"}).action == "allow"
 
@@ -985,11 +1136,14 @@ def test_cross_turn_process_spiral_cap_fires():
     failure streak should trigger the spiral-prone cap, not run uncapped."""
     controller = ToolCallGuardrailController()
     for _ in range(5):
-        controller.after_call("process", {"action": "poll"}, '{"error":"timeout"}', failed=True)
+        controller.after_call(
+            "process", {"action": "poll"}, '{"error":"timeout"}', failed=True
+        )
     controller.reset_for_turn()
     d = controller.before_call("process", {"action": "poll"})
     assert d.action == "block"
-    assert d.code == "spiral_prone_tool_failure_cap"
+    # #1826 — session-hard-stopped tools use session_hard_stop code.
+    assert d.code == "session_hard_stop"
     assert d.fallback_directive != ""
 
 
@@ -1008,7 +1162,8 @@ def test_cross_turn_search_files_spiral_cap_fires():
     controller.reset_for_turn()
     d = controller.before_call("search_files", {"pattern": "*.py", "target": "content"})
     assert d.action == "block"
-    assert d.code == "spiral_prone_tool_failure_cap"
+    # #1826 — session-hard-stopped tools use session_hard_stop code.
+    assert d.code == "session_hard_stop"
     assert d.fallback_directive != ""
     assert "target=files" in d.fallback_directive
 
@@ -1031,11 +1186,14 @@ def test_cross_turn_blocks_with_hard_stop_disabled():
         ToolCallGuardrailConfig(hard_stop_enabled=False)
     )
     for _ in range(5):
-        controller.after_call("execute_code", {"code": "x"}, '{"error":"boom"}', failed=True)
+        controller.after_call(
+            "execute_code", {"code": "x"}, '{"error":"boom"}', failed=True
+        )
     controller.reset_for_turn()
     d = controller.before_call("execute_code", {"code": "x"})
     assert d.action == "block"
-    assert d.code == "spiral_prone_tool_failure_cap"
+    # #1826 — session-hard-stopped tools use session_hard_stop code.
+    assert d.code == "session_hard_stop"
 
 
 def test_cross_turn_tool_call_spiral_cap_fires():
@@ -1056,28 +1214,32 @@ def test_cross_turn_tool_call_spiral_cap_fires():
         "tool_call", {"name": "some_mcp_tool", "arguments": "{}"}
     )
     assert d.action == "block"
-    assert d.code == "spiral_prone_tool_failure_cap"
+    # #1826 — session-hard-stopped tools use session_hard_stop code.
+    assert d.code == "session_hard_stop"
     assert d.fallback_directive != ""
     assert "tool_search" in d.fallback_directive
 
 
 def test_cross_turn_memory_spiral_cap_fires():
-    """#1186 — memory is now in _SPIRAL_PRONE_TOOLS so a cross-turn memory
-    failure streak should trigger the spiral-prone cap, not run uncapped as
-    it did when 94 failures / 21 sessions / 11-deep regressed from the 10x
-    that triggered #1135/#1136. Memory operations had no circuit breaker."""
+    """#1186/#1825 — memory is in _SPIRAL_PRONE_TOOLS with a LOWER per-tool
+    cap (default 3 instead of 5). A cross-turn memory failure streak should
+    trigger the cap at 3, not 5. Once triggered, the tool is session-hard-
+    stopped (#1826) so before_call uses the session code."""
     controller = ToolCallGuardrailController()
-    for _ in range(5):
+    # #1825 — memory cap is 3, not 5. Three failures should trigger the cap.
+    for _ in range(3):
         controller.after_call(
             "memory",
             {"action": "store", "content": "x"},
             '{"error":"store locked"}',
             failed=True,
         )
+    assert "memory" in controller._session_hard_stopped
     controller.reset_for_turn()
     d = controller.before_call("memory", {"action": "store", "content": "x"})
     assert d.action == "block"
-    assert d.code == "spiral_prone_tool_failure_cap"
+    # #1826 — session-hard-stopped tools use session_hard_stop code.
+    assert d.code == "session_hard_stop"
     assert d.fallback_directive != ""
 
 
@@ -1098,7 +1260,8 @@ def test_cross_turn_tool_describe_spiral_cap_fires():
     controller.reset_for_turn()
     d = controller.before_call("tool_describe", {"name": "stale_tool_name"})
     assert d.action == "block"
-    assert d.code == "spiral_prone_tool_failure_cap"
+    # #1826 — session-hard-stopped tools use session_hard_stop code.
+    assert d.code == "session_hard_stop"
     assert d.fallback_directive != ""
     assert "tool_search" in d.fallback_directive
 
@@ -1155,17 +1318,27 @@ def test_after_call_survives_lone_surrogates_in_result_and_args():
     # (live outage: "Outer loop error in API call #34 ... surrogates not
     # allowed"). Weird text must never take down the loop.
     controller = ToolCallGuardrailController(
-        ToolCallGuardrailConfig(hard_stop_enabled=True, exact_failure_block_after=2, no_progress_block_after=2)
+        ToolCallGuardrailConfig(
+            hard_stop_enabled=True,
+            exact_failure_block_after=2,
+            no_progress_block_after=2,
+        )
     )
     dirty = "price \ud835 update"
 
-    decision = controller.after_call("web_search", {"query": dirty}, dirty, failed=False)
+    decision = controller.after_call(
+        "web_search", {"query": dirty}, dirty, failed=False
+    )
     assert decision.action in {"allow", "warn"}
 
     # hashing stays deterministic: the same dirty failure twice still trips
     # the exact-failure guard, proving the hash is stable across calls
-    controller.after_call("web_search", {"query": dirty}, '{"error":"\ud835 boom"}', failed=True)
-    controller.after_call("web_search", {"query": dirty}, '{"error":"\ud835 boom"}', failed=True)
+    controller.after_call(
+        "web_search", {"query": dirty}, '{"error":"\ud835 boom"}', failed=True
+    )
+    controller.after_call(
+        "web_search", {"query": dirty}, '{"error":"\ud835 boom"}', failed=True
+    )
     assert controller.before_call("web_search", {"query": dirty}).action == "block"
 
 
@@ -1214,8 +1387,10 @@ def test_spiral_cap_interleaving_eventually_halts():
     for turn in range(20):
         controller.reset_for_turn()
         d_fail = controller.after_call(
-            "terminal", {"command": f"failing-cmd-{turn}"},
-            '{"exit_code":1}', failed=True,
+            "terminal",
+            {"command": f"failing-cmd-{turn}"},
+            '{"exit_code":1}',
+            failed=True,
         )
         if d_fail.should_halt:
             halted = True
@@ -1237,6 +1412,7 @@ def test_loop_cap_zero_disables_and_junk_falls_back():
     assert LoopCapConfig.from_mapping({"max_web_searches": -5}).max_web_searches == 50
     assert LoopCapConfig.from_mapping({"max_subagents": "nope"}).max_subagents == 50
 
+
 def test_web_search_cap_blocks_after_limit_regardless_of_hard_stop():
     # Loop caps fire even with hard_stop_enabled=False (the per-turn loop
     # detector's flag). Each distinct query avoids the loop detector so we know
@@ -1255,3 +1431,107 @@ def test_web_search_cap_blocks_after_limit_regardless_of_hard_stop():
     assert decision.action == "block"
     assert decision.code == "loop_web_search_cap"
     assert decision.should_halt is True
+
+
+# ── #1826/#1825: session-level permanent hard-stop + per-tool caps ──────────
+
+
+def test_session_hard_stop_persists_across_turns():
+    """#1826 — once a spiral-prone tool hits the cap, it is permanently
+    session-hard-stopped. reset_for_turn does NOT clear the session stop,
+    and the tool stays blocked for the rest of the session."""
+    controller = ToolCallGuardrailController()
+    for _ in range(5):
+        controller.after_call(
+            "terminal", {"command": "x"}, '{"exit_code":1}', failed=True
+        )
+    assert "terminal" in controller._session_hard_stopped
+    # Multiple resets + turns — still blocked
+    for _ in range(10):
+        controller.reset_for_turn()
+        d = controller.before_call("terminal", {"command": "x"})
+        assert d.action == "block"
+        assert d.code == "session_hard_stop"
+
+
+def test_session_hard_stop_only_affects_capped_tool():
+    """#1826 — session-hard-stopping terminal does not block write_file."""
+    controller = ToolCallGuardrailController()
+    for _ in range(5):
+        controller.after_call(
+            "terminal", {"command": "x"}, '{"exit_code":1}', failed=True
+        )
+    assert "terminal" in controller._session_hard_stopped
+    assert "write_file" not in controller._session_hard_stopped
+    controller.reset_for_turn()
+    # write_file is still allowed even though terminal is session-stopped
+    assert controller.before_call("write_file", {"path": "x"}).action == "allow"
+
+
+def test_session_hard_stop_success_does_not_unblock():
+    """#1826 — a successful call to a session-hard-stopped tool does NOT
+    clear the stop. The streak is frozen — no decay, no recovery."""
+    controller = ToolCallGuardrailController()
+    for _ in range(5):
+        controller.after_call(
+            "terminal", {"command": "x"}, '{"exit_code":1}', failed=True
+        )
+    assert "terminal" in controller._session_hard_stopped
+    # Inject a success — the streak should NOT decay
+    controller.reset_for_turn()
+    controller.after_call("terminal", {"command": "x"}, '{"exit_code":0}', failed=False)
+    controller.reset_for_turn()
+    # Still blocked
+    d = controller.before_call("terminal", {"command": "x"})
+    assert d.action == "block"
+    assert d.code == "session_hard_stop"
+
+
+def test_memory_session_hard_stop_at_lower_cap():
+    """#1825 — memory tools get a lower per-tool cap (3, not 5) so the
+    session-hard-stop fires sooner, matching the 11-deep spiral data."""
+    controller = ToolCallGuardrailController()
+    assert controller._effective_cap_for("memory") == 3
+    # Only 3 failures needed to hit the memory cap
+    for _ in range(3):
+        controller.after_call(
+            "memory",
+            {"action": "store", "content": "x"},
+            '{"error":"locked"}',
+            failed=True,
+        )
+    assert "memory" in controller._session_hard_stopped
+
+
+def test_per_tool_cap_from_config():
+    """#1825 — per_tool_failure_caps can be parsed from config.yaml."""
+    cfg = ToolCallGuardrailConfig.from_mapping({
+        "per_tool_failure_caps": {"terminal": 2, "memory": 4}
+    })
+    assert cfg.per_tool_failure_caps["terminal"] == 2
+    assert cfg.per_tool_failure_caps["memory"] == 4
+    # Non-configured tools fall back to the default cap
+    controller = ToolCallGuardrailController(cfg)
+    assert controller._effective_cap_for("terminal") == 2
+    assert controller._effective_cap_for("memory") == 4
+    assert controller._effective_cap_for("execute_code") == 5  # default
+
+
+def test_per_tool_cap_invalid_entries_ignored():
+    """#1825 — invalid per-tool cap entries (non-int, negative) are dropped."""
+    cfg = ToolCallGuardrailConfig.from_mapping({
+        "per_tool_failure_caps": {"terminal": "oops", "memory": -1, "patch": 2}
+    })
+    # terminal: not parsed (string), falls back to default 5
+    # memory: negative, not valid, falls back to default 3
+    # patch: valid
+    assert cfg.per_tool_failure_caps["memory"] == 3  # default not overridden
+    assert cfg.per_tool_failure_caps["patch"] == 2
+
+
+def test_memory_fallback_directive_includes_unavailable_directive():
+    """#1825 — memory fallback directive tells agent to proceed without memory."""
+    from agent.tool_guardrails import _fallback_directive_for
+
+    directive = _fallback_directive_for("memory")
+    assert "unavailable" in directive.lower()
