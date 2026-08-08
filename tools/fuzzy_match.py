@@ -1421,10 +1421,20 @@ def format_structured_error(
     # For ambiguous: the error message already lists the match locations,
     # so we just add a recovery hint.
     if error_type == "ambiguous":
+        # #1842 — the fuzzy_find_and_replace error already embeds the match
+        # locations (L<line>: <snippet> rows), but the structured_error field
+        # is rendered separately and the agent may focus on it instead of the
+        # raw error text. Restate the match count and the two recovery paths
+        # explicitly so the structured diagnostic is self-sufficient.
         sections.append(
-            "Recovery: provide a longer old_string with more surrounding "
-            "context lines to make the match unique, or use replace_all=True "
-            "if you intend to replace all occurrences."
+            "Recovery: Multiple matches found. Include more surrounding "
+            "context lines in old_string to make it unique, or use "
+            "replace_all=True if all matches should be replaced."
+        )
+        sections.append(
+            "Non-retryable: the same old_string will always match multiple "
+            "locations. Do NOT retry without changing old_string or adding "
+            "replace_all=true."
         )
 
     # For escape-drift: the error already explains the issue; add a
