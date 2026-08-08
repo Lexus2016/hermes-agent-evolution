@@ -469,6 +469,16 @@ def build_turn_context(
     _reset_consol = getattr(agent._memory_store, "reset_consolidation_failures", None)
     if callable(_reset_consol):
         _reset_consol()
+    # SkillTrojan composition defense (#1802): reset the per-turn tracer so
+    # composition detection is scoped to skills loaded in THIS turn, not
+    # accumulated across the whole session.  Without this reset, the
+    # singleton grows monotonically and triggers spurious cross-turn blocks
+    # on legitimate skills that happen to be loaded in separate turns.
+    try:
+        from tools.skill_composition_tracer import reset_tracer
+        reset_tracer()
+    except Exception:
+        pass
     agent._vision_supported = True
     # Plan-and-execute (#290): re-arm the once-per-turn plan emission guard so
     # an active plan (if any) is re-emitted at the start of each turn. Inert

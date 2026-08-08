@@ -109,6 +109,7 @@ from agent.skill_utils import (
     EXCLUDED_SKILL_DIRS as _EXCLUDED_SKILL_DIRS,
     is_skill_support_path as _is_skill_support_path,
 )
+from tools.skill_composition_tracer import check_composition as _check_composition
 
 logger = logging.getLogger(__name__)
 
@@ -1585,6 +1586,20 @@ def skill_view(
                     },
                     ensure_ascii=False,
                 )
+
+        # SkillTrojan defense (#1802): runtime composition trace.
+        # Checks whether the combination of skills loaded this turn
+        # reconstructs a payload across skill boundaries. The per-turn
+        # tracer is reset at the turn boundary in build_turn_context.
+        _composition_result = _check_composition(name, content)
+        if not _composition_result.get("success", True):
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": _composition_result.get("error", ""),
+                },
+                ensure_ascii=False,
+            )
 
         parsed_frontmatter: Dict[str, Any] = {}
         try:
