@@ -1,9 +1,9 @@
 name: evolution-pr-reflection
-# 07:35 daily — between funnel (07:25) and watchdog (07:47). The reflection
+# 07:38 daily — between hydra (07:35) and integration (07:40). The reflection
 # mines PRs closed in the last 7 days and writes the pr-reflection.txt sidecar
 # that the analysis stage reads (6d). Settles after the integration cycle
 # finishes but before the new analysis cycle starts.
-schedule: "35 7 * * *"
+schedule: "38 7 * * *"
 enabled: true
 mode: PRIVATE
 
