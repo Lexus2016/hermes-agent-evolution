@@ -109,7 +109,12 @@ _NONRETRY_THRESHOLD = 2
 #     threshold (3) + repo_map diversion hint from #973.
 _NON_RETRYABLE_BY_TOOL: dict[str, frozenset[str]] = {
     "read_file": frozenset({"not_found"}),
-    "patch": frozenset({"not_found"}),
+    "patch": frozenset({"not_found", "ambiguous"}),
+    # #1840 — write_file parse-errors are deterministic: the same malformed
+    # JSON/YAML/TOML content will fail validation identically on every retry.
+    # Marking parse_error non-retryable for write_file makes the loop_guard
+    # fire after 2 consecutive occurrences, bounding the spiral.
+    "write_file": frozenset({"parse_error"}),
 }
 
 

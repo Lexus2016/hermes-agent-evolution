@@ -1318,8 +1318,12 @@ def _detect_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str]
 
     data = safe_json_loads(result)
 
-    # Terminal: non-zero exit code is the canonical failure signal.
-    if tool_name == "terminal":
+    # Terminal and process: non-zero exit code is the canonical failure
+    # signal. The process tool (action=poll/log/wait) returns a JSON dict
+    # with exit_code but no "error" key when the background process exits
+    # non-zero — without this check those results are misclassified as
+    # successes and the spiral cap never fires (#1839).
+    if tool_name in ("terminal", "process"):
         if isinstance(data, dict):
             exit_code = data.get("exit_code")
             if exit_code is not None and exit_code != 0:

@@ -3427,7 +3427,11 @@ def terminal_tool(
                             ),
                             "failure_class": classification.category.value,
                             "suggestion": classification.hint,
-                            "should_retry": classification.should_retry,
+                            # #1841 — timeouts are deterministic: the same
+                            # long-running command will time out again on retry.
+                            # Mark should_retry=False so the model does not
+                            # blind-retry the identical foreground command.
+                            "should_retry": False,
                             "terminal_streak": streak,
                         }
                         rec = streak_recommendation(streak)

@@ -29,6 +29,35 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         "A required binary/command is missing. Check prerequisites first "
         "(`which <cmd>` / install it), or use a different tool — do NOT repeat the same command.",
     ),
+    # #1842 — patch-ambiguous: old_string matches multiple locations.
+    # The same old_string will match the same locations on retry, so
+    # this is deterministic — the agent must add context, not blind-retry.
+    # Must run BEFORE permission: the write_file parse-error message
+    # contains "Refusing to write" which would otherwise match permission.
+    (
+        re.compile(
+            r"\b(found \d+ matches|multiple matches found)\b",
+            re.I,
+        ),
+        "ambiguous",
+        "old_string matched multiple locations. Add more surrounding context to make it "
+        "unique, or use replace_all=true — do NOT retry the same old_string.",
+    ),
+    (
+        # #1840 — write_file/patch parse-errors: malformed content (JSON,
+        # YAML, TOML) fails syntax validation deterministically. The same
+        # malformed content will fail identically on every retry.
+        # Must run BEFORE permission: "Refusing to write" in the error
+        # message would otherwise match the permission regex.
+        re.compile(
+            r"\b(jsondecodeerror|yamlerror|tomldecodeerror|parseerror|syntaxerror|"
+            r"invalid (json|yaml|toml)|syntax validation|fails? \.(json|yaml|yml|toml) syntax)\b",
+            re.I,
+        ),
+        "parse_error",
+        "Content failed syntax validation. The malformed content will fail identically on "
+        "retry — fix the syntax error or re-read the source, do NOT blind-retry the same content.",
+    ),
     (
         re.compile(
             r"permission denied|access denied|not permitted|forbidden|refusing to write|operation not permitted|EACCES",

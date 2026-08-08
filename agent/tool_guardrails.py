@@ -97,6 +97,13 @@ _SPIRAL_PRONE_TOOLS = frozenset({
     # 5) that halts the turn regardless of hard_stop_enabled, bounding the
     # retry spiral and forcing a strategy switch.
     "patch",
+    # #1840 — write_file parse-errors: 48 failures in 7d with 15-deep
+    # spirals. The fail-closed syntax gate returns a validation error
+    # (JSON/YAML/TOML parse failure) that is deterministic — the same
+    # malformed content will fail identically on retry. Adding write_file
+    # here activates the always-on spiral_failure_cap (default 5) so the
+    # agent is forced to fix the content instead of blind-retrying.
+    "write_file",
 })
 
 # #1585 — number of consecutive successes required before a spiral-prone
@@ -361,7 +368,12 @@ def classify_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str
     if file_mutation_result_landed(tool_name, result):
         return False, ""
 
-    if tool_name == "terminal":
+    # Terminal and process: non-zero exit code is the canonical failure
+    # signal. The process tool (action=poll/log/wait) returns a JSON dict
+    # with exit_code but no "error" key when the background process exits
+    # non-zero — without this check those results are misclassified as
+    # successes and the spiral cap never fires (#1839).
+    if tool_name in ("terminal", "process"):
         data = safe_json_loads(result)
         if isinstance(data, dict):
             exit_code = data.get("exit_code")
@@ -1032,13 +1044,13 @@ def _tool_failure_recovery_hint(tool_name: str, count: int) -> str:
 # loop or policy interceptors: "use <alternative> instead".
 _TOOL_FALLBACK_DIRECTIVE: dict[str, str] = {
     "read_file": "use search_files to locate the file, or vision_analyze for binary/image files",
-    "terminal": "run a read-only diagnostic (pwd, ls) before retrying, or switch to read_file/patch",
+    "terminal": "run a read-only diagnostic (pwd, ls) before retrying, or switch to read_file/patch; for timeouts, use background=true with notify_on_complete=true instead of retrying in foreground",
     "execute_code": "install missing packages via terminal, or verify the interpreter/venv first",
     "web_search": "try web_extract on a known URL, or refine the query terms",
     "web_extract": "try web_search to find alternative URLs, or use the browser tool",
     "search_files": "no results found repeatedly — switch strategy: (a) use target=files mode instead of content, (b) broaden the directory path, (c) try a different glob pattern instead of regex, or (d) ask the user for the correct path",
     "patch": "use read_file to verify the exact text before patching, or use write_file",
-    "write_file": "verify the directory exists with terminal, or use patch for targeted edits",
+    "write_file": "verify the directory exists with terminal, or use patch for targeted edits; for parse-errors, fix the syntax in the content argument — the same malformed content will fail identically on retry",
     "process": "use process action=list to find the correct session_id before retrying",
     # #739 — media tools: a failed visual call is usually a bad path/format or an
     # unavailable provider, not something a blind retry fixes. Route to a check

@@ -1419,12 +1419,14 @@ def format_structured_error(
             )
 
     # For ambiguous: the error message already lists the match locations,
-    # so we just add a recovery hint.
+    # so we add a recovery hint with a concrete fallback directive (#1842).
     if error_type == "ambiguous":
         sections.append(
             "Recovery: provide a longer old_string with more surrounding "
             "context lines to make the match unique, or use replace_all=True "
-            "if you intend to replace all occurrences."
+            "if you intend to replace all occurrences. "
+            "Fallback: use read_file to see the exact text at the matched "
+            "lines, then include enough surrounding context to disambiguate."
         )
 
     # For escape-drift: the error already explains the issue; add a
