@@ -104,7 +104,8 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     ),
     (
         re.compile(
-            r"no such file or directory|not found|does not exist|cannot find|no matches found|0 results|no results",
+            r"no such file or directory|not found|does not exist|cannot find|"
+            r"could not find|no matches found|0 matches|0 results|no results",
             re.I,
         ),
         "not_found",
