@@ -49,6 +49,8 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         # malformed content will fail identically on every retry.
         # Must run BEFORE permission: "Refusing to write" in the error
         # message would otherwise match the permission regex.
+        # #2169 — enrich the hint with a fallback directive: if the content
+        # can't be fixed, use `terminal` with a heredoc as an alternative.
         re.compile(
             r"\b(jsondecodeerror|yamlerror|tomldecodeerror|parseerror|syntaxerror|"
             r"invalid (json|yaml|toml)|syntax validation|fails? \.(json|yaml|yml|toml) syntax)\b",
@@ -56,7 +58,8 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         ),
         "parse_error",
         "Content failed syntax validation. The malformed content will fail identically on "
-        "retry — fix the syntax error or re-read the source, do NOT blind-retry the same content.",
+        "retry — fix the syntax error or re-read the source. If the content cannot be fixed, "
+        "use `terminal` with a heredoc as an alternative write method. Do NOT blind-retry.",
     ),
     (
         # #1944 — search_files regex/glob parse errors: the tool wraps rg/grep
@@ -77,13 +80,39 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         "Fix the pattern syntax, or use search_files with target='files' for glob patterns.",
     ),
     (
+        # #2168 — tool-level refusal: the tool or backend actively refused
+        # the request (HTTP 403, access blocked, refused, rejected). Distinct
+        # from ``permission`` (filesystem OS-level denial): a refusal is the
+        # backend/service saying "no", which is deterministic for the same
+        # credentials. Classifying as ``refusal`` makes it non-retryable in
+        # loop_guard so the agent routes to alternatives instead of spiraling.
+        # Must run BEFORE permission (which also matches "forbidden") and
+        # before the runtime_error catch-all (which matches "error:").
+        re.compile(
+            r"\b(http 403|403 forbidden|access blocked|access refused|"
+            r"request refused|request rejected|blocked by|"
+            r"not allowed|operation refused)\b",
+            re.I,
+        ),
+        "refusal",
+        "The request was refused by the backend. The same request with the same "
+        "credentials will be refused identically on retry. Try an alternative tool, "
+        "path, or approach — or escalate with the exact access needed. Do NOT retry.",
+    ),
+    (
         re.compile(
             r"permission denied|access denied|not permitted|forbidden|refusing to write|operation not permitted|EACCES",
             re.I,
         ),
         "permission",
-        "Access is denied and the agent can't elevate. Do NOT retry the same path — "
-        "use an allowed path/tool, or report exactly what access is needed.",
+        # #2168 — permission/refusal recovery: steer toward alternatives and
+        # escalation instead of just "access is denied." The agent can't
+        # elevate credentials, so it needs a fallback chain: try a different
+        # path/tool, or escalate with the exact access needed.
+        "Access was denied. Try an alternative path, tool, or approach "
+        "(e.g. a different directory, `terminal` instead of `write_file`, "
+        "or a different API). If no alternative exists, escalate to the "
+        "user with the exact access needed. Do NOT retry the same action.",
     ),
     (
         re.compile(

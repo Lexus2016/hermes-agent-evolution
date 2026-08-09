@@ -83,8 +83,15 @@ _EXIT_CODE_RE = re.compile(r"exit code[:\s]+([1-9]\d*)", re.IGNORECASE)
 # provider is down for every query — and the recovery hint already tells the
 # agent to switch search_backend rather than retry. Leaving it out let
 # provider outages present as ordinary per-query failures and spiral.
+#
+# #2168 — ``refusal`` joined the set: access-denied / refusal situations where
+# the agent can't elevate credentials are deterministic (retrying the same
+# action with the same credentials reproduces the denial). Marking refusal
+# non-retryable makes the loop_guard fire after 2 consecutive occurrences
+# instead of the generic fail threshold, bounding the spiral and nudging the
+# agent toward alternatives sooner.
 _NON_RETRYABLE = frozenset(
-    {"timeout", "permission", "missing_command", "limit", "provider_dead"}
+    {"timeout", "permission", "missing_command", "limit", "provider_dead", "refusal"}
 )
 _NONRETRY_THRESHOLD = 2
 

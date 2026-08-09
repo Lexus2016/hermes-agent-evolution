@@ -32,7 +32,9 @@ class TestClassifyToolError:
     def test_permission_denied(self):
         result = classify_tool_error("write_file", "Permission denied: /root/secret")
         assert result.error_class == ToolErrorClass.permission
-        assert result.recovery_action == RecoveryAction.check_credentials
+        # #2168 — permission errors now steer toward alternatives instead of
+        # just "check credentials" (the agent can't elevate credentials).
+        assert result.recovery_action == RecoveryAction.use_alternative
 
     def test_rate_limit(self):
         result = classify_tool_error("web_search", "Rate limit exceeded (429)")

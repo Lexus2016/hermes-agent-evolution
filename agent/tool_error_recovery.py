@@ -119,7 +119,9 @@ _PATTERNS: list[tuple[re.Pattern, ToolErrorClass, RecoveryAction, str]] = [
         RecoveryAction.fix_args,
         "The tool arguments were invalid. Review the schema and fix the arguments.",
     ),
-    # JSON / parse errors — usually bad args
+    # JSON / parse errors — usually bad args, but for write_file they are
+    # deterministic (same malformed content fails identically on retry).
+    # Classify generically; the per-tool refinement below handles write_file.
     (
         re.compile(r"json|parse|decode|unexpected token|syntax error", re.I),
         ToolErrorClass.validation,
@@ -127,6 +129,52 @@ _PATTERNS: list[tuple[re.Pattern, ToolErrorClass, RecoveryAction, str]] = [
         "The input could not be parsed. Check the format of the arguments.",
     ),
 ]
+
+# ── Per-tool error refinements (#2169, #2168) ───────────────────────────
+#
+# Override the generic classification for tools where the error class has a
+# different recoverability profile.  ``refine_classification`` is called after
+# ``classify_tool_error`` to narrow the result when the tool+error combination
+# has a more specific recovery action.
+_PERMANENT_TOOLS: dict[str, frozenset[ToolErrorClass]] = {
+    # #2169 — write_file parse-errors are deterministic: the same malformed
+    # JSON/YAML/TOML content will fail validation identically on every retry.
+    # Map to permanent/abort so the circuit breaker fires and the hint
+    # steers the agent to fix the content or use an alternative.
+    "write_file": frozenset({ToolErrorClass.validation}),
+}
+
+
+def refine_classification(
+    failure: ToolFailure,
+) -> ToolFailure:
+    """Narrow a generic classification for tool-specific recoverability (#2169, #2168).
+
+    Called after ``classify_tool_error`` when the caller knows the tool name.
+    Returns a possibly-updated ``ToolFailure`` with a more specific error
+    class, recovery action, and hint.
+    """
+    permanent_classes = _PERMANENT_TOOLS.get(failure.tool_name)
+    if permanent_classes and failure.error_class in permanent_classes:
+        failure.error_class = ToolErrorClass.permanent
+        failure.recovery_action = RecoveryAction.abort
+        failure.hint = (
+            "Content failed validation and the same input will fail identically on retry. "
+            "Fix the structural issue (check the exact validation error), or use `terminal` "
+            "with a heredoc as an alternative write method. Do NOT blind-retry the same content."
+        )
+    # #2168 — permission errors: steer toward alternatives instead of just
+    # "check credentials", which the agent often can't act on (it can't
+    # elevate). Use_alternable/escalate gives the model a fallback chain.
+    elif failure.error_class == ToolErrorClass.permission:
+        failure.recovery_action = RecoveryAction.use_alternative
+        failure.hint = (
+            "Access was denied. Try an alternative path, tool, or approach "
+            "(e.g. a different directory, `terminal` instead of `write_file`, "
+            "or a different API). If no alternative exists, escalate to the "
+            "user with the exact access needed. Do NOT retry the same action."
+        )
+    return failure
 
 
 def classify_tool_error(tool_name: str, error_message: str, attempt: int = 1) -> ToolFailure:
@@ -149,9 +197,10 @@ def classify_tool_error(tool_name: str, error_message: str, attempt: int = 1) ->
     """
     msg_lower = error_message.lower() if error_message else ""
 
+    result = None
     for pattern, err_class, action, hint in _PATTERNS:
         if pattern.search(msg_lower):
-            return ToolFailure(
+            result = ToolFailure(
                 tool_name=tool_name,
                 error_message=error_message,
                 error_class=err_class,
@@ -159,16 +208,21 @@ def classify_tool_error(tool_name: str, error_message: str, attempt: int = 1) ->
                 hint=hint,
                 attempt_number=attempt,
             )
+            break
 
-    # Default: unknown — can't suggest a specific recovery
-    return ToolFailure(
-        tool_name=tool_name,
-        error_message=error_message,
-        error_class=ToolErrorClass.unknown,
-        recovery_action=RecoveryAction.escalate,
-        hint="The error could not be classified. Review the error message and decide how to proceed.",
-        attempt_number=attempt,
-    )
+    if result is None:
+        # Default: unknown — can't suggest a specific recovery
+        result = ToolFailure(
+            tool_name=tool_name,
+            error_message=error_message,
+            error_class=ToolErrorClass.unknown,
+            recovery_action=RecoveryAction.escalate,
+            hint="The error could not be classified. Review the error message and decide how to proceed.",
+            attempt_number=attempt,
+        )
+
+    # #2169, #2168 — narrow the classification for tool-specific recoverability
+    return refine_classification(result)
 
 
 def recovery_hint(failure: ToolFailure) -> str:
