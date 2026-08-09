@@ -146,3 +146,42 @@ class TestBestEffort:
             assert events[-1]["session_id"] == "s9"
         finally:
             refusal_telemetry._MAX_EVENTS = original
+
+# ── #2168 — recovery_rate metric ────────────────────────────────────────────
+
+
+class TestRecoveryRate:
+    def test_no_transitions_returns_none(self, _tmp_telemetry_home):
+        assert refusal_telemetry.recovery_rate() is None
+
+    def test_half_recovered(self, _tmp_telemetry_home):
+        refusal_telemetry.record_transition(
+            session_id="s1", nudge_tier="advisory",
+            category_before="over_refusal", category_after="",
+            recovered=True, took_action=True,
+        )
+        refusal_telemetry.record_transition(
+            session_id="s2", nudge_tier="advisory",
+            category_before="over_refusal", category_after="over_refusal",
+            recovered=False, took_action=False,
+        )
+        rate = refusal_telemetry.recovery_rate()
+        assert rate is not None
+        assert rate["recovery_rate"] == 0.5
+        assert rate["recovered"] == 1.0
+        assert rate["unrecovered"] == 1.0
+
+    def test_took_action_counts_as_recovered(self, _tmp_telemetry_home):
+        refusal_telemetry.record_transition(
+            session_id="s1", nudge_tier="advisory",
+            category_before="over_refusal", category_after="over_refusal",
+            recovered=False, took_action=True,
+        )
+        rate = refusal_telemetry.recovery_rate()
+        assert rate is not None and rate["recovery_rate"] == 1.0
+
+    def test_corrupt_sidecar_returns_none(self, _tmp_telemetry_home):
+        (_tmp_telemetry_home / ".refusal_telemetry.json").write_text(
+            "CORRUPT{", encoding="utf-8"
+        )
+        assert refusal_telemetry.recovery_rate() is None

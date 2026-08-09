@@ -120,8 +120,11 @@ class TestNonRetryableTrigger:
     """
 
     def test_two_permission_denials_stop_hard(self):
+        # #2168 — permission is now caught by the first-hit refusal recovery
+        # nudge at count 1 (has_alternative). At count 2 the same nudge fires
+        # (still the latest category), asserting the recovery directive.
         n = maybe_nudge(_run("terminal", 2, result="permission denied"))
-        assert n is not None and "non-retryable" in n and "permission" in n
+        assert n is not None and "permission" in n and "alternative" in n
 
     def test_two_timeouts_stop_hard(self):
         n = maybe_nudge(
@@ -132,7 +135,10 @@ class TestNonRetryableTrigger:
         assert n is not None and "non-retryable" in n and "timeout" in n
 
     def test_single_deterministic_failure_is_quiet(self):
-        assert maybe_nudge(_run("terminal", 1, result="permission denied")) is None
+        # #2168 — permission is now in _REFUSAL_RECOVERABILITY (has_alternative)
+        # and fires the first-hit nudge at count 1. A truly quiet single failure
+        # is a runtime_error (not in the refusal map) — that stays quiet.
+        assert maybe_nudge(_run("terminal", 1, result="some runtime error: detail")) is None
 
     def test_mixed_deterministic_classes_fall_through_to_generic_fail(self):
         # A permission then a timeout are different classes — the deterministic
@@ -150,12 +156,14 @@ class TestNonRetryableTrigger:
         """#1611 — a down search provider fails identically for every query.
 
         Rewording cannot help while the backend is unreachable, so this must
-        trip the deterministic stop rather than spiral per-query.
+        trip a recovery nudge rather than spiral per-query.
+        #2168 — provider_dead is now in _REFUSAL_RECOVERABILITY
+        (has_alternative), so it fires the first-hit refusal recovery nudge.
         """
         n = maybe_nudge(
             _run("search_web", 2, result="DuckDuckGo search failed (HTTP 502)")
         )
-        assert n is not None and "non-retryable" in n and "provider_dead" in n
+        assert n is not None and "provider_dead" in n and "alternative" in n
 
     def test_empty_local_search_is_not_provider_dead(self):
         """#1611 — an empty local search must not read as a dead web provider.
@@ -915,3 +923,26 @@ class TestStructuralFailureDetection:
 
     def test_a_single_failure_still_stays_quiet(self):
         assert maybe_nudge(self._terminal_run("no such file")) is None
+
+
+# ── #2168 — First-hit refusal recovery nudge ───────────────────────────────
+
+
+class TestFirstHitRefusalRecovery:
+    """#2168 — permission/access-denied fires a nudge on the VERY FIRST hit."""
+
+    def test_permission_fires_on_first_hit(self):
+        n = maybe_nudge(_run("terminal", 1, result="permission denied: /secret"))
+        assert n is not None and "permission" in n and "alternative" in n
+
+    def test_permission_nudge_names_fallback(self):
+        n = maybe_nudge(_run("write_file", 1, result="access denied: /readonly"))
+        assert n is not None and "patch" in n.lower()
+
+    def test_limit_fires_as_permanent(self):
+        n = maybe_nudge(_run("terminal", 1, result="Error: exceeds maximum size limit of 10MB"))
+        assert n is not None and "permanent" in n.lower()
+
+    def test_timeout_and_runtime_stay_quiet_on_first_hit(self):
+        assert maybe_nudge(_run("terminal", 1, result="connection timed out")) is None
+        assert maybe_nudge(_run("terminal", 1, result="error: syntax error")) is None

@@ -116,8 +116,10 @@ class TestSearchFilesNoResultStaysRetryable:
 
 class TestGlobalClassesStillApplyToPerToolTools:
     def test_read_file_permission_trips_non_retryable(self):
+        # #2168 — permission is now caught by the first-hit refusal recovery
+        # nudge (has_alternative) at count 1, not the non-retryable threshold.
         n = maybe_nudge(_fail_run("read_file", 2, "permission denied"))
-        assert n is not None and "non-retryable" in n and "permission" in n
+        assert n is not None and "permission" in n and "alternative" in n
 
     def test_patch_timeout_trips_non_retryable(self):
         n = maybe_nudge(_fail_run("patch", 2, "failure-class=timeout — timed out"))

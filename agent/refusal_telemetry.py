@@ -236,3 +236,38 @@ def load_events() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.debug("refusal_telemetry: load_events failed: %s", e)
         return []
+
+
+def recovery_rate() -> Optional[Dict[str, float]]:
+    """Compute the refusal recovery rate from recorded events (#2168).
+
+    A refusal is "recovered" when the model responded to a nudge by either
+    taking tool action (``took_action=True``) or dropping the refusal
+    language (``recovered=True``).  Returns a dict with:
+
+    - ``recovery_rate`` — fraction of nudged refusals that recovered (0.0–1.0)
+    - ``total_nudges`` — number of nudge events recorded
+    - ``recovered`` — count of recovered transitions
+    - ``unrecovered`` — count of transitions where the model kept refusing
+
+    Returns None when no transition events exist (insufficient data).
+    """
+    try:
+        events = load_events()
+    except Exception:
+        return None
+    transitions = [e for e in events if e.get("type") == "transition"]
+    if not transitions:
+        return None
+    recovered = sum(
+        1 for e in transitions if e.get("recovered") or e.get("took_action")
+    )
+    unrecovered = len(transitions) - recovered
+    rate = recovered / len(transitions) if transitions else 0.0
+    nudges = sum(1 for e in events if e.get("type") == "nudge")
+    return {
+        "recovery_rate": round(rate, 4),
+        "total_nudges": float(nudges),
+        "recovered": float(recovered),
+        "unrecovered": float(unrecovered),
+    }

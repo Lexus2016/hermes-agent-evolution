@@ -83,9 +83,13 @@ _EXIT_CODE_RE = re.compile(r"exit code[:\s]+([1-9]\d*)", re.IGNORECASE)
 # provider is down for every query — and the recovery hint already tells the
 # agent to switch search_backend rather than retry. Leaving it out let
 # provider outages present as ordinary per-query failures and spiral.
-_NON_RETRYABLE = frozenset(
-    {"timeout", "permission", "missing_command", "limit", "provider_dead"}
-)
+_NON_RETRYABLE = frozenset({
+    "timeout",
+    "permission",
+    "missing_command",
+    "limit",
+    "provider_dead",
+})
 _NONRETRY_THRESHOLD = 2
 
 # #1612 — Per-tool non-retryable failure classes. The global ``_NON_RETRYABLE``
@@ -139,6 +143,39 @@ def _is_non_retryable(tool: str, category: Optional[str]) -> bool:
     if category in _NON_RETRYABLE:
         return True
     return category in _NON_RETRYABLE_BY_TOOL.get(tool, frozenset())
+
+
+# ── #2168 — Refusal recoverability categorization ──────────────────────────
+# Maps failure categories to a recoverability verdict so a first-hit nudge
+# (below) fires on the VERY FIRST refusal — not after the 2-strike threshold
+# (#231), by which time the agent has often given up (76% unrecovered rate).
+_REFUSAL_RECOVERABILITY: dict[str, str] = {
+    "permission": "has_alternative",  # use an allowed path/tool instead
+    "limit": "permanent",  # can't raise limits at runtime
+    "missing_command": "has_alternative",  # install it or use a different tool
+    "timeout": "retryable",  # transient; backoff may succeed
+    "provider_dead": "has_alternative",  # switch search_backend
+}
+
+# Fallback chains — concrete next step on the FIRST refusal (#2168).
+_REFUSAL_FALLBACK_CHAIN: dict[str, str] = {
+    "terminal": "write_file or execute_code, or a read-only approach (`read_file`)",
+    "write_file": "patch for targeted edits, or terminal with a heredoc to an allowed path",
+    "patch": "write_file for a full replacement, or read_file to verify the target",
+    "web_search": "web_extract on a known URL, or a different search_backend",
+    "web_extract": "web_search to find an alternative source",
+    "read_file": "search_files to locate the file first, or terminal `cat`/`head`",
+    "search_files": "read_file on a known path, or `repo_map` for overview",
+    "execute_code": "terminal for simple commands, or write_file + terminal to run a script",
+}
+
+
+def _refusal_recoverability(category: Optional[str]) -> str:
+    """Return 'permanent', 'retryable', 'has_alternative', or '' (#2168)."""
+    if not category:
+        return ""
+    return _REFUSAL_RECOVERABILITY.get(category, "")
+
 
 # Idempotent tools that are especially prone to content-free repetition and that
 # the issue evidence shows spiraling with no progress even when individual calls
@@ -284,6 +321,7 @@ def _category_hint(category: Optional[str]) -> Optional[str]:
     except Exception:  # pragma: no cover - keep standalone if import path differs
         return None
     return hint_for(category)
+
 
 # Mutating tools get LOWER thresholds than idempotent tools because a fixation
 # on mutating operations (writing files, running commands) is more costly and
@@ -546,7 +584,9 @@ def detect_dead_end_loop(
 
     signatures: Counter[str] = Counter()
     sig_to_tool: dict[str, str] = {}
-    scan = messages[-_DEAD_END_WINDOW:] if len(messages) > _DEAD_END_WINDOW else messages
+    scan = (
+        messages[-_DEAD_END_WINDOW:] if len(messages) > _DEAD_END_WINDOW else messages
+    )
 
     for msg in scan:
         if not isinstance(msg, dict):
@@ -1007,6 +1047,37 @@ def maybe_nudge(
     else:
         cat_label = "idempotent"
 
+    # #2168 — First-hit refusal recovery nudge. Fire on the VERY FIRST
+    # refusal-class failure (permission/limit/timeout/provider_dead) instead
+    # of waiting for the 2-strike non-retryable threshold (#231). By then the
+    # agent has often given up — the introspection data showed 76% unrecovered.
+    # Runs before the non-retryable check: STRICTER condition (refusal-class
+    # only) + LOWER count (1). No overlap — categories not in the refusal map
+    # fall through to the existing thresholds below.
+    if consec_fail >= 1 and same:
+        _latest_cat = same[0][2] if same[0][1] else None
+        if _latest_cat:
+            _recoverability = _refusal_recoverability(_latest_cat)
+            if _recoverability:
+                _fallback = _REFUSAL_FALLBACK_CHAIN.get(tool, "")
+                _fallback_note = f" Try: {_fallback}." if _fallback else ""
+                if _recoverability == "has_alternative":
+                    return (
+                        f"[loop-guard] `{tool}` was refused ({_latest_cat}). "
+                        f"This has an alternative path — do NOT retry `{tool}` "
+                        f"the same way.{_fallback_note}"
+                        f"{_diversion_hint(tool)}"
+                    )
+                elif _recoverability == "permanent":
+                    return (
+                        f"[loop-guard] `{tool}` hit a permanent refusal "
+                        f"({_latest_cat}). Retrying cannot resolve this — the "
+                        f"limit/boundary is fixed. Report the blocker concisely "
+                        f"or use a fundamentally different approach."
+                        f"{_diversion_hint(tool)}"
+                    )
+                # retryable: don't escalate on first hit; let thresholds handle loops
+
     # Highest-priority: a DETERMINISTIC failure repeated even once (#231). These
     # reproduce on a near-identical retry, so the generic 3-strike threshold is
     # too lenient — two in a row is already a spiral (terminal timeouts, denied
@@ -1027,9 +1098,7 @@ def maybe_nudge(
         # surface its recovery hint (#365) so the model reacts to WHAT is
         # failing, not just that it failed. Ties resolve to the most recent
         # class (same is most-recent-first).
-        _fail_classes = [
-            c for _t, failed, c, _a in same[:consec_fail] if failed and c
-        ]
+        _fail_classes = [c for _t, failed, c, _a in same[:consec_fail] if failed and c]
         dominant = None
         if _fail_classes:
             _counts: Dict[str, int] = {}
@@ -1106,10 +1175,7 @@ def maybe_nudge(
     # catch this because the args differ. This cap fires at a lower count than
     # the generic repeat_threshold, with a nudge that explicitly directs
     # synthesis from the results already gathered.
-    if (
-        tool == "web_search"
-        and count >= _WEB_SEARCH_DIVERSE_QUERY_CAP
-    ):
+    if tool == "web_search" and count >= _WEB_SEARCH_DIVERSE_QUERY_CAP:
         arg_hashes = [r[3] for r in same if r[3] is not None]
         # Only trigger when queries are genuinely diverse (not all identical —
         # that's already handled by the same-arg branch above).
@@ -1341,13 +1407,14 @@ def detect_refusal_category(text: str) -> str:
     if not text or not text.strip():
         return ""
     refusals = [
-        m for m in _REFUSAL_PAT.finditer(text)
-        if not _FP_REFUSAL_PAT.match(text[m.start():m.start() + 40])
+        m
+        for m in _REFUSAL_PAT.finditer(text)
+        if not _FP_REFUSAL_PAT.match(text[m.start() : m.start() + 40])
     ]
     if not refusals:
         return ""
     first = refusals[0]
-    snippet = text[first.start():first.start() + 120]
+    snippet = text[first.start() : first.start() + 120]
     return _classify_refusal(snippet)
 
 
@@ -1392,14 +1459,15 @@ def maybe_refusal_nudge(
         return None
     # Detect refusal language
     refusals = [
-        m for m in _REFUSAL_PAT.finditer(last_assistant_text)
-        if not _FP_REFUSAL_PAT.match(last_assistant_text[m.start():m.start() + 40])
+        m
+        for m in _REFUSAL_PAT.finditer(last_assistant_text)
+        if not _FP_REFUSAL_PAT.match(last_assistant_text[m.start() : m.start() + 40])
     ]
     if not refusals:
         return None
     # Classify using the context around the first refusal
     first = refusals[0]
-    snippet = last_assistant_text[first.start():first.start() + 120]
+    snippet = last_assistant_text[first.start() : first.start() + 120]
     category = _classify_refusal(snippet)
     if not category:
         return None
