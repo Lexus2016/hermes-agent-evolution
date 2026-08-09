@@ -128,6 +128,41 @@ def audit_rejections(report: Dict[str, Any], repo_root: Optional[Path]) -> List[
     return out
 
 
+def _record_meta_skill_trace(report: Dict[str, Any], evolution_dir: Path) -> None:
+    """Wire #1876: append a per-cycle meta-skill trace record.
+
+    Called from ``audit_latest`` after the analysis JSON is read, so the trace
+    runs once per analysis cycle.  Fire-and-forget: IO errors are swallowed so
+    a trace write can never take the audit down.
+    """
+    try:
+        from scripts.evolution_meta_skill_trace import MetaSkillTrace, append_trace
+    except ImportError:
+        return
+
+    selected = report.get("selected_for_implementation") or []
+    merged_issue_ids: List[int] = []
+    # Merged issues are not known at audit time — the implementation stage
+    # fills those in.  Record what we have: date, variant, selection counts.
+    selected_issue_ids = [
+        s.get("issue_number", 0) for s in selected if isinstance(s, dict)
+    ]
+    variant_id = report.get("analysis_variant", "default-v1")
+    trace = MetaSkillTrace(
+        date=report.get("date", ""),
+        variant_id=variant_id,
+        selected=len(selected),
+        merged=0,  # filled post-merge by the implementation stage
+        selected_issue_ids=selected_issue_ids,
+        merged_issue_ids=merged_issue_ids,
+        effort_budget=float(report.get("effort_budget", 3.0)),
+    )
+    try:
+        append_trace(trace, evolution_dir=evolution_dir)
+    except OSError:
+        pass
+
+
 def audit_latest(evolution_dir: Path, repo_root: Optional[Path] = None) -> List[str]:
     """Audit the most recent dated analysis report under ``<dir>/analysis/``.
 
@@ -136,6 +171,9 @@ def audit_latest(evolution_dir: Path, repo_root: Optional[Path] = None) -> List[
     violation strings, or [] when there is no readable dated report. Only
     ``YYYY-MM-DD.json`` files are considered — the sibling ``issues_*.json`` /
     ``prs_*.json`` snapshots are skipped.
+
+    Also records a meta-skill variant trace (#1876) — fire-and-forget so a
+    trace write never takes the audit down.
     """
     analysis_dir = evolution_dir / "analysis"
     try:
@@ -151,6 +189,10 @@ def audit_latest(evolution_dir: Path, repo_root: Optional[Path] = None) -> List[
     except (OSError, ValueError):
         return []
     violations = audit_analysis(report) + audit_rejections(report, repo_root)
+
+    # Wire #1876: record a meta-skill trace per analysis cycle (fire-and-forget).
+    _record_meta_skill_trace(report, evolution_dir)
+
     return [f"({latest.stem}) {v}" for v in violations]
 
 

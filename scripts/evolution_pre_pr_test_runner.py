@@ -506,12 +506,36 @@ def run_gate(
     """Core gate logic: map, run, report. Pure except for subprocess + log IO.
 
     Returns a ``GateReport`` whose ``.passed`` is True when all shards pass.
+
+    Also records a per-cycle tool-cost trace (#1874) — fire-and-forget so a
+    cost write never takes the gate down.
     """
     report = GateReport(changed_files=list(changed_files))
+
+    # Wire #1874: cost tracker for this cycle.
+    _has_tracker = False
+    _tracker = None
+    _evo_dir = None
+    _save_report = None
+    try:
+        from scripts.evolution_tool_cost import ToolCallCostTracker, save_report as _sr
+        import os as _os
+        _hh = _os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
+        _evo_dir = Path(_hh) / "evolution"
+        _tracker = ToolCallCostTracker(date=time.strftime("%Y-%m-%d"))
+        _save_report = _sr
+        _has_tracker = True
+    except ImportError:
+        pass
 
     if not changed_files:
         report.passed = True
         report.note = "no changed files — nothing to test"
+        if _has_tracker and _tracker and _save_report and _evo_dir:
+            try:
+                _save_report(_tracker.report(), evolution_dir=_evo_dir)
+            except OSError:
+                pass
         return report
 
     shards = map_changed_files_to_shards(
@@ -528,6 +552,8 @@ def run_gate(
 
     all_passed = True
     for shard in shards:
+        if _has_tracker and _tracker:
+            _tracker.record("terminal")  # each shard is a terminal/pytest call
         result = run_shard(shard, repo_root, runner=runner)
         report.results.append(result)
         if result.returncode != 0:
@@ -539,6 +565,14 @@ def run_gate(
         report.note = f"{len(failed)}/{len(report.results)} shard(s) failed"
 
     write_log(report, log_path=log_path)
+
+    # Wire #1874: persist the cost trace for this cycle (fire-and-forget).
+    if _has_tracker and _tracker and _save_report and _evo_dir:
+        try:
+            _save_report(_tracker.report(), evolution_dir=_evo_dir)
+        except OSError:
+            pass
+
     return report
 
 
