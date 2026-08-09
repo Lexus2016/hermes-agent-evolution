@@ -109,7 +109,7 @@ class TestTerminalIntegration:
         # result assembly guards on returncode != 0 and no exit_note.
         from tools import terminal_tool
         # simulate: interpret gives None, hints give a value
-        note = terminal_tool._interpret_exit_code("python x.py", 127)
+        note = terminal_tool._interpret_exit_code("python x.py", 1)
         assert note is None
         hint = annotate_failure("python x.py", 127, "bash: python: command not found")
         assert hint and "python3" in hint

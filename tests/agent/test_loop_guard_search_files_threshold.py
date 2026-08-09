@@ -31,20 +31,18 @@ def _tool_result(content: str) -> dict:
     return {"role": "tool", "tool_call_id": "call_search_files", "content": content}
 
 
-def _search_files_fail_run(n: int) -> list[dict]:
+def _search_files_fail_run(n: int, err: str = "Error: search_files failed (exit status 1)") -> list[dict]:
     """Build a message list of ``n`` consecutive failed search_files calls."""
     msgs: list[dict] = []
     for i in range(n):
         msgs.append(
             _assistant_tool_call(
                 "search_files",
-                {"pattern": f"broken_regex_{i}", "target": "content"},
+                {"pattern": f"query_{i}", "target": "content"},
             )
         )
         msgs.append(
-            _tool_result(
-                "Error: regex parse error at position 0: unexpected metacharacter"
-            )
+            _tool_result(err)
         )
     return msgs
 

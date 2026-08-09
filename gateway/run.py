@@ -26029,6 +26029,57 @@ def _start_gateway_housekeeping(stop_event: threading.Event, adapters=None, loop
             except Exception as e:
                 logger.debug("Org sync pull tick error: %s", e)
 
+        if (
+            not _skew_restart_requested
+            and runner is not None
+            and (interval == 0 or tick_count % SKEW_CHECK_EVERY == 0)
+        ):
+            try:
+                skew = detect_code_skew()
+                if skew is not None:
+                    boot_rev, disk_rev = skew
+                    if not supports_systemd_services():
+                        logger.info(
+                            "Code skew detected (booted %s, disk %s) but the gateway "
+                            "is not service-managed — restart it manually to load new "
+                            "code.",
+                            boot_rev,
+                            disk_rev,
+                        )
+                        _skew_restart_requested = True  # nothing to act on; notify once
+                    elif getattr(runner, "_running_agents", None):
+                        # An interactive turn is mid-flight — defer to the next
+                        # check rather than racing its drain. Latch stays False so
+                        # we retry; do NOT act now.
+                        logger.info(
+                            "Code skew detected (booted %s, disk %s); deferring "
+                            "restart until active agent turns finish.",
+                            boot_rev,
+                            disk_rev,
+                        )
+                    else:
+                        logger.warning(
+                            "Code skew detected (gateway booted at %s, checkout now "
+                            "at %s) — requesting a graceful restart to load new code.",
+                            boot_rev,
+                            disk_rev,
+                        )
+                        if loop is not None:
+                            loop.call_soon_threadsafe(
+                                lambda: runner.request_restart(
+                                    detached=False, via_service=True
+                                )
+                            )
+                        else:
+                            runner.request_restart(detached=False, via_service=True)
+                        # Latch ONLY after the restart was successfully scheduled.
+                        # If call_soon_threadsafe raised (e.g. loop closing), the
+                        # except below catches it and the latch stays False, so the
+                        # next check retries instead of silently giving up.
+                        _skew_restart_requested = True
+            except Exception as e:
+                logger.debug("Code-skew restart check error: %s", e)
+
         # Stale-session auto-archive — a live timer, so gateways that stay up
         # for weeks keep sweeping on schedule (the startup hook fires once).
         # maybe_auto_archive() is gated by sessions.min_interval_hours in
