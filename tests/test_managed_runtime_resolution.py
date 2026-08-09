@@ -51,6 +51,7 @@ _EXEMPT_DIRS = (
     ".venv",
     "venv",
     ".worktrees",
+    ".claude",
 )
 
 # Call sites where a bare PATH lookup is the correct answer. Each entry is
@@ -65,6 +66,12 @@ _ALLOWED: dict[tuple[str, str], str] = {
     ("hermes_cli/update_cmd.py", "uv"): (
         "Termux fallback: a pkg-installed uv lands on PATH but not in the "
         "managed bin dir, and it is checked only after resolve_uv() misses."
+    ),
+    ("hermes_cli/tqmemory_setup.py", "uv"): (
+        "Termux/user bin fallback after resolve_uv()."
+    ),
+    ("tools/python_install.py", "uv"): (
+        "PATH fallback after resolve_uv()."
     ),
     ("hermes_cli/update_cmd.py", "npm"): (
         "WSL diagnostic: deliberately inspects what PATH resolves so it can "
