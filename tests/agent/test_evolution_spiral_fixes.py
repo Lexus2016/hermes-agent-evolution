@@ -52,8 +52,8 @@ class TestWriteFileSpiralCap:
     def test_parse_error_non_retryable_for_write_file(self):
         assert _is_non_retryable("write_file", "parse_error") is True
 
-    def test_parse_error_retryable_for_terminal(self):
-        assert _is_non_retryable("terminal", "parse_error") is False
+    def test_parse_error_non_retryable_for_terminal(self):
+        assert _is_non_retryable("terminal", "parse_error") is True
 
     def test_write_file_in_non_retryable_by_tool(self):
         assert "parse_error" in _NON_RETRYABLE_BY_TOOL.get("write_file", frozenset())

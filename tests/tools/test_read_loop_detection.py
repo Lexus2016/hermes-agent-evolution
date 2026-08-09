@@ -16,6 +16,7 @@ Run with:  python -m pytest tests/tools/test_read_loop_detection.py -v
 """
 
 import json
+import os
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -112,7 +113,7 @@ class TestReadLoopDetection(unittest.TestCase):
         result = json.loads(read_file_tool("/tmp/test.py", task_id="t1"))
         self.assertIn("_warning", result)
         self.assertIn("content", result)
-        self.assertIn("content of /tmp/test.py", result["content"])
+        self.assertIn(f"content of {os.path.realpath('/tmp/test.py')}", result["content"])
 
 
 class TestNotifyOtherToolCall(unittest.TestCase):

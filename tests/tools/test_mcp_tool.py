@@ -425,7 +425,8 @@ class TestRunOnMcpLoop:
                 gc.collect()
 
         assert created["coro"] is not None
-        assert created["coro"].cr_frame is None
+        with pytest.raises(RuntimeError, match="cannot reuse"):
+            created["coro"].send(None)
         runtime_warnings = [
             w for w in caught
             if issubclass(w.category, RuntimeWarning)
@@ -451,7 +452,8 @@ class TestRunOnMcpLoop:
                     mcp._run_on_mcp_loop(coro)
                 gc.collect()
 
-        assert coro.cr_frame is None
+        with pytest.raises(RuntimeError, match="cannot reuse"):
+            coro.send(None)
         runtime_warnings = [
             w for w in caught
             if issubclass(w.category, RuntimeWarning)
