@@ -104,9 +104,7 @@ _NONRETRY_THRESHOLD = 2
 #     no matches is legitimately retryable with a broadened/different query (the
 #     ``not_found`` recovery hint itself advises "broaden the search"), so a
 #     hard non-retryable stop would over-block legitimate absent-symbol lookups.
-#     The real search_files spiral driver is regex/glob parse errors, which
-#     classify as ``runtime_error`` and are already handled by the per-tool fail
-#     threshold (3) + repo_map diversion hint from #973.
+#     (search_files parse_error IS non-retryable — see the entry below.)
 _NON_RETRYABLE_BY_TOOL: dict[str, frozenset[str]] = {
     "read_file": frozenset({"not_found"}),
     "patch": frozenset({"not_found", "ambiguous"}),
@@ -115,6 +113,22 @@ _NON_RETRYABLE_BY_TOOL: dict[str, frozenset[str]] = {
     # Marking parse_error non-retryable for write_file makes the loop_guard
     # fire after 2 consecutive occurrences, bounding the spiral.
     "write_file": frozenset({"parse_error"}),
+    # #1942 — terminal parse_error: shell syntax errors (e.g. "rg: regex parse
+    # error", "unexpected token") are deterministic — re-running the same
+    # command produces the same failure.  The terminal failure classifier
+    # (terminal_failure_classifier.py) already marks these should_retry=False,
+    # but the loop_guard's _is_non_retryable check uses the tool_diagnostics
+    # taxonomy which classifies them as parse_error.  Without this entry the
+    # loop_guard fires one cycle later (at the generic fail threshold instead
+    # of the non-retryable threshold of 2), allowing extra spiral iterations.
+    "terminal": frozenset({"parse_error"}),
+    # #1944 — search_files regex/glob parse errors: the same invalid pattern
+    # will fail identically on every retry. tool_diagnostics now classifies
+    # rg/grep pattern-rejection messages as parse_error (previously they fell
+    # through to runtime_error, which is retryable). Marking parse_error as
+    # non-retryable for search_files bounds the spiral at 2 instead of the
+    # generic idempotent fail threshold of 4.
+    "search_files": frozenset({"parse_error"}),
 }
 
 

@@ -59,6 +59,24 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         "retry — fix the syntax error or re-read the source, do NOT blind-retry the same content.",
     ),
     (
+        # #1944 — search_files regex/glob parse errors: the tool wraps rg/grep
+        # errors as "Search failed: rg: regex parse error, …". These are
+        # deterministic — the exact same pattern will fail identically on every
+        # retry — but they were misclassified as ``runtime_error`` (via the
+        # generic "error:" match) which is retryable. Match the actual
+        # rg/grep syntax-failure signatures and classify as ``parse_error``.
+        # Must run BEFORE the runtime_error catch-all (which matches "error:").
+        re.compile(
+            r"\b(regex parse error|invalid regular expression|"
+            r"unrecognized repeat|unbalanced|unclosed|invalid repetition|"
+            r"rg:.*error|grep:.*error)\b",
+            re.I,
+        ),
+        "parse_error",
+        "Invalid regex/glob pattern — the same pattern will fail identically on retry. "
+        "Fix the pattern syntax, or use search_files with target='files' for glob patterns.",
+    ),
+    (
         re.compile(
             r"permission denied|access denied|not permitted|forbidden|refusing to write|operation not permitted|EACCES",
             re.I,
