@@ -2799,7 +2799,11 @@ def _run_single_child(
             # Signal the child to stop so its thread can exit cleanly.
             try:
                 interrupted = child is not None and request_hard_interrupt(child)
-                if not interrupted and child is not None and hasattr(child, "_interrupt_requested"):
+                if (
+                    not interrupted
+                    and child is not None
+                    and hasattr(child, "_interrupt_requested")
+                ):
                     child._interrupt_requested = True
             except Exception:
                 pass
@@ -3341,6 +3345,174 @@ def _parent_finalization_lock(parent_agent) -> threading.RLock:
     return lock
 
 
+def _run_grader_subagent(
+    rubric: str,
+    child_summary: str,
+    child_goal: str,
+    parent_agent,
+    model: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Run a grader subagent in a separate context to score child output.
+
+    Returns {"score": float, "feedback": str, "verdict": "pass"|"fail"}.
+    The grader sees only the rubric + the child's goal and summary — never
+    the parent's conversation — to avoid anchoring to the producing agent's
+    reasoning (issue #1871).
+    """
+    grader_goal = (
+        "You are a grader. Score the subagent's output against the rubric.\n\n"
+        f"## Task Goal\n{child_goal}\n\n"
+        f"## Rubric\n{rubric}\n\n"
+        "## Subagent Output\n"
+        f"{child_summary or '(empty)'}\n\n"
+        "## Instructions\n"
+        "Score 0-10. Output EXACTLY this JSON on the last line:\n"
+        '{"score": <number>, "verdict": "pass"|"fail", "feedback": "<one paragraph>"}\n'
+        "A score >= min_score is 'pass'. If tests fail or secrets leak, "
+        "verdict must be 'fail' regardless of score."
+    )
+    try:
+        grader_child = _build_child_preserving_parent_tools(
+            task_index=-1,
+            goal=grader_goal,
+            context=None,
+            toolsets=["file"],
+            model=model,
+            max_iterations=3,
+            task_count=1,
+            parent_agent=parent_agent,
+            role="leaf",
+        )
+        from agent.delegation_context import delegated_child_context as _dcc
+
+        with _dcc(str(getattr(grader_child, "session_id", "") or "")):
+            result = grader_child.run_conversation(
+                user_message=grader_goal,
+                task_id=f"grader-{getattr(grader_child, 'session_id', '')}",
+            )
+    except Exception as exc:
+        logger.debug("Grader subagent failed: %s", exc)
+        return {"score": 10.0, "feedback": "", "verdict": "pass"}
+
+    grader_text = ""
+    if isinstance(result, dict):
+        grader_text = result.get("final_response", "") or ""
+    elif isinstance(result, str):
+        grader_text = result
+
+    # Parse JSON from the last line
+    import re
+
+    match = re.search(
+        r'\{"score":\s*([\d.]+),\s*"verdict":\s*"(pass|fail)",\s*"feedback":\s*"([^"]*)"\}',
+        grader_text,
+    )
+    if match:
+        return {
+            "score": float(match.group(1)),
+            "verdict": match.group(2),
+            "feedback": match.group(3),
+        }
+    # If we can't parse, assume pass (don't block on grader parse failure)
+    logger.debug("Grader output unparseable: %s", grader_text[-200:])
+    return {"score": 10.0, "feedback": "", "verdict": "pass"}
+
+
+def _apply_grader_revisions(
+    results: List[Dict[str, Any]],
+    task_list: List[Dict[str, Any]],
+    children: List[tuple[int, Dict[str, Any], Any]],
+    parent_agent,
+    grader_spec: Optional[Dict[str, Any]],
+) -> None:
+    """Grade each child result and re-invoke failed children with feedback.
+
+    Implements the grader-driven revision loop (issue #1871). Runs in-place
+    on the results list — replacing a child's summary if it was revised.
+    """
+    if not grader_spec or not grader_spec.get("rubric"):
+        return
+
+    rubric = grader_spec["rubric"]
+    min_score = grader_spec.get("min_score", 7.0)
+    max_revisions = grader_spec.get("max_revisions", 1)
+    grader_model = grader_spec.get("model")
+
+    child_by_index = {idx: child for idx, _t, child in children}
+
+    # Children that completed successfully; don't grade errors/interruptions.
+    _gradeable_statuses = frozenset({"completed", "success", "ok"})
+
+    for entry in results:
+        if entry.get("status") not in _gradeable_statuses:
+            continue  # Don't grade errored/interrupted children
+
+        task_index = entry.get("task_index", -1)
+        task_goal = (
+            task_list[task_index]["goal"]
+            if isinstance(task_index, int) and 0 <= task_index < len(task_list)
+            else ""
+        )
+        child = child_by_index.get(task_index)
+        if child is None:
+            continue
+
+        for revision in range(max(0, max_revisions + 1)):
+            grade = _run_grader_subagent(
+                rubric=rubric,
+                child_summary=entry.get("summary", "") or "",
+                child_goal=task_goal,
+                parent_agent=parent_agent,
+                model=grader_model,
+            )
+
+            if grade["verdict"] == "pass" or grade["score"] >= min_score:
+                entry["grader_score"] = grade["score"]
+                entry["grader_revisions"] = revision
+                break
+
+            if revision >= max_revisions:
+                # Exhausted revisions — keep last result but record the grade
+                entry["grader_score"] = grade["score"]
+                entry["grader_revisions"] = revision
+                entry["grader_feedback"] = grade["feedback"][:500]
+                break
+
+            # Re-invoke the child with grader feedback appended to its goal
+            revised_goal = (
+                f"{task_goal}\n\n"
+                f"## Grader Feedback (revision {revision + 1})\n"
+                f"Score: {grade['score']}/10\n"
+                f"{grade['feedback']}\n\n"
+                "Address the feedback above and produce a corrected result."
+            )
+            logger.info(
+                "Grader triggered revision %d for task %d (score %.1f < %.1f)",
+                revision + 1,
+                task_index,
+                grade["score"],
+                min_score,
+            )
+            try:
+                from agent.delegation_context import delegated_child_context as _dcc
+
+                with _dcc(str(getattr(child, "session_id", "") or "")):
+                    child.run_conversation(
+                        user_message=revised_goal,
+                        task_id=f"revise-{task_index}-{revision}",
+                    )
+                # Re-derive the child's new summary
+                new_summary = getattr(child, "_last_final_response", None)
+                if new_summary:
+                    entry["summary"] = new_summary
+                    entry["grader_revisions"] = revision + 1
+            except Exception as exc:
+                logger.debug(
+                    "Revision re-invoke failed for task %d: %s", task_index, exc
+                )
+                break
+
+
 def _finalize_child_results(
     results: List[Dict[str, Any]],
     task_list: List[Dict[str, Any]],
@@ -3481,6 +3653,7 @@ def delegate_task(
     role: Optional[str] = None,
     background: Optional[bool] = None,
     handoff_mode: Optional[str] = None,
+    grader: Optional[Dict[str, Any]] = None,
     parent_agent=None,
 ) -> str:
     """
@@ -3945,6 +4118,13 @@ def delegate_task(
             # Sort by task_index so results match input order
             results.sort(key=lambda r: r["task_index"])
 
+        # Grader-driven revision loop (issue #1871): grade each child's
+        # output against an optional rubric and re-invoke failures with
+        # feedback, up to max_revisions. Runs before finalization so the
+        # revised summary is what the parent receives.
+        if grader:
+            _apply_grader_revisions(results, task_list, children, parent_agent, grader)
+
         # Cap subagent summaries against the parent's remaining context
         # headroom (split across the batch) before they enter the parent's
         # conversation. Full text is spilled to disk so nothing is lost.
@@ -4104,7 +4284,9 @@ def delegate_task(
         def _batch_interrupt():
             for _c in _child_agents:
                 try:
-                    interrupted = request_hard_interrupt(_c, "Async delegation cancelled")
+                    interrupted = request_hard_interrupt(
+                        _c, "Async delegation cancelled"
+                    )
                     if not interrupted and hasattr(_c, "_interrupt_requested"):
                         _c._interrupt_requested = True
                 except Exception:
@@ -4507,9 +4689,9 @@ def _build_top_level_description() -> str:
         "RULES:\n"
         "- Children know nothing of this conversation: pass everything needed "
         "via 'context', including any required output language, tone, or "
-        "style (e.g. \"respond in Chinese\").\n"
+        'style (e.g. "respond in Chinese").\n'
         "- Child summaries are SELF-REPORTS, not verified facts: a child "
-        "claiming \"uploaded successfully\" or \"file written\" may be wrong. "
+        'claiming "uploaded successfully" or "file written" may be wrong. '
         "For external side effects (uploads, remote writes, publishing), "
         "require a verifiable handle (URL, ID, absolute path) and verify it "
         "yourself — fetch the URL, stat the file, read back the content — "
@@ -4802,6 +4984,49 @@ DELEGATE_TASK_SCHEMA = {
                     "for self-contained tasks where a focused 'context' is enough."
                 ),
             },
+            "grader": {
+                "type": "object",
+                "description": (
+                    "Optional rubric grader that runs in a separate subagent "
+                    "context after each child returns. The grader receives only "
+                    "the rubric + the child's summary (no parent context) to "
+                    "avoid anchoring. If the score falls below 'min_score', the "
+                    "child is re-invoked with the grader's feedback appended to "
+                    "its goal, up to 'max_revisions' times. Hard fails (tests "
+                    "don't pass, secrets in output) always trigger revision."
+                ),
+                "properties": {
+                    "rubric": {
+                        "type": "string",
+                        "description": (
+                            "Markdown rubric describing pass/fail criteria. "
+                            "The grader scores the child's summary against this."
+                        ),
+                    },
+                    "min_score": {
+                        "type": "number",
+                        "description": (
+                            "Minimum acceptable score (0-10). Below this, the "
+                            "child is re-invoked with feedback. Default 7.0."
+                        ),
+                    },
+                    "max_revisions": {
+                        "type": "integer",
+                        "description": (
+                            "Max revision rounds. 0 = grade only (no re-invoke). "
+                            "Default 1."
+                        ),
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": (
+                            "Optional model override for the grader subagent "
+                            "(e.g. 'openai/gpt-4o'). Defaults to the parent's model."
+                        ),
+                    },
+                },
+                "required": ["rubric"],
+            },
         },
         "required": [],
     },
@@ -4843,6 +5068,7 @@ registry.register(
         role=args.get("role"),
         background=_model_background_value(args, kw.get("parent_agent")),
         handoff_mode=args.get("handoff_mode"),
+        grader=args.get("grader"),
         parent_agent=kw.get("parent_agent"),
     ),
     check_fn=check_delegate_requirements,
