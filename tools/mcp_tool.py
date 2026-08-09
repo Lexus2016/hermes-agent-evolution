@@ -310,6 +310,13 @@ try:
         _MCP_SAMPLING_TYPES = True
     except ImportError:
         logger.debug("MCP sampling types not available -- sampling disabled")
+        CreateMessageResult = None
+        CreateMessageResultWithTools = None
+        ErrorData = None
+        SamplingCapability = None
+        SamplingToolsCapability = None
+        TextContent = None
+        ToolUseContent = None
     # Elicitation types -- gated separately for the same reason as sampling.
     # Added in mcp Python SDK 1.11.0 (Jul 2025); servers use elicitation to
     # ask the client for structured input mid-tool-call (e.g. payment
@@ -5020,6 +5027,9 @@ def _wrap_with_home_override(coro: "Coroutine") -> "Coroutine":
         token = set_hermes_home_override(home_override)
         try:
             return await coro
+        except GeneratorExit:
+            coro.close()
+            raise
         finally:
             reset_hermes_home_override(token)
 
@@ -5041,8 +5051,12 @@ def _wrap_with_dashboard_oauth_flow(coro):
         return coro
 
     async def _scoped():
-        with dashboard_oauth_flow(flow):
-            return await coro
+        try:
+            with dashboard_oauth_flow(flow):
+                return await coro
+        except GeneratorExit:
+            coro.close()
+            raise
 
     return _scoped()
 

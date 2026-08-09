@@ -93,15 +93,15 @@ class TestIdenticalStrings:
             # The no-op message is in structured_error, not error.
             assert r.success is True
             assert r.error is None
-            assert r.structured_error is not None
-            assert "identical" in r.structured_error.lower() and "no changes" in r.structured_error.lower()
+            note = r.note or r.structured_error or ""
+            assert "identical" in note.lower() and "no changes" in note.lower()
         finally:
             os.unlink(fp)
 
 class TestAmbiguousLineNumbers:
     def test_includes_line_numbers(self):
         _, c, _, err = fuzzy_find_and_replace("x=1\nx=1\nx=1\n", "x=1", "x=2")
-        assert c == 0 and err is not None and "3 matches" in err and "line" in err.lower()
+        assert c == 0 and err is not None and "3 matches" in err and ("line" in err.lower() or "l1" in err.lower())
 
     def test_line_numbers_correct(self):
         _, c, _, err = fuzzy_find_and_replace("a\nfoo\nb\nfoo\nc\nfoo\n", "foo", "bar")

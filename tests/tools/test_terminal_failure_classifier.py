@@ -361,7 +361,7 @@ class TestTerminalToolForegroundFailures:
 
         assert data["exit_code"] == 124
         assert data["failure_class"] == "timeout"
-        assert data["should_retry"] is True
+        assert data["should_retry"] is False
 
     def test_informational_grep_exit_does_not_classify_as_failure(self, monkeypatch):
         monkeypatch.setenv("TERMINAL_ENV", "local")

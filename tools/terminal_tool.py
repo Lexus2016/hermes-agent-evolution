@@ -2532,6 +2532,40 @@ def _resolve_command_cwd(
     return get_session_cwd(session_key) or default_cwd
 
 
+def _attach_spill_metadata(
+    result_dict: dict,
+    spill_file_path: str | None,
+    spill_total_chars: int | None,
+    command: str,
+) -> None:
+    """Attach spill file handle + metadata to result_dict when output overflowed."""
+    if spill_file_path:
+        try:
+            from agent.redact import redact_terminal_output
+            from tools.ansi_strip import strip_ansi
+
+            _sp = Path(spill_file_path)
+            raw_spill = _sp.read_text(encoding="utf-8", errors="replace")
+            _sp.write_text(
+                redact_terminal_output(strip_ansi(raw_spill), command),
+                encoding="utf-8", errors="replace",
+            )
+            result_dict["output_total_chars"] = spill_total_chars
+            result_dict["full_output_path"] = spill_file_path
+            result_dict["truncation_note"] = (
+                "Output exceeded the capture window (head+tail shown). "
+                f"Full output ({spill_total_chars:,} chars) saved to "
+                f"{spill_file_path} — search it with search_files or page it "
+                "with read_file instead of re-running the command."
+            )
+        except Exception:
+            logger.debug("spill redaction failed; dropping spill handle", exc_info=True)
+            try:
+                Path(spill_file_path).unlink()
+            except OSError:
+                pass
+
+
 def terminal_tool(
     command: str,
     background: bool = False,
@@ -3573,6 +3607,12 @@ def terminal_tool(
                         rec = streak_recommendation(streak)
                         if rec:
                             result_dict["recommendation"] = rec
+                        _attach_spill_metadata(
+                            result_dict,
+                            result.get("full_output_path"),
+                            result.get("output_total_chars"),
+                            command,
+                        )
                         return json.dumps(result_dict, ensure_ascii=False)
 
                 # Successful (or informational) result: reset streak and process output.
@@ -3597,6 +3637,7 @@ def terminal_tool(
             # Extract output
             output = result.get("output", "")
             returncode = result.get("returncode", 0)
+
             # Spill metadata from the bounded collector: present only when
             # output overflowed the capture window (see _wait_for_process).
             spill_total_chars = result.get("output_total_chars")
@@ -3725,28 +3766,7 @@ def terminal_tool(
             # of re-running the command. The spill was written raw by the
             # collector; redact it here with the same pass as the visible
             # output so no secret persists unmasked on disk.
-            if spill_file_path:
-                try:
-                    _sp = Path(spill_file_path)
-                    raw_spill = _sp.read_text(encoding="utf-8", errors="replace")
-                    _sp.write_text(
-                        redact_terminal_output(strip_ansi(raw_spill), command),
-                        encoding="utf-8", errors="replace",
-                    )
-                    result_dict["output_total_chars"] = spill_total_chars
-                    result_dict["full_output_path"] = spill_file_path
-                    result_dict["truncation_note"] = (
-                        "Output exceeded the capture window (head+tail shown). "
-                        f"Full output ({spill_total_chars:,} chars) saved to "
-                        f"{spill_file_path} — search it with search_files or page it "
-                        "with read_file instead of re-running the command."
-                    )
-                except Exception:
-                    logger.debug("spill redaction failed; dropping spill handle", exc_info=True)
-                    try:
-                        Path(spill_file_path).unlink()
-                    except OSError:
-                        pass
+            _attach_spill_metadata(result_dict, spill_file_path, spill_total_chars, command)
             try:
                 from agent.verification_evidence import record_terminal_result
 
