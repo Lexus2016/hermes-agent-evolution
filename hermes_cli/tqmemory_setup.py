@@ -110,7 +110,8 @@ def _candidate_bins() -> List[Path]:
 
 
 def _find_uv() -> Optional[str]:
-    found = shutil.which("uv")
+    from hermes_cli.managed_uv import resolve_uv
+    found = resolve_uv() or shutil.which("uv")
     if found:
         return found
     for base in _candidate_bins():

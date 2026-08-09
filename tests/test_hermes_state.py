@@ -4358,11 +4358,6 @@ class TestListSessionsRich:
         activity = db.get_session_activity("gw-1")
         assert activity["last_activity_description"] == "compressing context"
 
-    def test_order_by_last_active_surfaces_recently_touched_older_session_first(self, db):
-        t0 = 1709500000.0
-        db.create_session("old", "cli")
-        db.create_session("new", "cli")
-
     def test_preview_newlines_collapsed(self, db):
         db.create_session("s1", "cli")
         db.append_message("s1", "user", "Line one\nLine two\nLine three")

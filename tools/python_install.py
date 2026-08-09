@@ -51,12 +51,14 @@ def is_pep668_active() -> bool:
 
 
 def has_uv() -> bool:
-    return shutil.which("uv") is not None
+    from hermes_cli.managed_uv import resolve_uv
+    return (resolve_uv() or shutil.which("uv")) is not None
 
 
 def _uv_python_flag() -> Optional[str]:
     """Return a ``--python=...`` flag targeting the current interpreter, or None."""
-    uv = shutil.which("uv")
+    from hermes_cli.managed_uv import resolve_uv
+    uv = resolve_uv() or shutil.which("uv")
     if not uv:
         return None
     rc, _, _ = _run([uv, "python", "find", sys.executable])
