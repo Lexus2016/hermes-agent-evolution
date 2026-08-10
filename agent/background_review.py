@@ -974,6 +974,13 @@ def _run_review_in_thread(
             except Exception:
                 pass
 
+            # Initialize the source-chain accumulator (#2192) so tool calls
+            # during this background-review fork record their provenance.  The
+            # chain is read by skill_manage(create) at admission time and
+            # persisted into the skill's usage record.
+            from tools.skill_provenance import init_source_chain, reset_source_chain
+
+            _source_chain_token = init_source_chain()
             try:
                 # Routed to a different model -> replay a digest (cache is cold
                 # on that model anyway, so minimise cold-written tokens). Same
@@ -992,6 +999,7 @@ def _run_review_in_thread(
                     conversation_history=_review_history,
                 )
             finally:
+                reset_source_chain(_source_chain_token)
                 clear_thread_tool_whitelist()
 
             # Snapshot review actions before teardown. close() is allowed to
