@@ -2330,6 +2330,15 @@ def _skill_view_with_bump(args, **kw):
                         record_skill_outcome(str(resolved), success=True)
                     except Exception:
                         pass
+                    # Compliance/trigger instrumentation (#2183): the agent
+                    # loaded this skill to act on it, so record a trigger.
+                    # Boundary violations are checked against the tool calls
+                    # observed in this session's skill-view tracker.
+                    try:
+                        from tools.skill_compliance import record_compliance
+                        record_compliance(str(resolved), triggered=True, complied=True)
+                    except Exception:
+                        pass
     except Exception:
         pass
     return result

@@ -156,6 +156,23 @@ def _cmd_status(args) -> int:
     if pinned:
         print(f"\npinned ({len(pinned)}): {', '.join(pinned)}")
 
+    # Compliance/trigger rates (#2183)
+    try:
+        from tools.skill_compliance import quality_summary
+        qs = quality_summary()
+        if qs:
+            print("\nskill compliance (trigger / comply / boundary):")
+            for sname, q in sorted(qs.items(), key=lambda kv: -kv[1]["triggers"]):
+                print(
+                    f"  {sname:40s}  "
+                    f"triggers={q['triggers']:3d}  "
+                    f"comply={q['complies']:3d}  "
+                    f"violations={q['violations']:2d}  "
+                    f"rate={q['comply_rate']:.0%}"
+                )
+    except Exception:
+        pass
+
     # Surface the curation blind spot on the managed path too.
     _print_unmanaged_summary()
 

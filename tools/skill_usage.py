@@ -659,6 +659,10 @@ def _empty_record() -> Dict[str, Any]:
         "recent_failure_rate": 0.0,
         # Source-chain provenance (#2192)
         "source_chain": [],
+        # Compliance/boundary instrumentation (#2183)
+        "trigger_count": 0,
+        "comply_count": 0,
+        "boundary_violation_count": 0,
     }
 
 
