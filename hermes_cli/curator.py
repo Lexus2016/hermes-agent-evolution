@@ -161,6 +161,15 @@ def _cmd_status(args) -> int:
             prov_tag = ""
             if srid or fr:
                 prov_tag = f"  run={srid or '-'}  fail_rate={fr:.0%}"
+            # Source-chain provenance (#2192): show source count + trust status
+            try:
+                from tools.skill_provenance import get_skill_provenance
+                chain = get_skill_provenance(r["name"])
+                if chain:
+                    untrusted = sum(1 for e in chain if not e.get("trusted"))
+                    prov_tag += f"  sources={len(chain)}  untrusted={untrusted}"
+            except Exception:
+                pass
             print(
                 f"  {r['name']:40s}  "
                 f"activity={r.get('activity_count', 0):3d}  "

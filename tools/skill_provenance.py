@@ -1,78 +1,96 @@
-"""Skill write-origin provenance — ContextVar for distinguishing agent-sediment skill writes from foreground user-directed writes.
+"""Skill write-origin provenance — ContextVar for distinguishing agent-sediment
+skill writes from foreground user-directed writes, plus source-chain tracking
+for background-review-created skills.
 
-The curator only consolidates/prunes skills it autonomously created via the
-background self-improvement review fork. Skills a user asks a foreground
-agent to write belong to the user and must never be auto-curated.
-
-This module exposes a ContextVar that run_agent.py sets before each tool
-loop so tool handlers (e.g. skill_manage create) can check whether they
-are executing inside the background-review fork.
-
-The signal piggybacks on AIAgent._memory_write_origin, which is already
-set to "background_review" for review-fork instances (see
-_spawn_background_review in run_agent.py) and defaults to "assistant_tool"
-for normal (foreground) agents.
-
-Usage:
-    from tools.skill_provenance import (
-        set_current_write_origin,
-        reset_current_write_origin,
-        get_current_write_origin,
-    )
-
-    token = set_current_write_origin("background_review")
-    try:
-        ...  # tool runs here
-    finally:
-        reset_current_write_origin(token)
-
-    # inside a tool:
-    if get_current_write_origin() == "background_review":
-        mark_agent_created(skill_name)
+The source chain records which tool calls / URLs / subagent runs produced the
+experience that compiled into a skill. This is the SkillJack defense (arXiv:2608.03509):
+later slices can taint-flag untrusted provenance sources.
 """
 
 import contextvars
+import logging
+from typing import Any, Dict, List
 
+logger = logging.getLogger(__name__)
 
 _write_origin: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "skill_write_origin",
-    default="foreground",
+    "skill_write_origin", default="foreground",
 )
 
-# The sentinel value the background review fork uses; mirrors
-# run_agent.py's AIAgent._memory_write_origin override in
-# _spawn_background_review().
+# Source-chain accumulator — list of source entries recorded during the
+# current background-review fork. Each entry: {source_type, source_id, trusted}.
+_source_chain: contextvars.ContextVar[list | None] = contextvars.ContextVar(
+    "skill_source_chain", default=None,
+)
+
 BACKGROUND_REVIEW = "background_review"
+
+# Source types classified as trusted vs untrusted (SkillJack taxonomy).
+_TRUSTED_TYPES = frozenset({"terminal", "read_file", "search_files", "execute_code"})
 
 
 def set_current_write_origin(origin: str) -> contextvars.Token[str]:
-    """Bind the active write origin to the current context.
-
-    Returns a Token the caller must pass to reset_current_write_origin
-    in a finally block.
-    """
     return _write_origin.set(origin or "foreground")
 
 
 def reset_current_write_origin(token: contextvars.Token[str]) -> None:
-    """Restore the prior write origin context."""
     _write_origin.reset(token)
 
 
 def get_current_write_origin() -> str:
-    """Return the active write origin.
-
-    Default: "foreground" — any tool call made by a regular (non-review)
-    agent, from the CLI, the gateway, cron, or a subagent.
-
-    "background_review" — the self-improvement review fork; only skills
-    created under this origin should be marked agent-created for curator
-    management.
-    """
     return _write_origin.get()
 
 
 def is_background_review() -> bool:
-    """Convenience: True iff the current write origin is the background
-    review fork."""
     return get_current_write_origin() == BACKGROUND_REVIEW
+
+
+def init_source_chain() -> contextvars.Token:
+    """Start accumulating source entries. Call at background-review fork start."""
+    return _source_chain.set([])
+
+
+def reset_source_chain(token: contextvars.Token) -> None:
+    """Clear the accumulator. Call at fork end."""
+    _source_chain.reset(token)
+
+
+def add_provenance_entry(source_type: str, source_id: str = "") -> None:
+    """Record a source entry in the current background-review chain.
+
+    Called from the post-tool-dispatch path in model_tools.py. Only records
+    when inside a background-review fork (is_background_review() is True and
+    a chain has been initialized). Classifies the source as trusted/untrusted.
+    """
+    if not is_background_review():
+        return
+    chain = _source_chain.get()
+    if chain is None:
+        return
+    trusted = source_type in _TRUSTED_TYPES
+    chain.append({
+        "source_type": source_type,
+        "source_id": (source_id or "")[:200],
+        "trusted": trusted,
+    })
+
+
+def get_recorded_chain() -> List[Dict[str, Any]]:
+    """Return the current source chain (for skill_manage to attach at creation)."""
+    chain = _source_chain.get()
+    return list(chain) if chain else []
+
+
+def get_skill_provenance(skill_name: str) -> List[Dict[str, Any]]:
+    """Retrieve the persisted source chain for a skill.
+
+    Reads from the skill's usage record in .usage.json (stored under the
+    ``source_chain`` key by skill_manage at creation time).
+    """
+    try:
+        from tools.skill_usage import get_record
+        rec = get_record(skill_name)
+        chain = rec.get("source_chain") or []
+        return chain if isinstance(chain, list) else []
+    except Exception:
+        return []

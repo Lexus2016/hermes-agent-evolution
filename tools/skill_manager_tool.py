@@ -1605,6 +1605,16 @@ def skill_manage(
                             set_source_run_id(name, run_id)
                     except Exception:
                         pass
+                    # Store the source chain accumulated during the
+                    # background-review fork (#2192).
+                    try:
+                        from tools.skill_provenance import get_recorded_chain
+                        chain = get_recorded_chain()
+                        if chain:
+                            from tools.skill_usage import _mutate
+                            _mutate(name, lambda rec: rec.update({"source_chain": chain[:50]}))
+                    except Exception:
+                        pass
             elif action in {"patch", "edit", "write_file", "remove_file"}:
                 bump_patch(name)
             elif action == "delete":
