@@ -7896,6 +7896,24 @@ class AIAgent:
             function_result = append_toolguard_guidance(function_result, decision)
         if decision.should_halt:
             self._set_tool_guardrail_halt(decision)
+        # #2233 — always-on non-retryable diagnostic. The failure classifier
+        # already identifies non-retryable errors (permission denied, missing
+        # command, syntax error, deterministic timeout, invalid arguments), but
+        # the recovery dispatcher (#1027) is config-gated OFF by default, so the
+        # should_retry=False signal never reaches the LLM. This causes 55-deep
+        # retry spirals across 985 sessions because the agent retries errors that
+        # are deterministic. This branch is ALWAYS active (not config-gated) and
+        # appends a single-line diagnostic ONLY for non-retryable failures,
+        # telling the agent not to retry the same call unchanged.
+        if failed and not decision.should_halt:
+            from tools.tool_failure_classifier import classify_tool_failure
+
+            _nr = classify_tool_failure(tool_name, function_result)
+            if not _nr.should_retry:
+                _nr_line = f"\n\n⚠️ Non-retryable: {_nr.category.value}. {_nr.hint}"
+                if "Non-retryable:" not in function_result:
+                    function_result = function_result + _nr_line
+
         # #1027 — recovery strategy dispatcher. Config-gated OFF by default: when
         # ``tool_failure_recovery.enabled`` is unset the branch never runs, so the
         # tool result is byte-for-byte unchanged (no behavior change, no prompt

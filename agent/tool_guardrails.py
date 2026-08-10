@@ -156,7 +156,9 @@ class ToolCallGuardrailConfig:
     # a high false-retry rate (161 failures/7d, 11-deep spirals) and should
     # be capped at a lower threshold (3) so the session-hard-stop fires sooner.
     # Keys are tool names; values override spiral_failure_cap for that tool.
-    per_tool_failure_caps: dict[str, int] = field(default_factory=lambda: {"memory": 3})
+    per_tool_failure_caps: dict[str, int] = field(
+        default_factory=lambda: {"memory": 3, "terminal": 3}
+    )
     spiral_prone_tools: frozenset[str] = field(
         default_factory=lambda: _SPIRAL_PRONE_TOOLS
     )
