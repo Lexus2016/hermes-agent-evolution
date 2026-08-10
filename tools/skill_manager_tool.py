@@ -1597,6 +1597,15 @@ def skill_manage(
             if action == "create":
                 if is_background_review():
                     mark_agent_created(name)
+                    # Source-chain provenance (#2192 Slice A) — record the
+                    # source chain that compiled into this auto-created skill.
+                    try:
+                        from tools.skill_source_provenance import (
+                            record_skill_provenance,
+                        )
+                        record_skill_provenance(name)
+                    except Exception:
+                        pass
             elif action in {"patch", "edit", "write_file", "remove_file"}:
                 bump_patch(name)
             elif action == "delete":
