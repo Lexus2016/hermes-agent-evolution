@@ -125,6 +125,14 @@ EXHAUSTED_TTL_401_SECONDS = 5 * 60           # 5 minutes
 EXHAUSTED_TTL_429_SECONDS = 60 * 60          # 1 hour
 EXHAUSTED_TTL_DEFAULT_SECONDS = 60 * 60      # 1 hour
 
+# Persistent provider demotion (issue #2194): after this many consecutive
+# exhaustion events with the SAME non-transient error code (402/403/404),
+# the cooldown is extended to EXHAUSTED_TTL_DEMOTED_SECONDS.  This prevents
+# a permanently-dead provider (e.g. lapsed subscription) from being retried
+# every hour and generating sustained failover noise across all cron jobs.
+CONSECUTIVE_FAILURE_DEMOTION_THRESHOLD = 3
+EXHAUSTED_TTL_DEMOTED_SECONDS = 24 * 60 * 60  # 24 hours
+
 # Throttle window for the "no available entries" INFO line. Credential
 # selection runs on a hot path (every model call, plus auxiliary tasks like
 # compression/moa/titles), so when a pool is empty or fully exhausted the
@@ -150,6 +158,7 @@ _EXTRA_KEYS = frozenset({
     "token_type", "scope", "client_id", "portal_base_url", "obtained_at",
     "expires_in", "agent_key_id", "agent_key_expires_in", "agent_key_reused",
     "agent_key_obtained_at", "tls", "secret_source", "secret_fingerprint",
+    "consecutive_failures",
 })
 
 
@@ -289,8 +298,15 @@ def _is_manual_source(source: str) -> bool:
     return normalized == SOURCE_MANUAL or normalized.startswith(f"{SOURCE_MANUAL}:")
 
 
-def _exhausted_ttl(error_code: Optional[int]) -> int:
-    """Return cooldown seconds based on the HTTP status that caused exhaustion."""
+def _exhausted_ttl(error_code: Optional[int], consecutive_failures: int = 0) -> int:
+    """Return cooldown seconds based on the HTTP status that caused exhaustion.
+
+    When *consecutive_failures* reaches the demotion threshold (issue #2194),
+    the cooldown is extended to 24h — a provider that fails identically N times
+    is almost certainly permanently dead (lapsed subscription, revoked key).
+    """
+    if consecutive_failures >= CONSECUTIVE_FAILURE_DEMOTION_THRESHOLD:
+        return EXHAUSTED_TTL_DEMOTED_SECONDS
     if error_code == 401:
         return EXHAUSTED_TTL_401_SECONDS
     if error_code == 429:
@@ -376,6 +392,37 @@ def _normalize_error_context(error_context: Optional[Dict[str, Any]]) -> Dict[st
     return normalized
 
 
+def _get_consecutive_failures(entry: PooledCredential) -> int:
+    """Return the consecutive-failure counter from entry.extra (issue #2194)."""
+    try:
+        return int(entry.extra.get("consecutive_failures", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _bump_consecutive_failures(
+    entry: PooledCredential, status_code: Optional[int]
+) -> int:
+    """Increment consecutive_failures when the SAME error code recurs.
+
+    Returns the new count.  A code change resets the counter to 1 — the new
+    error might be transient and should not inherit the demotion streak.
+    """
+    prev_code = entry.last_error_code
+    prev_count = _get_consecutive_failures(entry)
+    if status_code is not None and status_code == prev_code:
+        new_count = prev_count + 1
+    else:
+        new_count = 1
+    entry.extra["consecutive_failures"] = new_count
+    return new_count
+
+
+def _reset_consecutive_failures(entry: PooledCredential) -> None:
+    """Clear the consecutive-failure counter (on success or cooldown expiry)."""
+    entry.extra.pop("consecutive_failures", None)
+
+
 def _exhausted_until(entry: PooledCredential) -> Optional[float]:
     if entry.last_status != STATUS_EXHAUSTED:
         return None
@@ -383,7 +430,8 @@ def _exhausted_until(entry: PooledCredential) -> Optional[float]:
     if reset_at is not None:
         return reset_at
     if entry.last_status_at:
-        return entry.last_status_at + _exhausted_ttl(entry.last_error_code)
+        cf = _get_consecutive_failures(entry)
+        return entry.last_status_at + _exhausted_ttl(entry.last_error_code, cf)
     return None
 
 
@@ -755,6 +803,11 @@ class CredentialPool:
             terminal_status = STATUS_DEAD
         else:
             terminal_status = STATUS_EXHAUSTED
+        # Persistent provider demotion (issue #2194): bump the consecutive-
+        # failure counter on the ORIGINAL entry before replacing, so the
+        # demotion TTL is applied when the same error code recurs 3+ times.
+        if terminal_status == STATUS_EXHAUSTED:
+            _bump_consecutive_failures(entry, status_code)
         updated = replace(
             entry,
             last_status=terminal_status,
@@ -1839,6 +1892,7 @@ class CredentialPool:
                     ):
                         continue
                 if clear_expired:
+                    _reset_consecutive_failures(entry)  # issue #2194
                     cleared = replace(
                         entry,
                         last_status=STATUS_OK,
