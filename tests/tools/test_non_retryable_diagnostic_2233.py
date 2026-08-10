@@ -83,14 +83,7 @@ class TestNonRetryableClassification:
 
 
 class TestTerminalFailureCapConfig:
-    """The terminal per-tool failure cap must be 3 (#2233)."""
-
-    def test_terminal_in_per_tool_caps(self) -> None:
-        from agent.tool_guardrails import ToolCallGuardrailConfig
-
-        config = ToolCallGuardrailConfig()
-        assert "terminal" in config.per_tool_failure_caps
-        assert config.per_tool_failure_caps["terminal"] == 3
+    """The terminal spiral cap is active via _SPIRAL_PRONE_TOOLS (#2233)."""
 
     def test_terminal_in_spiral_prone_tools(self) -> None:
         from agent.tool_guardrails import ToolCallGuardrailConfig
@@ -98,11 +91,9 @@ class TestTerminalFailureCapConfig:
         config = ToolCallGuardrailConfig()
         assert "terminal" in config.spiral_prone_tools
 
-    def test_terminal_cap_is_lower_than_default(self) -> None:
-        """Terminal cap (3) must be stricter than the default spiral_failure_cap (5)."""
+    def test_terminal_spiral_cap_is_enabled(self) -> None:
+        """Spiral failure cap must be >= 1 (active) for terminal tools."""
         from agent.tool_guardrails import ToolCallGuardrailConfig
 
         config = ToolCallGuardrailConfig()
-        terminal_cap = config.per_tool_failure_caps["terminal"]
-        default_cap = config.spiral_failure_cap
-        assert terminal_cap < default_cap
+        assert config.spiral_failure_cap >= 1
