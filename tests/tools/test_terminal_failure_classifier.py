@@ -45,15 +45,28 @@ class TestClassifyPermissionDenied:
 
 
 class TestClassifyTimeout:
-    def test_exit_code_124(self):
+    def test_exit_code_124_non_retryable(self):
+        """exit_code=124 (wall-clock timeout) is non-retryable — the same
+        command will time out again (issue #2191)."""
         result = classifier.classify_terminal_failure("sleep 10", 124, "", "")
-        assert result.category == classifier.FailureCategory.timeout
-        assert result.should_retry is True
+        assert result.category == classifier.FailureCategory.timeout_deterministic
+        assert result.should_retry is False
 
-    def test_first_timeout_is_retryable(self):
-        """A single timeout (consecutive_count=1) is retryable."""
+    def test_exit_code_124_non_retryable_introspection(self):
+        """exit_code=124 with consecutive_count=0 is still non-retryable.
+        Wall-clock timeouts do not benefit from retry (issue #2191)."""
         result = classifier.classify_terminal_failure(
-            "sleep 10", 124, "", "", consecutive_count=1
+            "slowcmd", 124, "", "", consecutive_count=0
+        )
+        assert result.category == classifier.FailureCategory.timeout_deterministic
+        assert result.should_retry is False
+        assert "Change at least one of" in result.hint
+
+    def test_text_based_timeout_is_retryable(self):
+        """A text-based timeout (e.g. 'connection timed out' from curl) is a
+        transient network condition — retryable on first occurrence."""
+        result = classifier.classify_terminal_failure(
+            "curl http://example.test", 28, "", "connection timed out"
         )
         assert result.category == classifier.FailureCategory.timeout
         assert result.should_retry is True
@@ -258,22 +271,24 @@ class TestTerminalToolForegroundFailures:
     def test_transient_timeout_retries_then_stops(self, monkeypatch):
         monkeypatch.setenv("TERMINAL_ENV", "local")
         monkeypatch.setattr(terminal_tool.time, "sleep", lambda _s: None)
-        # Four consecutive timeouts: initial + 3 retries should exhaust the loop.
+        # Text-based timeout (connection timed out) is retryable — 4 calls:
+        # initial + 3 retries should exhaust the loop.  exit_code=124 (wall-
+        # clock timeout) is non-retryable and tested separately (#2191).
         fake = FakeEnvironment([
-            {"output": "", "returncode": 124},
-            {"output": "", "returncode": 124},
-            {"output": "", "returncode": 124},
-            {"output": "", "returncode": 124},
+            {"output": "connection timed out", "returncode": 28},
+            {"output": "connection timed out", "returncode": 28},
+            {"output": "connection timed out", "returncode": 28},
+            {"output": "connection timed out", "returncode": 28},
         ])
         monkeypatch.setattr(terminal_tool, "_active_environments", {"default": fake})
         monkeypatch.setattr(terminal_tool, "_last_activity", {"default": 0})
 
         result = terminal_tool.terminal_tool(
-            "slowcmd", timeout=1, task_id="test-streak"
+            "curl http://slow.test", timeout=1, task_id="test-streak"
         )
         data = json.loads(result)
 
-        assert data["exit_code"] == 124
+        assert data["exit_code"] == 28
         assert data["failure_class"] == "timeout"
         assert (
             data["should_retry"] is False
