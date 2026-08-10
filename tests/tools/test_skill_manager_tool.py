@@ -375,8 +375,15 @@ class TestSkillManageDispatcher:
                  patch("tools.skill_usage.is_hub_installed", return_value=False), \
                  patch("tools.skill_usage.is_bundled",
                        side_effect=lambda skill_name: skill_name == "bundled"):
-                skill_manage(action="create", name="umbrella", content=VALID_SKILL_CONTENT)
-                skill_manage(action="create", name="bundled", content=VALID_SKILL_CONTENT)
+                # Bypass the validation gate (#2189) for the create steps —
+                # this test exercises the DELETE path, not skill admission.
+                from tools.skill_manager_tool import _skill_gate_bypass as _bypass
+                _tok = _bypass.set(True)
+                try:
+                    skill_manage(action="create", name="umbrella", content=VALID_SKILL_CONTENT)
+                    skill_manage(action="create", name="bundled", content=VALID_SKILL_CONTENT)
+                finally:
+                    _bypass.reset(_tok)
                 raw = skill_manage(
                     action="delete",
                     name="bundled",

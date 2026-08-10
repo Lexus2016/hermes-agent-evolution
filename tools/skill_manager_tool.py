@@ -148,6 +148,115 @@ def _security_scan_skill(skill_dir: Path) -> Optional[str]:
         logger.warning("Security scan failed for %s: %s", skill_dir, e, exc_info=True)
     return None
 
+
+# ---------------------------------------------------------------------------
+# Pre-commit validation gate (#2189)
+# ---------------------------------------------------------------------------
+# Auto-created (background-review-origin) skills must pass a structural
+# validation check BEFORE being admitted to the active library.  A skill that
+# fails validation is NOT marked agent-created and its directory is rolled
+# back.  This is the structural-safety mechanism for self-evolution
+# (arXiv:2608.05810): a malformed or placeholder skill must never reach the
+# active library where it could degrade routing.
+
+# Minimum body length for a structurally valid skill (chars after frontmatter).
+_MIN_SKILL_BODY_CHARS = 80
+
+# Phrases that signal a placeholder / incomplete skill body.
+_PLACEHOLDER_MARKERS = (
+    "lorem ipsum",
+    "todo:",
+    "placeholder",
+    "tbd",
+    "your content here",
+    "[describe",
+    "[insert",
+    "[add ",
+)
+
+
+def validate_skill_content(name: str) -> Optional[str]:
+    """Structural validation of an auto-created skill AFTER it is written to
+    disk but BEFORE it is admitted (marked agent-created).
+
+    Returns an error string describing the validation failure, or ``None`` if
+    the skill passes.  This is a STATIC structural check (frontmatter fields
+    are already validated during ``_create_skill``; this pass focuses on
+    body quality signals that catch degenerate auto-created skills).
+
+    Called from the skill-admission path only for background-review-origin
+    skills (detected via ``is_background_review()``).
+    """
+    skill_dir = _find_skill(name)
+    if not skill_dir:
+        return f"Skill '{name}' not found for validation."
+    skill_md = Path(skill_dir["path"]) / "SKILL.md"
+    if not skill_md.exists():
+        return f"SKILL.md missing for skill '{name}'."
+
+    try:
+        content = skill_md.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return f"Could not read SKILL.md for skill '{name}': {e}"
+
+    fm, body = _parse_frontmatter(content)
+    body = (body or "").strip()
+
+    if len(body) < _MIN_SKILL_BODY_CHARS:
+        return (
+            f"Skill body is too short ({len(body)} chars, minimum "
+            f"{_MIN_SKILL_BODY_CHARS}). Auto-created skills must contain "
+            f"substantive procedural instructions, not a stub."
+        )
+
+    lower_body = body.lower()
+    for marker in _PLACEHOLDER_MARKERS:
+        if marker in lower_body:
+            return (
+                f"Skill body contains placeholder marker '{marker}'. "
+                f"Auto-created skills must contain complete, actionable "
+                f"instructions."
+            )
+
+    # Description must be a real sentence, not a single token.
+    desc = ""
+    if isinstance(fm, dict):
+        desc = str(fm.get("description", "")).strip()
+    if len(desc.split()) < 3:
+        return (
+            f"Skill description is too short ('{desc}'). It must be a "
+            f"meaningful trigger phrase of at least 3 words for reliable "
+            f"routing."
+        )
+
+    return None
+
+
+def _rollback_skill_dir(name: str) -> None:
+    """Remove a just-created skill directory (validation-gate rollback, #2189).
+
+    Used when ``validate_skill_content`` rejects an auto-created skill: the
+    skill was written to disk by ``_create_skill`` but must NOT be admitted.
+    Best-effort — a rollback failure is logged but does not raise.
+    """
+    try:
+        found = _find_skill(name)
+        if not found:
+            return
+        skill_dir = Path(found["path"])
+        if skill_dir.exists():
+            shutil.rmtree(skill_dir, ignore_errors=True)
+            parent = skill_dir.parent
+            skills_root = _skills_dir()
+            try:
+                if parent != skills_root and parent.exists() and not any(parent.iterdir()):
+                    parent.rmdir()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("Rollback of skill '%s' failed: %s", name, e)
+
+
 import yaml
 
 
@@ -1596,6 +1705,30 @@ def skill_manage(
             from tools.skill_provenance import is_background_review
             if action == "create":
                 if is_background_review():
+                    # Pre-commit validation gate (#2189): auto-created skills
+                    # must pass structural validation BEFORE admission.  A
+                    # failing skill is NOT marked agent-created and its
+                    # directory is rolled back so it never reaches the active
+                    # library.  This is blocking — not a warning.
+                    # Bypassed during approved-pending replay (same as the
+                    # write-approval gate above).
+                    if not _skill_gate_bypass.get():
+                        validation_error = validate_skill_content(name)
+                        if validation_error:
+                            logger.warning(
+                                "Validation gate BLOCKED auto-created skill '%s': %s",
+                                name, validation_error,
+                            )
+                            _rollback_skill_dir(name)
+                            return json.dumps({
+                                "success": False,
+                                "error": (
+                                    f"Validation gate rejected auto-created skill "
+                                    f"'{name}': {validation_error} The skill was "
+                                    f"NOT admitted. Fix the structural issues and "
+                                    f"retry."
+                                ),
+                            }, ensure_ascii=False)
                     mark_agent_created(name)
                     # Record the source run ID for provenance tracking (#2190).
                     try:
