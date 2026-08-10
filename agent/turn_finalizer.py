@@ -844,4 +844,18 @@ def finalize_turn(
     agent._turn_preflight_display_snapshot = None
     agent._turn_received_provider_response = False
 
+    # Record post-compaction trajectory outcome (#2185 Phase 1).
+    # Only records if this turn had a compaction event (matched by turn_id).
+    try:
+        from agent.compaction_eval import record_post_compaction_outcome
+        _success = bool(final_response) and not interrupted and not failed
+        record_post_compaction_outcome(
+            turn_id=turn_id or "",
+            success=_success,
+            interrupted=interrupted,
+            failed=failed,
+        )
+    except Exception:
+        pass
+
     return result

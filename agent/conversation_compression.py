@@ -2319,6 +2319,20 @@ def compress_context(
         # go through agent._emit_warning and are never suppressed here.
         if _compaction_status_emitted:
             _emit_compaction_done(agent)
+        # Record compaction evaluation event (#2185 Phase 1).
+        # Best-effort; never blocks the compaction lifecycle.
+        try:
+            from agent.compaction_eval import record_compaction_event
+            _turn_id = getattr(agent, "_current_turn_id", "") or ""
+            _sess_id = getattr(agent, "session_id", "") or ""
+            _cc = getattr(agent.context_compressor, "compression_count", 0)
+            record_compaction_event(
+                turn_id=_turn_id,
+                session_id=_sess_id,
+                messages_after=len(compressed) if isinstance(compressed, list) else 0,
+            )
+        except Exception:
+            pass
 
     # ── Compression lock ────────────────────────────────────────────────
     # Atomic, state.db-backed lock per session_id.  Without this, two
