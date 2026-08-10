@@ -138,18 +138,18 @@ class TestClassifySyntaxError:
         result = classifier.classify_terminal_failure(
             "if then", 2, "", "bash: syntax error near unexpected token"
         )
-        assert result.category == classifier.FailureCategory.persistent_error
+        assert result.category == classifier.FailureCategory.shell_syntax_error
         assert result.should_retry is False
-        assert "Syntax" in result.hint
+        assert "Syntax" in result.hint or "syntax" in result.hint
 
     def test_interpreter_exit_2_is_syntax(self):
         """Python exit code 2 (interpreter) is treated as a syntax error."""
         result = classifier.classify_terminal_failure(
             'python3 -c "if true print(1)"', 2, "", ""
         )
-        assert result.category == classifier.FailureCategory.persistent_error
+        assert result.category == classifier.FailureCategory.shell_syntax_error
         assert result.should_retry is False
-        assert "Syntax" in result.hint
+        assert "Syntax" in result.hint or "syntax" in result.hint
 
     def test_grep_exit_2_not_syntax(self):
         """grep exit 2 is a generic error (file-not-found), NOT a syntax
