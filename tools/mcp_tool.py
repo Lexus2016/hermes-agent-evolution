@@ -4237,6 +4237,72 @@ def _reset_server_error(server_name: str) -> None:
     _server_breaker_opened_at.pop(server_name, None)
 
 
+# ── Provider billing/quota failover (issue #2193) ──────────────────────────
+# When an MCP server returns HTTP 402 / 'Payment Required' / 'quota exhausted',
+# the provider's billing has lapsed — retrying within seconds is futile (the
+# quota recovers on hourly/daily cycles, not seconds).  This is distinct from
+# the generic circuit breaker (60s cooldown): quota exhaustion gets a 30min
+# cooldown plus a diagnostic hint directing the agent to alternative providers.
+_MCP_QUOTA_COOLDOWN_SEC = 1800.0  # 30 minutes
+_server_quota_exhausted_until: Dict[str, float] = {}
+
+_QUOTA_ERROR_SIGNATURES = (
+    "402",
+    "payment required",
+    "quota exhausted",
+    "quota exceeded",
+    "billing",
+    "subscription required",
+    "upgrade for access",
+    "insufficient quota",
+    "insufficient credits",
+    "rate limit exceeded",
+    "usage limit",
+)
+
+
+def _is_quota_error(text: str) -> bool:
+    """Check whether *text* indicates a billing/quota failure (issue #2193)."""
+    lower = (text or "").lower()
+    return any(sig in lower for sig in _QUOTA_ERROR_SIGNATURES)
+
+
+def _mark_quota_exhausted(server_name: str) -> None:
+    """Mark *server_name* as quota-exhausted with a 30min cooldown."""
+    _server_quota_exhausted_until[server_name] = (
+        time.monotonic() + _MCP_QUOTA_COOLDOWN_SEC
+    )
+
+
+def _clear_quota_exhausted(server_name: str) -> None:
+    """Clear the quota-exhausted flag (on successful call)."""
+    _server_quota_exhausted_until.pop(server_name, None)
+
+
+def _quota_cooldown_active(server_name: str) -> bool:
+    """True if *server_name* is still in its quota-exhaustion cooldown."""
+    until = _server_quota_exhausted_until.get(server_name)
+    if until is None:
+        return False
+    if time.monotonic() >= until:
+        _server_quota_exhausted_until.pop(server_name, None)
+        return False
+    return True
+
+
+def _quota_fallback_hint(server_name: str) -> str:
+    """Build a diagnostic hint directing the agent to alternative providers."""
+    until = _server_quota_exhausted_until.get(server_name, 0.0)
+    remaining = max(1, int(until - time.monotonic()))
+    return (
+        f"MCP server '{server_name}' is quota-exhausted (HTTP 402 / billing). "
+        f"Do NOT retry this server for ~{remaining}s. "
+        f"Use alternative web-access tools: tavily (web search), "
+        f"scrapling/web_extract (page fetch), or web_search. "
+        f"The quota typically recovers on an hourly or daily cycle."
+    )
+
+
 def _signal_reconnect(server: Any) -> bool:
     """Ask a server task to rebuild its transport, thread-safely.
 
@@ -5578,6 +5644,12 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                 )
             # Cooldown elapsed → fall through as a half-open probe.
 
+        # Quota-exhaustion short-circuit (issue #2193): if this server
+        # returned HTTP 402 / billing failure recently, skip the call
+        # entirely and direct the agent to alternative providers.
+        if _quota_cooldown_active(server_name):
+            return tool_error(_quota_fallback_hint(server_name))
+
         server = _get_connected_server_for_call(server_name)
         if not server:
             _bump_server_error(server_name)
@@ -5674,6 +5746,14 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                 # retry with slightly different arguments in a loop (19 failed
                 # sessions/7d). The directive tells them to re-check the schema.
                 error_text = error_text or "MCP tool returned an error"
+                # Quota/billing detection (issue #2193): HTTP 402 / Payment
+                # Required means the MCP provider's billing has lapsed. Mark
+                # the server quota-exhausted with a 30min cooldown so the
+                # agent is directed to alternative providers instead of
+                # retrying a billing failure every few seconds.
+                if _is_quota_error(error_text):
+                    _mark_quota_exhausted(server_name)
+                    return tool_error(_quota_fallback_hint(server_name))
                 lower_err = error_text.lower()
                 if (
                     "not_found" in lower_err
@@ -5773,8 +5853,10 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                     _bump_server_error(server_name)
                 else:
                     _reset_server_error(server_name)  # success — reset
+                    _clear_quota_exhausted(server_name)  # issue #2193
             except (json.JSONDecodeError, TypeError):
                 _reset_server_error(server_name)  # non-JSON = success
+                _clear_quota_exhausted(server_name)  # issue #2193
             return result
         except InterruptedError:
             return _interrupted_call_result()
@@ -5804,6 +5886,12 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                 return recovered
 
             _bump_server_error(server_name)
+            # Quota detection in exception path (issue #2193): some MCP
+            # servers raise billing errors as exceptions rather than
+            # CallToolResult.isError.  Detect and mark quota-exhausted.
+            if _is_quota_error(str(exc)):
+                _mark_quota_exhausted(server_name)
+                return tool_error(_quota_fallback_hint(server_name))
             logger.error(
                 "MCP tool %s/%s call failed: %s",
                 server_name,
