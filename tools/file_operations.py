@@ -269,6 +269,52 @@ def classify_file_error(
         return "read_error", (
             "The read failed. Check the path/permissions; don't repeat the same call blindly."
         )
+    # ── Decompose remaining "other" failures (#2244) ────────────────────
+    # 55 patch failures/7d fell through to the generic "error" catch-all
+    # below. These patterns capture the common sub-reasons that were never
+    # classified: encoding/Unicode issues, line-ending conflicts, BOM
+    # markers, and concurrent modification (file changed between read and
+    # write). Each gets a targeted recovery hint so the agent can correct
+    # without guessing.
+    if (
+        "unicode" in low
+        or "codec can't decode" in low
+        or "invalid byte" in low
+        or "invalid continuation byte" in low
+        or "can't decode" in low
+    ):
+        return "encoding_error", (
+            "The file has a byte sequence that can't be decoded as UTF-8. "
+            "It may be a non-UTF-8 encoding or contain invalid bytes. "
+            "Use write_file to replace the content, or handle the encoding "
+            "explicitly via execute_code."
+        )
+    if "line ending" in low or "crlf" in low or "line-ending" in low:
+        return "line_ending_conflict", (
+            "The file uses different line endings (CRLF vs LF) than "
+            "old_string. Re-read the file and copy the EXACT line endings, "
+            "or use write_file to replace the whole file."
+        )
+    if "bom" in low or "ufeff" in low or "u+feff" in low or "byte order mark" in low:
+        return "bom_conflict", (
+            "The file has a UTF-8 BOM (byte order mark) prefix that "
+            "interferes with the match. Re-read the file from line 1 and "
+            "include the BOM in old_string, or use write_file."
+        )
+    if (
+        "concurrent" in low
+        or "modified" in low
+        and "since" in low
+        or "changed" in low
+        and "since" in low
+        or "stale" in low
+        and "handle" in low
+    ):
+        return "concurrent_modification", (
+            "The file was modified between the read and the write. "
+            "Re-read the current content and retry the patch against the "
+            "latest version."
+        )
     # Last resort: the structured diagnostic may still classify an otherwise
     # generic message before we fall back to the catch-all "error" bucket.
     finer = _class_from_structured_error(structured_error)
@@ -616,9 +662,7 @@ def _enrich_search_parse_error(
     chars_in_pattern = set(pattern)
     has_star_or_q = "*" in chars_in_pattern or "?" in chars_in_pattern
     looks_like_glob = (
-        has_star_or_q
-        and not (regex_only_chars & chars_in_pattern)
-        and not file_glob
+        has_star_or_q and not (regex_only_chars & chars_in_pattern) and not file_glob
     )
 
     hints: list[str] = []
@@ -1011,7 +1055,7 @@ LINTERS_INPROC = {
 # established, exercised pattern as an error and break it. Python source
 # keeps the existing (unchanged) post-write lint-delta *report* — still
 # visible to the caller, just not a write-blocking refusal.
-_FAIL_CLOSED_INPROC_EXTS = frozenset({'.json', '.yaml', '.yml', '.toml'})
+_FAIL_CLOSED_INPROC_EXTS = frozenset({".json", ".yaml", ".yml", ".toml"})
 
 # Max limits for read operations
 MAX_LINES = 2000
@@ -1211,8 +1255,9 @@ class ShellFileOperations(FileOperations):
             # contains U+FFFD.
             if "\ufffd" in content_sample[:1000]:
                 return True
-            non_printable = sum(1 for c in content_sample[:1000]
-                               if ord(c) < 32 and c not in '\n\r\t')
+            non_printable = sum(
+                1 for c in content_sample[:1000] if ord(c) < 32 and c not in "\n\r\t"
+            )
             return non_printable / min(len(content_sample), 1000) > 0.30
 
         return False
@@ -1360,7 +1405,7 @@ class ShellFileOperations(FileOperations):
             'rt="$(readlink -f "$t" 2>/dev/null || realpath "$t" 2>/dev/null || true)"; '
             '[ -n "$rt" ] && { t="$rt"; d="$(dirname "$t")"; }; '
             "fi; "
-            'tmp="$(mktemp -p "$d" ' + tmpl + ' 2>/dev/null '
+            'tmp="$(mktemp -p "$d" ' + tmpl + " 2>/dev/null "
             '|| mktemp "$d/.hermes-tmp.$$.XXXXXX" 2>/dev/null '
             '|| { tmp="$d/.hermes-tmp.$$"; : > "$tmp" && echo "$tmp"; })"; '
             '[ -n "$tmp" ] || { echo "atomic write: could not create temp file" >&2; exit 1; }; '
@@ -1852,7 +1897,9 @@ class ShellFileOperations(FileOperations):
         # re-adds the marker the read layer strips — see
         # ``_file_has_bom``/``_UTF8_BOM`` below.
         ext = os.path.splitext(path)[1].lower()
-        inproc_linter = LINTERS_INPROC.get(ext) if ext in _FAIL_CLOSED_INPROC_EXTS else None
+        inproc_linter = (
+            LINTERS_INPROC.get(ext) if ext in _FAIL_CLOSED_INPROC_EXTS else None
+        )
         if inproc_linter is not None:
             _ok, _lint_err = inproc_linter(content)
             if not _ok and _lint_err != "__SKIP__":
@@ -1973,7 +2020,9 @@ class ShellFileOperations(FileOperations):
             hash_result = self._exec(hash_cmd)
             if hash_result.exit_code == 0 and hash_result.stdout.strip():
                 disk_sha = hash_result.stdout.strip().split()[0]
-                expected_sha = hashlib.sha256(content.encode("utf-8", "surrogatepass")).hexdigest()
+                expected_sha = hashlib.sha256(
+                    content.encode("utf-8", "surrogatepass")
+                ).hexdigest()
                 content_verified = disk_sha == expected_sha
                 if not content_verified:
                     return WriteResult(
@@ -2170,6 +2219,7 @@ class ShellFileOperations(FileOperations):
             # success-shaped no-op so the model moves on instead of
             # burning turns on re-reads and re-patches.
             from tools.fuzzy_match import is_already_applied
+
             if is_already_applied(content, old_string, new_string):
                 return PatchResult(
                     success=True,
@@ -2764,12 +2814,21 @@ class ShellFileOperations(FileOperations):
         if target == "files":
             return self._search_files(pattern, path, limit, offset)
         else:
-            return self._search_content(pattern, path, file_glob, limit, offset,
-                                        output_mode, context)
+            return self._search_content(
+                pattern, path, file_glob, limit, offset, output_mode, context
+            )
 
-    def _try_multi_path_search(self, pattern: str, path: str, target: str,
-                               file_glob: Optional[str], limit: int, offset: int,
-                               output_mode: str, context: int) -> Optional[SearchResult]:
+    def _try_multi_path_search(
+        self,
+        pattern: str,
+        path: str,
+        target: str,
+        file_glob: Optional[str],
+        limit: int,
+        offset: int,
+        output_mode: str,
+        context: int,
+    ) -> Optional[SearchResult]:
         """Recover a not-found ``path`` that is really several paths in one string.
 
         Production trajectories show models passing "dir1 dir2 dir3" (or
@@ -2796,8 +2855,9 @@ class ShellFileOperations(FileOperations):
             if target == "files":
                 sub = self._search_files(pattern, p, limit, offset)
             else:
-                sub = self._search_content(pattern, p, file_glob, limit, offset,
-                                           output_mode, context)
+                sub = self._search_content(
+                    pattern, p, file_glob, limit, offset, output_mode, context
+                )
             if sub.error:
                 continue
             merged.matches.extend(sub.matches)
@@ -2808,7 +2868,9 @@ class ShellFileOperations(FileOperations):
         # Respect the caller's limit across the merged set.
         merged.matches = merged.matches[:limit]
         merged.files = merged.files[:limit]
-        note = f"path contained {len(parts)} entries; searched {len(existing)} that exist"
+        note = (
+            f"path contained {len(parts)} entries; searched {len(existing)} that exist"
+        )
         if missing:
             note += "; skipped missing: " + ", ".join(missing[:3])
             if len(missing) > 3:
@@ -2816,8 +2878,9 @@ class ShellFileOperations(FileOperations):
         merged.warning = note
         return merged
 
-    def _zero_match_probe(self, pattern: str, path: str,
-                          file_glob: Optional[str]) -> Optional[str]:
+    def _zero_match_probe(
+        self, pattern: str, path: str, file_glob: Optional[str]
+    ) -> Optional[str]:
         """Return a hint for a 0-match content search, or None.
 
         13.9% of production content searches return zero matches and give
@@ -2826,7 +2889,7 @@ class ShellFileOperations(FileOperations):
         metacharacters, also probe it as a fixed string. Bounded: two rg
         invocations max, count-only output.
         """
-        if not self._has_command('rg'):
+        if not self._has_command("rg"):
             return None
         glob_expr = f" --glob {self._escape_shell_arg(file_glob)}" if file_glob else ""
         probe = self._exec(
@@ -2890,7 +2953,9 @@ class ShellFileOperations(FileOperations):
                 )
         return None
 
-    def _search_files(self, pattern: str, path: str, limit: int, offset: int) -> SearchResult:
+    def _search_files(
+        self, pattern: str, path: str, limit: int, offset: int
+    ) -> SearchResult:
         """Search for files by name pattern (glob-like)."""
         # Auto-prepend **/ for recursive search if not already present
         if not pattern.startswith("**/") and "/" not in pattern:
@@ -3046,13 +3111,15 @@ class ShellFileOperations(FileOperations):
         """Search for content inside files (grep-like)."""
         # Try ripgrep first (fast), fallback to grep (slower but works)
         used_rg = False
-        if self._has_command('rg'):
+        if self._has_command("rg"):
             used_rg = True
-            result = self._search_with_rg(pattern, path, file_glob, limit, offset,
-                                          output_mode, context)
-        elif self._has_command('grep'):
-            result = self._search_with_grep(pattern, path, file_glob, limit, offset,
-                                            output_mode, context)
+            result = self._search_with_rg(
+                pattern, path, file_glob, limit, offset, output_mode, context
+            )
+        elif self._has_command("grep"):
+            result = self._search_with_grep(
+                pattern, path, file_glob, limit, offset, output_mode, context
+            )
         else:
             # Neither rg nor grep available (Windows without Git Bash, etc.)
             return SearchResult(
@@ -3064,14 +3131,21 @@ class ShellFileOperations(FileOperations):
         # turn. Probe cheaply for near-misses (wrong casing, hidden-only
         # matches, unescaped regex metacharacters) and attach the finding
         # as a warning. Runs for BOTH engines.
-        if (not result.error and result.total_count == 0
-                and not result.matches and not result.files and not result.counts):
+        if (
+            not result.error
+            and result.total_count == 0
+            and not result.matches
+            and not result.files
+            and not result.counts
+        ):
             try:
                 hint = self._zero_match_probe(pattern, path, file_glob)
             except Exception:
                 hint = None
             if hint:
-                result.warning = hint if not result.warning else f"{result.warning} {hint}"
+                result.warning = (
+                    hint if not result.warning else f"{result.warning} {hint}"
+                )
 
         # rg auto-enables --multiline for \n patterns, so the line-oriented
         # explanation only applies to the grep fallback engine.
@@ -3146,17 +3220,19 @@ class ShellFileOperations(FileOperations):
         # usable match payload remains. Otherwise we keep the real matches.
         if result.exit_code == 2 and not payload.strip():
             error_msg = diagnostics.strip() or result.stdout.strip() or "Search error"
-            enriched = _enrich_search_parse_error(
-                error_msg, pattern, file_glob or ""
-            )
+            enriched = _enrich_search_parse_error(error_msg, pattern, file_glob or "")
             return SearchResult(error=enriched, total_count=0)
 
         # Parse the diagnostic-free payload so error text never becomes a match.
         stdout = payload
         _ml_note = (
-            "Pattern contains \\n — multiline mode (-U) was enabled automatically "
-            "so the regex can match across line boundaries."
-        ) if multiline else None
+            (
+                "Pattern contains \\n — multiline mode (-U) was enabled automatically "
+                "so the regex can match across line boundaries."
+            )
+            if multiline
+            else None
+        )
         # Parse results based on output mode
         if output_mode == "files_only":
             all_files = [f for f in stdout.strip().split("\n") if f]
@@ -3295,9 +3371,7 @@ class ShellFileOperations(FileOperations):
         # usable match payload remains.
         if result.exit_code == 2 and not payload.strip():
             error_msg = diagnostics.strip() or result.stdout.strip() or "Search error"
-            enriched = _enrich_search_parse_error(
-                error_msg, pattern, file_glob or ""
-            )
+            enriched = _enrich_search_parse_error(error_msg, pattern, file_glob or "")
             return SearchResult(error=enriched, total_count=0)
 
         stdout = payload
