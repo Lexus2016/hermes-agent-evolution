@@ -947,6 +947,27 @@ def _create_skill(name: str, content: str, category: str = None) -> Dict[str, An
         shutil.rmtree(skill_dir, ignore_errors=True)
         return {"success": False, "error": scan_error}
 
+    # Pre-commit validation gate (#2181 Slice A) — structural validation for
+    # background-review-origin auto-created skills. Blocks admission of
+    # contaminated / trivial skills before they enter the active library.
+    # No-op when skills.pre_commit_validation is off or origin is foreground.
+    try:
+        from tools.skill_admission_gate import validate_before_admission
+        verdict = validate_before_admission(name, skill_dir, content)
+        if verdict.blocked:
+            shutil.rmtree(skill_dir, ignore_errors=True)
+            reasons = "; ".join(verdict.errors)
+            return {
+                "success": False,
+                "error": (
+                    f"Pre-commit validation gate blocked skill '{name}': "
+                    f"{reasons}. Revise the skill to pass structural checks "
+                    f"before re-admission."
+                ),
+            }
+    except Exception as e:
+        logger.debug("skill_admission_gate error (non-blocking): %s", e)
+
     # Extract description from frontmatter for verbose notifications
     _desc = ""
     try:
