@@ -250,9 +250,11 @@ class TestClassificationShape:
 class TestTerminalDelegation:
     def test_exit_124_is_timeout(self):
         result = tfc.classify_tool_failure("terminal", "", exit_code=124)
-        assert result.category == tfc.ToolFailureCategory.timeout
+        # exit_code=124 (wall-clock timeout) is non-retryable — same command
+        # will time out again (issue #2191).
+        assert result.category == tfc.ToolFailureCategory.persistent_error
         assert result.tool_type == tfc.ToolType.terminal
-        assert result.should_retry is True
+        assert result.should_retry is False
 
     def test_exit_127_is_tool_unavailable(self):
         result = tfc.classify_tool_failure(
