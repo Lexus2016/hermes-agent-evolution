@@ -4237,6 +4237,80 @@ def _reset_server_error(server_name: str) -> None:
     _server_breaker_opened_at.pop(server_name, None)
 
 
+# ---------------------------------------------------------------------------
+# Quota / billing-exhaustion failover (#2193).
+#
+# Distinct from the generic circuit breaker above: a quota exhaustion
+# (HTTP 402 / "Payment Required") recovers on hourly or daily billing
+# cycles, not seconds. The generic 60 s breaker would burn a probe call
+# every minute against a server that is guaranteed to keep failing for
+# hours, wasting agent iterations. Instead we mark the server
+# quota-exhausted for a longer cooldown and short-circuit calls with a
+# hint directing the agent to alternative providers (tavily, scrapling,
+# ...). The flag clears on the first successful call after the cooldown
+# elapses (quota recovered).
+#
+# IMPORTANT: quota detection inspects *transport-level exceptions*
+# (raised by ``call_tool`` when the server rejects the request at the
+# HTTP layer). It must NOT inspect ``isError=True`` tool *results* —
+# those carry the tool's own error text (e.g. "file not found" or a
+# resource body that happens to mention "quota"), which is unrelated to
+# server billing state and must surface unchanged.
+_server_quota_exhausted_until: Dict[str, float] = {}
+_QUOTA_COOLDOWN_SEC = 1800.0  # 30 minutes
+
+
+def _is_quota_error(exc: BaseException) -> bool:
+    """Return True if ``exc`` indicates MCP-server billing/quota exhaustion.
+
+    HTTP 402 is returned by MCP servers whose backing API (e.g. Jina)
+    has exhausted its billing/quota allocation. We detect it from the
+    exception's string representation, which carries the status code and
+    reason propagated by the MCP client transport.
+    """
+    text = str(exc).lower()
+    if "402" in text or "payment required" in text:
+        return True
+    # "quota exhausted" / "billing" appear in some providers' error bodies
+    # but ONLY when surfaced as a transport exception — never from a tool
+    # result, which we do not inspect here.
+    if "quota exhausted" in text or "quota-exhausted" in text:
+        return True
+    return False
+
+
+def _mark_quota_exhausted(server_name: str) -> None:
+    """Mark ``server_name`` as quota-exhausted for the cooldown window."""
+    _server_quota_exhausted_until[server_name] = time.monotonic() + _QUOTA_COOLDOWN_SEC
+
+
+def _clear_quota_exhausted(server_name: str) -> None:
+    """Clear the quota-exhausted flag for ``server_name`` (quota recovered)."""
+    _server_quota_exhausted_until.pop(server_name, None)
+
+
+def _quota_cooldown_active(server_name: str) -> bool:
+    """Return True if ``server_name`` is still in its quota cooldown."""
+    until = _server_quota_exhausted_until.get(server_name)
+    if until is None:
+        return False
+    if time.monotonic() >= until:
+        # Cooldown elapsed — purge and allow a probe call.
+        _server_quota_exhausted_until.pop(server_name, None)
+        return False
+    return True
+
+
+def _quota_fallback_hint(server_name: str) -> str:
+    """Build the short-circuit error directing the agent to alternatives."""
+    return tool_error(
+        f"MCP server '{server_name}' is quota-exhausted (HTTP 402 / billing). "
+        f"Calls will fail until the provider's quota resets. Do NOT retry this "
+        f"server — use an alternative provider (e.g. tavily, scrapling, "
+        f"web_extract) or ask the user to top up the MCP provider's billing."
+    )
+
+
 def _signal_reconnect(server: Any) -> bool:
     """Ask a server task to rebuild its transport, thread-safely.
 
@@ -5438,7 +5512,9 @@ def _ensure_lazy_server_connected(server_name: str) -> bool:
             _server_connect_errors[server_name] = message
             _record_connect_failure(server_name)
         logger.warning(
-            "Lazy MCP connect failed for '%s': %s", server_name, message,
+            "Lazy MCP connect failed for '%s': %s",
+            server_name,
+            message,
         )
         return False
 
@@ -5449,9 +5525,7 @@ def _ensure_lazy_server_connected(server_name: str) -> bool:
         stale_fingerprint = _lazy_server_fingerprints.pop(server_name, None)
         cached_names = _lazy_server_tool_names.pop(server_name, None) or []
         server = _servers.get(server_name)
-        live_names = set(
-            getattr(server, "_registered_tool_names", []) or []
-        )
+        live_names = set(getattr(server, "_registered_tool_names", []) or [])
     # Stale-cache reconciliation: the cached manifest may advertise tools
     # the live server no longer serves. Deregister those phantoms so the
     # model stops seeing tools that can never succeed.
@@ -5465,7 +5539,9 @@ def _ensure_lazy_server_connected(server_name: str) -> bool:
         logger.info(
             "MCP server '%s': deregistered %d phantom cached tool(s) not "
             "served live (stale schema-cache fingerprint %s): %s",
-            server_name, len(phantom_names), stale_fingerprint,
+            server_name,
+            len(phantom_names),
+            stale_fingerprint,
             ", ".join(phantom_names),
         )
     return server is not None and server.session is not None
@@ -5577,6 +5653,16 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                     f"approaches or ask the user to check the MCP server."
                 )
             # Cooldown elapsed → fall through as a half-open probe.
+
+        # Quota / billing-exhaustion failover (#2193): if this server was
+        # marked quota-exhausted (HTTP 402) and the 30 min cooldown has not
+        # elapsed, short-circuit immediately with a fallback hint so the
+        # agent switches to an alternative provider instead of burning a
+        # call that is guaranteed to fail. ``_quota_cooldown_active``
+        # auto-clears the flag once the window expires, letting a probe
+        # through to test whether the quota has recovered.
+        if _quota_cooldown_active(server_name):
+            return _quota_fallback_hint(server_name)
 
         server = _get_connected_server_for_call(server_name)
         if not server:
@@ -5773,8 +5859,13 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                     _bump_server_error(server_name)
                 else:
                     _reset_server_error(server_name)  # success — reset
+                    # A successful call means the provider's quota has
+                    # recovered — clear any stale quota-exhaustion flag
+                    # (#2193).
+                    _clear_quota_exhausted(server_name)
             except (json.JSONDecodeError, TypeError):
                 _reset_server_error(server_name)  # non-JSON = success
+                _clear_quota_exhausted(server_name)
             return result
         except InterruptedError:
             return _interrupted_call_result()
@@ -5802,6 +5893,23 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             )
             if recovered is not None:
                 return recovered
+
+            # Quota / billing-exhaustion detection (#2193): an HTTP 402
+            # from the MCP server's backing API surfaces here as a
+            # transport exception. Mark the server quota-exhausted so
+            # subsequent calls short-circuit for the cooldown window,
+            # then return the fallback hint immediately — the generic
+            # "MCP call failed" message gives the agent no signal to
+            # switch providers.
+            if _is_quota_error(exc):
+                _mark_quota_exhausted(server_name)
+                logger.warning(
+                    "MCP server %s quota-exhausted (HTTP 402); "
+                    "failover active for %.0fs",
+                    server_name,
+                    _QUOTA_COOLDOWN_SEC,
+                )
+                return _quota_fallback_hint(server_name)
 
             _bump_server_error(server_name)
             logger.error(
@@ -7027,7 +7135,9 @@ def _register_from_cache_sync(name: str, config: dict, entry: dict) -> List[str]
             logger.warning(
                 "MCP server '%s' (lazy): cached tool '%s' collides with "
                 "toolset '%s' — skipping",
-                name, registry_name, existing_toolset,
+                name,
+                registry_name,
+                existing_toolset,
             )
             continue
         registry.register(
@@ -7085,7 +7195,8 @@ def _register_from_cache_sync(name: str, config: dict, entry: dict) -> List[str]
             _lazy_server_tool_names[name] = list(registered_names)
         logger.info(
             "MCP server '%s' (lazy): registered %d tool(s) from schema cache",
-            name, len(registered_names),
+            name,
+            len(registered_names),
         )
     return registered_names
 
@@ -7256,7 +7367,9 @@ def register_mcp_servers(servers: Dict[str, dict]) -> List[str]:
                 names = _register_from_cache_sync(name, cfg, entry)
             except Exception as exc:
                 logger.warning(
-                    "Failed lazy MCP registration for '%s': %s", name, exc,
+                    "Failed lazy MCP registration for '%s': %s",
+                    name,
+                    exc,
                 )
                 with _lock:
                     _server_connecting.add(name)
