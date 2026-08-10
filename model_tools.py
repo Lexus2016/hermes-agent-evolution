@@ -1883,6 +1883,15 @@ def handle_function_call(
         except Exception:
             pass
 
+        # Skill-Use boundary instrumentation (#2183): record each tool call
+        # made while a skill is active so check_boundary_violations can
+        # detect forbidden-tool usage when the skill is deactivated.
+        try:
+            from tools.skill_compliance import record_tool_call_for_active_skill
+            record_tool_call_for_active_skill(function_name)
+        except Exception:
+            pass
+
         # Generic tool-result canonicalization seam: plugins receive the
         # final result string (JSON, usually) and may replace it by
         # returning a string from transform_tool_result. Runs after

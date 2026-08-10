@@ -2330,6 +2330,33 @@ def _skill_view_with_bump(args, **kw):
                         record_skill_outcome(str(resolved), success=True)
                     except Exception:
                         pass
+                    # Skill-Use compliance instrumentation (#2183):
+                    # Before activating a new skill, check if the PREVIOUS
+                    # active skill had boundary violations. Then set the new
+                    # skill as active so subsequent tool calls are tracked.
+                    try:
+                        from tools.skill_compliance import (
+                            check_boundary_violations,
+                            get_active_skill,
+                            get_active_skill_tool_calls,
+                            record_compliance,
+                            set_active_skill,
+                        )
+                        prev_skill = get_active_skill()
+                        if prev_skill and prev_skill != str(resolved):
+                            prev_calls = get_active_skill_tool_calls()
+                            violated = check_boundary_violations(prev_skill, prev_calls)
+                            record_compliance(
+                                prev_skill,
+                                triggered=True,
+                                complied=not violated,
+                                boundary_violated=violated,
+                            )
+                        # Record compliance for the skill being loaded now.
+                        record_compliance(str(resolved), triggered=True, complied=True)
+                        set_active_skill(str(resolved))
+                    except Exception:
+                        pass
     except Exception:
         pass
     return result
