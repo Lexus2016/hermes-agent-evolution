@@ -362,8 +362,12 @@ def get_tool_definitions(
             # schemas are treated as read-only by all known callers.
             return list(cached)
 
-    result = _compute_tool_definitions(enabled_toolsets, disabled_toolsets, quiet_mode,
-                                       skip_tool_search_assembly=skip_tool_search_assembly)
+    result = _compute_tool_definitions(
+        enabled_toolsets,
+        disabled_toolsets,
+        quiet_mode,
+        skip_tool_search_assembly=skip_tool_search_assembly,
+    )
     if quiet_mode and cache_key is not None:
         # Cache the freshly-computed list, but hand callers a shallow copy so
         # downstream mutations (e.g. run_agent appending memory/LCM tool
@@ -1874,6 +1878,27 @@ def handle_function_call(
             duration_ms=duration_ms,
             middleware_trace=list(_tool_middleware_trace),
         )
+
+        # Source-chain provenance (#2192): record each tool call as a
+        # source entry when inside a background-review fork. This is a
+        # lightweight ContextVar append — no-op outside review forks.
+        try:
+            from tools.skill_provenance import record_source
+
+            ref = ""
+            if function_name == "read_file":
+                ref = str(function_args.get("path", ""))[:200]
+            elif function_name == "search_files":
+                ref = str(function_args.get("pattern", ""))[:200]
+            elif function_name in ("web_search", "web_extract"):
+                ref = str(function_args.get("query", function_args.get("urls", "")))[
+                    :200
+                ]
+            elif function_name == "terminal":
+                ref = str(function_args.get("command", ""))[:200]
+            record_source(function_name, source_ref=ref)
+        except Exception:
+            pass
 
         # Generic tool-result canonicalization seam: plugins receive the
         # final result string (JSON, usually) and may replace it by

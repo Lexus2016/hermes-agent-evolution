@@ -1593,10 +1593,20 @@ def skill_manage(
         # not touch them). Best-effort; telemetry failures never break the tool.
         try:
             from tools.skill_usage import bump_patch, forget, mark_agent_created
-            from tools.skill_provenance import is_background_review
+            from tools.skill_provenance import (
+                is_background_review,
+                get_source_chain,
+                save_source_chain,
+            )
             if action == "create":
                 if is_background_review():
                     mark_agent_created(name)
+                    # Save the source chain for this skill (#2192).
+                    # The source chain is accumulated by record_source()
+                    # calls during the background-review fork's tool loop.
+                    chain = get_source_chain()
+                    if chain:
+                        save_source_chain(name, chain)
             elif action in {"patch", "edit", "write_file", "remove_file"}:
                 bump_patch(name)
             elif action == "delete":

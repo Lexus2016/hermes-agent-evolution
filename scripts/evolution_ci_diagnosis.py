@@ -533,12 +533,11 @@ def create_child_issue(
     Skips entirely if all failures are 'unknown' — unrecognised patterns
     produce noise, not actionable issues.
     """
-    # Only create issues for complex, classifiable failures.
-    # Skip trivial (lint/format) and unknown (unrecognised pattern).
+    # Filter out unknown failures — they are not actionable
     classified = [
         (check, failure)
         for check, failure in failures
-        if failure.classification == "complex" and failure.error_class != "unknown"
+        if failure.error_class != "unknown"
     ]
     if not classified:
         print(

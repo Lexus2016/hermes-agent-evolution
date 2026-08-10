@@ -378,6 +378,15 @@ def build_turn_context(
     # Bind the skill write-origin ContextVar for this thread.
     set_current_write_origin(getattr(agent, "_memory_write_origin", "assistant_tool"))
 
+    # Initialize the source-chain accumulator for background-review forks
+    # so tool calls can be recorded as provenance sources (#2192).
+    try:
+        from tools.skill_provenance import is_background_review, init_source_chain
+        if is_background_review():
+            init_source_chain()
+    except Exception:
+        pass
+
     # Restore the primary runtime if the previous turn activated fallback.
     agent._restore_primary_runtime()
 

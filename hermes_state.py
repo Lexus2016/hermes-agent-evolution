@@ -5677,7 +5677,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
     # declarative reconciliation are included automatically instead of
     # silently dropping out of list rows.
     _SESSION_COMPACT_EXCLUDED = frozenset(
-        {"system_prompt", "system_prompt_hash"}
+        {"system_prompt"}
     )
     _session_compact_cols_sql: Optional[str] = None
 

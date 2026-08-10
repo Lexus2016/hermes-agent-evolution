@@ -232,18 +232,9 @@ class TestDDGSProviderSearch:
         wall-clock timeout and surface a failure instead of hanging the
         shared agent loop. We patch the blocking helper to wait on an Event
         (released in finally so no worker thread leaks past the test) and
-        shrink the timeout; search() must return success=False promptly.
-
-        Skipped when the real ddgs package is not installed — this test
-        requires the subprocess worker path which needs a real importable
-        ddgs module in the child."""
+        shrink the timeout; search() must return success=False promptly."""
         import threading
         import time
-
-        try:
-            import ddgs  # noqa: F401
-        except ImportError:
-            pytest.skip("ddgs package not installed — subprocess timeout test requires it")
 
         # ddgs must import-probe True for search() to proceed.
         _install_fake_ddgs(monkeypatch)
@@ -278,9 +269,6 @@ class TestDDGSProviderSearch:
             monkeypatch,
             text_results=[{"title": "T", "href": "https://e.com", "body": "B"}],
         )
-        monkeypatch.delitem(sys.modules, "plugins.web.ddgs.provider", raising=False)
-        import plugins.web.ddgs.provider as _prov
-        _force_inprocess_search(monkeypatch, _prov)
         from plugins.web.ddgs.provider import DDGSWebSearchProvider
 
         result = DDGSWebSearchProvider().search("q", limit=5)

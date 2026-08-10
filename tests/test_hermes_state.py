@@ -6836,7 +6836,7 @@ class TestCompactRows:
         # Hardcode the one sanctioned exclusion: if the excluded set ever
         # widens (or the projection silently drops a column), this fails and
         # forces a conscious review of what list consumers lose.
-        missing = live_cols - set(row) - {"system_prompt", "system_prompt_hash"}
+        missing = live_cols - set(row) - {"system_prompt"}
         assert not missing, f"compact projection lost schema columns: {missing}"
         assert "system_prompt" not in row
 

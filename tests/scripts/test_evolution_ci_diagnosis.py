@@ -212,7 +212,7 @@ def test_diagnose_prs_detects_failure_and_creates_child_issue(hermes_home, monke
     assert state_path.is_file()
     recorded = json.loads(state_path.read_text(encoding="utf-8"))
     assert (
-        recorded["Lexus2016/hermes-agent-evolution#42"]
+        recorded["Lexus2016/hermes-agent-evolution#42/tests"]
         == issue_response["html_url"]
     )
 

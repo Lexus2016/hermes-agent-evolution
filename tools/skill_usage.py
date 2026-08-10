@@ -1076,6 +1076,12 @@ def curated_report() -> List[Dict[str, Any]]:
         row["last_activity_at"] = latest_activity_at(row)
         row["activity_count"] = activity_count(row)
         row["provenance"] = provenance(name)
+        # Source-chain provenance summary (#2192)
+        try:
+            from tools.skill_provenance import get_source_chain_summary
+            row["source_chain"] = get_source_chain_summary(name)
+        except Exception:
+            row["source_chain"] = {"has_source_chain": False}
         rows.append(row)
     return rows
 
