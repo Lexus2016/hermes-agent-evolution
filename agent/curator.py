@@ -1676,6 +1676,20 @@ def run_curator_review(
                     )
                 else:
                     prompt = f"{CURATOR_REVIEW_PROMPT}{builtins_note}\n\n{candidate_list}"
+                # Deterministic pre-clustering pass (#2184) — feeds similarity
+                # groups to the LLM so it can consolidate without searching the
+                # full candidate space. Zero LLM cost; runs inline.
+                try:
+                    from tools.skill_consolidation import (
+                        run_consolidation_pass,
+                        render_clusters_for_prompt,
+                    )
+                    cons = run_consolidation_pass()
+                    cluster_hints = render_clusters_for_prompt(cons)
+                    if cluster_hints:
+                        prompt += f"\n\n{cluster_hints}"
+                except Exception:
+                    pass
                 llm_meta = _run_llm_review(prompt)
                 final_summary = (
                     f"{prefix}{auto_summary}; llm: {llm_meta.get('summary', 'no change')}"
