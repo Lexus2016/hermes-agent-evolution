@@ -1596,6 +1596,18 @@ def skill_manage(
             from tools.skill_provenance import is_background_review
             if action == "create":
                 if is_background_review():
+                    # Validation gate (#2189): run pre-commit checks on
+                    # background-review-created skills before admission.
+                    try:
+                        from tools.skill_validation import validate_skill_content
+                        passed, issues = validate_skill_content(name)
+                        if not passed:
+                            logger.warning(
+                                "Skill '%s' failed validation gate: %s",
+                                name, "; ".join(issues),
+                            )
+                    except Exception:
+                        pass
                     mark_agent_created(name)
                     # Record the source run ID for provenance tracking (#2190).
                     try:
