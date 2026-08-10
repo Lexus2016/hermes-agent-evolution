@@ -654,6 +654,9 @@ def _empty_record() -> Dict[str, Any]:
         "state": STATE_ACTIVE,
         "pinned": False,
         "archived_at": None,
+        # Provenance record fields (#2190)
+        "source_run_id": None,
+        "recent_failure_rate": 0.0,
     }
 
 
@@ -812,6 +815,47 @@ def mark_agent_created(skill_name: str) -> None:
     def _apply(rec: Dict[str, Any]) -> None:
         rec["created_by"] = "agent"
     _mutate(skill_name, _apply, require_curation_eligible=True)
+
+
+def set_source_run_id(skill_name: str, run_id: str) -> None:
+    """Record the source run that produced this skill (#2190).
+
+    Called at admission time (skill_manage create in background-review
+    context) to tag the skill with the originating review-run identifier.
+    Best-effort; telemetry failures never break the tool.
+    """
+    if not run_id:
+        return
+    def _apply(rec: Dict[str, Any]) -> None:
+        rec["source_run_id"] = run_id[:200]
+    _mutate(skill_name, _apply)
+
+
+# Window for recent_failure_rate — track the last N invocation outcomes.
+_FAILURE_WINDOW = 10
+
+
+def record_skill_outcome(skill_name: str, success: bool) -> None:
+    """Update invocation_count and recent_failure_rate from an execution outcome (#2190).
+
+    Called after each skill execution to track whether the skill helped or
+    hindered the task. The failure rate is a sliding window over the last
+    ``_FAILURE_WINDOW`` invocations. Best-effort; telemetry failures never
+    break the tool.
+    """
+    def _apply(rec: Dict[str, Any]) -> None:
+        # invocation_count is the same as use_count — bump it.
+        rec["use_count"] = int(rec.get("use_count") or 0) + 1
+        rec["last_used_at"] = _now_iso()
+        # Update recent_failure_rate as a sliding window.
+        outcomes = rec.get("_recent_outcomes") or []
+        outcomes.append(0 if success else 1)
+        outcomes = outcomes[-_FAILURE_WINDOW:]
+        rec["_recent_outcomes"] = outcomes
+        rec["recent_failure_rate"] = (
+            sum(outcomes) / len(outcomes) if outcomes else 0.0
+        )
+    _mutate(skill_name, _apply)
 
 
 def set_state(skill_name: str, state: str) -> None:

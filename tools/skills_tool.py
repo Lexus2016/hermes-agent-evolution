@@ -2323,6 +2323,13 @@ def _skill_view_with_bump(args, **kw):
                 # which keys off last_used_at (see agent/curator.py).
                 if not schema_only:
                     bump_use(str(resolved))
+                    # Record a successful invocation outcome for provenance
+                    # tracking (#2190).
+                    try:
+                        from tools.skill_usage import record_skill_outcome
+                        record_skill_outcome(str(resolved), success=True)
+                    except Exception:
+                        pass
     except Exception:
         pass
     return result

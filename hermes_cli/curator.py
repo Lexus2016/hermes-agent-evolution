@@ -155,13 +155,19 @@ def _cmd_status(args) -> int:
         print("\nleast recently active (top 5):")
         for r in active:
             last = _fmt_ts(r.get("last_activity_at"))
+            # Provenance display (#2190): show source_run_id and failure_rate
+            srid = r.get("source_run_id")
+            fr = r.get("recent_failure_rate", 0.0)
+            prov_tag = ""
+            if srid or fr:
+                prov_tag = f"  run={srid or '-'}  fail_rate={fr:.0%}"
             print(
                 f"  {r['name']:40s}  "
                 f"activity={r.get('activity_count', 0):3d}  "
                 f"use={r.get('use_count', 0):3d}  "
                 f"view={r.get('view_count', 0):3d}  "
                 f"patches={r.get('patch_count', 0):3d}  "
-                f"last_activity={last}"
+                f"last_activity={last}{prov_tag}"
             )
 
     # Show top 5 most-active and least-active skills by activity_count
