@@ -1597,6 +1597,15 @@ def skill_manage(
             if action == "create":
                 if is_background_review():
                     mark_agent_created(name)
+                    # Provenance record (#2190 Slice B) — initialize the
+                    # persistent per-skill provenance score at admission.
+                    try:
+                        from tools.skill_provenance_record import (
+                            init_provenance_record,
+                        )
+                        init_provenance_record(name)
+                    except Exception:
+                        pass
             elif action in {"patch", "edit", "write_file", "remove_file"}:
                 bump_patch(name)
             elif action == "delete":
