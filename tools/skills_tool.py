@@ -2242,9 +2242,12 @@ def _check_skill_view_dedup(task_id, name, file_path) -> str | None:
             rec_name, rec_fp = key
             if rec_fp != (file_path or ""):
                 continue
-            if rec_name != str(name) and not str(name).endswith("/" + rec_name) \
-                    and not rec_name.endswith("/" + str(name)) \
-                    and str(name).split(":")[-1] != rec_name:
+            if (
+                rec_name != str(name)
+                and not str(name).endswith("/" + rec_name)
+                and not rec_name.endswith("/" + str(name))
+                and str(name).split(":")[-1] != rec_name
+            ):
                 continue
             try:
                 st = os.stat(src)
@@ -2302,7 +2305,9 @@ def _skill_view_with_bump(args, **kw):
     if stub is not None:
         return stub
     result = skill_view(
-        name, file_path=args.get("file_path"), task_id=task_id,
+        name,
+        file_path=args.get("file_path"),
+        task_id=task_id,
         schema_only=schema_only,
     )
     try:
@@ -2323,6 +2328,14 @@ def _skill_view_with_bump(args, **kw):
                 # which keys off last_used_at (see agent/curator.py).
                 if not schema_only:
                     bump_use(str(resolved))
+                    # Quality instrumentation (#2183) — Trigger facet:
+                    # the agent actively invoked this skill.
+                    try:
+                        from tools.skill_quality_signal import record_trigger
+
+                        record_trigger(str(resolved))
+                    except Exception:
+                        pass
     except Exception:
         pass
     return result
