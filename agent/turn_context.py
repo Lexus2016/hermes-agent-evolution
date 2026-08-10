@@ -214,6 +214,15 @@ def _compression_made_progress(
     same floor the overflow-handler retry path uses (conversation_loop.py,
     #39550) — so a sub-5% wobble doesn't keep the multi-pass loop spinning.
     """
+    # Record compaction event for eval signal (#2185 CompactionRL).
+    try:
+        from agent.compaction_eval import record_compaction_event
+        record_compaction_event(
+            messages_before=orig_len, messages_after=new_len,
+            tokens_before=orig_tokens, tokens_after=new_tokens,
+        )
+    except Exception:
+        pass
     if new_len < orig_len:
         return True
     return orig_tokens > 0 and new_tokens < orig_tokens * 0.95

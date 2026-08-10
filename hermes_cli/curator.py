@@ -111,6 +111,21 @@ def _cmd_status(args) -> int:
         f"{'' if curator.get_consolidate() else ' (prune-only; LLM merge pass opt-in)'}"
     )
 
+    # CompactionRL eval signal (#2185): show compaction stats in curator status.
+    try:
+        from agent.compaction_eval import get_eval_summary
+        ce = get_eval_summary()
+        if ce.get("total_events", 0) > 0:
+            sr = ce.get("success_rate")
+            sr_str = f"{sr:.0%}" if sr is not None else "n/a"
+            print(
+                f"  compaction:     {ce['total_events']} events  "
+                f"avg_ratio={ce['avg_ratio']:.2f}  success={sr_str}  "
+                f"tokens_saved={ce['total_tokens_saved']}"
+            )
+    except Exception:
+        pass
+
     rows = skill_usage.curated_report()
     if not rows:
         print("\nno curator-managed skills")
@@ -161,6 +176,15 @@ def _cmd_status(args) -> int:
             prov_tag = ""
             if srid or fr:
                 prov_tag = f"  run={srid or '-'}  fail_rate={fr:.0%}"
+            # Source-chain provenance (#2192): show source count + trust status
+            try:
+                from tools.skill_provenance import get_skill_provenance
+                chain = get_skill_provenance(r["name"])
+                if chain:
+                    untrusted = sum(1 for e in chain if not e.get("trusted"))
+                    prov_tag += f"  sources={len(chain)}  untrusted={untrusted}"
+            except Exception:
+                pass
             print(
                 f"  {r['name']:40s}  "
                 f"activity={r.get('activity_count', 0):3d}  "

@@ -1875,6 +1875,14 @@ def handle_function_call(
             middleware_trace=list(_tool_middleware_trace),
         )
 
+        # Source-chain provenance (#2192): record tool-call sources during
+        # background-review forks so the skill's origin chain is traceable.
+        try:
+            from tools.skill_provenance import add_provenance_entry
+            add_provenance_entry(function_name, source_id=function_args.get("url") or function_args.get("path") or "")
+        except Exception:
+            pass
+
         # Generic tool-result canonicalization seam: plugins receive the
         # final result string (JSON, usually) and may replace it by
         # returning a string from transform_tool_result. Runs after

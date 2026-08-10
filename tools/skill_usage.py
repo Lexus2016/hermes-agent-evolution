@@ -657,6 +657,8 @@ def _empty_record() -> Dict[str, Any]:
         # Provenance record fields (#2190)
         "source_run_id": None,
         "recent_failure_rate": 0.0,
+        # Source-chain provenance (#2192)
+        "source_chain": [],
     }
 
 
