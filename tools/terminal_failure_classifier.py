@@ -145,12 +145,34 @@ def classify_terminal_failure(
     text = _output_text(stdout, stderr)
     base_cmd = _base_command(command)
 
-    # Transient timeout / partial output is safe to retry with backoff.
-    # After 2 consecutive identical timeouts (was 3) the failure is
-    # deterministic — the same command with the same parameters cannot
-    # succeed.  Promote to ``timeout_deterministic`` so the agent gets a
-    # distinct signal to change parameters or switch tools (issue #1091).
-    if exit_code == 124 or any(p.search(text) for p in _TIMEOUT_PATTERNS):
+    # Wall-clock timeout: exit_code 124 is the ``timeout`` command's kill
+    # signal.  It is inherently non-retryable — the same command with the
+    # same parameters will take the same amount of time and time out again.
+    # Retrying amplifies a single 120s timeout into ~494s of wasted
+    # wall-clock (issue #2191).  Classify as ``timeout_deterministic`` so the
+    # agent gets a distinct signal to change parameters or switch tools.
+    # Text-based timeouts (e.g. curl "connection timed out") are transient
+    # network conditions and remain retryable on first occurrence.
+    text_based_timeout = any(p.search(text) for p in _TIMEOUT_PATTERNS)
+    if exit_code == 124:
+        return TerminalFailureClassification(
+            category=FailureCategory.timeout_deterministic,
+            hint=(
+                "The command exceeded the wall-clock timeout (exit_code=124). "
+                "Re-running the same command unchanged will time out again. "
+                "Change at least one of: the command, the working directory, "
+                "the timeout value, or the flags. Alternatively, run it in "
+                "the background with notify_on_complete=true, use "
+                "execute_code, or split the work into smaller steps."
+            ),
+            should_retry=False,
+        )
+
+    # Text-based timeout (e.g. "connection timed out" from curl) — a
+    # transient network condition that may recover on retry with backoff.
+    # After 2 consecutive identical timeouts the failure is deterministic;
+    # promote to ``timeout_deterministic`` (issue #1091).
+    if text_based_timeout:
         if consecutive_count >= 2:
             return TerminalFailureClassification(
                 category=FailureCategory.timeout_deterministic,
