@@ -182,6 +182,54 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         "The target wasn't found. Re-check the path/name (it may be dynamic), broaden the "
         "search, or create the prerequisite first — don't repeat the same lookup.",
     ),
+    # #2306 — terminal exit-code family mapping. The generic runtime_error
+    # catch-all below matches any "exit code: N" and labels every non-zero
+    # exit as a retryable runtime_error, but the dominant terminal failure
+    # bucket (465/7d, 0.135 rate, 67-deep spirals) is a non-zero exit with no
+    # exit-code-specific recovery hint. These rules decompose the exit-code
+    # space into per-family recovery routes BEFORE the catch-all. Ordered
+    # most-specific first (137/139/143 are exact signals, 2.x is a family).
+    (
+        re.compile(
+            r"\bexit code[:\s]+137\b",
+            re.I,
+        ),
+        "oom_killed",
+        "The process was killed by the OOM killer (exit 137 = SIGKILL). The command "
+        "exhausted memory. Reduce the workload (smaller input, chunk the work, lower "
+        "parallelism), or free memory first — do NOT retry the same command unchanged.",
+    ),
+    (
+        re.compile(
+            r"\bexit code[:\s]+139\b",
+            re.I,
+        ),
+        "segfault",
+        "The process segfaulted (exit 139 = SIGSEGV). This is a native crash, often in "
+        "a C extension or the runtime itself. Try a different approach, a smaller input, "
+        "or a different tool — retrying the same command will likely crash again.",
+    ),
+    (
+        re.compile(
+            r"\bexit code[:\s]+143\b",
+            re.I,
+        ),
+        "terminated",
+        "The process was terminated (exit 143 = SIGTERM). It was killed by a signal, "
+        "often a timeout or an external kill. Check for a timeout/limit, or run it in "
+        "the background — do NOT retry the same blocking command.",
+    ),
+    (
+        re.compile(
+            r"\bexit code[:\s]+2[0-9]?\b",
+            re.I,
+        ),
+        "command_misuse",
+        "The command exited with a 2.x code — shell builtin misuse or a bad argument "
+        "(e.g. `cd` to a missing dir, `export` with a bad name). This is deterministic: "
+        "the same command will fail identically. Fix the command/arguments, do NOT retry "
+        "it unchanged.",
+    ),
     (
         re.compile(
             r"traceback \(most recent call|exit code[:\s]+[1-9]|exit status [1-9]|non-zero exit|error:|exception|failed",

@@ -47,6 +47,40 @@ class TestClassify:
         )
         assert classify("process exited, exit code: 1")[0] == "runtime_error"
 
+    def test_exit_code_137_oom_killed(self):
+        """#2306 — exit 137 (SIGKILL/OOM) maps to oom_killed, not runtime_error."""
+        cat, hint = classify("process exited, exit code: 137")
+        assert cat == "oom_killed"
+        assert "OOM" in hint or "memory" in hint.lower()
+
+    def test_exit_code_139_segfault(self):
+        """#2306 — exit 139 (SIGSEGV) maps to segfault, not runtime_error."""
+        cat, hint = classify("process exited, exit code: 139")
+        assert cat == "segfault"
+        assert "segfault" in hint.lower() or "crash" in hint.lower()
+
+    def test_exit_code_143_terminated(self):
+        """#2306 — exit 143 (SIGTERM) maps to terminated, not runtime_error."""
+        cat, hint = classify("process exited, exit code: 143")
+        assert cat == "terminated"
+        assert "terminat" in hint.lower() or "signal" in hint.lower()
+
+    def test_exit_code_2_command_misuse(self):
+        """#2306 — exit 2 (shell misuse/bad arg) maps to command_misuse (deterministic)."""
+        cat, hint = classify("process exited, exit code: 2")
+        assert cat == "command_misuse"
+        assert "deterministic" in hint.lower() or "do not retry" in hint.lower()
+
+    def test_exit_code_25_command_misuse(self):
+        """#2306 — exit 25 (2.x family) also maps to command_misuse."""
+        cat, _ = classify("process exited, exit code: 25")
+        assert cat == "command_misuse"
+
+    def test_exit_code_127_still_runtime_error(self):
+        """#2306 — exit 127 (command not found is handled by missing_command;
+        raw 'exit code: 127' without 'command not found' falls to runtime_error)."""
+        assert classify("process exited, exit code: 127")[0] == "runtime_error"
+
     def test_retry_spiral_diagnostic_classified_correctly(self):
         """#2302 — the spiral-break diagnostic must classify as ``retry_spiral``,
         NOT ``runtime_error`` (the message contains "failed" which would
