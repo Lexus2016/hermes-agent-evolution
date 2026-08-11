@@ -3123,6 +3123,80 @@ def _glob_to_regex(glob: str) -> str:
     return "".join(out)
 
 
+def _classify_regex_error(pattern: str, exc) -> tuple:
+    """#2308 — decompose a regex compile failure into a sub-cause + recovery.
+
+    The pre-validation in ``_handle_search_files`` catches patterns that fail
+    ``re.compile`` before ripgrep ever sees them, but the returned error was
+    a single generic bucket with no sub-cause and no recovery directive —
+    so the agent blind-retried with near-identical patterns (74/7d, 17-deep
+    spirals). This classifies the ``re.error`` message into a structured
+    reason with a corrected-pattern suggestion.
+
+    Returns ``(reason, recovery)`` where ``reason`` is one of:
+      - ``invalid_regex_syntax`` — malformed regex (unclosed bracket/group,
+        bad escape, dangling quantifier)
+      - ``glob_as_regex`` — a shell glob that slipped past the auto-convert
+        guard (e.g. a ``[!...]`` negation or a pattern the heuristic missed)
+      - ``unsupported_feature`` — a regex feature ripgrep/Python rejects
+      - ``other`` — unclassified compile failure
+    """
+    if exc is None:
+        return (
+            "other",
+            "The regex failed to compile. Read the error text, fix the "
+            "pattern, and re-run — do NOT retry the same pattern unchanged.",
+        )
+    low = str(exc).lower()
+    # #2308 — glob_as_regex is checked BEFORE invalid_regex_syntax because
+    # it is more specific: a pattern containing ``[!`` (glob negation
+    # syntax, which is invalid in Python regex) is almost certainly a
+    # shell glob the model intended as a filename pattern. We key on the
+    # pattern-level signal ``[!`` rather than the error message text,
+    # because "unterminated character set" fires for ANY unclosed ``[``,
+    # including plain malformed regex like ``[unclosed`` that has no glob
+    # intent.
+    if "[!" in pattern:
+        return (
+            "glob_as_regex",
+            "This looks like a shell glob (filename pattern) passed as a "
+            "regex — the '[!' glob negation syntax is not valid regex. Use "
+            "target='files' or move it to the file_glob parameter instead of "
+            "the regex pattern.",
+        )
+    # Unclosed character class / group / dangling quantifier — the classic
+    # malformed-regex family.
+    if any(tok in low for tok in (
+        "unterminated", "unclosed", "missing ), unterminated subpattern",
+        "nothing to repeat", "multiple repeat", "unexpected end of pattern",
+        "bad escape", "invalid escape", "trailing backslash",
+    )):
+        return (
+            "invalid_regex_syntax",
+            "The regex is malformed (unclosed bracket/group, bad escape, or "
+            "dangling quantifier). Fix the syntax — e.g. close the '[' or '(' "
+            "and escape literal metacharacters with '\\'. Do NOT retry the "
+            "same malformed pattern.",
+        )
+    # Lookbehind/lookahead or other engine-specific feature rejection.
+    if any(tok in low for tok in (
+        "look-behind", "lookbehind", "fixed-width", "variable-length",
+        "not supported", "unsupported", "invalid group",
+    )):
+        return (
+            "unsupported_feature",
+            "The regex uses a feature the search engine does not support "
+            "(e.g. variable-width lookbehind). Rewrite it with a supported "
+            "construct — do NOT retry the same pattern.",
+        )
+    return (
+        "other",
+        "The regex failed to compile for an unclassified reason. Read the "
+        "error text, fix the pattern, and re-run — do NOT retry the same "
+        "pattern unchanged.",
+    )
+
+
 def _handle_search_files(args, **kw):
     tid = kw.get("task_id") or "default"
     target_map = {"grep": "content", "find": "files"}
@@ -3165,8 +3239,16 @@ def _handle_search_files(args, **kw):
         try:
             re.compile(pattern)
             compile_reason = ""
+            # Defensive default — this branch is only reached when the
+            # pattern fails _is_valid_regex, so compile always raises, but
+            # keep the classifier result bound for the type checker.
+            reason, recovery = _classify_regex_error(pattern, None)
         except re.error as exc:
             compile_reason = str(exc)
+            # #2308 — decompose the compile failure into a structured
+            # sub-cause + recovery directive so the agent fixes the pattern
+            # instead of blind-retrying with a near-identical one.
+            reason, recovery = _classify_regex_error(pattern, exc)
         return json.dumps(
             {
                 "error": (
@@ -3178,6 +3260,9 @@ def _handle_search_files(args, **kw):
                     "or move it to the file_glob parameter instead of the regex pattern.\n"
                     "  - Re-run search_files with a corrected regex pattern."
                 ),
+                # #2308 — structured reason + recovery.
+                "reason": reason,
+                "recovery": recovery,
             },
             ensure_ascii=False,
         )

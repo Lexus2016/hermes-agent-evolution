@@ -271,3 +271,63 @@ class TestInvalidRegexEnrichment:
                 assert "Invalid regex" not in data["error"]
         except (json.JSONDecodeError, TypeError):
             pass
+
+
+class TestStructuredRegexErrorReasons:
+    """#2308 — search_files parse errors carry a structured reason + recovery
+    directive so the agent fixes the pattern instead of blind-retrying with
+    a near-identical one (74/7d, 17-deep spirals)."""
+
+    def test_unclosed_bracket_has_invalid_regex_syntax_reason(self):
+        result = _handle_search_files(
+            {"pattern": "[unclosed", "target": "content"},
+            task_id="test",
+        )
+        data = json.loads(result)
+        assert data.get("reason") == "invalid_regex_syntax"
+        assert "recovery" in data
+        assert "malformed" in data["recovery"].lower()
+
+    def test_unclosed_group_has_invalid_regex_syntax_reason(self):
+        result = _handle_search_files(
+            {"pattern": "(", "target": "content"},
+            task_id="test",
+        )
+        data = json.loads(result)
+        assert data.get("reason") == "invalid_regex_syntax"
+        assert "recovery" in data
+
+    def test_glob_negation_has_glob_as_regex_reason(self):
+        """A '[!' glob negation is invalid regex — classify as glob_as_regex."""
+        result = _handle_search_files(
+            {"pattern": "[!a-z", "target": "content"},
+            task_id="test",
+        )
+        data = json.loads(result)
+        assert data.get("reason") == "glob_as_regex"
+        assert "target='files'" in data["recovery"] or "file_glob" in data["recovery"]
+
+    def test_lookbehind_has_unsupported_feature_reason(self):
+        """A variable-width lookbehind is rejected by Python re — classify
+        as unsupported_feature (ripgrep rejects it too)."""
+        result = _handle_search_files(
+            {"pattern": r"(?<=a+)b", "target": "content"},
+            task_id="test",
+        )
+        data = json.loads(result)
+        assert data.get("reason") == "unsupported_feature"
+        assert "recovery" in data
+
+    def test_valid_regex_has_no_reason(self):
+        """A valid regex must pass through to search_tool, not hit the
+        structured-error path."""
+        result = _handle_search_files(
+            {"pattern": r"\bfoo\b", "target": "content"},
+            task_id="test",
+        )
+        try:
+            data = json.loads(result)
+            if "error" in data:
+                assert "reason" not in data
+        except (json.JSONDecodeError, TypeError):
+            pass  # non-JSON -> went through to search_tool, correct
