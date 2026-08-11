@@ -1376,9 +1376,26 @@ async def vision_analyze_tool(
         # Detect vision capability errors — give the model a clear message
         # so it can inform the user instead of a cryptic API error.
         err_str = str(e).lower()
+        # #2310 — structured reason + fallback directive so the agent can
+        # distinguish "retry later" from "this input is invalid" instead of
+        # an opaque "other" error. Each branch sets a reason and a recovery
+        # path; the generic bucket gets a conservative fallback.
+        reason = "other"
+        recovery = (
+            "The vision backend failed with an unclassified error. Check the "
+            "underlying error text; if it looks transient (network/timeout), "
+            "retry once — otherwise the input may be invalid. Do NOT retry "
+            "the same image+question repeatedly."
+        )
         if any(hint in err_str for hint in (
             "402", "insufficient", "payment required", "credits", "billing",
         )):
+            reason = "insufficient_credits"
+            recovery = (
+                "The vision provider is out of credits or requires payment. "
+                "Top up the API provider account, then retry — do NOT retry "
+                "until the account is funded."
+            )
             analysis = (
                 "Insufficient credits or payment required. Please top up your "
                 f"API provider account and try again. Error: {e}"
@@ -1388,11 +1405,24 @@ async def vision_analyze_tool(
             "content_policy", "multimodal",
             "unrecognized request argument", "image input",
         )):
+            reason = "vision_not_supported"
+            recovery = (
+                "The configured model does not support vision input. Switch "
+                "to a vision-capable model (e.g. via auxiliary.vision.provider "
+                "in config.yaml) or use a different approach — retrying the "
+                "same model will fail identically."
+            )
             analysis = (
                 f"{model} does not support vision or our request was not "
                 f"accepted by the server. Error: {e}"
             )
         elif "invalid_request" in err_str or "image_url" in err_str:
+            reason = "invalid_image"
+            recovery = (
+                "The image was rejected by the vision API — unsupported "
+                "format, corrupted, or too large. Convert to a smaller "
+                "JPEG/PNG and retry with the corrected image."
+            )
             analysis = (
                 "The vision API rejected the image. This can happen when the "
                 "image is in an unsupported format, corrupted, or still too "
@@ -1410,6 +1440,9 @@ async def vision_analyze_tool(
             "success": False,
             "error": error_msg,
             "analysis": analysis,
+            # #2310 — structured reason + recovery directive.
+            "reason": reason,
+            "recovery": recovery,
         }
         
         debug_call_data["error"] = error_msg

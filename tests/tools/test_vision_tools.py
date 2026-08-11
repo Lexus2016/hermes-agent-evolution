@@ -896,3 +896,119 @@ class TestVisionCpuBurstCap:
             f"analyses were serialized to the cap (peak={calls_peak}); only the "
             "encode burst should be bounded, not the whole call"
         )
+
+
+# ---------------------------------------------------------------------------
+# Structured error reasons (#2310)
+# ---------------------------------------------------------------------------
+
+
+class TestStructuredErrorReasons:
+    """#2310 — vision_analyze 'other' errors carry a structured reason +
+    recovery directive so the agent can distinguish 'retry later' from
+    'this input is invalid' (mirrors tool_call #2245 / patch #2244)."""
+
+    @pytest.mark.asyncio
+    async def test_insufficient_credits_reason(self, tmp_path):
+        img = tmp_path / "test.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+        with (
+            patch(
+                "tools.vision_tools._image_to_base64_data_url",
+                return_value="data:image/png;base64,abc",
+            ),
+            patch(
+                "tools.vision_tools.async_call_llm",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("402 Payment Required: insufficient credits"),
+            ),
+        ):
+            result = json.loads(await vision_analyze_tool(str(img), "describe"))
+        assert result["success"] is False
+        assert result["reason"] == "insufficient_credits"
+        assert "top up" in result["recovery"].lower()
+
+    @pytest.mark.asyncio
+    async def test_vision_not_supported_reason(self, tmp_path):
+        img = tmp_path / "test.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+        with (
+            patch(
+                "tools.vision_tools._image_to_base64_data_url",
+                return_value="data:image/png;base64,abc",
+            ),
+            patch(
+                "tools.vision_tools.async_call_llm",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("model does not support image input"),
+            ),
+        ):
+            result = json.loads(await vision_analyze_tool(str(img), "describe"))
+        assert result["success"] is False
+        assert result["reason"] == "vision_not_supported"
+        assert "vision-capable" in result["recovery"].lower()
+
+    @pytest.mark.asyncio
+    async def test_invalid_image_reason(self, tmp_path):
+        img = tmp_path / "test.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+        with (
+            patch(
+                "tools.vision_tools._image_to_base64_data_url",
+                return_value="data:image/png;base64,abc",
+            ),
+            patch(
+                "tools.vision_tools.async_call_llm",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("invalid_request: image_url is malformed"),
+            ),
+        ):
+            result = json.loads(await vision_analyze_tool(str(img), "describe"))
+        assert result["success"] is False
+        assert result["reason"] == "invalid_image"
+        assert "JPEG/PNG" in result["recovery"]
+
+    @pytest.mark.asyncio
+    async def test_other_reason_fallback(self, tmp_path):
+        img = tmp_path / "test.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+        with (
+            patch(
+                "tools.vision_tools._image_to_base64_data_url",
+                return_value="data:image/png;base64,abc",
+            ),
+            patch(
+                "tools.vision_tools.async_call_llm",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("some completely unexpected backend error"),
+            ),
+        ):
+            result = json.loads(await vision_analyze_tool(str(img), "describe"))
+        assert result["success"] is False
+        assert result["reason"] == "other"
+        assert "recovery" in result
+
+    @pytest.mark.asyncio
+    async def test_success_has_no_reason(self, tmp_path):
+        """A successful analysis must NOT carry error-only fields."""
+        img = tmp_path / "test.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+        mock_response = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = "A test image"
+        mock_response.choices = [mock_choice]
+        with (
+            patch(
+                "tools.vision_tools._image_to_base64_data_url",
+                return_value="data:image/png;base64,abc",
+            ),
+            patch(
+                "tools.vision_tools.async_call_llm",
+                new_callable=AsyncMock,
+                return_value=mock_response,
+            ),
+        ):
+            result = json.loads(await vision_analyze_tool(str(img), "describe"))
+        assert result["success"] is True
+        assert "reason" not in result
+        assert "recovery" not in result
