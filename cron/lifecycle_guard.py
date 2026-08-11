@@ -258,7 +258,11 @@ def _read_referenced_script(path: Path) -> tuple[Optional[str], bool]:
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
     try:
         descriptor = os.open(path, flags)
-    except OSError:
+    except (OSError, ValueError):
+        # ValueError: "embedded null character in path" — os.open() raises
+        # ValueError (not OSError) when the path contains a null byte. This
+        # mirrors the (OSError, ValueError) pattern already used at the
+        # script_path.resolve() call site (#2303).
         return None, False
     try:
         metadata = os.fstat(descriptor)

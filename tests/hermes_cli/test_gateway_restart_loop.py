@@ -705,6 +705,25 @@ class TestLifecycleGuardModule:
         with pytest.raises(GatewayLifecycleBlocked):
             check_gateway_lifecycle("daily ops", str(script))
 
+    def test_read_referenced_script_null_byte_path(self):
+        """#2303: os.open() on a path with an embedded null byte raises
+        ValueError (not OSError). Before the fix, _read_referenced_script
+        only caught OSError, so the ValueError propagated and crashed the
+        terminal tool (~55 min wasted across 7 occurrences).
+
+        Now ValueError is caught alongside OSError, returning (None, False)
+        — treating a null-byte path as "nothing to scan", same as a missing
+        or unreadable file.
+        """
+        from pathlib import Path
+
+        from cron.lifecycle_guard import _read_referenced_script
+
+        # A path containing an embedded NUL byte — os.open() raises
+        # ValueError: embedded null character in path
+        result = _read_referenced_script(Path("evil\x00path.sh"))
+        assert result == (None, False)
+
 
 # ---------------------------------------------------------------------------
 # Defense 2 (chokepoint): cron.jobs.create_job blocks the AGENT model-tool path
