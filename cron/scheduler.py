@@ -4760,6 +4760,73 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
                 job_name,
             )
 
+        # ── Refusal-recovery nudge for cron dispatch (#2240 Slice B) ──────
+        # The main conversation loop wires maybe_refusal_nudge (loop_guard.py)
+        # to detect over-refusal and inject recovery directives. Cron dispatch
+        # bypasses conversation_loop.py, so refusals in cron contexts were
+        # unrecoverable (76% of 3138 refusals/7d unrecovered, majority in cron).
+        # Mirror the delegate_tool.py pattern (#2296): if the run completed
+        # text-only with refusal language, re-run ONCE with the recovery
+        # directive. Adopt only on verified recovery. Bounded: 1 re-run.
+        if (
+            result.get("completed")
+            and not _count_tool_calls(result.get("messages"))
+        ):
+            _cron_messages = result.get("messages") or []
+            _refusal_nudge = None
+            try:
+                from agent.loop_guard import maybe_refusal_nudge as _maybe_refusal
+
+                _refusal_nudge = _maybe_refusal(
+                    _cron_messages, already_nudged=False
+                )
+            except Exception:
+                _refusal_nudge = None
+            if _refusal_nudge:
+                logger.info(
+                    "Cron job '%s' refusal detected; re-running with recovery nudge",
+                    job_name,
+                )
+                _refusal_result = None
+                try:
+                    _refusal_result = _cron_context.run(
+                        lambda: agent.run_conversation(_refusal_nudge)
+                    )
+                except Exception as _rf_exc:
+                    logger.warning(
+                        "Cron job '%s' refusal-recovery re-run raised %s; keeping original",
+                        job_name,
+                        type(_rf_exc).__name__,
+                    )
+                if _refusal_result:
+                    # Only adopt if recovery actually happened: the re-run made
+                    # tool calls OR the response no longer reads as a refusal.
+                    _rf_still_refusal = False
+                    try:
+                        from agent.loop_guard import (
+                            maybe_refusal_nudge as _mr2,
+                        )
+
+                        _rf_still_refusal = (
+                            _mr2(
+                                _refusal_result.get("messages") or [],
+                                already_nudged=True,
+                            )
+                            is not None
+                        )
+                    except Exception:
+                        pass
+                    _rf_tool_calls = _count_tool_calls(
+                        _refusal_result.get("messages")
+                    )
+                    if _rf_tool_calls or not _rf_still_refusal:
+                        result = _refusal_result
+                        logger.info(
+                            "Cron job '%s' refusal recovery adopted (%d tool calls in re-run)",
+                            job_name,
+                            _rf_tool_calls,
+                        )
+
         final_response = result.get("final_response", "") or ""
         # Zero-tool-call detection (#701): a "successful" run that never
         # invoked a single tool usually means a broken or missing toolset —
