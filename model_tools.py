@@ -1976,11 +1976,24 @@ def handle_function_call(
         except Exception as _hook_err:
             logger.debug("transform_tool_result hook error: %s", _hook_err)
 
-        # Record successful tool outcome for circuit-breaker tracking.
+        # Record tool outcome for circuit-breaker tracking.
+        #
+        # A tool that returns a normal JSON result is NOT necessarily a
+        # success: `terminal` returns exit_code != 0 (and `status: "error"`)
+        # for failed commands without raising, so it lands on this path and
+        # would otherwise reset the breaker to 0 every call — the breaker
+        # never accumulates consecutive failures and the retry spiral runs
+        # unchecked (#2302, 8th recurrence). Inspect the result for error
+        # indicators and record a failure when present.
         try:
-            from agent.tool_error_recovery import record_tool_outcome
+            from agent.tool_error_recovery import (
+                record_tool_outcome,
+                result_indicates_failure,
+            )
 
-            record_tool_outcome(function_name, success=True)
+            record_tool_outcome(
+                function_name, success=not result_indicates_failure(result)
+            )
         except Exception:
             pass
 

@@ -15,6 +15,7 @@ from agent.tool_error_recovery import (
     CircuitBreaker,
     get_breaker,
     record_tool_outcome,
+    result_indicates_failure,
 )
 from tools.registry import registry
 
@@ -97,3 +98,64 @@ def test_circuit_breaker_threshold_configurable():
     assert not b.should_trip()
     b.record_failure()
     assert b.should_trip()
+
+
+# ── result_indicates_failure (#2302) ────────────────────────────────────
+
+
+def test_result_indicates_failure_terminal_exit_code():
+    """A terminal result with exit_code != 0 is a failure."""
+    assert result_indicates_failure(
+        json.dumps({"output": "boom", "exit_code": 1, "status": "error"})
+    )
+
+
+def test_result_indicates_failure_status_error():
+    """A result with status 'error' is a failure even without exit_code."""
+    assert result_indicates_failure(json.dumps({"output": "", "status": "error"}))
+
+
+def test_result_indicates_failure_error_field():
+    """A result with an error field is a failure."""
+    assert result_indicates_failure(json.dumps({"error": "command not found"}))
+
+
+def test_result_indicates_failure_success_exit_zero():
+    """exit_code == 0 and no error field is a success."""
+    assert not result_indicates_failure(
+        json.dumps({"output": "ok", "exit_code": 0, "status": "success"})
+    )
+
+
+def test_result_indicates_failure_non_json_is_success():
+    """Non-JSON results are treated as success (fail-open)."""
+    assert not result_indicates_failure("plain text output")
+    assert not result_indicates_failure(None)
+    assert not result_indicates_failure(123)
+
+
+def test_result_indicates_failure_non_dict_json_is_success():
+    """JSON that is not a dict has no error indicator."""
+    assert not result_indicates_failure(json.dumps(["a", "b"]))
+    assert not result_indicates_failure(json.dumps("just a string"))
+
+
+def test_result_indicates_failure_malformed_json_is_success():
+    """Malformed JSON is treated as success (fail-open)."""
+    assert not result_indicates_failure("{not valid json")
+
+
+def test_terminal_failure_accumulates_breaker():
+    """A terminal failure result must accumulate the breaker, not reset it.
+
+    Regression for #2302: previously the success path recorded success=True
+    unconditionally, so a terminal command returning exit_code != 0 reset
+    the breaker to 0 every call and the retry spiral never tripped.
+    """
+    for _ in range(5):
+        record_tool_outcome(
+            "terminal", success=not result_indicates_failure(
+                json.dumps({"output": "err", "exit_code": 1, "status": "error"})
+            )
+        )
+    assert get_breaker("terminal").should_trip()

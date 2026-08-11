@@ -19,6 +19,7 @@ loop's semantics and risk cache-breaking mid-conversation.
 from __future__ import annotations
 
 import enum
+import json
 import logging
 import re
 from dataclasses import dataclass, field
@@ -434,3 +435,34 @@ def record_tool_outcome(tool_name: str, success: bool) -> None:
         breaker.record_success()
     else:
         breaker.record_failure()
+
+
+def result_indicates_failure(result: object) -> bool:
+    """Return True when a tool result string signals a failed call.
+
+    Some tools (notably ``terminal``) return a normal JSON result with an
+    error indicator (``exit_code != 0``, ``status: "error"``, or an
+    ``error`` field) instead of raising an exception. Callers that record
+    circuit-breaker outcomes must treat these as failures — otherwise the
+    breaker resets to 0 on every call and never trips, letting a retry
+    spiral run unchecked (#2302, 8th recurrence).
+
+    Non-JSON results and JSON that is not a dict are treated as success
+    (no error indicator present). Fail-open: any parse error returns False.
+    """
+    if not isinstance(result, str):
+        return False
+    try:
+        parsed = json.loads(result)
+    except Exception:
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    exit_code = parsed.get("exit_code")
+    if isinstance(exit_code, int) and exit_code != 0:
+        return True
+    if parsed.get("status") == "error":
+        return True
+    if parsed.get("error"):
+        return True
+    return False
