@@ -47,6 +47,18 @@ class TestClassify:
         )
         assert classify("process exited, exit code: 1")[0] == "runtime_error"
 
+    def test_retry_spiral_diagnostic_classified_correctly(self):
+        """#2302 — the spiral-break diagnostic must classify as ``retry_spiral``,
+        NOT ``runtime_error`` (the message contains "failed" which would
+        otherwise match the runtime_error catch-all)."""
+        msg = (
+            "Retry spiral detected: this exact command has failed identically "
+            "4 times in a row (threshold 3). It is failing deterministically."
+        )
+        cat, hint = classify(msg)
+        assert cat == "retry_spiral"
+        assert "deterministic" in hint.lower()
+
 
 class TestInlineDiagnosticsEnabled:
     def test_default_off_with_empty_config(self, monkeypatch):

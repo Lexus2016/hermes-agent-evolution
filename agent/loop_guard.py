@@ -128,7 +128,7 @@ _NON_RETRYABLE_BY_TOOL: dict[str, frozenset[str]] = {
     # taxonomy which classifies them as parse_error.  Without this entry the
     # loop_guard fires one cycle later (at the generic fail threshold instead
     # of the non-retryable threshold of 2), allowing extra spiral iterations.
-    "terminal": frozenset({"parse_error"}),
+    "terminal": frozenset({"parse_error", "retry_spiral"}),
     # #1944 — search_files regex/glob parse errors: the same invalid pattern
     # will fail identically on every retry. tool_diagnostics now classifies
     # rg/grep pattern-rejection messages as parse_error (previously they fell

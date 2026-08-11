@@ -114,6 +114,37 @@ class TestSearchFilesNoResultStaysRetryable:
         assert n is not None and "non-retryable" not in n
 
 
+class TestTerminalRetrySpiralNonRetryable:
+    """#2302 — terminal retry_spiral must be enforced as non-retryable.
+
+    When terminal_tool escalates an identical-failure spiral, it sets
+    ``failure_class = "retry_spiral"`` in the result JSON and replaces the
+    error text with a "Retry spiral detected: ..." diagnostic. tool_diagnostics
+    classifies that text as ``retry_spiral``, and loop_guard must treat it as
+    non-retryable so the guard fires at the 2-call threshold instead of the
+    much-higher generic fail threshold (observed: 67 consecutive retries).
+    """
+
+    _SPIRAL_MSG = (
+        "Retry spiral detected: this exact command has failed identically "
+        "4 times in a row (threshold 3). It is failing deterministically — "
+        "running it again unchanged will produce the same failure."
+    )
+
+    def test_is_non_retryable(self):
+        assert _is_non_retryable("terminal", "retry_spiral")
+
+    def test_two_spiral_results_trip_hard_stop(self):
+        n = maybe_nudge(_fail_run("terminal", 2, self._SPIRAL_MSG))
+        assert n is not None and "non-retryable" in n and "retry_spiral" in n
+
+    def test_two_spiral_results_warrant_cron_hard_stop(self):
+        assert run_warrants_cron_hard_stop(_fail_run("terminal", 2, self._SPIRAL_MSG))
+
+    def test_single_spiral_is_quiet(self):
+        assert maybe_nudge(_fail_run("terminal", 1, self._SPIRAL_MSG)) is None
+
+
 class TestGlobalClassesStillApplyToPerToolTools:
     def test_read_file_permission_trips_non_retryable(self):
         n = maybe_nudge(_fail_run("read_file", 2, "permission denied"))

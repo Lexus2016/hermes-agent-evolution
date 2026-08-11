@@ -80,6 +80,29 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         "Fix the pattern syntax, or use search_files with target='files' for glob patterns.",
     ),
     (
+        # #2302 — terminal retry-spiral diagnostic. When terminal_tool detects
+        # the SAME command failing identically N times in a row, it escalates
+        # the result to a ``retry_spiral`` diagnostic (spiral_break_diagnostic).
+        # That diagnostic message contains the word "failed" which would
+        # otherwise match the runtime_error catch-all (line ~164) — classifying
+        # it as retryable ``runtime_error``. But a retry spiral is the MOST
+        # deterministic failure class there is: the same command WILL fail
+        # identically again. Match the diagnostic's signature text and classify
+        # as ``retry_spiral`` so loop_guard can enforce it as non-retryable
+        # (via ``_NON_RETRYABLE_BY_TOOL["terminal"]``). Must run BEFORE the
+        # runtime_error catch-all.
+        re.compile(
+            r"\bretry spiral detected\b",
+            re.I,
+        ),
+        "retry_spiral",
+        "This command has failed identically multiple times in a row — it is "
+        "deterministic and retrying it unchanged WILL fail again. Stop retrying: "
+        "read the error, fix the root cause, change the command or its arguments, "
+        "or switch to a different tool (read_file, execute_code, process, "
+        "web_search). Do NOT retry the same command.",
+    ),
+    (
         # #2168 — tool-level refusal: the tool or backend actively refused
         # the request (HTTP 403, access blocked, refused, rejected). Distinct
         # from ``permission`` (filesystem OS-level denial): a refusal is the
