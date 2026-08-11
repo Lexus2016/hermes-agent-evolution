@@ -59,6 +59,7 @@ from tools.terminal_failure_classifier import (
     spiral_break_diagnostic,
     streak_recommendation,
 )
+from tools.path_validation import suggest_nearby_paths, format_nearby_hint
 
 logger = logging.getLogger(__name__)
 
@@ -3613,6 +3614,35 @@ def terminal_tool(
                             result.get("output_total_chars"),
                             command,
                         )
+                        # #2242 Slice B — surface nearby paths when the shell
+                        # reports a missing file (the missing_command classifier
+                        # catches "No such file or directory" first, so we enrich
+                        # HERE, before the early return, not at the generic path
+                        # below). Mirrors read_file/search_files/patch.
+                        if "No such file or directory" in output:
+                            _nf_path = None
+                            # Form 1: "cmd: /path: No such file or directory"
+                            _m1 = re.search(
+                                r":\s+'?([^\s':]+?)'?\s*:\s*No such file or directory",
+                                output,
+                            )
+                            # Form 2: "cannot access '/path'"
+                            _m2 = re.search(
+                                r"cannot access ['\"]([^'\"]+)['\"]", output
+                            )
+                            if _m2:
+                                _nf_path = _m2.group(1)
+                            elif _m1:
+                                _nf_path = _m1.group(1)
+                            if _nf_path:
+                                _nearby = suggest_nearby_paths(_nf_path)
+                                _hint = format_nearby_hint(_nf_path, _nearby)
+                                if _hint:
+                                    result_dict["error"] = (
+                                        str(result_dict.get("error") or "")
+                                        + "\n\n"
+                                        + _hint
+                                    )
                         return json.dumps(result_dict, ensure_ascii=False)
 
                 # Successful (or informational) result: reset streak and process output.

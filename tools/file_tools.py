@@ -2298,6 +2298,29 @@ def patch_tool(
                 return tool_error(f"Unknown mode: {mode}")
 
             result_dict = result.to_dict()
+            # #2242 Slice B — when patch targets a non-existent file, surface
+            # nearby paths (mirrors read_file #2293 / search_files). Covers
+            # both replace-mode ("File not found:") and V4A-mode ("file not
+            # found") errors. Suppressed when the impl already attached
+            # similar_files (shell-based suggestion found something).
+            _patch_nf_err = result_dict.get("error") or ""
+            if (
+                isinstance(_patch_nf_err, str)
+                and "not found" in _patch_nf_err.lower()
+                and not result_dict.get("similar_files")
+            ):
+                # resolve the first path mentioned in the error back to its
+                # absolute form via _path_to_resolved (replace mode); fall back
+                # to the raw path for V4A multi-file patches.
+                _nf_path = path or ""
+                if mode != "replace" and _paths_to_check:
+                    _nf_path = _paths_to_check[0]
+                _nf_resolved = _path_to_resolved.get(_nf_path) or _nf_path or ""
+                if _nf_resolved:
+                    _nearby = suggest_nearby_paths(_nf_resolved)
+                    _hint = format_nearby_hint(_nf_resolved, _nearby)
+                    if _hint:
+                        result_dict["error"] = _patch_nf_err + "\n\n" + _hint
             if stale_warnings:
                 result_dict["_warning"] = (
                     stale_warnings[0]
@@ -2706,6 +2729,13 @@ def search_tool(
         # flowing through the consecutive-search bookkeeping below.
         _search_err = result_dict.get("error") or ""
         if isinstance(_search_err, str) and _search_err.startswith("Path not found:"):
+            # #2242 Slice B — surface nearby paths so the agent can correct a
+            # hallucinated search root in one turn instead of guessing. Mirrors
+            # the read_file integration (#2293) at the same call-site pattern.
+            _nearby = suggest_nearby_paths(resolved_search_path)
+            _hint = format_nearby_hint(resolved_search_path, _nearby)
+            if _hint:
+                result_dict["error"] = _search_err + "\n\n" + _hint
             _search_nf_json = json.dumps(result_dict, ensure_ascii=False)
             _record_not_found("search", resolved_search_path, task_id, _search_nf_json)
 
