@@ -2926,6 +2926,75 @@ def _run_single_child(
         tool_trace = _outcome["tool_trace"]
         exit_reason = _outcome["exit_reason"]
 
+        # ── Refusal-recovery nudge for subagent dispatch (#2292, child of #2240) ──
+        # The main conversation loop wires maybe_refusal_nudge (loop_guard.py:1361)
+        # to detect over-refusal and inject recovery directives. Subagent dispatch
+        # bypasses conversation_loop.py, so refusals in subagent contexts were
+        # unrecoverable. Mirror the main loop: if child completed with text-only
+        # refusal language, re-run the SAME child once with the recovery directive.
+        # Same isolation as shallow-retry; adopts only on actual recovery. Bounded: 1.
+        if (
+            status == "completed"
+            and not tool_trace
+            and getattr(child, "_delegate_role", None) != "orchestrator"
+        ):
+            _child_messages = result.get("messages") or []
+            _refusal_nudge = None
+            try:
+                from agent.loop_guard import maybe_refusal_nudge as _maybe_refusal
+
+                _refusal_nudge = _maybe_refusal(_child_messages, already_nudged=False)
+            except Exception:
+                _refusal_nudge = None
+            if _refusal_nudge:
+                logger.info(
+                    "Subagent %d refusal detected; re-running with recovery nudge",
+                    task_index,
+                )
+                try:
+                    from agent.delegation_context import (
+                        delegated_child_context as _dcc,
+                    )
+
+                    with _dcc(str(getattr(child, "session_id", "") or "")):
+                        _refusal_result = child.run_conversation(
+                            user_message=_refusal_nudge,
+                            task_id=child_task_id,
+                            stream_callback=_relay_child_text,
+                        )
+                except Exception as _rf_exc:
+                    logger.warning(
+                        "Subagent %d refusal-recovery re-run raised %s; keeping original",
+                        task_index,
+                        type(_rf_exc).__name__,
+                    )
+                    _refusal_result = None
+                if _refusal_result:
+                    _rf_outcome = _derive_child_outcome(_refusal_result)
+                    # Only adopt if recovery actually happened: the re-run made
+                    # tool calls OR the summary no longer reads as a refusal.
+                    _rf_still_refusal = False
+                    try:
+                        from agent.loop_guard import maybe_refusal_nudge as _mr2
+
+                        _rf_still_refusal = (
+                            _mr2(
+                                _refusal_result.get("messages") or [],
+                                already_nudged=True,
+                            )
+                            is not None
+                        )
+                    except Exception:
+                        pass
+                    if _rf_outcome["tool_trace"] or not _rf_still_refusal:
+                        summary = _rf_outcome["summary"]
+                        completed = _rf_outcome["completed"]
+                        api_calls = _rf_outcome["api_calls"]
+                        status = _rf_outcome["status"]
+                        tool_trace = _rf_outcome["tool_trace"]
+                        exit_reason = _rf_outcome["exit_reason"]
+                        result = _refusal_result  # noqa: F841 — update for downstream
+
         # Bounded shallow-delegation auto-retry (issue #323). A child that
         # COMPLETED but made ZERO tool calls returned narrative text instead
         # of executing tools — the round-trip is already wasted. Re-run the
