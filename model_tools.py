@@ -362,8 +362,12 @@ def get_tool_definitions(
             # schemas are treated as read-only by all known callers.
             return list(cached)
 
-    result = _compute_tool_definitions(enabled_toolsets, disabled_toolsets, quiet_mode,
-                                       skip_tool_search_assembly=skip_tool_search_assembly)
+    result = _compute_tool_definitions(
+        enabled_toolsets,
+        disabled_toolsets,
+        quiet_mode,
+        skip_tool_search_assembly=skip_tool_search_assembly,
+    )
     if quiet_mode and cache_key is not None:
         # Cache the freshly-computed list, but hand callers a shallow copy so
         # downstream mutations (e.g. run_agent appending memory/LCM tool
@@ -1879,7 +1883,11 @@ def handle_function_call(
         # background-review forks so the skill's origin chain is traceable.
         try:
             from tools.skill_provenance import add_provenance_entry
-            add_provenance_entry(function_name, source_id=function_args.get("url") or function_args.get("path") or "")
+
+            add_provenance_entry(
+                function_name,
+                source_id=function_args.get("url") or function_args.get("path") or "",
+            )
         except Exception:
             pass
 
@@ -1888,6 +1896,7 @@ def handle_function_call(
         # detect forbidden-tool usage when the skill is deactivated.
         try:
             from tools.skill_compliance import record_tool_call_for_active_skill
+
             record_tool_call_for_active_skill(function_name)
         except Exception:
             pass
@@ -2006,12 +2015,19 @@ def handle_function_call(
         try:
             from agent.tool_error_recovery import (
                 classify_tool_error,
+                classify_tool_exception,
                 recovery_hint,
                 record_tool_outcome,
                 get_breaker,
             )
 
-            failure = classify_tool_error(function_name, str(e))
+            # #2245 — inspect the exception *type* first (catches TimeoutError,
+            # ConnectionError, KeyError, HTTP-status wrappers that stringify to
+            # unhelpful messages), then fall back to the string classifier.
+            try:
+                failure = classify_tool_exception(function_name, e)
+            except Exception:
+                failure = classify_tool_error(function_name, str(e))
             hint = recovery_hint(failure)
             if hint:
                 enriched = f"{enriched}{hint}"

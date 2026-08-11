@@ -33,27 +33,27 @@ logger = logging.getLogger(__name__)
 class ToolErrorClass(enum.Enum):
     """Classification of a tool-level failure."""
 
-    transient = "transient"          # timeout, resource busy — retry may help
-    not_found = "not_found"           # file/path not found — check path
-    permission = "permission"        # auth/permission denied — check credentials
-    validation = "validation"        # bad arguments — fix the call args
-    rate_limit = "rate_limit"        # tool-specific rate limit — backoff
-    dependency = "dependency"         # missing system dependency — install/configure
-    permanent = "permanent"           # structural failure — won't fix by retrying
-    unknown = "unknown"              # couldn't classify
+    transient = "transient"  # timeout, resource busy — retry may help
+    not_found = "not_found"  # file/path not found — check path
+    permission = "permission"  # auth/permission denied — check credentials
+    validation = "validation"  # bad arguments — fix the call args
+    rate_limit = "rate_limit"  # tool-specific rate limit — backoff
+    dependency = "dependency"  # missing system dependency — install/configure
+    permanent = "permanent"  # structural failure — won't fix by retrying
+    unknown = "unknown"  # couldn't classify
 
 
 class RecoveryAction(enum.Enum):
     """Suggested recovery action for a tool error."""
 
-    retry = "retry"                     # retry the same call (transient)
-    fix_args = "fix_args"               # fix the arguments and retry
-    check_path = "check_path"           # verify the file/path exists
+    retry = "retry"  # retry the same call (transient)
+    fix_args = "fix_args"  # fix the arguments and retry
+    check_path = "check_path"  # verify the file/path exists
     check_credentials = "check_credentials"  # verify API key / permissions
     install_dependency = "install_dependency"  # install missing system tool
     use_alternative = "use_alternative"  # try a different tool or approach
-    escalate = "escalate"               # surface to user, can't auto-recover
-    abort = "abort"                     # stop trying — permanent failure
+    escalate = "escalate"  # surface to user, can't auto-recover
+    abort = "abort"  # stop trying — permanent failure
 
 
 @dataclass
@@ -64,9 +64,9 @@ class ToolFailure:
     error_message: str
     error_class: ToolErrorClass
     recovery_action: RecoveryAction
-    hint: str = ""                     # human-readable recovery suggestion
+    hint: str = ""  # human-readable recovery suggestion
     attempt_number: int = 1
-    timestamp: float = 0.0             # set by caller if needed
+    timestamp: float = 0.0  # set by caller if needed
 
 
 # ── Pattern-based classifier ────────────────────────────────────────────
@@ -79,14 +79,19 @@ _PATTERNS: list[tuple[re.Pattern, ToolErrorClass, RecoveryAction, str]] = [
     # Dependency missing (must precede not_found — "command not found"
     # would otherwise match the not_found pattern)
     (
-        re.compile(r"command not found|not recognized|no module named|importerror|modulenotfound|executable.*not found", re.I),
+        re.compile(
+            r"command not found|not recognized|no module named|importerror|modulenotfound|executable.*not found",
+            re.I,
+        ),
         ToolErrorClass.dependency,
         RecoveryAction.install_dependency,
         "A required system dependency is missing. Install it and retry.",
     ),
     # Not found
     (
-        re.compile(r"no such file|file not found|does not exist|not found|enoent", re.I),
+        re.compile(
+            r"no such file|file not found|does not exist|not found|enoent", re.I
+        ),
         ToolErrorClass.not_found,
         RecoveryAction.check_path,
         "The file or path was not found. Verify the path exists and is accessible.",
@@ -107,14 +112,20 @@ _PATTERNS: list[tuple[re.Pattern, ToolErrorClass, RecoveryAction, str]] = [
     ),
     # Timeout / transient
     (
-        re.compile(r"timeout|timed out|connection reset|temporarily unavailable|try again", re.I),
+        re.compile(
+            r"timeout|timed out|connection reset|temporarily unavailable|try again",
+            re.I,
+        ),
         ToolErrorClass.transient,
         RecoveryAction.retry,
         "A transient error occurred. Retrying the same call may succeed.",
     ),
     # Validation / bad args
     (
-        re.compile(r"invalid|validation|bad request|wrong type|expected.*got|argument|param.*required|missing", re.I),
+        re.compile(
+            r"invalid|validation|bad request|wrong type|expected.*got|argument|param.*required|missing",
+            re.I,
+        ),
         ToolErrorClass.validation,
         RecoveryAction.fix_args,
         "The tool arguments were invalid. Review the schema and fix the arguments.",
@@ -177,7 +188,9 @@ def refine_classification(
     return failure
 
 
-def classify_tool_error(tool_name: str, error_message: str, attempt: int = 1) -> ToolFailure:
+def classify_tool_error(
+    tool_name: str, error_message: str, attempt: int = 1
+) -> ToolFailure:
     """Classify a tool-level error and suggest a recovery action.
 
     Parameters
@@ -223,6 +236,126 @@ def classify_tool_error(tool_name: str, error_message: str, attempt: int = 1) ->
 
     # #2169, #2168 — narrow the classification for tool-specific recoverability
     return refine_classification(result)
+
+
+# ── Exception-type-aware classification (#2245) ─────────────────────────
+#
+# tool_call (deferred-tool / MCP dispatch) failures surface as opaque "other"
+# errors because ``classify_tool_error`` only sees ``str(exc)`` — the exception
+# *type* (TimeoutError, ConnectionError, KeyError, HTTP-status wrappers) is lost,
+# landing in the ``unknown`` bucket with zero recovery guidance (291 "other"
+# failures / 7d, max 13-deep spiral). ``classify_tool_exception`` inspects the
+# exception object directly before falling back to the string classifier.
+
+
+def _resolve_timeout_types() -> tuple[type, ...]:
+    import asyncio
+
+    types: list[type] = [asyncio.TimeoutError, TimeoutError]
+    try:
+        from concurrent.futures import TimeoutError as _FT
+
+        types.append(_FT)
+    except Exception:
+        pass
+    return tuple(types)
+
+
+def _resolve_connection_types() -> tuple[type, ...]:
+    types: list[type] = [ConnectionError, OSError]
+    try:
+        import aiohttp
+
+        types.append(aiohttp.ClientError)
+    except Exception:
+        pass
+    try:
+        import httpx
+
+        types.append(httpx.TransportError)
+    except Exception:
+        pass
+    return tuple(types)
+
+
+_EXC_MAP: list[tuple[tuple[type, ...], ToolErrorClass, RecoveryAction, str]] = [
+    (
+        _resolve_timeout_types(),
+        ToolErrorClass.transient,
+        RecoveryAction.retry,
+        "The deferred tool call timed out. Retry tool_call — if it times out again, try a lighter-weight alternative.",
+    ),
+    (
+        _resolve_connection_types(),
+        ToolErrorClass.transient,
+        RecoveryAction.retry,
+        "Connection error reaching the tool server (MCP). Retry once; if it persists the server may be down — try an alternative tool.",
+    ),
+    (
+        (ValueError, TypeError),
+        ToolErrorClass.validation,
+        RecoveryAction.fix_args,
+        "The tool rejected the arguments. Call tool_describe to see the schema, then retry with correctly-typed args.",
+    ),
+    (
+        (KeyError,),
+        ToolErrorClass.not_found,
+        RecoveryAction.use_alternative,
+        "The tool server reported a missing key — tool name or registry entry not found. Use tool_search to list available tools.",
+    ),
+]
+
+
+def classify_tool_exception(
+    tool_name: str, exc: BaseException, attempt: int = 1
+) -> ToolFailure:
+    """Classify a deferred-tool-call exception by inspecting its *type* (#2245).
+
+    Falls back to ``classify_tool_error`` on the stringified message when the
+    exception type is not recognised, ensuring no regression for existing paths.
+    """
+    # Check HTTP-status-bearing exceptions first (instance attrs, not type).
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    if status is not None:
+        try:
+            status = int(status)
+        except (TypeError, ValueError):
+            status = None
+    if status is not None:
+        if status == 404:
+            return ToolFailure(
+                tool_name,
+                str(exc),
+                ToolErrorClass.not_found,
+                RecoveryAction.use_alternative,
+                "The tool returned 404 — not found. Use tool_search to confirm the name.",
+                attempt,
+            )
+        if 500 <= status < 600:
+            return ToolFailure(
+                tool_name,
+                str(exc),
+                ToolErrorClass.transient,
+                RecoveryAction.use_alternative,
+                "Server error (5xx). Retry once, then switch to an alternative tool.",
+                attempt,
+            )
+        if 400 <= status < 500:
+            return ToolFailure(
+                tool_name,
+                str(exc),
+                ToolErrorClass.validation,
+                RecoveryAction.fix_args,
+                "Client error (4xx). Review the arguments and retry.",
+                attempt,
+            )
+
+    for exc_types, cls, action, hint in _EXC_MAP:
+        if isinstance(exc, exc_types):
+            return ToolFailure(tool_name, str(exc), cls, action, hint, attempt)
+
+    # Fallback: string-based classification (preserves existing behaviour).
+    return classify_tool_error(tool_name, str(exc), attempt)
 
 
 def recovery_hint(failure: ToolFailure) -> str:
