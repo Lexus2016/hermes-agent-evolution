@@ -3120,6 +3120,15 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
             )
     else:
         def _execute(next_args: dict) -> Any:
+            # #2236 — record non-atomic tool calls in the live dispatch path
+            # (rework: the prior PR shipped the module as dead code). Guarded
+            # by is_non_atomic() because record() raises for atomic tools.
+            try:
+                from tools.tool_call_log import get_default_log, is_non_atomic
+                if is_non_atomic(function_name):
+                    get_default_log().record(function_name, next_args)
+            except Exception:
+                pass
             dispatch_kwargs = dict(
                 tool_call_id=tool_call_id,
                 session_id=agent.session_id or "",

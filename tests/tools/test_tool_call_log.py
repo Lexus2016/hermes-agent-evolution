@@ -258,3 +258,80 @@ class TestDefaultLog:
         assert len(log.all_entries()) >= 1
         reset_default_log()
         assert len(log.all_entries()) == 0
+
+
+# ── dispatch-path integration (rework of #2236) ─────────────────────────
+
+
+class TestDispatchIntegration:
+    """invoke_tool must record non-atomic calls in the live dispatch path."""
+
+    def test_invoke_tool_records_non_atomic(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        from agent.agent_runtime_helpers import invoke_tool
+
+        agent = MagicMock()
+        agent.session_id = "s1"
+        agent._current_turn_id = "t1"
+        agent._current_api_request_id = "r1"
+        agent.valid_tool_names = ["agentmail__send_message"]
+        agent.enabled_toolsets = None
+        agent.disabled_toolsets = None
+        agent._memory_manager = None  # avoid the memory-manager branch
+
+        fake_log = ToolCallLog()
+        with (
+            patch("tools.tool_call_log.get_default_log", return_value=fake_log),
+            patch(
+                "agent.agent_runtime_helpers._ra",
+                return_value=MagicMock(
+                    handle_function_call=lambda *a, **k: '{"success": true}'
+                ),
+            ),
+        ):
+            invoke_tool(
+                agent,
+                "agentmail__send_message",
+                {"to": "bob@b.com", "subject": "hi"},
+                "task1",
+                skip_tool_execution_middleware=True,
+            )
+
+        entries = fake_log.all_entries()
+        assert len(entries) == 1
+        assert entries[0].tool_name == "agentmail__send_message"
+
+    def test_invoke_tool_skips_atomic(self) -> None:
+        from unittest.mock import MagicMock, patch
+
+        from agent.agent_runtime_helpers import invoke_tool
+
+        agent = MagicMock()
+        agent.session_id = "s1"
+        agent._current_turn_id = "t1"
+        agent._current_api_request_id = "r1"
+        agent.valid_tool_names = ["read_file"]
+        agent.enabled_toolsets = None
+        agent.disabled_toolsets = None
+        agent._memory_manager = None
+
+        fake_log = ToolCallLog()
+        with (
+            patch("tools.tool_call_log.get_default_log", return_value=fake_log),
+            patch(
+                "agent.agent_runtime_helpers._ra",
+                return_value=MagicMock(
+                    handle_function_call=lambda *a, **k: '{"success": true}'
+                ),
+            ),
+        ):
+            invoke_tool(
+                agent,
+                "read_file",
+                {"path": "/x"},
+                "task1",
+                skip_tool_execution_middleware=True,
+            )
+
+        assert fake_log.all_entries() == []
