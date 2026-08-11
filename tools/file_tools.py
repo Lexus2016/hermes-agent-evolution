@@ -20,6 +20,7 @@ from tools.file_operations import (
     normalize_search_pagination,
 )
 from tools import file_state
+from tools.path_validation import format_nearby_hint, suggest_nearby_paths
 from agent.redact import redact_sensitive_text
 
 logger = logging.getLogger(__name__)
@@ -1656,6 +1657,16 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 2000, task_id: str =
         # optimization; recording must stay side-effect-identical.
         _err = result_dict.get("error") or ""
         if isinstance(_err, str) and _err.startswith("File not found:"):
+            # #2293 — if the shell-based _suggest_similar_files found nothing
+            # (no similar_files), fall back to the shared pure-Python module
+            # so the agent still gets a nearby-files hint. This exercises the
+            # reusable path-validation layer in a real call site (Slice B
+            # extends it to terminal/search_files/patch).
+            if not result_dict.get("similar_files"):
+                _nearby = suggest_nearby_paths(str(_resolved))
+                _hint = format_nearby_hint(str(_resolved), _nearby)
+                if _hint:
+                    result_dict["error"] = _err + "\n\n" + _hint
             _not_found_json = json.dumps(result_dict, ensure_ascii=False)
             _record_not_found("read", resolved_str_for_neg, task_id, _not_found_json)
 
