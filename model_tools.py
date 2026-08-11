@@ -1875,6 +1875,46 @@ def handle_function_call(
             middleware_trace=list(_tool_middleware_trace),
         )
 
+        # Tool-call dedup tracker (When2Tool, #2282): record this call's
+        # outcome and, if it is a repeat of a recently-successful call,
+        # append an advisory hint so the model can reuse the prior result
+        # instead of re-running the tool. Fail-open and cache-safe — it
+        # only appends to the result string, never mutates the system
+        # prompt or message roles.
+        try:
+            from agent.tool_dedup import check_tool_dedup, record_tool_call
+
+            # Derive success from the *raw* result BEFORE appending any
+            # hint, so an error result is never misclassified as "ok".
+            _dedup_status, _, _ = _tool_result_observer_fields(result)
+            # Check for a duplicate of a *prior* successful call BEFORE
+            # recording this one, so the current call never flags itself.
+            _dedup_hint = check_tool_dedup(
+                function_name, function_args, session_id=session_id
+            )
+            if _dedup_hint and isinstance(result, str):
+                # Embed the hint inside the JSON result dict (following the
+                # `_warning` key pattern in file_tools.py) so downstream
+                # consumers that call json.loads(result) still see valid
+                # JSON.  Fall back to raw append for non-JSON results.
+                try:
+                    _parsed = json.loads(result)
+                    if isinstance(_parsed, dict):
+                        _parsed["_dedup_hint"] = _dedup_hint
+                        result = json.dumps(_parsed, ensure_ascii=False)
+                    else:
+                        result = result + "\n" + _dedup_hint
+                except (json.JSONDecodeError, TypeError):
+                    result = result + "\n" + _dedup_hint
+            record_tool_call(
+                function_name,
+                function_args,
+                session_id=session_id,
+                success=(_dedup_status == "ok"),
+            )
+        except Exception as _dedup_err:
+            logger.debug("tool_dedup wiring error: %s", _dedup_err)
+
         # Source-chain provenance (#2192): record tool-call sources during
         # background-review forks so the skill's origin chain is traceable.
         try:

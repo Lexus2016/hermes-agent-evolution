@@ -30,6 +30,21 @@ def _disable_arg_contract_for_dispatch_tests(monkeypatch):
     monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", "0")
 
 
+# The tool-call dedup tracker (#2282) keeps a process-global per-session
+# registry. Many dispatch tests here call the same tool+args (e.g.
+# ``web_search {"q": "test"}``) with no session_id, so they share the
+# "default" session and a prior test's recorded call would surface a
+# ``_dedup_hint`` in a later test's exact-match assertion. Reset the
+# registry before each test so the tracker never leaks across tests.
+@pytest.fixture(autouse=True)
+def _reset_tool_dedup_registry():
+    from agent.tool_dedup import reset_tool_dedup
+
+    reset_tool_dedup(None)
+    yield
+    reset_tool_dedup(None)
+
+
 # =========================================================================
 # handle_function_call
 # =========================================================================
