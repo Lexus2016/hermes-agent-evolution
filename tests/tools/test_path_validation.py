@@ -85,5 +85,102 @@ class TestReadFileToolFallback(_TmpDir):
         self.assertIn("config.yaml", err)
 
 
+class TestSearchFilesNearbyHint(_TmpDir):
+    """#2242 Slice B — search_files must surface a nearby-paths hint when
+    the search root path doesn't exist."""
+
+    def test_search_surfaces_nearby_hint(self):
+        from tools.file_tools import search_tool
+
+        missing = os.path.join(self._tmp, "sub", "config.yam")  # 'sub' doesn't exist
+
+        class _FakeResult:
+            def to_dict(self, **kwargs):
+                return {"error": f"Path not found: {missing}", "results": []}
+
+        fake_ops = MagicMock()
+        fake_ops.search.return_value = _FakeResult()
+        with (
+            patch("tools.file_tools._get_file_ops", return_value=fake_ops),
+            patch.dict(os.environ, {"TERMINAL_CWD": self._tmp}),
+        ):
+            result = search_tool(
+                pattern="test", path=missing, task_id="test_search_nf"
+            )
+        err = json.loads(result).get("error") or ""
+        self.assertIn("Path not found", err)
+        self.assertIn("Did you mean", err)
+
+
+class TestPatchToolNearbyHint(_TmpDir):
+    """#2242 Slice B — patch must surface a nearby-paths hint when the
+    target file doesn't exist."""
+
+    def test_patch_replace_surfaces_nearby_hint(self):
+        from tools.file_tools import patch_tool
+
+        missing = os.path.join(self._tmp, "config.yam")
+
+        class _FakeResult:
+            def to_dict(self, **kwargs):
+                return {
+                    "error": f"File not found: {missing}",
+                    "similar_files": [],
+                }
+
+        fake_ops = MagicMock()
+        fake_ops.patch_replace.return_value = _FakeResult()
+        with (
+            patch("tools.file_tools._get_file_ops", return_value=fake_ops),
+            patch.dict(os.environ, {"TERMINAL_CWD": self._tmp}),
+        ):
+            result = patch_tool(
+                mode="replace",
+                path=missing,
+                old_string="x",
+                new_string="y",
+                task_id="test_patch_nf",
+            )
+        err = json.loads(result).get("error") or ""
+        self.assertIn("File not found", err)
+        self.assertIn("Did you mean", err)
+        self.assertIn("config.yaml", err)
+
+
+class TestTerminalNearbyHint(_TmpDir):
+    """#2242 Slice B — terminal must surface a nearby-paths hint when a
+    command fails with 'No such file or directory'."""
+
+    def test_terminal_surfaces_nearby_hint(self):
+        from tools.terminal_tool import terminal_tool
+
+        missing = os.path.join(self._tmp, "config.yam")
+
+        class _FakeResult(dict):
+            def __init__(self):
+                super().__init__(
+                    output=f"cat: {missing}: No such file or directory",
+                    returncode=1,
+                    error=None,
+                )
+
+        class _FakeEnv:
+            cwd = None
+
+            def execute(self, command, **kwargs):
+                return _FakeResult()
+
+        with (
+            patch("tools.terminal_tool.get_active_env", return_value=_FakeEnv()),
+            patch.dict(os.environ, {"TERMINAL_CWD": self._tmp}),
+        ):
+            result = terminal_tool(
+                command=f"cat {missing}", task_id="test_term_nf"
+            )
+        err = json.loads(result).get("error") or ""
+        self.assertIn("Did you mean", err)
+        self.assertIn("config.yaml", err)
+
+
 if __name__ == "__main__":
     unittest.main()
