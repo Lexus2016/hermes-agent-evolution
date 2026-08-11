@@ -379,6 +379,22 @@ def classify_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str
             exit_code = data.get("exit_code")
             if exit_code is not None and exit_code != 0:
                 return True, f" [exit {exit_code}]"
+            # #2241 — process-specific failure patterns that don't carry an
+            # exit_code.  process_registry returns {"status": "not_found",
+            # "error": "No process with ID …"} for session-not-found,
+            # {"status": "error", "error": str(e)} for action failures, and
+            # {"success": False, "error": …} for write/submit rejections.
+            # Without these checks the early ``return False`` above swallows
+            # them, the streak counter never accumulates, and the spiral cap
+            # never fires — regressing to 18-deep (#2241).
+            if tool_name == "process":
+                status = data.get("status")
+                if status in ("not_found", "error", "already_exited"):
+                    return True, f" [{status}]"
+                if data.get("success") is False:
+                    return True, " [failed]"
+                if data.get("error") and not data.get("output"):
+                    return True, " [error]"
         return False, ""
 
     if tool_name == "memory":

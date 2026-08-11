@@ -24,6 +24,11 @@ class FailureCategory(str, Enum):
     # retrying with the same command.  The agent must change at least one
     # of {command, cwd, timeout, flags} or switch tools (issue #1091).
     timeout_deterministic = "timeout_deterministic"
+    # Shell parse/syntax error — malformed quoting, unmatched delimiter, bad
+    # token.  Deterministic: retrying the exact same command reproduces it
+    # (#2243).  Distinct from a non-zero exit caused by the command running
+    # and failing at runtime.
+    shell_syntax_error = "shell_syntax_error"
     unknown = "unknown"
 
 
@@ -52,6 +57,9 @@ _SYNTAX_ERROR_PATTERNS = (
     re.compile(r"unexpected token", re.IGNORECASE),
     re.compile(r"unexpected end of file", re.IGNORECASE),
     re.compile(r"SyntaxError:", re.IGNORECASE),
+    re.compile(r"parse error near", re.IGNORECASE),
+    re.compile(r"unterminated quoted string", re.IGNORECASE),
+    re.compile(r"unexpected EOF while looking for matching", re.IGNORECASE),
 )
 
 _PERMISSION_DENIED_PATTERNS = (
@@ -232,18 +240,30 @@ def classify_terminal_failure(
     # syntax-error signature, OR when exit_code == 2 AND the base command is
     # a known interpreter (bash, python, node, …) whose exit-2 is syntax.
     _INTERPRETER_COMMANDS = frozenset({
-        "bash", "sh", "zsh", "dash", "ksh",
-        "python", "python3", "python2",
-        "node", "ruby", "perl", "php",
+        "bash",
+        "sh",
+        "zsh",
+        "dash",
+        "ksh",
+        "python",
+        "python3",
+        "python2",
+        "node",
+        "ruby",
+        "perl",
+        "php",
     })
     has_syntax_text = any(p.search(text) for p in _SYNTAX_ERROR_PATTERNS)
     if has_syntax_text or (exit_code == 2 and base_cmd in _INTERPRETER_COMMANDS):
         return TerminalFailureClassification(
-            category=FailureCategory.persistent_error,
+            category=FailureCategory.shell_syntax_error,
             hint=(
                 "Syntax error in the command or script. Re-running unchanged "
                 "will fail identically. Fix the syntax (quoting, brackets, "
                 "operators), or use execute_code to run the corrected logic. "
+                "For complex quoting (nested quotes, special characters), "
+                "write the command to a script file with write_file and run "
+                "it instead of trying to escape everything inline (#2243). "
                 "Do NOT retry the same command."
             ),
             should_retry=False,

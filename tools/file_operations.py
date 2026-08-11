@@ -269,6 +269,49 @@ def classify_file_error(
         return "read_error", (
             "The read failed. Check the path/permissions; don't repeat the same call blindly."
         )
+    # ── Decompose remaining "other" failures (#2244) ────────────────────
+    # 55 patch failures/7d fell through to the generic "error" catch-all
+    # below. These patterns capture the common sub-reasons that were never
+    # classified: encoding/Unicode issues, line-ending conflicts, BOM
+    # markers, and concurrent modification (file changed between read and
+    # write). Each gets a targeted recovery hint so the agent can correct
+    # without guessing.
+    if (
+        "unicode" in low
+        or "codec can't decode" in low
+        or "invalid byte" in low
+        or "invalid continuation byte" in low
+        or "can't decode" in low
+    ):
+        return "encoding_error", (
+            "The file has a byte sequence that can't be decoded as UTF-8. "
+            "It may be a non-UTF-8 encoding or contain invalid bytes. "
+            "Use write_file to replace the content, or handle the encoding "
+            "explicitly via execute_code."
+        )
+    if "line ending" in low or "crlf" in low or "line-ending" in low:
+        return "line_ending_conflict", (
+            "The file uses different line endings (CRLF vs LF) than "
+            "old_string. Re-read the file and copy the EXACT line endings, "
+            "or use write_file to replace the whole file."
+        )
+    if "bom" in low or "ufeff" in low or "u+feff" in low or "byte order mark" in low:
+        return "bom_conflict", (
+            "The file has a UTF-8 BOM (byte order mark) prefix that "
+            "interferes with the match. Re-read the file from line 1 and "
+            "include the BOM in old_string, or use write_file."
+        )
+    if (
+        ("concurrent" in low)
+        or ("modified" in low and "since" in low)
+        or ("changed" in low and "since" in low)
+        or ("stale" in low and "handle" in low)
+    ):
+        return "concurrent_modification", (
+            "The file was modified between the read and the write. "
+            "Re-read the current content and retry the patch against the "
+            "latest version."
+        )
     # Last resort: the structured diagnostic may still classify an otherwise
     # generic message before we fall back to the catch-all "error" bucket.
     finer = _class_from_structured_error(structured_error)
