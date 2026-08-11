@@ -3504,6 +3504,14 @@ def compress_context(
             reset_skill_view_dedup(task_id)
         except Exception:
             pass
+        # Same for the tool-call dedup tracker (#2282): after compression
+        # the prior result is summarised away, so a re-read/re-search is
+        # legitimate and must not be flagged as a duplicate.
+        try:
+            from agent.tool_dedup import reset_tool_dedup
+            reset_tool_dedup(task_id)
+        except Exception:
+            pass
 
         logger.info(
             "context compression done: session=%s messages=%d->%d rough_tokens=~%s awaiting_real_usage=true",
@@ -3665,6 +3673,12 @@ def _compress_context_via_codex_app_server(
         from tools.file_tools import reset_file_dedup
 
         reset_file_dedup(task_id)
+    except Exception:
+        pass
+    try:
+        from agent.tool_dedup import reset_tool_dedup
+
+        reset_tool_dedup(task_id)
     except Exception:
         pass
 

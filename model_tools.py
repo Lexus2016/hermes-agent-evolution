@@ -362,8 +362,12 @@ def get_tool_definitions(
             # schemas are treated as read-only by all known callers.
             return list(cached)
 
-    result = _compute_tool_definitions(enabled_toolsets, disabled_toolsets, quiet_mode,
-                                       skip_tool_search_assembly=skip_tool_search_assembly)
+    result = _compute_tool_definitions(
+        enabled_toolsets,
+        disabled_toolsets,
+        quiet_mode,
+        skip_tool_search_assembly=skip_tool_search_assembly,
+    )
     if quiet_mode and cache_key is not None:
         # Cache the freshly-computed list, but hand callers a shallow copy so
         # downstream mutations (e.g. run_agent appending memory/LCM tool
@@ -1875,11 +1879,55 @@ def handle_function_call(
             middleware_trace=list(_tool_middleware_trace),
         )
 
+        # Tool-call dedup tracker (When2Tool, #2282): record this call's
+        # outcome and, if it is a repeat of a recently-successful call,
+        # append an advisory hint so the model can reuse the prior result
+        # instead of re-running the tool. Fail-open and cache-safe — it
+        # only appends to the result string, never mutates the system
+        # prompt or message roles.
+        try:
+            from agent.tool_dedup import check_tool_dedup, record_tool_call
+
+            # Derive success from the *raw* result BEFORE appending any
+            # hint, so an error result is never misclassified as "ok".
+            _dedup_status, _, _ = _tool_result_observer_fields(result)
+            # Check for a duplicate of a *prior* successful call BEFORE
+            # recording this one, so the current call never flags itself.
+            _dedup_hint = check_tool_dedup(
+                function_name, function_args, session_id=session_id
+            )
+            if _dedup_hint and isinstance(result, str):
+                # Embed the hint inside the JSON result dict (following the
+                # `_warning` key pattern in file_tools.py) so downstream
+                # consumers that call json.loads(result) still see valid
+                # JSON.  Fall back to raw append for non-JSON results.
+                try:
+                    _parsed = json.loads(result)
+                    if isinstance(_parsed, dict):
+                        _parsed["_dedup_hint"] = _dedup_hint
+                        result = json.dumps(_parsed, ensure_ascii=False)
+                    else:
+                        result = result + "\n" + _dedup_hint
+                except (json.JSONDecodeError, TypeError):
+                    result = result + "\n" + _dedup_hint
+            record_tool_call(
+                function_name,
+                function_args,
+                session_id=session_id,
+                success=(_dedup_status == "ok"),
+            )
+        except Exception as _dedup_err:
+            logger.debug("tool_dedup wiring error: %s", _dedup_err)
+
         # Source-chain provenance (#2192): record tool-call sources during
         # background-review forks so the skill's origin chain is traceable.
         try:
             from tools.skill_provenance import add_provenance_entry
-            add_provenance_entry(function_name, source_id=function_args.get("url") or function_args.get("path") or "")
+
+            add_provenance_entry(
+                function_name,
+                source_id=function_args.get("url") or function_args.get("path") or "",
+            )
         except Exception:
             pass
 
@@ -1888,6 +1936,7 @@ def handle_function_call(
         # detect forbidden-tool usage when the skill is deactivated.
         try:
             from tools.skill_compliance import record_tool_call_for_active_skill
+
             record_tool_call_for_active_skill(function_name)
         except Exception:
             pass
@@ -2006,12 +2055,19 @@ def handle_function_call(
         try:
             from agent.tool_error_recovery import (
                 classify_tool_error,
+                classify_tool_exception,
                 recovery_hint,
                 record_tool_outcome,
                 get_breaker,
             )
 
-            failure = classify_tool_error(function_name, str(e))
+            # #2245 — inspect the exception *type* first (catches TimeoutError,
+            # ConnectionError, KeyError, HTTP-status wrappers that stringify to
+            # unhelpful messages), then fall back to the string classifier.
+            try:
+                failure = classify_tool_exception(function_name, e)
+            except Exception:
+                failure = classify_tool_error(function_name, str(e))
             hint = recovery_hint(failure)
             if hint:
                 enriched = f"{enriched}{hint}"

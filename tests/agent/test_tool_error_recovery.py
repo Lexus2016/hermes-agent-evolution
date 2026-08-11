@@ -52,11 +52,15 @@ class TestClassifyToolError:
         assert result.recovery_action == RecoveryAction.install_dependency
 
     def test_module_not_found(self):
-        result = classify_tool_error("execute_code", "ModuleNotFoundError: No module named 'foo'")
+        result = classify_tool_error(
+            "execute_code", "ModuleNotFoundError: No module named 'foo'"
+        )
         assert result.error_class == ToolErrorClass.dependency
 
     def test_validation_bad_args(self):
-        result = classify_tool_error("patch", "Invalid arguments: expected str, got int")
+        result = classify_tool_error(
+            "patch", "Invalid arguments: expected str, got int"
+        )
         assert result.error_class == ToolErrorClass.validation
         assert result.recovery_action == RecoveryAction.fix_args
 
@@ -65,7 +69,9 @@ class TestClassifyToolError:
         assert result.error_class == ToolErrorClass.validation
 
     def test_json_parse_error(self):
-        result = classify_tool_error("web_extract", "JSON decode error: unexpected token")
+        result = classify_tool_error(
+            "web_extract", "JSON decode error: unexpected token"
+        )
         assert result.error_class == ToolErrorClass.validation
 
     def test_unknown_error(self):
@@ -174,3 +180,107 @@ class TestBreakerRegistry:
             record_tool_outcome("test_tool_unique_4", success=False)
         assert breaker._consecutive_failures == 5
         assert not breaker.should_trip()  # threshold is 10
+
+
+class TestClassifyToolException:
+    """Tests for classify_tool_exception — exception-type-aware classification (#2245)."""
+
+    def test_timeout_is_transient_retry(self):
+        import asyncio
+        from agent.tool_error_recovery import (
+            classify_tool_exception,
+            ToolErrorClass,
+            RecoveryAction,
+        )
+
+        f = classify_tool_exception("tool_call", asyncio.TimeoutError())
+        assert f.error_class == ToolErrorClass.transient
+        assert f.recovery_action == RecoveryAction.retry
+
+    def test_connection_error_is_transient(self):
+        from agent.tool_error_recovery import (
+            classify_tool_exception,
+            ToolErrorClass,
+            RecoveryAction,
+        )
+
+        f = classify_tool_exception("tool_call", ConnectionError("refused"))
+        assert f.error_class == ToolErrorClass.transient
+        assert f.recovery_action == RecoveryAction.retry
+
+    def test_value_error_is_validation(self):
+        from agent.tool_error_recovery import (
+            classify_tool_exception,
+            ToolErrorClass,
+            RecoveryAction,
+        )
+
+        f = classify_tool_exception("tool_call", ValueError("bad arg"))
+        assert f.error_class == ToolErrorClass.validation
+        assert f.recovery_action == RecoveryAction.fix_args
+
+    def test_key_error_is_not_found(self):
+        from agent.tool_error_recovery import (
+            classify_tool_exception,
+            ToolErrorClass,
+            RecoveryAction,
+        )
+
+        f = classify_tool_exception("tool_call", KeyError("missing_tool"))
+        assert f.error_class == ToolErrorClass.not_found
+        assert f.recovery_action == RecoveryAction.use_alternative
+
+    def test_http_404_is_not_found(self):
+        from agent.tool_error_recovery import (
+            classify_tool_exception,
+            ToolErrorClass,
+            RecoveryAction,
+        )
+
+        class FakeHTTPError(Exception):
+            status_code = 404
+
+        f = classify_tool_exception("tool_call", FakeHTTPError("not found"))
+        assert f.error_class == ToolErrorClass.not_found
+
+    def test_http_500_is_transient_alternative(self):
+        from agent.tool_error_recovery import (
+            classify_tool_exception,
+            ToolErrorClass,
+            RecoveryAction,
+        )
+
+        class FakeHTTPError(Exception):
+            status_code = 503
+
+        f = classify_tool_exception("tool_call", FakeHTTPError("unavailable"))
+        assert f.error_class == ToolErrorClass.transient
+        assert f.recovery_action == RecoveryAction.use_alternative
+
+    def test_http_400_is_validation(self):
+        from agent.tool_error_recovery import (
+            classify_tool_exception,
+            ToolErrorClass,
+            RecoveryAction,
+        )
+
+        class FakeHTTPError(Exception):
+            status = 400
+
+        f = classify_tool_exception("tool_call", FakeHTTPError("bad request"))
+        assert f.error_class == ToolErrorClass.validation
+
+    def test_generic_exception_falls_back_to_string(self):
+        """An unrecognised exception type falls back to string classification."""
+        from agent.tool_error_recovery import classify_tool_exception, ToolFailure
+
+        f = classify_tool_exception("tool_call", RuntimeError("file not found in path"))
+        assert isinstance(f, ToolFailure)
+        # Should have been classified by the string "file not found" pattern.
+        assert "not_found" in f.error_class.value or "unknown" in f.error_class.value
+
+    def test_hint_is_nonempty_for_classified(self):
+        from agent.tool_error_recovery import classify_tool_exception
+
+        f = classify_tool_exception("tool_call", TimeoutError())
+        assert f.hint != ""
