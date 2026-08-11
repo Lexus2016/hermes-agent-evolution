@@ -133,3 +133,82 @@ class TestDispatchToolDescribeFuzzy:
         )
         assert "error" in result
         assert "required" in result["error"]
+
+
+class TestDispatchToolDescribeStructuredReasons:
+    """#2309 — tool_describe 'other' errors carry a structured reason +
+    recovery directive so the agent gets a concrete path instead of an
+    opaque error (mirrors the tool_call #2245 / patch #2244 treatment)."""
+
+    @patch("tools.tool_search.is_deferrable_tool_name", return_value=True)
+    def test_typo_error_has_reason_and_recovery(self, _mock):
+        defs = [_make_tool_def("github_create_issue")]
+        result = json.loads(
+            dispatch_tool_describe(
+                {"name": "github_create"},
+                current_tool_defs=defs,
+                config=None,
+            )
+        )
+        assert result.get("reason") == "not_available"
+        assert "recovery" in result
+        assert "tool_search" in result["recovery"].lower()
+
+    def test_non_deferrable_error_has_reason_and_recovery(self):
+        defs = [_make_tool_def("mcp_search_web")]
+        with patch(
+            "tools.tool_search.is_deferrable_tool_name",
+            side_effect=lambda name, config=None: name == "mcp_search_web",
+        ):
+            result = json.loads(
+                dispatch_tool_describe(
+                    {"name": "mcp_search"},
+                    current_tool_defs=defs,
+                    config=None,
+                )
+            )
+            assert result.get("reason") == "not_deferrable"
+            assert "recovery" in result
+            assert "tool_search" in result["recovery"].lower()
+
+    def test_completely_wrong_name_has_reason_and_recovery(self):
+        """A completely unknown name is not deferrable, so it routes to the
+        not_deferrable branch — not not_available."""
+        result = json.loads(
+            dispatch_tool_describe(
+                {"name": "zzzzzzzzzz"},
+                current_tool_defs=[_make_tool_def("web_search")],
+                config=None,
+            )
+        )
+        assert result.get("reason") == "not_deferrable"
+        assert "recovery" in result
+        assert "tool_search" in result["recovery"].lower()
+
+    @patch("tools.tool_search.is_deferrable_tool_name", return_value=True)
+    def test_deferrable_but_not_registered_has_reason_and_recovery(self, _mock):
+        """When the name IS deferrable but not in the tool list and no fuzzy
+        matches exist, it routes to not_available with no suggestions."""
+        result = json.loads(
+            dispatch_tool_describe(
+                {"name": "mcp_some_obscure_tool_xyz"},
+                current_tool_defs=[_make_tool_def("web_search")],
+                config=None,
+            )
+        )
+        assert result.get("reason") == "not_available"
+        assert "recovery" in result
+        assert "suggestions" not in result
+
+    def test_success_has_no_reason_or_recovery(self):
+        """A successful describe must NOT carry error-only fields."""
+        with patch("tools.tool_search.is_deferrable_tool_name", return_value=True):
+            result = json.loads(
+                dispatch_tool_describe(
+                    {"name": "my_tool"},
+                    current_tool_defs=[_make_tool_def("my_tool")],
+                    config=None,
+                )
+            )
+            assert "reason" not in result
+            assert "recovery" not in result

@@ -1388,6 +1388,15 @@ def _dispatch_tool_describe_inner(
                         f"tool_describe or tool_call."
                     ),
                     "suggestions": suggestions,
+                    # #2309 — structured reason + recovery so the agent gets
+                    # a concrete path instead of an opaque "other" error.
+                    "reason": "not_deferrable",
+                    "recovery": (
+                        "This tool is not in the deferred set — it may already be in "
+                        "your active toolset (call it directly) or it may be misspelled. "
+                        "Use a suggested name with tool_describe or tool_call, or re-run "
+                        "tool_search to list available deferred tools."
+                    ),
                 },
                 ensure_ascii=False,
             )
@@ -1396,6 +1405,12 @@ def _dispatch_tool_describe_inner(
                 "error": (
                     f"'{name}' is not a deferrable tool. If you see it in the tools list "
                     "already, call it directly; otherwise check the spelling against tool_search."
+                ),
+                "reason": "not_deferrable",
+                "recovery": (
+                    "This tool is not in the deferred set. If it is in your active "
+                    "toolset, call it directly. Otherwise re-run tool_search to find "
+                    "the correct name — do NOT retry tool_describe with the same name."
                 ),
             },
             ensure_ascii=False,
@@ -1425,12 +1440,25 @@ def _dispatch_tool_describe_inner(
                     f"or tool_call."
                 ),
                 "suggestions": suggestions,
+                # #2309 — structured reason + recovery.
+                "reason": "not_available",
+                "recovery": (
+                    "The tool name is deferrable but not in the current toolset scope. "
+                    "Use a suggested name, or re-run tool_search to refresh the deferred "
+                    "catalog — do NOT retry tool_describe with the same name unchanged."
+                ),
             },
             ensure_ascii=False,
         )
     return json.dumps(
         {
             "error": f"'{name}' is not currently available. Re-run tool_search to refresh.",
+            "reason": "not_available",
+            "recovery": (
+                "The tool name is deferrable but not registered in the current session. "
+                "Re-run tool_search to refresh the deferred catalog, then use the exact "
+                "name returned — do NOT retry tool_describe with the same name."
+            ),
         },
         ensure_ascii=False,
     )
