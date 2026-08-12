@@ -126,47 +126,76 @@ def _trust_rank(tier: str) -> int:
         return -1
 
 
-def encode_provenance(text: str, source_class: str, trust_tier: str) -> str:
+def encode_provenance(
+    text: str,
+    source_class: str,
+    trust_tier: str,
+    model_identity: Optional[str] = None,
+) -> str:
     """Return the on-disk string for ``text`` with a provenance trailer.
 
-    When ``source_class`` and ``trust_tier`` are BOTH the safe defaults, the
-    text is returned unchanged (no trailer) so default adds stay byte-identical
-    to the pre-#316 format. Otherwise a single ``⟦src:…|trust:…⟧`` trailer is
-    appended, separated by one space.
+    When ``source_class`` and ``trust_tier`` are BOTH the safe defaults and no
+    ``model_identity`` is supplied, the text is returned unchanged (no trailer)
+    so default adds stay byte-identical to the pre-#316 format. Otherwise a
+    single ``⟦src:…|trust:…[|model:…]⟧`` trailer is appended, separated by one
+    space. ``model_identity`` is the optional model that authored the entry
+    (#2234) — it is only written when explicitly provided.
     """
     text = text.strip()
-    if source_class == DEFAULT_SOURCE_CLASS and trust_tier == DEFAULT_TRUST_TIER:
+    if (
+        source_class == DEFAULT_SOURCE_CLASS
+        and trust_tier == DEFAULT_TRUST_TIER
+        and not model_identity
+    ):
         return text
-    return f"{text} {_PROV_OPEN}{source_class}|trust:{trust_tier}{_PROV_CLOSE}"
+    trailer = f"{_PROV_OPEN}{source_class}|trust:{trust_tier}"
+    if model_identity:
+        trailer += f"|model:{model_identity}"
+    return f"{text} {trailer}{_PROV_CLOSE}"
+
+
+def parse_provenance_full(stored: str):
+    """Split a stored entry into ``(display_text, source_class, trust_tier, model)``.
+
+    Entries written before #316 (and default adds) have no trailer, so they
+    parse to ``(stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER, None)``. A
+    trailing ``⟦src:<class>|trust:<tier>[|model:<name>]⟧`` token, if present and
+    well-formed with a recognised class+tier, is stripped from the display text
+    and returned as the provenance. A malformed or unrecognised trailer is left
+    as part of the text (treated as ordinary content) and defaults are returned
+    — we never guess provenance from garbage. ``model`` is None when the entry
+    carries no model-identity metadata (#2234).
+    """
+    s = stored.rstrip()
+    if not s.endswith(_PROV_CLOSE):
+        return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER, None
+    open_at = s.rfind(_PROV_OPEN)
+    if open_at == -1:
+        return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER, None
+    inner = s[open_at + len(_PROV_OPEN) : -len(_PROV_CLOSE)]
+    # inner looks like "<source_class>|trust:<trust_tier>[|model:<name>]"
+    if "|trust:" not in inner:
+        return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER, None
+    src, rest = inner.split("|trust:", 1)
+    tier = rest
+    model = None
+    if "|model:" in rest:
+        tier, model = rest.split("|model:", 1)
+    if src not in SOURCE_CLASSES or tier not in TRUST_TIERS:
+        # Unrecognised vocabulary — treat the whole thing as plain content.
+        return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER, None
+    display = s[:open_at].rstrip()
+    return display, src, tier, model
 
 
 def parse_provenance(stored: str):
     """Split a stored entry into ``(display_text, source_class, trust_tier)``.
 
-    Entries written before #316 (and default adds) have no trailer, so they
-    parse to ``(stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER)``. A trailing
-    ``⟦src:<class>|trust:<tier>⟧`` token, if present and well-formed with a
-    recognised class+tier, is stripped from the display text and returned as
-    the provenance. A malformed or unrecognised trailer is left as part of the
-    text (treated as ordinary content) and defaults are returned — we never
-    guess provenance from garbage.
+    Backward-compatible 3-tuple view of :func:`parse_provenance_full` — the
+    model-identity field is dropped. See that function for the full contract.
     """
-    s = stored.rstrip()
-    if not s.endswith(_PROV_CLOSE):
-        return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER
-    open_at = s.rfind(_PROV_OPEN)
-    if open_at == -1:
-        return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER
-    inner = s[open_at + len(_PROV_OPEN) : -len(_PROV_CLOSE)]
-    # inner looks like "<source_class>|trust:<trust_tier>"
-    if "|trust:" not in inner:
-        return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER
-    src, tier = inner.split("|trust:", 1)
-    if src not in SOURCE_CLASSES or tier not in TRUST_TIERS:
-        # Unrecognised vocabulary — treat the whole thing as plain content.
-        return stored, DEFAULT_SOURCE_CLASS, DEFAULT_TRUST_TIER
-    display = s[:open_at].rstrip()
-    return display, src, tier
+    text, src, tier, _model = parse_provenance_full(stored)
+    return text, src, tier
 
 
 # ---------------------------------------------------------------------------
@@ -690,12 +719,15 @@ class MemoryStore:
         content: str,
         source_class: str = DEFAULT_SOURCE_CLASS,
         trust_tier: str = DEFAULT_TRUST_TIER,
+        model_identity: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Append a new entry. Returns error if it would exceed the char limit.
 
         ``source_class`` / ``trust_tier`` tag the entry's provenance (#316).
-        When both are the safe defaults the entry is stored verbatim (no
-        trailer) so the on-disk format is byte-identical to pre-#316.
+        ``model_identity`` optionally tags the model that authored the entry
+        (#2234). When both provenance fields are the safe defaults and no model
+        is supplied the entry is stored verbatim (no trailer) so the on-disk
+        format is byte-identical to pre-#316.
         """
         content = content.strip()
         if not content:
@@ -718,7 +750,7 @@ class MemoryStore:
             _log_guard_event("add", target, guard_event)
 
         # The string actually stored on disk carries the optional trailer.
-        stored = encode_provenance(content, source_class, trust_tier)
+        stored = encode_provenance(content, source_class, trust_tier, model_identity)
 
         with self._file_lock(self._path_for(target)):
             # Re-read from disk under lock to pick up writes from other sessions.
@@ -812,13 +844,16 @@ class MemoryStore:
         new_content: str,
         source_class: str = DEFAULT_SOURCE_CLASS,
         trust_tier: str = DEFAULT_TRUST_TIER,
+        model_identity: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Find entry containing old_text substring, replace it with new_content.
 
         ``source_class`` / ``trust_tier`` re-tag the replacement's provenance
-        (#316). Defaults keep the stored form trailer-free (byte-compatible).
-        The ``old_text`` match runs against each entry's DISPLAY text so a user
-        matching on visible content still finds an entry that carries a trailer.
+        (#316). ``model_identity`` optionally re-tags the model that authored
+        the replacement (#2234). Defaults keep the stored form trailer-free
+        (byte-compatible). The ``old_text`` match runs against each entry's
+        DISPLAY text so a user matching on visible content still finds an entry
+        that carries a trailer.
         """
         old_text = old_text.strip()
         new_content = new_content.strip()
@@ -844,7 +879,9 @@ class MemoryStore:
         if guard_event is not None:
             _log_guard_event("replace", target, guard_event)
 
-        stored_new = encode_provenance(new_content, source_class, trust_tier)
+        stored_new = encode_provenance(
+            new_content, source_class, trust_tier, model_identity
+        )
 
         with self._file_lock(self._path_for(target)):
             bak = self._reload_target(target)
@@ -1013,7 +1050,7 @@ class MemoryStore:
 
             # Resolve display text (strip provenance trailers) for trimming; we
             # re-encode provenance on the shortened entry so tags are preserved.
-            parsed = [parse_provenance(e) for e in entries]
+            parsed = [parse_provenance_full(e) for e in entries]
 
             if prefer == "longest":
                 order = sorted(
@@ -1022,9 +1059,10 @@ class MemoryStore:
             else:
                 order = list(range(len(entries)))
 
-            working_text = [text for text, _, _ in parsed]
-            working_src = [src for _, src, _ in parsed]
-            working_tier = [tier for _, _, tier in parsed]
+            working_text = [text for text, _, _, _ in parsed]
+            working_src = [src for _, src, _, _ in parsed]
+            working_tier = [tier for _, _, tier, _ in parsed]
+            working_model = [model for _, _, _, model in parsed]
 
             overage = start_total - goal
             changed_indices: set = set()
@@ -1048,7 +1086,9 @@ class MemoryStore:
                     overage -= len(text) - len(trimmed)
 
             new_entries = [
-                encode_provenance(working_text[i], working_src[i], working_tier[i])
+                encode_provenance(
+                    working_text[i], working_src[i], working_tier[i], working_model[i]
+                )
                 for i in range(len(entries))
             ]
             new_total = len(ENTRY_DELIMITER.join(new_entries)) if new_entries else 0
@@ -1114,6 +1154,7 @@ class MemoryStore:
         target: str,
         source_filter: Optional[object] = None,
         min_trust: Optional[str] = None,
+        model_identity: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Return live entries as provenance-resolved rows, optionally filtered.
 
@@ -1126,6 +1167,10 @@ class MemoryStore:
           * ``source_filter``: a source_class string or iterable of them; keep
             entries whose source_class is in the set.
           * ``min_trust``: a trust tier; keep entries whose tier ranks >= it.
+          * ``model_identity`` (#2234): when set, entries authored by a
+            DIFFERENT model family are down-weighted (moved to the end of the
+            result). Entries with no model metadata are treated as compatible
+            (kept in place) so legacy notes are never hidden.
         """
         if isinstance(source_filter, str):
             allowed = {source_filter}
@@ -1138,12 +1183,33 @@ class MemoryStore:
 
         rows: List[Dict[str, Any]] = []
         for entry in self._entries_for(target):
-            text, src, tier = parse_provenance(entry)
+            text, src, tier, model = parse_provenance_full(entry)
             if allowed is not None and src not in allowed:
                 continue
             if min_rank is not None and _trust_rank(tier) < min_rank:
                 continue
-            rows.append({"text": text, "source_class": src, "trust_tier": tier})
+            rows.append(
+                {
+                    "text": text,
+                    "source_class": src,
+                    "trust_tier": tier,
+                    "model_identity": model,
+                }
+            )
+
+        # Model-aware retrieval (#2234): when the consuming model is known,
+        # down-weight entries authored by a different model family. Entries
+        # with no model metadata are treated as compatible (kept in place).
+        if model_identity:
+            compatible: List[Dict[str, Any]] = []
+            entangled: List[Dict[str, Any]] = []
+            for row in rows:
+                row_model = row.get("model_identity")
+                if row_model and row_model != model_identity:
+                    entangled.append(row)
+                else:
+                    compatible.append(row)
+            rows = compatible + entangled
         return rows
 
     def apply_batch(
@@ -1765,6 +1831,7 @@ def memory_tool(
     trust_tier: str = DEFAULT_TRUST_TIER,
     source_filter: Optional[object] = None,
     min_trust: Optional[str] = None,
+    model_identity: Optional[str] = None,
     operations: Optional[List[Dict[str, Any]]] = None,
     target_size: Optional[int] = None,
     prefer: str = "longest",
@@ -1779,6 +1846,7 @@ def memory_tool(
       - Batch:     operations=[{action, content?, old_text?}, ...] applied
                    atomically against the final char budget in ONE call.
     ``source_class`` / ``trust_tier`` tag provenance on add/replace (#316).
+    ``model_identity`` optionally tags the model that authored an entry (#2234).
     ``source_filter`` / ``min_trust`` filter the ``search`` action's results.
     ``memory_char_limit`` is an optional per-batch override for target='memory'
     that is only honoured when ``store.allow_batch_override`` is True (issue #517).
@@ -1804,7 +1872,12 @@ def memory_tool(
 
     # search is a read-only retrieval path — no gate, no required content.
     if action == "search":
-        rows = store.search(target, source_filter=source_filter, min_trust=min_trust)
+        rows = store.search(
+            target,
+            source_filter=source_filter,
+            min_trust=min_trust,
+            model_identity=model_identity,
+        )
         return json.dumps(
             {
                 "success": True,
@@ -1874,7 +1947,11 @@ def memory_tool(
     if action == "add":
         try:
             result = store.add(
-                target, content, source_class=source_class, trust_tier=trust_tier
+                target,
+                content,
+                source_class=source_class,
+                trust_tier=trust_tier,
+                model_identity=model_identity,
             )
         except Exception as exc:
             return _memory_enriched_error(exc, "add")
@@ -1887,6 +1964,7 @@ def memory_tool(
                 content,
                 source_class=source_class,
                 trust_tier=trust_tier,
+                model_identity=model_identity,
             )
         except Exception as exc:
             return _memory_enriched_error(exc, "replace")
@@ -1925,15 +2003,25 @@ def apply_memory_pending(
     old_text = payload.get("old_text") or ""
     source_class = payload.get("source_class", DEFAULT_SOURCE_CLASS)
     trust_tier = payload.get("trust_tier", DEFAULT_TRUST_TIER)
+    model_identity = payload.get("model_identity")
     if action == "batch":
         return store.apply_batch(target, payload.get("operations") or [])
     if action == "add":
         return store.add(
-            target, content, source_class=source_class, trust_tier=trust_tier
+            target,
+            content,
+            source_class=source_class,
+            trust_tier=trust_tier,
+            model_identity=model_identity,
         )
     if action == "replace":
         return store.replace(
-            target, old_text, content, source_class=source_class, trust_tier=trust_tier
+            target,
+            old_text,
+            content,
+            source_class=source_class,
+            trust_tier=trust_tier,
+            model_identity=model_identity,
         )
     if action == "remove":
         return store.remove(target, old_text)
@@ -2056,6 +2144,16 @@ MEMORY_SCHEMA = {
                 "enum": list(TRUST_TIERS),
                 "description": "Optional for 'search': keep only entries at or above this trust tier.",
             },
+            "model_identity": {
+                "type": "string",
+                "description": (
+                    "Optional model-identity metadata (#2234). On 'add'/'replace': "
+                    "tags the model that authored the entry. On 'search': when set, "
+                    "entries authored by a DIFFERENT model are down-weighted (moved "
+                    "to the end of the results); entries with no model metadata are "
+                    "treated as compatible."
+                ),
+            },
             "memory_char_limit": {
                 "type": "integer",
                 "description": (
@@ -2087,6 +2185,7 @@ registry.register(
         trust_tier=args.get("trust_tier", DEFAULT_TRUST_TIER),
         source_filter=args.get("source_filter"),
         min_trust=args.get("min_trust"),
+        model_identity=args.get("model_identity"),
         operations=args.get("operations"),
         target_size=args.get("target_size"),
         prefer=args.get("prefer"),
