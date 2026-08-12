@@ -1737,9 +1737,46 @@ def _memory_enriched_error(exc: Exception, action: str) -> str:
     elif isinstance(exc, (TypeError,)):
         category = "serialization-error"
         hint = "The content could not be serialized. Simplify the content and retry."
+    elif isinstance(exc, (RuntimeError,)):
+        # File-lock contention, atomic_write failures, internal state errors.
+        # RuntimeError is the dominant "unexpected" type because the lock
+        # retry path and atomic_write_text wrapper raise it (#2332).
+        msg_lower = str(exc).lower()
+        if "lock" in msg_lower or "timeout" in msg_lower:
+            category = "lock-contention"
+            hint = (
+                "The memory file is locked by a concurrent write. Wait 1-2 "
+                "seconds and retry the same operation. If it persists, "
+                "proceed without memory — the fact can be saved in a later turn."
+            )
+        else:
+            category = "internal-error"
+            hint = (
+                f"Memory store internal error ({exc_type}). Retry once; if it "
+                f"fails identically, proceed with your reply and save memory "
+                f"later. Do NOT loop on the same memory call."
+            )
+    elif isinstance(exc, (AttributeError, IndexError, KeyError)):
+        category = "entry-state-mismatch"
+        hint = (
+            "The in-memory entry list is out of sync with disk (a concurrent "
+            "session may have written between your read and write). Call "
+            "action='search' to refresh the current state, then retry."
+        )
+    elif isinstance(exc, (UnicodeDecodeError,)):
+        category = "encoding-corruption"
+        hint = (
+            "The memory file contains non-UTF-8 bytes. Use a terminal command "
+            "to inspect the memory file, fix the encoding, then retry. The "
+            "file was not modified."
+        )
     else:
         category = "unexpected"
-        hint = f"Unexpected error ({exc_type}). Proceed without memory persistence if this repeats."
+        hint = (
+            f"Unexpected error ({exc_type}). Retry the memory operation once; "
+            f"if it fails identically, proceed with your reply and save the "
+            f"fact in a later turn. Do NOT repeat the same call more than once."
+        )
 
     logger.warning("memory_tool %s failed: %s: %s", action, exc_type, exc_msg)
 

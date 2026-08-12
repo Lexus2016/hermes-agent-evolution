@@ -579,6 +579,48 @@ def _exc_str(exc: BaseException) -> str:
     return text if text else repr(exc)
 
 
+def _classify_mcp_call_failure(exc: BaseException) -> str:
+    """Return a recovery-hint suffix for an MCP tool-call exception (#2336).
+
+    MCP tool errors are returned as ``tool_error()`` strings inside the
+    handler, NOT raised — so they bypass ``classify_tool_exception`` in
+    ``model_tools.py`` entirely. The model sees only the opaque
+    ``MCP call failed: Type: msg`` with zero recovery guidance, producing
+    13-deep retry spirals (291 failures/7d). This inline classifier
+    appends a bracketed hint so the model can choose the right action.
+    """
+    exc_msg = str(exc).lower()
+    exc_type = type(exc).__name__
+
+    # Connection / transport failures — may recover on retry
+    if isinstance(exc, (ConnectionError, OSError)) or "connection" in exc_msg:
+        return (
+            " [Connection to MCP server failed. Retry tool_call once; "
+            "if it fails again the server may be down — use tool_search "
+            "to find an alternative tool.]"
+        )
+    # Timeout — bounded retry
+    if "timeout" in exc_msg or "timed out" in exc_msg:
+        return (
+            " [The MCP tool call timed out. Retry once with a simpler "
+            "request; if it times out again, try a lighter-weight alternative.]"
+        )
+    # ClosedResourceError — server crashed, needs reconnect
+    if "closedresource" in exc_type.lower() or "closed" in exc_msg:
+        return (
+            " [The MCP server's transport was closed (server crashed or "
+            "restarted). Wait a few seconds for auto-reconnect, or use "
+            "tool_search for an alternative.]"
+        )
+    # Method not found — schema drift
+    if "method not found" in exc_msg or "not found" in exc_msg:
+        return (
+            " [The MCP server doesn't recognize this tool. Use tool_search "
+            "and tool_describe to confirm the current tool name and schema.]"
+        )
+    return ""  # No enrichment for truly novel errors
+
+
 # JSON-RPC "method not found" — the error a server returns when it does not
 # implement a requested method (e.g. a tool-capable server that never wired up
 # the optional ``ping`` utility). Defined locally with a fallback so detection
@@ -5898,7 +5940,7 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             )
             return tool_error(
                 _sanitize_error(
-                    f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}"
+                    f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}{_classify_mcp_call_failure(exc)}"
                 )
             )
 
@@ -5964,7 +6006,7 @@ def _make_list_resources_handler(server_name: str, tool_timeout: float):
             )
             return tool_error(
                 _sanitize_error(
-                    f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}"
+                    f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}{_classify_mcp_call_failure(exc)}"
                 )
             )
 
@@ -6037,7 +6079,7 @@ def _make_read_resource_handler(server_name: str, tool_timeout: float):
             )
             return tool_error(
                 _sanitize_error(
-                    f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}"
+                    f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}{_classify_mcp_call_failure(exc)}"
                 )
             )
 
@@ -6116,7 +6158,7 @@ def _make_list_prompts_handler(server_name: str, tool_timeout: float):
             )
             return tool_error(
                 _sanitize_error(
-                    f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}"
+                    f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}{_classify_mcp_call_failure(exc)}"
                 )
             )
 
@@ -6244,7 +6286,7 @@ def _make_get_prompt_handler(server_name: str, tool_timeout: float):
                 exc,
             )
             err_msg = _sanitize_error(
-                f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}"
+                f"MCP call failed: {type(exc).__name__}: {_exc_str(exc)}{_classify_mcp_call_failure(exc)}"
             )
             unknown = _is_unknown_prompt_error(exc)
             if unknown:

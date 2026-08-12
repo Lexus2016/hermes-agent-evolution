@@ -140,12 +140,13 @@ class TestMemoryErrorDecomposition:
         result = json.loads(_memory_enriched_error(TypeError("bad type"), "add"))
         assert result["error_category"] == "serialization-error"
 
-    def test_unexpected_error_classified(self):
+    def test_runtime_error_classified(self):
         from tools.memory_tool import _memory_enriched_error
 
         result = json.loads(_memory_enriched_error(RuntimeError("weird"), "add"))
-        assert result["error_category"] == "unexpected"
+        assert result["error_category"] == "internal-error"
         assert "RuntimeError" in result["recovery_hint"]
+        assert "Retry once" in result["recovery_hint"]
 
     def test_all_results_have_required_fields(self):
         """Every enriched error should include error, error_type, category, hint, action."""
