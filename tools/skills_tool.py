@@ -2330,6 +2330,22 @@ def _skill_view_with_bump(args, **kw):
                         record_skill_outcome(str(resolved), success=True)
                     except Exception:
                         pass
+                    # Trust lifecycle consumer (#2256): a provisional skill is
+                    # surfaced with a warning so the agent knows it is not yet
+                    # trusted, and a trusted skill is surfaced as such. This is
+                    # the live read of get_trust_state() that gates the skill.
+                    try:
+                        from tools.skill_usage import get_trust_state
+                        trust_state = get_trust_state(str(resolved))
+                        parsed["trust_state"] = trust_state
+                        if trust_state == "provisional":
+                            parsed["warning"] = (
+                                f"Skill '{resolved}' is provisional (not yet "
+                                "trusted). It will be promoted after enough "
+                                "successful uses."
+                            )
+                    except Exception:
+                        pass
                     # Skill-Use compliance instrumentation (#2183):
                     # Before activating a new skill, check if the PREVIOUS
                     # active skill had boundary violations. Then set the new
@@ -2357,6 +2373,15 @@ def _skill_view_with_bump(args, **kw):
                         set_active_skill(str(resolved))
                     except Exception:
                         pass
+        elif isinstance(parsed, dict) and not parsed.get("success"):
+            # A failed skill_view is an attributable failure for the skill —
+            # record it so the trust lifecycle can demote a trusted skill
+            # (#2256). Best-effort; never breaks the tool.
+            try:
+                from tools.skill_usage import record_skill_outcome
+                record_skill_outcome(str(name), success=False)
+            except Exception:
+                pass
     except Exception:
         pass
     return result

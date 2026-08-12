@@ -55,6 +55,25 @@ STATE_STALE = "stale"
 STATE_ARCHIVED = "archived"
 _VALID_STATES = {STATE_ACTIVE, STATE_STALE, STATE_ARCHIVED}
 
+# Trust lifecycle (#2256): a skill captured as ``provisional`` is promoted to
+# ``trusted`` after N independent successful uses, and demoted back to
+# ``provisional`` when an attributable failure is observed. The trust state
+# lives on the usage sidecar alongside ``state``/``pinned``/``sync``.
+TRUST_PROVISIONAL = "provisional"
+TRUST_TRUSTED = "trusted"
+TRUST_DEMOTED = "demoted"
+_VALID_TRUST_STATES = {TRUST_PROVISIONAL, TRUST_TRUSTED, TRUST_DEMOTED}
+
+# Number of independent successful uses required to promote a provisional
+# skill to trusted. Configurable via ``curator.trust_promotion_threshold``.
+_DEFAULT_TRUST_PROMOTION_THRESHOLD = 3
+
+# Recent-failure rate above which a trusted skill is demoted to provisional.
+# Configurable via ``curator.trust_demotion_failure_rate``.
+_DEFAULT_TRUST_DEMOTION_FAILURE_RATE = 0.5
+# Minimum outcomes before demotion is considered (avoid demoting on 1/2).
+_TRUST_DEMOTION_MIN_OUTCOMES = 4
+
 # Load-bearing bundled built-ins the curator must NEVER archive or consolidate,
 # regardless of ``curator.prune_builtins``, pin state, or LLM judgment. These
 # back advertised UX paths (e.g. ``plan`` powers the ``/plan`` slash-command
@@ -659,6 +678,9 @@ def _empty_record() -> Dict[str, Any]:
         "recent_failure_rate": 0.0,
         # Source-chain provenance (#2192)
         "source_chain": [],
+        # Trust lifecycle (#2256)
+        "trust_state": TRUST_PROVISIONAL,
+        "trust_success_count": 0,
     }
 
 
@@ -842,8 +864,10 @@ def record_skill_outcome(skill_name: str, success: bool) -> None:
 
     Called after each skill execution to track whether the skill helped or
     hindered the task. The failure rate is a sliding window over the last
-    ``_FAILURE_WINDOW`` invocations. Best-effort; telemetry failures never
-    break the tool.
+    ``_FAILURE_WINDOW`` invocations. Also drives the trust lifecycle (#2256):
+    a provisional skill is promoted to trusted after enough successful uses,
+    and a trusted skill is demoted when its recent failure rate crosses the
+    threshold. Best-effort; telemetry failures never break the tool.
     """
     def _apply(rec: Dict[str, Any]) -> None:
         # invocation_count is the same as use_count — bump it.
@@ -857,7 +881,113 @@ def record_skill_outcome(skill_name: str, success: bool) -> None:
         rec["recent_failure_rate"] = (
             sum(outcomes) / len(outcomes) if outcomes else 0.0
         )
+        _apply_trust_lifecycle(rec, success)
     _mutate(skill_name, _apply)
+
+
+def _apply_trust_lifecycle(rec: Dict[str, Any], success: bool) -> None:
+    """Promote/demote a skill's trust state based on an execution outcome.
+
+    Runs inside the sidecar mutation so it is atomic with the outcome bump.
+    Promotion requires ``_DEFAULT_TRUST_PROMOTION_THRESHOLD`` successful uses;
+    demotion requires the recent failure rate to cross the threshold with at
+    least ``_TRUST_DEMOTION_MIN_OUTCOMES`` recorded.
+    """
+    trust_state = rec.get("trust_state") or TRUST_PROVISIONAL
+    if trust_state not in _VALID_TRUST_STATES:
+        trust_state = TRUST_PROVISIONAL
+
+    if success:
+        # A success advances the promotion counter (independent successful use).
+        rec["trust_success_count"] = int(rec.get("trust_success_count") or 0) + 1
+        if trust_state == TRUST_PROVISIONAL:
+            threshold = _trust_promotion_threshold()
+            if rec["trust_success_count"] >= threshold:
+                rec["trust_state"] = TRUST_TRUSTED
+                rec["trust_promoted_at"] = _now_iso()
+                logger.debug(
+                    "trust lifecycle: promoted %s to trusted after %d uses",
+                    rec.get("name", "?"),
+                    rec["trust_success_count"],
+                )
+        return
+
+    # Failure — reset the promotion counter (a failure breaks the run of
+    # independent successes) and consider demotion for a trusted skill.
+    rec["trust_success_count"] = 0
+    if trust_state == TRUST_TRUSTED:
+        outcomes = rec.get("_recent_outcomes") or []
+        if len(outcomes) >= _TRUST_DEMOTION_MIN_OUTCOMES:
+            rate = rec.get("recent_failure_rate") or 0.0
+            if rate >= _trust_demotion_failure_rate():
+                rec["trust_state"] = TRUST_PROVISIONAL
+                rec["trust_demoted_at"] = _now_iso()
+                logger.debug(
+                    "trust lifecycle: demoted %s to provisional (failure rate %.2f)",
+                    rec.get("name", "?"),
+                    rate,
+                )
+
+
+def _trust_promotion_threshold() -> int:
+    """Read the promotion threshold from config (``curator.trust_promotion_threshold``)."""
+    try:
+        from hermes_cli.config import get_config_value
+        val = get_config_value("curator.trust_promotion_threshold")
+        if isinstance(val, int) and val > 0:
+            return val
+    except BaseException:
+        # get_config_value raises SystemExit (a BaseException, not Exception)
+        # when the key is unset — treat that as "use the default".
+        pass
+    return _DEFAULT_TRUST_PROMOTION_THRESHOLD
+
+
+def _trust_demotion_failure_rate() -> float:
+    """Read the demotion failure-rate threshold from config (``curator.trust_demotion_failure_rate``)."""
+    try:
+        from hermes_cli.config import get_config_value
+        val = get_config_value("curator.trust_demotion_failure_rate")
+        if isinstance(val, (int, float)) and 0.0 <= val <= 1.0:
+            return float(val)
+    except BaseException:
+        pass
+    return _DEFAULT_TRUST_DEMOTION_FAILURE_RATE
+
+
+def get_trust_state(skill_name: str) -> str:
+    """Return the current trust state for a skill (``provisional``/``trusted``/``demoted``).
+
+    Best-effort; returns ``provisional`` if the record is missing or corrupt.
+    """
+    rec = get_record(skill_name)
+    state = rec.get("trust_state") or TRUST_PROVISIONAL
+    if state not in _VALID_TRUST_STATES:
+        return TRUST_PROVISIONAL
+    return state
+
+
+def set_trust_state(skill_name: str, trust_state: str) -> bool:
+    """Manually set a skill's trust state (curator/operator override).
+
+    Returns True on success, False if the state is invalid or the skill
+    isn't curation-eligible. Best-effort; never raises.
+    """
+    if trust_state not in _VALID_TRUST_STATES:
+        return False
+
+    def _apply(rec: Dict[str, Any]) -> None:
+        rec["trust_state"] = trust_state
+        if trust_state == TRUST_TRUSTED:
+            rec["trust_promoted_at"] = _now_iso()
+        elif trust_state == TRUST_DEMOTED:
+            rec["trust_demoted_at"] = _now_iso()
+
+    try:
+        _mutate(skill_name, _apply, require_curation_eligible=True)
+        return True
+    except Exception:
+        return False
 
 
 def set_state(skill_name: str, state: str) -> None:
