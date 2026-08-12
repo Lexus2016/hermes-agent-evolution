@@ -724,6 +724,29 @@ class TestLifecycleGuardModule:
         result = _read_referenced_script(Path("evil\x00path.sh"))
         assert result == (None, False)
 
+    def test_resolve_terminal_script_path_null_byte_path(self):
+        """#2319: Path(candidate).expanduser() raises ValueError (not OSError)
+        when candidate contains an embedded null byte (observed on the prod
+        Python where expanduser() routes through getpwuid/lstat). Before the
+        fix, _resolve_terminal_script_path had no guard, so the ValueError
+        propagated up and crashed the terminal tool (~87s wasted per crash,
+        4 hard occurrences documented in introspection P5).
+
+        Now ValueError is caught alongside OSError, returning None. The three
+        caller sites in _iter_referenced_shell_scripts skip a None return
+        (treating a null-byte path as "nothing to scan", mirroring #2303).
+
+        The test candidate uses a leading '~' so expanduser() exercises its
+        system-call path — the exact route that produced the crash on the
+        prod host (a bare null byte without '~' is not touched by expanduser
+        on newer CPython and would not reproduce).
+        """
+        from cron.lifecycle_guard import _resolve_terminal_script_path
+
+        # expanduser() processes '~' via getpwuid; a NUL byte there raises
+        # ValueError: embedded null byte — the prod-host crash signature.
+        assert _resolve_terminal_script_path("~\x00evil.sh", None) is None
+
 
 # ---------------------------------------------------------------------------
 # Defense 2 (chokepoint): cron.jobs.create_job blocks the AGENT model-tool path

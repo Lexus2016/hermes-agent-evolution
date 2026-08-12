@@ -107,8 +107,6 @@ _MAX_REFERENCED_SCRIPT_DEPTH = 8
 _CONTROL_CHARS = frozenset(";&|()")
 
 
-
-
 _ReadRemoteScriptFn = Callable[[str], Optional[str]]
 
 
@@ -170,8 +168,15 @@ def contains_launchctl_submit_command(command: str) -> bool:
     return False
 
 
-def _resolve_terminal_script_path(candidate: str, cwd: Optional[str]) -> Path:
-    path = Path(candidate).expanduser()
+def _resolve_terminal_script_path(candidate: str, cwd: Optional[str]) -> Optional[Path]:
+    # ValueError: "embedded null character in path" — pathlib.Path raises
+    # ValueError (not OSError) on NUL in path. This mirrors the
+    # (OSError, ValueError) guard at os.open() (line 261) and
+    # script_path.resolve() (line 320) established by PR #2311. #2303. #2319.
+    try:
+        path = Path(candidate).expanduser()
+    except (OSError, ValueError):
+        return None
     if not path.is_absolute():
         path = Path(cwd or Path.cwd()) / path
     return path
@@ -192,7 +197,9 @@ def _iter_referenced_shell_scripts(
 
         if executable_name in {".", "source"}:
             if len(segment) > index + 1:
-                yield _resolve_terminal_script_path(segment[index + 1], cwd)
+                resolved = _resolve_terminal_script_path(segment[index + 1], cwd)
+                if resolved is not None:
+                    yield resolved
             continue
 
         if executable_name in _SHELL_EXECUTABLES:
@@ -216,7 +223,9 @@ def _iter_referenced_shell_scripts(
                 "-c",
                 "--command",
             }:
-                yield _resolve_terminal_script_path(arguments[arg_index], cwd)
+                resolved = _resolve_terminal_script_path(arguments[arg_index], cwd)
+                if resolved is not None:
+                    yield resolved
             continue
 
         # A bare "/" token is pathlib's division operator in Python sources
@@ -226,7 +235,9 @@ def _iter_referenced_shell_scripts(
         # (#77131). Skip pure-separator tokens.
         if executable.strip("/"):
             if "/" in executable or executable.endswith((".sh", ".bash", ".zsh")):
-                yield _resolve_terminal_script_path(executable, cwd)
+                resolved = _resolve_terminal_script_path(executable, cwd)
+                if resolved is not None:
+                    yield resolved
 
 
 def _iter_shell_command_payloads(command: str) -> Iterator[str]:
@@ -361,8 +372,6 @@ def contains_gateway_lifecycle_command_or_referenced_script(
         visited=set(),
         read_remote_script=read_remote_script,
     )
-
-
 
 
 def _resolve_script_path(script_path: str) -> Path:
