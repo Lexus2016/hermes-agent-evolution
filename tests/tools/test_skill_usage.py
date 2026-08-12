@@ -364,3 +364,116 @@ def test_adopt_rejects_empty_name(skills_home):
 
     assert adopt_skill("")[0] is False
 
+
+# ---------------------------------------------------------------------------
+# Trust lifecycle — provisional → trusted promotion / demotion (#2256, Slice B)
+# ---------------------------------------------------------------------------
+
+
+def _trust_skill(skills_home, name="trust-skill"):
+    """Create a curation-eligible skill and return its name."""
+    _write_skill(skills_home / "skills", name)
+    return name
+
+
+def test_provisional_promotes_to_trusted_after_threshold(skills_home):
+    from tools.skill_usage import (
+        TRUST_PROVISIONAL,
+        TRUST_TRUSTED,
+        get_trust_state,
+        record_skill_outcome,
+    )
+
+    name = _trust_skill(skills_home)
+    assert get_trust_state(name) == TRUST_PROVISIONAL
+
+    # Default threshold is 3 independent successful uses.
+    for _ in range(3):
+        record_skill_outcome(name, success=True)
+
+    assert get_trust_state(name) == TRUST_TRUSTED
+
+
+def test_failure_resets_promotion_counter(skills_home):
+    from tools.skill_usage import (
+        TRUST_PROVISIONAL,
+        get_trust_state,
+        record_skill_outcome,
+    )
+
+    name = _trust_skill(skills_home)
+    record_skill_outcome(name, success=True)
+    record_skill_outcome(name, success=True)
+    # A failure breaks the run of independent successes.
+    record_skill_outcome(name, success=False)
+    record_skill_outcome(name, success=True)
+    record_skill_outcome(name, success=True)
+
+    # Only 2 consecutive successes remain after the failure reset — not 3.
+    assert get_trust_state(name) == TRUST_PROVISIONAL
+
+
+def test_trusted_demotes_on_sustained_failure_rate(skills_home):
+    from tools.skill_usage import (
+        TRUST_PROVISIONAL,
+        TRUST_TRUSTED,
+        get_trust_state,
+        record_skill_outcome,
+    )
+
+    name = _trust_skill(skills_home)
+    # Promote to trusted first.
+    for _ in range(3):
+        record_skill_outcome(name, success=True)
+    assert get_trust_state(name) == TRUST_TRUSTED
+
+    # Now drive the recent-failure rate above the demotion threshold with
+    # enough outcomes to clear the min-outcome guard (default 4).
+    for _ in range(4):
+        record_skill_outcome(name, success=False)
+
+    assert get_trust_state(name) == TRUST_PROVISIONAL
+
+
+def test_single_flake_does_not_demote_trusted(skills_home):
+    from tools.skill_usage import (
+        TRUST_TRUSTED,
+        get_trust_state,
+        record_skill_outcome,
+    )
+
+    name = _trust_skill(skills_home)
+    for _ in range(3):
+        record_skill_outcome(name, success=True)
+    assert get_trust_state(name) == TRUST_TRUSTED
+
+    # One failure out of a small window must not demote (min-outcome guard).
+    record_skill_outcome(name, success=False)
+    assert get_trust_state(name) == TRUST_TRUSTED
+
+
+def test_set_trust_state_manual_override(skills_home):
+    from tools.skill_usage import (
+        TRUST_DEMOTED,
+        TRUST_TRUSTED,
+        get_trust_state,
+        set_trust_state,
+    )
+
+    name = _trust_skill(skills_home)
+    assert set_trust_state(name, TRUST_TRUSTED) is True
+    assert get_trust_state(name) == TRUST_TRUSTED
+
+    assert set_trust_state(name, TRUST_DEMOTED) is True
+    assert get_trust_state(name) == TRUST_DEMOTED
+
+    # Invalid state is rejected.
+    assert set_trust_state(name, "bogus") is False
+    assert get_trust_state(name) == TRUST_DEMOTED
+
+
+def test_trust_state_defaults_to_provisional_for_unknown_skill(skills_home):
+    from tools.skill_usage import TRUST_PROVISIONAL, get_trust_state
+
+    assert get_trust_state("no-such-skill") == TRUST_PROVISIONAL
+
