@@ -1824,6 +1824,18 @@ DEFAULT_CONFIG = {
         # Flip to true only if you trust delegated work to run dangerous cmds
         # without human review (cron pipelines, batch automation, etc.).
         "subagent_auto_approve": False,
+        # #2317 — LLM routing at subagent-delegation time. When enabled, each
+        # subagent is routed to the model that has historically performed best
+        # on its task dimension (coding / reasoning / creative / tool-use /
+        # general) via tools/model_routing_table.py, instead of always
+        # inheriting the parent's model. Fail-open: any routing error or
+        # misconfiguration falls back to the inherited model, so routing never
+        # breaks delegation. ``models`` lists the candidate model names to
+        # route among (empty = routing disabled regardless of ``enabled``).
+        "routing": {
+            "enabled": False,
+            "models": [],
+        },
     },
     # Ephemeral prefill messages file — JSON list of {role, content} dicts
     # injected at the start of every API call for few-shot priming.

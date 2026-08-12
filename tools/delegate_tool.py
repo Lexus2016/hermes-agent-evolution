@@ -1846,6 +1846,18 @@ def _build_child_agent(
     if not override_base_url:
         effective_base_url = _inherit_parent_base_url(parent_agent, effective_base_url)
     effective_api_key = override_api_key or parent_api_key
+
+    # #2317 — LLM routing at subagent-delegation time. When
+    # ``delegation.routing.enabled`` is true, consult the per-task-dimension
+    # routing table (tools/model_routing_table.py) to pick the best model for
+    # this subagent's task type instead of always inheriting the parent's
+    # model. This is the live call site that makes the routing abstraction
+    # actually route. Fail-open: any routing error falls back to the inherited
+    # model so a routing misconfiguration never breaks delegation.
+    _routed_model = _route_subagent_model(goal, context, task_index)
+    if _routed_model:
+        effective_model = _routed_model
+
     # Bug #20558 / PR #20563: api_mode must NOT be inherited when the child uses a
     # different provider than the parent — each provider has its own API surface
     # (e.g. MiniMax uses anthropic_messages, DeepSeek uses chat_completions).
@@ -4680,6 +4692,47 @@ def _resolve_delegation_credentials(cfg: dict, parent_agent) -> dict:
         "command": runtime.get("command"),
         "args": list(runtime.get("args") or []),
     }
+
+
+def _route_subagent_model(
+    goal: str,
+    context: Optional[str],
+    task_index: int,
+) -> Optional[str]:
+    """Route a subagent to a model via the routing table (#2317).
+
+    When ``delegation.routing.enabled`` is true and ``delegation.routing.models``
+    lists candidate models, consult ``tools.model_routing_table.RoutingTable``
+    to pick the best model for this subagent's task type (classified from the
+    goal/context). Returns the routed model name, or None when routing is
+    disabled, misconfigured, or fails — the caller then inherits the parent's
+    model. Fail-open: a routing error must never break delegation.
+    """
+    try:
+        delegation_cfg = _load_config()
+        routing_cfg = delegation_cfg.get("routing") or {}
+        if not routing_cfg.get("enabled"):
+            return None
+        from tools.model_routing_table import RoutingTable, classify_task
+
+        _routing_models = routing_cfg.get("models") or []
+        if not _routing_models:
+            return None
+        _task = {"type": goal, "tags": [context or ""]}
+        _routing_table = RoutingTable(models=list(_routing_models))
+        _routed = _routing_table.select_model(_task)
+        if _routed:
+            logger.info(
+                "delegate_task: routing subagent %d to model %r "
+                "(task dimension %r) — #2317",
+                task_index,
+                _routed,
+                classify_task(_task),
+            )
+        return _routed
+    except Exception as _routing_err:
+        logger.debug("delegate_task: routing disabled/failed (%s)", _routing_err)
+        return None
 
 
 def _load_config() -> dict:

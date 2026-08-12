@@ -355,6 +355,9 @@ delegation:
   # max_concurrent_children: 3              # Parallel children per batch (default: 3)
   # max_spawn_depth: 1                      # Tree depth (floor 1, no ceiling, default 1 = flat). Raise to 2 to allow orchestrator children to spawn leaves; 3+ for deeper trees.
   # orchestrator_enabled: true              # Disable to force all children to leaf role.
+  # routing:                                 # #2317 — route subagents to the best model per task dimension
+  #   enabled: false                         #   (coding/reasoning/creative/tool-use/general). Fail-open.
+  #   models: []                             #   Candidate model names to route among (empty = disabled).
   model: "google/gemini-3-flash-preview"             # Optional provider/model override
   provider: "openrouter"                             # Optional built-in provider
   api_mode: anthropic_messages                       # optional; auto-detected from base_url for anthropic_messages endpoints
@@ -368,6 +371,19 @@ delegation:
 ```
 
 When `base_url` points at an Anthropic-compatible endpoint — for example a path ending in `/anthropic`, an Azure Foundry Claude route, or a MiniMax `/anthropic` proxy — `api_mode` is auto-detected as `anthropic_messages` so the subagent uses the right wire format without you setting anything. Set `api_mode` explicitly when the auto-detection guess is wrong (rare).
+
+### Model routing for subagents (#2317)
+
+By default every subagent inherits the parent's model. When you want subagents routed to the model that has historically performed best on their task type, enable `delegation.routing`:
+
+```yaml
+delegation:
+  routing:
+    enabled: true
+    models: ["openai/gpt-5", "anthropic/claude-sonnet-4", "google/gemini-3-flash-preview"]
+```
+
+With routing enabled, each `delegate_task` call classifies the subagent's goal into a coarse task dimension (`coding`, `reasoning`, `creative`, `tool-use`, or `general`) and consults the per-task-dimension performance record (`tools/model_routing_table.py`) to pick the best model from `models`. The routing is **fail-open**: any routing error, misconfiguration, or empty `models` list falls back to the inherited parent model, so a routing problem never breaks delegation. Routing is off by default (`enabled: false`).
 
 :::tip
 The agent handles delegation automatically based on the task complexity. You don't need to explicitly ask it to delegate — it will do so when it makes sense.
