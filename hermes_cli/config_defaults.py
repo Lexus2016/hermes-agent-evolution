@@ -1978,6 +1978,12 @@ DEFAULT_CONFIG = {
         # genuine non-use (never a mass-prune on the first run). Set to false
         # to keep all bundled built-ins permanently.
         "prune_builtins": True,
+        # Trust lifecycle (#2256): a provisional skill is promoted to trusted
+        # after this many independent successful uses.
+        "trust_promotion_threshold": 3,
+        # Recent-failure rate above which a trusted skill is demoted back to
+        # provisional (0.0-1.0).
+        "trust_demotion_failure_rate": 0.5,
         # Pre-run backup: before every real curator pass (dry-run is
         # skipped), snapshot ~/.hermes/skills/ into
         # ~/.hermes/skills/.curator_backups/<utc-iso>/skills.tar.gz so the
