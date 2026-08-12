@@ -633,7 +633,8 @@ class TestAmbiguousMatchEnrichment:
             content, "aaa", "ccc", replace_all=False
         )
         assert count == 0
-        assert "Provide more context" in err
+        assert err is not None
+        assert "more surrounding context" in err or "Provide more context" in err
         assert "replace_all=True" in err
 
 

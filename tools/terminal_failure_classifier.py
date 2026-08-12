@@ -177,9 +177,14 @@ def classify_terminal_failure(
         )
 
     # Text-based timeout (e.g. "connection timed out" from curl) — a
-    # transient network condition that may recover on retry with backoff.
-    # After 2 consecutive identical timeouts the failure is deterministic;
-    # promote to ``timeout_deterministic`` (issue #1091).
+    # transient network condition that may recover on the INTERNAL retry
+    # loop (which uses exponential backoff).  However the model-facing
+    # should_retry signal must stay False: a text timeout on the SAME
+    # command means the endpoint is slow or unreachable, and blind
+    # re-issuing it across turns produces the 304/7d spiral (#2335).
+    # The internal retry loop (retry_count < max_retries at the call site)
+    # still gets its backoff attempts; this classification only governs
+    # whether the MODEL is told to try again.
     if text_based_timeout:
         if consecutive_count >= 2:
             return TerminalFailureClassification(
@@ -199,10 +204,12 @@ def classify_terminal_failure(
         return TerminalFailureClassification(
             category=FailureCategory.timeout,
             hint=(
-                "The command timed out. Retry with a longer timeout, run it in "
-                "the background with notify_on_complete=true, or split the work."
+                "The command timed out (likely a slow or unreachable network "
+                "endpoint). Do NOT retry the same command unchanged — it will "
+                "time out again. Increase the timeout value, run it in the "
+                "background with notify_on_complete=true, or switch approach."
             ),
-            should_retry=True,
+            should_retry=False,
         )
 
     # Missing command / binary not on PATH.

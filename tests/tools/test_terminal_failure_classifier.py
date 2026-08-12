@@ -62,14 +62,18 @@ class TestClassifyTimeout:
         assert result.should_retry is False
         assert "Change at least one of" in result.hint
 
-    def test_text_based_timeout_is_retryable(self):
-        """A text-based timeout (e.g. 'connection timed out' from curl) is a
-        transient network condition — retryable on first occurrence."""
+    def test_text_based_timeout_is_non_retryable(self):
+        """A text-based timeout (e.g. 'connection timed out' from curl) is
+        non-retryable from the model's perspective — blind re-issuing the
+        same command across turns produces the timeout spiral (#2335).
+        The internal retry loop (retry_count < max_retries at the call site)
+        still gets its backoff attempts; this classification only governs
+        whether the MODEL is told to try again."""
         result = classifier.classify_terminal_failure(
             "curl http://example.test", 28, "", "connection timed out"
         )
         assert result.category == classifier.FailureCategory.timeout
-        assert result.should_retry is True
+        assert result.should_retry is False
 
     def test_second_consecutive_timeout_is_deterministic(self):
         """After 2 consecutive identical timeouts, the failure is
@@ -268,16 +272,14 @@ class TestTerminalToolForegroundFailures:
         assert len(fake.calls) == 1
         assert fake.calls[0][0] == "cat /root/secret"
 
-    def test_transient_timeout_retries_then_stops(self, monkeypatch):
+    def test_transient_timeout_does_not_amplify(self, monkeypatch):
         monkeypatch.setenv("TERMINAL_ENV", "local")
         monkeypatch.setattr(terminal_tool.time, "sleep", lambda _s: None)
-        # Text-based timeout (connection timed out) is retryable — 4 calls:
-        # initial + 3 retries should exhaust the loop.  exit_code=124 (wall-
-        # clock timeout) is non-retryable and tested separately (#2191).
+        # Text-based timeout (connection timed out) is non-retryable (#2335):
+        # the model must not blind-retry a slow/unreachable endpoint. Only
+        # 1 call is made — no internal amplification.  exit_code=124 (wall-
+        # clock timeout) is also non-retryable and tested separately (#2191).
         fake = FakeEnvironment([
-            {"output": "connection timed out", "returncode": 28},
-            {"output": "connection timed out", "returncode": 28},
-            {"output": "connection timed out", "returncode": 28},
             {"output": "connection timed out", "returncode": 28},
         ])
         monkeypatch.setattr(terminal_tool, "_active_environments", {"default": fake})
@@ -292,8 +294,8 @@ class TestTerminalToolForegroundFailures:
         assert data["failure_class"] == "timeout"
         assert (
             data["should_retry"] is False
-        )  # retries exhausted; caller should switch strategy
-        assert len(fake.calls) == 4
+        )  # non-retryable: caller should switch strategy
+        assert len(fake.calls) == 1  # no internal amplification
 
     def test_successful_command_resets_streak(self, monkeypatch):
         monkeypatch.setenv("TERMINAL_ENV", "local")

@@ -217,9 +217,11 @@ def classify_file_error(
         )
     if "found" in low and "matches" in low and "old_string" in low:
         return "ambiguous_match", (
-            "Multiple matches found. Include more surrounding context lines in "
-            "old_string to make it unique, or use replace_all=True if you want "
-            "all occurrences replaced."
+            "Multiple matches found — old_string is NOT unique. Do NOT retry "
+            "the same old_string (it will match the same multiple locations). "
+            "Either (1) read the match locations shown in the error and include "
+            "enough surrounding context to disambiguate, or (2) use "
+            "replace_all=True if you intend to replace ALL occurrences."
         )
     # ── Sub-classify the fuzzy matcher's distinctive failure strings (#1586) ──
     # These previously fell through to the generic "error" bucket (the 'other'
@@ -266,8 +268,23 @@ def classify_file_error(
             "The write failed. Check disk space / permissions and the path before retrying."
         )
     if "failed to read" in low:
+        # Decompose the read_file "other" bucket (#2333: 217 failures/7d).
+        # At this point the file exists, is not a directory, and is not
+        # binary — so a read failure is a genuine "other" cause.  The exit
+        # code and output text let us route to a targeted recovery instead
+        # of the generic "check path/permissions" hint that drives blind
+        # retries (20-deep spiral observed).
+        if "exit 1" in low or "exit 2" in low:
+            return "read_error", (
+                "The file exists but could not be read (likely an encoding or "
+                "I/O issue mid-file). Try reading a smaller offset/limit range "
+                "to isolate the problematic region, or use write_file to replace "
+                "the content. Do NOT retry the exact same read."
+            )
         return "read_error", (
-            "The read failed. Check the path/permissions; don't repeat the same call blindly."
+            "The read failed unexpectedly. The file exists and is not binary — "
+            "try a smaller offset/limit range, or use execute_code to read it "
+            "with explicit error handling. Don't repeat the same call blindly."
         )
     # ── Decompose remaining "other" failures (#2244) ────────────────────
     # 55 patch failures/7d fell through to the generic "error" catch-all
@@ -1546,7 +1563,18 @@ class ShellFileOperations(FileOperations):
         read_result = self._exec(read_cmd)
 
         if read_result.exit_code != 0:
-            return ReadResult(error=f"Failed to read file: {read_result.stdout}")
+            # At this point the file exists, is not a directory, and passed
+            # the binary sample probe — so a sed failure is a genuine "other"
+            # read error (encoding corruption mid-file, transient I/O, or
+            # interrupted read).  Surface the exit code so classify_file_error
+            # can route the model to the right recovery instead of falling
+            # through to the opaque "error" catch-all (#2333).
+            return ReadResult(
+                error=(
+                    f"Failed to read file (sed exit {read_result.exit_code})"
+                    f": {read_result.stdout or 'no output'}"
+                )
+            )
         read_output = _strip_terminal_fence_leaks(read_result.stdout)
         # Strip a leading UTF-8 BOM so the model never sees a phantom U+FEFF
         # before the first real character. Only meaningful on the first
@@ -1735,7 +1763,12 @@ class ShellFileOperations(FileOperations):
             )
         cat_result = self._exec(f"cat {self._escape_shell_arg(path)}")
         if cat_result.exit_code != 0:
-            return ReadResult(error=f"Failed to read file: {cat_result.stdout}")
+            return ReadResult(
+                error=(
+                    f"Failed to read file (cat exit {cat_result.exit_code})"
+                    f": {cat_result.stdout or 'no output'}"
+                )
+            )
         # Strip a leading UTF-8 BOM so patch's fuzzy matcher operates on
         # clean content (a phantom U+FEFF before line 1 would defeat an
         # exact first-line match). write_file restores the BOM on the way

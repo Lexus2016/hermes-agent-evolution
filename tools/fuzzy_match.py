@@ -188,9 +188,11 @@ def fuzzy_find_and_replace(content: str, old_string: str, new_string: str,
             if len(matches) > 1 and not replace_all:
                 locations = _format_match_locations(content, matches)
                 return content, 0, None, (
-                    f"Found {len(matches)} matches for old_string. "
-                    f"Provide more context to make it unique, or use replace_all=True. "
-                    f"Matches:\n{locations}"
+                    f"Found {len(matches)} matches for old_string — it is NOT unique. "
+                    f"Do NOT retry the same old_string; it will match the same "
+                    f"{len(matches)} locations again. Either include more surrounding "
+                    f"context lines to make it unique, or use replace_all=True. "
+                    f"Match locations:\n{locations}"
                 )
 
             # replace_all with a similarity-based strategy would overwrite
