@@ -304,6 +304,50 @@ def _digest_result(result: Any) -> Optional[str]:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+# ── Replay-or-fork decision (Slice B, #2237) ─────────────────────────────
+
+
+def replay_or_fork(tool_name: str, arguments: Dict[str, Any]) -> Optional[str]:
+    """Decide replay vs fork for a non-atomic tool call.
+
+    Returns a JSON string to **replay** (the call already executed with this
+    exact semantic intent and its result was observed) or ``None`` to
+    **execute normally** (fork). Read-only / atomic tools always return
+    ``None`` — replaying them is harmless and they are never logged.
+
+    Slice B (#2237): after a checkpoint-restore, a previously-succeeded
+    non-atomic call must NOT be re-executed (that would duplicate a real-world
+    side effect — a second email, a double charge). This consults the
+    tool-call log's idempotency key to answer "has this exact intent already
+    executed successfully?". A call whose intent differs from anything logged
+    returns ``None`` (fork) so it is never silently re-run as a duplicate.
+    """
+    if not is_non_atomic(tool_name):
+        return None
+    log = get_default_log()
+    existing = log.lookup(tool_name, arguments)
+    # Only replay calls whose result was actually observed (result_digest set).
+    # A call that was recorded but never completed (digest None) is treated as
+    # not-yet-succeeded and allowed to execute (fork).
+    if existing is not None and existing.result_digest is not None:
+        return json.dumps(
+            {
+                "success": True,
+                "replayed": True,
+                "tool": tool_name,
+                "idempotency_key": existing.idempotency_key,
+                "note": (
+                    "This non-atomic tool call already executed with identical "
+                    "semantic intent (see idempotency_key). Replaying the prior "
+                    "result instead of re-executing to avoid a duplicate "
+                    "real-world side effect."
+                ),
+            },
+            ensure_ascii=False,
+        )
+    return None
+
+
 # Module-level singleton — the default log used by the agent session.
 # Slice B will reset/restore this on checkpoint-restore.
 _default_log: Optional[ToolCallLog] = None

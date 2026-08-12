@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import copy
+import json
 
 import pytest
+from unittest.mock import patch
 
 from tools.tool_call_log import (
     NON_ATOMIC_TOOLS,
@@ -14,6 +16,7 @@ from tools.tool_call_log import (
     infer_idempotency_key,
     is_non_atomic,
     register_non_atomic_tool,
+    replay_or_fork,
     reset_default_log,
 )
 
@@ -258,6 +261,59 @@ class TestDefaultLog:
         assert len(log.all_entries()) >= 1
         reset_default_log()
         assert len(log.all_entries()) == 0
+
+
+# ── replay-or-fork decision (Slice B, #2237) ─────────────────────────────
+
+
+class TestReplayOrFork:
+    def test_atomic_tool_never_replays(self) -> None:
+        assert replay_or_fork("web_search", {"query": "x"}) is None
+
+    def test_unknown_tool_never_replays(self) -> None:
+        assert replay_or_fork("nonexistent_tool", {}) is None
+
+    def test_unseen_non_atomic_forks(self) -> None:
+        # No prior record -> execute normally (fork).
+        assert replay_or_fork("agentmail__send_message", {"to": "a@b.com"}) is None
+
+    def test_same_intent_after_success_replays(self) -> None:
+        log = ToolCallLog()
+        args = {"to": "a@b.com", "subject": "hi"}
+        log.record("agentmail__send_message", args, result={"status": "sent"})
+        with patch("tools.tool_call_log.get_default_log", return_value=log):
+            out = replay_or_fork(
+                "agentmail__send_message",
+                {"to": "a@b.com", "subject": "hi", "trace_id": "noise"},
+            )
+        assert out is not None
+        payload = json.loads(out)
+        assert payload["replayed"] is True
+        assert payload["tool"] == "agentmail__send_message"
+
+    def test_different_intent_forks(self) -> None:
+        log = ToolCallLog()
+        log.record(
+            "agentmail__send_message",
+            {"to": "a@b.com", "subject": "hi"},
+            result={"status": "sent"},
+        )
+        with patch("tools.tool_call_log.get_default_log", return_value=log):
+            out = replay_or_fork(
+                "agentmail__send_message", {"to": "other@b.com", "subject": "hi"}
+            )
+        assert out is None
+
+    def test_recorded_but_unobserved_forks(self) -> None:
+        # Recorded but result never observed (digest None) -> not yet
+        # succeeded, so it must execute (fork), not replay.
+        log = ToolCallLog()
+        log.record("agentmail__send_message", {"to": "a@b.com", "subject": "hi"})
+        with patch("tools.tool_call_log.get_default_log", return_value=log):
+            out = replay_or_fork(
+                "agentmail__send_message", {"to": "a@b.com", "subject": "hi"}
+            )
+        assert out is None
 
 
 # ── dispatch-path integration (rework of #2236) ─────────────────────────
