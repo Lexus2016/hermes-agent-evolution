@@ -284,3 +284,46 @@ class TestClassifyToolException:
 
         f = classify_tool_exception("tool_call", TimeoutError())
         assert f.hint != ""
+
+
+class TestClassifyMcpError:
+    """Tests for MCP / JSON-RPC structural classification (#2336)."""
+
+    class _FakeMcpError(Exception):
+        """Mimics mcp.shared.exceptions.McpError: .error.code + .error.message."""
+
+        def __init__(self, code, message):
+            super().__init__(f"McpError: {message}")
+            er = type("E", (), {"code": code, "message": message})()
+            self.error = er
+
+    @pytest.mark.parametrize(
+        "code,message,exp_cls,exp_action",
+        [
+            (-32601, "Method not found", "not_found", "use_alternative"),
+            (-32602, "Invalid params", "validation", "fix_args"),
+            (-32603, "Internal error", "transient", "retry"),
+            (-32050, "Server disconnected", "transient", "retry"),
+            (-32700, "Parse error", "validation", "fix_args"),
+            (-99999, "Weird error", "unknown", "use_alternative"),
+        ],
+    )
+    def test_mcp_code_classification(self, code, message, exp_cls, exp_action):
+        from agent.tool_error_recovery import (
+            classify_tool_exception,
+            ToolErrorClass,
+            RecoveryAction,
+        )
+
+        f = classify_tool_exception("tool_call", self._FakeMcpError(code, message))
+        assert f.error_class == ToolErrorClass(exp_cls)
+        assert f.recovery_action == RecoveryAction(exp_action)
+        assert f.hint != ""
+
+    def test_non_mcp_exception_falls_through(self):
+        """A plain RuntimeError must reach the string classifier, not MCP path."""
+        from agent.tool_error_recovery import classify_tool_exception, ToolFailure
+
+        f = classify_tool_exception("tool_call", RuntimeError("file not found"))
+        assert isinstance(f, ToolFailure)
+        assert "not_found" in f.error_class.value or "unknown" in f.error_class.value
