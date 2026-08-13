@@ -65,6 +65,13 @@ class SkillVersion:
     diff_ref: str = ""
     critic_ref: str = ""
     note: str = ""
+    # Trajectory attribution (#2288 — PoisonedEvolution).  Which task
+    # trajectories contributed to this skill's content.  Treating
+    # provisional→trusted promotion as a security boundary means recording
+    # the provenance of the skill's content so a cross-trajectory
+    # credit-assignment attack (a skill that looks causally useful and
+    # recurrent but was poisoned) can be audited after the fact.
+    trajectory_refs: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -78,6 +85,7 @@ class SkillVersion:
             "diff_ref": self.diff_ref,
             "critic_ref": self.critic_ref,
             "note": self.note,
+            "trajectory_refs": list(self.trajectory_refs),
         }
 
     @classmethod
@@ -92,6 +100,7 @@ class SkillVersion:
             diff_ref=str(data.get("diff_ref", "")),
             critic_ref=str(data.get("critic_ref", "")),
             note=str(data.get("note", "")),
+            trajectory_refs=list(data.get("trajectory_refs", []) or []),
         )
 
 
@@ -129,7 +138,9 @@ def load_versions(skill: str, store_dir: Optional[Path] = None) -> List[SkillVer
     return out
 
 
-def current_version(skill: str, store_dir: Optional[Path] = None) -> Optional[SkillVersion]:
+def current_version(
+    skill: str, store_dir: Optional[Path] = None
+) -> Optional[SkillVersion]:
     """The live version — the highest recorded, not merely the last written.
 
     Ordering by ``version`` rather than by file position means an out-of-order
@@ -151,6 +162,7 @@ def record_promotion(
     diff_ref: str = "",
     critic_ref: str = "",
     note: str = "",
+    trajectory_refs: Optional[List[str]] = None,
     promoted_at: Optional[str] = None,
     store_dir: Optional[Path] = None,
 ) -> SkillVersion:
@@ -171,12 +183,29 @@ def record_promotion(
         diff_ref=diff_ref,
         critic_ref=critic_ref,
         note=note,
+        trajectory_refs=list(trajectory_refs or []),
     )
     path = _path(skill, store_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry.to_dict(), sort_keys=True) + "\n")
     return entry
+
+
+def provenance_ok(record: SkillVersion) -> bool:
+    """Security-boundary check on a promotion's trajectory attribution (#2288).
+
+    PoisonedEvolution (arXiv:2608.05563) shows a skill that looks causally
+    useful and recurrent can still be poisoned via cross-trajectory credit
+    assignment.  Treating provisional→trusted promotion as a security
+    boundary means a promotion should not be trusted if it carries NO
+    trajectory provenance at all — there is no way to audit which trajectories
+    contributed to its content.
+
+    Returns True when the record has at least one trajectory reference
+    (attribution is present and auditable), False when it has none.
+    """
+    return bool(record.trajectory_refs)
 
 
 def rollback_target(
@@ -213,7 +242,7 @@ def _usage() -> str:
     return (
         "usage: evolution_skill_version.py <command> [args]\n"
         "  record <skill> [--verdict V] [--diff REF] [--critic REF] [--note N]\n"
-        "         [--fixes a,b] [--regressions c,d]\n"
+        "         [--fixes a,b] [--regressions c,d] [--trajectories t1,t2]\n"
         "  current <skill>          which version is live, and what approved it\n"
         "  rollback <skill>         the version to revert to\n"
         "  history <skill>          every promotion, oldest first\n"
@@ -250,6 +279,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             note=_opt(args, "--note"),
             fixes=[x for x in _opt(args, "--fixes").split(",") if x],
             regressions=[x for x in _opt(args, "--regressions").split(",") if x],
+            trajectory_refs=[x for x in _opt(args, "--trajectories").split(",") if x],
         )
         print(json.dumps(entry.to_dict(), indent=2, sort_keys=True))
         return 0
@@ -266,8 +296,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if cmd == "rollback":
         target = rollback_target(skill)
         if target is None:
-            print(f"[skill-version] {skill}: no earlier version to roll back to",
-                  file=sys.stderr)
+            print(
+                f"[skill-version] {skill}: no earlier version to roll back to",
+                file=sys.stderr,
+            )
             return 1
         print(json.dumps(target.to_dict(), indent=2, sort_keys=True))
         return 0
