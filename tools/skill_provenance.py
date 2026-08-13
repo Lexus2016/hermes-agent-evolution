@@ -14,13 +14,15 @@ from typing import Any, Dict, List
 logger = logging.getLogger(__name__)
 
 _write_origin: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "skill_write_origin", default="foreground",
+    "skill_write_origin",
+    default="foreground",
 )
 
 # Source-chain accumulator — list of source entries recorded during the
 # current background-review fork. Each entry: {source_type, source_id, trusted}.
 _source_chain: contextvars.ContextVar[list | None] = contextvars.ContextVar(
-    "skill_source_chain", default=None,
+    "skill_source_chain",
+    default=None,
 )
 
 BACKGROUND_REVIEW = "background_review"
@@ -89,8 +91,63 @@ def get_skill_provenance(skill_name: str) -> List[Dict[str, Any]]:
     """
     try:
         from tools.skill_usage import get_record
+
         rec = get_record(skill_name)
         chain = rec.get("source_chain") or []
         return chain if isinstance(chain, list) else []
     except Exception:
         return []
+
+
+def provenance_ok(
+    chain: list | None = None,
+) -> tuple[bool, str]:
+    """Provenance gate for provisional→trusted skill promotion (#2288).
+
+    PoisonedEvolution (arXiv:2608.05563) shows that trajectory-poisoning
+    attacks embed malicious behaviors via seemingly-ordinary evidence that
+    *looks* causally useful.  The distinctive defense lever is **attribution**:
+    a skill promoted to trusted must carry verifiable source provenance.
+
+    Returns ``(ok, reason)``.  ``ok=False`` blocks promotion.
+
+    The gate is a **taint check**, not an attribution requirement: it blocks a
+    skill whose recorded source chain contains *zero* trusted sources
+    (terminal, read_file, search_files, execute_code — the SkillJack
+    taxonomy).  A chain with at least one trusted source passes.  An **empty**
+    chain also passes — a skill created with no recorded trajectory evidence
+    has no evidence that could be poisoned, so there is nothing to taint-flag.
+    (PoisonedEvolution requires the attacker to inject malicious evidence into
+    the chain; an absent chain has no injection surface.)
+
+    Accepts the *live* chain (from ``get_recorded_chain``) so the gate can run
+    BEFORE the chain is persisted to ``.usage.json``.
+    """
+    entries = chain if chain is not None else get_recorded_chain()
+    if not entries:
+        return True, ""
+    trusted = [e for e in entries if e.get("trusted")]
+    if not trusted:
+        untrusted_types = sorted({e.get("source_type", "?") for e in entries})
+        return (
+            False,
+            f"source_chain has no trusted sources (all untrusted: {untrusted_types})",
+        )
+    return True, ""
+
+
+def record_promotion(skill_name: str, reason: str = "") -> None:
+    """Stamp the usage record that this skill passed the provenance gate and
+    was promoted to trusted.  Best-effort audit trail (#2288).
+    """
+    try:
+        from datetime import datetime, timezone
+        from tools.skill_usage import _mutate
+
+        def _apply(rec: dict) -> None:
+            rec["promoted_at"] = datetime.now(timezone.utc).isoformat()
+            rec["promotion_reason"] = (reason or "provenance_ok")[:200]
+
+        _mutate(skill_name, _apply)
+    except Exception as exc:
+        logger.warning("record_promotion(%s) failed: %s", skill_name, exc)
