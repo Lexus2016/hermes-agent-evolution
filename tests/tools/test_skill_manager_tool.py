@@ -881,3 +881,73 @@ class TestCuratorConsolidationDeleteGuard:
             assert allowed["success"] is True, allowed
 
         _reset_background_review_read_marks()
+
+
+# ---------------------------------------------------------------------------
+# Background-review SKILL.md auto-preload (#2375)
+# ---------------------------------------------------------------------------
+
+
+class TestCuratorSkillMdAutoPreload:
+    """The read-before-write guard must NOT trap the curator in an infinite
+    loop when it tries to edit/patch SKILL.md without a prior skill_view.
+
+    Reproduces #2375: the background skill-curation agent oscillates —
+    skill_manage(edit) is refused ("content has not been loaded"), the agent
+    falls back to read_file (denied — not whitelisted in background-review
+    mode), then loops back to the write. Auto-preloading SKILL.md (the write
+    paths re-read it from disk before mutating) breaks the cycle while
+    preserving the blind-overwrite protection for supporting files.
+    """
+
+    def test_edit_skill_md_succeeds_without_prior_skill_view(self, tmp_path, monkeypatch):
+        from tools.skill_manager_tool import _reset_background_review_read_marks
+
+        _reset_background_review_read_marks()
+        with _curator_pass(tmp_path, monkeypatch=monkeypatch):
+            _create_curator_skill("looped", _skill_content("looped"))
+
+            # No skill_view("looped") first — the exact oscillation trigger.
+            new_content = _skill_content("looped").replace(
+                "Step 1: Do the thing.", "Step 1: Do the better thing."
+            )
+            result = _edit_skill("looped", new_content)
+        assert result["success"] is True, result
+        _reset_background_review_read_marks()
+
+    def test_patch_skill_md_succeeds_without_prior_skill_view(self, tmp_path, monkeypatch):
+        from tools.skill_manager_tool import _reset_background_review_read_marks
+
+        _reset_background_review_read_marks()
+        with _curator_pass(tmp_path, monkeypatch=monkeypatch):
+            _create_curator_skill("looped", _skill_content("looped"))
+
+            result = _patch_skill(
+                "looped",
+                old_string="Step 1: Do the thing.",
+                new_string="Step 1: Do the patched thing.",
+            )
+        assert result["success"] is True, result
+        _reset_background_review_read_marks()
+
+    def test_support_file_still_requires_explicit_read(self, tmp_path, monkeypatch):
+        """Auto-preload applies to SKILL.md only; linked files keep the strict
+        refuse path (blind-overwrite protection must stay intact)."""
+        from tools.skill_manager_tool import _reset_background_review_read_marks
+
+        _reset_background_review_read_marks()
+        with _curator_pass(tmp_path, monkeypatch=monkeypatch):
+            _create_curator_skill("looped", _skill_content("looped"))
+            ref = tmp_path / ".hermes" / "skills" / "looped" / "references"
+            ref.mkdir()
+            (ref / "workflow.md").write_text("old workflow\n", encoding="utf-8")
+
+            blocked = json.loads(skill_manage(
+                action="write_file",
+                name="looped",
+                file_path="references/workflow.md",
+                file_content="new workflow\n",
+            ))
+        assert blocked["success"] is False
+        assert blocked.get("_read_before_write_required") is True
+        _reset_background_review_read_marks()

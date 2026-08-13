@@ -536,7 +536,24 @@ def _background_review_read_before_write_guard(
     action: str,
     file_label: str,
 ) -> Optional[Dict[str, Any]]:
-    """Require review forks to load the exact target before mutating it."""
+    """Require review forks to load the exact target before mutating it.
+
+    SKILL.md auto-preload (#2375): the background skill-curation agent enters
+    an infinite oscillation when it attempts to edit/patch SKILL.md without
+    first calling skill_view — the guard refuses the write, the agent then
+    tries read_file (not whitelisted in background-review mode), that is
+    denied, and it loops back to the write. ``read_file`` is intentionally
+    NOT whitelisted (only memory/skill tools are), so the precondition the
+    refusal demands can never be satisfied through the agent's reflexive
+    recovery path. ``skill_view`` IS whitelisted, but the LLM often does not
+    reach for it. SKILL.md writes (edit/patch) re-read the actual on-disk
+    content in ``_edit_skill`` / ``_patch_skill`` before mutating, so the
+    guard's "content basis" guarantee is preserved by auto-marking SKILL.md
+    as read here. Supporting files (references/, templates/, scripts/) keep
+    the strict refuse path — the agent can satisfy those via
+    skill_view(name, file_path=...) which IS whitelisted, and the blind-
+    overwrite protection for linked files must stay intact (#2375 test).
+    """
     try:
         from tools.skill_provenance import is_background_review
         if not is_background_review():
@@ -545,6 +562,19 @@ def _background_review_read_before_write_guard(
         return None
 
     if _background_review_has_read(target):
+        return None
+
+    # Auto-preload the skill's main SKILL.md: this is the file the curator
+    # most often edits, and the write paths below re-read it from disk before
+    # applying changes, so marking it read is safe and breaks the loop.
+    if _is_skill_md_target(name, target):
+        try:
+            mark_background_review_skill_read(target)
+        except Exception:
+            logger.debug(
+                "auto-preload of SKILL.md for skill '%s' failed", name,
+                exc_info=True,
+            )
         return None
 
     return {
@@ -558,6 +588,29 @@ def _background_review_read_before_write_guard(
         ),
         "_read_before_write_required": True,
     }
+
+
+def _is_skill_md_target(name: str, target: Path) -> bool:
+    """True if ``target`` is the main SKILL.md of skill ``name``.
+
+    Used by the read-before-write guard to decide auto-preload eligibility:
+    only the skill's primary SKILL.md is auto-loaded (the write paths re-read
+    it from disk), never its supporting files.
+    """
+    if target.name != "SKILL.md":
+        return False
+    try:
+        resolved = str(target.resolve())
+    except Exception:
+        resolved = str(target)
+    found = _find_skill(name)
+    if not found:
+        return False
+    try:
+        skill_md = str((found["path"] / "SKILL.md").resolve())
+    except Exception:
+        skill_md = str(found["path"] / "SKILL.md")
+    return resolved == skill_md
 
 
 def _background_review_preflight(action: str, name: str) -> Optional[Dict[str, Any]]:
