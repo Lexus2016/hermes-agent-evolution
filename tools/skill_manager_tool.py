@@ -1782,6 +1782,29 @@ def skill_manage(
                                     f"retry."
                                 ),
                             }, ensure_ascii=False)
+                    # === Provenance gate (#2288, PoisonedEvolution) ===
+                    # A background-review skill must carry verifiable source
+                    # attribution before promotion to trusted. Mirrors the
+                    # validate_skill_content gate above: blocking + rollback.
+                    # Reads the LIVE chain (before it's persisted below).
+                    if not _skill_gate_bypass.get():
+                        from tools.skill_provenance import provenance_ok
+                        _ok, _prov_reason = provenance_ok()
+                        if not _ok:
+                            logger.warning(
+                                "Provenance gate BLOCKED promotion of '%s': %s",
+                                name, _prov_reason,
+                            )
+                            _rollback_skill_dir(name)
+                            return json.dumps({
+                                "success": False,
+                                "error": (
+                                    f"Provenance gate rejected skill '{name}': "
+                                    f"{_prov_reason}. The skill was NOT promoted. "
+                                    f"A trusted skill requires verifiable source "
+                                    f"attribution (#2288)."
+                                ),
+                            }, ensure_ascii=False)
                     mark_agent_created(name)
                     # Record the source run ID for provenance tracking (#2190).
                     try:
@@ -1799,6 +1822,12 @@ def skill_manage(
                         if chain:
                             from tools.skill_usage import _mutate
                             _mutate(name, lambda rec: rec.update({"source_chain": chain[:50]}))
+                    except Exception:
+                        pass
+                    # Record promotion audit trail (#2288).
+                    try:
+                        from tools.skill_provenance import record_promotion
+                        record_promotion(name, reason="provenance_ok: trusted sources present")
                     except Exception:
                         pass
             elif action in {"patch", "edit", "write_file", "remove_file"}:
