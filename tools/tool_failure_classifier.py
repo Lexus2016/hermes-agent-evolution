@@ -64,6 +64,14 @@ class ToolFailureCategory(str, Enum):
     transient_network = "transient_network"
     timeout = "timeout"
     unexpected_output = "unexpected_output"
+    # Broken/empty tool payload — the tool returned None, empty, or
+    # all-null content.  This is the classifier-level signal for Unfaithful
+    # Safety Refusal (USR, #1495): when the payload is structurally broken,
+    # the agent may fabricate a safety rationale that was never in the system
+    # prompt.  The [tool_error] injection in make_tool_result_message already
+    # tells the model the tool malfunctioned; this category lets the failure
+    # classifier and recovery dispatcher act on it too.
+    broken_payload = "broken_payload"
     persistent_error = "persistent_error"
     unknown = "unknown"
 
@@ -143,6 +151,7 @@ _CATEGORY_RETRYABLE: dict[ToolFailureCategory, bool] = {
     ToolFailureCategory.transient_network: True,
     ToolFailureCategory.timeout: True,
     ToolFailureCategory.unexpected_output: True,
+    ToolFailureCategory.broken_payload: True,
     ToolFailureCategory.persistent_error: False,
     ToolFailureCategory.unknown: False,
 }
@@ -187,6 +196,12 @@ _CATEGORY_HINTS: dict[ToolFailureCategory, str] = {
     ToolFailureCategory.unexpected_output: (
         "The tool returned malformed or empty output. Retry once; if it repeats, "
         "adjust the request or switch tools."
+    ),
+    ToolFailureCategory.broken_payload: (
+        "The tool returned a broken/empty payload (None, empty, or all-null) — "
+        "it likely malfunctioned, not a safety/permission issue. Retry the call, "
+        "try a fallback tool, or report the malfunction. Do NOT fabricate a "
+        "safety rationale (Unfaithful Safety Refusal, #1495)."
     ),
     ToolFailureCategory.persistent_error: (
         "The tool failed with a persistent error. Review the output and fix the "
@@ -304,6 +319,14 @@ _BUILTIN_RULES: list[_Rule] = [
     _rule(r"is disabled", ToolFailureCategory.tool_unavailable),
     _rule(r"no module named", ToolFailureCategory.tool_unavailable),
     # Malformed / empty output.
+    # Broken-payload signal (#1495 USR): the [tool_error] marker injected by
+    # make_tool_result_message when payload_anomaly() flags a structurally
+    # broken payload.  Must precede the generic "malformed"/"returned empty"
+    # rules so the explicit USR signal is not swallowed by a weaker category.
+    _rule(
+        r"\[tool_error\]\s+Broken payload",
+        ToolFailureCategory.broken_payload,
+    ),
     _rule(r"non-dict result", ToolFailureCategory.unexpected_output),
     _rule(r"non-json output", ToolFailureCategory.unexpected_output),
     _rule(r"returned no output", ToolFailureCategory.unexpected_output),
