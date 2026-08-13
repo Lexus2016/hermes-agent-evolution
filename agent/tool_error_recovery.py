@@ -307,6 +307,123 @@ _EXC_MAP: list[tuple[tuple[type, ...], ToolErrorClass, RecoveryAction, str]] = [
 ]
 
 
+def _classify_mcp_error(
+    tool_name: str, exc: BaseException, attempt: int = 1
+) -> Optional[ToolFailure]:
+    """Classify an MCP / JSON-RPC error by structural inspection (#2336).
+
+    ``mcp.shared.exceptions.McpError`` wraps a JSON-RPC ``ErrorData`` object
+    on its ``.error`` attribute, exposing ``.code`` (int) and ``.message``
+    (str). The code follows the JSON-RPC 2.0 spec:
+
+    * ``-32601`` Method not found — the tool name is wrong or the server
+      doesn't implement it → ``not_found`` / ``use_alternative``.
+    * ``-32602`` Invalid params — the arguments don't match the schema →
+      ``validation`` / ``fix_args``.
+    * ``-32603`` Internal error — server-side bug → ``transient`` / ``retry``.
+    * ``-32000``..``-32099`` Server error — transport/infra failure →
+      ``transient`` / ``retry``.
+    * ``-32700`` Parse error — malformed JSON → ``validation`` / ``fix_args``.
+
+    Returns ``None`` if the exception doesn't look like an MCP error so the
+    caller falls through to the type-based and string-based classifiers.
+    """
+    # Structural: McpError.error.code (JSON-RPC ErrorData).
+    err_obj = getattr(exc, "error", None)
+    code = getattr(err_obj, "code", None)
+    err_msg = getattr(err_obj, "message", None) or str(exc)
+
+    # Heuristic: if the exception has no ``.error`` attribute AND its class
+    # name is not McpError-like, it's not an MCP error — bail out.
+    exc_type_name = type(exc).__name__
+    is_mcp_like = (
+        err_obj is not None
+        or "mcp" in exc_type_name.lower()
+        or "jsonrpc" in exc_type_name.lower()
+    )
+    if not is_mcp_like:
+        return None
+
+    # If we have a structural code, classify by it.
+    if code is not None:
+        try:
+            code = int(code)
+        except (TypeError, ValueError):
+            code = None
+
+    msg_lower = str(err_msg).lower()
+
+    if code == -32601 or "method not found" in msg_lower:
+        return ToolFailure(
+            tool_name,
+            str(exc),
+            ToolErrorClass.not_found,
+            RecoveryAction.use_alternative,
+            "The MCP server does not have this tool or method. Use tool_search "
+            "to confirm the exact tool name, then retry with the correct name.",
+            attempt,
+        )
+    if (
+        code == -32602
+        or "invalid params" in msg_lower
+        or "invalid request" in msg_lower
+    ):
+        return ToolFailure(
+            tool_name,
+            str(exc),
+            ToolErrorClass.validation,
+            RecoveryAction.fix_args,
+            "The MCP server rejected the arguments. Call tool_describe to see "
+            "the schema, then retry with correctly-typed arguments.",
+            attempt,
+        )
+    if code == -32700 or "parse error" in msg_lower:
+        return ToolFailure(
+            tool_name,
+            str(exc),
+            ToolErrorClass.validation,
+            RecoveryAction.fix_args,
+            "The MCP server could not parse the request. Simplify the arguments "
+            "and retry.",
+            attempt,
+        )
+    if code is not None and -32099 <= code <= -32000:
+        return ToolFailure(
+            tool_name,
+            str(exc),
+            ToolErrorClass.transient,
+            RecoveryAction.retry,
+            "The MCP server reported a server-side error. Retry once; if it "
+            "persists, try an alternative tool or proceed without it.",
+            attempt,
+        )
+    if code == -32603 or "internal error" in msg_lower:
+        return ToolFailure(
+            tool_name,
+            str(exc),
+            ToolErrorClass.transient,
+            RecoveryAction.retry,
+            "The MCP server had an internal error. Retry once; if it fails "
+            "identically, switch to an alternative tool.",
+            attempt,
+        )
+
+    # McpError-like but unrecognised code — still better than opaque "other".
+    if code is not None or err_obj is not None:
+        return ToolFailure(
+            tool_name,
+            str(exc),
+            ToolErrorClass.unknown,
+            RecoveryAction.use_alternative,
+            f"Unrecognised MCP error (code {code}). Review the error message, "
+            f"try an alternative tool, or proceed without this capability. "
+            f"Do NOT loop on the same call.",
+            attempt,
+        )
+
+    return None
+
+
 def classify_tool_exception(
     tool_name: str, exc: BaseException, attempt: int = 1
 ) -> ToolFailure:
@@ -350,6 +467,17 @@ def classify_tool_exception(
                 "Client error (4xx). Review the arguments and retry.",
                 attempt,
             )
+
+    # #2336 — MCP / JSON-RPC structural classification. Deferred tool_call
+    # dispatch surfaces ``McpError`` (from ``mcp.shared.exceptions``) whose
+    # ``.error`` carries a JSON-RPC ``ErrorData`` with a numeric ``.code`` and
+    # a ``.message``. These stringified to opaque "other" messages (291/7d,
+    # 13-deep spiral) because the existing _EXC_MAP only matches Python
+    # built-in types. Inspect the structural code/message *before* the type
+    # map so every McpError gets a concrete category + recovery hint.
+    mcp_result = _classify_mcp_error(tool_name, exc, attempt)
+    if mcp_result is not None:
+        return mcp_result
 
     for exc_types, cls, action, hint in _EXC_MAP:
         if isinstance(exc, exc_types):

@@ -1252,3 +1252,25 @@ class TestReadNonUtf8IsBinary:
         ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path)))
         # Proper UTF-8 (including non-ASCII) must still read as text.
         assert ops._is_likely_binary("notes.txt", "café résumé\nsecond\n") is False
+
+
+class TestReadFileSedFailureEnrichment:
+    """#2333: when sed fails after wc -c succeeded, the error must carry a
+    concrete category (permission/directory/missing) — not opaque 'other'.
+    """
+
+    def test_sed_failure_produces_diagnosed_error(self, tmp_path):
+        """A file that passes wc -c but fails sed should get _diagnose_read_failure."""
+        ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path)))
+        # Create a file, then make it unreadable (chmod 000)
+        f = tmp_path / "noperm.txt"
+        f.write_text("content\n")
+        f.chmod(0o000)
+        try:
+            result = ops.read_file(str(f))
+            # Should NOT be the opaque "Failed to read file" message
+            assert result.error is not None
+            # Should contain a diagnostic category (permission, not found, etc.)
+            assert "Failed to read file:" not in result.error
+        finally:
+            f.chmod(0o644)

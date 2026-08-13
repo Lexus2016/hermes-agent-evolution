@@ -1546,7 +1546,15 @@ class ShellFileOperations(FileOperations):
         read_result = self._exec(read_cmd)
 
         if read_result.exit_code != 0:
-            return ReadResult(error=f"Failed to read file: {read_result.stdout}")
+            # #2333 — the file passed wc -c (exists) and binary detection,
+            # but sed failed. This was an opaque "other" error (217/7d,
+            # 20-deep spiral). Probe WHY it failed so the agent gets a
+            # concrete category instead of blind-retrying.
+            _err, _sim = self._diagnose_read_failure(path, operation="read")
+            return ReadResult(
+                error=_err or f"Failed to read file: {read_result.stdout}",
+                similar_files=_sim,
+            )
         read_output = _strip_terminal_fence_leaks(read_result.stdout)
         # Strip a leading UTF-8 BOM so the model never sees a phantom U+FEFF
         # before the first real character. Only meaningful on the first

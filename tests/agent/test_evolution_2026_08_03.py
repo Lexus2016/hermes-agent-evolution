@@ -140,12 +140,47 @@ class TestMemoryErrorDecomposition:
         result = json.loads(_memory_enriched_error(TypeError("bad type"), "add"))
         assert result["error_category"] == "serialization-error"
 
-    def test_unexpected_error_classified(self):
+    def test_runtime_error_classified_as_internal(self):
         from tools.memory_tool import _memory_enriched_error
 
         result = json.loads(_memory_enriched_error(RuntimeError("weird"), "add"))
-        assert result["error_category"] == "unexpected"
+        assert result["error_category"] == "internal-error"
         assert "RuntimeError" in result["recovery_hint"]
+        assert "Retry once" in result["recovery_hint"]
+
+    def test_runtime_error_lock_contention(self):
+        """RuntimeError with 'lock' in message → lock-contention (#2349)."""
+        from tools.memory_tool import _memory_enriched_error
+
+        result = json.loads(
+            _memory_enriched_error(RuntimeError("File lock timeout"), "replace")
+        )
+        assert result["error_category"] == "lock-contention"
+        assert "concurrent write" in result["recovery_hint"]
+
+    def test_attribute_error_classified_as_state_mismatch(self):
+        from tools.memory_tool import _memory_enriched_error
+
+        result = json.loads(_memory_enriched_error(AttributeError("no attr"), "add"))
+        assert result["error_category"] == "entry-state-mismatch"
+
+    def test_unicode_decode_error_classified(self):
+        from tools.memory_tool import _memory_enriched_error
+
+        result = json.loads(
+            _memory_enriched_error(
+                UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad"), "add"
+            )
+        )
+        assert result["error_category"] == "encoding-corruption"
+
+    def test_truly_unexpected_error_retry_hint(self):
+        """A novel exception type still gets 'Retry once' guidance (#2349)."""
+        from tools.memory_tool import _memory_enriched_error
+
+        result = json.loads(_memory_enriched_error(ImportError("novel"), "add"))
+        assert result["error_category"] == "unexpected"
+        assert "Retry" in result["recovery_hint"]
 
     def test_all_results_have_required_fields(self):
         """Every enriched error should include error, error_type, category, hint, action."""
