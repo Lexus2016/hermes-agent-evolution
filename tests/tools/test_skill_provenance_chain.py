@@ -56,10 +56,10 @@ def test_get_skill_provenance_empty():
 
 
 def test_provenance_ok_empty_chain():
-    """No chain at all → rejected (no attribution)."""
+    """No chain at all → passes (no evidence to taint-flag)."""
     ok, reason = provenance_ok(chain=[])
-    assert ok is False
-    assert "no source_chain" in reason
+    assert ok is True
+    assert reason == ""
 
 
 def test_provenance_ok_no_trusted_sources():
@@ -107,7 +107,7 @@ def test_provenance_ok_reads_live_chain():
     token = init_source_chain()
     try:
         ok, reason = provenance_ok()
-        assert ok is False  # empty live chain
+        assert ok is True  # empty live chain passes (no evidence to taint)
         wtoken = set_current_write_origin(BACKGROUND_REVIEW)
         try:
             add_provenance_entry("search_files", "/tmp")

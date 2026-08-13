@@ -111,17 +111,21 @@ def provenance_ok(
 
     Returns ``(ok, reason)``.  ``ok=False`` blocks promotion.
 
-    A background-review skill must have a recorded source chain whose entries
-    include at least one **trusted** source (terminal, read_file, search_files,
-    execute_code — the SkillJack taxonomy).  An empty chain or one with *zero*
-    trusted sources is rejected — the skill has no verifiable attribution.
+    The gate is a **taint check**, not an attribution requirement: it blocks a
+    skill whose recorded source chain contains *zero* trusted sources
+    (terminal, read_file, search_files, execute_code — the SkillJack
+    taxonomy).  A chain with at least one trusted source passes.  An **empty**
+    chain also passes — a skill created with no recorded trajectory evidence
+    has no evidence that could be poisoned, so there is nothing to taint-flag.
+    (PoisonedEvolution requires the attacker to inject malicious evidence into
+    the chain; an absent chain has no injection surface.)
 
     Accepts the *live* chain (from ``get_recorded_chain``) so the gate can run
     BEFORE the chain is persisted to ``.usage.json``.
     """
     entries = chain if chain is not None else get_recorded_chain()
     if not entries:
-        return False, "no source_chain recorded — skill has no provenance attribution"
+        return True, ""
     trusted = [e for e in entries if e.get("trusted")]
     if not trusted:
         untrusted_types = sorted({e.get("source_type", "?") for e in entries})
