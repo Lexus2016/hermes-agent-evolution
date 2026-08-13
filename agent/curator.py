@@ -77,6 +77,10 @@ DEFAULT_ARCHIVE_AFTER_DAYS = 90
 # consolidation pass is opt-in.
 DEFAULT_CONSOLIDATE = False
 
+# Provisional→trusted lifecycle defaults (#2256).
+DEFAULT_TRUST_PROMOTION_THRESHOLD = 3
+DEFAULT_TRUST_DEMOTION_FAILURE_RATE = 0.5
+
 
 # ---------------------------------------------------------------------------
 # .curator_state — persistent scheduler + status
@@ -215,6 +219,24 @@ def get_consolidate() -> bool:
     """
     cfg = _load_config()
     return bool(cfg.get("consolidate", DEFAULT_CONSOLIDATE))
+
+
+def get_trust_promotion_threshold() -> int:
+    """Consecutive successes to promote provisional→trusted (#2256)."""
+    cfg = _load_config()
+    try:
+        return int(cfg.get("trust_promotion_threshold", DEFAULT_TRUST_PROMOTION_THRESHOLD))
+    except (TypeError, ValueError):
+        return DEFAULT_TRUST_PROMOTION_THRESHOLD
+
+
+def get_trust_demotion_failure_rate() -> float:
+    """Failure-rate threshold to demote trusted→provisional (#2256)."""
+    cfg = _load_config()
+    try:
+        return float(cfg.get("trust_demotion_failure_rate", DEFAULT_TRUST_DEMOTION_FAILURE_RATE))
+    except (TypeError, ValueError):
+        return DEFAULT_TRUST_DEMOTION_FAILURE_RATE
 
 
 # ---------------------------------------------------------------------------
