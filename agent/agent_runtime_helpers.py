@@ -2898,6 +2898,14 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
     except Exception as _mw_err:
         logger.debug("tool_request middleware error: %s", _mw_err)
 
+    # Stamp tqmemory writes with model-identity metadata (#2234).
+    try:
+        from agent.tqmemory_model_filter import is_tqmemory_write, stamp_model_metadata
+        if is_tqmemory_write(function_name):
+            function_args = stamp_model_metadata(function_args, getattr(agent, "model", None))
+    except Exception:
+        pass
+
     # Check plugin hooks for a block or approval directive before executing.
     block_message: Optional[str] = None
     if not pre_tool_block_checked:
@@ -3166,21 +3174,30 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
             )
 
     if skip_tool_execution_middleware:
-        return _execute(function_args)
+        result = _execute(function_args)
+    else:
+        from hermes_cli.middleware import run_tool_execution_middleware
+        result = run_tool_execution_middleware(
+            function_name,
+            function_args,
+            lambda next_args: _execute(next_args if isinstance(next_args, dict) else function_args),
+            original_args=function_args,
+            task_id=effective_task_id or "",
+            session_id=getattr(agent, "session_id", "") or "",
+            tool_call_id=tool_call_id or "",
+            turn_id=getattr(agent, "_current_turn_id", "") or "",
+            api_request_id=getattr(agent, "_current_api_request_id", "") or "",
+        )
 
-    from hermes_cli.middleware import run_tool_execution_middleware
+    # Filter tqmemory reads by model family — down-weight cross-family notes (#2234).
+    try:
+        from agent.tqmemory_model_filter import is_tqmemory_read, filter_by_model_family
+        if is_tqmemory_read(function_name) and isinstance(result, str):
+            result = filter_by_model_family(result, getattr(agent, "model", None))
+    except Exception:
+        pass
 
-    return run_tool_execution_middleware(
-        function_name,
-        function_args,
-        lambda next_args: _execute(next_args if isinstance(next_args, dict) else function_args),
-        original_args=function_args,
-        task_id=effective_task_id or "",
-        session_id=getattr(agent, "session_id", "") or "",
-        tool_call_id=tool_call_id or "",
-        turn_id=getattr(agent, "_current_turn_id", "") or "",
-        api_request_id=getattr(agent, "_current_api_request_id", "") or "",
-    )
+    return result
 
 
 
