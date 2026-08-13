@@ -1002,6 +1002,78 @@ _QUICK_STATE_FILES = (
 _QUICK_SNAPSHOTS_DIR = "state-snapshots"
 _QUICK_DEFAULT_KEEP = 20
 
+# When the state.db exceeds this fraction of max_file_size, we proactively
+# prune+VACUUM before snapshotting so the shrunken DB fits under the cap
+# instead of being silently skipped (issue #2373). 50% leaves headroom for
+# the post-VACUUM file to still be well under the limit.
+_PRUNE_BEFORE_SNAPSHOT_FACTOR = 0.5
+
+
+def _prune_and_vacuum_state_db_before_snapshot(
+    hermes_home: Path,
+    max_file_size: int,
+) -> None:
+    """Run prune+VACUUM on state.db *before* a size-capped snapshot.
+
+    Issue #2373: the state database grows monotonically (~3 MB/hour) even
+    when nothing is prunable, so the existing ``maybe_auto_prune_and_vacuum``
+    (whose VACUUM is gated on ``pruned > 0``) never reclaims space. Once the
+    file crosses ``max_file_size`` the snapshot silently skips it, so no
+    backup is captured for 24h+ — a data-loss risk.
+
+    This opens a short-lived read/write SessionDB connection, runs the prune
+    sweep with a size-based VACUUM threshold set well below ``max_file_size``,
+    and closes it. Never raises — pruning is best-effort and must not block
+    the snapshot.
+    """
+    db_path = hermes_home / "state.db"
+    try:
+        if not db_path.exists():
+            return
+        db_size = db_path.stat().st_size
+        threshold = int(max_file_size * _PRUNE_BEFORE_SNAPSHOT_FACTOR)
+        if db_size <= threshold:
+            return
+
+        from hermes_state import SessionDB
+
+        logger.info(
+            "state.db is %d bytes (>%d threshold) — running prune+VACUUM "
+            "before snapshot (issue #2373)",
+            db_size,
+            threshold,
+        )
+        print(
+            f"  ℹ state.db is {_format_size(db_size)} — pruning + VACUUM "
+            f"before snapshot to stay under {_format_size(max_file_size)} limit"
+        )
+        session_db = SessionDB(db_path=db_path)
+        try:
+            from hermes_constants import get_hermes_home as _get_home
+            from hermes_cli.config import load_config as _load_cfg
+
+            cfg = (_load_cfg() or {}).get("sessions") or {}
+            session_db.maybe_auto_prune_and_vacuum(
+                retention_days=int(cfg.get("retention_days", 90)),
+                min_interval_hours=0,  # force: the snapshot needs it now
+                vacuum=bool(cfg.get("vacuum_after_prune", True)),
+                sessions_dir=_get_home() / "sessions",
+                db_size_vacuum_threshold=threshold,
+            )
+        finally:
+            session_db.close()
+
+        new_size = db_path.stat().st_size if db_path.exists() else 0
+        if new_size < db_size:
+            logger.info(
+                "state.db prune+VACUUM reclaimed %d bytes (%d → %d)",
+                db_size - new_size,
+                db_size,
+                new_size,
+            )
+    except Exception as exc:
+        logger.debug("Pre-snapshot prune+VACUUM skipped: %s", exc)
+
 
 def _quick_snapshot_root(hermes_home: Optional[Path] = None) -> Path:
     home = hermes_home or get_hermes_home()
@@ -1034,6 +1106,12 @@ def create_quick_snapshot(
     """
     home = hermes_home or get_hermes_home()
     root = _quick_snapshot_root(home)
+
+    # Issue #2373: when a size cap is in effect (pre-update / auto snapshot),
+    # proactively prune+VACUUM state.db *before* walking files so the shrunken
+    # DB fits under the cap instead of being silently skipped.
+    if max_file_size is not None:
+        _prune_and_vacuum_state_db_before_snapshot(home, max_file_size)
 
     def _too_large(path: Path, rel_name: str) -> bool:
         """True (and warn) when ``path`` exceeds the max_file_size cap."""
