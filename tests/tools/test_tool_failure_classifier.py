@@ -287,6 +287,32 @@ class TestTerminalDelegation:
         assert result.should_retry is False
         assert result.tool_type == tfc.ToolType.terminal
 
+    def test_wall_clock_timeout_with_exit_code_is_non_retryable(self):
+        """#2335 — terminal timeout with exit_code=124 must be non-retryable.
+
+        The run_agent #2233 non-retryable diagnostic branch extracts
+        exit_code from the terminal result JSON and passes it through.
+        Without exit_code, the same timeout text is classified by the
+        generic "timed out" text rule as retryable — the retry
+        amplification path. This test documents the contract: exit_code=124
+        must yield non-retryable, while the same text WITHOUT exit_code
+        is retryable (demonstrating the gap the wiring closes).
+        """
+        timeout_json = (
+            '{"output": "", "exit_code": 124, "error": '
+            '"Command timed out after 120 seconds."}'
+        )
+        # WITH exit_code=124 — non-retryable (deterministic timeout)
+        with_code = tfc.classify_tool_failure("terminal", timeout_json, exit_code=124)
+        assert with_code.should_retry is False
+        assert with_code.category == tfc.ToolFailureCategory.persistent_error
+
+        # WITHOUT exit_code — text-based match yields retryable timeout.
+        # This is the pre-#2335 behavior the wiring fix prevents.
+        without_code = tfc.classify_tool_failure("terminal", timeout_json)
+        assert without_code.should_retry is True
+        assert without_code.category == tfc.ToolFailureCategory.timeout
+
 
 # ---------------------------------------------------------------------------
 # Extensibility
