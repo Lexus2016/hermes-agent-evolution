@@ -18,7 +18,10 @@ from tools.skill_manager_tool import (
 )
 from tools.skill_provenance import (
     BACKGROUND_REVIEW,
+    add_provenance_entry,
+    init_source_chain,
     reset_current_write_origin,
+    reset_source_chain,
     set_current_write_origin,
 )
 
@@ -132,7 +135,12 @@ class TestValidationGateBlocksAdmission:
     def test_background_review_create_valid_skill_admitted(self, tmp_path):
         """A valid auto-created skill IS admitted (marked agent-created)."""
         token = set_current_write_origin(BACKGROUND_REVIEW)
+        chain_token = init_source_chain()
         try:
+            # Simulate a trusted source entry that a real background-review
+            # fork would record (e.g. via read_file / terminal). The
+            # provenance gate (#2288) requires at least one trusted source.
+            add_provenance_entry("read_file", str(tmp_path / "research.md"))
             with _skill_dir(tmp_path):
                 raw = skill_manage("create", "good-auto-skill", content=VALID_SKILL)
                 result = json.loads(raw)
@@ -145,6 +153,7 @@ class TestValidationGateBlocksAdmission:
                 rec = get_record("good-auto-skill")
                 assert rec.get("created_by") is not None
         finally:
+            reset_source_chain(chain_token)
             reset_current_write_origin(token)
 
     def test_background_review_create_short_skill_blocked(self, tmp_path):
