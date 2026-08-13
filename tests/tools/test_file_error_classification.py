@@ -47,24 +47,20 @@ class TestClassifyFileError:
         )
         assert klass == "fuzzy_match" and ("Re-read" in rec or "EXACT" in rec)
 
-    def test_ambiguous_match_is_classified(self):
-        """'Found N matches' errors get a specific error_class and recovery (#976).
+    def test_ambiguous_match_decomposed_replace_all(self):
+        """'Found N matches' errors mentioning replace_all → replace_all_intent (#2354).
 
-        The recovery must explicitly tell the model NOT to retry the same
-        old_string (it will match the same locations again) and steer toward
-        either more context or replace_all=True — the disambiguation context
-        (#1842/#1683) is only consumed when the hint points at WHICH locations
-        to verify, not just "add more context" (TDAD 'context over procedure').
+        The ambiguous_match bucket is decomposed into subclasses so the
+        recovery hint tells the model exactly what to change. This error
+        mentions replace_all → the model likely wants all occurrences.
         """
         klass, rec = classify_file_error(
             "Found 3 matches for old_string at:\n  Line 10: def foo()\n"
             "Provide more context to make it unique, or use replace_all=True."
         )
-        assert klass == "ambiguous_match"
-        assert "Do NOT retry" in rec
-        assert "same old_string" in rec
+        assert klass == "replace_all_intent"
         assert "replace_all" in rec
-        assert "context" in rec
+        assert "Do NOT" in rec
 
     def test_verification(self):
         klass, _ = classify_file_error("Post-write verification failed: could not re-read x")
@@ -177,15 +173,15 @@ class TestResultToDict:
         d = PatchResult(success=False, error="Failed to parse patch: x").to_dict()
         assert d["error_class"] == "patch_parse" and "recovery" in d
 
-    def test_patch_result_ambiguous_match_classified(self):
-        """PatchResult with ambiguous-match error gets error_class (#976)."""
+    def test_patch_result_ambiguous_decomposed_replace_all(self):
+        """PatchResult with ambiguous-match error mentioning replace_all (#2354)."""
         d = PatchResult(
             success=False,
             error="Found 3 matches for old_string at:\n  Line 10: x\n"
             "Provide more context to make it unique, or use replace_all=True.",
         ).to_dict()
-        assert d["error_class"] == "ambiguous_match"
-        assert "replace_all" in d["recovery"] or "context" in d["recovery"]
+        assert d["error_class"] == "replace_all_intent"
+        assert "replace_all" in d["recovery"]
 
     def test_patch_result_success_clean(self):
         d = PatchResult(success=True, diff="--- a").to_dict()

@@ -216,13 +216,28 @@ def classify_file_error(
             "see actual state before editing again."
         )
     if "found" in low and "matches" in low and "old_string" in low:
-        return "ambiguous_match", (
-            "Multiple matches found — old_string is not unique. Do NOT retry "
-            "the same old_string (it will match the same locations again). "
-            "The error message lists the exact match lines (L<line>: <snippet>); "
-            "verify WHICH of those locations is the intended target, then either "
-            "add more surrounding context lines to old_string to make it unique, "
-            "or use replace_all=True if you intend to replace all occurrences."
+        # #2354: decompose ambiguous_match into actionable subclasses, each with
+        # explicit anti-retry language to break the 21-deep retry spirals.
+        if "replace_all" in low:
+            return "replace_all_intent", (
+                "Multiple matches found and the resolution suggests replace_all. "
+                "If you intend to replace ALL occurrences, re-send the patch with "
+                "replace_all=True. Do NOT retry the same old_string with "
+                "replace_all unset — it will fail the same way."
+            )
+        if "more context" in low or "surrounding context" in low or "longer" in low:
+            return "ambiguous_insufficient_context", (
+                "old_string is too short to be unique — multiple regions match. "
+                "Re-read the file with read_file, then include more surrounding "
+                "context lines (function signature, class name, unique nearby "
+                "lines) so only one location matches. Do NOT retry the same "
+                "old_string — it is inherently ambiguous."
+            )
+        return "ambiguous_not_unique", (
+            "Multiple matches found for old_string — it is not unique. Do NOT "
+            "retry the same old_string (it will match the same locations again). "
+            "Either add more surrounding context to make it unique, or use "
+            "replace_all=True if you intend to replace all occurrences."
         )
     # ── Sub-classify the fuzzy matcher's distinctive failure strings (#1586) ──
     # These previously fell through to the generic "error" bucket (the 'other'
