@@ -48,13 +48,23 @@ class TestClassifyFileError:
         assert klass == "fuzzy_match" and ("Re-read" in rec or "EXACT" in rec)
 
     def test_ambiguous_match_is_classified(self):
-        """'Found N matches' errors get a specific error_class and recovery (#976)."""
+        """'Found N matches' errors get a specific error_class and recovery (#976).
+
+        The recovery must explicitly tell the model NOT to retry the same
+        old_string (it will match the same locations again) and steer toward
+        either more context or replace_all=True — the disambiguation context
+        (#1842/#1683) is only consumed when the hint points at WHICH locations
+        to verify, not just "add more context" (TDAD 'context over procedure').
+        """
         klass, rec = classify_file_error(
             "Found 3 matches for old_string at:\n  Line 10: def foo()\n"
             "Provide more context to make it unique, or use replace_all=True."
         )
         assert klass == "ambiguous_match"
-        assert "replace_all" in rec or "context" in rec
+        assert "Do NOT retry" in rec
+        assert "same old_string" in rec
+        assert "replace_all" in rec
+        assert "context" in rec
 
     def test_verification(self):
         klass, _ = classify_file_error("Post-write verification failed: could not re-read x")

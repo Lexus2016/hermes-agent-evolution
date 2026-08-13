@@ -217,9 +217,12 @@ def classify_file_error(
         )
     if "found" in low and "matches" in low and "old_string" in low:
         return "ambiguous_match", (
-            "Multiple matches found. Include more surrounding context lines in "
-            "old_string to make it unique, or use replace_all=True if you want "
-            "all occurrences replaced."
+            "Multiple matches found — old_string is not unique. Do NOT retry "
+            "the same old_string (it will match the same locations again). "
+            "The error message lists the exact match lines (L<line>: <snippet>); "
+            "verify WHICH of those locations is the intended target, then either "
+            "add more surrounding context lines to old_string to make it unique, "
+            "or use replace_all=True if you intend to replace all occurrences."
         )
     # ── Sub-classify the fuzzy matcher's distinctive failure strings (#1586) ──
     # These previously fell through to the generic "error" bucket (the 'other'

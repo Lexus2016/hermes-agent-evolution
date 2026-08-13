@@ -2435,11 +2435,13 @@ def patch_tool(
                 )
             elif is_ambiguous and not has_diagnostic:
                 result_dict["_hint"] = (
-                    "Multiple matches found. Use read_file to see the "
-                    "surrounding context at each match location, then "
-                    "provide a longer old_string that uniquely identifies "
-                    "the target. The error message above shows the line "
-                    "content at each match."
+                    "Multiple matches found — old_string is not unique. Do NOT "
+                    "retry the same old_string (it will match the same locations "
+                    "again). The error message above lists the exact match lines "
+                    "(L<line>: <snippet>); verify WHICH of those locations is the "
+                    "intended target, then provide a longer old_string with more "
+                    "surrounding context to make it unique, or use replace_all=True "
+                    "if you intend to replace all occurrences."
                 )
             elif (
                 not has_diagnostic
