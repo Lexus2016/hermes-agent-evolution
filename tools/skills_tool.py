@@ -2316,6 +2316,19 @@ def _skill_view_with_bump(args, **kw):
                 from tools.skill_usage import bump_use, bump_view
 
                 bump_view(str(resolved))
+                # Provisional→trusted lifecycle consumer (#2256): warn (not
+                # block) when loading a provisional skill so the agent knows
+                # this skill has not yet earned trusted status.
+                try:
+                    from tools.skill_usage import get_trust_state
+                    if get_trust_state(str(resolved)) == "provisional":
+                        parsed["trust_state"] = "provisional"
+                        parsed.setdefault("warnings", []).append(
+                            "This skill is PROVISIONAL — it has not yet earned "
+                            "trusted status. Verify its output carefully."
+                        )
+                except Exception:
+                    pass
                 # A full skill_view tool call is the agent actively loading the
                 # skill to act on it — that counts as use, not just a browse.
                 # A schema_only load is a cheap preview (tier 2), so it bumps
@@ -2352,6 +2365,14 @@ def _skill_view_with_bump(args, **kw):
                                 complied=not violated,
                                 boundary_violated=violated,
                             )
+                            # Wire the failure path into the trust lifecycle
+                            # (#2256): a boundary violation is an attributable
+                            # failure that feeds demotion telemetry.
+                            try:
+                                from tools.skill_usage import record_skill_outcome
+                                record_skill_outcome(prev_skill, success=not violated)
+                            except Exception:
+                                pass
                         # Record compliance for the skill being loaded now.
                         record_compliance(str(resolved), triggered=True, complied=True)
                         set_active_skill(str(resolved))
