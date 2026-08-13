@@ -659,6 +659,9 @@ def _empty_record() -> Dict[str, Any]:
         "recent_failure_rate": 0.0,
         # Source-chain provenance (#2192)
         "source_chain": [],
+        # Provisional→trusted lifecycle (#2256)
+        "trust_state": "provisional",
+        "consecutive_successes": 0,
     }
 
 
@@ -836,6 +839,10 @@ def set_source_run_id(skill_name: str, run_id: str) -> None:
 # Window for recent_failure_rate — track the last N invocation outcomes.
 _FAILURE_WINDOW = 10
 
+# Provisional→trusted lifecycle defaults (#2256). Overridable via curator config.
+DEFAULT_TRUST_PROMOTION_THRESHOLD = 3
+DEFAULT_TRUST_DEMOTION_FAILURE_RATE = 0.5
+
 
 def record_skill_outcome(skill_name: str, success: bool) -> None:
     """Update invocation_count and recent_failure_rate from an execution outcome (#2190).
@@ -844,6 +851,10 @@ def record_skill_outcome(skill_name: str, success: bool) -> None:
     hindered the task. The failure rate is a sliding window over the last
     ``_FAILURE_WINDOW`` invocations. Best-effort; telemetry failures never
     break the tool.
+
+    Also drives the provisional→trusted lifecycle (#2256): successes bump
+    ``consecutive_successes`` and promote at the configured threshold; a
+    failure resets the counter and may demote.
     """
     def _apply(rec: Dict[str, Any]) -> None:
         # invocation_count is the same as use_count — bump it.
@@ -857,7 +868,65 @@ def record_skill_outcome(skill_name: str, success: bool) -> None:
         rec["recent_failure_rate"] = (
             sum(outcomes) / len(outcomes) if outcomes else 0.0
         )
+        # Provisional→trusted lifecycle transitions (#2256)
+        _apply_trust_transition(rec, success)
+
     _mutate(skill_name, _apply)
+
+
+def _apply_trust_transition(rec: Dict[str, Any], success: bool) -> None:
+    """Mutate *rec* for provisional→trusted lifecycle (#2256)."""
+    state = rec.get("trust_state", "trusted")
+    if success:
+        rec["consecutive_successes"] = int(rec.get("consecutive_successes") or 0) + 1
+        if state == "provisional":
+            threshold = _get_promotion_threshold()
+            if rec["consecutive_successes"] >= threshold:
+                rec["trust_state"] = "trusted"
+    else:
+        rec["consecutive_successes"] = 0
+        if state == "trusted":
+            rate = rec.get("recent_failure_rate", 0.0)
+            demotion_rate = _get_demotion_failure_rate()
+            if rate >= demotion_rate:
+                rec["trust_state"] = "provisional"
+
+
+def get_trust_state(skill_name: str) -> str:
+    """Return the trust state of a skill: ``provisional`` or ``trusted``.
+
+    Defaults to ``trusted`` for pre-existing skills that predate the lifecycle
+    field (#2256) or have no usage record — they are assumed trusted so the
+    upgrade does not mass-demote the library. Only skills that were created
+    AFTER this field shipped carry ``provisional`` from their empty record.
+    """
+    try:
+        data = load_usage()
+        rec = data.get(skill_name)
+        if not isinstance(rec, dict):
+            return "trusted"  # no usage record at all → legacy/trusted
+        state = rec.get("trust_state", "trusted")
+        return state if state in ("provisional", "trusted", "demoted") else "trusted"
+    except Exception:
+        return "trusted"
+
+
+def _get_promotion_threshold() -> int:
+    """Read ``curator.trust_promotion_threshold`` from config (#2256)."""
+    try:
+        from agent.curator import get_trust_promotion_threshold
+        return get_trust_promotion_threshold()
+    except Exception:
+        return DEFAULT_TRUST_PROMOTION_THRESHOLD
+
+
+def _get_demotion_failure_rate() -> float:
+    """Read ``curator.trust_demotion_failure_rate`` from config (#2256)."""
+    try:
+        from agent.curator import get_trust_demotion_failure_rate
+        return get_trust_demotion_failure_rate()
+    except Exception:
+        return DEFAULT_TRUST_DEMOTION_FAILURE_RATE
 
 
 def set_state(skill_name: str, state: str) -> None:
