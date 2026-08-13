@@ -1,0 +1,25 @@
+name: evolution-utility-audit
+# Daily at 06:40 — before the funnel (07:25) and watchdog (07:47), so the
+# audit's demotion markers are in place before the morning cycle measures
+# the settled corpus. Off the :00/:30 marks; jitter stays < 07:00.
+schedule: "40 6 * * *"
+enabled: true
+mode: PRIVATE
+
+# Deterministic audit — NO LLM agent. The script IS the job. It reads the
+# curator sidecar (~/.hermes/skills/.usage.json), runs the leave-one-out
+# utility audit, and (with --apply) stamps trust_state=demoted on demote
+# verdicts so the audit has consequence. See scripts/evolution_utility_audit.py
+# (issue #2286, SkillProx).
+no_agent: true
+script: evolution_utility_audit.py
+
+# Keep on disk for the owner + curator to read; nothing is delivered to
+# channels (an audit summary is not an alert).
+deliver: local
+
+prompt: |
+  Deterministic leave-one-out utility audit (no LLM). Reads the curator
+  sidecar, scores each skill's recency-weighted utility, and stamps
+  trust_state=demoted on low-utility non-redundant skills. See
+  scripts/evolution_utility_audit.py (issue #2286).
