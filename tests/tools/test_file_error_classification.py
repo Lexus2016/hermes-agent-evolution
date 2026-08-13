@@ -13,7 +13,9 @@ class TestClassifyFileError:
         assert classify_file_error("") is None
 
     def test_permission(self):
-        klass, rec = classify_file_error("Write denied: '/etc/x' is a protected system/credential file.")
+        klass, rec = classify_file_error(
+            "Write denied: '/etc/x' is a protected system/credential file."
+        )
         assert klass == "permission" and "allowed path" in rec
 
     def test_not_found_without_similars_routes_to_write_file(self):
@@ -22,7 +24,8 @@ class TestClassifyFileError:
 
     def test_not_found_with_similars_is_fuzzy_match(self):
         klass, rec = classify_file_error(
-            "File not found: /tmp/utils.py", similar_files=["/tmp/util.py", "/tmp/utils2.py"]
+            "File not found: /tmp/utils.py",
+            similar_files=["/tmp/util.py", "/tmp/utils2.py"],
         )
         assert klass == "fuzzy_match" and "util.py" in rec
 
@@ -48,16 +51,23 @@ class TestClassifyFileError:
         assert klass == "fuzzy_match" and ("Re-read" in rec or "EXACT" in rec)
 
     def test_ambiguous_match_is_classified(self):
-        """'Found N matches' errors get a specific error_class and recovery (#976)."""
+        """'Found N matches' errors get a specific error_class and recovery (#976).
+
+        #2354: the ambiguous_match bucket is now decomposed into subclasses:
+        replace_all_intent (error mentions replace_all), insufficient_context
+        (error mentions more context), and not_unique (generic fallback).
+        This error string mentions replace_all → replace_all_intent."""
         klass, rec = classify_file_error(
             "Found 3 matches for old_string at:\n  Line 10: def foo()\n"
             "Provide more context to make it unique, or use replace_all=True."
         )
-        assert klass == "ambiguous_match"
-        assert "replace_all" in rec or "context" in rec
+        assert klass == "replace_all_intent"
+        assert "replace_all" in rec
 
     def test_verification(self):
-        klass, _ = classify_file_error("Post-write verification failed: could not re-read x")
+        klass, _ = classify_file_error(
+            "Post-write verification failed: could not re-read x"
+        )
         assert klass == "verification"
 
     def test_binary(self):
@@ -149,7 +159,9 @@ class TestClassifyFileError:
     def test_no_structured_error_keeps_legacy_behavior(self):
         """Callers that don't pass structured_error get identical behavior to
         before — backward compatible."""
-        klass, _ = classify_file_error("Could not find a match for old_string in the file")
+        klass, _ = classify_file_error(
+            "Could not find a match for old_string in the file"
+        )
         assert klass == "fuzzy_match"
 
 
@@ -168,14 +180,17 @@ class TestResultToDict:
         assert d["error_class"] == "patch_parse" and "recovery" in d
 
     def test_patch_result_ambiguous_match_classified(self):
-        """PatchResult with ambiguous-match error gets error_class (#976)."""
+        """PatchResult with ambiguous-match error gets error_class (#976).
+
+        #2354: ambiguous_match is decomposed — this error mentions replace_all
+        so it classifies as replace_all_intent."""
         d = PatchResult(
             success=False,
             error="Found 3 matches for old_string at:\n  Line 10: x\n"
             "Provide more context to make it unique, or use replace_all=True.",
         ).to_dict()
-        assert d["error_class"] == "ambiguous_match"
-        assert "replace_all" in d["recovery"] or "context" in d["recovery"]
+        assert d["error_class"] == "replace_all_intent"
+        assert "replace_all" in d["recovery"]
 
     def test_patch_result_success_clean(self):
         d = PatchResult(success=True, diff="--- a").to_dict()

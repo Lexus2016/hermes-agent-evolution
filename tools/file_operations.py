@@ -216,10 +216,41 @@ def classify_file_error(
             "see actual state before editing again."
         )
     if "found" in low and "matches" in low and "old_string" in low:
-        return "ambiguous_match", (
-            "Multiple matches found. Include more surrounding context lines in "
-            "old_string to make it unique, or use replace_all=True if you want "
-            "all occurrences replaced."
+        # ── #2354: decompose the 'ambiguous_match' bucket ──────────────
+        # This bucket recurs at 229/7d with 21-deep spirals because the old
+        # hint ("include more context or use replace_all") gave no anti-retry
+        # signal — the model re-sent the same non-unique old_string, matching
+        # the same multiple locations again. Split into actionable subclasses
+        # so the recovery hint tells the model exactly what to change:
+        #   (1) replace_all-intent: the error already mentions replace_all as
+        #       the resolution → the model likely WANTS all occurrences
+        #       replaced; steer it to re-send with replace_all=True.
+        #   (2) insufficient-context: old_string is too short to be unique →
+        #       steer to re-read and include surrounding lines.
+        #   (3) not-unique: old_string genuinely appears multiple times and is
+        #       not meant to → explicit anti-retry language ("do NOT retry
+        #       the same old_string").
+        if "replace_all" in low:
+            return "replace_all_intent", (
+                "Multiple matches found and the resolution suggests replace_all. "
+                "If you intend to replace ALL occurrences, re-send the patch with "
+                "replace_all=True. Do NOT retry the same call with replace_all "
+                "unset — it will fail the same way."
+            )
+        if "more context" in low or "surrounding context" in low or "longer" in low:
+            return "ambiguous_insufficient_context", (
+                "old_string is too short to be unique — multiple regions match. "
+                "Re-read the file with read_file, then include more surrounding "
+                "context lines (function signature, class name, or unique nearby "
+                "lines) in old_string so only one location matches. Do NOT retry "
+                "the same old_string — it is inherently ambiguous."
+            )
+        return "ambiguous_not_unique", (
+            "Multiple matches found for old_string — it is not unique in the file. "
+            "Either (a) add surrounding context lines to old_string to make it "
+            "unique, or (b) set replace_all=True if you intend to replace every "
+            "occurrence. Do NOT retry the same old_string unchanged — it will "
+            "match the same multiple locations again."
         )
     # ── Sub-classify the fuzzy matcher's distinctive failure strings (#1586) ──
     # These previously fell through to the generic "error" bucket (the 'other'
