@@ -7908,7 +7908,29 @@ class AIAgent:
         if failed and not decision.should_halt:
             from tools.tool_failure_classifier import classify_tool_failure
 
-            _nr = classify_tool_failure(tool_name, function_result)
+            # #2335 — pass the terminal exit code through so the classifier uses
+            # its rich exit-code/signal logic instead of falling back to text
+            # matching. Without it, a wall-clock timeout ("Command timed out
+            # after N seconds", exit_code=124) is classified by the generic
+            # "timed out" text rule as retryable (should_retry=True), so the
+            # always-on non-retryable diagnostic below never fires and the
+            # agent keeps re-running the identical long command — the retry
+            # amplification path. With exit_code=124 the classifier returns
+            # timeout_deterministic (non-retryable, #2191) and the model gets
+            # the explicit stop signal.
+            _exit_code = None
+            if tool_name == "terminal":
+                try:
+                    _parsed = json.loads(function_result)
+                    if isinstance(_parsed, dict) and isinstance(
+                        _parsed.get("exit_code"), int
+                    ):
+                        _exit_code = _parsed["exit_code"]
+                except (ValueError, TypeError):
+                    _exit_code = None
+            _nr = classify_tool_failure(
+                tool_name, function_result, exit_code=_exit_code
+            )
             if not _nr.should_retry:
                 _nr_line = f"\n\n⚠️ Non-retryable: {_nr.category.value}. {_nr.hint}"
                 if "Non-retryable:" not in function_result:
