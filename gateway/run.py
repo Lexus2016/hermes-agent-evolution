@@ -6087,6 +6087,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         ),
                         vacuum=bool(_sess_cfg.get("vacuum_after_prune", True)),
                         sessions_dir=self.config.sessions_dir,
+                        # Issue #2373: force VACUUM when state.db approaches the
+                        # 1 GiB backup limit (default 768 MiB = 75% of the cap).
+                        db_size_vacuum_threshold=int(
+                            _sess_cfg.get("db_size_vacuum_threshold", 768 * 1024 * 1024)
+                        ),
                     )
             except Exception as exc:
                 logger.debug("state.db auto-maintenance skipped: %s", exc)

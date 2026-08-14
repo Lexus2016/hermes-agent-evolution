@@ -5144,6 +5144,47 @@ class TestVacuum:
         assert vacuum_calls == [True, True]
         assert db.get_meta("last_vacuum") is not None
 
+    def test_auto_maintenance_vacuum_on_size_threshold(self, db, monkeypatch):
+        """Issue #2373: VACUUM must fire on DB size alone, even if pruned == 0."""
+        # No sessions pruned (the old gate that prevented VACUUM).
+        monkeypatch.setattr(db, "prune_sessions", lambda **_kwargs: 0)
+        vacuum_calls = []
+        monkeypatch.setattr(db, "vacuum", lambda: vacuum_calls.append(True))
+        # Simulate the DB file exceeding the threshold via a fake path object.
+        fake_path = type("FakePath", (), {
+            "exists": lambda self: True,
+            "stat": lambda self: type("S", (), {"st_size": 2 * 1024 * 1024 * 1024})(),
+        })()
+        monkeypatch.setattr(db, "db_path", fake_path)
+
+        result = db.maybe_auto_prune_and_vacuum(
+            min_interval_hours=0,
+            db_size_vacuum_threshold=1024 * 1024 * 1024,
+        )
+
+        assert result["vacuumed"] is True
+        assert vacuum_calls == [True]
+
+    def test_auto_maintenance_no_size_vacuum_below_threshold(self, db, monkeypatch):
+        """Issue #2373: below the size threshold and no prunes → no VACUUM."""
+        monkeypatch.setattr(db, "prune_sessions", lambda **_kwargs: 0)
+        vacuum_calls = []
+        monkeypatch.setattr(db, "vacuum", lambda: vacuum_calls.append(True))
+        fake_path = type("FakePath", (), {
+            "exists": lambda self: True,
+            "stat": lambda self: type("S", (), {"st_size": 100 * 1024 * 1024})(),
+        })()
+        monkeypatch.setattr(db, "db_path", fake_path)
+
+        result = db.maybe_auto_prune_and_vacuum(
+            min_interval_hours=0,
+            db_size_vacuum_threshold=1024 * 1024 * 1024,
+        )
+
+        assert result["vacuumed"] is False
+        assert vacuum_calls == []
+
+
 
 class TestOptimizeFts:
     def test_optimize_returns_index_count(self, db):

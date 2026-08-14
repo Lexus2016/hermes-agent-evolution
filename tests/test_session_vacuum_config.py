@@ -38,4 +38,5 @@ def test_cli_auto_maintenance_forwards_vacuum_interval(monkeypatch, tmp_path: Pa
         min_vacuum_interval_days=17,
         vacuum=True,
         sessions_dir=tmp_path / "sessions",
+        db_size_vacuum_threshold=768 * 1024 * 1024,
     )

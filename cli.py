@@ -2342,6 +2342,13 @@ def _run_state_db_auto_maintenance(session_db) -> None:
             min_vacuum_interval_days=int(cfg.get("min_vacuum_interval_days", 30)),
             vacuum=bool(cfg.get("vacuum_after_prune", True)),
             sessions_dir=_hermes_home_maint / "sessions",
+            # Issue #2373: force VACUUM when state.db approaches the 1 GiB
+            # backup snapshot limit (768 MiB = 75% of the cap), so the file
+            # is shrunk *before* it grows past the limit and snapshots start
+            # getting silently skipped for 24h+.
+            db_size_vacuum_threshold=int(
+                cfg.get("db_size_vacuum_threshold", 768 * 1024 * 1024)
+            ),
         )
     except Exception as exc:
         logger.debug("state.db auto-maintenance skipped: %s", exc)

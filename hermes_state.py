@@ -9264,6 +9264,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         vacuum: bool = True,
         sessions_dir: Optional[Path] = None,
         min_vacuum_interval_days: int = 30,
+        db_size_vacuum_threshold: int = 0,
     ) -> Dict[str, Any]:
         """Idempotent auto-maintenance: prune inactive sessions + optional VACUUM.
 
@@ -9277,6 +9278,12 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         When *sessions_dir* is provided, on-disk transcript files
         (``.json`` / ``.jsonl`` / ``request_dump_*``) for pruned sessions
         are removed as part of the same sweep (issue #3015).
+
+        When *db_size_vacuum_threshold* is > 0 and the database file on disk
+        exceeds that many bytes, VACUUM is forced regardless of whether rows
+        were pruned (issue #2373: the DB grows monotonically even with no
+        prunable sessions, so the ``pruned > 0`` gate alone never fires and
+        the file balloons past backup limits).
 
         Never raises. On any failure, logs a warning and returns a dict
         with ``"error"`` set.
@@ -9307,13 +9314,15 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             )
             result["pruned"] = pruned
 
-            # Only VACUUM if we actually freed rows, and no more often than
-            # once every min_vacuum_interval_days -- a large prune (e.g. the
-            # first one to cross retention_days on a DB with tens of
-            # thousands of rows) can free enough pages that pruned > 0 fires
-            # on every subsequent startup even though a VACUUM already ran
-            # recently. VACUUM on this DB's size (FTS5 shadow tables) is not
-            # cheap -- it holds an exclusive lock for the full rewrite.
+            # VACUUM when either (a) we freed rows this pass, or (b) the DB
+            # file exceeds db_size_vacuum_threshold bytes — issue #2373: the
+            # database grows monotonically even when nothing is prunable, so a
+            # ``pruned > 0``-only gate lets the file balloon past the 1 GiB
+            # backup limit and snapshots get silently skipped for 24h+.
+            # Throttled to once every min_vacuum_interval_days regardless of
+            # which condition triggered it — VACUUM on this DB's size (FTS5
+            # shadow tables) is not cheap; it holds an exclusive lock for the
+            # full rewrite.
             last_vacuum_raw = self.get_meta("last_vacuum")
             vacuum_due = True
             if last_vacuum_raw:
@@ -9321,7 +9330,18 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     vacuum_due = (now - float(last_vacuum_raw)) >= min_vacuum_interval_days * 86400
                 except (TypeError, ValueError):
                     vacuum_due = True
-            if vacuum and pruned > 0 and vacuum_due:
+
+            db_over_size = False
+            if db_size_vacuum_threshold > 0:
+                try:
+                    db_over_size = (
+                        self.db_path.exists()
+                        and self.db_path.stat().st_size > db_size_vacuum_threshold
+                    )
+                except OSError:
+                    db_over_size = False
+
+            if vacuum and vacuum_due and (pruned > 0 or db_over_size):
                 try:
                     self.vacuum()
                     result["vacuumed"] = True
