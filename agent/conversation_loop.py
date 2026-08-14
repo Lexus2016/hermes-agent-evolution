@@ -2688,6 +2688,23 @@ def _run_conversation_impl(
         api_start_time = time.time()
         retry_count = 0
         max_retries = agent._api_max_retries
+
+        # Issue #2376 (SLICE A): For cron/non-interactive contexts (no user
+        # waiting), raise the retry ceiling so brief provider 429/overload
+        # spikes don't kill the pipeline stage. The default interactive
+        # ceiling (3) is designed for responsiveness; cron jobs benefit from
+        # more persistence since nobody is watching the spinner.
+        _is_cron_context = env_var_enabled("HERMES_CRON_SESSION")
+        if _is_cron_context:
+            _cron_retries = int(os.environ.get("HERMES_CRON_MAX_RETRIES", "15"))
+            if _cron_retries > max_retries:
+                logger.info(
+                    "cron-context API retry ceiling raised %d → %d "
+                    "(HERMES_CRON_SESSION active, issue #2376)",
+                    max_retries,
+                    _cron_retries,
+                )
+                max_retries = _cron_retries
         _retry = TurnRetryState()
 
         finish_reason = "stop"
