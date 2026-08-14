@@ -12,7 +12,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from tools.gepa_evolution import EvolutionTree, run_gepa_generation  # noqa: E402
 from tools.gepa_reflector import VariantResult  # noqa: E402
-from tools.gepa_validator import promote_if_valid, validate_held_out  # noqa: E402
+from tools.gepa_validator import (  # noqa: E402
+    default_ledger_path,
+    promote_if_valid,
+    validate_held_out,
+)
 
 SEED_TEXT = (
     "Read the task prompt carefully. Use the available tools to gather the "
@@ -66,6 +70,7 @@ def run(argv: List[str]) -> int:
                     "n_passed": result.n_passed,
                 },
                 "promoted": promoted,
+                "ledger_path": default_ledger_path(),
             },
             sort_keys=True,
         )

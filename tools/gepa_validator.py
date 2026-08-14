@@ -2,16 +2,34 @@
 """GEPA held-out validation gate (issue #2232, Slice C).
 
 Validates mutated candidates against an unseen held-out task set before
-promotion, preventing overfit to training-set critiques.
+promotion, preventing overfit to training-set critiques. Promoted
+candidates are persisted to a JSONL ledger so downstream consumers
+(Slice D skill-system wiring) can read them — nothing stays in memory.
 """
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List
 
 from tools.gepa_evolution import Candidate
 from tools.gepa_reflector import VariantResult
+
+
+def default_ledger_path() -> str:
+    """Ledger location under HERMES_HOME (override: GEPA_LEDGER_PATH)."""
+    override = os.environ.get("GEPA_LEDGER_PATH")
+    if override:
+        return override
+    return os.path.join(
+        os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes")),
+        "evolution",
+        "gepa",
+        "promotions.jsonl",
+    )
 
 
 @dataclass
@@ -59,6 +77,42 @@ def validate_held_out(
     )
 
 
+def persist_promotion(candidate: Candidate, result: HeldOutResult) -> str | None:
+    """Append a promotion record to the JSONL ledger; return the path.
+
+    Only promoted (passed) candidates are persisted — the ledger is the
+    hand-off point to Slice D consumers. IO errors return ``None``
+    rather than raising: validation must never fail because the ledger
+    is unwritable.
+    """
+    if not result.passed:
+        return None
+    record = {
+        "candidate_id": candidate.id,
+        "parent_id": candidate.parent_id,
+        "generation": candidate.generation,
+        "origin": candidate.origin,
+        "text": candidate.text,
+        "critique_summary": candidate.critique_summary,
+        "held_out_validation": {
+            "pass_rate": round(result.pass_rate, 4),
+            "threshold": result.threshold,
+            "train_pass_rate": round(result.train_pass_rate, 4),
+            "n_held_out": result.n_held_out,
+            "n_passed": result.n_passed,
+        },
+        "promoted_at": datetime.now(timezone.utc).isoformat(),
+    }
+    path = default_ledger_path()
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        return None
+    return path
+
+
 def promote_if_valid(candidate: Candidate, result: HeldOutResult) -> bool:
     """Mark *candidate* selected (pass) or pruned (fail); record audit metadata."""
     if result.passed:
@@ -73,4 +127,6 @@ def promote_if_valid(candidate: Candidate, result: HeldOutResult) -> bool:
         "n_held_out": result.n_held_out,
         "n_passed": result.n_passed,
     }
+    if result.passed:
+        candidate.metadata["ledger_path"] = persist_promotion(candidate, result)
     return result.passed

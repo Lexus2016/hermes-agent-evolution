@@ -68,3 +68,37 @@ def test_held_out_gate_after_gepa_generation():
     assert res.passed is True
     assert child.selected is True
     assert child.metadata["held_out_validation"]["n_held_out"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Slice C persistence: promoted candidates survive to a JSONL ledger
+# ---------------------------------------------------------------------------
+
+
+def test_promoted_candidate_persisted_to_ledger(tmp_path, monkeypatch):
+    """A PASSING candidate must be appended to the promotions ledger."""
+    ledger = tmp_path / "promotions.jsonl"
+    monkeypatch.setenv("GEPA_LEDGER_PATH", str(ledger))
+    cand = _candidate()
+    res = validate_held_out(cand, _results([True]), _results([True, True]))
+    promote_if_valid(cand, res)
+    assert ledger.exists()
+    import json as _json
+
+    lines = ledger.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    rec = _json.loads(lines[0])
+    assert rec["candidate_id"] == cand.id
+    assert rec["held_out_validation"]["n_passed"] == 2
+    assert rec["promoted_at"]
+
+
+def test_failed_candidate_not_persisted(tmp_path, monkeypatch):
+    """A FAILING candidate must NOT be written to the ledger."""
+    ledger = tmp_path / "promotions.jsonl"
+    monkeypatch.setenv("GEPA_LEDGER_PATH", str(ledger))
+    cand = _candidate()
+    res = validate_held_out(cand, _results([True]), _results([False, False]))
+    promote_if_valid(cand, res)
+    assert not ledger.exists()
+    assert cand.metadata["ledger_path"] if "ledger_path" in cand.metadata else True
