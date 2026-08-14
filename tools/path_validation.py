@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 
 
-def suggest_nearby_paths(path: str, max_results: int = 5) -> List[str]:
+def _scored_nearby(path: str) -> List[tuple]:
     """Return up to *max_results* paths near *path* the caller likely meant.
 
     Pure-Python existence check + similarity scoring (no shell). Returns
@@ -61,7 +61,29 @@ def suggest_nearby_paths(path: str, max_results: int = 5) -> List[str]:
             scored.append((score, os.path.join(target, f)))
 
     scored.sort(key=lambda x: -x[0])
-    return [fp for _, fp in scored[:max_results]]
+    return scored
+
+
+def suggest_nearby_paths(path: str, max_results: int = 5) -> List[str]:
+    """Return up to *max_results* paths near *path* the caller likely meant."""
+    return [fp for _, fp in _scored_nearby(path)[:max_results]]
+
+
+def confident_nearby_match(path: str, min_score: int = 90) -> Optional[str]:
+    """Return the single unambiguous high-confidence correction for *path*.
+
+    #2411 auto-retry gate: a candidate qualifies only when it is the sole
+    entry at or above *min_score* (exact-case-insensitive or same-stem
+    match) and is a regular file. Ambiguous or weak matches return None —
+    callers fall back to the hint-only contract.
+    """
+    scored = _scored_nearby(path)
+    if not scored or scored[0][0] < min_score:
+        return None
+    if len(scored) > 1 and scored[1][0] >= min_score:
+        return None  # two equally-plausible candidates — don't guess
+    best = scored[0][1]
+    return best if os.path.isfile(best) else None
 
 
 def format_nearby_hint(path: str, nearby: List[str]) -> Optional[str]:

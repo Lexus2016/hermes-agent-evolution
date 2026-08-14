@@ -20,7 +20,11 @@ from tools.file_operations import (
     normalize_search_pagination,
 )
 from tools import file_state
-from tools.path_validation import format_nearby_hint, suggest_nearby_paths
+from tools.path_validation import (
+    confident_nearby_match,
+    format_nearby_hint,
+    suggest_nearby_paths,
+)
 from agent.redact import redact_sensitive_text
 
 logger = logging.getLogger(__name__)
@@ -1667,6 +1671,24 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 2000, task_id: str =
                 _hint = format_nearby_hint(str(_resolved), _nearby)
                 if _hint:
                     result_dict["error"] = _err + "\n\n" + _hint
+                # #2411 — auto-retry-with-correction: with ONE unambiguous
+                # high-confidence candidate (score >= 90: exact-case or
+                # same-stem), retry once with the corrected path instead of
+                # only hinting. Hints drove the rate 10.6% -> 5.8%
+                # (#1377/#1587/#2293) then plateaued — the residual cohort
+                # re-issues the same wrong path. A corrected retry collapses
+                # that failure turn; on retry failure fall through to the
+                # negative cache + hint exactly as before.
+                _fixed = confident_nearby_match(str(_resolved))
+                if _fixed:
+                    _retry = file_ops.read_file(_fixed, offset, limit)
+                    _retry_dict = _retry.to_dict()
+                    if not (_retry_dict.get("error") or _retry_dict.get("error_class")):
+                        _retry_dict["auto_corrected"] = {
+                            "requested": resolved_str_for_neg,
+                            "read": _fixed,
+                        }
+                        return json.dumps(_retry_dict, ensure_ascii=False)
             _not_found_json = json.dumps(result_dict, ensure_ascii=False)
             _record_not_found("read", resolved_str_for_neg, task_id, _not_found_json)
 
