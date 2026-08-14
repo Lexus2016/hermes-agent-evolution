@@ -26,17 +26,37 @@ def evo_dir(tmp_path):
     evo = tmp_path / "evolution"
     issues_dir = evo / "issues"
     issues_dir.mkdir(parents=True)
-    (issues_dir / "2026-07-08.json").write_text(json.dumps({
-        "date": "2026-07-08",
-        "proposals": [
-            {"title": "Alpha", "decision": "filed", "issue": 100,
-             "priority_score": 1.5, "impact": 0.8, "effort": 0.3},
-            {"title": "Beta", "decision": "skipped", "issue": None,
-             "priority_score": 0.5, "impact": 0.2, "effort": 0.1},
-            {"title": "Gamma", "decision": "filed", "issue": 200,
-             "priority_score": 0.9, "impact": 0.5, "effort": 0.8},
-        ]
-    }))
+    (issues_dir / "2026-07-08.json").write_text(
+        json.dumps({
+            "date": "2026-07-08",
+            "proposals": [
+                {
+                    "title": "Alpha",
+                    "decision": "filed",
+                    "issue": 100,
+                    "priority_score": 1.5,
+                    "impact": 0.8,
+                    "effort": 0.3,
+                },
+                {
+                    "title": "Beta",
+                    "decision": "skipped",
+                    "issue": None,
+                    "priority_score": 0.5,
+                    "impact": 0.2,
+                    "effort": 0.1,
+                },
+                {
+                    "title": "Gamma",
+                    "decision": "filed",
+                    "issue": 200,
+                    "priority_score": 0.9,
+                    "impact": 0.5,
+                    "effort": 0.8,
+                },
+            ],
+        })
+    )
     return evo
 
 
@@ -134,6 +154,7 @@ def test_latest_file_returns_most_recent(tmp_path):
     new.write_text("{}")
     # Ensure new is modified after old
     import os
+
     os.utime(old, (1, 1))
     os.utime(new, (2, 2))
     result = _latest_file(d)
@@ -152,6 +173,7 @@ def test_read_sidecar_md(tmp_path):
     f.write_text("# Research report\n\nContent here.")
     result = _read_sidecar(f)
     assert result["char_count"] > 0
+
 
 def test_output_is_json_serializable_with_stage_result(tmp_path):
     """The triage output must survive json.dumps with the StageResult envelope
@@ -173,3 +195,76 @@ def test_output_is_json_serializable_with_stage_result(tmp_path):
     if "stage_result" in output:
         assert "result" not in output["stage_result"]
         assert output["stage_result"]["stage"] == "local_triage"
+
+
+# ---------------------------------------------------------------------------
+# #2386: confidence estimation + abstention in local triage
+# ---------------------------------------------------------------------------
+
+
+def test_confidence_estimate_bounds_and_signals():
+    from evolution_local_triage import estimate_proposal_confidence
+
+    strong = {
+        "issue_number": 42,
+        "title": "A substantive proposal title long enough",
+        "impact_score": 0.8,
+        "effort_score": 0.3,
+        "priority_score": 1.5,
+    }
+    # with cross-referenced sidecars the estimate rises
+    high = estimate_proposal_confidence(strong, {"issues": {}, "introspection": {}})
+    base = estimate_proposal_confidence(strong, {"issues": {}})
+    assert 5 <= high <= 95 and 5 <= base <= 95
+    assert high > base
+
+    weak = {
+        "issue_number": None,
+        "title": "x",
+        "impact_score": 0.0,
+        "effort_score": 0.0,
+        "priority_score": 0.5,
+    }
+    low = estimate_proposal_confidence(weak, {})
+    assert low == max(5, 50 - 15 - 10)  # unknown effort + weak priority
+
+
+def test_low_confidence_proposal_deferred_not_selected(tmp_path):
+    evo = tmp_path / "evolution"
+    issues_dir = evo / "issues"
+    issues_dir.mkdir(parents=True)
+    (issues_dir / "2026-08-14.json").write_text(
+        json.dumps({
+            "date": "2026-08-14",
+            "proposals": [
+                {
+                    "title": "Solid well-evidenced proposal",
+                    "decision": "filed",
+                    "issue": 301,
+                    "priority_score": 1.4,
+                    "impact": 0.8,
+                    "effort": 0.3,
+                },
+                {
+                    "title": "Vague idea",
+                    "decision": "filed",
+                    "issue": 302,
+                    "priority_score": 0.5,
+                    "impact": 0.2,
+                    "effort": 0.0,
+                },
+            ],
+        })
+    )
+    result = run_local_triage(evo)
+    selected_nums = [s["issue_number"] for s in result["selected_for_implementation"]]
+    deferred_nums = [d["issue_number"] for d in result["deferred_low_confidence"]]
+    assert 301 in selected_nums
+    assert 302 not in selected_nums
+    assert 302 in deferred_nums
+    ce = result["confidence_estimation"]
+    assert ce["min_selection_confidence"] == 40
+    assert ce["deferred_count"] == 1
+    # selected proposals carry their confidence estimate
+    sel = result["selected_for_implementation"][0]
+    assert isinstance(sel["confidence"], int)
