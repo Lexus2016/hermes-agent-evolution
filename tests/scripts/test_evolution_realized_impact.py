@@ -157,7 +157,6 @@ class TestComputeRealized:
         h0 = compute_realized(recs, today="2026-06-30", maturity_days=0)
         assert h0["merged_tracked"] == 0
 
-
 class TestFormat:
     def test_format_includes_rate_and_tail(self):
         recs = [_merge(1, "2026-06-01") | _verdict(1, "confirmed")]

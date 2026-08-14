@@ -362,8 +362,7 @@ def compute_realized(
     # Every window entry is mature by construction, so any without a verdict
     # is matured-but-unverified — the verification step never recorded one.
     matured_unverified = [
-        r
-        for r in window
+        r for r in window
         if r.get("verdict") not in (VERDICTS_GOOD | VERDICTS_BAD)
     ]
 
