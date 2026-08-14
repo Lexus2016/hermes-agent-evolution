@@ -150,8 +150,8 @@ def test_latest_file_returns_most_recent(tmp_path):
     d.mkdir()
     old = d / "2026-07-01.json"
     new = d / "2026-07-08.json"
-    old.write_text("{}")
-    new.write_text("{}")
+    old.write_text("{}", encoding="utf-8")
+    new.write_text("{}", encoding="utf-8")
     # Ensure new is modified after old
     import os
 
@@ -163,14 +163,14 @@ def test_latest_file_returns_most_recent(tmp_path):
 
 def test_read_sidecar_json(tmp_path):
     f = tmp_path / "test.json"
-    f.write_text('{"key": "value"}')
+    f.write_text('{"key": "value"}', encoding="utf-8")
     result = _read_sidecar(f)
     assert result["data"]["key"] == "value"
 
 
 def test_read_sidecar_md(tmp_path):
     f = tmp_path / "test.md"
-    f.write_text("# Research report\n\nContent here.")
+    f.write_text("# Research report\n\nContent here.", encoding="utf-8")
     result = _read_sidecar(f)
     assert result["char_count"] > 0
 
