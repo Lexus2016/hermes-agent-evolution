@@ -1806,6 +1806,7 @@ def try_activate_fallback(
                     "cooldown_seconds": _cooldown,
                     "fallback_index": getattr(agent, "_fallback_index", 0),
                     "fallback_chain_length": len(getattr(agent, "_fallback_chain", [])),
+                    "platform": getattr(agent, "platform", ""),
                 },
             )
     if agent._fallback_index >= len(agent._fallback_chain):

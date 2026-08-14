@@ -48,7 +48,7 @@ from hermes_cli.config import (
     cron_model_drift_guard_enabled,
     load_config,
 )
-from hermes_cli.fallback_config import get_fallback_chain
+from hermes_cli.fallback_config import get_fallback_chain, get_fallback_chain_from_list
 from hermes_time import now as _hermes_now
 from agent.interrupt_compat import request_hard_interrupt
 
@@ -4369,7 +4369,22 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
                     f"(or pin the original values to keep them). See #44585."
                 )
 
-        fallback_model = get_fallback_chain(_cfg) or None
+        # Issue #2377 (Slice B): cron-specific fallback provider chain. A
+        # non-empty ``cron.fallback_providers`` overrides the global chain for
+        # cron-context runs ONLY, so unattended jobs can target different
+        # failover providers than interactive sessions. Empty (default) falls
+        # through to the global chain, preserving legacy behavior.
+        _cron_fb_raw = (_cfg.get("cron") or {}).get("fallback_providers")
+        _cron_fb_chain = get_fallback_chain_from_list(_cron_fb_raw)
+        if _cron_fb_chain:
+            fallback_model = _cron_fb_chain
+            logger.info(
+                "Job '%s': using cron-specific fallback chain (%d provider(s))",
+                job_id,
+                len(_cron_fb_chain),
+            )
+        else:
+            fallback_model = get_fallback_chain(_cfg) or None
         credential_pool = None
         runtime_provider = str(runtime.get("provider") or "").strip().lower()
         if runtime_provider:
@@ -4768,18 +4783,13 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
         # Mirror the delegate_tool.py pattern (#2296): if the run completed
         # text-only with refusal language, re-run ONCE with the recovery
         # directive. Adopt only on verified recovery. Bounded: 1 re-run.
-        if (
-            result.get("completed")
-            and not _count_tool_calls(result.get("messages"))
-        ):
+        if result.get("completed") and not _count_tool_calls(result.get("messages")):
             _cron_messages = result.get("messages") or []
             _refusal_nudge = None
             try:
                 from agent.loop_guard import maybe_refusal_nudge as _maybe_refusal
 
-                _refusal_nudge = _maybe_refusal(
-                    _cron_messages, already_nudged=False
-                )
+                _refusal_nudge = _maybe_refusal(_cron_messages, already_nudged=False)
             except Exception:
                 _refusal_nudge = None
             if _refusal_nudge:
@@ -4816,9 +4826,7 @@ def _run_job_impl(job: dict) -> tuple[bool, str, str, Optional[str]]:
                         )
                     except Exception:
                         pass
-                    _rf_tool_calls = _count_tool_calls(
-                        _refusal_result.get("messages")
-                    )
+                    _rf_tool_calls = _count_tool_calls(_refusal_result.get("messages"))
                     if _rf_tool_calls or not _rf_still_refusal:
                         result = _refusal_result
                         logger.info(
@@ -5412,9 +5420,10 @@ def tick(
             # sweeps on idle ticks so orphaned stdio children from crashed
             # jobs are reaped even when nothing is due.
             if verbose:
-                logger.info("%s - No jobs due", _hermes_now().strftime('%H:%M:%S'))
+                logger.info("%s - No jobs due", _hermes_now().strftime("%H:%M:%S"))
             try:
                 from tools.mcp_tool import _kill_orphaned_mcp_children
+
                 _kill_orphaned_mcp_children()
             except Exception as _e:
                 logger.debug("Post-tick MCP orphan cleanup failed: %s", _e)
@@ -5632,11 +5641,11 @@ def tick(
         lock_fd.close()
 
 
-
 # ── Helpers upstream added in v2026.7.30 ──────────────────────────────
 # Their call sites arrived with the merge but these definitions sit in
 # regions this fork had also edited, so they did not come across.
 # Carried over verbatim.
+
 
 def _interpreter_shutting_down(exc: Optional[BaseException] = None) -> bool:
     """True when the Python interpreter is finalizing.
@@ -5707,7 +5716,8 @@ def _is_channel_dm_topic(
         from agent.async_utils import safe_schedule_threadsafe
 
         future = safe_schedule_threadsafe(
-            get_chat_info(runtime_adapter, str(chat_id)), loop,  # type: ignore[arg-type]
+            get_chat_info(runtime_adapter, str(chat_id)),
+            loop,  # type: ignore[arg-type]
         )
         if future is None:
             return False
@@ -5718,14 +5728,19 @@ def _is_channel_dm_topic(
         logger.debug(
             "Job '%s': get_chat_info probe failed for chat=%s — "
             "defaulting to message_thread_id routing",
-            job_id, chat_id, exc_info=True,
+            job_id,
+            chat_id,
+            exc_info=True,
         )
         return False
-    is_channel = isinstance(info, dict) and str(info.get("type") or "").lower() == "channel"
+    is_channel = (
+        isinstance(info, dict) and str(info.get("type") or "").lower() == "channel"
+    )
     if is_channel:
         logger.info(
             "Job '%s': chat=%s is a channel — routing via direct_messages_topic_id",
-            job_id, chat_id,
+            job_id,
+            chat_id,
         )
     return is_channel
 

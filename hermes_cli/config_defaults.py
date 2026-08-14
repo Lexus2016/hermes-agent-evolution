@@ -2363,6 +2363,16 @@ DEFAULT_CONFIG = {
         # Also overridable via HERMES_CRON_TIMEOUT env var (which takes
         # precedence). 0 = unlimited (no inactivity watchdog).
         "inactivity_timeout_seconds": 900,
+        # Cron-specific fallback provider chain (issue #2377, Slice B). When a
+        # cron-context run exhausts retries on its primary provider (after the
+        # raised ceiling from Slice A #2376), the agent walks this chain. Empty
+        # list (default) = inherit the global ``fallback_providers`` /
+        # ``fallback_model`` chain, preserving legacy behavior. Non-empty = use
+        # this list for cron-context runs ONLY, independent of interactive
+        # sessions — so an operator can keep cheap/free providers for unattended
+        # jobs without affecting chat. Each entry mirrors the global schema:
+        # {provider, model, [base_url], [api_key|key_env]}.
+        "fallback_providers": [],
     },
     # Kanban multi-agent coordination — controls the dispatcher loop that
     # spawns workers for ready tasks. The dispatcher ticks every N seconds

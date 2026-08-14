@@ -2096,6 +2096,93 @@ class TestRunJobConfigEnvVarExpansion:
         assert kwargs["base_url"] == self._RUNTIME["base_url"]
         assert kwargs["provider"] == self._RUNTIME["provider"]
 
+    def test_cron_specific_fallback_overrides_global(self, tmp_path):
+        """Issue #2377: cron.fallback_providers overrides the global chain."""
+        (tmp_path / "config.yaml").write_text(
+            "model:\n"
+            "  default: primary-model\n"
+            "  provider: anthropic\n"
+            "fallback_providers:\n"
+            "  - provider: openrouter\n"
+            "    model: global-fallback\n"
+            "cron:\n"
+            "  fallback_providers:\n"
+            "    - provider: groq\n"
+            "      model: cron-fallback-1\n"
+            "    - provider: openai\n"
+            "      model: cron-fallback-2\n",
+            encoding="utf-8",
+        )
+        job = {"id": "cron-fb-test", "name": "cron-job", "prompt": "hi"}
+
+        with (
+            patch("cron.scheduler._hermes_home", tmp_path),
+            patch("cron.scheduler._resolve_origin", return_value=None),
+            patch("hermes_cli.env_loader.load_hermes_dotenv"),
+            patch("hermes_cli.env_loader.reset_secret_source_cache"),
+            patch("hermes_state.SessionDB", return_value=MagicMock()),
+            patch(
+                "hermes_cli.runtime_provider.resolve_runtime_provider",
+                return_value=self._RUNTIME,
+            ),
+            patch("tools.mcp_tool.discover_mcp_tools", return_value=[]),
+            patch("run_agent.AIAgent") as mock_agent_cls,
+        ):
+            mock_agent = MagicMock()
+            mock_agent.run_conversation.return_value = {"final_response": "ok"}
+            mock_agent_cls.return_value = mock_agent
+            success, _, _, error = run_job(job)
+
+        assert success is True
+        assert error is None
+        kwargs = mock_agent_cls.call_args.kwargs
+        # Cron-specific chain must be used, NOT the global one.
+        assert len(kwargs["fallback_model"]) == 2
+        assert kwargs["fallback_model"][0]["provider"] == "groq"
+        assert kwargs["fallback_model"][0]["model"] == "cron-fallback-1"
+        assert kwargs["fallback_model"][1]["provider"] == "openai"
+
+    def test_cron_empty_fallback_inherits_global(self, tmp_path):
+        """Issue #2377: empty cron.fallback_providers inherits global chain."""
+        (tmp_path / "config.yaml").write_text(
+            "model:\n"
+            "  default: primary-model\n"
+            "  provider: anthropic\n"
+            "fallback_providers:\n"
+            "  - provider: openrouter\n"
+            "    model: global-fallback\n"
+            "cron:\n"
+            "  fallback_providers: []\n",
+            encoding="utf-8",
+        )
+        job = {"id": "cron-fb-empty", "name": "cron-job", "prompt": "hi"}
+
+        with (
+            patch("cron.scheduler._hermes_home", tmp_path),
+            patch("cron.scheduler._resolve_origin", return_value=None),
+            patch("hermes_cli.env_loader.load_hermes_dotenv"),
+            patch("hermes_cli.env_loader.reset_secret_source_cache"),
+            patch("hermes_state.SessionDB", return_value=MagicMock()),
+            patch(
+                "hermes_cli.runtime_provider.resolve_runtime_provider",
+                return_value=self._RUNTIME,
+            ),
+            patch("tools.mcp_tool.discover_mcp_tools", return_value=[]),
+            patch("run_agent.AIAgent") as mock_agent_cls,
+        ):
+            mock_agent = MagicMock()
+            mock_agent.run_conversation.return_value = {"final_response": "ok"}
+            mock_agent_cls.return_value = mock_agent
+            success, _, _, error = run_job(job)
+
+        assert success is True
+        assert error is None
+        kwargs = mock_agent_cls.call_args.kwargs
+        # Empty cron chain → global chain is used (legacy behavior preserved).
+        assert kwargs["fallback_model"] == [
+            {"provider": "openrouter", "model": "global-fallback"}
+        ]
+
     def test_model_env_ref_in_config_yaml_is_expanded(self, tmp_path, monkeypatch):
         """${VAR} in config.yaml model: is expanded using env after .env is loaded."""
         (tmp_path / "config.yaml").write_text("model: ${_HERMES_TEST_CRON_MODEL}\n")

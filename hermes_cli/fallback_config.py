@@ -99,3 +99,26 @@ def get_fallback_chain(config: dict[str, Any] | None) -> list[dict[str, Any]]:
             chain.append(entry)
 
     return chain
+
+
+def get_fallback_chain_from_list(raw: Any) -> list[dict[str, Any]]:
+    """Build a fallback chain from an explicit entries list (issue #2377).
+
+    Used for cron-specific ``fallback_providers`` (the value of the ``cron``
+    config block's key) which is already a list of provider entries, not a
+    top-level config dict. Normalizes and deduplicates using the same rules as
+    :func:`get_fallback_chain` so callers get a consistent shape. Returns an
+    empty list when *raw* is missing/invalid/has no usable entries.
+    """
+    entries = _iter_fallback_entries(raw)
+    if not entries:
+        return []
+    chain: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for entry in entries:
+        identity = _entry_identity(entry)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        chain.append(entry)
+    return chain

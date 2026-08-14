@@ -945,6 +945,21 @@ agent:
   # underneath this wrapper — this is the Hermes-level loop.
   # api_max_retries: 3
 
+  # Cron-specific fallback provider chain (issue #2377). When a cron-context
+  # run exhausts retries on its primary provider, the agent walks this chain
+  # instead of the global one. Empty (default) inherits the global
+  # fallback_providers/fallback_model chain. Set a non-empty list to give
+  # unattended cron jobs different failover providers than interactive chat —
+  # e.g. cheaper/free models for overnight evolution jobs. Each entry mirrors
+  # the global fallback_providers schema:
+  #   {provider: <name>, model: <model>, [base_url: ...], [api_key|key_env: ...]}
+  #
+  # Example:
+  # cron:
+  #   fallback_providers:
+  #     - {provider: openrouter, model: deepseek/deepseek-chat}
+  #     - {provider: groq, model: llama-3.3-70b-versatile, key_env: GROQ_API_KEY}
+
   # After the agent edits code without fresh passing verification, nudge it to
   # verify before finishing. The default "auto" enables it on interactive
   # coding surfaces (CLI, TUI, desktop) and programmatic callers, and disables
