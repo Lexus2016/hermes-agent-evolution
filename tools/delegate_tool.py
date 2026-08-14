@@ -3594,6 +3594,60 @@ def _apply_grader_revisions(
                 break
 
 
+def _record_delegation_experience(
+    results: List[Dict[str, Any]],
+    task_list: List[Dict[str, Any]],
+    parent_agent,
+) -> None:
+    """Record each child outcome to the experience bank (#2261, Slice A).
+
+    Delegation configurations (goal, role, model) and their outcomes become
+    retrievable assets by flowing through the EXISTING experience-bank
+    pipeline (entries.jsonl → distiller → system-prompt guidance) — extend,
+    not duplicate. Best-effort: a bank failure must never break finalization.
+    """
+    try:
+        from agent.experience_bank import ExperienceEntry, append_entry
+    except Exception:
+        return
+    for entry in results:
+        try:
+            task_index = entry.get("task_index", -1)
+            if not isinstance(task_index, int) or not (
+                0 <= task_index < len(task_list)
+            ):
+                continue
+            goal = str(task_list[task_index].get("goal", ""))[:200]
+            status = str(entry.get("status", ""))
+            if not goal or not status:
+                continue
+            append_entry(
+                ExperienceEntry(
+                    session_id=str(getattr(parent_agent, "session_id", "") or ""),
+                    platform="delegation",
+                    model=str(entry.get("model") or ""),
+                    success=status == "completed",
+                    outcome_source="heuristic:child_status",
+                    confidence="low",
+                    terminal_reason=str(entry.get("exit_reason", "") or ""),
+                    primary_dimension="orchestration",
+                    analysis=f"delegation status={status}",
+                    stats={
+                        "delegation": {
+                            "goal": goal,
+                            "role": entry.get("_child_role"),
+                            "status": status,
+                            "api_calls": entry.get("api_calls", 0),
+                            "duration_seconds": entry.get("duration_seconds", 0),
+                            "cost_usd": entry.get("_child_cost_usd", 0.0),
+                        }
+                    },
+                )
+            )
+        except Exception:
+            logger.debug("delegation experience record failed", exc_info=True)
+
+
 def _finalize_child_results(
     results: List[Dict[str, Any]],
     task_list: List[Dict[str, Any]],
@@ -3623,6 +3677,10 @@ def _finalize_child_results(
                     )
                 except Exception:
                     pass
+
+        # Slice A of #2261: delegation outcomes → experience bank. Runs
+        # BEFORE the hook loop pops _child_role / _child_cost_usd.
+        _record_delegation_experience(results, task_list, parent_agent)
 
         parent_session_id = getattr(parent_agent, "session_id", None)
         try:
