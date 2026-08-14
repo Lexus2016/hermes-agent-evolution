@@ -84,3 +84,21 @@ def test_anchoring_rule_uses_date_from_hermes_time_now():
 
     prompt = mock_call.call_args.kwargs["messages"][0]["content"]
     assert "2025-12-31" in prompt
+
+
+def test_anchoring_rule_preserves_temporal_information_directive():
+    """Issue #2381: the compaction prompt must instruct the summariser to
+    preserve timestamps, dates, durations, and sequence ordering from the
+    source turns — not just anchor the current date. This is the fix from
+    the Sleeping Agent paper (arXiv:2608.11775): gist compression silently
+    destroys temporal info, which a one-sentence prompt directive recovers."""
+    compressor = _compressor()
+    with patch.object(hermes_time, "now", _fixed_now), patch(
+        "agent.context_compressor.call_llm", return_value=_response("summary")
+    ) as mock_call:
+        compressor._generate_summary(_turns())
+
+    prompt = mock_call.call_args.kwargs["messages"][0]["content"]
+    assert "PRESERVE TEMPORAL INFORMATION" in prompt
+    assert "timestamps" in prompt.lower()
+    assert "sequence" in prompt.lower()

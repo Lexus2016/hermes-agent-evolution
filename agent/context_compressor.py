@@ -3847,6 +3847,13 @@ Describe agent/tool work only as completed actions, state, or historical work.]"
                 f'proposal email to John on {_today_str}." Never leave a finished '
                 "action worded as if it still needs doing, and never invent a date "
                 "for work that has not happened yet.\n"
+                "PRESERVE TEMPORAL INFORMATION: When summarising the source turns, "
+                "retain all timestamps, dates, durations, deadlines, and sequence "
+                "ordering mentioned in the conversation — do not strip temporal "
+                "expressions just because they are not task-critical. If a turn "
+                'says "ran the test at 14:30 UTC on 2026-03-15 and it failed", '
+                'keep the time, not just "the test failed". Events that happened '
+                "in a specific order must stay ordered in the summary.\n"
             )
         else:
             _temporal_anchoring_rule = ""
