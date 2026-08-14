@@ -1769,6 +1769,13 @@ def handle_function_call(
                     f"blocker. Repeatedly calling {function_name} will keep "
                     f"failing."
                 )
+                # #2423 — the breaker auto-recovers: after its cooldown it admits
+                # one probe; success closes it. Say so — "wait Ns", not tool death.
+                _breaker_msg += (
+                    f" One recovery probe is admitted automatically in "
+                    f"{_breaker.seconds_until_retry():.0f}s; if it succeeds, "
+                    f"the breaker closes."
+                )
                 result = json.dumps({"error": _breaker_msg}, ensure_ascii=False)
                 _emit_post_tool_call_hook(
                     function_name=function_name,

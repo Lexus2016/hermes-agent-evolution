@@ -22,6 +22,7 @@ import enum
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -499,44 +500,97 @@ def recovery_hint(failure: ToolFailure) -> str:
     return f" [{failure.recovery_action.value}: {failure.hint}]"
 
 
-# ── Circuit breaker (lightweight, per-tool) ──────────────────────────────
+# ── Circuit breaker (per-tool, with half-open recovery) ──────────────────
+
+# How long an admitted-but-unrecorded probe (cancelled call, crash) pins
+# the breaker in half-open before should_trip() re-arms a fresh probe.
+_BREAKER_PROBE_STALE_SECONDS = 300.0
 
 
 @dataclass
 class CircuitBreaker:
-    """Simple per-tool circuit breaker.
+    """Per-tool circuit breaker with half-open recovery (#2423).
 
-    Tracks consecutive failures for a single tool. After ``threshold``
-    consecutive failures, the circuit opens and ``should_trip()`` returns
-    True — callers can use this to fail-fast instead of retrying.
-
-    The breaker resets on any success. It does not auto-transition to
-    half-open; a success call manually resets it.
-
-    This is intentionally minimal — no timeout-based half-open, no rolling
-    window. Just consecutive-count → trip. Enough to prevent infinite
-    retry loops on a permanently broken tool without adding complexity.
+    ``threshold`` consecutive failures open the circuit (fail-fast, #942).
+    Previously it then stayed open forever — the fail-fast gate suppressed
+    the very success that would have reset it, so a run of recoverable
+    mistakes removed a whole tool for the rest of the process (#2423).
+    Now after ``cooldown_seconds`` the breaker half-opens and admits
+    exactly ONE probe: success closes it, failure re-opens with a fresh
+    cooldown. Inside the cooldown every call still trips (#942 unchanged).
     """
 
     threshold: int = 5
+    cooldown_seconds: float = 60.0
     _consecutive_failures: int = 0
     _is_open: bool = False
+    _opened_at: float = 0.0
+    _half_open: bool = False
+    _probe_in_flight: bool = False
+    _probe_started_at: float = 0.0
+
+    def _open(self, now: float) -> None:
+        self._is_open = True
+        self._half_open = False
+        self._probe_in_flight = False
+        self._opened_at = now
+        logger.warning(
+            "circuit breaker opened for tool after %d consecutive "
+            "failures; half-open probe in %.0fs",
+            self._consecutive_failures,
+            self.cooldown_seconds,
+        )
 
     def record_failure(self) -> None:
         self._consecutive_failures += 1
-        if self._consecutive_failures >= self.threshold:
-            self._is_open = True
-            logger.warning(
-                "circuit breaker opened for tool after %d consecutive failures",
-                self._consecutive_failures,
-            )
+        now = time.monotonic()
+        if self._half_open:
+            # The recovery probe failed — re-open with a fresh cooldown.
+            self._open(now)
+        elif self._consecutive_failures >= self.threshold:
+            self._open(now)
 
     def record_success(self) -> None:
         self._consecutive_failures = 0
         self._is_open = False
+        self._half_open = False
+        self._probe_in_flight = False
+
+    def _cooldown_elapsed(self, now: float) -> bool:
+        return (now - self._opened_at) >= self.cooldown_seconds
+
+    def _probe_is_stale(self, now: float) -> bool:
+        return (now - self._probe_started_at) >= _BREAKER_PROBE_STALE_SECONDS
 
     def should_trip(self) -> bool:
-        return self._is_open
+        """Trip while cooling down; admit exactly one probe after cooldown."""
+        if not self._is_open:
+            return False
+        now = time.monotonic()
+        if self._half_open:
+            if self._probe_in_flight and not self._probe_is_stale(now):
+                return True  # a probe is still pending
+            # No live probe (or the admitted one went stale) — admit one.
+            self._probe_in_flight = True
+            self._probe_started_at = now
+            return False
+        if self._cooldown_elapsed(now):
+            self._half_open = True
+            self._probe_in_flight = True
+            self._probe_started_at = now
+            return False
+        return True
+
+    def is_half_open(self) -> bool:
+        """True while the breaker is admitting (or running) a recovery probe."""
+        return self._is_open and self._half_open
+
+    def seconds_until_retry(self) -> float:
+        """Seconds until the next recovery probe is admitted (0.0 if now)."""
+        if not self._is_open or self._half_open:
+            return 0.0
+        remaining = self.cooldown_seconds - (time.monotonic() - self._opened_at)
+        return max(0.0, remaining)
 
 
 # ── Per-tool breaker registry (process-global) ───────────────────────────
