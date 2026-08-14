@@ -15,14 +15,16 @@ on a broken pipeline (#770).
 
 A per-edge dispatch ledger (#1305) suppresses false-positive wake-ups: once the
 gate has dispatched for an edge on a given day, subsequent ticks on the same day
-do NOT re-fire unless the upstream stage produced NEW output (a strictly newer
-mtime) since the last dispatch. Without this ledger the raw-mtime check re-fires
-on every tick — observed at 20+ wasted orchestrator wake-ups/day on the
-integration→upstream-sync edge alone (#1305).
+do NOT re-fire unless the upstream stage produced NEW content since the last
+dispatch. Newness is judged by a content hash of the upstream output (#2425) —
+mtime alone is clobberable by parallel writers rewriting identical bytes, which
+caused 4/9 zero-dispatch orchestrator wakes in a single day. Ledger entries
+written before #2425 (mtime-only) keep the old mtime semantics until refreshed.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -72,6 +74,23 @@ def _latest_output(evo_dir: Path, stage: str) -> float:
     return max(_mtime(json_path), _mtime(md_path))
 
 
+def _stage_content_hash(evo_dir: Path, stage: str) -> str:
+    """Stable content fingerprint of today's stage output (#2425).
+
+    Parallel writers can rewrite a file with byte-identical content, bumping
+    its mtime without any substantive change — such a rewrite must NOT count
+    as new material. Hashing the bytes makes the dispatch ledger immune to
+    that; only a real content change re-fires the edge.
+    """
+    h = hashlib.sha256()
+    for path in sorted(_today_paths(evo_dir, stage)):
+        try:
+            h.update(path.read_bytes())
+        except OSError:
+            h.update(b"<missing>")
+    return h.hexdigest()
+
+
 # ---------------------------------------------------------------------------
 # Dispatch ledger (#1305) — stop false-positive re-wake-ups on the same day
 # ---------------------------------------------------------------------------
@@ -118,13 +137,19 @@ def _write_ledger(evo_dir: Path, ledger: Dict[str, dict]) -> None:
         print(f"[hydra-gate] ledger write failed ({exc}) — continuing", file=sys.stderr)
 
 
-def _already_dispatched_today(evo_dir: Path, edge: str, upstream_mtime: float) -> bool:
+def _already_dispatched_today(
+    evo_dir: Path,
+    edge: str,
+    upstream_mtime: float,
+    upstream_hash: Optional[str] = None,
+) -> bool:
     """Return True if this edge was already dispatched today AND the upstream
-    stage has NOT produced newer output since that dispatch.
+    stage has NOT produced new content since that dispatch.
 
-    A NEW upstream mtime (strictly greater than the one recorded at dispatch
-    time) means genuinely fresh material arrived → re-fire. The same or older
-    mtime means the edge is a repeat of an already-adjudicated state → suppress.
+    #2425: newness is judged by content hash first — a rewritten-but-identical
+    upstream file (same hash, newer mtime) is NOT new material and stays
+    suppressed. Entries recorded before #2425 carry no hash and fall back to
+    the legacy mtime comparison until the next dispatch refreshes them.
     """
     entry = _read_ledger(evo_dir).get(edge)
     if not isinstance(entry, dict):
@@ -132,24 +157,33 @@ def _already_dispatched_today(evo_dir: Path, edge: str, upstream_mtime: float) -
     if entry.get("date") != _today():
         # Stale entry from a prior day — that day's verdict doesn't carry over.
         return False
+    recorded_hash = entry.get("upstream_hash")
+    if isinstance(recorded_hash, str) and upstream_hash is not None:
+        return recorded_hash == upstream_hash
     recorded_mtime = entry.get("upstream_mtime")
     if not isinstance(recorded_mtime, (int, float)):
         return False
-    # Suppress only when upstream has not advanced since the last dispatch.
-    # A strict-newer mtime is genuine new material and must re-fire.
+    # Legacy entry (no hash): suppress only when upstream has not advanced.
     return upstream_mtime <= float(recorded_mtime)
 
 
-def _record_dispatch(evo_dir: Path, edge: str, upstream_mtime: float) -> None:
-    """Record that the gate dispatched for ``edge`` at ``upstream_mtime`` today.
+def _record_dispatch(
+    evo_dir: Path,
+    edge: str,
+    upstream_mtime: float,
+    upstream_hash: Optional[str] = None,
+) -> None:
+    """Record that the gate dispatched for ``edge`` at ``upstream_mtime`` (and
+    content hash, #2425) today. Opportunistically prunes old entries.
 
-    Also opportunistically prunes entries older than ``_LEDGER_PRUNE_DAYS`` so
-    the file stays small over time.
+    ``upstream_hash`` makes the entry immune to same-content rewrites: the
+    next tick compares content, not the clobberable mtime.
     """
     ledger = _read_ledger(evo_dir)
     ledger[edge] = {
         "date": _today(),
         "upstream_mtime": upstream_mtime,
+        "upstream_hash": upstream_hash,
         "verdict": None,
     }
     # Prune stale entries (older than the prune window). Keep today's + the
@@ -302,7 +336,8 @@ def _has_work(evo_dir: Path) -> Tuple[bool, str]:
             fresh_pairs.append(pair)
             continue
         up_mtime = _latest_output(evo_dir, up_stage)
-        if _already_dispatched_today(evo_dir, pair, up_mtime):
+        up_hash = _stage_content_hash(evo_dir, up_stage)
+        if _already_dispatched_today(evo_dir, pair, up_mtime, up_hash):
             # Already dispatched today for this exact upstream state — suppress.
             suppressed.append(pair)
         else:
@@ -313,7 +348,12 @@ def _has_work(evo_dir: Path) -> Tuple[bool, str]:
         # no upstream advancement is suppressed next time.
         for pair in fresh_pairs:
             up_stage = edge_upstream[pair]
-            _record_dispatch(evo_dir, pair, _latest_output(evo_dir, up_stage))
+            _record_dispatch(
+                evo_dir,
+                pair,
+                _latest_output(evo_dir, up_stage),
+                _stage_content_hash(evo_dir, up_stage),
+            )
         return True, f"fresh material: {', '.join(fresh_pairs)}"
 
     # Time-based triggers: root stages that should run periodically even when

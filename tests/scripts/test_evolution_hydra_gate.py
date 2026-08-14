@@ -183,25 +183,54 @@ class TestDispatchLedger:
     def test_newer_upstream_after_dispatch_re_fires(
         self, tmp_path, capsys, monkeypatch
     ):
-        """Genuine new material (newer upstream mtime) must re-wake even after a
-        same-day dispatch — the ledger must not suppress a real state change."""
+        """Genuine new material (new upstream CONTENT, #2425) must re-wake even
+        after a same-day dispatch — the ledger must not suppress a real state
+        change. A pure mtime bump with identical bytes stays suppressed."""
         monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
-        self._make_edge_fresh(tmp_path, "integration→upstream-sync")
+        # Give EVERY stage a today-output so no time trigger / safety wake can
+        # fire — isolating the ledger's verdict on this single edge.
+        for stage in (
+            "research",
+            "issues",
+            "introspection",
+            "analysis",
+            "implementation",
+            "integration",
+            "upstream-sync",
+        ):
+            d = tmp_path / stage
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"{hydra._today()}.json").write_text("{}", encoding="utf-8")
+        # Make ONLY integration newer than its downstream → the single fresh edge.
+        up_file = tmp_path / "integration" / f"{hydra._today()}.json"
+        up_file.write_text('{"merges": ["#2400"]}', encoding="utf-8")
+        # Same-tick writes share an mtime (fs granularity) — back-date the
+        # downstream file so the edge is strictly fresh.
+        old_ts = time.time() - 3600
+        ds_file = tmp_path / "upstream-sync" / f"{hydra._today()}.json"
+        os.utime(ds_file, (old_ts, old_ts))
         with patch.object(
             hydra, "_check_github_write_access", return_value=(True, "ok")
         ):
-            hydra.main()  # tick 1 — records dispatch at mtime T1
+            hydra.main()  # tick 1 — records dispatch (mtime + content hash)
             capsys.readouterr()
 
-            # Simulate the upstream stage producing NEW output (newer mtime).
-            up_file = tmp_path / "integration" / f"{hydra._today()}.json"
+            # Same-content rewrite (mtime-only bump) must NOT re-fire (#2425).
             new_time = time.time()
             os.utime(up_file, (new_time, new_time))
-
-            hydra.main()  # tick 2 — newer upstream → must wake
+            hydra.main()  # tick 2 — identical bytes → suppressed
             out2 = capsys.readouterr().out
-        assert "fresh material" in out2
-        assert json.loads(out2.strip().splitlines()[-1]) == {"wakeAgent": True}
+            assert json.loads(out2.strip().splitlines()[-1]) == {"wakeAgent": False}
+
+            # Real new material (content change) must re-wake.
+            up_file.write_text(
+                up_file.read_text(encoding="utf-8") + "\n# new merge landed",
+                encoding="utf-8",
+            )
+            hydra.main()  # tick 3 — content changed → wake
+            out3 = capsys.readouterr().out
+        assert "fresh material" in out3
+        assert json.loads(out3.strip().splitlines()[-1]) == {"wakeAgent": True}
 
     def test_ledger_prunes_old_entries(self, tmp_path):
         """_record_dispatch prunes entries older than the prune window so the
