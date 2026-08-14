@@ -1948,6 +1948,16 @@ def init_agent(
         _api_retries = 3
     agent._api_max_retries = _api_retries
 
+    # Issue #2376: cron/unattended contexts get a higher retry ceiling so
+    # transient 429/overload spikes don't kill the pipeline stage.
+    try:
+        _raw_cron_retries = _agent_section.get("cron_api_max_retries", 15)
+        _cron_retries = int(_raw_cron_retries)
+        _cron_retries = max(_cron_retries, 1)
+    except (TypeError, ValueError):
+        _cron_retries = 15
+    agent._cron_api_max_retries = _cron_retries
+
     # Initialize context compressor for automatic context management
     # Compresses conversation when approaching model's context limit
     # Configuration via config.yaml (compression section)

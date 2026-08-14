@@ -2688,6 +2688,20 @@ def _run_conversation_impl(
         api_start_time = time.time()
         retry_count = 0
         max_retries = agent._api_max_retries
+        # Issue #2376: raise the retry ceiling for cron/unattended contexts
+        # where no human is waiting — transient 429/overload spikes should
+        # not kill the pipeline stage. Cron gets a higher ceiling (default
+        # 15 vs 3) and wider jitter (±40% vs ±25%) so retries are decorrelated
+        # and ride out brief provider spikes.
+        _is_cron_context = getattr(agent, "platform", None) == "cron"
+        if _is_cron_context:
+            _cron_max = getattr(agent, "_cron_api_max_retries", 15)
+            if _cron_max > max_retries:
+                max_retries = _cron_max
+                logger.info(
+                    "%sCron-context extended retry active: max_retries=%d (default %d)",
+                    agent.log_prefix, max_retries, agent._api_max_retries,
+                )
         _retry = TurnRetryState()
 
         finish_reason = "stop"
@@ -3332,8 +3346,15 @@ def _run_conversation_impl(
                             "failed": True,  # Mark as failure for filtering
                         }
 
-                    # Backoff before retry — jittered exponential: 5s base, 120s cap
-                    wait_time = jittered_backoff(retry_count, base_delay=5.0, max_delay=120.0)
+                    # Backoff before retry — jittered exponential: 5s base, 120s cap.
+                    # Issue #2376: in cron context, widen jitter to ±40% (jitter_ratio=0.8)
+                    # so concurrent cron retries are decorrelated and don't thunder-herd
+                    # the same overloaded provider simultaneously.
+                    _backoff_jitter = 0.8 if _is_cron_context else 0.5
+                    wait_time = jittered_backoff(
+                        retry_count, base_delay=5.0, max_delay=120.0,
+                        jitter_ratio=_backoff_jitter,
+                    )
                     agent._buffer_vprint(f"⏳ Retrying in {wait_time:.1f}s ({_failure_hint})...")
                     logger.warning("Invalid API response (retry %d/%d): %s | Provider: %s", retry_count, max_retries, ', '.join(error_details), provider_name)
                     # Sleep in small increments to stay responsive to interrupts

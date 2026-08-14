@@ -69,6 +69,11 @@ DEFAULT_CONFIG = {
         # on flaky primaries; raise it if you prefer to tolerate longer
         # provider hiccups on a single provider.
         "api_max_retries": 3,
+        # Issue #2376: in cron/unattended contexts there is no human waiting,
+        # so transient 429/overload spikes should tolerate more retries before
+        # giving up. This raises the ceiling for platform=="cron" only;
+        # interactive sessions keep the standard api_max_retries.
+        "cron_api_max_retries": 15,
         "service_tier": "",
         # Tool-use enforcement: injects system prompt guidance that tells the
         # model to actually call tools instead of describing intended actions.
