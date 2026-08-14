@@ -3681,6 +3681,49 @@ def _finalize_child_results(
             except Exception:
                 logger.debug("Subagent cost rollup failed", exc_info=True)
 
+        # Issue #2261: record delegation configurations + outcomes so
+        # successful orchestration patterns can be promoted to retrievable
+        # assets (delegation bank). Best-effort — never blocks finalization.
+        try:
+            from agent.delegation_bank import DelegationRecord, record_delegation
+
+            parent_session_id = getattr(parent_agent, "session_id", "") or ""
+            for entry in results:
+                task_index = entry.get("task_index", -1)
+                if not isinstance(task_index, int) or not (
+                    0 <= task_index < len(task_list)
+                ):
+                    continue
+                task = task_list[task_index]
+                goal = str(task.get("goal", "") or "")
+                if not goal:
+                    continue
+                status = str(entry.get("status", "failed") or "failed")
+                child = child_by_index.get(task_index)
+                _cfg = _load_config()
+                _configured_model = str(_cfg.get("model") or "").strip() or ""
+                _role = _normalize_role(task.get("role"))
+                record_delegation(
+                    DelegationRecord(
+                        ts=time.time(),
+                        task_signature="",  # set by record_delegation via goal
+                        goal=goal,
+                        role=_role,
+                        model=_configured_model or getattr(child, "model", "") or "",
+                        handoff_mode=task.get("handoff_mode"),
+                        max_iterations=task.get("max_iterations"),
+                        config_hash="",  # set by record_delegation
+                        success=(status == "completed"),
+                        status=status,
+                        duration_seconds=float(entry.get("duration_seconds") or 0),
+                        summary=str(entry.get("summary", "") or ""),
+                        api_calls=int(entry.get("api_calls") or 0),
+                        session_id=parent_session_id,
+                    )
+                )
+        except Exception:
+            logger.debug("Delegation bank recording failed", exc_info=True)
+
 
 def _run_child_lifecycle(
     task_index: int,
