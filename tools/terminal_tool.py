@@ -221,6 +221,7 @@ def _check_disk_usage_warning():
     harmless.
     """
     import time as _time_mod
+
     now = _time_mod.monotonic()
     if now - _disk_usage_cache["timestamp"] < _DISK_USAGE_CACHE_TTL:
         return _disk_usage_cache["result"]
@@ -238,12 +239,15 @@ def _check_disk_usage_warning():
                         total_bytes += f.stat().st_size
                     except OSError as e:
                         logger.debug("Could not stat file %s: %s", f, e)
-        total_gb = total_bytes / (1024 ** 3)
+        total_gb = total_bytes / (1024**3)
 
         exceeded = total_gb > DISK_USAGE_WARNING_THRESHOLD_GB
         if exceeded:
-            logger.warning("Disk usage (%.1fGB) exceeds threshold (%.0fGB). Consider running cleanup_all_environments().",
-                           total_gb, DISK_USAGE_WARNING_THRESHOLD_GB)
+            logger.warning(
+                "Disk usage (%.1fGB) exceeds threshold (%.0fGB). Consider running cleanup_all_environments().",
+                total_gb,
+                DISK_USAGE_WARNING_THRESHOLD_GB,
+            )
         _disk_usage_cache["timestamp"] = _time_mod.monotonic()
         _disk_usage_cache["result"] = exceeded
         return exceeded
@@ -405,7 +409,7 @@ def _check_all_guards(
 # paths while preserving the injection boundary around command execution
 # (the cwd is additionally shlex-quoted before it reaches the shell; this
 # allowlist is defense-in-depth).
-_WORKDIR_SAFE_ASCII_CHARS = frozenset('/\\:_-.~ +@=,')
+_WORKDIR_SAFE_ASCII_CHARS = frozenset("/\\:_-.~ +@=,")
 
 
 def _is_safe_workdir_char(ch: str) -> bool:
@@ -1065,9 +1069,7 @@ def _transform_sudo_command(command: str | None) -> tuple[str | None, str | None
         _configured_password = os.environ.get("SUDO_PASSWORD")
     has_configured_password = _configured_password is not None
     sudo_password = (
-        _configured_password
-        if has_configured_password
-        else _get_cached_sudo_password()
+        _configured_password if has_configured_password else _get_cached_sudo_password()
     )
 
     # Local hosts with sudoers NOPASSWD should not be forced through the
@@ -1415,7 +1417,9 @@ def _docker_session_isolation_enabled() -> bool:
     if os.getenv("TERMINAL_ENV", "local") != "docker":
         return False
     return os.getenv("TERMINAL_CONTAINER_PERSISTENT", "true").lower() not in {
-        "true", "1", "yes",
+        "true",
+        "1",
+        "yes",
     }
 
 
@@ -1424,10 +1428,16 @@ def _has_isolation_overrides(task_id: Optional[str]) -> bool:
     if not task_id:
         return False
     overrides = _task_env_overrides.get(task_id) or {}
-    return bool(set(overrides.keys()) & {
-        "docker_image", "modal_image", "singularity_image",
-        "daytona_image", "env_type",
-    })
+    return bool(
+        set(overrides.keys())
+        & {
+            "docker_image",
+            "modal_image",
+            "singularity_image",
+            "daytona_image",
+            "env_type",
+        }
+    )
 
 
 def register_task_env_overrides(task_id: str, overrides: Dict[str, Any]):
@@ -1631,7 +1641,9 @@ def _is_unusable_container_cwd(cwd: str) -> bool:
     return False
 
 
-def _resolve_task_host_cwd(config: Dict[str, Any], task_id: Optional[str]) -> Optional[str]:
+def _resolve_task_host_cwd(
+    config: Dict[str, Any], task_id: Optional[str]
+) -> Optional[str]:
     """Host directory to bind-mount at ``/workspace`` for *task_id*'s container.
 
     The single owner of the cwd-mount policy, shared by every environment
@@ -1762,10 +1774,18 @@ def _get_env_config() -> Dict[str, Any]:
         container_disk = 51200
 
     if docker_backend:
-        docker_forward_env = _parse_env_var("TERMINAL_DOCKER_FORWARD_ENV", "[]", json.loads, "valid JSON")
-        docker_volumes = _parse_env_var("TERMINAL_DOCKER_VOLUMES", "[]", json.loads, "valid JSON")
-        docker_env = _parse_env_var("TERMINAL_DOCKER_ENV", "{}", json.loads, "valid JSON")
-        docker_extra_args = _parse_env_var("TERMINAL_DOCKER_EXTRA_ARGS", "[]", json.loads, "valid JSON")
+        docker_forward_env = _parse_env_var(
+            "TERMINAL_DOCKER_FORWARD_ENV", "[]", json.loads, "valid JSON"
+        )
+        docker_volumes = _parse_env_var(
+            "TERMINAL_DOCKER_VOLUMES", "[]", json.loads, "valid JSON"
+        )
+        docker_env = _parse_env_var(
+            "TERMINAL_DOCKER_ENV", "{}", json.loads, "valid JSON"
+        )
+        docker_extra_args = _parse_env_var(
+            "TERMINAL_DOCKER_EXTRA_ARGS", "[]", json.loads, "valid JSON"
+        )
         docker_shm_size = os.getenv("TERMINAL_DOCKER_SHM_SIZE", "1g")
     else:
         docker_forward_env = []
@@ -1973,7 +1993,8 @@ def _create_environment(
             network=docker_network,
             extra_args=docker_extra_args,
             persist_across_processes=(
-                False if session_scoped
+                False
+                if session_scoped
                 else cc.get("docker_persist_across_processes", True)
             ),
             shm_size=cc.get("docker_shm_size", "1g"),
@@ -2290,7 +2311,9 @@ def ensure_task_env(task_id: Optional[str] = None):
                     ),
                     "docker_forward_env": config.get("docker_forward_env", []),
                     "docker_env": config.get("docker_env", {}),
-                    "docker_run_as_host_user": config.get("docker_run_as_host_user", False),
+                    "docker_run_as_host_user": config.get(
+                        "docker_run_as_host_user", False
+                    ),
                     "docker_extra_args": config.get("docker_extra_args", []),
                     "docker_shm_size": config.get("docker_shm_size", "1g"),
                     "docker_network": config.get("docker_network", True),
@@ -2325,7 +2348,9 @@ def ensure_task_env(task_id: Optional[str] = None):
         except Exception as exc:  # noqa: BLE001 — best-effort bring-up
             logger.warning(
                 "Lazy %s environment init failed for task %s: %s",
-                env_type, effective_task_id[:8], exc,
+                env_type,
+                effective_task_id[:8],
+                exc,
             )
             return None
 
@@ -2334,7 +2359,8 @@ def ensure_task_env(task_id: Optional[str] = None):
             _last_activity[effective_task_id] = time.time()
         logger.info(
             "%s environment lazily initialized for task %s",
-            env_type, effective_task_id[:8],
+            env_type,
+            effective_task_id[:8],
         )
         return new_env
 
@@ -2704,7 +2730,7 @@ def _foreground_background_guidance(command: str) -> str | None:
     if _SHELL_LEVEL_BACKGROUND_RE.search(unquoted):
         return (
             "Foreground command uses shell-level background wrappers (nohup/disown/setsid). "
-            "Re-send WITHOUT the wrapper as terminal(command=\"<cmd>\", background=true, "
+            'Re-send WITHOUT the wrapper as terminal(command="<cmd>", background=true, '
             "notify_on_complete=true) so Hermes tracks the process, then run readiness "
             "checks and tests in separate commands."
         )
@@ -2714,7 +2740,7 @@ def _foreground_background_guidance(command: str) -> str | None:
     ):
         return (
             "Foreground command uses '&' backgrounding. Re-send WITHOUT the '&' as "
-            "terminal(command=\"<cmd>\", background=true) — add notify_on_complete=true "
+            'terminal(command="<cmd>", background=true) — add notify_on_complete=true '
             "for bounded jobs — then run health checks and tests in follow-up terminal calls."
         )
 
@@ -2790,7 +2816,9 @@ def _resolve_command_cwd(
         logger.info(
             "Ignoring recorded session cwd %r for %s backend "
             "(host/relative path won't work in sandbox). Using %r instead.",
-            recorded, env_type, default_cwd,
+            recorded,
+            env_type,
+            default_cwd,
         )
         return default_cwd
     return recorded or default_cwd
@@ -2812,7 +2840,8 @@ def _attach_spill_metadata(
             raw_spill = _sp.read_text(encoding="utf-8", errors="replace")
             _sp.write_text(
                 redact_terminal_output(strip_ansi(raw_spill), command),
-                encoding="utf-8", errors="replace",
+                encoding="utf-8",
+                errors="replace",
             )
             result_dict["output_total_chars"] = spill_total_chars
             result_dict["full_output_path"] = spill_file_path
@@ -2888,6 +2917,26 @@ def terminal_tool(
                 },
                 ensure_ascii=False,
             )
+
+        # Check active verification scope (issue #2458 / #2436)
+        from agent.file_safety import get_active_verification_scope
+
+        active_scope = get_active_verification_scope()
+        if active_scope is not None:
+            from agent.verification_scope import VerificationScopeEnforcer
+
+            enforcer = VerificationScopeEnforcer(active_scope)
+            ok, violation = enforcer.check_command_execution(command)
+            if not ok and violation:
+                return json.dumps(
+                    {
+                        "output": "",
+                        "exit_code": -1,
+                        "error": f"Command blocked by active verification scope ({active_scope.name}): {violation.reason}",
+                        "status": "error",
+                    },
+                    ensure_ascii=False,
+                )
 
         # Get configuration
         config = _get_env_config()
@@ -3094,8 +3143,12 @@ def terminal_tool(
                                     "docker_forward_env", []
                                 ),
                                 "docker_env": config.get("docker_env", {}),
-                                "docker_run_as_host_user": config.get("docker_run_as_host_user", False),
-                                "docker_extra_args": config.get("docker_extra_args", []),
+                                "docker_run_as_host_user": config.get(
+                                    "docker_run_as_host_user", False
+                                ),
+                                "docker_extra_args": config.get(
+                                    "docker_extra_args", []
+                                ),
                                 "docker_shm_size": config.get("docker_shm_size", "1g"),
                                 "docker_network": config.get("docker_network", True),
                                 "docker_persist_across_processes": config.get(
@@ -3168,18 +3221,22 @@ def terminal_tool(
                 contains_gateway_lifecycle_command_or_referenced_script,
                 contains_launchctl_submit_command,
             )
+
             if contains_launchctl_submit_command(command):
-                return json.dumps({
-                    "output": "",
-                    "exit_code": 1,
-                    "error": (
-                        "Blocked: launchctl submit/bootstrap registers a persistent "
-                        "KeepAlive job and is unsafe from inside the gateway process. "
-                        "Use Hermes cron for one-shot delayed work, or install an "
-                        "explicit LaunchAgent from a separate shell."
-                    ),
-                    "status": "error",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "output": "",
+                        "exit_code": 1,
+                        "error": (
+                            "Blocked: launchctl submit/bootstrap registers a persistent "
+                            "KeepAlive job and is unsafe from inside the gateway process. "
+                            "Use Hermes cron for one-shot delayed work, or install an "
+                            "explicit LaunchAgent from a separate shell."
+                        ),
+                        "status": "error",
+                    },
+                    ensure_ascii=False,
+                )
             guard_cwd_base = get_session_cwd(session_key)
             if guard_cwd_base is None:
                 guard_cwd_base = getattr(env, "cwd", None) or cwd
@@ -3205,7 +3262,10 @@ def terminal_tool(
                         local_path = Path(guard_cwd) / local_path
                     if local_path.is_file():
                         metadata = local_path.stat()
-                        if stat.S_ISREG(metadata.st_mode) and metadata.st_size <= 1024 * 1024:
+                        if (
+                            stat.S_ISREG(metadata.st_mode)
+                            and metadata.st_size <= 1024 * 1024
+                        ):
                             data = local_path.read_bytes()
                             if len(data) <= 1024 * 1024:
                                 return data.decode("utf-8", errors="replace")
@@ -3225,18 +3285,21 @@ def terminal_tool(
                 cwd=guard_cwd,
                 read_remote_script=_read_script_in_env,
             ):
-                return json.dumps({
-                    "output": "",
-                    "exit_code": 1,
-                    "error": (
-                        "Blocked: command or referenced script cannot restart or stop "
-                        "the gateway from inside the gateway process. The gateway would "
-                        "kill this command before it could complete (SIGTERM propagates "
-                        "to child processes). Run `hermes gateway restart` from a "
-                        "separate shell outside the running gateway."
-                    ),
-                    "status": "error",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "output": "",
+                        "exit_code": 1,
+                        "error": (
+                            "Blocked: command or referenced script cannot restart or stop "
+                            "the gateway from inside the gateway process. The gateway would "
+                            "kill this command before it could complete (SIGTERM propagates "
+                            "to child processes). Run `hermes gateway restart` from a "
+                            "separate shell outside the running gateway."
+                        ),
+                        "status": "error",
+                    },
+                    ensure_ascii=False,
+                )
 
         # Pre-exec security checks (tirith + dangerous command detection)
         # Skip check if force=True (user has confirmed they want to run it)
@@ -3408,12 +3471,15 @@ def terminal_tool(
                     "Blocked self-repo git mutation (command: %s)",
                     _safe_command_preview(command),
                 )
-                return json.dumps({
-                    "output": "",
-                    "exit_code": 1,
-                    "error": _self_repo_msg,
-                    "status": "blocked",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "output": "",
+                        "exit_code": 1,
+                        "error": _self_repo_msg,
+                        "status": "blocked",
+                    },
+                    ensure_ascii=False,
+                )
 
         # Prepare command for execution
         pty_disabled_reason = None
@@ -4069,6 +4135,7 @@ def terminal_tool(
                 _min_error += " Review the output above for details."
                 try:
                     from tools.terminal_hints import annotate_failure
+
                     failure_hint = annotate_failure(command, returncode, output)
                 except Exception:
                     failure_hint = None
@@ -4086,7 +4153,12 @@ def terminal_tool(
             # borrowed from crush's <cwd> injection).
             try:
                 post_cwd = getattr(env, "cwd", None)
-                if post_cwd and command_cwd and os.path.realpath(str(post_cwd)) != os.path.realpath(str(command_cwd)):
+                if (
+                    post_cwd
+                    and command_cwd
+                    and os.path.realpath(str(post_cwd))
+                    != os.path.realpath(str(command_cwd))
+                ):
                     result_dict["cwd"] = str(post_cwd)
             except Exception:
                 pass
@@ -4096,7 +4168,9 @@ def terminal_tool(
             # of re-running the command. The spill was written raw by the
             # collector; redact it here with the same pass as the visible
             # output so no secret persists unmasked on disk.
-            _attach_spill_metadata(result_dict, spill_file_path, spill_total_chars, command)
+            _attach_spill_metadata(
+                result_dict, spill_file_path, spill_total_chars, command
+            )
             try:
                 from agent.verification_evidence import record_terminal_result
 
@@ -4153,17 +4227,23 @@ def terminal_tool(
         degraded_mode = os.getenv("TERMINAL_DEGRADED_MODE", "warn").strip().lower()
         if degraded_mode == "fail":
             import traceback
+
             tb_str = traceback.format_exc()
             logger.error("terminal_tool exception:\n%s", tb_str)
             # Exception text can embed the failing command line (and any
             # secrets inline in it) — redact before returning to the model.
-            return json.dumps({
-                "output": "",
-                "exit_code": -1,
-                "error": _redact_terminal_error_text(f"Failed to execute command: {e}"),
-                "traceback": _redact_terminal_error_text(tb_str),
-                "status": "error"
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "output": "",
+                    "exit_code": -1,
+                    "error": _redact_terminal_error_text(
+                        f"Failed to execute command: {e}"
+                    ),
+                    "traceback": _redact_terminal_error_text(tb_str),
+                    "status": "error",
+                },
+                ensure_ascii=False,
+            )
 
         logger.warning("terminal backend degraded: %s", e.reason)
         # Never keep a possibly-broken backend cached: evict it so the next
@@ -4175,14 +4255,17 @@ def terminal_tool(
                 _last_activity.pop(task_id, None)
         except Exception:
             logger.debug("degraded-env eviction failed", exc_info=True)
-        return json.dumps({
-            "output": "",
-            "exit_code": -1,
-            "status": "degraded",
-            "reason": e.reason,
-            "retry_hint": e.retry_hint,
-            "error": f"Terminal backend degraded: {e.reason}",
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "output": "",
+                "exit_code": -1,
+                "status": "degraded",
+                "reason": e.reason,
+                "retry_hint": e.retry_hint,
+                "error": f"Terminal backend degraded: {e.reason}",
+            },
+            ensure_ascii=False,
+        )
 
     except Exception as e:
         import traceback
@@ -4319,6 +4402,7 @@ def check_terminal_requirements() -> bool:
             from daytona import Daytona  # noqa: F401 — SDK presence check
 
             from agent.secret_scope import get_secret
+
             return get_secret("DAYTONA_API_KEY") is not None
 
         else:
@@ -4407,7 +4491,7 @@ TERMINAL_SCHEMA = {
             "background": {
                 "type": "boolean",
                 "description": "Run in the background, returning a session_id. Pair with notify_on_complete=true for anything with a defined end (tests, builds, deploys) — without it the process runs silently. Only servers/watchers/daemons that never exit should stay silent. Short commands: prefer foreground with a generous timeout.",
-                "default": False
+                "default": False,
             },
             "timeout": {
                 "type": "integer",
@@ -4426,13 +4510,13 @@ TERMINAL_SCHEMA = {
             "notify_on_complete": {
                 "type": "boolean",
                 "description": "With background=true: get exactly one notification when the process exits. The right choice for nearly every bounded long task — set it and keep working. MUTUALLY EXCLUSIVE with watch_patterns (watch_patterns is dropped when both are set).",
-                "default": False
+                "default": False,
             },
             "watch_patterns": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Strings to watch for in background output. ONLY for rare one-shot mid-process signals on processes that never exit (e.g. ['Application startup complete'] on a server). NOT for end-of-run markers (use notify_on_complete) and NOT for per-iteration patterns like 'ERROR' in loops — rate-limited to 1 notification/15s; repeated over-firing auto-disables it and falls back to notify-on-exit. When in doubt, use notify_on_complete. MUTUALLY EXCLUSIVE with notify_on_complete."
-            }
+                "description": "Strings to watch for in background output. ONLY for rare one-shot mid-process signals on processes that never exit (e.g. ['Application startup complete'] on a server). NOT for end-of-run markers (use notify_on_complete) and NOT for per-iteration patterns like 'ERROR' in loops — rate-limited to 1 notification/15s; repeated over-firing auto-disables it and falls back to notify-on-exit. When in doubt, use notify_on_complete. MUTUALLY EXCLUSIVE with notify_on_complete.",
+            },
         },
         "required": ["command"],
     },

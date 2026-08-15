@@ -62,6 +62,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # (via build_draft_tasks) and a ``select`` command that picks the best draft
 # (via select_best_draft) — closing the dead-code gap flagged in #798.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from agent.verification_scope import get_stage_verification_scope
 from evolution_draft_selector import (  # noqa: E402  # fmt: skip
     build_draft_tasks,
     route_cost_tier,
@@ -95,6 +96,8 @@ def build_worker_task(
     *,
     toolsets: Optional[List[str]] = None,
     complexity: Optional[str] = None,
+    stage: str = "research",
+    workspace_root: str = ".",
 ) -> Dict[str, Any]:
     """Build ONE leaf-worker task dict for ``delegate_task``'s batch array.
 
@@ -106,6 +109,9 @@ def build_worker_task(
     When ``complexity`` is provided, ``route_cost_tier`` is called to determine
     the model tier for this worker, and the result is attached as ``model_hint``
     so the skill can pass it to ``delegate_task``'s model override (#798 inc 3).
+
+    Also attaches the least-agency ``verification_scope`` for the target stage
+    (#2436 / #2458).
     """
     subtask = _clean_str(subtask)
     angle = _clean_str(angle)
@@ -127,6 +133,9 @@ def build_worker_task(
         if toolsets is not None
         else list(DEFAULT_WORKER_TOOLSETS),
         "role": "leaf",
+        "verification_scope": get_stage_verification_scope(
+            stage, workspace_root=workspace_root
+        ).to_dict(),
     }
     # Cost-aware routing (#798 inc 3): attach model tier hint when complexity
     # is provided so the skill can route workers to cheaper models for simple
@@ -321,7 +330,10 @@ def _cmd_build(argv: List[str]) -> int:
         )
         return 2
     tasks, dropped = build_worker_tasks(
-        subtask, angles, max_workers=max_workers, toolsets=toolsets,
+        subtask,
+        angles,
+        max_workers=max_workers,
+        toolsets=toolsets,
         complexity=complexity,
     )
     print(json.dumps({"tasks": tasks, "dropped": dropped}, ensure_ascii=False))
@@ -506,7 +518,7 @@ def main(argv: List[str]) -> int:
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(
             "usage: evolution_orchestrator.py {build,collect,draft,draft-select,route} ...\n"
-            "  build         --subtask S --angle A [--angle A ...] [--max-workers N] [--toolsets a,b] [--complexity \"task desc\"]\n"
+            '  build         --subtask S --angle A [--angle A ...] [--max-workers N] [--toolsets a,b] [--complexity "task desc"]\n'
             "  collect       [results.json] [--angles angles.json]   (reads stdin if no path)\n"
             "  draft         --goal G [--drafters N] [--context C] [--toolsets a,b]\n"
             "  draft-select  [results.json]   (reads stdin if no path)\n"

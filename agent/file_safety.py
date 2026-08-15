@@ -11,6 +11,7 @@ def _hermes_home_path() -> Path:
     """Resolve the active HERMES_HOME (profile-aware) without circular imports."""
     try:
         from hermes_constants import get_hermes_home  # local import to avoid cycles
+
         return get_hermes_home()
     except Exception:
         return Path(os.path.expanduser("~/.hermes"))
@@ -19,10 +20,27 @@ def _hermes_home_path() -> Path:
 def _hermes_root_path() -> Path:
     """Resolve the Hermes root dir (always the parent of any profile, never per-profile)."""
     try:
-        from hermes_constants import get_default_hermes_root  # local import to avoid cycles
+        from hermes_constants import (
+            get_default_hermes_root,
+        )  # local import to avoid cycles
+
         return get_default_hermes_root()
     except Exception:
         return Path(os.path.expanduser("~/.hermes"))
+
+
+_ACTIVE_VERIFICATION_SCOPE: Any = None
+
+
+def set_active_verification_scope(scope: Any) -> None:
+    """Set the active VerificationScope for least-agency boundary enforcement."""
+    global _ACTIVE_VERIFICATION_SCOPE
+    _ACTIVE_VERIFICATION_SCOPE = scope
+
+
+def get_active_verification_scope() -> Any:
+    """Return the currently active VerificationScope, or None if unbounded."""
+    return _ACTIVE_VERIFICATION_SCOPE
 
 
 def build_write_denied_paths(home: str) -> set[str]:
@@ -194,6 +212,17 @@ def _classify_write_denial(path: str) -> Optional[str]:
         if not allowed:
             return "safe_root"
 
+    if _ACTIVE_VERIFICATION_SCOPE is not None:
+        try:
+            from agent.verification_scope import VerificationScopeEnforcer
+
+            enforcer = VerificationScopeEnforcer(_ACTIVE_VERIFICATION_SCOPE)
+            ok, _ = enforcer.check_file_access(resolved, mode="write")
+            if not ok:
+                return "verification_scope"
+        except Exception:
+            pass
+
     return None
 
 
@@ -207,6 +236,9 @@ def get_write_denied_error(path: str, *, verb: str = "Write") -> Optional[str]:
     denial = _classify_write_denial(path)
     if denial is None:
         return None
+    if denial == "verification_scope":
+        scope_name = getattr(_ACTIVE_VERIFICATION_SCOPE, "name", "active_scope")
+        return f"{verb} denied: '{path}' violates active verification scope ({scope_name})."
     if denial == "safe_root":
         roots_display = os.pathsep.join(sorted(get_safe_write_roots()))
         return (
@@ -387,6 +419,18 @@ def get_read_block_error(path: str) -> Optional[str]:
             "(Defense-in-depth — not a security boundary; the terminal tool can still bypass.)"
         )
 
+    if _ACTIVE_VERIFICATION_SCOPE is not None:
+        try:
+            from agent.verification_scope import VerificationScopeEnforcer
+
+            enforcer = VerificationScopeEnforcer(_ACTIVE_VERIFICATION_SCOPE)
+            ok, _ = enforcer.check_file_access(resolved, mode="read")
+            if not ok:
+                scope_name = getattr(_ACTIVE_VERIFICATION_SCOPE, "name", "active_scope")
+                return f"Access denied: '{path}' violates active verification scope ({scope_name})."
+        except Exception:
+            pass
+
     return None
 
 
@@ -507,9 +551,7 @@ def classify_cross_profile_target(path: str) -> Optional[dict]:
         target_profile = "default"
         area = parts[0]
     elif (
-        parts[0] == "profiles"
-        and len(parts) >= 3
-        and parts[2] in PROFILE_SCOPED_AREAS
+        parts[0] == "profiles" and len(parts) >= 3 and parts[2] in PROFILE_SCOPED_AREAS
     ):
         # ``<root>/profiles/<name>/<area>/...`` → named profile.
         target_profile = parts[1]
@@ -628,7 +670,9 @@ def classify_sandbox_mirror_target(path: str) -> Optional[dict]:
         return None
 
     mirror_root = str(Path(*parts[: inner_idx + 1]))
-    inner_path = str(Path(*parts[inner_idx + 1 :])) if inner_idx + 1 < len(parts) else ""
+    inner_path = (
+        str(Path(*parts[inner_idx + 1 :])) if inner_idx + 1 < len(parts) else ""
+    )
 
     return {
         "target_path": str(target),
