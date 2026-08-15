@@ -22,6 +22,7 @@ import enum
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -504,7 +505,7 @@ def recovery_hint(failure: ToolFailure) -> str:
 
 @dataclass
 class CircuitBreaker:
-    """Simple per-tool circuit breaker.
+    """Simple per-tool circuit breaker with a half-open probe state.
 
     Tracks consecutive failures for a single tool. After ``threshold``
     consecutive failures, the circuit opens and ``should_trip()`` returns
@@ -521,11 +522,22 @@ class CircuitBreaker:
     threshold: int = 5
     _consecutive_failures: int = 0
     _is_open: bool = False
+    # #2439 — half-open probe state. When the breaker opens, it records the
+    # wall-clock time it opened. After ``cooldown_seconds`` elapse, the next
+    # ``should_trip()`` call returns False (allowing a single probe call).
+    # A successful probe closes the breaker; a failed probe re-opens it and
+    # restarts the cooldown. This lets a transient infrastructure failure
+    # recover within a session instead of wedging the tool permanently.
+    cooldown_seconds: float = 30.0
+    _opened_at: Optional[float] = None
+    _probe_armed: bool = False
 
     def record_failure(self) -> None:
         self._consecutive_failures += 1
         if self._consecutive_failures >= self.threshold:
             self._is_open = True
+            self._opened_at = time.monotonic()
+            self._probe_armed = False
             logger.warning(
                 "circuit breaker opened for tool after %d consecutive failures",
                 self._consecutive_failures,
@@ -534,9 +546,36 @@ class CircuitBreaker:
     def record_success(self) -> None:
         self._consecutive_failures = 0
         self._is_open = False
+        self._opened_at = None
+        self._probe_armed = False
 
     def should_trip(self) -> bool:
-        return self._is_open
+        """Return True when the breaker is open and no probe is due.
+
+        When the breaker is open but the cooldown has elapsed, this returns
+        False exactly once (arming a single probe). The probe is consumed by
+        ``record_failure`` (re-opens) or ``record_success`` (closes). This
+        gives a transient failure a chance to recover within a session
+        (#2439).
+        """
+        if not self._is_open:
+            return False
+        if self._probe_armed:
+            # A probe is already armed and awaiting its outcome — keep the
+            # gate closed until the probe resolves.
+            return True
+        if self._opened_at is not None:
+            elapsed = time.monotonic() - self._opened_at
+            if elapsed >= self.cooldown_seconds:
+                # Cooldown elapsed — arm a single probe and let it through.
+                self._probe_armed = True
+                logger.info(
+                    "circuit breaker half-open probe armed for tool after "
+                    "%.1fs cooldown",
+                    elapsed,
+                )
+                return False
+        return True
 
 
 # ── Per-tool breaker registry (process-global) ───────────────────────────

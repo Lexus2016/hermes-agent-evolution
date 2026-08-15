@@ -159,3 +159,100 @@ def test_terminal_failure_accumulates_breaker():
             )
         )
     assert get_breaker("terminal").should_trip()
+
+
+# ── Half-open probe state (#2439) ────────────────────────────────────────
+
+
+class _FakeClock:
+    """Controllable monotonic clock for deterministic cooldown tests."""
+
+    def __init__(self, start: float = 1000.0):
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _open_breaker(threshold: int = 3, cooldown: float = 30.0) -> CircuitBreaker:
+    breaker = CircuitBreaker(threshold=threshold, cooldown_seconds=cooldown)
+    for _ in range(threshold):
+        breaker.record_failure()
+    assert breaker.should_trip()
+    return breaker
+
+
+def test_breaker_stays_open_until_cooldown_elapses(monkeypatch):
+    """An open breaker keeps tripping until the cooldown elapses."""
+    clock = _FakeClock()
+    monkeypatch.setattr("agent.tool_error_recovery.time.monotonic", clock)
+    breaker = _open_breaker()
+    # Even after more failures, still open.
+    breaker.record_failure()
+    assert breaker.should_trip()
+    # Cooldown has not elapsed — still tripping.
+    clock.advance(10.0)
+    assert breaker.should_trip()
+
+
+def test_breaker_half_open_probes_after_cooldown(monkeypatch):
+    """After the cooldown elapses, should_trip() returns False once (probe)."""
+    clock = _FakeClock()
+    monkeypatch.setattr("agent.tool_error_recovery.time.monotonic", clock)
+    breaker = _open_breaker()
+    assert breaker.should_trip()
+
+    # Simulate the cooldown elapsing.
+    clock.advance(31.0)
+    # First call after cooldown: probe armed, gate opens.
+    assert not breaker.should_trip()
+    # Probe is armed and awaiting outcome — gate stays closed.
+    assert breaker.should_trip()
+
+
+def test_breaker_half_open_probe_closes_on_success(monkeypatch):
+    """A successful probe closes the breaker and resets the failure count."""
+    clock = _FakeClock()
+    monkeypatch.setattr("agent.tool_error_recovery.time.monotonic", clock)
+    breaker = _open_breaker()
+
+    clock.advance(31.0)
+    assert not breaker.should_trip()  # probe allowed through
+    breaker.record_success()  # probe succeeded
+    assert not breaker.should_trip()
+    assert breaker._consecutive_failures == 0
+    assert breaker._is_open is False
+
+
+def test_breaker_half_open_probe_reopens_on_failure(monkeypatch):
+    """A failed probe re-opens the breaker and restarts the cooldown."""
+    clock = _FakeClock()
+    monkeypatch.setattr("agent.tool_error_recovery.time.monotonic", clock)
+    breaker = _open_breaker()
+
+    clock.advance(31.0)
+    assert not breaker.should_trip()  # probe allowed through
+    breaker.record_failure()  # probe failed — re-opens, restarts cooldown
+    assert breaker.should_trip()
+    # Cooldown restarted — still tripping immediately after.
+    assert breaker.should_trip()
+    # After the restarted cooldown elapses, a new probe is allowed.
+    clock.advance(31.0)
+    assert not breaker.should_trip()
+
+
+def test_breaker_half_open_probe_requires_cooldown(monkeypatch):
+    """A probe is only allowed after the cooldown has fully elapsed."""
+    clock = _FakeClock()
+    monkeypatch.setattr("agent.tool_error_recovery.time.monotonic", clock)
+    breaker = _open_breaker()
+
+    # Only 10s elapsed — still tripping.
+    clock.advance(10.0)
+    assert breaker.should_trip()
+    # Exactly at the boundary (30s) — probe allowed.
+    clock.advance(20.0)
+    assert not breaker.should_trip()

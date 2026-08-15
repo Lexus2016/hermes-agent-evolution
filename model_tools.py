@@ -1767,7 +1767,10 @@ def handle_function_call(
                     f"{function_name} and use an alternative tool "
                     f"(read_file, search_files, write_file) or report the "
                     f"blocker. Repeatedly calling {function_name} will keep "
-                    f"failing."
+                    f"failing. The breaker will allow a single probe call "
+                    f"after a ~{int(_breaker.cooldown_seconds)}s cooldown — "
+                    f"wait, then retry once; if it succeeds the breaker "
+                    f"closes and normal use resumes."
                 )
                 result = json.dumps({"error": _breaker_msg}, ensure_ascii=False)
                 _emit_post_tool_call_hook(
