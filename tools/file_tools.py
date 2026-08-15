@@ -74,6 +74,226 @@ def _find_unicode_equivalent_path(requested: Path) -> Path | None:
     return None
 
 
+def _find_auto_repaired_path(
+    requested: Path,
+    raw_path: str,
+    task_id: str = "default",
+) -> tuple[Path | None, str | None]:
+    """Find a single unambiguous valid path candidate when *requested* does not exist (#2411).
+
+    Strategies evaluated in priority order:
+      1. Unicode normalization (NFC + invisible-space folding via _find_unicode_equivalent_path)
+      2. Case-insensitive match in the requested parent directory (e.g. readme.md -> README.md)
+      3. Case-insensitive component-wise path traversal (e.g. Tools/file_tools.py -> tools/file_tools.py)
+      4. Workspace-root fallback (if relative path failed against cwd)
+      5. Extraneous prefix stripping (e.g. hermes-agent/tools/foo.py -> tools/foo.py)
+      6. Unique filename in workspace tree (for non-generic filenames >3 chars)
+
+    Returns (repaired_path, explanation_hint) or (None, None) if ambiguous or none found.
+    """
+    # 1. Unicode normalization
+    unicode_hit = _find_unicode_equivalent_path(requested)
+    if unicode_hit is not None and unicode_hit.is_file():
+        return (
+            unicode_hit,
+            f"Opened unicode-equivalent filename {unicode_hit.name!r} instead of {requested.name!r}.",
+        )
+
+    # 2. Case-insensitive match in parent directory
+    try:
+        parent = requested.parent
+        if parent.is_dir():
+            target_lower = requested.name.lower()
+            ci_matches = [
+                entry
+                for entry in parent.iterdir()
+                if entry.is_file() and entry.name.lower() == target_lower
+            ]
+            if len(ci_matches) == 1 and ci_matches[0].name != requested.name:
+                return (
+                    ci_matches[0],
+                    f"Opened case-corrected filename {ci_matches[0].name!r} instead of {requested.name!r}.",
+                )
+    except OSError:
+        pass
+
+    # 3. Case-insensitive component-wise path traversal
+    try:
+        curr_dir = requested.parent
+        unresolved_parts = [requested.name]
+        while not curr_dir.exists() and curr_dir.parent != curr_dir:
+            unresolved_parts.insert(0, curr_dir.name)
+            curr_dir = curr_dir.parent
+        if (
+            curr_dir.exists()
+            and curr_dir.is_dir()
+            and unresolved_parts != [requested.name]
+        ):
+            matched_all = True
+            for part in unresolved_parts:
+                if not curr_dir.is_dir():
+                    matched_all = False
+                    break
+                part_lower = part.lower()
+                matches = [
+                    e for e in curr_dir.iterdir() if e.name.lower() == part_lower
+                ]
+                if len(matches) == 1:
+                    curr_dir = matches[0]
+                else:
+                    matched_all = False
+                    break
+            if matched_all and curr_dir.is_file() and curr_dir != requested:
+                return (
+                    curr_dir,
+                    f"Opened case-corrected path '{curr_dir}' instead of '{raw_path}'.",
+                )
+    except OSError:
+        pass
+
+    # 4. Workspace / Project root vs CWD fallback
+    ws_root = None
+    base_dir = None
+    try:
+        ws_root = _authoritative_workspace_root(task_id)
+        base_dir = str(_resolve_base_dir(task_id, container_paths=False))
+        if not Path(raw_path).is_absolute():
+            # Check explicit workspace root
+            if ws_root and ws_root != base_dir:
+                ws_candidate = (Path(ws_root) / raw_path).resolve()
+                if ws_candidate.is_file() and ws_candidate != requested:
+                    return (
+                        ws_candidate,
+                        f"Resolved path relative to workspace root '{ws_root}' instead of working directory.",
+                    )
+            # Check project root by walking up to find .git, pyproject.toml, package.json, config.yaml
+            start_dir = Path(base_dir if base_dir else os.getcwd())
+            proj_root = start_dir
+            while proj_root.parent != proj_root:
+                if (
+                    (proj_root / ".git").exists()
+                    or (proj_root / "pyproject.toml").exists()
+                    or (proj_root / "package.json").exists()
+                    or (proj_root / "config.yaml").exists()
+                ):
+                    break
+                proj_root = proj_root.parent
+            if proj_root != start_dir:
+                proj_cand = (proj_root / raw_path).resolve()
+                if proj_cand.is_file() and proj_cand != requested:
+                    return (
+                        proj_cand,
+                        f"Resolved path relative to project root '{proj_root}' instead of working directory.",
+                    )
+            if base_dir:
+                cwd_candidate = (Path(base_dir) / raw_path).resolve()
+                if cwd_candidate.is_file() and cwd_candidate != requested:
+                    return (
+                        cwd_candidate,
+                        f"Resolved path relative to working directory '{base_dir}'.",
+                    )
+    except Exception:
+        pass
+
+    # 5. Extraneous prefix stripping (e.g. repo name or /workspace/ or workspace/)
+    try:
+        raw_parts = Path(raw_path.lstrip("/\\")).parts
+        if len(raw_parts) > 1:
+            base_p = Path(base_dir if base_dir else os.getcwd())
+            ws_p = Path(ws_root) if ws_root else base_p
+            # Try stripping 1 leading component
+            stripped_1 = Path(*raw_parts[1:])
+            for anchor in (base_p, ws_p):
+                cand = (anchor / stripped_1).resolve()
+                if cand.is_file() and cand != requested:
+                    return (
+                        cand,
+                        f"Stripped leading directory prefix from '{raw_path}' to '{cand}'.",
+                    )
+            # If 2+ components and starts with common container/repo names, try stripping 2
+            if len(raw_parts) > 2 and raw_parts[0].lower() in {
+                "workspace",
+                "config",
+                "app",
+            }:
+                stripped_2 = Path(*raw_parts[2:])
+                for anchor in (base_p, ws_p):
+                    cand = (anchor / stripped_2).resolve()
+                    if cand.is_file() and cand != requested:
+                        return (
+                            cand,
+                            f"Stripped leading directory prefix from '{raw_path}' to '{cand}'.",
+                        )
+    except Exception:
+        pass
+
+    # 6. Unique matching file in workspace tree for non-generic filenames
+    _GENERIC_NAMES = frozenset({
+        "__init__.py",
+        "index.js",
+        "index.ts",
+        "index.html",
+        "setup.py",
+        "pyproject.toml",
+        "package.json",
+        "cargo.toml",
+        "main.py",
+        "app.py",
+        "readme.md",
+        "license",
+        "config.yaml",
+        "config.yml",
+        "config.json",
+        "conftest.py",
+        "makefile",
+        "dockerfile",
+    })
+    filename = requested.name
+    if filename.lower() not in _GENERIC_NAMES and len(filename) > 3:
+        try:
+            ws_root_path = Path(
+                ws_root if ws_root else (base_dir if base_dir else os.getcwd())
+            )
+            if ws_root_path.is_dir():
+                matches = []
+                target_name_lower = filename.lower()
+                for root_dir, dirs, files in os.walk(ws_root_path):
+                    dirs[:] = [
+                        d
+                        for d in dirs
+                        if d
+                        not in {
+                            ".git",
+                            ".venv",
+                            "venv",
+                            "node_modules",
+                            "__pycache__",
+                            ".pytest_cache",
+                            ".claude",
+                        }
+                    ]
+                    for f in files:
+                        if f.lower() == target_name_lower:
+                            matches.append(Path(root_dir) / f)
+                            if len(matches) > 1:
+                                break
+                    if len(matches) > 1:
+                        break
+                if (
+                    len(matches) == 1
+                    and matches[0].is_file()
+                    and matches[0] != requested
+                ):
+                    return (
+                        matches[0],
+                        f"Found unique matching file '{matches[0]}' in workspace for '{raw_path}'.",
+                    )
+        except Exception:
+            pass
+
+    return None, None
+
+
 def _expand_tilde(path: str) -> str:
     """Expand ``~`` using the effective profile home when available.
 
@@ -596,7 +816,7 @@ def _rewrite_v4a_patch_paths_for_host(
         return f"{prefix}{resolved}"
 
     patch = _re.sub(
-        r'^(\*\*\*\s*(?:Update|Add|Delete)\s+File:\s*)(.+)$',
+        r"^(\*\*\*\s*(?:Update|Add|Delete)\s+File:\s*)(.+)$",
         _replace_single,
         patch,
         flags=_re.MULTILINE,
@@ -609,7 +829,7 @@ def _rewrite_v4a_patch_paths_for_host(
         return f"{prefix}{src} -> {dst}"
 
     patch = _re.sub(
-        r'^(\*\*\*\s*Move\s+File:\s*)(.+?)\s*->\s*(.+)$',
+        r"^(\*\*\*\s*Move\s+File:\s*)(.+?)\s*->\s*(.+)$",
         _replace_move,
         patch,
         flags=_re.MULTILINE,
@@ -799,14 +1019,17 @@ def _filter_read_blocked_search_results(result, task_id: str = "default") -> int
 # Paths that file tools should refuse to write to without going through the
 # terminal tool's approval system.  These match prefixes after os.path.realpath.
 _SENSITIVE_PATH_PREFIXES = (
-    "/etc/", "/boot/", "/usr/lib/systemd/",
+    "/etc/",
+    "/boot/",
+    "/usr/lib/systemd/",
     "/private/etc/",
     # macOS: /private/var mirrors /var. Block the sensitive subtrees, NOT the
     # whole thing — a blanket "/private/var/" refused every legitimate temp-file
     # write, because $TMPDIR, /tmp, and /var/folders all realpath() into
     # /private/var/folders/... on macOS (and _resolve_path_for_task resolves
     # symlinks), and /private/var/tmp is a normal temp dir.
-    "/private/var/db/", "/private/var/root/",
+    "/private/var/db/",
+    "/private/var/root/",
 )
 _SENSITIVE_EXACT_PATHS = {"/var/run/docker.sock", "/run/docker.sock"}
 
@@ -842,7 +1065,10 @@ def _get_hermes_config_resolved() -> str | None:
 # case-sensitive filesystems most loaders probe common case variants too,
 # so the stricter behavior is kept uniform.
 _PROTECTED_INSTRUCTION_BASENAMES = frozenset({
-    "agents.md", "claude.md", "soul.md", ".cursorrules",
+    "agents.md",
+    "claude.md",
+    "soul.md",
+    ".cursorrules",
 })
 
 _real_hermes_home_cached: str | None = None
@@ -857,6 +1083,7 @@ def _get_real_hermes_home() -> str | None:
     _real_hermes_home_loaded = True
     try:
         from hermes_constants import get_hermes_home
+
         _real_hermes_home_cached = os.path.realpath(str(get_hermes_home()))
     except Exception:
         try:
@@ -881,11 +1108,12 @@ def _protected_instruction_config() -> tuple[bool, list[str]]:
     """
     try:
         from hermes_cli.config import load_config, cfg_get
+
         cfg = load_config()
-        enabled = cfg_get(cfg, "security", "protected_instruction_files",
-                          default=True)
-        extra = cfg_get(cfg, "security", "protected_instruction_extra_patterns",
-                        default=[])
+        enabled = cfg_get(cfg, "security", "protected_instruction_files", default=True)
+        extra = cfg_get(
+            cfg, "security", "protected_instruction_extra_patterns", default=[]
+        )
     except Exception:
         return True, []
     if not isinstance(enabled, bool):
@@ -895,9 +1123,13 @@ def _protected_instruction_config() -> tuple[bool, list[str]]:
     return enabled, [str(p) for p in extra if p]
 
 
-def _protected_instruction_reason(filepath: str, task_id: str = "default",
-                                  *, enabled: bool | None = None,
-                                  extra_patterns: list[str] | None = None) -> str | None:
+def _protected_instruction_reason(
+    filepath: str,
+    task_id: str = "default",
+    *,
+    enabled: bool | None = None,
+    extra_patterns: list[str] | None = None,
+) -> str | None:
     """Return a short label when ``filepath`` targets a protected
     agent-instruction file, else ``None``.
 
@@ -923,11 +1155,11 @@ def _protected_instruction_reason(filepath: str, task_id: str = "default",
     # ``.hermes`` component rule below, which would otherwise match the
     # home directory itself.
     real_home = _get_real_hermes_home()
-    if real_home and (resolved == real_home
-                      or resolved.startswith(real_home + os.sep)):
+    if real_home and (resolved == real_home or resolved.startswith(real_home + os.sep)):
         return None
 
     import fnmatch
+
     for candidate in (normalized, resolved):
         base = os.path.basename(candidate)
         base_lower = base.lower()
@@ -949,7 +1181,8 @@ def _protected_instruction_reason(filepath: str, task_id: str = "default",
 
 
 def _request_protected_instruction_approval(
-        reasons: list[str], task_id: str = "default") -> str | None:
+    reasons: list[str], task_id: str = "default"
+) -> str | None:
     """Ask the human to approve a write to protected instruction file(s).
 
     Returns ``None`` when approved, or a BLOCKED error string. This gate
@@ -975,8 +1208,9 @@ def _request_protected_instruction_approval(
     try:
         import tools.approval as _approval
     except Exception:
-        return blocked.format(why="requires approval but the approval "
-                                  "subsystem is unavailable.")
+        return blocked.format(
+            why="requires approval but the approval subsystem is unavailable."
+        )
 
     # Gateway surface: block on the button round-trip when a notify callback
     # is registered for this session (Telegram/Discord/Slack). One-operation
@@ -999,12 +1233,15 @@ def _request_protected_instruction_approval(
             "allow_session": False,
         }
         decision = _approval._await_gateway_decision(
-            session_key, notify_cb, approval_data, surface="gateway",
+            session_key,
+            notify_cb,
+            approval_data,
+            surface="gateway",
         )
         if decision.get("notify_failed"):
             return blocked.format(
-                why="requires approval but the approval request could not "
-                    "be delivered.")
+                why="requires approval but the approval request could not be delivered."
+            )
         choice = decision.get("choice")
         if decision.get("resolved") and choice in {"once", "session", "always"}:
             # One-operation grant regardless of the tapped scope — nothing
@@ -1013,20 +1250,23 @@ def _request_protected_instruction_approval(
         if not decision.get("resolved"):
             return blocked.format(
                 why="approval prompt timed out without a user response. "
-                    "Silence is not consent.")
+                "Silence is not consent."
+            )
         return blocked.format(why="was denied by the user.")
 
     # CLI surface: per-thread approval callback (prompt_toolkit panel).
     callback = None
     try:
         from tools.terminal_tool import _get_approval_callback
+
         callback = _get_approval_callback()
     except Exception:
         callback = None
 
     if callback is not None:
         choice = _approval.prompt_dangerous_approval(
-            display, description,
+            display,
+            description,
             allow_permanent=False,
             approval_callback=callback,
         )
@@ -1036,18 +1276,21 @@ def _request_protected_instruction_approval(
         if choice == "timeout":
             return blocked.format(
                 why="approval prompt timed out without a user response. "
-                    "Silence is not consent.")
+                "Silence is not consent."
+            )
         return blocked.format(why="was denied by the user.")
 
     # No human channel at all (script, cron, background thread): fail
     # closed. Auto-approving here would recreate the persistence vector.
     return blocked.format(
         why="requires approval but no interactive user or gateway is "
-            "present to approve it.")
+        "present to approve it."
+    )
 
 
-def _check_protected_instruction_write(paths: list[str],
-                                       task_id: str = "default") -> str | None:
+def _check_protected_instruction_write(
+    paths: list[str], task_id: str = "default"
+) -> str | None:
     """Gate a write/patch touching protected instruction files.
 
     Returns ``None`` when no target is protected or the human approved;
@@ -1063,7 +1306,8 @@ def _check_protected_instruction_write(paths: list[str],
     reasons: list[str] = []
     for p in paths:
         reason = _protected_instruction_reason(
-            p, task_id, enabled=enabled, extra_patterns=extra)
+            p, task_id, enabled=enabled, extra_patterns=extra
+        )
         if reason:
             reasons.append(reason)
     if not reasons:
@@ -1365,18 +1609,19 @@ def _empty_old_string_error(path: str, task_id: str) -> str:
     return tool_error(msg)
 
 
-
 # Per-task bounds for the containers inside each _read_tracker[task_id].
 # A CLI session uses one stable task_id for its lifetime; without these
 # caps, a 10k-read session would accumulate ~1.5MB of dict/set state that
 # is never referenced again (only the most recent reads matter for dedup,
 # loop detection, and external-edit warnings).  Hard caps bound the
 # accretion to a few hundred KB regardless of session length.
-_READ_HISTORY_CAP = 500       # set; used only by get_read_files_summary
-_DEDUP_CAP = 1000             # dict; skip-identical-reread guard
-_READ_TIMESTAMPS_CAP = 1000   # dict; external-edit detection for write/patch
-_NOT_FOUND_CAP = 500          # dict; per-task negative-result cache for missing paths
-_NOT_FOUND_TTL_SECONDS = 60.0 # short TTL — a path that didn't exist may be created soon
+_READ_HISTORY_CAP = 500  # set; used only by get_read_files_summary
+_DEDUP_CAP = 1000  # dict; skip-identical-reread guard
+_READ_TIMESTAMPS_CAP = 1000  # dict; external-edit detection for write/patch
+_NOT_FOUND_CAP = 500  # dict; per-task negative-result cache for missing paths
+_NOT_FOUND_TTL_SECONDS = (
+    60.0  # short TTL — a path that didn't exist may be created soon
+)
 _READ_DEDUP_STATUS_MESSAGE = (
     "File unchanged since last read. The content from "
     "the earlier read_file result in this conversation is "
@@ -1459,6 +1704,7 @@ def _check_not_found_cache(op: str, resolved_str: str, task_id: str) -> str | No
     """
     import os as _os
     import time
+
     with _read_tracker_lock:
         task_data = _read_tracker.get(task_id)
         if not task_data:
@@ -1494,15 +1740,24 @@ def _check_not_found_cache(op: str, resolved_str: str, task_id: str) -> str | No
     return cached_json
 
 
-def _record_not_found(op: str, resolved_str: str, task_id: str, error_json: str) -> None:
+def _record_not_found(
+    op: str, resolved_str: str, task_id: str, error_json: str
+) -> None:
     """Cache a not-found error so the next *op* call for *resolved_str* skips I/O."""
     import time
+
     with _read_tracker_lock:
-        task_data = _read_tracker.setdefault(task_id, {
-            "last_key": None, "consecutive": 0,
-            "read_history": set(), "dedup": {},
-            "dedup_hits": {}, "read_timestamps": {},
-        })
+        task_data = _read_tracker.setdefault(
+            task_id,
+            {
+                "last_key": None,
+                "consecutive": 0,
+                "read_history": set(),
+                "dedup": {},
+                "dedup_hits": {},
+                "read_timestamps": {},
+            },
+        )
         nf = task_data.setdefault("not_found", {})
         nf[(op, resolved_str)] = (time.monotonic(), error_json)
         _cap_read_tracker_data(task_data)
@@ -1785,7 +2040,9 @@ def clear_file_ops_cache(task_id: str = None):
             _file_ops_cache.clear()
 
 
-def read_file_tool(path: str, offset: int = 1, limit: int = 2000, task_id: str = "default") -> str:
+def read_file_tool(
+    path: str, offset: int = 1, limit: int = 2000, task_id: str = "default"
+) -> str:
     """Read a file with pagination and line numbers."""
     try:
         offset, limit = normalize_read_pagination(offset, limit)
@@ -1848,12 +2105,8 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 2000, task_id: str =
                 )
                 if binary.error or binary.base64_content is None:
                     raise ExtractionError(binary.error or "Document bytes unavailable")
-                document_bytes = base64.b64decode(
-                    binary.base64_content, validate=True
-                )
-                extracted_text = extract_document_bytes(
-                    document_bytes, str(_resolved)
-                )
+                document_bytes = base64.b64decode(binary.base64_content, validate=True)
+                extracted_text = extract_document_bytes(document_bytes, str(_resolved))
             except (ExtractionError, ValueError, base64.binascii.Error) as exc:
                 logger.debug("document extraction failed for %s", path, exc_info=True)
                 # For binary document formats, surface the specific failure
@@ -1883,9 +2136,11 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 2000, task_id: str =
                 lines = extracted_text.splitlines()
                 total_lines = len(lines)
                 end_line = offset + limit - 1
-                page_text = "\n".join(lines[offset - 1:end_line])
+                page_text = "\n".join(lines[offset - 1 : end_line])
                 result_dict = {
-                    "content": file_ops._add_line_numbers(page_text, offset) if page_text else "",
+                    "content": file_ops._add_line_numbers(page_text, offset)
+                    if page_text
+                    else "",
                     "total_lines": total_lines,
                     "file_size": binary.file_size,
                     "truncated": total_lines > end_line,
@@ -2049,18 +2304,18 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 2000, task_id: str =
         # optimization; recording must stay side-effect-identical.
         _err = result_dict.get("error") or ""
         if isinstance(_err, str) and _err.startswith("File not found:"):
-            unicode_hit = _find_unicode_equivalent_path(Path(str(_resolved)))
-            if unicode_hit is not None:
-                repaired = file_ops.read_file(str(unicode_hit), offset, limit)
+            repaired_path, repair_note = _find_auto_repaired_path(
+                Path(str(_resolved)), raw_path=path, task_id=task_id
+            )
+            if repaired_path is not None:
+                repaired = file_ops.read_file(str(repaired_path), offset, limit)
                 repaired_dict = repaired.to_dict()
                 if not repaired_dict.get("error"):
                     existing_hint = repaired_dict.get("hint") or ""
-                    note = (
-                        f"Opened unicode-equivalent filename {unicode_hit.name!r} "
-                        f"instead of {Path(str(_resolved)).name!r}."
-                    )
                     repaired_dict["hint"] = (
-                        f"{existing_hint} {note}".strip() if existing_hint else note
+                        f"{existing_hint} {repair_note}".strip()
+                        if existing_hint
+                        else repair_note
                     )
                     result = repaired
                     result_dict = repaired_dict
@@ -2077,7 +2332,9 @@ def read_file_tool(path: str, offset: int = 1, limit: int = 2000, task_id: str =
                     if _hint:
                         result_dict["error"] = _err + "\n\n" + _hint
                 _not_found_json = json.dumps(result_dict, ensure_ascii=False)
-                _record_not_found("read", resolved_str_for_neg, task_id, _not_found_json)
+                _record_not_found(
+                    "read", resolved_str_for_neg, task_id, _not_found_json
+                )
 
         # ── Per-session read_file failure-rate directive (#1370) ──────
         # read_file has the highest failure rate of any core tool (10.6%,
@@ -3051,7 +3308,9 @@ def search_tool(
             resolved_search_path = str(_resolve_path_for_task(path, task_id))
         except (OSError, ValueError):
             resolved_search_path = path
-        cached_search_nf = _check_not_found_cache("search", resolved_search_path, task_id)
+        cached_search_nf = _check_not_found_cache(
+            "search", resolved_search_path, task_id
+        )
         if cached_search_nf is not None:
             return cached_search_nf
 
@@ -3585,11 +3844,20 @@ def _classify_regex_error(pattern: str, exc) -> tuple:
         )
     # Unclosed character class / group / dangling quantifier — the classic
     # malformed-regex family.
-    if any(tok in low for tok in (
-        "unterminated", "unclosed", "missing ), unterminated subpattern",
-        "nothing to repeat", "multiple repeat", "unexpected end of pattern",
-        "bad escape", "invalid escape", "trailing backslash",
-    )):
+    if any(
+        tok in low
+        for tok in (
+            "unterminated",
+            "unclosed",
+            "missing ), unterminated subpattern",
+            "nothing to repeat",
+            "multiple repeat",
+            "unexpected end of pattern",
+            "bad escape",
+            "invalid escape",
+            "trailing backslash",
+        )
+    ):
         return (
             "invalid_regex_syntax",
             "The regex is malformed (unclosed bracket/group, bad escape, or "
@@ -3598,10 +3866,18 @@ def _classify_regex_error(pattern: str, exc) -> tuple:
             "same malformed pattern.",
         )
     # Lookbehind/lookahead or other engine-specific feature rejection.
-    if any(tok in low for tok in (
-        "look-behind", "lookbehind", "fixed-width", "variable-length",
-        "not supported", "unsupported", "invalid group",
-    )):
+    if any(
+        tok in low
+        for tok in (
+            "look-behind",
+            "lookbehind",
+            "fixed-width",
+            "variable-length",
+            "not supported",
+            "unsupported",
+            "invalid group",
+        )
+    ):
         return (
             "unsupported_feature",
             "The regex uses a feature the search engine does not support "
