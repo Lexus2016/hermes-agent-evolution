@@ -184,6 +184,11 @@ def parse_provenance(stored: str):
 
 from tools.threat_patterns import first_threat_message as _first_threat_message
 
+from tools.memory_governance import (
+    parse_supersession,
+    supersede_entry,
+)
+
 
 def _scan_memory_content(content: str) -> Optional[str]:
     """Scan memory content for injection/exfil patterns. Returns error string if blocked."""
@@ -1114,6 +1119,7 @@ class MemoryStore:
         target: str,
         source_filter: Optional[object] = None,
         min_trust: Optional[str] = None,
+        include_superseded: bool = False,
     ) -> List[Dict[str, Any]]:
         """Return live entries as provenance-resolved rows, optionally filtered.
 
@@ -1126,6 +1132,10 @@ class MemoryStore:
           * ``source_filter``: a source_class string or iterable of them; keep
             entries whose source_class is in the set.
           * ``min_trust``: a trust tier; keep entries whose tier ranks >= it.
+          * ``include_superseded`` (#2437): when False (default), superseded
+            entries are hidden from recall. When True, every superseded row
+            carries an extra ``superseded_at`` timestamp field (``None`` for
+            live entries).
         """
         if isinstance(source_filter, str):
             allowed = {source_filter}
@@ -1138,13 +1148,58 @@ class MemoryStore:
 
         rows: List[Dict[str, Any]] = []
         for entry in self._entries_for(target):
-            text, src, tier = parse_provenance(entry)
+            # Supersession marker is OUTERMOST, so parse it before provenance
+            # (parse_supersession returns the display text with any provenance
+            # trailer still attached).
+            entry_display, sup_ts = parse_supersession(entry)
+            if sup_ts is not None and not include_superseded:
+                continue
+            text, src, tier = parse_provenance(entry_display)
             if allowed is not None and src not in allowed:
                 continue
             if min_rank is not None and _trust_rank(tier) < min_rank:
                 continue
-            rows.append({"text": text, "source_class": src, "trust_tier": tier})
+            row = {"text": text, "source_class": src, "trust_tier": tier}
+            if sup_ts is not None:
+                row["superseded_at"] = sup_ts
+            rows.append(row)
         return rows
+
+    def supersede(self, target: str, old_text: str) -> Dict[str, Any]:
+        """Mark the entry containing *old_text* as superseded (#2437).
+
+        Temporal governance: bytes stay on disk (audit trail) but recall
+        hides the entry unless ``include_superseded=True``. First
+        supersession wins — if the matched entry is already superseded, the
+        original timestamp is preserved and the operation is a no-op.
+        Runs under the file lock like replace/remove.
+        """
+        old_text = (old_text or "").strip()
+        if not old_text:
+            return {"success": False, "error": "old_text cannot be empty."}
+        with self._file_lock(self._path_for(target)):
+            bak = self._reload_target(target)
+            if bak is _READ_FAILED:
+                return _read_failed_error(self._path_for(target))
+            if bak:
+                return _drift_error(self._path_for(target), bak)
+            entries = self._entries_for(target)
+            result = supersede_entry(entries, old_text)
+            if not result.get("success"):
+                return self._consolidation_failure(
+                    {
+                        "success": False,
+                        "error": result.get("error", "supersede failed."),
+                        "current_entries": entries,
+                    }
+                )
+            self.save_to_disk(target)
+            msg = (
+                "Entry already superseded (no change)."
+                if result.get("already_superseded")
+                else "Entry superseded; hidden from default recall."
+            )
+            return self._success_response(target, msg)
 
     def apply_batch(
         self,
@@ -1803,6 +1858,7 @@ def memory_tool(
     trust_tier: str = DEFAULT_TRUST_TIER,
     source_filter: Optional[object] = None,
     min_trust: Optional[str] = None,
+    include_superseded: bool = False,
     operations: Optional[List[Dict[str, Any]]] = None,
     target_size: Optional[int] = None,
     prefer: str = "longest",
@@ -1842,7 +1898,12 @@ def memory_tool(
 
     # search is a read-only retrieval path — no gate, no required content.
     if action == "search":
-        rows = store.search(target, source_filter=source_filter, min_trust=min_trust)
+        rows = store.search(
+            target,
+            source_filter=source_filter,
+            min_trust=min_trust,
+            include_superseded=bool(include_superseded),
+        )
         return json.dumps(
             {
                 "success": True,
@@ -1935,9 +1996,15 @@ def memory_tool(
         except Exception as exc:
             return _memory_enriched_error(exc, "remove")
 
+    elif action == "supersede":
+        try:
+            result = store.supersede(target, old_text)
+        except Exception as exc:
+            return _memory_enriched_error(exc, "supersede")
+
     else:
         return tool_error(
-            f"Unknown action '{action}'. Use: add, replace, remove, search",
+            f"Unknown action '{action}'. Use: add, replace, remove, search, supersede",
             success=False,
         )
 
@@ -2017,8 +2084,8 @@ MEMORY_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "replace", "remove", "search", "compact"],
-                "description": "The action to perform (single op, or 'search' to read entries, or 'compact' to shorten entries to fit). Omit when using the 'operations' batch array.",
+                "enum": ["add", "replace", "remove", "search", "compact", "supersede"],
+                "description": "The action to perform (single op, 'search' to read entries, 'compact' to shorten entries to fit, or 'supersede' to retire a stale entry — hidden from recall, kept on disk). Omit when using the 'operations' batch array.",
             },
             "target": {
                 "type": "string",
@@ -2094,6 +2161,10 @@ MEMORY_SCHEMA = {
                 "enum": list(TRUST_TIERS),
                 "description": "Optional for 'search': keep only entries at or above this trust tier.",
             },
+            "include_superseded": {
+                "type": "boolean",
+                "description": "Optional for 'search': also return superseded (retired) entries, each with a superseded_at timestamp. Default false.",
+            },
             "memory_char_limit": {
                 "type": "integer",
                 "description": (
@@ -2125,6 +2196,7 @@ registry.register(
         trust_tier=args.get("trust_tier", DEFAULT_TRUST_TIER),
         source_filter=args.get("source_filter"),
         min_trust=args.get("min_trust"),
+        include_superseded=args.get("include_superseded"),
         operations=args.get("operations"),
         target_size=args.get("target_size"),
         prefer=args.get("prefer"),
