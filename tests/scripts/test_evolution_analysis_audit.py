@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from evolution_analysis_audit import (  # noqa: E402
+    audit_already_implemented,
     audit_analysis,
     audit_latest,
     audit_rejections,
@@ -102,7 +103,9 @@ class TestAuditLatest:
 
     def test_unreadable_json_is_silent(self, tmp_path):
         (tmp_path / "analysis").mkdir(parents=True)
-        (tmp_path / "analysis" / "2026-06-24.json").write_text("{not json", encoding="utf-8")
+        (tmp_path / "analysis" / "2026-06-24.json").write_text(
+            "{not json", encoding="utf-8"
+        )
         assert audit_latest(tmp_path) == []
 
     def test_audit_latest_runs_rejection_check_with_repo(self, tmp_path):
@@ -232,3 +235,104 @@ class TestAuditRejections:
         assert audit_rejections({"rejected": []}, tmp_path) == []
         assert audit_rejections({}, tmp_path) == []
 
+
+class TestAuditAlreadyImplemented:
+    def _rep(self, selected=None, deferred=None):
+        report = {"date": "2026-08-15"}
+        if selected is not None:
+            report["selected_for_implementation"] = selected
+        if deferred is not None:
+            report["deferred_not_selected"] = deferred
+        return report
+
+    def test_verified_path_is_clean(self, tmp_path):
+        (tmp_path / "agent").mkdir()
+        (tmp_path / "agent" / "cache.py").write_text("x")
+        selected = [
+            {
+                "issue_number": 21,
+                "note": "already implemented locally in agent/cache.py",
+            }
+        ]
+        assert audit_already_implemented(self._rep(selected=selected), tmp_path) == []
+
+    def test_unverified_path_flagged(self, tmp_path):
+        selected = [
+            {
+                "issue_number": 22,
+                "note": "already_implemented: see tools/ghost_cache.py (line 42)",
+            }
+        ]
+        v = audit_already_implemented(self._rep(selected=selected), tmp_path)
+        assert any("UNVERIFIED_ALREADY_IMPLEMENTED" in x and "#22" in x for x in v)
+        assert any("tools/ghost_cache.py" in x for x in v)
+
+    def test_both_marker_variants_detected(self, tmp_path):
+        # "already implemented" (spaces) and "implemented locally" are both markers.
+        selected = [
+            {"issue_number": 23, "note": "already implemented in tools/nope.py"}
+        ]
+        deferred = [{"id": 24, "reason": "implemented locally in agent/also_nope.py"}]
+        v = audit_already_implemented(
+            self._rep(selected=selected, deferred=deferred), tmp_path
+        )
+        assert any("#23" in x for x in v)
+        assert any("#24" in x for x in v)
+
+    def test_mixed_real_and_missing_is_clean(self, tmp_path):
+        (tmp_path / "agent").mkdir()
+        (tmp_path / "agent" / "real.py").write_text("x")
+        selected = [
+            {
+                "issue_number": 25,
+                "note": "already implemented in agent/real.py and agent/missing.py",
+            }
+        ]
+        assert audit_already_implemented(self._rep(selected=selected), tmp_path) == []
+
+    def test_no_concrete_path_is_not_flagged(self, tmp_path):
+        # A bare word ("cache") is not verifiable; do not false-alarm.
+        selected = [
+            {
+                "issue_number": 26,
+                "note": "already_implemented: the cache capability exists",
+            }
+        ]
+        assert audit_already_implemented(self._rep(selected=selected), tmp_path) == []
+
+    def test_non_claim_entries_ignored(self, tmp_path):
+        selected = [
+            {
+                "issue_number": 27,
+                "note": "unblocks slice B; no already-implemented claim",
+            }
+        ]
+        assert audit_already_implemented(self._rep(selected=selected), tmp_path) == []
+
+    def test_no_repo_root_is_silent(self):
+        selected = [{"issue_number": 1, "note": "already implemented in x/y.py"}]
+        assert audit_already_implemented(self._rep(selected=selected), None) == []
+
+    def test_empty_report_clean(self, tmp_path):
+        assert audit_already_implemented({}, tmp_path) == []
+        assert (
+            audit_already_implemented({"selected_for_implementation": []}, tmp_path)
+            == []
+        )
+
+    def test_audit_latest_runs_already_implemented_check(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (tmp_path / "analysis").mkdir(parents=True)
+        report = {
+            "scoring_model": {"selection_constraints": {"max_total_effort": 3.0}},
+            "total_effort_selected": 2.0,
+            "selected_for_implementation": [
+                {"issue_number": 28, "note": "already implemented in tools/phantom.py"}
+            ],
+        }
+        (tmp_path / "analysis" / "2026-08-15.json").write_text(
+            json.dumps(report), encoding="utf-8"
+        )
+        out = audit_latest(tmp_path, repo)
+        assert any("UNVERIFIED_ALREADY_IMPLEMENTED" in x and "#28" in x for x in out)

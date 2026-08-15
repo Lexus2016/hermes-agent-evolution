@@ -38,6 +38,14 @@ _CITED_PATH_RE = re.compile(
     r"(?<![\w./-])([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+\.[A-Za-z][A-Za-z0-9]{0,5})"
 )
 
+# A prose marker that the analysis agent believes a capability already exists on
+# the tree — "already_implemented", "already implemented", "already-implemented",
+# or "implemented locally". These are the #2468 claims that must be re-verified
+# against the live worktree before being trusted.
+_ALREADY_IMPL_RE = re.compile(
+    r"already[_ -]?implemented|implemented locally", re.IGNORECASE
+)
+
 
 def _num(x: Any) -> Optional[float]:
     """Coerce to float, but reject bool (True/False are ints in Python)."""
@@ -128,6 +136,62 @@ def audit_rejections(report: Dict[str, Any], repo_root: Optional[Path]) -> List[
     return out
 
 
+def audit_already_implemented(
+    report: Dict[str, Any], repo_root: Optional[Path]
+) -> List[str]:
+    """Catch UNVERIFIED ``already_implemented`` claims — the #2468 class.
+
+    The analysis agent sometimes marks an issue as already-implemented (or
+    "implemented locally on <date>") based on a stale prior-report reading, and
+    cites a code artifact that does not actually exist in the current worktree.
+    Unlike the #83 fabrication (which closes an issue), this defect rides the
+    note/deprioritize path: a wrong already-implemented note mis-ranks the issue
+    and wastes an implementation slot re-doing phantom work. This is the same
+    defect class, guarded on the other path.
+
+    Mirrors ``audit_rejections``: flags ONLY when a claim cites one or more
+    concrete repo paths and NONE of them exist (a single missing path among
+    existing ones is a typo / secondary reference). Needs the repo to verify;
+    silent without it, with no such claims, or when a claim cites no concrete
+    path (a bare word is not proof of fabrication).
+    """
+    if not isinstance(report, dict) or repo_root is None:
+        return []
+    repo = Path(repo_root)
+    try:
+        if not repo.is_dir():
+            return []
+    except OSError:
+        return []
+    out: List[str] = []
+    # A claim can live in a selection note, a deferred note, or any per-issue
+    # entry the report carries; scan every dict-valued top-level list.
+    for value in report.values():
+        if not isinstance(value, list):
+            continue
+        for entry in value:
+            if not isinstance(entry, dict):
+                continue
+            blob = " ".join(
+                str(v) for v in entry.values() if isinstance(v, (str, int, float))
+            )
+            if not _ALREADY_IMPL_RE.search(blob):
+                continue
+            cited = _CITED_PATH_RE.findall(blob)
+            if cited and not any((repo / p).exists() for p in cited):
+                issue = (
+                    entry.get("issue_number")
+                    or entry.get("id")
+                    or entry.get("parent_issue")
+                )
+                out.append(
+                    f"UNVERIFIED_ALREADY_IMPLEMENTED: issue #{issue} marked "
+                    f"already-implemented citing {', '.join(cited[:3])} — none "
+                    f"exist in the repo"
+                )
+    return out
+
+
 def _record_meta_skill_trace(report: Dict[str, Any], evolution_dir: Path) -> None:
     """Wire #1876: append a per-cycle meta-skill trace record.
 
@@ -188,7 +252,11 @@ def audit_latest(evolution_dir: Path, repo_root: Optional[Path] = None) -> List[
         report = json.loads(latest.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
-    violations = audit_analysis(report) + audit_rejections(report, repo_root)
+    violations = (
+        audit_analysis(report)
+        + audit_rejections(report, repo_root)
+        + audit_already_implemented(report, repo_root)
+    )
 
     # Wire #1876: record a meta-skill trace per analysis cycle (fire-and-forget).
     _record_meta_skill_trace(report, evolution_dir)
