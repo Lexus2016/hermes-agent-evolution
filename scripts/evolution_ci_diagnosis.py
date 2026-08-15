@@ -65,9 +65,6 @@ _TRIVIAL_ERROR_CLASSES = {
 
 # Regex -> error_class heuristic.
 _TRIVIAL_PATTERNS: List[Tuple[str, str]] = [
-    (r"ruff.*\b(F401|F811|F841|E501|W291|W292|E302|E303|W391)\b", "lint"),
-    (r"ruff format --check", "format"),
-    (r"black --check", "format"),
     (r"`([^`]+)` imported but unused", "unused-import"),
     (r"\b(\w+)\s+imported but unused", "unused-import"),
     (r"`([^`]+)` is not defined", "undefined-name"),
@@ -81,26 +78,48 @@ _TRIVIAL_PATTERNS: List[Tuple[str, str]] = [
     (r"Incompatible return value type", "incompatible-return"),
     (r"Module .* has no attribute", "missing-attribute"),
     (r"mypy.*failed", "mypy"),
+    (r"ruff format --check", "format"),
+    (r"black --check", "format"),
+    (r"ruff.*\b(F401|F811|F841|E501|W291|W292|E302|E303|W391)\b", "lint"),
+    (r"ruff\s+(?:check|format)\s+failed", "lint"),
+    (
+        r"\b(?:F|E|W|I|N|D|UP|YTT|ANN|ASYNC|S|BLE|FBT|B|A|COM|C4|DTZ|T10|DJ|EM|EXE|FA|ISC|ICN|G|INP|PIE|T20|PYI|PT|Q|RSE|RET|SLF|SLOT|SIM|TID|TCH|INT|ARG|PTH|TD|FIX|ERA|PD|PGH|PL|TRY|FLY|NPY|AIR|PERF|FURB|LOG|RUF)\d{3,4}\b",
+        "lint",
+    ),
+    (r"check-attribution.*failed", "attribution"),
+    (r"check-no-committed-infographics.*failed", "infographics"),
+    (r"check-common-ancestor.*failed", "unrelated-histories"),
 ]
 
 _COMPLEX_PATTERNS: List[Tuple[str, str]] = [
     (r"FAILED\s+(tests/\S+)::\S+\s+-\s+(\w+Error):", "pytest-error"),
-    (r"FAILED\s+(tests/\S+)::\S+", "test-failure"),
-    (r"ERROR\s+(tests/\S+)::\S+", "test-error"),
-    (r"SyntaxError:", "syntax-error"),
-    (r"IndentationError:", "indentation-error"),
-    (r"TypeError:", "type-error"),
-    (r"ValueError:", "value-error"),
+    (r"FAILED\s+([^\s:]+::[^\s:]+)(?:\s+-\s+([^\n]+))?", "test-failure"),
+    (r"ERROR\s+([^\s:]+::[^\s:]+)(?:\s+-\s+([^\n]+))?", "test-error"),
+    (r"=== \d+ files? with test failures? \(\d+ tests? failed\) ===", "test-failure"),
+    (r"=== \d+ file where no tests ran .* ===", "test-collection-failure"),
+    (r"AssertionError(?::\s*([^\n]+))?", "assertion-error"),
+    (r"AssertionError", "assertion-error"),
+    (r"SyntaxError(?::\s*([^\n]+))?", "syntax-error"),
+    (r"IndentationError(?::\s*([^\n]+))?", "indentation-error"),
+    (r"TypeError(?::\s*([^\n]+))?", "type-error"),
+    (r"ValueError(?::\s*([^\n]+))?", "value-error"),
     (r"KeyError:\s*['\"]?([^'\"\n]+)", "key-error"),
-    (r"IndexError:", "index-error"),
-    (r"AttributeError:\s*(.*)", "attribute-error"),
-    (r"ImportError:", "import-error"),
+    (r"IndexError(?::\s*([^\n]+))?", "index-error"),
+    (r"AttributeError:\s*([^\n]+)", "attribute-error"),
+    (r"ImportError(?::\s*([^\n]+))?", "import-error"),
     (r"ModuleNotFoundError:\s*([^\n]+)", "module-not-found"),
-    (r"RecursionError:", "recursion-error"),
-    (r"TimeoutError:", "timeout"),
-    (r"ConnectionError:", "connection-error"),
-    (r"PermissionError:", "permission-error"),
+    (r"RuntimeError(?::\s*([^\n]+))?", "runtime-error"),
+    (r"RecursionError(?::\s*([^\n]+))?", "recursion-error"),
+    (r"TimeoutError(?::\s*([^\n]+))?", "timeout"),
+    (r"ConnectionError(?::\s*([^\n]+))?", "connection-error"),
+    (r"PermissionError(?::\s*([^\n]+))?", "permission-error"),
     (r"subprocess\.CalledProcessError", "subprocess-error"),
+    (r"##\[error\]\s*Process completed with exit code (\d+)", "exit-code-failure"),
+    (r"Process completed with exit code (\d+)", "exit-code-failure"),
+    (r"##\[error\]([^\n]+)", "step-error"),
+    (r"builder for .* failed with exit code", "nix-build-error"),
+    (r"nix.*failed", "nix-build-error"),
+    (r"Windows footguns.*failed", "windows-footgun"),
 ]
 
 # -----------------------------------------------------------------------------
@@ -459,12 +478,15 @@ def extract_failure(
         )
 
     error_class, message = _extract_from_text(log_text)
-    offset = log_text.find(message) if message else 0
-    snippet = (
-        "\n".join(log_text.splitlines()[:_RUN_LOG_MAX_LINES])
-        if offset == 0
-        else _extract_snippet(log_text, offset)
-    )
+    offset = log_text.find(message) if message and message in log_text else -1
+    lines = log_text.splitlines()
+    if offset >= 0:
+        snippet = _extract_snippet(log_text, offset)
+    else:
+        # Failure details are in the log tail, not the initial setup
+        tail_count = min(len(lines), _RUN_LOG_MAX_LINES)
+        snippet = "\n".join(lines[-tail_count:]) if lines else ""
+
     return FailureDetails(
         error_class=error_class,
         classification=classify_failure(error_class),
@@ -475,6 +497,9 @@ def extract_failure(
 
 
 def _extract_from_text(text: str) -> Tuple[str, str]:
+    if not text or not text.strip():
+        return "unknown", "Empty failure log"
+
     for pattern, error_class in _TRIVIAL_PATTERNS:
         match = re.search(pattern, text, re.MULTILINE | re.IGNORECASE)
         if match:
@@ -483,6 +508,29 @@ def _extract_from_text(text: str) -> Tuple[str, str]:
         match = re.search(pattern, text, re.MULTILINE | re.IGNORECASE)
         if match:
             return error_class, match.group(0).strip()
+
+    # Scan lines backwards from tail for informative failure markers
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    for ln in reversed(lines):
+        if any(
+            marker in ln.lower()
+            for marker in (
+                "error",
+                "fail",
+                "fatal",
+                "exit code",
+                "exception",
+                "traceback",
+            )
+        ):
+            clean_ln = re.sub(r"^.*?Z\s+", "", ln)
+            clean_ln = re.sub(r"^##\[error\]\s*", "", clean_ln).strip()
+            if clean_ln:
+                return "ci-error", clean_ln[:150]
+
+    if lines:
+        return "ci-failure", lines[-1][:150]
+
     return "unknown", "Unrecognized failure pattern"
 
 
@@ -500,11 +548,14 @@ def _find_existing_issue(
     client: Client,
     pr_number: int,
     repo: str = _REPO,
+    root_cause_key: Optional[str] = None,
 ) -> Optional[str]:
     recorded = _load_recorded()
     key = _issue_key(pr_number)
     if key in recorded:
         return recorded[key]
+    if root_cause_key and root_cause_key in recorded:
+        return recorded[root_cause_key]
     # Search open issues referencing the PR number in the title/body.
     query = f'is:issue is:open repo:{repo} "CI failure on PR #{pr_number}"'
     encoded = urllib.parse.quote(query)
@@ -513,10 +564,12 @@ def _find_existing_issue(
     if isinstance(data, dict) and data.get("total_count", 0) > 0:
         items = data.get("items", [])
         if items:
-            url = str(items[0].get("html_url", ""))
-            if url:
-                _record_issue(key, url)
-                return url
+            url_str = str(items[0].get("html_url", ""))
+            if url_str:
+                _record_issue(key, url_str)
+                if root_cause_key:
+                    _record_issue(root_cause_key, url_str)
+                return url_str
     return None
 
 
@@ -547,7 +600,13 @@ def create_child_issue(
         return None
 
     key = _issue_key(pr.number)
-    existing = _find_existing_issue(client, pr.number)
+    primary_failure = classified[0] if classified else None
+    root_cause_key = (
+        f"root-cause: {primary_failure[0].name} ({primary_failure[1].error_class})"
+        if primary_failure
+        else None
+    )
+    existing = _find_existing_issue(client, pr.number, root_cause_key=root_cause_key)
     if existing:
         print(f"[ci-diagnosis] issue already exists for PR #{pr.number}: {existing}")
         return existing
@@ -577,10 +636,10 @@ def create_child_issue(
             f"- **Check run URL**: {check.details_url}",
             "",
             f"**Error message:**",
-            f"```\\n{failure.message}\\n```",
+            f"```\n{failure.message}\n```",
             "",
             f"**Log/annotation excerpt:**",
-            f"```\\n{failure.snippet[:1000]}\\n```",
+            f"```\n{failure.snippet[:1000]}\n```",
             "",
         ])
 
@@ -619,6 +678,8 @@ def create_child_issue(
         issue_url = ""
     if issue_url:
         _record_issue(key, issue_url, recorded_state_path)
+        if root_cause_key:
+            _record_issue(root_cause_key, issue_url, recorded_state_path)
     return issue_url
 
 

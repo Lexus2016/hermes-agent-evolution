@@ -211,10 +211,7 @@ def test_diagnose_prs_detects_failure_and_creates_child_issue(hermes_home, monke
     # Verify state was recorded.
     assert state_path.is_file()
     recorded = json.loads(state_path.read_text(encoding="utf-8"))
-    assert (
-        recorded["Lexus2016/hermes-agent-evolution#42"]
-        == issue_response["html_url"]
-    )
+    assert recorded["Lexus2016/hermes-agent-evolution#42"] == issue_response["html_url"]
 
 
 def test_diagnose_prs_dry_run_does_not_create_issue(hermes_home, monkeypatch):
@@ -323,3 +320,31 @@ def test_main_cli_runs_with_dry_run(monkeypatch):
     rc = diag.main(["evolution_ci_diagnosis.py", "--dry-run"])
     assert rc == 0
     assert called["dry_run"] is True
+
+
+def test_extract_from_text_detects_exit_code_and_step_error():
+    text = "##[error]Process completed with exit code 1."
+    error_class, message = diag._extract_from_text(text)
+    assert error_class == "exit-code-failure"
+    assert "exit code 1" in message
+
+
+def test_extract_from_text_detects_nix_and_assertion_errors():
+    text1 = "builder for '/nix/store/abc.drv' failed with exit code 1"
+    err1, msg1 = diag._extract_from_text(text1)
+    assert err1 == "nix-build-error"
+
+    text2 = "AssertionError: assert 1 == 2"
+    err2, msg2 = diag._extract_from_text(text2)
+    assert err2 == "assertion-error"
+
+
+def test_extract_from_text_fallback_log_tail():
+    text = (
+        "2026-08-15T21:00:00Z Setting up job\n"
+        "2026-08-15T21:00:10Z Running tests\n"
+        "2026-08-15T21:01:00Z fatal: failed unexpectedly in step execution\n"
+    )
+    error_class, message = diag._extract_from_text(text)
+    assert error_class == "ci-error"
+    assert "failed unexpectedly" in message
