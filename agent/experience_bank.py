@@ -64,15 +64,21 @@ __all__ = [
     "GUIDANCE_TEMPLATES",
     "ExperienceEntry",
     "ExperiencePattern",
+    "DelegationPattern",
     "pattern_id",
     "entries_path",
     "patterns_path",
+    "delegation_patterns_path",
     "harvest_state_path",
     "experience_lock",
     "append_entry",
     "iter_entries",
     "load_patterns",
     "save_patterns",
+    "load_delegation_patterns",
+    "save_delegation_patterns",
+    "record_delegation_outcome",
+    "find_matching_delegation_patterns",
     "format_patterns_prompt",
     "get_harvest_state",
     "set_harvest_state",
@@ -155,15 +161,14 @@ GUIDANCE_TEMPLATES: Dict[tuple[str, str], tuple[str, str]] = {
 }
 
 _SECONDS_PER_DAY = 86400.0
-_SAFE_TOOL_CHARS = frozenset(
-    "abcdefghijklmnopqrstuvwxyz0123456789_"
-)
+_SAFE_TOOL_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
 _WINDOWS_LOCK_CONTENTION_ERRORS = frozenset({33, 36})
 
 
 # ---------------------------------------------------------------------------
 # Paths (resolved lazily — tests monkeypatch HERMES_HOME)
 # ---------------------------------------------------------------------------
+
 
 def _experience_dir() -> Path:
     """Return the experience-bank directory (not created here)."""
@@ -188,6 +193,7 @@ def harvest_state_path() -> Path:
 # ---------------------------------------------------------------------------
 # Shared cross-platform process lock
 # ---------------------------------------------------------------------------
+
 
 @contextmanager
 def experience_lock() -> Iterator[bool]:
@@ -228,6 +234,7 @@ def experience_lock() -> Iterator[bool]:
                 def unlock() -> None:
                     handle.seek(0)
                     msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
             except ImportError as exc:
                 _warn(f"Windows experience locking is unavailable: {exc}")
                 acquired = False
@@ -244,6 +251,7 @@ def experience_lock() -> Iterator[bool]:
 
                 def unlock() -> None:
                     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
             except BlockingIOError:
                 acquired = False
             except ImportError as exc:
@@ -268,12 +276,12 @@ def experience_lock() -> Iterator[bool]:
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 def _validate_dimension(dim: Optional[str], field_name: str) -> Optional[str]:
     """Validate a single dimension value at construction time."""
     if dim is not None and dim not in HARNESS_DIMENSIONS:
         raise ValueError(
-            f"{field_name} must be one of {HARNESS_DIMENSIONS} or None, "
-            f"got {dim!r}"
+            f"{field_name} must be one of {HARNESS_DIMENSIONS} or None, got {dim!r}"
         )
     return dim
 
@@ -522,6 +530,7 @@ class ExperiencePattern:
         Tolerant of malformed field types (coerces to safe defaults) and of
         v0 dicts missing the ``v`` / ``tool`` keys.
         """
+
         def _s(key: str) -> str:
             return str(d.get(key, "") or "")
 
@@ -552,6 +561,7 @@ class ExperiencePattern:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _warn(message: str) -> None:
     """Log a non-fatal storage problem to stderr.  Never raises."""
@@ -610,6 +620,7 @@ def _atomic_write_json(path: Path, payload: Any) -> bool:
 # Entries (append-only per-session diagnoses)
 # ---------------------------------------------------------------------------
 
+
 def append_entry(entry: ExperienceEntry) -> bool:
     """Append one entry as a JSON line to ``entries.jsonl``.
 
@@ -628,9 +639,9 @@ def append_entry(entry: ExperienceEntry) -> bool:
     original_length: Optional[int] = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        data = (
-            json.dumps(entry.to_dict(), separators=(",", ":")) + "\n"
-        ).encode("utf-8")
+        data = (json.dumps(entry.to_dict(), separators=(",", ":")) + "\n").encode(
+            "utf-8"
+        )
         fd = os.open(
             path,
             os.O_WRONLY | os.O_CREAT | os.O_APPEND,
@@ -709,6 +720,7 @@ def iter_entries(since_ts: Optional[float] = None) -> Iterator[ExperienceEntry]:
 # ---------------------------------------------------------------------------
 # Patterns (distilled global guidance)
 # ---------------------------------------------------------------------------
+
 
 def load_patterns(
     max_age_days: Optional[float] = None,
@@ -863,6 +875,7 @@ def format_patterns_prompt(
 # Harvest state (dedup cursor)
 # ---------------------------------------------------------------------------
 
+
 def get_harvest_state() -> Dict[str, Any]:
     """Read the harvest dedup cursor.  Returns ``{}`` on missing/corrupt."""
     path = harvest_state_path()
@@ -880,3 +893,144 @@ def set_harvest_state(state: Dict[str, Any]) -> bool:
     Атомарно зберігає курсор усунення дублів і повертає результат.
     """
     return _atomic_write_json(harvest_state_path(), dict(state))
+
+
+# ---------------------------------------------------------------------------
+# Delegation patterns (agent bank #2261 / parent #2251)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DelegationPattern:
+    """A proven subagent delegation configuration asset (#2261 / parent #2251)."""
+
+    task_type: str
+    role: str
+    model: str = ""
+    goal_template: str = ""
+    context_keys: List[str] = field(default_factory=list)
+    success_count: int = 1
+    total_count: int = 1
+    last_used: float = field(default_factory=time.time)
+
+    @property
+    def success_rate(self) -> float:
+        return self.success_count / self.total_count if self.total_count > 0 else 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to a JSON-compatible dictionary."""
+        return {
+            "task_type": self.task_type,
+            "role": self.role,
+            "model": self.model,
+            "goal_template": self.goal_template,
+            "context_keys": list(self.context_keys),
+            "success_count": self.success_count,
+            "total_count": self.total_count,
+            "last_used": _finite_float(self.last_used),
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "DelegationPattern":
+        """Deserialize from dictionary."""
+        return cls(
+            task_type=str(d.get("task_type", "")),
+            role=str(d.get("role", "")),
+            model=str(d.get("model", "")),
+            goal_template=str(d.get("goal_template", "")),
+            context_keys=list(d.get("context_keys", []) or []),
+            success_count=int(d.get("success_count", 1)),
+            total_count=int(d.get("total_count", 1)),
+            last_used=_finite_float(d.get("last_used", time.time())),
+        )
+
+
+def delegation_patterns_path() -> Path:
+    """Return the absolute path to the delegation patterns asset bank."""
+    return _experience_dir() / "delegation_patterns.json"
+
+
+def load_delegation_patterns() -> List[DelegationPattern]:
+    """Load all tracked delegation patterns from disk."""
+    path = delegation_patterns_path()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, list):
+            return [
+                DelegationPattern.from_dict(item)
+                for item in data
+                if isinstance(item, dict)
+            ]
+    except (OSError, ValueError):
+        pass
+    return []
+
+
+def save_delegation_patterns(patterns: Sequence[DelegationPattern]) -> bool:
+    """Persist delegation patterns atomically to disk."""
+    payload = [p.to_dict() for p in patterns]
+    return _atomic_write_json(delegation_patterns_path(), payload)
+
+
+def record_delegation_outcome(
+    task_type: str,
+    role: str,
+    model: str = "",
+    goal_template: str = "",
+    context_keys: Sequence[str] = (),
+    success: bool = True,
+) -> bool:
+    """Track a delegation execution outcome and update the agent bank."""
+    patterns = load_delegation_patterns()
+    matched = False
+    for p in patterns:
+        if p.task_type.lower() == task_type.lower() and p.role.lower() == role.lower():
+            p.total_count += 1
+            if success:
+                p.success_count += 1
+            p.last_used = time.time()
+            if model and not p.model:
+                p.model = model
+            if goal_template and not p.goal_template:
+                p.goal_template = goal_template
+            if context_keys:
+                p.context_keys = sorted(set(p.context_keys) | set(context_keys))
+            matched = True
+            break
+
+    if not matched:
+        patterns.append(
+            DelegationPattern(
+                task_type=task_type,
+                role=role,
+                model=model,
+                goal_template=goal_template,
+                context_keys=list(context_keys),
+                success_count=1 if success else 0,
+                total_count=1,
+                last_used=time.time(),
+            )
+        )
+
+    return save_delegation_patterns(patterns)
+
+
+def find_matching_delegation_patterns(
+    task_type: str,
+    min_success_rate: float = 0.5,
+    min_evidence: int = 1,
+) -> List[DelegationPattern]:
+    """Retrieve proven delegation patterns matching task_type."""
+    patterns = load_delegation_patterns()
+    query = task_type.lower().strip()
+    results = []
+    for p in patterns:
+        if p.total_count < min_evidence or p.success_rate < min_success_rate:
+            continue
+        p_type = p.task_type.lower().strip()
+        if p_type == query or p_type in query or query in p_type:
+            results.append(p)
+    return sorted(
+        results, key=lambda p: (-p.success_rate, -p.success_count, -p.last_used)
+    )
