@@ -1078,12 +1078,40 @@ class ToolRegistry:
         persistence from receiving values they cannot safely slice or size.
         """
         if isinstance(result, str):
+            # Credential masking (issue #2435): when
+            # ``security.credential_masking`` is enabled in config.yaml,
+            # run every string tool result through the redaction filter
+            # before it enters the model's context (terminal output, file
+            # reads, search results, errors). Gate-off (the default) is a
+            # byte-identical passthrough. Masking must never break a tool
+            # result, so any failure degrades to the unmasked string.
+            try:
+                from tools.credential_masking import mask_tool_output
+
+                result = mask_tool_output(result)
+            except Exception:
+                pass
             return _bound_json_error_result(result)
         if (
             isinstance(result, dict)
             and result.get("_multimodal") is True
             and isinstance(result.get("content"), list)
         ):
+            # Mask the text parts of the multimodal envelope too (images
+            # and other binary parts cannot carry token-shaped text).
+            try:
+                from tools.credential_masking import mask_credentials, masking_enabled
+
+                if masking_enabled():
+                    for _part in result.get("content", []):
+                        if (
+                            isinstance(_part, dict)
+                            and _part.get("type") == "text"
+                            and isinstance(_part.get("text"), str)
+                        ):
+                            _part["text"] = mask_credentials(_part["text"])
+            except Exception:
+                pass
             return result
 
         result_type = type(result).__name__
