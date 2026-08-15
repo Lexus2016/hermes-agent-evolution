@@ -1,11 +1,14 @@
 ---
 name: memory-consolidation
-description: Autonomous sleep-time memory consolidation during idle periods
-version: "1.0.0"
-tags:
-  - cron
-  - memory
-  - tqmemory
+description: Autonomous sleep-time memory consolidation.
+version: 1.0.0
+author: Hermes Agent
+license: MIT
+platforms: [linux, macos, windows]
+metadata:
+  hermes:
+    tags: [cron, memory, tqmemory]
+    category: memory
 ---
 
 # Memory Consolidation (Sleep-Time Compute)
