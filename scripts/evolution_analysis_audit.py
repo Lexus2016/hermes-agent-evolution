@@ -95,6 +95,145 @@ def audit_analysis(
     return out
 
 
+def extract_cited_paths(text: str) -> List[str]:
+    """Extract repo-relative file paths cited in text."""
+    if not text:
+        return []
+    return _CITED_PATH_RE.findall(str(text))
+
+
+def verify_implementation_claim(
+    item: Dict[str, Any], repo_root: Optional[Path]
+) -> bool:
+    """Verify whether an already_implemented claim refers to real code artifacts in repo_root.
+
+    Returns True if:
+    - repo_root is None or unreadable (cannot disprove)
+    - At least one cited repo path exists on disk
+    - No concrete paths are cited (cannot disprove by file existence alone)
+
+    Returns False if concrete repo paths are cited and none exist on disk.
+    """
+    if not isinstance(item, dict) or repo_root is None:
+        return True
+    repo = Path(repo_root)
+    try:
+        if not repo.is_dir():
+            return True
+    except OSError:
+        return True
+
+    text_blobs = [
+        str(item.get("reason") or ""),
+        str(item.get("claimed_artifact") or ""),
+        str(item.get("notes") or ""),
+        str(item.get("evidence") or ""),
+        str(item.get("description") or ""),
+    ]
+    cited: List[str] = []
+    for blob in text_blobs:
+        for p in extract_cited_paths(blob):
+            if p not in cited:
+                cited.append(p)
+
+    if cited and not any((repo / p).exists() for p in cited):
+        return False
+    return True
+
+
+def audit_implemented_claims(
+    report: Dict[str, Any], repo_root: Optional[Path]
+) -> List[str]:
+    """Catch unverified `already_implemented` claims in analysis reports (#2468).
+
+    If a candidate or proposal is marked `already_implemented: True` (or similar)
+    citing concrete artifacts that do not exist in the worktree, flag it.
+    """
+    if not isinstance(report, dict) or repo_root is None:
+        return []
+    repo = Path(repo_root)
+    try:
+        if not repo.is_dir():
+            return []
+    except OSError:
+        return []
+
+    out: List[str] = []
+    # Inspect all possible candidate/issue collection keys
+    items_to_check: List[Dict[str, Any]] = []
+    for key in (
+        "candidates",
+        "proposals",
+        "evaluated_issues",
+        "selected_for_implementation",
+        "issues",
+    ):
+        val = report.get(key)
+        if isinstance(val, list):
+            for entry in val:
+                if isinstance(entry, dict):
+                    items_to_check.append(entry)
+
+    for item in items_to_check:
+        is_claimed = (
+            bool(item.get("already_implemented"))
+            or str(item.get("status") or "").lower() == "already_implemented"
+        )
+        if not is_claimed:
+            continue
+        if not verify_implementation_claim(item, repo):
+            issue = (
+                item.get("issue_number")
+                or item.get("issue")
+                or item.get("id")
+                or "unknown"
+            )
+            cited = extract_cited_paths(
+                str(
+                    item.get("reason")
+                    or item.get("claimed_artifact")
+                    or item.get("notes")
+                    or ""
+                )
+            )
+            cited_str = f" citing {', '.join(cited[:3])}" if cited else ""
+            out.append(
+                f"UNVERIFIED_IMPLEMENTED_CLAIM: issue #{issue} marked already_implemented{cited_str} "
+                f"— artifact does not exist in worktree"
+            )
+    return out
+
+
+def reconcile_implemented_candidates(
+    candidates: Sequence[Dict[str, Any]],
+    repo_root: Optional[Path],
+) -> List[Dict[str, Any]]:
+    """Verify and reconcile already_implemented claims against the live worktree (#2468).
+
+    If an issue was marked `already_implemented: True` based on a stale/fabricated claim
+    that fails worktree verification, clear the flag so it can be ranked and scheduled normally.
+    """
+    if not candidates:
+        return []
+    reconciled: List[Dict[str, Any]] = []
+    for cand in candidates:
+        if not isinstance(cand, dict):
+            continue
+        item = dict(cand)
+        is_claimed = (
+            bool(item.get("already_implemented"))
+            or str(item.get("status") or "").lower() == "already_implemented"
+        )
+        if is_claimed and repo_root is not None:
+            if not verify_implementation_claim(item, repo_root):
+                item["already_implemented"] = False
+                if str(item.get("status") or "").lower() == "already_implemented":
+                    item["status"] = "open"
+                item["already_implemented_unverified"] = True
+        reconciled.append(item)
+    return reconciled
+
+
 def audit_rejections(report: Dict[str, Any], repo_root: Optional[Path]) -> List[str]:
     """Catch FABRICATED ``already-exists`` rejections — the #83 class, where the
     analysis agent CLOSED an issue claiming the feature already exists and cited a
@@ -188,7 +327,11 @@ def audit_latest(evolution_dir: Path, repo_root: Optional[Path] = None) -> List[
         report = json.loads(latest.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
-    violations = audit_analysis(report) + audit_rejections(report, repo_root)
+    violations = (
+        audit_analysis(report)
+        + audit_rejections(report, repo_root)
+        + audit_implemented_claims(report, repo_root)
+    )
 
     # Wire #1876: record a meta-skill trace per analysis cycle (fire-and-forget).
     _record_meta_skill_trace(report, evolution_dir)

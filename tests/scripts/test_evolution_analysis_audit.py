@@ -9,8 +9,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from evolution_analysis_audit import (  # noqa: E402
     audit_analysis,
+    audit_implemented_claims,
     audit_latest,
     audit_rejections,
+    extract_cited_paths,
+    reconcile_implemented_candidates,
+    verify_implementation_claim,
 )
 
 
@@ -102,7 +106,9 @@ class TestAuditLatest:
 
     def test_unreadable_json_is_silent(self, tmp_path):
         (tmp_path / "analysis").mkdir(parents=True)
-        (tmp_path / "analysis" / "2026-06-24.json").write_text("{not json", encoding="utf-8")
+        (tmp_path / "analysis" / "2026-06-24.json").write_text(
+            "{not json", encoding="utf-8"
+        )
         assert audit_latest(tmp_path) == []
 
     def test_audit_latest_runs_rejection_check_with_repo(self, tmp_path):
@@ -232,3 +238,95 @@ class TestAuditRejections:
         assert audit_rejections({"rejected": []}, tmp_path) == []
         assert audit_rejections({}, tmp_path) == []
 
+
+class TestVerifyImplementationClaim:
+    def test_existing_file_claim_verifies_true(self, tmp_path):
+        (tmp_path / "evolution" / "lib").mkdir(parents=True)
+        (tmp_path / "evolution" / "lib" / "real.py").write_text("ok")
+        item = {
+            "issue_number": 101,
+            "already_implemented": True,
+            "reason": "implemented in evolution/lib/real.py",
+        }
+        assert verify_implementation_claim(item, tmp_path) is True
+
+    def test_nonexistent_file_claim_verifies_false(self, tmp_path):
+        item = {
+            "issue_number": 102,
+            "already_implemented": True,
+            "reason": "claimed done in evolution/lib/nonexistent_file.py",
+        }
+        assert verify_implementation_claim(item, tmp_path) is False
+
+    def test_no_concrete_path_verifies_true(self, tmp_path):
+        item = {
+            "issue_number": 103,
+            "already_implemented": True,
+            "reason": "already done in earlier refactor",
+        }
+        assert verify_implementation_claim(item, tmp_path) is True
+
+
+class TestAuditImplementedClaims:
+    def test_flags_unverified_implemented_claim(self, tmp_path):
+        report = {
+            "date": "2026-08-15",
+            "candidates": [
+                {
+                    "issue_number": 200,
+                    "already_implemented": True,
+                    "reason": "already implemented in scripts/ghost_script.py",
+                }
+            ],
+        }
+        v = audit_implemented_claims(report, tmp_path)
+        assert len(v) == 1
+        assert "UNVERIFIED_IMPLEMENTED_CLAIM" in v[0]
+        assert "#200" in v[0]
+
+    def test_clean_when_implemented_artifact_exists(self, tmp_path):
+        (tmp_path / "scripts").mkdir()
+        (tmp_path / "scripts" / "real_script.py").write_text("x")
+        report = {
+            "date": "2026-08-15",
+            "candidates": [
+                {
+                    "issue_number": 201,
+                    "already_implemented": True,
+                    "reason": "already implemented in scripts/real_script.py",
+                }
+            ],
+        }
+        assert audit_implemented_claims(report, tmp_path) == []
+
+
+class TestReconcileImplementedCandidates:
+    def test_clears_stale_already_implemented_flag(self, tmp_path):
+        candidates = [
+            {
+                "issue_number": 301,
+                "already_implemented": True,
+                "reason": "implemented in tools/phantom.py",
+                "priority_score": 0.9,
+            }
+        ]
+        reconciled = reconcile_implemented_candidates(candidates, tmp_path)
+        assert len(reconciled) == 1
+        assert reconciled[0]["already_implemented"] is False
+        assert reconciled[0]["already_implemented_unverified"] is True
+        assert reconciled[0]["priority_score"] == 0.9
+
+    def test_preserves_valid_already_implemented_flag(self, tmp_path):
+        (tmp_path / "tools").mkdir()
+        (tmp_path / "tools" / "valid.py").write_text("x")
+        candidates = [
+            {
+                "issue_number": 302,
+                "already_implemented": True,
+                "reason": "implemented in tools/valid.py",
+                "priority_score": 0.8,
+            }
+        ]
+        reconciled = reconcile_implemented_candidates(candidates, tmp_path)
+        assert len(reconciled) == 1
+        assert reconciled[0]["already_implemented"] is True
