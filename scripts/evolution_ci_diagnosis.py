@@ -81,6 +81,8 @@ _TRIVIAL_PATTERNS: List[Tuple[str, str]] = [
     (r"Incompatible return value type", "incompatible-return"),
     (r"Module .* has no attribute", "missing-attribute"),
     (r"mypy.*failed", "mypy"),
+    (r"\b(E[0-9]{3}|W[0-9]{3}|F[0-9]{3}|C[0-9]{3})\b", "lint"),
+    (r"\berror:\s*\[[a-z][a-z0-9-]*\]", "lint"),
 ]
 
 _COMPLEX_PATTERNS: List[Tuple[str, str]] = [
@@ -101,6 +103,17 @@ _COMPLEX_PATTERNS: List[Tuple[str, str]] = [
     (r"ConnectionError:", "connection-error"),
     (r"PermissionError:", "permission-error"),
     (r"subprocess\.CalledProcessError", "subprocess-error"),
+    (r"AssertionError", "assertion-error"),
+    (r"^E\s+assert\b", "assertion-error"),
+    (
+        r"(?:Process completed with|Exited with|Command exited with) exit code \d+",
+        "exit-code",
+    ),
+    (r"exit code \d+", "exit-code"),
+    (r"exit status \d+", "exit-code"),
+    (r"\btimed out\b|Operation timed out|Timeout expired", "timeout"),
+    (r"Permission denied|EACCES|Operation not permitted", "permission-error"),
+    (r"No module named ['\"]?[^'\"]+", "module-not-found"),
 ]
 
 # -----------------------------------------------------------------------------
@@ -401,6 +414,19 @@ def _extract_snippet(
     return "\n".join(lines[start:end])
 
 
+def _raw_tail(text: str, max_lines: int = _SNIPPET_LINES) -> str:
+    """Return the tail of a log/annotation blob as a raw diagnostic excerpt.
+
+    Used when no failure pattern matches, so an unrecognised failure still
+    surfaces actionable context (the actual log lines) in the issue body instead
+    of a bare "Unrecognized failure pattern" with nothing to diagnose (#2467).
+    """
+    if not text:
+        return ""
+    lines = text.splitlines()
+    return "\n".join(lines[-max_lines:])
+
+
 def _format_annotations(annotations: List[Dict[str, Any]]) -> str:
     parts: List[str] = []
     for ann in annotations:
@@ -434,13 +460,20 @@ def extract_failure(
     if check.annotations:
         annotations_text = _format_annotations(check.annotations)
         error_class, message = _extract_from_text(annotations_text)
+        if error_class == "unknown":
+            snippet = _raw_tail(annotations_text)
+        else:
+            offset = annotations_text.find(message)
+            snippet = (
+                _extract_snippet(annotations_text, offset)
+                if offset >= 0
+                else _raw_tail(annotations_text)
+            )
         return FailureDetails(
             error_class=error_class,
             classification=classify_failure(error_class),
             message=message,
-            snippet=_extract_snippet(
-                annotations_text, annotations_text.find(message) if message else 0
-            ),
+            snippet=snippet,
             source="annotations",
         )
 
@@ -460,11 +493,14 @@ def extract_failure(
 
     error_class, message = _extract_from_text(log_text)
     offset = log_text.find(message) if message else 0
-    snippet = (
-        "\n".join(log_text.splitlines()[:_RUN_LOG_MAX_LINES])
-        if offset == 0
-        else _extract_snippet(log_text, offset)
-    )
+    if offset < 0:
+        snippet = _raw_tail(log_text, max_lines=_RUN_LOG_MAX_LINES)
+    else:
+        snippet = (
+            "\n".join(log_text.splitlines()[:_RUN_LOG_MAX_LINES])
+            if offset == 0
+            else _extract_snippet(log_text, offset)
+        )
     return FailureDetails(
         error_class=error_class,
         classification=classify_failure(error_class),
@@ -529,20 +565,26 @@ def create_child_issue(
 ) -> Optional[str]:
     """Create ONE aggregated issue for all failed checks on a PR.
 
-    Only called when at least one failure is classified (not 'unknown').
-    Skips entirely if all failures are 'unknown' — unrecognised patterns
-    produce noise, not actionable issues.
+    Classified (complex, root-caused) failures get a focused section; failures
+    whose pattern is still unrecognised get their raw log/annotation excerpt
+    surfaced so a human or LLM can diagnose them (rather than being silently
+    dropped). Skips entirely only when nothing is actionable (all trivial).
     """
-    # Only create issues for complex, classifiable failures.
-    # Skip trivial (lint/format) and unknown (unrecognised pattern).
+    # Complex failures with a recognised root cause.
     classified = [
         (check, failure)
         for check, failure in failures
         if failure.classification == "complex" and failure.error_class != "unknown"
     ]
-    if not classified:
+    # Complex failures with no recognised pattern — surface their raw excerpt.
+    unclassified = [
+        (check, failure)
+        for check, failure in failures
+        if failure.error_class == "unknown"
+    ]
+    if not classified and not unclassified:
         print(
-            f"[ci-diagnosis] PR #{pr.number}: all failures are 'unknown' — skipping issue creation"
+            f"[ci-diagnosis] PR #{pr.number}: no classifiable failures (all trivial) — skipping"
         )
         return None
 
@@ -554,6 +596,8 @@ def create_child_issue(
 
     # Aggregate error classes for the title
     error_classes = sorted({f.error_class for _, f in classified})
+    if not error_classes:
+        error_classes = ["unrecognized"]
     title = f"CI failure on PR #{pr.number}: {', '.join(error_classes)}"
 
     # Build body with all failed checks
@@ -563,7 +607,7 @@ def create_child_issue(
         f"**PR**: #{pr.number} — {pr.title}",
         f"**PR URL**: {pr.html_url}",
         f"**Head SHA**: `{pr.head_sha}`",
-        f"**Failed checks**: {len(classified)} (of {len(failures)} total)",
+        f"**Failed checks**: {len(classified) + len(unclassified)} (of {len(failures)} total)",
         "",
     ]
 
@@ -584,13 +628,27 @@ def create_child_issue(
             "",
         ])
 
-    # Note about unclassified failures
-    unknown_count = len(failures) - len(classified)
-    if unknown_count:
+    for check, failure in unclassified:
         body_lines.extend([
-            f"### Unclassified failures ({unknown_count})",
+            f"### {check.name}",
             "",
-            f"{unknown_count} check(s) had unrecognised failure patterns and were omitted.",
+            f"- **Error class**: `{failure.error_class}` (unrecognized pattern)",
+            f"- **Classification**: `{failure.classification}`",
+            f"- **Source**: `{failure.source}`",
+            f"- **Check run URL**: {check.details_url}",
+            "",
+            "**Raw log/annotation excerpt (no pattern matched):**",
+            f"```\n{failure.snippet[:1000] or failure.message}\n```",
+            "",
+        ])
+
+    # Trivial (lint/format) failures are auto-fixable and omitted on purpose.
+    trivial_count = len(failures) - len(classified) - len(unclassified)
+    if trivial_count:
+        body_lines.extend([
+            f"### Trivial failures ({trivial_count})",
+            "",
+            f"{trivial_count} lint/format check(s) were trivial and omitted (auto-fixable).",
             "",
         ])
 

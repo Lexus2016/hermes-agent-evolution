@@ -211,10 +211,7 @@ def test_diagnose_prs_detects_failure_and_creates_child_issue(hermes_home, monke
     # Verify state was recorded.
     assert state_path.is_file()
     recorded = json.loads(state_path.read_text(encoding="utf-8"))
-    assert (
-        recorded["Lexus2016/hermes-agent-evolution#42"]
-        == issue_response["html_url"]
-    )
+    assert recorded["Lexus2016/hermes-agent-evolution#42"] == issue_response["html_url"]
 
 
 def test_diagnose_prs_dry_run_does_not_create_issue(hermes_home, monkeypatch):
@@ -323,3 +320,96 @@ def test_main_cli_runs_with_dry_run(monkeypatch):
     rc = diag.main(["evolution_ci_diagnosis.py", "--dry-run"])
     assert rc == 0
     assert called["dry_run"] is True
+
+
+# --- #2467: root-cause extraction + raw-excerpt fallback ---
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("E   AssertionError: assert 1 == 2", "assertion-error"),
+        ("Process completed with exit code 1.", "exit-code"),
+        ("runner exited with exit code 2", "exit-code"),
+        ("Operation timed out after 120s", "timeout"),
+        ("Permission denied: /nix/store", "permission-error"),
+        ("No module named 'hermes_foo'", "module-not-found"),
+        ("scripts/x.py:42:5: E501 line too long", "lint"),
+    ],
+)
+def test_extract_from_text_new_patterns(text, expected):
+    error_class, _ = diag._extract_from_text(text)
+    assert error_class == expected
+
+
+def test_raw_tail_returns_last_lines():
+    text = "\n".join(f"line {i}" for i in range(50))
+    assert diag._raw_tail(text, max_lines=5).splitlines() == [
+        "line 45",
+        "line 46",
+        "line 47",
+        "line 48",
+        "line 49",
+    ]
+
+
+def test_extract_failure_unknown_surfaces_raw_tail():
+    check = diag.FailedCheck(
+        check_run_id=1,
+        name="tests (slice 3)",
+        conclusion="failure",
+        details_url="https://github.com/runs/1",
+        head_sha="sha1",
+        annotations=[
+            {
+                "path": "tests/x.py",
+                "start_line": 1,
+                "annotation_level": "failure",
+                "message": "some opaque native error without a known shape",
+                "title": "test failed",
+            }
+        ],
+    )
+    failure = diag.extract_failure(check)
+    assert failure.error_class == "unknown"
+    assert failure.classification == "complex"
+    assert "opaque native error" in failure.snippet
+
+
+def test_create_child_issue_surfaces_unclassified_raw_excerpt(hermes_home):
+    pr = diag.PRInfo(
+        number=60,
+        title="feat: opaque failure",
+        head_sha="sha60",
+        head_branch="evolution/x",
+        html_url="https://github.com/Lexus2016/hermes-agent-evolution/pull/60",
+    )
+    check = diag.FailedCheck(
+        check_run_id=7,
+        name="tests (slice 4)",
+        conclusion="failure",
+        details_url="https://github.com/runs/7",
+        head_sha="sha60",
+        annotations=[],
+    )
+    failure = diag.FailureDetails(
+        error_class="unknown",
+        classification="complex",
+        message="Unrecognized failure pattern",
+        snippet="line A\nline B\nopaque detail",
+        source="gh-run-log",
+    )
+    client = FakeClient([
+        (200, {"total_count": 0, "items": []}),
+        (
+            201,
+            {
+                "html_url": "https://github.com/Lexus2016/hermes-agent-evolution/issues/999"
+            },
+        ),
+    ])
+    url = diag.create_child_issue(client, pr, [(check, failure)], dry_run=False)
+    assert url == "https://github.com/Lexus2016/hermes-agent-evolution/issues/999"
+    post_body = json.loads(client.calls[-1][2] or "{}")
+    assert "opaque detail" in post_body["body"]
+    assert "Raw log/annotation excerpt" in post_body["body"]
