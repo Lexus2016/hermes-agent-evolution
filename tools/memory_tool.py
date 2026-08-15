@@ -1186,13 +1186,11 @@ class MemoryStore:
             entries = self._entries_for(target)
             result = supersede_entry(entries, old_text)
             if not result.get("success"):
-                return self._consolidation_failure(
-                    {
-                        "success": False,
-                        "error": result.get("error", "supersede failed."),
-                        "current_entries": entries,
-                    }
-                )
+                return self._consolidation_failure({
+                    "success": False,
+                    "error": result.get("error", "supersede failed."),
+                    "current_entries": entries,
+                })
             self.save_to_disk(target)
             msg = (
                 "Entry already superseded (no change)."

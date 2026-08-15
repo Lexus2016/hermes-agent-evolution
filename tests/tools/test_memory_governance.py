@@ -80,3 +80,76 @@ class TestGovernedSearch:
         from tools.memory_governance import governed_search
 
         assert callable(governed_search)
+
+    def test_search_hides_superseded_by_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        from tools.memory_tool import MemoryStore
+
+        store = MemoryStore()
+        store.add("memory", "active note about python")
+        store.add("memory", "stale note about ruby")
+
+        # Supersede ruby note
+        res = store.supersede("memory", "stale note about ruby")
+        assert res["success"] is True
+
+        # Default search hides superseded entry
+        results = store.search("memory")
+        texts = [r["text"] for r in results]
+        assert "active note about python" in texts
+        assert not any("ruby" in t for t in texts)
+
+        # include_superseded=True returns it with timestamp
+        all_results = store.search("memory", include_superseded=True)
+        assert len(all_results) == 2
+        ruby_row = next(r for r in all_results if "ruby" in r["text"])
+        assert ruby_row["superseded_at"] is not None
+        python_row = next(r for r in all_results if "python" in r["text"])
+        assert python_row.get("superseded_at") is None
+
+    def test_memory_tool_supersede_action_e2e(self, tmp_path, monkeypatch):
+        import json
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        from tools.memory_tool import MemoryStore, memory_tool
+
+        store = MemoryStore()
+
+        # Add an entry
+        r1 = json.loads(
+            memory_tool(
+                action="add",
+                target="memory",
+                content="fact A to supersede",
+                store=store,
+            )
+        )
+        assert r1["success"] is True
+
+        # Supersede it
+        r2 = json.loads(
+            memory_tool(
+                action="supersede", target="memory", old_text="fact A", store=store
+            )
+        )
+        assert r2["success"] is True
+        assert "superseded" in r2["message"].lower()
+
+        # Supersede again (first-supersession-wins)
+        r3 = json.loads(
+            memory_tool(
+                action="supersede", target="memory", old_text="fact A", store=store
+            )
+        )
+        assert r3["success"] is True
+        assert "already superseded" in r3["message"].lower()
+
+        # Search via tool with include_superseded
+        r4 = json.loads(
+            memory_tool(
+                action="search", target="memory", include_superseded=True, store=store
+            )
+        )
+        assert r4["success"] is True
+        assert len(r4["results"]) == 1
+        assert r4["results"][0].get("superseded_at") is not None
