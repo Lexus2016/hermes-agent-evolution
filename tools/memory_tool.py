@@ -183,6 +183,9 @@ def parse_provenance(stored: str):
 # ---------------------------------------------------------------------------
 
 from tools.threat_patterns import first_threat_message as _first_threat_message
+from tools.memory_governance import governed_search as _governed_search
+from tools.memory_governance import parse_supersession
+from tools.memory_governance import supersede_entry as _supersede_entry
 
 
 def _scan_memory_content(content: str) -> Optional[str]:
@@ -1114,6 +1117,7 @@ class MemoryStore:
         target: str,
         source_filter: Optional[object] = None,
         min_trust: Optional[str] = None,
+        include_superseded: bool = False,
     ) -> List[Dict[str, Any]]:
         """Return live entries as provenance-resolved rows, optionally filtered.
 
@@ -1126,6 +1130,11 @@ class MemoryStore:
           * ``source_filter``: a source_class string or iterable of them; keep
             entries whose source_class is in the set.
           * ``min_trust``: a trust tier; keep entries whose tier ranks >= it.
+
+        Governance (#2437): superseded entries (``⟦sup:…⟧`` trailer) are
+        hidden unless ``include_superseded=True``; when included, each row
+        carries ``"superseded_at"``. Parsing order: sup trailer FIRST, then
+        provenance — it is the outermost trailer.
         """
         if isinstance(source_filter, str):
             allowed = {source_filter}
@@ -1138,13 +1147,53 @@ class MemoryStore:
 
         rows: List[Dict[str, Any]] = []
         for entry in self._entries_for(target):
-            text, src, tier = parse_provenance(entry)
+            entry_display, sup_ts = parse_supersession(entry)
+            if sup_ts is not None and not include_superseded:
+                continue
+            text, src, tier = parse_provenance(entry_display)
             if allowed is not None and src not in allowed:
                 continue
             if min_rank is not None and _trust_rank(tier) < min_rank:
                 continue
-            rows.append({"text": text, "source_class": src, "trust_tier": tier})
+            row = {"text": text, "source_class": src, "trust_tier": tier}
+            if sup_ts is not None:
+                row["superseded_at"] = sup_ts
+            rows.append(row)
         return rows
+
+    def supersede(self, target: str, old_text: str) -> Dict[str, Any]:
+        """Mark the entry containing *old_text* as superseded (#2437).
+
+        Temporal governance: bytes stay on disk (audit) but recall hides
+        the entry. First supersession wins — the timestamp is the audit
+        record. Runs under the file lock like replace/remove.
+        """
+        old_text = (old_text or "").strip()
+        if not old_text:
+            return {"success": False, "error": "old_text cannot be empty."}
+        with self._file_lock(self._path_for(target)):
+            bak = self._reload_target(target)
+            if bak is _READ_FAILED:
+                return _read_failed_error(self._path_for(target))
+            if bak:
+                return _drift_error(self._path_for(target), bak)
+            entries = self._entries_for(target)
+            result = _supersede_entry(entries, old_text)
+            if not result.get("success"):
+                return self._consolidation_failure(
+                    {
+                        "success": False,
+                        "error": result.get("error", "supersede failed."),
+                        "current_entries": entries,
+                    }
+                )
+            self.save_to_disk(target)
+            msg = (
+                "Entry already superseded (no change)."
+                if result.get("already_superseded")
+                else "Entry superseded; hidden from default recall."
+            )
+            return self._success_response(target, msg)
 
     def apply_batch(
         self,

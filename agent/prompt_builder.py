@@ -51,6 +51,14 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 from tools.threat_patterns import scan_for_threats as _scan_for_threats
+from agent.context_load_instrument import (  # noqa: F401  (re-exported for #2442)
+    KIND_AGENTS,
+    KIND_CLAUDE,
+    KIND_CURSORRULES,
+    KIND_HERMES,
+    KIND_SOUL,
+    record_context_load as _record_context_load,
+)
 
 
 def _scan_context_content(content: str, filename: str) -> str:
@@ -2325,9 +2333,13 @@ def load_soul_md(context_length: Optional[int] = None) -> Optional[str]:
             content, "SOUL.md", context_length=context_length,
             read_path=str(soul_path),
         )
+        _record_context_load(
+            str(soul_path), KIND_SOUL, chars=len(content), section="## SOUL.md"
+        )
         return content
     except Exception as e:
         logger.debug("Could not read SOUL.md from %s: %s", soul_path, e)
+        _record_context_load(str(soul_path), KIND_SOUL, loaded=False)
         return None
 
 
@@ -2348,10 +2360,14 @@ def _load_hermes_md(cwd_path: Path, context_length: Optional[int] = None) -> str
             pass
         content = _scan_context_content(content, rel)
         result = f"## {rel}\n\n{content}"
-        return _truncate_content(
+        result = _truncate_content(
             result, ".hermes.md", context_length=context_length,
             read_path=str(hermes_md_path),
         )
+        _record_context_load(
+            str(hermes_md_path), KIND_HERMES, chars=len(content), section=f"## {rel}"
+        )
+        return result
     except Exception as e:
         logger.debug("Could not read %s: %s", hermes_md_path, e)
         return ""
@@ -2381,6 +2397,10 @@ def _load_agents_md(cwd_path: Path, context_length: Optional[int] = None) -> str
                 if section:
                     base.append(section)
                     loaded_paths.append(candidate)
+                    _record_context_load(
+                        str(candidate), KIND_AGENTS,
+                        chars=len(_section_body(section)), section=section.split("\n", 1)[0],
+                    )
                 break  # one AGENTS.md per directory
         for name in _AGENTS_OVERRIDE_NAMES:
             candidate = directory / name
@@ -2389,6 +2409,10 @@ def _load_agents_md(cwd_path: Path, context_length: Optional[int] = None) -> str
                 if section:
                     overrides.append(section)
                     loaded_paths.append(candidate)
+                    _record_context_load(
+                        str(candidate), KIND_AGENTS,
+                        chars=len(_section_body(section)), section=section.split("\n", 1)[0],
+                    )
                 break
 
     if not base and not overrides:
@@ -2442,10 +2466,15 @@ def _load_claude_md(cwd_path: Path, context_length: Optional[int] = None) -> str
                     if seam_block:
                         return seam_block
                     result = f"## {name}\n\n{content}"
-                    return _truncate_content(
+                    result = _truncate_content(
                         result, "CLAUDE.md", context_length=context_length,
                         read_path=str(candidate),
                     )
+                    _record_context_load(
+                        str(candidate), KIND_CLAUDE,
+                        chars=len(content), section=f"## {name}",
+                    )
+                    return result
             except Exception as e:
                 logger.debug("Could not read %s: %s", candidate, e)
     return ""
@@ -2478,10 +2507,14 @@ def _load_cursorrules(cwd_path: Path, context_length: Optional[int] = None) -> s
 
     if not cursorrules_content:
         return ""
-    return _truncate_content(
+    result = _truncate_content(
         cursorrules_content, ".cursorrules", context_length=context_length,
         read_path=str(cwd_path / ".cursorrules"),
     )
+    _record_context_load(
+        str(cwd_path / ".cursorrules"), KIND_CURSORRULES, chars=len(cursorrules_content)
+    )
+    return result
 
 
 def build_context_files_prompt(

@@ -10,19 +10,26 @@ Design
 ------
 A process-wide singleton ``FileStateRegistry`` tracks, per resolved path:
 
-  * per-agent read stamps: {task_id: {path: (mtime, read_ts, partial)}}
-  * last writer globally: {path: (task_id, write_ts)}
-  * per-path ``threading.Lock`` for read→modify→write critical sections
+* per-agent read stamps: {task_id: {path: (mtime, read_ts, partial)}}
+* last writer globally: {path: (task_id, write_ts)}
+* per-path ``threading.Lock`` for read→modify→write critical sections
 
 Three public hooks are used by the file tools:
 
-  * ``record_read(task_id, path, *, partial)`` — called by read_file
-  * ``note_write(task_id, path)`` — called after write_file / patch
-  * ``check_stale(task_id, path)`` — called BEFORE write_file / patch
+* ``record_read(task_id, path, *, partial)`` — called by read_file
+* ``note_write(task_id, path)`` — called after write_file / patch
+* ``check_stale(task_id, path)`` — called BEFORE write_file / patch
 
 Plus ``lock_path(path)`` — a context-manager returning a per-path lock to
 wrap the whole read→modify→write block. And ``writes_since(task_id,
 since_ts, paths)`` for the subagent-completion reminder in delegate_tool.
+
+On a sibling-subagent conflict (#2424), ``check_stale`` also snapshots the
+current on-disk content to a ``.conflict-*`` sidecar via
+``snapshot_conflict()`` BEFORE the caller overwrites, and names the
+snapshot path in the warning — so the write path surfaces BOTH the
+canonical path and the preserved sibling copy, and a caller that ignores
+the warning can no longer silently destroy the sibling's content.
 
 All methods are no-ops when ``HERMES_DISABLE_FILE_STATE_GUARD=1`` is set.
 
@@ -40,19 +47,18 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-
 # ── Public stamp type ────────────────────────────────────────────────
-# (mtime, read_ts, partial).  partial=True when read_file returned a
+# (mtime, read_ts, partial). partial=True when read_file returned a
 # windowed view (offset > 1 or limit < total_lines) — writes that happen
 # after a partial read should still warn so the model re-reads in full.
 ReadStamp = Tuple[float, float, bool]
 
-# Number of resolved-path entries retained per agent.  Bounded to keep
-# long sessions from accumulating unbounded state.  On overflow we drop
+# Number of resolved-path entries retained per agent. Bounded to keep
+# long sessions from accumulating unbounded state. On overflow we drop
 # the oldest entries by insertion order.
 _MAX_PATHS_PER_AGENT = 4096
 
-# Global last-writer map cap.  Same policy.
+# Global last-writer map cap. Same policy.
 _MAX_GLOBAL_WRITERS = 4096
 
 
@@ -67,6 +73,7 @@ class FileStateRegistry:
         self._state_lock = threading.Lock()  # guards _reads + _last_writer
 
     # ── Path lock management ────────────────────────────────────────
+
     def _lock_for(self, resolved: str) -> threading.Lock:
         with self._meta_lock:
             lock = self._path_locks.get(resolved)
@@ -90,6 +97,7 @@ class FileStateRegistry:
             lock.release()
 
     # ── Read/write accounting ───────────────────────────────────────
+
     def record_read(
         self,
         task_id: str,
@@ -144,12 +152,17 @@ class FileStateRegistry:
 
         Three staleness classes, in order of severity:
 
-          1. Sibling subagent wrote this file after this agent's last read.
-          2. External/unknown change (mtime differs from our last read).
-          3. Agent never read the file (write-without-read).
+        1. Sibling subagent wrote this file after this agent's last read.
+        2. External/unknown change (mtime differs from our last read).
+        3. Agent never read the file (write-without-read).
 
-        Returns ``None`` when the write is safe.  Does not raise — callers
+        Returns ``None`` when the write is safe. Does not raise — callers
         decide whether to block or warn.
+
+        #2424: in Case 1 the sibling's on-disk content is snapshot to a
+        ``.conflict-*`` sidecar before this agent can overwrite it, and
+        the warning names BOTH paths so the caller can merge instead of
+        losing the sibling's write.
         """
         if _disabled():
             return None
@@ -158,7 +171,7 @@ class FileStateRegistry:
             last_writer = self._last_writer.get(resolved)
 
         # Case 3: never read AND we have no write record — net-new file or
-        # first touch by this agent.  Let existing _check_sensitive_path
+        # first touch by this agent. Let existing _check_sensitive_path
         # and file-exists logic handle it; nothing to warn about here.
         if stamp is None and last_writer is None:
             return None
@@ -174,19 +187,21 @@ class FileStateRegistry:
             writer_tid, writer_ts = last_writer
             if writer_tid != task_id:
                 if stamp is None:
+                    preserved = _preserved_suffix(resolved, writer_tid)
                     return (
                         f"{resolved} was modified by sibling subagent "
                         f"{writer_tid!r} but this agent never read it. "
                         "Read the file before writing to avoid overwriting "
-                        "the sibling's changes."
+                        f"the sibling's changes.{preserved}"
                     )
                 read_ts = stamp[1]
                 if writer_ts > read_ts:
+                    preserved = _preserved_suffix(resolved, writer_tid)
                     return (
                         f"{resolved} was modified by sibling subagent "
                         f"{writer_tid!r} at {_fmt_ts(writer_ts)} — after "
                         f"this agent's last read at {_fmt_ts(read_ts)}. "
-                        "Re-read the file before writing."
+                        f"Re-read the file before writing.{preserved}"
                     )
 
         # Case 2: external / unknown modification (mtime drifted).
@@ -215,6 +230,7 @@ class FileStateRegistry:
         return None
 
     # ── Reminder helper for delegate_tool ───────────────────────────
+
     def writes_since(
         self,
         exclude_task_id: str,
@@ -249,8 +265,9 @@ class FileStateRegistry:
             return list(self._reads.get(task_id, {}).keys())
 
     # ── Testing hooks ───────────────────────────────────────────────
+
     def clear(self) -> None:
-        """Reset all state.  Intended for tests only."""
+        """Reset all state. Intended for tests only."""
         with self._state_lock:
             self._reads.clear()
             self._last_writer.clear()
@@ -259,6 +276,7 @@ class FileStateRegistry:
 
 
 # ── Module-level singleton + helpers ─────────────────────────────────
+
 _registry = FileStateRegistry()
 
 
@@ -269,6 +287,86 @@ def get_registry() -> FileStateRegistry:
 def _disabled() -> bool:
     # Re-read each call so tests can toggle via monkeypatch.setenv.
     return os.environ.get("HERMES_DISABLE_FILE_STATE_GUARD", "").strip() == "1"
+
+
+# ── Conflict snapshots (#2424) ──────────────────────────────────────
+# check_stale() historically only *warned* on a sibling-subagent
+# lost-update (Case 1); the write path surfaced the warning and then
+# overwrote anyway, so the sibling's on-disk content was silently lost —
+# unrecoverable when the read path is circuit-broken in the same fan-out
+# session. snapshot_conflict() copies the current on-disk bytes to a
+# ".conflict-*" sidecar BEFORE the caller overwrites, and check_stale()
+# surfaces BOTH paths in its warning so the model can merge the two
+# versions instead of losing one.
+
+_CONFLICT_SNAPSHOT_SUFFIX = ".conflict-"
+_MAX_CONFLICT_SNAPSHOTS_PER_PATH = 5
+
+
+def _sanitize_task_id_for_filename(task_id: str) -> str:
+    """Filesystem-safe, length-capped rendering of a task id."""
+    safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in task_id)
+    return safe[:48] or "unknown"
+
+
+def snapshot_conflict(resolved: str, writer_task_id: str) -> Optional[str]:
+    """Best-effort pre-overwrite snapshot of ``resolved``.
+
+    Copies the file's current bytes to
+    ``<resolved>.conflict-<writer>-<utc-ts>-<frac>`` beside it and returns
+    the snapshot path, so a caller that ignores the staleness warning
+    cannot destroy the sibling subagent's content (#2424). Returns
+    ``None`` on any failure (missing file, OSError, guard disabled) —
+    this must never raise into the tool path. Keeps at most
+    ``_MAX_CONFLICT_SNAPSHOTS_PER_PATH`` sidecars per target, dropping
+    the oldest.
+    """
+    if _disabled():
+        return None
+    try:
+        src = Path(resolved)
+        if not src.is_file():
+            return None
+        stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+        frac = time.time_ns() % 1_000_000
+        snap = src.with_name(
+            f"{src.name}{_CONFLICT_SNAPSHOT_SUFFIX}"
+            f"{_sanitize_task_id_for_filename(writer_task_id)}-{stamp}-{frac:06d}"
+        )
+        tmp = snap.with_name(snap.name + ".tmp")
+        tmp.write_bytes(src.read_bytes())
+        os.replace(tmp, snap)  # atomic publish
+        _prune_conflict_snapshots(src)
+        return str(snap)
+    except OSError:
+        return None
+
+
+def _prune_conflict_snapshots(src: Path) -> None:
+    """Keep only the newest N ``.conflict-*`` sidecars for ``src``."""
+    existing = sorted(src.parent.glob(src.name + _CONFLICT_SNAPSHOT_SUFFIX + "*"))
+    overflow = len(existing) - _MAX_CONFLICT_SNAPSHOTS_PER_PATH
+    for stale in (existing[:overflow] if overflow > 0 else []):
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+
+
+def _preserved_suffix(resolved: str, writer_tid: str) -> str:
+    """Snapshot the sibling's content and render the warning suffix.
+
+    Returns ``""`` when no snapshot could be taken (file missing, guard
+    disabled, OSError) so the caller's warning degrades gracefully to
+    the pre-#2424 text.
+    """
+    snap = snapshot_conflict(resolved, writer_tid)
+    if not snap:
+        return ""
+    return (
+        f" Sibling content preserved at {snap} — merge both versions "
+        "instead of overwriting."
+    )
 
 
 def _fmt_ts(ts: float) -> str:
@@ -292,6 +390,8 @@ def _cap_dict(d: dict, limit: int) -> None:
 
 
 # ── Convenience wrappers (short names used at call sites) ────────────
+
+
 def record_read(task_id: str, resolved_or_path: str | Path, *, partial: bool = False) -> None:
     _registry.record_read(task_id, str(resolved_or_path), partial=partial)
 
@@ -329,4 +429,5 @@ __all__ = [
     "lock_path",
     "writes_since",
     "known_reads",
+    "snapshot_conflict",
 ]
