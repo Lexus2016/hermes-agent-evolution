@@ -22,6 +22,7 @@ import enum
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -504,28 +505,43 @@ def recovery_hint(failure: ToolFailure) -> str:
 
 @dataclass
 class CircuitBreaker:
-    """Simple per-tool circuit breaker.
+    """Per-tool circuit breaker with half-open probe recovery.
 
     Tracks consecutive failures for a single tool. After ``threshold``
     consecutive failures, the circuit opens and ``should_trip()`` returns
     True — callers can use this to fail-fast instead of retrying.
 
-    The breaker resets on any success. It does not auto-transition to
-    half-open; a success call manually resets it.
+    Unlike the old minimal breaker, this one is NOT wedged forever once
+    open (#2439): after ``cooldown_s`` seconds in the open state it
+    transitions to *half-open*, where ``should_trip()`` admits exactly ONE
+    probe call. Concurrent callers are blocked until the probe outcome
+    lands. Probe success → closed (retries resume); probe failure → open
+    with a fresh cooldown. This preserves the anti-retry-spiral guarantee
+    while letting a tool that recovers mid-session come back online.
 
-    This is intentionally minimal — no timeout-based half-open, no rolling
-    window. Just consecutive-count → trip. Enough to prevent infinite
-    retry loops on a permanently broken tool without adding complexity.
+    State machine::
+
+        closed --N consecutive failures--> open --cooldown elapsed--> half-open
+        half-open --probe success--> closed
+        half-open --probe failure--> open (fresh cooldown)
     """
 
     threshold: int = 5
+    cooldown_s: float = 30.0
     _consecutive_failures: int = 0
     _is_open: bool = False
+    _opened_at: float | None = None
+    _probe_in_flight: bool = False
+
+    def _enter_open(self) -> None:
+        self._is_open = True
+        self._opened_at = time.monotonic()
+        self._probe_in_flight = False
 
     def record_failure(self) -> None:
         self._consecutive_failures += 1
         if self._consecutive_failures >= self.threshold:
-            self._is_open = True
+            self._enter_open()
             logger.warning(
                 "circuit breaker opened for tool after %d consecutive failures",
                 self._consecutive_failures,
@@ -534,9 +550,29 @@ class CircuitBreaker:
     def record_success(self) -> None:
         self._consecutive_failures = 0
         self._is_open = False
+        self._opened_at = None
+        self._probe_in_flight = False
 
     def should_trip(self) -> bool:
-        return self._is_open
+        """Return True when the caller should refuse the tool call.
+
+        When open but the cooldown has elapsed, transition to half-open and
+        admit exactly one probe; subsequent callers are blocked until the
+        probe outcome is recorded (via ``record_success``/``record_failure``).
+        """
+        if not self._is_open:
+            return False
+        # Still cooling down — keep blocking.
+        if self._opened_at is not None and (
+            time.monotonic() - self._opened_at < self.cooldown_s
+        ):
+            return True
+        # Cooldown elapsed → half-open: let one probe through.
+        if not self._probe_in_flight:
+            self._probe_in_flight = True
+            return False
+        # A probe is already in flight — block concurrent callers.
+        return True
 
 
 # ── Per-tool breaker registry (process-global) ───────────────────────────
