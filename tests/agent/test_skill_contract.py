@@ -113,3 +113,86 @@ pytest tests/
             "git" in contract.tools.required_tools
             or "gh" in contract.tools.required_tools
         )
+
+    def test_compress_skill_mdl_preserves_critical_rules(self):
+        from agent.skill_contract import compress_skill_mdl, validate_skill_contract
+
+        verbose_skill = """---
+name: security-auditor
+description: "Perform comprehensive security audit on code repository."
+version: 1.0.0
+platforms: [linux, macos]
+metadata:
+  hermes:
+    tags: [Security, Audit]
+---
+
+# Security Auditor
+
+This is an extensive introductory paragraph explaining the philosophical importance of security audits in large distributed multi-tenant cloud agent systems. It discusses history, general principles, and best practices at great length without adding specific actionable rules.
+
+## Prerequisites & Constraints
+- [CRITICAL] Never log unmasked authorization tokens to disk
+- [CONSTRAINT] Always run audit inside an isolated container sandbox
+- [RULE] Report CVE severity scores using CVSS v3.1 standard
+
+## 1. Scan Dependencies
+First we explain why scanning dependencies is very critical in modern supply chain security ecosystems. We give multiple historical examples.
+
+```bash
+safety check --full-report
+```
+
+## 2. Scan Code
+Here is another large discursive section discussing AST analysis and regex pattern searching.
+
+```bash
+bandit -r src/
+```
+"""
+        compressed = compress_skill_mdl(verbose_skill)
+        assert len(compressed) < len(verbose_skill)
+        # Verify rare-but-critical rules survived compression
+        assert "Never log unmasked authorization tokens to disk" in compressed
+        assert "isolated container sandbox" in compressed
+        assert "CVSS v3.1" in compressed
+        assert "safety check --full-report" in compressed
+        assert "bandit -r src/" in compressed
+
+        # Verify contract validation passes
+        orig_contract = extract_skill_contract(verbose_skill)
+        is_valid, violations = validate_skill_contract(orig_contract, compressed)
+        assert is_valid is True
+        assert len(violations) == 0
+
+    def test_validate_skill_contract_detects_violations(self):
+        from agent.skill_contract import validate_skill_contract
+
+        orig = """---
+name: test-skill
+description: "Test skill."
+---
+
+## Rules
+- Critical security barrier: do not bypass auth proxy
+
+## 1. Step
+```bash
+curl -s http://api.internal
+```
+"""
+        bad_compressed = """---
+name: wrong-name
+description: "Test skill."
+---
+
+## 1. Step
+```bash
+curl -s http://api.internal
+```
+"""
+        contract = extract_skill_contract(orig)
+        is_valid, violations = validate_skill_contract(contract, bad_compressed)
+        assert is_valid is False
+        assert any("Name mismatch" in v for v in violations)
+        assert any("Missing critical rule" in v for v in violations)

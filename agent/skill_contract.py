@@ -148,9 +148,20 @@ def extract_skill_contract(skill_markdown: str) -> SkillContract:
         sec_body = "\n".join(lines[1:]).strip()
         sec_lower = header.lower()
 
+        # Skip top-level skill title for rules
+        if lines[0].startswith("# ") and not lines[0].startswith("##"):
+            continue
+
         if any(
             cat in sec_lower
-            for cat in ("prerequisite", "constraint", "rule", "security", "guard")
+            for cat in (
+                "prerequisite",
+                "constraint",
+                "rule",
+                "guard",
+                "security rule",
+                "requirement",
+            )
         ):
             category = (
                 "prerequisite"
@@ -187,3 +198,117 @@ def extract_skill_contract(skill_markdown: str) -> SkillContract:
         rules=rules,
         raw_char_count=raw_len,
     )
+
+
+def validate_skill_contract(
+    original: SkillContract,
+    compressed_markdown: str,
+) -> tuple[bool, list[str]]:
+    """Validate whether a compressed skill markdown satisfies its original contract.
+
+    Gate condition:
+    - Name must match.
+    - All scoped rules (prerequisites, constraints, security rules) must be preserved.
+    - All required tools must be preserved.
+    - Workflow steps must not be empty if the original had steps.
+    """
+    violations: list[str] = []
+    compressed_contract = extract_skill_contract(compressed_markdown)
+
+    if compressed_contract.name != original.name:
+        violations.append(
+            f"Name mismatch: '{compressed_contract.name}' != '{original.name}'"
+        )
+
+    comp_text = compressed_markdown.lower()
+    for rule in original.rules:
+        r_text = rule.rule.lower().strip()
+        keywords = [w for w in re.findall(r"\b[a-z0-9_]{4,}\b", r_text)]
+        if keywords:
+            matches = sum(1 for k in keywords if k in comp_text)
+            if matches / len(keywords) < 0.6:
+                violations.append(
+                    f"Missing critical rule ({rule.category}): {rule.rule[:60]}..."
+                )
+        elif r_text not in comp_text:
+            violations.append(
+                f"Missing critical rule ({rule.category}): {rule.rule[:60]}..."
+            )
+
+    for tool in original.tools.required_tools:
+        if (
+            tool not in compressed_contract.tools.required_tools
+            and tool.lower() not in comp_text
+        ):
+            violations.append(f"Missing required tool: {tool}")
+
+    if original.workflow and not compressed_contract.workflow:
+        violations.append("Compressed skill lost all workflow steps")
+
+    return (len(violations) == 0, violations)
+
+
+def compress_skill_mdl(
+    skill_markdown: str,
+    *,
+    preserve_rules: bool = True,
+) -> str:
+    """Compress a skill to its Minimum Description Length (MDL) structural contract.
+
+    Replaces verbose discursive prose with concise structural steps and rules,
+    strictly preserving all rare-but-critical operational rules and tool commands.
+    """
+    contract = extract_skill_contract(skill_markdown)
+
+    lines: list[str] = ["---"]
+    lines.append(f"name: {contract.name}")
+    desc = contract.interface.description
+    if desc:
+        clean_desc = desc if len(desc) <= 60 else desc[:57] + "..."
+        lines.append(f'description: "{clean_desc}"')
+    if contract.interface.version:
+        lines.append(f"version: {contract.interface.version}")
+    if contract.interface.platforms:
+        lines.append(f"platforms: [{', '.join(contract.interface.platforms)}]")
+    if contract.interface.tags:
+        lines.append("metadata:")
+        lines.append("  hermes:")
+        lines.append(f"    tags: [{', '.join(contract.interface.tags)}]")
+    lines.append("---")
+    lines.append("")
+    lines.append(f"# {contract.name.replace('-', ' ').title()}")
+    lines.append("")
+
+    if preserve_rules and contract.rules:
+        lines.append("## Prerequisites & Rules")
+        lines.append("")
+        for rule in contract.rules:
+            r_str = rule.rule.strip()
+            if not r_str.startswith("[") and rule.category != "rule":
+                r_str = f"[{rule.category.upper()}] {r_str}"
+            lines.append(f"- {r_str}")
+        lines.append("")
+
+    for step in contract.workflow:
+        lines.append(f"## {step.title}")
+        lines.append("")
+        if step.description:
+            sentences = [s.strip() for s in step.description.split(". ") if s.strip()]
+            short_desc = ". ".join(sentences[:1])
+            if short_desc and not short_desc.endswith("."):
+                short_desc += "."
+            lines.append(short_desc)
+            lines.append("")
+        for snip in step.code_snippets:
+            lines.append("```bash")
+            lines.append(snip.strip())
+            lines.append("```")
+            lines.append("")
+
+    compressed = "\n".join(lines).strip() + "\n"
+
+    is_valid, _ = validate_skill_contract(contract, compressed)
+    if not is_valid:
+        return skill_markdown
+
+    return compressed
