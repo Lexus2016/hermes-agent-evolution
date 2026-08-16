@@ -153,3 +153,40 @@ class TestGlobalClassesStillApplyToPerToolTools:
     def test_patch_timeout_trips_non_retryable(self):
         n = maybe_nudge(_fail_run("patch", 2, "failure-class=timeout — timed out"))
         assert n is not None and "non-retryable" in n and "timeout" in n
+
+
+class TestProcessNonRetryable:
+    """#2621 — process "other" bucket: a dead session, a bad action name, and a
+    write to a finished process are deterministic and must stop being retried."""
+
+    def test_session_not_found_is_non_retryable(self):
+        assert _is_non_retryable("process", "session_not_found")
+
+    def test_invalid_action_is_non_retryable(self):
+        assert _is_non_retryable("process", "invalid_action")
+
+    def test_process_exited_is_non_retryable(self):
+        assert _is_non_retryable("process", "process_exited")
+
+    def test_two_session_not_found_trips_hard_stop(self):
+        n = maybe_nudge(
+            _fail_run("process", 2, '{"status": "not_found", "error": "No process with ID proc_x"}')
+        )
+        assert n is not None and "non-retryable" in n and "session_not_found" in n
+
+    def test_two_session_not_found_warrants_cron_hard_stop(self):
+        assert run_warrants_cron_hard_stop(
+            _fail_run("process", 2, '{"status": "not_found", "error": "No process with ID proc_x"}')
+        )
+
+    def test_single_session_not_found_is_quiet(self):
+        assert (
+            maybe_nudge(_fail_run("process", 1, '{"status": "not_found", "error": "No process with ID proc_x"}'))
+            is None
+        )
+
+    def test_two_invalid_action_trips_hard_stop(self):
+        n = maybe_nudge(
+            _fail_run("process", 2, '{"error": "Unknown process action: \'create\'. Valid actions: list, poll"}')
+        )
+        assert n is not None and "non-retryable" in n and "invalid_action" in n

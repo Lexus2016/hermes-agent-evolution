@@ -136,6 +136,15 @@ _NON_RETRYABLE_BY_TOOL: dict[str, frozenset[str]] = {
     # non-retryable for search_files bounds the spiral at 2 instead of the
     # generic idempotent fail threshold of 4.
     "search_files": frozenset({"parse_error"}),
+    # #2621 — process "other" bucket. A dead session (session_not_found), a wrong
+    # action name (invalid_action), and a write/submit/close against a finished
+    # process (process_exited) are all deterministic: the same call reproduces the
+    # same failure. Marking them non-retryable makes the loop_guard fire at the
+    # 2-call threshold instead of the generic mutating fail threshold, bounding the
+    # 18-deep blind-retry spirals observed on background-process tasks. (A `wait`
+    # timeout — status="timeout", the process still running — is already caught by
+    # the global _NON_RETRYABLE set, so it is not duplicated here.)
+    "process": frozenset({"session_not_found", "invalid_action", "process_exited"}),
 }
 
 
@@ -239,6 +248,13 @@ _DIVERSION_HINT = {
     "tool_describe": (
         " Verify the tool name first (`skills_list` or the available-tools "
         "list); if an MCP server is unavailable, pick a native alternative."
+    ),
+    "process": (
+        " If the session is gone (session_not_found), use action='list' to find "
+        "the live session id or re-spawn the process with terminal(background=true). "
+        "If the process already finished, read its output with action='log' instead "
+        "of writing/submitting to it. If an action name was rejected, use a valid "
+        "one: list / poll / log / wait / kill / write / submit / close."
     ),
     "browser_navigate": (
         " Stop navigating: extract what you need from the CURRENT page "

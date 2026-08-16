@@ -230,6 +230,50 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         "the same command will fail identically. Fix the command/arguments, do NOT retry "
         "it unchanged.",
     ),
+    # #2621 — process tool "other" bucket decomposition. The process tool's
+    # failures were opaque: "No process with ID ..." (dead session), "Unknown
+    # process action" (bad action name), and "Process has already finished"
+    # (write/submit/close to an exited process) all fell through to the generic
+    # ``runtime_error`` ``error:`` catch-all below — retryable, with no
+    # process-specific recovery hint — leaving the agent to blind-retry (observed
+    # 18-deep spirals). These rules decompose that bucket into reason subclasses
+    # with targeted hints; loop_guard marks session_not_found / invalid_action /
+    # process_exited non-retryable (a dead session won't reappear, a wrong action
+    # name won't become valid, and writing to a finished process fails
+    # identically). Must run BEFORE the runtime_error catch-all (which matches the
+    # JSON ``error:`` key present in every tool_error envelope).
+    (
+        re.compile(
+            r"no process with id|no processes are currently registered|"
+            r"session_id is required",
+            re.I,
+        ),
+        "session_not_found",
+        "The background-process session no longer exists (never spawned, already "
+        "pruned, or belongs to a different gateway session). A dead session will "
+        "NOT reappear on retry. Use action='list' to see live sessions, or re-spawn "
+        "with terminal(background=true). Do NOT retry the same session_id.",
+    ),
+    (
+        re.compile(
+            r"unknown process action",
+            re.I,
+        ),
+        "invalid_action",
+        "That action name is not a valid process action. Use one of: list / poll / "
+        "log / wait / kill / write / submit / close. A wrong action name will never "
+        "become valid — do NOT retry it unchanged.",
+    ),
+    (
+        re.compile(
+            r"process has already finished|already_exited",
+            re.I,
+        ),
+        "process_exited",
+        "The process has already finished — you cannot write/submit/close to a "
+        "completed process. Read its final output with action='log', or spawn a new "
+        "process. Do NOT retry the write against the finished session.",
+    ),
     (
         re.compile(
             r"traceback \(most recent call|exit code[:\s]+[1-9]|exit status [1-9]|non-zero exit|error:|exception|failed",

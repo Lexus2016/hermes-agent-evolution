@@ -94,6 +94,68 @@ class TestClassify:
         assert "deterministic" in hint.lower()
 
 
+class TestProcessBucketDecomposition:
+    """#2621 — process tool "other" bucket decomposed into reason subclasses.
+
+    Before the fix, every process failure envelope (``{"error": ...}``) fell
+    through to the generic ``runtime_error`` via the JSON ``error:`` key —
+    retryable and carrying no process-specific recovery hint — so a dead session
+    or a typo'd action name was blindly retried (18-deep spirals observed).
+    """
+
+    def test_session_not_found(self):
+        cat, hint = classify(
+            '{"status": "not_found", "error": "No process with ID proc_abc123"}'
+        )
+        assert cat == "session_not_found"
+        assert "list" in hint
+
+    def test_session_not_found_handler_form(self):
+        cat, _ = classify(
+            '{"error": "No process with ID \'proc_x\'. Available: proc_y. '
+            "Use action='list' to see all processes.\"}"
+        )
+        assert cat == "session_not_found"
+
+    def test_no_processes_registered(self):
+        cat, _ = classify(
+            '{"error": "No process with ID \'proc_x\'. No processes are currently '
+            "registered. Use action='list' to verify.\"}"
+        )
+        assert cat == "session_not_found"
+
+    def test_session_id_required(self):
+        cat, _ = classify(
+            '{"error": "session_id is required for poll. 3 processes are running. '
+            "Specify one of: proc_a, proc_b, proc_c\"}"
+        )
+        assert cat == "session_not_found"
+
+    def test_invalid_action(self):
+        cat, hint = classify(
+            '{"error": "Unknown process action: \'create\'. Did you mean \'list\'? '
+            "Valid actions: list, poll, log, wait, kill, write, submit, close\"}"
+        )
+        assert cat == "invalid_action"
+        assert "list" in hint
+
+    def test_process_exited(self):
+        cat, hint = classify(
+            '{"status": "already_exited", "error": "Process has already finished"}'
+        )
+        assert cat == "process_exited"
+        assert "log" in hint
+
+    def test_not_runtime_error(self):
+        # Regression guard: these used to be classified as retryable runtime_error.
+        for content in (
+            '{"status": "not_found", "error": "No process with ID proc_x"}',
+            '{"error": "Unknown process action: \'create\'."}',
+            '{"status": "already_exited", "error": "Process has already finished"}',
+        ):
+            assert classify(content)[0] != "runtime_error"
+
+
 class TestInlineDiagnosticsEnabled:
     def test_default_off_with_empty_config(self, monkeypatch):
         monkeypatch.delenv("HERMES_DIAGNOSTICS_INLINE", raising=False)
