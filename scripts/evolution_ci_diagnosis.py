@@ -117,6 +117,94 @@ _COMPLEX_PATTERNS: List[Tuple[str, str]] = [
 ]
 
 # -----------------------------------------------------------------------------
+# MAST failure taxonomy (arXiv:2503.13657) — adopted as the tagging rubric (#2523)
+# -----------------------------------------------------------------------------
+# 14 failure modes in 3 categories. Each diagnosed failure is tagged with one
+# mode (in addition to its free-form narrative) so recurrence is measurable by
+# mode ("incorrect-verification dropped N%") instead of by narrative.
+
+MAST_CATEGORIES: Dict[str, str] = {
+    "1": "system-design",
+    "2": "inter-agent-misalignment",
+    "3": "task-verification",
+}
+
+MAST_FAILURE_MODES: Dict[str, str] = {
+    "1.1": "Disobey Task Specification",
+    "1.2": "Disobey Role Specification",
+    "1.3": "Step Repetition",
+    "1.4": "Loss of Conversation History",
+    "1.5": "Unaware of Termination",
+    "2.1": "Conversation Reset",
+    "2.2": "Fail to Ask for Clarification",
+    "2.3": "Task Derailment",
+    "2.4": "Information Withholding",
+    "2.5": "Ignored Other Agent's Input",
+    "2.6": "Reasoning-Action Mismatch",
+    "3.1": "Premature Termination",
+    "3.2": "No or Incomplete Verification",
+    "3.3": "Incorrect Verification",
+}
+
+# Deterministic error_class -> MAST mode. The error_class names a failure
+# family the existing patterns already classify; this maps each to its most
+# likely mode.
+_ERROR_CLASS_TO_MAST: Dict[str, str] = {
+    "assertion-error": "3.3",
+    "test-failure": "3.3",
+    "test-error": "3.3",
+    "pytest-error": "3.3",
+    "timeout": "3.1",
+    "exit-code": "3.1",
+    "recursion-error": "1.3",
+    "syntax-error": "2.6",
+    "indentation-error": "2.6",
+    "type-error": "2.6",
+    "value-error": "2.6",
+    "key-error": "2.6",
+    "index-error": "2.6",
+    "attribute-error": "2.6",
+    "subprocess-error": "2.6",
+    "import-error": "1.1",
+    "module-not-found": "1.1",
+    "permission-error": "1.1",
+    "connection-error": "1.4",
+}
+
+# High-signal message keywords that override the coarse error_class map.
+_MAST_MESSAGE_HINTS: Tuple[Tuple[str, str], ...] = (
+    ("timeout", "3.1"),
+    ("terminat", "3.1"),
+    ("premature", "3.1"),
+    ("assert", "3.3"),
+    ("verif", "3.3"),
+    ("repetit", "1.3"),
+    ("conversation history", "1.4"),
+    ("no module named", "1.1"),
+)
+
+
+def mast_mode_label(mode: str) -> str:
+    """Return a MAST mode as ``id Name`` (e.g. ``1.1 Disobey Task Specification``)."""
+    name = MAST_FAILURE_MODES.get(mode)
+    return f"{mode} {name}" if name else mode
+
+
+def classify_mast_mode(error_class: str, message: str = "") -> str:
+    """Map a diagnosed failure to a MAST mode id, deterministically.
+
+    Message keywords win over the error_class map (they are more specific);
+    unknown error classes fall back to 2.6 (reasoning-action mismatch), the
+    most common failure family. Always returns one of the 14 mode ids.
+    """
+    text = (message or "").lower()
+    for keyword, mode in _MAST_MESSAGE_HINTS:
+        if keyword in text:
+            return mode
+    return _ERROR_CLASS_TO_MAST.get(error_class, "2.6")
+
+
+# -----------------------------------------------------------------------------
 # Types
 # -----------------------------------------------------------------------------
 
@@ -147,6 +235,7 @@ class FailureDetails:
     message: str
     snippet: str
     source: str  # "annotations" or "gh-run-log"
+    mast_mode: str = ""  # MAST failure-mode id (e.g. "3.3") — #2523
 
 
 Client = Callable[
@@ -475,6 +564,7 @@ def extract_failure(
             message=message,
             snippet=snippet,
             source="annotations",
+            mast_mode=classify_mast_mode(error_class, message),
         )
 
     # 2. Fallback to gh run view --log-failed.
@@ -489,6 +579,7 @@ def extract_failure(
             message="Could not retrieve failure details (no annotations and no gh log).",
             snippet="",
             source="none",
+            mast_mode=classify_mast_mode("unknown", ""),
         )
 
     error_class, message = _extract_from_text(log_text)
@@ -507,6 +598,7 @@ def extract_failure(
         message=message,
         snippet=snippet,
         source="gh-run-log",
+        mast_mode=classify_mast_mode(error_class, message),
     )
 
 
@@ -617,6 +709,7 @@ def create_child_issue(
             "",
             f"- **Error class**: `{failure.error_class}`",
             f"- **Classification**: `{failure.classification}`",
+            f"- **MAST mode**: `{mast_mode_label(failure.mast_mode)}`",
             f"- **Source**: `{failure.source}`",
             f"- **Check run URL**: {check.details_url}",
             "",
@@ -814,6 +907,7 @@ def diagnose_prs(
                 "conclusion": "failure",
                 "classification": failure.classification,
                 "error_class": failure.error_class,
+                "mast_mode": failure.mast_mode,
                 "message": failure.message,
                 "child_issue_url": child_issue_url,
             })

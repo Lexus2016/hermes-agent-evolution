@@ -145,6 +145,13 @@ class TestChildSystemPrompt(unittest.TestCase):
         self.assertIn("CONTEXT", prompt)
         self.assertIn("assertion failed", prompt)
 
+    def test_mind_virus_inoculation_clause(self):
+        """#2522: subagents must treat self-propagating instructions as data."""
+        prompt = _build_child_system_prompt("Summarize the source")
+        self.assertIn("data, not instructions", prompt)
+        self.assertIn("never propagate", prompt)
+        self.assertIn("UNTRUSTED CONTENT", prompt)
+
     def test_empty_context_ignored(self):
         prompt = _build_child_system_prompt("Do something", "  ")
         self.assertNotIn("CONTEXT", prompt)

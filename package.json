@@ -34,10 +34,6 @@
     "url": "https://github.com/Lexus2016/hermes-agent-evolution/issues"
   },
   "homepage": "https://github.com/Lexus2016/hermes-agent-evolution#readme",
-  "dependencies": {
-    "@streamdown/math": "1.0.2",
-    "agent-browser": "0.26.0"
-  },
   "devDependencies": {
     "@eslint/js": "9.39.5",
     "typescript-eslint": "8.64.0",
@@ -61,7 +57,7 @@
     "esbuild@0.28.1": true,
     "node-pty@1.1.0": true,
     "electron-winstaller@5.4.0": true,
-    "agent-browser@0.26.0": true,
+    "get-windows@9.3.0": true,
     "electron@40.10.2": true,
     "fsevents@2.3.2": true,
     "fsevents@2.3.3": true

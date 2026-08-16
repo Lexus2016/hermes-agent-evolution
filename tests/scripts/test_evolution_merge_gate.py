@@ -440,3 +440,32 @@ class TestFlipGateWiringInQualityGate:
             )
             == []
         )
+
+
+# ── #2498: Reachability gate integration ────────────────────────────────────
+
+
+class TestReachabilityIntegration:
+    def test_reachability_violation_in_merge_gate(self):
+        files = [_f("agent/unwired_feature.py", 30, 0)]
+        source_contents = {
+            "agent/unwired_feature.py": "class UnwiredFeature:\n    pass\n",
+        }
+        violations = check_merge_policy_with_quality(
+            files,
+            source_contents=source_contents,
+        )
+        assert any("DEAD_CODE_UNREACHABLE" in v for v in violations)
+        assert any("UnwiredFeature" in v for v in violations)
+
+    def test_reachability_clean_passes(self):
+        files = [_f("agent/wired_feature.py", 30, 0)]
+        source_contents = {
+            "agent/wired_feature.py": "class WiredFeature:\n    pass\n",
+            "run_agent.py": "from agent.wired_feature import WiredFeature\n",
+        }
+        violations = check_merge_policy_with_quality(
+            files,
+            source_contents=source_contents,
+        )
+        assert violations == []

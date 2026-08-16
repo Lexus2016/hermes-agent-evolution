@@ -144,3 +144,52 @@ def test_failed_compaction_handling():
     assert compactor.last_error is None
 
     executor.shutdown(wait=True)
+
+
+def test_context_compressor_parallel_compactor_wiring():
+    """Verify ContextCompressor instantiates and wires ParallelCompactor (#2495)."""
+    from agent.context_compressor import ContextCompressor
+    from agent.conversation_compression import maybe_apply_parallel_compaction
+
+    compressor = ContextCompressor(
+        model="gpt-4o",
+        config_context_length=128000,
+        quiet_mode=True,
+    )
+    assert compressor.parallel_compactor is not None
+    assert compressor.parallel_compactor.config.hard_token_limit == 128000
+
+    # Start parallel compaction via compressor helper
+    msgs = [
+        {"role": "user", "content": "Initial user message"},
+        {"role": "assistant", "content": "Initial assistant reply"},
+    ]
+
+    # Mock compress to avoid actual LLM calls
+    compressor.compress = lambda *args, **kwargs: [
+        {"role": "system", "content": "Compacted summary"}
+    ]
+
+    ok = compressor.start_parallel_compaction(msgs, current_tokens=115000)
+    assert ok is True
+    assert compressor.parallel_compactor.state == CompactionState.READY_TO_SWAP
+
+    # Apply swap via compressor
+    swapped = compressor.try_apply_parallel_swap(msgs)
+    assert swapped is not None
+    assert len(swapped) == 1
+    assert swapped[0]["content"] == "Compacted summary"
+
+
+def test_agent_parallel_compactor_property():
+    """Verify AIAgent exposes parallel_compactor property (#2495)."""
+    from run_agent import AIAgent
+
+    agent = AIAgent(
+        model="mock-model",
+        api_key="mock-key",
+        base_url="http://127.0.0.1:8000/v1",
+        quiet_mode=True,
+    )
+    assert agent.parallel_compactor is not None
+    assert agent.parallel_compactor.config.enabled is True

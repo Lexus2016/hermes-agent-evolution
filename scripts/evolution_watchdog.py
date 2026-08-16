@@ -809,13 +809,20 @@ def check_analysis_integrity(evolution_dir: Path) -> List[str]:
     scheduler installs evolution_*.py alongside this script, so the sibling import
     resolves at runtime; the guard keeps unit imports safe)."""
     try:
-        from evolution_analysis_audit import audit_latest
+        from evolution_analysis_audit import audit_latest, reconcile_latest
     except ImportError:
         return []
-    return [
-        f"analysis selection integrity: {v}"
-        for v in audit_latest(evolution_dir, _resolve_repo_dir())
+    repo = _resolve_repo_dir()
+    out = [
+        f"analysis selection integrity: {v}" for v in audit_latest(evolution_dir, repo)
     ]
+    # Reconcile AFTER auditing: audit flags the original fabricated claim, then
+    # reconciliation clears it so implementation re-ranks it (#2494 live call site).
+    out += [
+        f"analysis claim reconciliation: {n}"
+        for n in reconcile_latest(evolution_dir, repo)
+    ]
+    return out
 
 
 # ---------------------------------------------------------------------------

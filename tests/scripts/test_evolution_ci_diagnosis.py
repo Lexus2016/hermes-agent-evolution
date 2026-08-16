@@ -413,3 +413,56 @@ def test_create_child_issue_surfaces_unclassified_raw_excerpt(hermes_home):
     post_body = json.loads(client.calls[-1][2] or "{}")
     assert "opaque detail" in post_body["body"]
     assert "Raw log/annotation excerpt" in post_body["body"]
+
+
+# --- #2523: MAST failure-mode tagging ---
+
+
+def test_mast_failure_modes_complete():
+    assert len(diag.MAST_FAILURE_MODES) == 14
+    assert set(diag.MAST_CATEGORIES) == {"1", "2", "3"}
+
+
+def test_classify_mast_mode_by_error_class():
+    assert diag.classify_mast_mode("test-failure") == "3.3"
+    assert diag.classify_mast_mode("assertion-error") == "3.3"
+    assert diag.classify_mast_mode("timeout") == "3.1"
+    assert diag.classify_mast_mode("module-not-found") == "1.1"
+    assert diag.classify_mast_mode("syntax-error") == "2.6"
+
+
+def test_classify_mast_mode_message_hint_overrides():
+    # a "timeout" keyword in the message wins over a non-timeout error class
+    assert diag.classify_mast_mode("exit-code", "Operation timed out after 120s") == "3.1"
+    assert diag.classify_mast_mode("key-error", "assert x == y failed") == "3.3"
+
+
+def test_classify_mast_mode_unknown_defaults():
+    assert diag.classify_mast_mode("unknown", "") == "2.6"
+    assert diag.classify_mast_mode("some-future-class") == "2.6"
+
+
+def test_mast_mode_label():
+    assert diag.mast_mode_label("3.3") == "3.3 Incorrect Verification"
+    assert diag.mast_mode_label("") == ""
+
+
+def test_extract_failure_tags_mast_mode():
+    check = diag.FailedCheck(
+        check_run_id=1,
+        name="tests",
+        conclusion="failure",
+        details_url="https://github.com/runs/1",
+        head_sha="sha1",
+        annotations=[
+            {
+                "path": "tests/x.py",
+                "start_line": 1,
+                "annotation_level": "failure",
+                "message": "KeyError: 'missing'",
+                "title": "test failed",
+            }
+        ],
+    )
+    failure = diag.extract_failure(check)
+    assert failure.mast_mode == "2.6"  # key-error -> reasoning-action mismatch

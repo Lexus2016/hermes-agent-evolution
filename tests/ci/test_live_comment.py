@@ -157,3 +157,30 @@ def test_runs_all_completed_empty_list_is_not_done():
 
 def test_runs_all_completed_missing_status_is_not_done():
     assert not _mod.runs_all_completed([{}])
+
+
+# ─── merge_review_statuses ───────────────────────────────────────────
+
+
+def test_merges_static_and_dynamic_statuses():
+    static = [{"source": "lints", "results": []}]
+    dynamic = [{"source": "timings", "results": []}]
+    merged = _mod.merge_review_statuses(static, dynamic)
+    assert [s["source"] for s in merged] == ["lints", "timings"]
+
+
+def test_dedupes_by_source_with_static_winning():
+    static = [{"source": "lints", "results": ["static"]}]
+    dynamic = [{"source": "lints", "results": ["dynamic"]}]
+    merged = _mod.merge_review_statuses(static, dynamic)
+    assert merged == [{"source": "lints", "results": ["static"]}]
+
+
+def test_entries_without_source_are_all_kept():
+    static = [{"results": []}, {"results": []}]
+    dynamic = [{"results": []}]
+    assert len(_mod.merge_review_statuses(static, dynamic)) == 3
+
+
+def test_empty_inputs_merge_to_empty():
+    assert _mod.merge_review_statuses([], []) == []

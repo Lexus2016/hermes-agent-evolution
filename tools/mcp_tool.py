@@ -111,6 +111,7 @@ from datetime import datetime
 from typing import Any, Coroutine, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
+from tools.mcp_tasks import extract_task_info, poll_task_to_completion
 from tools.registry import tool_error
 
 logger = logging.getLogger(__name__)
@@ -268,6 +269,7 @@ LATEST_PROTOCOL_VERSION = "2025-03-26"
 # ~260ms. Availability is decided here with a metadata-only find_spec probe.
 try:
     import importlib.util as _importlib_util
+
     _MCP_AVAILABLE = _importlib_util.find_spec("mcp") is not None
 except Exception:
     _MCP_AVAILABLE = False
@@ -283,13 +285,23 @@ _MCP_SDK_IMPORT_ATTEMPTED = False
 _MCP_SDK_IMPORT_LOCK = threading.Lock()
 
 _MCP_SDK_LAZY_SYMBOLS = frozenset({
-    "StdioServerParameters", "stdio_client",
-    "streamablehttp_client", "streamable_http_client",
-    "CreateMessageResult", "CreateMessageResultWithTools", "ErrorData",
-    "SamplingCapability", "SamplingToolsCapability", "TextContent",
-    "ToolUseContent", "ElicitRequestParams", "ElicitResult",
-    "ServerNotification", "ToolListChangedNotification",
-    "PromptListChangedNotification", "ResourceListChangedNotification",
+    "StdioServerParameters",
+    "stdio_client",
+    "streamablehttp_client",
+    "streamable_http_client",
+    "CreateMessageResult",
+    "CreateMessageResultWithTools",
+    "ErrorData",
+    "SamplingCapability",
+    "SamplingToolsCapability",
+    "TextContent",
+    "ToolUseContent",
+    "ElicitRequestParams",
+    "ElicitResult",
+    "ServerNotification",
+    "ToolListChangedNotification",
+    "PromptListChangedNotification",
+    "ResourceListChangedNotification",
     "sse_client",
 })
 
@@ -300,8 +312,16 @@ def __getattr__(name: str):
         try:
             return globals()[name]
         except KeyError:
-            pass
+            return None
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+class _CompatType:
+    """Minimal attribute bag for MCP SDK types missing in older/newer builds."""
+
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 
 def _ensure_mcp_sdk() -> bool:
@@ -328,44 +348,67 @@ def _ensure_mcp_sdk() -> bool:
         try:
             from mcp import ClientSession, StdioServerParameters
             from mcp.client.stdio import stdio_client
+
             _MCP_AVAILABLE = True
             try:
                 from mcp.client.streamable_http import streamablehttp_client
+
                 _MCP_HTTP_AVAILABLE = True
             except ImportError:
                 _MCP_HTTP_AVAILABLE = False
             try:
                 from mcp.client.streamable_http import streamable_http_client
+
                 _MCP_NEW_HTTP = True
             except ImportError:
                 _MCP_NEW_HTTP = False
             try:
                 from mcp.types import LATEST_PROTOCOL_VERSION
             except ImportError:
-                logger.debug("mcp.types.LATEST_PROTOCOL_VERSION not available -- using fallback protocol version")
+                logger.debug(
+                    "mcp.types.LATEST_PROTOCOL_VERSION not available -- using fallback protocol version"
+                )
             try:
                 from mcp.client.sse import sse_client
             except ImportError:
                 sse_client = None
-                logger.debug("mcp.client.sse.sse_client not available -- SSE transport disabled")
+                logger.debug(
+                    "mcp.client.sse.sse_client not available -- SSE transport disabled"
+                )
             try:
                 from mcp.types import (
                     CreateMessageResult,
-                    CreateMessageResultWithTools,
                     ErrorData,
                     SamplingCapability,
-                    SamplingToolsCapability,
                     TextContent,
-                    ToolUseContent,
                 )
+
                 _MCP_SAMPLING_TYPES = True
+
+                try:
+                    from mcp.types import CreateMessageResultWithTools
+                except ImportError:
+                    CreateMessageResultWithTools = _CompatType
+
+                try:
+                    from mcp.types import SamplingToolsCapability
+                except ImportError:
+                    SamplingToolsCapability = _CompatType
+
+                try:
+                    from mcp.types import ToolUseContent
+                except ImportError:
+                    ToolUseContent = _CompatType
             except ImportError:
                 logger.debug("MCP sampling types not available -- sampling disabled")
             try:
                 from mcp.types import ElicitRequestParams, ElicitResult
+
                 _MCP_ELICITATION_TYPES = True
             except ImportError:
-                logger.debug("MCP elicitation types not available -- elicitation disabled")
+                logger.debug(
+                    "MCP elicitation types not available -- elicitation disabled"
+                )
             try:
                 from mcp.types import (
                     ServerNotification,
@@ -373,9 +416,12 @@ def _ensure_mcp_sdk() -> bool:
                     PromptListChangedNotification,
                     ResourceListChangedNotification,
                 )
+
                 _MCP_NOTIFICATION_TYPES = True
             except ImportError:
-                logger.debug("MCP notification types not available -- dynamic tool discovery disabled")
+                logger.debug(
+                    "MCP notification types not available -- dynamic tool discovery disabled"
+                )
         except ImportError:
             logger.debug("mcp package not installed -- MCP tool support disabled")
             _MCP_AVAILABLE = False
@@ -383,6 +429,7 @@ def _ensure_mcp_sdk() -> bool:
         if _MCP_AVAILABLE:
             try:
                 from mcp.types import METHOD_NOT_FOUND as _mnf
+
                 global _JSONRPC_METHOD_NOT_FOUND
                 _JSONRPC_METHOD_NOT_FOUND = _mnf
             except Exception:
@@ -390,7 +437,9 @@ def _ensure_mcp_sdk() -> bool:
 
         _MCP_MESSAGE_HANDLER_SUPPORTED = _check_message_handler_support()
         if _MCP_AVAILABLE and not _MCP_MESSAGE_HANDLER_SUPPORTED:
-            logger.debug("MCP SDK does not support message_handler -- dynamic tool discovery disabled")
+            logger.debug(
+                "MCP SDK does not support message_handler -- dynamic tool discovery disabled"
+            )
         _MCP_LOGGING_CALLBACK_SUPPORTED = _check_logging_callback_support()
         _MCP_SDK_IMPORT_ATTEMPTED = True
         return _MCP_AVAILABLE
@@ -1526,14 +1575,15 @@ def _resolve_identity_header(server_name: str, config: dict):
         logger.warning(
             "MCP server '%s': identity_header must be a mapping with "
             "'name' and 'value'/'value_from' keys (got %s) — ignoring",
-            server_name, type(raw).__name__,
+            server_name,
+            type(raw).__name__,
         )
         return None
     name = raw.get("name")
     if not isinstance(name, str) or not name.strip():
         logger.warning(
-            "MCP server '%s': identity_header requires a non-empty "
-            "'name' — ignoring", server_name,
+            "MCP server '%s': identity_header requires a non-empty 'name' — ignoring",
+            server_name,
         )
         return None
     value_from = (raw.get("value_from") or "static").strip().lower()
@@ -1557,7 +1607,8 @@ def _resolve_identity_header(server_name: str, config: dict):
         return name.strip(), str(profile)
     logger.warning(
         "MCP server '%s': identity_header unknown value_from %r — ignoring",
-        server_name, value_from,
+        server_name,
+        value_from,
     )
     return None
 
@@ -1571,7 +1622,9 @@ def _apply_identity_header(server_name: str, config: dict, headers: dict) -> dic
     if any(key.lower() == name.lower() for key in headers):
         logger.debug(
             "MCP server '%s': identity_header '%s' already set via explicit "
-            "headers config — keeping the explicit value", server_name, name,
+            "headers config — keeping the explicit value",
+            server_name,
+            name,
         )
         return headers
     headers[name] = value
@@ -3009,7 +3062,8 @@ class MCPServerTask:
             # copy-pasted HTTP config block doesn't silently mislead.
             logger.warning(
                 "MCP server '%s': identity_header is only supported on "
-                "HTTP/SSE transports — ignored for stdio servers", self.name,
+                "HTTP/SSE transports — ignored for stdio servers",
+                self.name,
             )
         if not _MCP_AVAILABLE:
             raise ImportError(
@@ -4998,7 +5052,8 @@ def _normalize_server_trust(value: Any) -> str:
         return _TRUST_UNTRUSTED
     logger.warning(
         "MCP trust: unrecognized trust value %r — treating as 'untrusted' "
-        "(valid values: full, untrusted)", value,
+        "(valid values: full, untrusted)",
+        value,
     )
     return _TRUST_UNTRUSTED
 
@@ -5071,7 +5126,10 @@ def _trust_gate_check(server_name: str, tool_name: str) -> Optional[str]:
     except Exception as exc:
         logger.error(
             "MCP trust gate: approval check failed for %s.%s: %s",
-            server_name, tool_name, exc, exc_info=True,
+            server_name,
+            tool_name,
+            exc,
+            exc_info=True,
         )
         return tool_error(
             f"MCP tool '{tool_name}' on untrusted server '{server_name}' "
@@ -5084,13 +5142,15 @@ def _trust_gate_check(server_name: str, tool_name: str) -> Optional[str]:
     logger.info(
         "MCP trust gate: user %s '%s' on untrusted server '%s'",
         "cancelled" if answer == "cancel" else "denied",
-        tool_name, server_name,
+        tool_name,
+        server_name,
     )
     return tool_error(
         f"The user did not approve running write-capable MCP tool "
         f"'{tool_name}' on untrusted server '{server_name}'. The command "
         f"was NOT run. Do not retry without explicit user direction."
     )
+
 
 # ---------------------------------------------------------------------------
 # Cross-process MCP discovery guard
@@ -6035,6 +6095,54 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             _mark_proven = getattr(server, "_mark_session_proven", None)
             if _mark_proven is not None:
                 _mark_proven()
+
+            # MCP Tasks Extension (MCP 2026-07-28 spec, #2285): detect taskId
+            # responses and drive them to completion via tasks/get and tasks/result.
+            task_info = extract_task_info(result)
+            if task_info is not None:
+                task_id, task_status = task_info
+                if task_status.lower() not in {
+                    "completed",
+                    "success",
+                    "done",
+                    "failed",
+                    "error",
+                }:
+                    logger.info(
+                        "MCP %s: detected task %s (status=%s) for tool %s; driving to completion via tasks/get...",
+                        server_name,
+                        task_id,
+                        task_status,
+                        tool_name,
+                    )
+                    task = await poll_task_to_completion(
+                        server.session,
+                        task_id,
+                        server_name=server_name,
+                        max_wait_sec=tool_timeout,
+                    )
+                    if task.is_successful:
+                        res_val = (
+                            task.result
+                            if task.result is not None
+                            else task.message or "Task completed successfully."
+                        )
+                        if isinstance(res_val, (dict, list)):
+                            return json.dumps({"result": res_val}, ensure_ascii=False)
+                        return json.dumps({"result": str(res_val)}, ensure_ascii=False)
+                    elif task.status in {"cancelled", "canceled"}:
+                        return json.dumps(
+                            {"error": f"MCP task {task_id} was cancelled."},
+                            ensure_ascii=False,
+                        )
+                    else:
+                        err_msg = (
+                            task.error or task.message or f"MCP task {task_id} failed"
+                        )
+                        return json.dumps(
+                            {"error": _sanitize_error(err_msg)}, ensure_ascii=False
+                        )
+
             # MCP CallToolResult has .content (list of content blocks) and .isError
             if result.isError:
                 error_text = ""
@@ -6745,6 +6853,7 @@ def _normalize_mcp_input_schema(schema: dict | None) -> dict:
     normalized = _rewrite_local_refs(schema)
     normalized = _strip_nullable_union(normalized)
     from tools.schema_sanitizer import collapse_const_unions
+
     normalized = collapse_const_unions(normalized)
     normalized = _repair_object_shape(normalized)
 
@@ -7426,7 +7535,8 @@ def _register_from_cache_sync(name: str, config: dict, entry: dict) -> List[str]
         SimpleNamespace(
             name=raw.get("name"),
             annotations=raw.get("annotations")
-            if isinstance(raw.get("annotations"), dict) else None,
+            if isinstance(raw.get("annotations"), dict)
+            else None,
         )
         for raw in tools_from_cache_entry(entry)
         if isinstance(raw, dict) and raw.get("name")
