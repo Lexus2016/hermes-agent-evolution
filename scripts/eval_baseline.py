@@ -16,6 +16,7 @@ Usage::
     python3 scripts/eval_baseline.py                       # null baseline
     python3 scripts/eval_baseline.py --agent real          # real agent run
     python3 scripts/eval_baseline.py -o /tmp/scores.jsonl
+    python3 scripts/eval_baseline.py --with-long-horizon   # + opt-in stress bucket
 
 Writes ``scores.jsonl`` (one JSON object per task) plus a summary line.
 """
@@ -37,7 +38,11 @@ from eval_runner import (  # noqa: E402
     run_task_set,
     write_trajectories,
 )
-from eval_tasks import latest_version, load_task_set  # noqa: E402
+from eval_tasks import (  # noqa: E402
+    latest_version,
+    load_long_horizon_tasks,
+    load_task_set,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +164,31 @@ def summarize(scores: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _run_bucket(
+    tasks: List[Any],
+    *,
+    agent: str,
+    scores_path: Optional[str] = None,
+    trajectories_path: Optional[str] = None,
+    agent_config: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Run + score one bucket through the real code path (shared wiring)."""
+    if agent == "null":
+        trajectories = run_task_set(
+            tasks,
+            agent_factory=_null_agent_factory,
+            conversation_fn=_null_run_conversation,
+        )
+    else:
+        trajectories = run_task_set(tasks, agent_config=agent_config)
+    scores = score_all(trajectories, tasks)
+    if scores_path:
+        write_scores(scores, scores_path)
+    if trajectories_path:
+        write_trajectories(trajectories, trajectories_path)
+    return scores, summarize(scores)
+
+
 def run_null_agent_baseline(
     version: Optional[str] = None,
     scores_path: str = ".evolution/eval/scores-null.jsonl",
@@ -166,21 +196,12 @@ def run_null_agent_baseline(
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Run the null agent over the task set and write its floor scores."""
     tasks = load_task_set(version or latest_version())
-
-    # Only the conversation driver is swapped. Everything else — recorder
-    # wiring, trajectory assembly, error capture, scoring — is the same code a
-    # real run goes through, so the floor is measured on the real path.
-    trajectories = run_task_set(
+    return _run_bucket(
         tasks,
-        agent_factory=_null_agent_factory,
-        conversation_fn=_null_run_conversation,
+        agent="null",
+        scores_path=scores_path,
+        trajectories_path=trajectories_path,
     )
-
-    scores = score_all(trajectories, tasks)
-    write_scores(scores, scores_path)
-    if trajectories_path:
-        write_trajectories(trajectories, trajectories_path)
-    return scores, summarize(scores)
 
 
 def run_real_agent_baseline(
@@ -191,12 +212,32 @@ def run_real_agent_baseline(
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Run the real agent over the task set and write its scores."""
     tasks = load_task_set(version or latest_version())
-    trajectories = run_task_set(tasks, agent_config=agent_config)
-    scores = score_all(trajectories, tasks)
-    write_scores(scores, scores_path)
-    if trajectories_path:
-        write_trajectories(trajectories, trajectories_path)
-    return scores, summarize(scores)
+    return _run_bucket(
+        tasks,
+        agent="real",
+        scores_path=scores_path,
+        trajectories_path=trajectories_path,
+        agent_config=agent_config,
+    )
+
+
+def run_long_horizon_stress(
+    agent: str = "null",
+    scores_path: Optional[str] = None,
+    trajectories_path: Optional[str] = None,
+    agent_config: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """Run the opt-in long-horizon stress bucket — 50+ turn tasks (#2530).
+    Too expensive to block CI on; a too-fast finish is marked ``shortcut``."""
+    if scores_path is None:
+        scores_path = f".evolution/eval/scores-long-horizon-{agent}.jsonl"
+    return _run_bucket(
+        load_long_horizon_tasks(),
+        agent=agent,
+        scores_path=scores_path,
+        trajectories_path=trajectories_path,
+        agent_config=agent_config,
+    )
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -210,6 +251,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--version", default=None, help="task-set version")
     ap.add_argument("-o", "--output", default=None, help="scores.jsonl path")
     ap.add_argument("--trajectories", default=None, help="trajectories.jsonl path")
+    ap.add_argument(
+        "--with-long-horizon",
+        action="store_true",
+        help="also run the opt-in long-horizon stress bucket (#2530)",
+    )
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -228,6 +274,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
 
     print(json.dumps({"agent": args.agent, **summary}, indent=2))
+
+    if args.with_long_horizon:
+        base_out = args.output or f".evolution/eval/scores-{args.agent}.jsonl"
+        _, stress_summary = run_long_horizon_stress(
+            agent=args.agent,
+            scores_path=base_out.replace(".jsonl", "-long-horizon.jsonl"),
+        )
+        # Separate section: the stress bucket never folds into the default mean.
+        print(
+            json.dumps(
+                {"agent": args.agent, "bucket": "long-horizon-stress", **stress_summary},
+                indent=2,
+            )
+        )
 
     if args.agent == "null" and summary["mean_total"] > 0.25:
         print(

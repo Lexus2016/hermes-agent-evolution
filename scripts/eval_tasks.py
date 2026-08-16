@@ -30,6 +30,7 @@ class EvalTask:
     expected_result_pattern: Optional[str] = None
     category: str = "reasoning"
     difficulty: str = "easy"
+    min_turns: int = 0  # >0 flags a long-horizon task (#2530); 0 = no floor
 
 
 # Canonical v1.0 task set — small, real pieces of evolution work, covering
@@ -80,6 +81,69 @@ _TASKS_V1: List[EvalTask] = [
 
 def _by_version(version: str) -> Dict[str, List[EvalTask]]:
     return {"1.0": _TASKS_V1, "1": _TASKS_V1}  # "1" = major-version alias
+
+
+# Long-horizon stress bucket (#2530, LongHorizon-Harness): benchmarks rarely
+# test behavior after the 50th tool turn, yet long-running work is where
+# reliability collapses. Each task is an iterative survey/verify chain over
+# the real evolution scripts — each loop iteration structurally needs its own
+# tool turns, so an honest solution cannot compress the chain. NOT part of
+# ``_TASKS_V1``/``load_task_set``: 50+ turn runs are too expensive for CI.
+LONG_HORIZON_MIN_TURNS = 50
+
+_TASKS_LONG_HORIZON: List[EvalTask] = [
+    EvalTask(
+        id="lh-extract-helpers-loop",
+        prompt=(
+            "Run an iterative refactor survey over every scripts/evolution_*.py "
+            "module: read each fully, list functions longer than 20 lines, then "
+            "per function re-read the module, identify one extractable helper, "
+            "search the repo for call sites, verify each, and record the plan. "
+            "Report per-module planned-extraction counts and the total."
+        ),
+        expected_tools=["search_files", "read_file"],
+        expected_result_pattern="extraction",
+        category="long-horizon",
+        difficulty="hard",
+        min_turns=60,
+    ),
+    EvalTask(
+        id="lh-import-graph-audit",
+        prompt=(
+            "Audit imports of every scripts/evolution_*.py module: read each, "
+            "list repo-local imports, then per import search the repo to locate "
+            "the target file and read it to confirm the symbol exists; re-check "
+            "failures with an alternate search pattern. Report per-module "
+            "import counts and the unresolved list."
+        ),
+        expected_tools=["search_files", "read_file"],
+        expected_result_pattern="unresolved",
+        category="long-horizon",
+        difficulty="hard",
+        min_turns=50,
+    ),
+    EvalTask(
+        id="lh-config-drift-sweep",
+        prompt=(
+            "Sweep every scripts/evolution_*.py module for config drift: read "
+            "each, extract config keys/defaults/thresholds, then per key search "
+            "for other users, read each user, and check values agree. Flag "
+            "disagreements. Report a per-module drift table and total count."
+        ),
+        expected_tools=["search_files", "read_file"],
+        expected_result_pattern="drift",
+        category="long-horizon",
+        difficulty="hard",
+        min_turns=50,
+    ),
+]
+
+
+def load_long_horizon_tasks() -> List[EvalTask]:
+    """Load the opt-in long-horizon stress bucket (#2530) — deliberately kept
+    out of ``load_task_set`` so the default split is unchanged; enter via
+    ``eval_baseline --with-long-horizon`` (manual/cron only)."""
+    return list(_TASKS_LONG_HORIZON)
 
 
 def latest_version() -> str:

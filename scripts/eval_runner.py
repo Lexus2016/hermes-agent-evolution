@@ -14,7 +14,9 @@ reflects what the agent actually did rather than a reconstruction.
 Anything that goes wrong while running a task is captured into
 ``EvalTrajectory.error`` instead of raising: one task blowing up must not
 abort a whole baseline run, and "this task errored" is itself a result worth
-scoring.
+scoring. Long-horizon tasks (``min_turns > 0``, #2530) additionally fail via
+that same error gate when they finish in fewer turns than the chain requires
+— a "shortcut" solution skipped the work and scores zero.
 """
 
 from __future__ import annotations
@@ -35,6 +37,23 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = os.environ.get("HERMES_EVAL_MODEL", "")
 DEFAULT_TOOLSETS = ["files"]
 DEFAULT_MAX_ITERATIONS = 8
+
+# Name of the opt-in long-horizon stress bucket (#2530): tasks flagged with
+# ``min_turns > 0`` in the task schema. 50+ turn runs are too expensive for
+# the default (CI-blocking) split, so these route into a separate bucket.
+LONG_HORIZON_BUCKET = "long-horizon-stress"
+
+
+def horizon_bucket(task: Any) -> Optional[str]:
+    """Stress-bucket name for a ``min_turns > 0`` task, else None."""
+    return LONG_HORIZON_BUCKET if int(getattr(task, "min_turns", 0) or 0) > 0 else None
+
+
+def split_by_horizon(tasks: List[Any]) -> Tuple[List[Any], List[Any]]:
+    """Partition tasks into ``(default, long_horizon_stress)`` buckets."""
+    stress = [t for t in tasks if horizon_bucket(t) is not None]
+    default = [t for t in tasks if horizon_bucket(t) is None]
+    return default, stress
 
 
 @dataclass
@@ -160,6 +179,12 @@ def run_eval_task(
     pinned = build_pinned_config(agent_config)
     task_id = getattr(task, "id", str(task))
     prompt = getattr(task, "prompt", str(task))
+    min_turns = int(getattr(task, "min_turns", 0) or 0)
+    if min_turns > 0 and pinned["max_iterations"] < min_turns:
+        # A long-horizon task must be runnable at its own horizon: the default
+        # cap of 8 iterations would truncate the chain before it completes.
+        # The raised cap lands in traj.agent_config, so runs stay comparable.
+        pinned["max_iterations"] = min_turns
 
     traj = EvalTrajectory(task_id=task_id, agent_config=pinned)
     tool_calls, on_start, on_complete = _make_recorder()
@@ -203,6 +228,15 @@ def run_eval_task(
     if not traj.model_turns and traj.final_answer:
         # Providers that don't return a history still completed a turn.
         traj.model_turns = 1
+    if min_turns > 0 and not traj.error and traj.model_turns < min_turns:
+        # Long-horizon shortcut rule (#2530): completing a 50+ turn chain in a
+        # handful of turns means the agent skipped the chain. Recorded through
+        # the existing error gate so scoring floors it at zero like any other
+        # failed run, instead of rewarding a too-cheap "solution".
+        traj.error = (
+            f"shortcut: finished in {traj.model_turns} turns, "
+            f"long-horizon task requires >= {min_turns}"
+        )
     return traj
 
 
