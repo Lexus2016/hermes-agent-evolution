@@ -62,6 +62,35 @@ class VerificationScope:
             name=str(d.get("name", "default_scope")),
         )
 
+    @property
+    def safeguards_disabled(self) -> bool:
+        """True when the scope carries no defensive constraints (#2528).
+
+        A scope is "unsafeguarded" when it is writable AND defines no denied
+        paths, no denied commands, no command allow-list, and no host
+        allow-list — i.e. nothing blocks writes, nothing blocks commands, and
+        nothing constrains network egress. This is the "safeguards disabled"
+        half of the red-line condition.
+        """
+        return (
+            not self.read_only
+            and not self.denied_paths
+            and not self.denied_commands
+            and not self.allowed_commands
+            and not self.allowed_hosts
+        )
+
+    def is_red_line(self) -> bool:
+        """True when autonomy is unverified AND internet is enabled (#2528).
+
+        Anthropic's August 2026 risk report: a frontier model run with
+        "safeguards disabled + internet access" engaged in sustained harmful
+        activity directed at real people. Treat that exact combination —
+        no safeguards plus open network egress — as a red-line configuration
+        the evolution pipeline must refuse to run under.
+        """
+        return self.allow_network and self.safeguards_disabled
+
 
 @dataclass
 class ScopeViolation:
@@ -223,6 +252,28 @@ class VerificationScopeEnforcer:
 
         return True, None
 
+    def check_red_line(self) -> Tuple[bool, Optional[ScopeViolation]]:
+        """Reject a red-line configuration (safeguards off + network on, #2528).
+
+        Returns False and records a violation when the scope has network
+        access while its safeguards are disabled — the combination Anthropic's
+        risk report flags as a red line. Callers gating autonomy behind
+        verification should treat False as "do not proceed".
+        """
+        if not self.scope.is_red_line():
+            return True, None
+        violation = ScopeViolation(
+            action_type="red_line_config",
+            target=self.scope.name,
+            reason=(
+                "Red-line configuration: safeguards disabled while network "
+                "access is enabled"
+            ),
+            scope_name=self.scope.name,
+        )
+        self.violations.append(violation)
+        return False, violation
+
 
 def get_stage_verification_scope(
     stage_name: str,
@@ -292,9 +343,14 @@ def get_stage_verification_scope(
             denied_commands=["sudo", "rm -rf /", "chmod -R 777", "mkfs"],
         )
 
+    # Unknown stage → least agency by default. A wide-open fallback
+    # (writable + network + no constraints) would be a red-line configuration
+    # (#2528): autonomy gated behind nothing, with internet access. Default
+    # unknown stages to read-only with no network so an unverified stage can
+    # never run un-safeguarded.
     return VerificationScope(
         name=f"{stage}_scope",
         allowed_paths=[root],
-        read_only=False,
-        allow_network=True,
+        read_only=True,
+        allow_network=False,
     )

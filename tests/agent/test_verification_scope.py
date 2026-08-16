@@ -159,3 +159,62 @@ class TestVerificationScope:
         impl_scope = get_stage_verification_scope("implementation", tmp_path)
         assert impl_scope.read_only is False
         assert impl_scope.allow_network is True
+
+
+class TestRedLineConfig:
+    """#2528: treat "safeguards disabled + internet access" as a red line."""
+
+    def test_safeguards_disabled_wide_open_scope(self):
+        scope = VerificationScope(name="wide_open", allow_network=True)
+        assert scope.safeguards_disabled is True
+
+    def test_safeguards_present_constrained_scope(self):
+        scope = VerificationScope(
+            name="constrained",
+            allow_network=True,
+            denied_commands=["rm -rf"],
+            allowed_hosts=["github.com"],
+        )
+        assert scope.safeguards_disabled is False
+        # Read-only alone is also a safeguard.
+        assert VerificationScope(read_only=True).safeguards_disabled is False
+
+    def test_is_red_line_network_plus_no_safeguards(self):
+        assert VerificationScope(allow_network=True).is_red_line() is True
+
+    def test_not_red_line_when_network_disabled(self):
+        assert VerificationScope(allow_network=False).is_red_line() is False
+
+    def test_not_red_line_when_safeguards_present(self):
+        scope = VerificationScope(
+            allow_network=True,
+            denied_paths=["/etc"],
+            denied_commands=["sudo"],
+        )
+        assert scope.is_red_line() is False
+
+    def test_enforcer_check_red_line_rejects(self):
+        enforcer = VerificationScopeEnforcer(VerificationScope(allow_network=True))
+        ok, violation = enforcer.check_red_line()
+        assert ok is False
+        assert violation is not None
+        assert violation.action_type == "red_line_config"
+
+    def test_enforcer_check_red_line_allows_safe(self):
+        enforcer = VerificationScopeEnforcer(
+            VerificationScope(allow_network=False, read_only=True)
+        )
+        ok, violation = enforcer.check_red_line()
+        assert ok is True
+        assert violation is None
+
+    def test_unknown_stage_defaults_to_least_agency(self, tmp_path: Path):
+        scope = get_stage_verification_scope("mystery_stage", tmp_path)
+        assert scope.read_only is True
+        assert scope.allow_network is False
+        assert scope.is_red_line() is False
+
+    def test_preset_stages_are_not_red_line(self, tmp_path: Path):
+        for stage in ("research", "analysis", "implementation"):
+            scope = get_stage_verification_scope(stage, tmp_path)
+            assert scope.is_red_line() is False, f"{stage} must not be red-line"
