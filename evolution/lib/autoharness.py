@@ -21,6 +21,7 @@ __all__ = [
     "HARNESS_SPEC_JSON_SCHEMA",
     "HARNESS_SYNTHESIS_SYSTEM_PROMPT",
     "AssertionResult",
+    "CycleEvaluationResult",
     "HarnessAssertion",
     "HarnessDiagnosticReport",
     "HarnessSpec",
@@ -28,7 +29,9 @@ __all__ = [
     "TestCaseSpec",
     "build_harness_synthesis_prompt",
     "evaluate_assertion",
+    "evaluate_improvement_cycle",
     "parse_skill_capabilities",
+    "run_autoharness_loop",
     "run_harness",
     "synthesize_harness_spec",
 ]
@@ -533,8 +536,11 @@ def _synthesize_category_test_cases(
 
 
 def synthesize_harness_spec(
-    skill_def: Union[Dict[str, Any], str],
+    skill_def: Union[Dict[str, Any], str, Path],
     default_category: Optional[str] = None,
+    llm_synthesizer: Optional[Callable[[str], str]] = None,
+    passing_threshold: float = 0.8,
+    context: Optional[Dict[str, Any]] = None,
 ) -> HarnessSpec:
     """Synthesize an executable HarnessSpec from a skill's declared capabilities (Issue #2250, Slice A #2516)."""
     parsed = parse_skill_capabilities(skill_def)
@@ -542,6 +548,28 @@ def synthesize_harness_spec(
         default_category if default_category else parsed.get("category", "general")
     )
     capabilities = parsed.get("capabilities", [])
+
+    if llm_synthesizer is not None:
+        try:
+            prompt = build_harness_synthesis_prompt(skill_def, context=context)
+            raw_response = llm_synthesizer(prompt)
+            # Try parsing JSON payload from LLM
+            clean_json = raw_response.strip()
+            if "```json" in clean_json:
+                clean_json = (
+                    clean_json.split("```json", 1)[1].split("```", 1)[0].strip()
+                )
+            elif "```" in clean_json:
+                clean_json = clean_json.split("```", 1)[1].split("```", 1)[0].strip()
+            spec_data = json.loads(clean_json)
+            if isinstance(spec_data, dict) and "test_cases" in spec_data:
+                spec = HarnessSpec.from_dict(spec_data)
+                spec.passing_threshold = passing_threshold
+                return spec
+        except Exception as e:
+            logger.warning(
+                "LLM harness synthesis failed, falling back to heuristic: %s", e
+            )
 
     test_cases = _synthesize_category_test_cases(
         skill_name=parsed["name"],
@@ -554,7 +582,7 @@ def synthesize_harness_spec(
         skill_category=category,
         claimed_capabilities=capabilities,
         test_cases=test_cases,
-        passing_threshold=0.8,
+        passing_threshold=passing_threshold,
         metadata={
             "description": parsed.get("description", ""),
             "synthesized_by": "AUTOHARNESS",
@@ -975,3 +1003,159 @@ def run_harness(
             "synthesized_cases_count": len(harness_spec.test_cases),
         },
     )
+
+
+@dataclass
+class CycleEvaluationResult:
+    """Outcome of grading an improvement candidate in a self-improvement cycle (Slice C)."""
+
+    cycle_index: int
+    skill_name: str
+    harness_spec: HarnessSpec
+    candidate_report: HarnessDiagnosticReport
+    baseline_report: Optional[HarnessDiagnosticReport] = None
+    accepted: bool = False
+    score_delta: Optional[float] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "cycle_index": self.cycle_index,
+            "skill_name": self.skill_name,
+            "harness_spec": self.harness_spec.to_dict(),
+            "candidate_report": self.candidate_report.to_dict(),
+            "baseline_report": (
+                self.baseline_report.to_dict() if self.baseline_report else None
+            ),
+            "accepted": self.accepted,
+            "score_delta": self.score_delta,
+            "metadata": self.metadata,
+        }
+
+    def to_json(self, indent: int = 2) -> str:
+        return json.dumps(self.to_dict(), indent=indent, default=str)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> CycleEvaluationResult:
+        base_data = data.get("baseline_report")
+        base_report = (
+            HarnessDiagnosticReport.from_dict(base_data) if base_data else None
+        )
+        return cls(
+            cycle_index=int(data.get("cycle_index", 1)),
+            skill_name=str(data.get("skill_name", "")),
+            harness_spec=HarnessSpec.from_dict(dict(data.get("harness_spec", {}))),
+            candidate_report=HarnessDiagnosticReport.from_dict(
+                dict(data.get("candidate_report", {}))
+            ),
+            baseline_report=base_report,
+            accepted=bool(data.get("accepted", False)),
+            score_delta=(
+                float(data["score_delta"])
+                if data.get("score_delta") is not None
+                else None
+            ),
+            metadata=dict(data.get("metadata", {})),
+        )
+
+    @classmethod
+    def from_json(cls, json_str: str) -> CycleEvaluationResult:
+        return cls.from_dict(json.loads(json_str))
+
+
+def evaluate_improvement_cycle(
+    skill_dict: Union[Dict[str, Any], str, Path],
+    candidate_runner: Callable[[Dict[str, Any]], Dict[str, Any]],
+    baseline_runner: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    *,
+    cycle_index: int = 1,
+    llm_synthesizer: Optional[Callable[[str], str]] = None,
+    passing_threshold: float = 0.8,
+    require_non_negative_delta: bool = True,
+    context: Optional[Dict[str, Any]] = None,
+) -> CycleEvaluationResult:
+    """Run one evaluation cycle by synthesizing a fresh harness and grading the candidate.
+
+    1. Synthesizes fresh criteria (HarnessSpec) for this cycle from the skill definition.
+    2. Runs the baseline runner if provided to establish prior diagnostic baseline.
+    3. Runs the candidate runner against the freshly synthesized harness.
+    4. Computes pass/fail acceptance based on threshold and score delta.
+    """
+    # 1. Synthesis fresh criteria
+    spec = synthesize_harness_spec(
+        skill_def=skill_dict,
+        llm_synthesizer=llm_synthesizer,
+        passing_threshold=passing_threshold,
+        context=context,
+    )
+
+    # 2. Baseline run if available
+    baseline_report = None
+    if baseline_runner is not None:
+        baseline_report = run_harness(spec, baseline_runner)
+
+    # 3. Candidate evaluation against freshly synthesized criteria
+    candidate_report = run_harness(spec, candidate_runner, prior_report=baseline_report)
+
+    # 4. Determine acceptance
+    score_delta = candidate_report.score_delta
+    passed = candidate_report.passed
+    if require_non_negative_delta and score_delta is not None:
+        accepted = passed and (score_delta >= 0.0)
+    else:
+        accepted = passed
+
+    return CycleEvaluationResult(
+        cycle_index=cycle_index,
+        skill_name=spec.skill_name,
+        harness_spec=spec,
+        candidate_report=candidate_report,
+        baseline_report=baseline_report,
+        accepted=accepted,
+        score_delta=score_delta,
+        metadata={
+            "passing_threshold": passing_threshold,
+            "require_non_negative_delta": require_non_negative_delta,
+        },
+    )
+
+
+def run_autoharness_loop(
+    skill_dict: Union[Dict[str, Any], str, Path],
+    candidate_generator: Callable[
+        [int, Optional[HarnessDiagnosticReport]],
+        Callable[[Dict[str, Any]], Dict[str, Any]],
+    ],
+    baseline_runner: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    *,
+    max_cycles: int = 3,
+    llm_synthesizer: Optional[Callable[[str], str]] = None,
+    passing_threshold: float = 0.8,
+) -> List[CycleEvaluationResult]:
+    """Execute a self-improvement loop across multiple cycles, auto-synthesizing fresh criteria each cycle.
+
+    Terminates early once an improvement candidate is accepted.
+    """
+    results: List[CycleEvaluationResult] = []
+    current_baseline = baseline_runner
+    last_report: Optional[HarnessDiagnosticReport] = None
+
+    for cycle in range(1, max_cycles + 1):
+        candidate_runner = candidate_generator(cycle, last_report)
+        cycle_res = evaluate_improvement_cycle(
+            skill_dict=skill_dict,
+            candidate_runner=candidate_runner,
+            baseline_runner=current_baseline,
+            cycle_index=cycle,
+            llm_synthesizer=llm_synthesizer,
+            passing_threshold=passing_threshold,
+        )
+        results.append(cycle_res)
+        last_report = cycle_res.candidate_report
+        if cycle_res.accepted:
+            break
+        # If candidate improved over baseline, it becomes the new baseline for next cycle
+        if cycle_res.score_delta is not None and cycle_res.score_delta > 0:
+            current_baseline = candidate_runner
+
+    return results

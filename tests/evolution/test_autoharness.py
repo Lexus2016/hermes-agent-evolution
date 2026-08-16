@@ -12,6 +12,7 @@ from evolution.lib.autoharness import (
     HARNESS_SPEC_JSON_SCHEMA,
     HARNESS_SYNTHESIS_SYSTEM_PROMPT,
     AssertionResult,
+    CycleEvaluationResult,
     HarnessAssertion,
     HarnessDiagnosticReport,
     HarnessSpec,
@@ -19,7 +20,9 @@ from evolution.lib.autoharness import (
     TestCaseSpec,
     build_harness_synthesis_prompt,
     evaluate_assertion,
+    evaluate_improvement_cycle,
     parse_skill_capabilities,
+    run_autoharness_loop,
     run_harness,
     synthesize_harness_spec,
 )
@@ -328,3 +331,95 @@ def test_run_harness_exception_resilience() -> None:
     assert report.failed_cases == 1
     assert report.test_case_results[0].error is not None
     assert "Uncaught fatal crash" in str(report.test_case_results[0].error)
+
+
+def test_evaluate_improvement_cycle_fresh_synthesis() -> None:
+    skill_dict = {
+        "name": "text_summarizer",
+        "category": "data_processing",
+        "capabilities": ["Summarize long text", "Extract key entities"],
+    }
+
+    # Baseline fails entity extraction
+    def baseline_runner(input_data: dict) -> dict:
+        return {"stdout": "Summarized text only", "stderr": "", "return_value": 0}
+
+    # Improved candidate returns valid structured JSON with entities
+    def candidate_runner(input_data: dict) -> dict:
+        return {
+            "stdout": json.dumps({
+                "summary": "Brief summary",
+                "entities": ["Alice", "Bob"],
+            }),
+            "stderr": "",
+            "return_value": 0,
+            "execution_time_sec": 0.3,
+        }
+
+    res = evaluate_improvement_cycle(
+        skill_dict=skill_dict,
+        candidate_runner=candidate_runner,
+        baseline_runner=baseline_runner,
+        cycle_index=1,
+    )
+
+    assert isinstance(res, CycleEvaluationResult)
+    assert res.cycle_index == 1
+    assert res.skill_name == "text_summarizer"
+    assert res.harness_spec is not None
+    assert res.candidate_report.passed is True
+    assert res.baseline_report is not None
+    assert res.accepted is True
+    assert res.score_delta is not None
+    assert res.score_delta > 0.0
+
+    # Test roundtrip serialization
+    json_repr = res.to_json()
+    loaded = CycleEvaluationResult.from_json(json_repr)
+    assert loaded.cycle_index == 1
+    assert loaded.accepted is True
+    assert loaded.score_delta == res.score_delta
+
+
+def test_run_autoharness_loop_multi_cycle() -> None:
+    skill_dict = {
+        "name": "auto_refactor",
+        "category": "coding",
+        "capabilities": ["Format python AST", "Lint syntax"],
+    }
+
+    # Baseline runner
+    def baseline_runner(input_data: dict) -> dict:
+        return {"stdout": "syntax error", "stderr": "err", "return_value": 1}
+
+    # Generator produces failing candidate in cycle 1, passing candidate in cycle 2
+    def candidate_generator(cycle: int, last_report: Optional[HarnessDiagnosticReport]):
+        if cycle == 1:
+            return lambda inp: {"stdout": "half fixed", "return_value": 1}
+
+        def _candidate_v2(inp: dict) -> dict:
+            if inp.get("mode") == "invalid":
+                return {"stderr": "error: malformed payload", "return_value": 1}
+            return {
+                "stdout": json.dumps({"ast_ok": True, "lint_clean": True}),
+                "return_value": 0,
+            }
+
+        return _candidate_v2
+
+    results = run_autoharness_loop(
+        skill_dict=skill_dict,
+        candidate_generator=candidate_generator,
+        baseline_runner=baseline_runner,
+        max_cycles=3,
+    )
+
+    assert len(results) == 2
+    # Cycle 1 did not accept
+    assert results[0].accepted is False
+    assert results[0].cycle_index == 1
+
+    # Cycle 2 auto-synthesized fresh criteria, candidate passed and terminated loop
+    assert results[1].accepted is True
+    assert results[1].cycle_index == 2
+    assert results[1].candidate_report.passed is True
