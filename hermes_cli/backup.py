@@ -369,6 +369,36 @@ def _safe_copy_db(src: Path, dst: Path) -> bool:
                     pass
 
 
+def _vacuum_copy_db(src: Path, dst: Path) -> bool:
+    """Copy a SQLite DB via ``VACUUM INTO``, producing a compacted copy (#2489).
+
+    Unlike the backup API (which copies freelist pages verbatim and therefore
+    preserves a bloated on-disk size), ``VACUUM INTO`` drops free pages, so a
+    ``state.db`` inflated by deleted/updated rows is reined in as it is
+    snapshotted. WAL-safe and consistent (the engine reads the WAL for a read-only
+    source). Falls back to :func:`_safe_copy_db` when the build lacks
+    ``VACUUM INTO`` (SQLite < 3.27) or the copy fails.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+        conn.execute("VACUUM INTO ?", (str(dst),))
+        return True
+    except Exception as exc:
+        logger.warning("SQLite VACUUM INTO copy failed for %s: %s", src, exc)
+        try:
+            dst.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return _safe_copy_db(src, dst)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 def is_zeroed_sqlite_file(
     path: Path, *, probe_bytes: int = 100, force: bool = False
 ) -> bool:
@@ -1138,6 +1168,69 @@ def _quick_snapshot_root(hermes_home: Optional[Path] = None) -> Path:
     return home / _QUICK_SNAPSHOTS_DIR
 
 
+# Hard bound on VACUUM-compaction cost: skip (don't VACUUM) a source DB more than
+# this multiple of the cap, so a multi-GB state.db can never stall the update on a
+# full VACUUM (the original #15733/#34600 concern). The cap still applies to the
+# compacted copy below.
+_COMPACT_ATTEMPT_MAX_RATIO = 4
+
+
+def _snapshot_db(
+    src: Path, dst: Path, rel_name: str, max_file_size: Optional[int]
+) -> str:
+    """Snapshot a SQLite DB, compacting free pages only when over the cap (#2489).
+
+    Under the cap (or with no cap) the proven WAL-safe :func:`_safe_copy_db` path
+    is used unchanged. Over the cap, a bloated ``state.db`` (free pages from
+    deleted/updated rows) is compacted via :func:`_vacuum_copy_db` so it is no
+    longer silently skipped just for exceeding the soft cap; the cap then applies
+    to the COMPACTED copy. A DB far over the cap is skipped without a costly
+    VACUUM (``_COMPACT_ATTEMPT_MAX_RATIO`` bound).
+
+    Returns ``"ok"``, ``"failed"`` (locked/corrupted), or ``"oversized"``
+    (compacted copy still exceeds the cap and was removed).
+    """
+    if max_file_size is None:
+        return "ok" if _safe_copy_db(src, dst) else "failed"
+
+    try:
+        src_size = src.stat().st_size
+    except OSError:
+        src_size = None
+    if src_size is None or src_size <= max_file_size:
+        return "ok" if _safe_copy_db(src, dst) else "failed"
+    if src_size > max_file_size * _COMPACT_ATTEMPT_MAX_RATIO:
+        logger.warning(
+            "Quick snapshot skipped %s: %d bytes far exceeds %d byte limit "
+            "(no VACUUM attempt)",
+            rel_name,
+            src_size,
+            max_file_size,
+        )
+        return "oversized"
+
+    # Over the cap but within the compaction bound: VACUUM-compact, then re-check.
+    if not _vacuum_copy_db(src, dst):
+        return "failed"
+    try:
+        size = dst.stat().st_size
+    except OSError:
+        return "ok"
+    if size <= max_file_size:
+        return "ok"
+    try:
+        dst.unlink(missing_ok=True)
+    except OSError:
+        pass
+    logger.warning(
+        "Quick snapshot skipped %s: compacted copy %d bytes exceeds %d byte limit",
+        rel_name,
+        size,
+        max_file_size,
+    )
+    return "oversized"
+
+
 def create_quick_snapshot(
     label: Optional[str] = None,
     hermes_home: Optional[Path] = None,
@@ -1243,18 +1336,18 @@ def _create_quick_snapshot_locked(
                 # the board databases + their metadata to restore a board.
                 if "/workspaces/" in f"/{sub_rel}/" or "/attachments/" in f"/{sub_rel}/":
                     continue
-                if _too_large(sub, sub_rel):
-                    if sub.suffix == ".db":
-                        oversized_skipped.append(sub_rel)
+                if sub.suffix != ".db" and _too_large(sub, sub_rel):
                     continue
                 dst = staging_dir / sub_rel
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 try:
                     # Route SQLite DBs through the WAL-safe backup() path so a
                     # board DB with an open WAL (the gateway may hold it at
-                    # snapshot time) is captured consistently.
+                    # snapshot time) is captured consistently. Over the size cap,
+                    # VACUUM-compact instead (see _snapshot_db, #2489).
                     if sub.suffix == ".db":
-                        if not _safe_copy_db(sub, dst):
+                        outcome = _snapshot_db(sub, dst, sub_rel, max_file_size)
+                        if outcome == "failed":
                             failed_dbs.append(sub_rel)
                             print(
                                 f"  ⚠ Snapshot: SQLite safe copy FAILED for {sub_rel} "
@@ -1266,6 +1359,9 @@ def _create_quick_snapshot_locked(
                                     f"(no SQLite header; {sub.stat().st_size} bytes of NULs?)"
                                 )
                             continue
+                        if outcome == "oversized":
+                            oversized_skipped.append(sub_rel)
+                            continue
                     else:
                         shutil.copy2(sub, dst)
                     manifest[sub_rel] = dst.stat().st_size
@@ -1276,9 +1372,7 @@ def _create_quick_snapshot_locked(
         if not src.is_file():
             continue
 
-        if _too_large(src, rel):
-            if src.suffix == ".db":
-                oversized_skipped.append(rel)
+        if src.suffix != ".db" and _too_large(src, rel):
             continue
 
         dst = staging_dir / rel
@@ -1286,7 +1380,8 @@ def _create_quick_snapshot_locked(
 
         try:
             if src.suffix == ".db":
-                if not _safe_copy_db(src, dst):
+                outcome = _snapshot_db(src, dst, rel, max_file_size)
+                if outcome == "failed":
                     failed_dbs.append(rel)
                     print(
                         f"  ⚠ Snapshot: SQLite safe copy FAILED for {rel} "
@@ -1297,6 +1392,9 @@ def _create_quick_snapshot_locked(
                             f"  ⚠ Snapshot: {rel} looks ZEROED "
                             f"(no SQLite header; {src.stat().st_size} bytes)"
                         )
+                    continue
+                if outcome == "oversized":
+                    oversized_skipped.append(rel)
                     continue
             else:
                 shutil.copy2(src, dst)

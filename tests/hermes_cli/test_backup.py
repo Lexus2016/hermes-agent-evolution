@@ -722,6 +722,42 @@ class TestSafeCopyDb:
         assert is_zeroed_sqlite_file(p) is True
 
 
+    def test_snapshot_db_compacts_bloated_db_under_cap(self, tmp_path):
+        # #2489: a state.db that exceeds the cap only because of free pages
+        # (deleted rows) must be compacted via VACUUM INTO and snapshotted,
+        # not silently skipped.
+        from hermes_cli.backup import _snapshot_db
+
+        src = tmp_path / "state.db"
+        conn = sqlite3.connect(str(src))
+        conn.execute("CREATE TABLE t (x BLOB)")
+        conn.execute("INSERT INTO t VALUES (?)", (b"x" * 100_000,))
+        conn.commit()
+        conn.execute("DELETE FROM t")
+        conn.commit()
+        conn.close()
+        assert src.stat().st_size > 30_000  # bloated on disk
+
+        dst = tmp_path / "out.db"
+        assert _snapshot_db(src, dst, "state.db", max_file_size=30_000) == "ok"
+        assert dst.exists()
+        assert dst.stat().st_size <= 30_000
+
+    def test_snapshot_db_still_oversized_for_real_data(self, tmp_path):
+        from hermes_cli.backup import _snapshot_db
+
+        src = tmp_path / "state.db"
+        conn = sqlite3.connect(str(src))
+        conn.execute("CREATE TABLE t (x BLOB)")
+        conn.execute("INSERT INTO t VALUES (?)", (b"x" * 100_000,))
+        conn.commit()
+        conn.close()
+
+        dst = tmp_path / "out.db"
+        assert _snapshot_db(src, dst, "state.db", max_file_size=30_000) == "oversized"
+        assert not dst.exists()
+
+
 # ---------------------------------------------------------------------------
 # Quick state snapshot tests
 # ---------------------------------------------------------------------------
