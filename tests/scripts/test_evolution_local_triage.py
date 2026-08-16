@@ -26,17 +26,37 @@ def evo_dir(tmp_path):
     evo = tmp_path / "evolution"
     issues_dir = evo / "issues"
     issues_dir.mkdir(parents=True)
-    (issues_dir / "2026-07-08.json").write_text(json.dumps({
-        "date": "2026-07-08",
-        "proposals": [
-            {"title": "Alpha", "decision": "filed", "issue": 100,
-             "priority_score": 1.5, "impact": 0.8, "effort": 0.3},
-            {"title": "Beta", "decision": "skipped", "issue": None,
-             "priority_score": 0.5, "impact": 0.2, "effort": 0.1},
-            {"title": "Gamma", "decision": "filed", "issue": 200,
-             "priority_score": 0.9, "impact": 0.5, "effort": 0.8},
-        ]
-    }))
+    (issues_dir / "2026-07-08.json").write_text(
+        json.dumps({
+            "date": "2026-07-08",
+            "proposals": [
+                {
+                    "title": "Alpha",
+                    "decision": "filed",
+                    "issue": 100,
+                    "priority_score": 1.5,
+                    "impact": 0.8,
+                    "effort": 0.3,
+                },
+                {
+                    "title": "Beta",
+                    "decision": "skipped",
+                    "issue": None,
+                    "priority_score": 0.5,
+                    "impact": 0.2,
+                    "effort": 0.1,
+                },
+                {
+                    "title": "Gamma",
+                    "decision": "filed",
+                    "issue": 200,
+                    "priority_score": 0.9,
+                    "impact": 0.5,
+                    "effort": 0.8,
+                },
+            ],
+        })
+    )
     return evo
 
 
@@ -134,6 +154,7 @@ def test_latest_file_returns_most_recent(tmp_path):
     new.write_text("{}")
     # Ensure new is modified after old
     import os
+
     os.utime(old, (1, 1))
     os.utime(new, (2, 2))
     result = _latest_file(d)
@@ -152,6 +173,7 @@ def test_read_sidecar_md(tmp_path):
     f.write_text("# Research report\n\nContent here.")
     result = _read_sidecar(f)
     assert result["char_count"] > 0
+
 
 def test_output_is_json_serializable_with_stage_result(tmp_path):
     """The triage output must survive json.dumps with the StageResult envelope
@@ -173,3 +195,48 @@ def test_output_is_json_serializable_with_stage_result(tmp_path):
     if "stage_result" in output:
         assert "result" not in output["stage_result"]
         assert output["stage_result"]["stage"] == "local_triage"
+
+
+def test_local_triage_reconciles_unverified_already_implemented(tmp_path):
+    """An issue marked already_implemented citing a non-existent file must be reconciled (#2494)."""
+    evo = tmp_path / "evolution"
+    issues_dir = evo / "issues"
+    issues_dir.mkdir(parents=True)
+    (issues_dir / "2026-08-16.json").write_text(
+        json.dumps({
+            "date": "2026-08-16",
+            "proposals": [
+                {
+                    "title": "Unverified Fake Feature",
+                    "decision": "already_implemented",
+                    "issue": 300,
+                    "priority_score": 1.8,
+                    "impact": 0.9,
+                    "effort": 0.5,
+                    "reason": "Implemented in nonexistent/feature.py (lines 1-10)",
+                },
+                {
+                    "title": "Real Implemented Feature",
+                    "decision": "already_implemented",
+                    "issue": 400,
+                    "priority_score": 1.2,
+                    "impact": 0.6,
+                    "effort": 0.4,
+                    "reason": "Implemented in real/existing.py (lines 1-10)",
+                },
+            ],
+        })
+    )
+
+    repo_dir = tmp_path / "repo"
+    real_file = repo_dir / "real" / "existing.py"
+    real_file.parent.mkdir(parents=True)
+    real_file.write_text("# existing code\n")
+
+    result = run_local_triage(evo, repo_root=repo_dir)
+    selected_issues = [s["issue_number"] for s in result["selected_for_implementation"]]
+
+    # Issue 300 must be reconciled and selected because nonexistent/feature.py does not exist
+    assert 300 in selected_issues
+    # Issue 400 must NOT be selected because real/existing.py exists
+    assert 400 not in selected_issues
