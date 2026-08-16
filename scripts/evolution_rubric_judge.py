@@ -188,6 +188,7 @@ def _hot_path(evolution_dir: Path) -> Path:
 # Helpers — safe JSON/MD loading
 # ──────────────────────────────────────────────────────────────────────
 
+
 def _load_json(path: Path) -> Any | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -225,6 +226,7 @@ def _safe_int(v: Any, default: int = 0) -> int:
 # ──────────────────────────────────────────────────────────────────────
 # StrictRubricJudgeGrader — deterministic, rule-based, no LLM
 # ──────────────────────────────────────────────────────────────────────
+
 
 class StrictRubricJudgeGrader:
     """Score each dimension by parsing the structured outputs with explicit rules.
@@ -282,9 +284,7 @@ class StrictRubricJudgeGrader:
         meta = _as_dict(data.get("meta"))
 
         # priority_distribution: all issues have priority_score > 0
-        scored = sum(
-            1 for i in issues if _safe_int(i.get("priority_score", 0)) > 0
-        )
+        scored = sum(1 for i in issues if _safe_int(i.get("priority_score", 0)) > 0)
         if not issues:
             priority_distribution = 0.0
         elif scored == len(issues):
@@ -357,14 +357,16 @@ class StrictRubricJudgeGrader:
         # signal_quality: distinct signals with rich observations
         signals = _as_dict(d.get("signals"))
         good_signals = sum(
-            1 for s in signals.values()
+            1
+            for s in signals.values()
             if isinstance(s, dict) and len(str(s.get("observation", ""))) > 80
         )
         signal_quality = min(3.0, good_signals)
 
         # cross_referencing: signals refer to tracked issues
         ref_count = sum(
-            1 for s in signals.values()
+            1
+            for s in signals.values()
             if isinstance(s, dict) and _safe_int(s.get("tracked_in_issue"))
         )
         total_signals = len(signals)
@@ -378,7 +380,8 @@ class StrictRubricJudgeGrader:
         # action_proposals: new_issues_proposed with impact/effort
         proposals = d.get("new_issues_proposed") or []
         scored_props = sum(
-            1 for p in proposals
+            1
+            for p in proposals
             if isinstance(p, dict) and p.get("priority_score") is not None
         )
         action_proposals = min(3.0, scored_props)
@@ -402,16 +405,18 @@ class StrictRubricJudgeGrader:
         scope_discipline = min(3.0, issue_refs)
 
         # test_presence: mentions tests
-        test_mentions = _count_matches(
-            tx, r"(?i)\b(?:test|tests|testing|pytest)\b"
+        test_mentions = _count_matches(tx, r"(?i)\b(?:test|tests|testing|pytest)\b")
+        test_presence = (
+            2.0 if test_mentions >= 2 else (1.0 if test_mentions >= 1 else 0.0)
         )
-        test_presence = 2.0 if test_mentions >= 2 else (1.0 if test_mentions >= 1 else 0.0)
 
         # documentation: mentions documentation
         doc_mentions = _count_matches(
             tx, r"(?i)\b(?:doc|docs|documentation|documented)\b"
         )
-        documentation = 2.0 if doc_mentions >= 2 else (1.0 if doc_mentions >= 1 else 0.0)
+        documentation = (
+            2.0 if doc_mentions >= 2 else (1.0 if doc_mentions >= 1 else 0.0)
+        )
 
         # diff_quality: diff size is clean and reported
         diff_mentions = _count_matches(
@@ -448,9 +453,7 @@ class StrictRubricJudgeGrader:
 
         # merge_discipline: merges limited, evolution/* pattern
         branch_pattern = _count_matches(tx, r"(?i)evolution/")
-        limit_mentions = _count_matches(
-            tx, r"(?i)\b(?:max|limit)\s+\d+\s+(?:merge|pr)"
-        )
+        limit_mentions = _count_matches(tx, r"(?i)\b(?:max|limit)\s+\d+\s+(?:merge|pr)")
         score = 0
         if branch_pattern >= 1:
             score += 1
@@ -543,8 +546,10 @@ class StrictRubricJudgeGrader:
             freshness = 0.0
 
         # failure_awareness: any output mentions failure rates
-        combined = research_md + json.dumps(issues_json or {}) + json.dumps(
-            introspection_json or {}
+        combined = (
+            research_md
+            + json.dumps(issues_json or {})
+            + json.dumps(introspection_json or {})
         )
         failure_mentions = _count_matches(
             combined,
@@ -566,15 +571,11 @@ class StrictRubricJudgeGrader:
 
         # Load all stage outputs (gracefully — missing = empty)
         research_md = _load_md(evolution_dir / "research" / f"{date}.md")
-        issues_json = _as_dict(
-            _load_json(evolution_dir / "issues" / f"{date}.json")
-        )
+        issues_json = _as_dict(_load_json(evolution_dir / "issues" / f"{date}.json"))
         introspection_data = _load_json(
             evolution_dir / "introspection" / f"{date}.json"
         )
-        implementation_md = _load_md(
-            evolution_dir / "implementation" / f"{date}.md"
-        )
+        implementation_md = _load_md(evolution_dir / "implementation" / f"{date}.md")
         integration_json = _as_dict(
             _load_json(evolution_dir / "integration" / f"{date}.json")
         )
@@ -588,9 +589,7 @@ class StrictRubricJudgeGrader:
         health_scores = self._score_pipeline_health(date, evolution_dir)
 
         # Build dimension records
-        def _build_dimension(
-            dim_name: str, scores: Dict[str, float]
-        ) -> Dict[str, Any]:
+        def _build_dimension(dim_name: str, scores: Dict[str, float]) -> Dict[str, Any]:
             dim_def = RUBRIC_DIMENSIONS[dim_name]
             total = sum(scores.values())
             return {
@@ -612,6 +611,19 @@ class StrictRubricJudgeGrader:
         total_max = sum(d["max"] for d in dimensions.values())
         pct = round((total_score / total_max) * 100, 1) if total_max > 0 else 0.0
 
+        raw_claims = extract_claims(
+            ("research", research_md),
+            ("implementation", implementation_md),
+            ("integration", json.dumps(integration_json)),
+        )
+        claims = triage_claims(raw_claims)
+        claim_stats = compute_claim_score(claims, total_max)
+
+        # Derive aggregate score from claim verdicts when claims are present
+        if claims:
+            total_score = claim_stats["score"]
+            pct = claim_stats["overall_percentage"]
+
         # Generate flags for concerning signals
         flags: List[str] = []
         if pct < 30:
@@ -632,6 +644,18 @@ class StrictRubricJudgeGrader:
                     f"({dim_pct:.0f}%) — stage nearly absent or very poor"
                 )
 
+        # Slice C: Rejection-bias (post-hoc rationalization) detection
+        rejection_bias_detections = detect_rejection_bias([
+            ("research", research_md),
+            ("implementation", implementation_md),
+            ("integration", json.dumps(integration_json)),
+        ])
+        rejection_bias_flag = len(rejection_bias_detections) > 0
+        if rejection_bias_flag:
+            flags.append(
+                f"REJECTION_BIAS: {len(rejection_bias_detections)} post-hoc rationalization pattern(s) detected"
+            )
+
         return {
             "cycle_date": date,
             "grader": "strict",
@@ -640,12 +664,17 @@ class StrictRubricJudgeGrader:
             "total_max": total_max,
             "overall_percentage": pct,
             "flags": flags,
+            "claims": claims,
+            "claim_verdicts": claim_stats["verdict_counts"] if claims else {},
+            "rejection_bias": rejection_bias_detections,
+            "rejection_bias_flag": rejection_bias_flag,
         }
 
 
 # ──────────────────────────────────────────────────────────────────────
 # AgentJudgeGrader — LLM-based qualitative assessment
 # ──────────────────────────────────────────────────────────────────────
+
 
 class AgentJudgeGrader:
     """LLM-backed grader that loads the strict scores, reads the raw outputs,
@@ -695,9 +724,7 @@ class AgentJudgeGrader:
         LLM to adjust."""
         return self.strict_grader.score(self.cycle_date, self.evolution_dir)
 
-    def narrative_assessment(
-        self, outputs: Dict[str, Any]
-    ) -> Dict[str, str]:
+    def narrative_assessment(self, outputs: Dict[str, Any]) -> Dict[str, str]:
         """Template for LLM output: per-dimension narrative commentary.
 
         The LLM should fill this dict by reading each stage's output and
@@ -732,8 +759,326 @@ class AgentJudgeGrader:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Claim extraction — machine-readable, deterministic (#2482 Slice A)
+# ──────────────────────────────────────────────────────────────────────
+
+# Outcome signals marking a sentence as a claim (an asserted achievement /
+# enablement / measured result) rather than neutral prose. Kept to strong,
+# measurable words so extraction is stable and doesn't over-fire.
+_CLAIM_SIGNALS = (
+    "improve",
+    "reduced",
+    "reduce",
+    "increase",
+    "faster",
+    "speedup",
+    "latency",
+    "enables",
+    "enabled",
+    "achiev",
+    "fixes",
+    "fixed",
+    "resolves",
+    "merged",
+    "%",
+    "percent",
+    "seconds",
+    "tokens",
+    "cost",
+)
+
+_CLAIM_URL_RE = re.compile(r"https?://\S+")
+
+
+def _markdown_sections(text: str) -> List[Tuple[str, str]]:
+    """Split markdown into ``(section_header, body)`` blocks in order;
+    text before the first ``#`` header is an unnamed preamble block."""
+    blocks: List[Tuple[str, str]] = []
+    current: List[str] = []
+    current_header = ""
+    for line in text.splitlines():
+        if line.startswith("#") and line.strip("# "):
+            if current:
+                blocks.append((current_header, "\n".join(current)))
+            current_header = line.strip("# ").strip()
+            current = []
+        else:
+            current.append(line)
+    if current:
+        blocks.append((current_header, "\n".join(current)))
+    return [(h.strip(), b) for h, b in blocks if b.strip()]
+
+
+def _split_sentences(block: str) -> List[str]:
+    """Deterministic per-line sentence splitter for markdown prose."""
+    sentences: List[str] = []
+    for raw in block.splitlines():
+        raw = raw.strip().lstrip("-* \t")
+        if not raw:
+            continue
+        for p in re.split(r"(?<=[.!?])\s+(?=[A-Z\"#(])", raw):
+            p = p.strip().rstrip(".").strip()
+            if len(p) >= 20:
+                sentences.append(p)
+    return sentences
+
+
+def _is_claim_sentence(sentence: str) -> bool:
+    low = sentence.lower()
+    return any(sig in low for sig in _CLAIM_SIGNALS)
+
+
+def extract_claims(
+    *artifacts: Tuple[str, Optional[str]],
+    max_per_source: int = 12,
+) -> List[Dict[str, Any]]:
+    """Deterministically extract discrete claims from judged artifacts.
+
+    A claim is a sentence asserting an outcome (improvement, reduction,
+    enablement, a merged/fixed issue, a measured result), tagged with its
+    source stage + section and any supporting URL. Returns a machine-readable
+    list of ``{"claim", "source", "evidence_url"}`` dicts, deduplicated and
+    sorted so identical input always yields identical output (Slice A
+    determinism). ``artifacts`` are ``(stage, markdown_text)`` pairs.
+    """
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for stage, text in artifacts:
+        if not text:
+            continue
+        per_source = 0
+        for header, block in _markdown_sections(text):
+            for sentence in _split_sentences(block):
+                if per_source >= max_per_source:
+                    break
+                if not _is_claim_sentence(sentence):
+                    continue
+                urls = _CLAIM_URL_RE.findall(sentence)
+                key = (stage, header, sentence)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({
+                    "claim": sentence,
+                    "source": {
+                        "stage": stage,
+                        "section": header or "preamble",
+                    },
+                    "evidence_url": urls[0] if urls else None,
+                })
+                per_source += 1
+    out.sort(key=lambda c: (c["source"]["stage"], c["source"]["section"], c["claim"]))
+    return out
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Claim triage taxonomy — Slice B (#2482 / #2514)
+# ──────────────────────────────────────────────────────────────────────
+
+CLAIM_VERDICTS: Tuple[str, ...] = ("verified", "falsified", "toy-scale", "no-evidence")
+
+CLAIM_VERDICT_WEIGHTS: Dict[str, float] = {
+    "verified": 1.0,
+    "toy-scale": 0.3,
+    "no-evidence": 0.0,
+    "falsified": 0.0,
+}
+
+_FALSIFIED_RE = re.compile(
+    r"\b(failed|falsified|broken|regression|reverted|0\s*passed|error|conflict|timeout|crash|fails)\b",
+    re.IGNORECASE,
+)
+_TOY_SCALE_RE = re.compile(
+    r"\b(toy|mock|stub|synthetic|dummy|trivial|placeholder|sample\s*only|minimal\s*test|toy-scale)\b",
+    re.IGNORECASE,
+)
+_VERIFIED_METRIC_RE = re.compile(
+    r"(\d+(?:\.\d+)?%|\d+\s*ms|\d+\s*s\b|\d+\s*seconds|\d+\s*tokens?|\d+\s*lines?|\d+x\b|issue\s*#\d+|pr\s*#\d+|#\d+|\bmerged\b|\bfixed\b|\bresolves\b)",
+    re.IGNORECASE,
+)
+
+
+def triage_claim(claim_item: Dict[str, Any]) -> Dict[str, Any]:
+    """Classify an extracted claim into the 4-verdict triage taxonomy (#2514).
+
+    Verdicts:
+      - ``falsified``: claim asserts a failure, regression, conflict, or refuted outcome.
+      - ``toy-scale``: claim relies on synthetic, mock, or toy-scale demonstration without production proof.
+      - ``verified``: claim is supported by an evidence URL, tracked PR/issue, or concrete measured metrics.
+      - ``no-evidence``: assertive outcome statement without backing URL, commit, or numerical evidence.
+
+    Returns a shallow copy of ``claim_item`` with ``verdict`` and ``justification`` fields.
+    """
+    out = dict(claim_item)
+    text = out.get("claim", "")
+    url = out.get("evidence_url")
+
+    if _FALSIFIED_RE.search(text):
+        verdict = "falsified"
+        justification = (
+            "Claim asserts a failure, regression, conflict, or refuted outcome."
+        )
+    elif _TOY_SCALE_RE.search(text):
+        verdict = "toy-scale"
+        justification = "Claim relies on synthetic, mock, or toy-scale demonstration without production-scale evidence."
+    elif url or _VERIFIED_METRIC_RE.search(text):
+        verdict = "verified"
+        justification = "Claim is backed by external evidence URL, tracked PR/issue, or concrete measured metrics."
+    else:
+        verdict = "no-evidence"
+        justification = "Claim asserts an outcome without concrete numerical metrics, commit/PR links, or external evidence."
+
+    out["verdict"] = verdict
+    out["justification"] = justification
+    return out
+
+
+def triage_claims(claims: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Triage a list of extracted claims, classifying each into the 4-verdict taxonomy."""
+    return [triage_claim(c) for c in claims]
+
+
+def compute_claim_score(
+    claims: List[Dict[str, Any]],
+    dimension_max: float = 52.0,
+) -> Dict[str, Any]:
+    """Compute aggregate quality score and statistics from triaged claim verdicts."""
+    counts = {
+        "verified": 0,
+        "falsified": 0,
+        "toy-scale": 0,
+        "no-evidence": 0,
+    }
+    for c in claims:
+        v = c.get("verdict", "no-evidence")
+        if v in counts:
+            counts[v] += 1
+        else:
+            counts["no-evidence"] += 1
+
+    total_claims = len(claims)
+    if total_claims == 0:
+        return {
+            "score": 0.0,
+            "max": dimension_max,
+            "overall_percentage": 0.0,
+            "verdict_counts": counts,
+        }
+
+    raw_points = sum(
+        CLAIM_VERDICT_WEIGHTS.get(c.get("verdict", ""), 0.0) for c in claims
+    )
+    percentage = round((raw_points / total_claims) * 100, 1)
+    derived_score = round((percentage / 100.0) * dimension_max, 1)
+
+    return {
+        "score": derived_score,
+        "max": dimension_max,
+        "overall_percentage": percentage,
+        "verdict_counts": counts,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Rejection-bias (post-hoc rationalization) detection — Slice C (#2482 / #2515)
+# ──────────────────────────────────────────────────────────────────────
+
+_RATIONALIZATION_PATTERNS: List[Tuple[str, str, str, re.Pattern[str]]] = [
+    (
+        "dismissed_failure",
+        "high",
+        "Dismisses test failures or build errors as expected, non-blocking, or harmless.",
+        re.compile(
+            r"(?i)\b(?:although|despite|even though|however)\b.*?\b(?:failed|failures?|errors?|breakages?)\b.*?\b(?:expected|negligible|minor|harmless|acceptable|normal|intended|ignored|non-blocking)\b"
+        ),
+    ),
+    (
+        "dismissed_failure_inline",
+        "high",
+        "Asserts that failures can be safely ignored without remediation.",
+        re.compile(
+            r"(?i)\b(?:failed|failures?|errors?)\b.*?\b(?:is expected|can be ignored|not an issue|not a blocker|minor glitch|disregarded|harmless)\b"
+        ),
+    ),
+    (
+        "unproven_tradeoff",
+        "medium",
+        "Asserts performance regression or accuracy loss is an acceptable tradeoff without empirical backing.",
+        re.compile(
+            r"(?i)\b(?:regression|slowdown|latency increase|drop in (?:accuracy|performance))\b.*?\b(?:is harmless|tradeoff worth making|irrelevant|negligible|marginal|acceptable|intended)\b"
+        ),
+    ),
+    (
+        "theoretical_rationalization",
+        "high",
+        "Claims design is theoretically sound or valid despite broken execution.",
+        re.compile(
+            r"(?i)\b(?:failed|error|broken|failing)\b.*?\b(?:works? in principle|theoretically sound|conceptually valid|architecture holds)\b"
+        ),
+    ),
+    (
+        "environment_blaming",
+        "medium",
+        "Blames test environment or flakiness rather than addressing bug.",
+        re.compile(
+            r"(?i)\b(?:failure|fail|failed|error)\b.*?\b(?:due to (?:the )?(?:environment|test suite|flakiness|runner))\b.*?\b(?:not (?:our|the) code|not a real bug|ignore)\b"
+        ),
+    ),
+]
+
+
+def detect_rejection_bias(
+    artifacts: List[Tuple[str, Optional[str]]],
+    max_detections: int = 10,
+) -> List[Dict[str, Any]]:
+    """Scan judged artifacts for post-hoc rationalization / rejection-bias patterns.
+
+    Detects structural over-scoring patterns where negative results or failures
+    are rationalized away without empirical justification (Slice C / #2515).
+    """
+    detections: List[Dict[str, Any]] = []
+    seen: set = set()
+
+    for stage, text in artifacts:
+        if not text:
+            continue
+        for header, block in _markdown_sections(text):
+            for sentence in _split_sentences(block):
+                if len(detections) >= max_detections:
+                    break
+                for cat, severity, reason, pattern in _RATIONALIZATION_PATTERNS:
+                    if pattern.search(sentence):
+                        key = (stage, header, cat, sentence)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        detections.append({
+                            "category": cat,
+                            "statement": sentence,
+                            "source": {
+                                "stage": stage,
+                                "section": header or "preamble",
+                            },
+                            "severity": severity,
+                            "reason": reason,
+                        })
+                        break
+
+    detections.sort(
+        key=lambda d: (
+            d["source"]["stage"],
+            d["source"]["section"],
+            d["category"],
+            d["statement"],
+        )
+    )
+    return detections
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Persistence — read / append rubric scorecards (like metrics.jsonl)
 # ──────────────────────────────────────────────────────────────────────
+
 
 def load_scorecards(scorecard_file: Path) -> List[Dict[str, Any]]:
     """Read all rubric scorecards, oldest-first, skipping malformed lines."""
@@ -785,7 +1130,11 @@ def summarize_scorecards(
     strict_records = [r for r in records if r.get("grader") == "strict"]
     recent = strict_records[-last:] if last and last > 0 else list(strict_records)
 
-    pcts = [r.get("overall_percentage", 0) for r in recent if r.get("overall_percentage") is not None]
+    pcts = [
+        r.get("overall_percentage", 0)
+        for r in recent
+        if r.get("overall_percentage") is not None
+    ]
     avg_pct = sum(pcts) / len(pcts) if pcts else 0.0
 
     # Trend: improving / flat / declining
@@ -818,7 +1167,11 @@ def summarize_scorecards(
 
 def format_summary(summary: Dict[str, Any]) -> str:
     """One-line rendering for no_agent cron output."""
-    tail = " | ".join(summary["persistent_flags"][:3]) if summary["persistent_flags"] else "no flags"
+    tail = (
+        " | ".join(summary["persistent_flags"][:3])
+        if summary["persistent_flags"]
+        else "no flags"
+    )
     return (
         f"[rubric-judge] last {summary['cycles']} cycles: "
         f"avg={summary['avg_overall_pct']}% min={summary['min_pct']}% "
@@ -829,6 +1182,7 @@ def format_summary(summary: Dict[str, Any]) -> str:
 # ──────────────────────────────────────────────────────────────────────
 # CLI
 # ──────────────────────────────────────────────────────────────────────
+
 
 def cycle_date(now: datetime | None = None) -> str:
     """Same logic as evolution_funnel.cycle_date: before 08:00, use yesterday."""
