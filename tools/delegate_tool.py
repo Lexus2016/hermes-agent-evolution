@@ -3562,6 +3562,21 @@ def _run_single_child(
         if status == "failed":
             entry["error"] = result.get("error", "Subagent did not produce a response.")
 
+        # Co-evolution loop (#2262, parent #2251): record final outcome + child
+        # tool trace. Fail-open — never break delegation itself.
+        try:
+            from agent import coevolution as _coevo
+
+            _coevo.record_delegation_and_tools(
+                session_key=owner_session_id or "", goal=goal,
+                outcome={"status": status, "completed": completed},
+                tool_calls=tool_trace,
+                role=getattr(child, "_delegate_role", None) or "leaf",
+                model=_model if isinstance(_model, str) else "",
+            )
+        except Exception:
+            logger.debug("co-evolution record failed", exc_info=True)
+
         # Surface the bounded auto-retry count (issue #323) so callers and
         # trace-mining (#248) can see recovery happened. Absent (not 0) when
         # no retry was attempted, to avoid noise on the healthy path.
