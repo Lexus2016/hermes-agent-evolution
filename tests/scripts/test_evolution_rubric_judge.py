@@ -19,6 +19,7 @@ from evolution_rubric_judge import (  # noqa: E402
     StrictRubricJudgeGrader,
     _markdown_sections,
     compute_claim_score,
+    detect_rejection_bias,
     extract_claims,
     triage_claim,
     triage_claims,
@@ -151,3 +152,46 @@ def test_strict_grader_scores_from_claim_verdicts(tmp_path: Path) -> None:
     assert scorecard["claim_verdicts"]["verified"] >= 1
     # Check that total_score was derived from claim verdicts, not self-assigned
     assert scorecard["overall_percentage"] > 0
+    assert "rejection_bias" in scorecard
+    assert "rejection_bias_flag" in scorecard
+
+
+def test_detect_rejection_bias_patterns() -> None:
+    text = """\
+# Implementation Note
+Although tests failed, this failure is expected and harmless for now.
+
+# Architecture
+Even though the script failed, the design is theoretically sound and conceptually valid.
+
+# Root Cause
+The timeout occurred due to the environment rather than our code.
+"""
+    detections = detect_rejection_bias([("implementation", text)])
+    assert len(detections) >= 2
+    categories = {d["category"] for d in detections}
+    assert "dismissed_failure" in categories or "dismissed_failure_inline" in categories
+    assert "theoretical_rationalization" in categories
+    for d in detections:
+        assert d["severity"] in ("high", "medium")
+        assert len(d["reason"]) > 5
+
+
+def test_detect_rejection_bias_clean_text() -> None:
+    assert detect_rejection_bias([("research", SAMPLE)]) == []
+    assert detect_rejection_bias([("research", None)]) == []
+
+
+def test_strict_grader_rejection_bias_flag(tmp_path: Path) -> None:
+    res_dir = tmp_path / "research"
+    res_dir.mkdir(parents=True, exist_ok=True)
+    res_file = res_dir / "2026-06-23.md"
+    res_file.write_text(
+        "# Finding\nAlthough tests failed, this failure is expected and harmless.\n",
+        encoding="utf-8",
+    )
+    grader = StrictRubricJudgeGrader()
+    scorecard = grader.score("2026-06-23", tmp_path)
+    assert scorecard["rejection_bias_flag"] is True
+    assert len(scorecard["rejection_bias"]) >= 1
+    assert any("REJECTION_BIAS" in flag for flag in scorecard["flags"])

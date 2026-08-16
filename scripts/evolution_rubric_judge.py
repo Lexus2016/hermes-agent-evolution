@@ -644,15 +644,17 @@ class StrictRubricJudgeGrader:
                     f"({dim_pct:.0f}%) — stage nearly absent or very poor"
                 )
 
-        if claims:
-            if claim_stats["verdict_counts"]["falsified"] > 0:
-                flags.append(
-                    f"FALSIFIED_CLAIMS: {claim_stats['verdict_counts']['falsified']} claim(s) refuted by evidence"
-                )
-            if claim_stats["verdict_counts"]["no-evidence"] > len(claims) * 0.5:
-                flags.append(
-                    f"UNVERIFIED_CLAIMS: {claim_stats['verdict_counts']['no-evidence']}/{len(claims)} claims lack evidence"
-                )
+        # Slice C: Rejection-bias (post-hoc rationalization) detection
+        rejection_bias_detections = detect_rejection_bias([
+            ("research", research_md),
+            ("implementation", implementation_md),
+            ("integration", json.dumps(integration_json)),
+        ])
+        rejection_bias_flag = len(rejection_bias_detections) > 0
+        if rejection_bias_flag:
+            flags.append(
+                f"REJECTION_BIAS: {len(rejection_bias_detections)} post-hoc rationalization pattern(s) detected"
+            )
 
         return {
             "cycle_date": date,
@@ -664,6 +666,8 @@ class StrictRubricJudgeGrader:
             "flags": flags,
             "claims": claims,
             "claim_verdicts": claim_stats["verdict_counts"] if claims else {},
+            "rejection_bias": rejection_bias_detections,
+            "rejection_bias_flag": rejection_bias_flag,
         }
 
 
@@ -973,6 +977,102 @@ def compute_claim_score(
         "overall_percentage": percentage,
         "verdict_counts": counts,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Rejection-bias (post-hoc rationalization) detection — Slice C (#2482 / #2515)
+# ──────────────────────────────────────────────────────────────────────
+
+_RATIONALIZATION_PATTERNS: List[Tuple[str, str, str, re.Pattern[str]]] = [
+    (
+        "dismissed_failure",
+        "high",
+        "Dismisses test failures or build errors as expected, non-blocking, or harmless.",
+        re.compile(
+            r"(?i)\b(?:although|despite|even though|however)\b.*?\b(?:failed|failures?|errors?|breakages?)\b.*?\b(?:expected|negligible|minor|harmless|acceptable|normal|intended|ignored|non-blocking)\b"
+        ),
+    ),
+    (
+        "dismissed_failure_inline",
+        "high",
+        "Asserts that failures can be safely ignored without remediation.",
+        re.compile(
+            r"(?i)\b(?:failed|failures?|errors?)\b.*?\b(?:is expected|can be ignored|not an issue|not a blocker|minor glitch|disregarded|harmless)\b"
+        ),
+    ),
+    (
+        "unproven_tradeoff",
+        "medium",
+        "Asserts performance regression or accuracy loss is an acceptable tradeoff without empirical backing.",
+        re.compile(
+            r"(?i)\b(?:regression|slowdown|latency increase|drop in (?:accuracy|performance))\b.*?\b(?:is harmless|tradeoff worth making|irrelevant|negligible|marginal|acceptable|intended)\b"
+        ),
+    ),
+    (
+        "theoretical_rationalization",
+        "high",
+        "Claims design is theoretically sound or valid despite broken execution.",
+        re.compile(
+            r"(?i)\b(?:failed|error|broken|failing)\b.*?\b(?:works? in principle|theoretically sound|conceptually valid|architecture holds)\b"
+        ),
+    ),
+    (
+        "environment_blaming",
+        "medium",
+        "Blames test environment or flakiness rather than addressing bug.",
+        re.compile(
+            r"(?i)\b(?:failure|fail|failed|error)\b.*?\b(?:due to (?:the )?(?:environment|test suite|flakiness|runner))\b.*?\b(?:not (?:our|the) code|not a real bug|ignore)\b"
+        ),
+    ),
+]
+
+
+def detect_rejection_bias(
+    artifacts: List[Tuple[str, Optional[str]]],
+    max_detections: int = 10,
+) -> List[Dict[str, Any]]:
+    """Scan judged artifacts for post-hoc rationalization / rejection-bias patterns.
+
+    Detects structural over-scoring patterns where negative results or failures
+    are rationalized away without empirical justification (Slice C / #2515).
+    """
+    detections: List[Dict[str, Any]] = []
+    seen: set = set()
+
+    for stage, text in artifacts:
+        if not text:
+            continue
+        for header, block in _markdown_sections(text):
+            for sentence in _split_sentences(block):
+                if len(detections) >= max_detections:
+                    break
+                for cat, severity, reason, pattern in _RATIONALIZATION_PATTERNS:
+                    if pattern.search(sentence):
+                        key = (stage, header, cat, sentence)
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        detections.append({
+                            "category": cat,
+                            "statement": sentence,
+                            "source": {
+                                "stage": stage,
+                                "section": header or "preamble",
+                            },
+                            "severity": severity,
+                            "reason": reason,
+                        })
+                        break
+
+    detections.sort(
+        key=lambda d: (
+            d["source"]["stage"],
+            d["source"]["section"],
+            d["category"],
+            d["statement"],
+        )
+    )
+    return detections
 
 
 # ──────────────────────────────────────────────────────────────────────
