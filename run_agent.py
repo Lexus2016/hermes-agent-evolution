@@ -4929,6 +4929,46 @@ class AIAgent:
             return store.list_vars()
         return []
 
+    @property
+    def harness_state(self) -> Optional[Any]:
+        """Access the attached VersionedHarnessState instance."""
+        if not hasattr(self, "_harness_state") or self._harness_state is None:
+            try:
+                from evolution.lib.versioned_harness_state import VersionedHarnessState
+
+                init_prompt = getattr(self, "system_prompt", "") or ""
+                self._harness_state = VersionedHarnessState(
+                    initial_instructions=init_prompt, session_id=self.session_id
+                )
+            except Exception:
+                self._harness_state = None
+        return self._harness_state
+
+    def update_harness_instructions(
+        self, instructions: str, reason: str = ""
+    ) -> Optional[Any]:
+        """Update operating instructions with a new version."""
+        hs = self.harness_state
+        if hs:
+            return hs.update(instructions, reason=reason)
+        return None
+
+    def rollback_harness_instructions(
+        self, target_version: Optional[int] = None, reason: str = ""
+    ) -> Optional[Any]:
+        """Rollback operating instructions to a previous version."""
+        hs = self.harness_state
+        if hs:
+            return hs.rollback(target_version=target_version, reason=reason)
+        return None
+
+    def get_harness_instructions(self) -> str:
+        """Get current versioned harness instructions."""
+        hs = self.harness_state
+        if hs:
+            return hs.current_instructions
+        return getattr(self, "system_prompt", "") or ""
+
     def _build_system_prompt_parts(self, system_message: str = None) -> Dict[str, str]:
         """Forwarder — see ``agent.system_prompt.build_system_prompt_parts``."""
         from agent.system_prompt import build_system_prompt_parts
