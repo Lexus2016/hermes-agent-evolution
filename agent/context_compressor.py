@@ -3007,7 +3007,7 @@ class ContextCompressor(ContextEngine):
     @property
     def parallel_compactor(self) -> Optional[Any]:
         """Access the attached ParallelCompactor instance."""
-        return self._parallel_compactor
+        return getattr(self, "_parallel_compactor", None)
 
     def start_parallel_compaction(
         self,
@@ -3016,9 +3016,10 @@ class ContextCompressor(ContextEngine):
         focus_topic: Optional[str] = None,
     ) -> bool:
         """Launch background summarization via ParallelCompactor if enabled."""
-        if not self._parallel_compactor:
+        pc = getattr(self, "_parallel_compactor", None)
+        if not pc:
             return False
-        return self._parallel_compactor.start_async_compaction(
+        return pc.start_async_compaction(
             messages=messages,
             current_tokens=current_tokens,
             summarize_fn=lambda msgs: self.compress(
@@ -3030,9 +3031,10 @@ class ContextCompressor(ContextEngine):
         self, messages: List[Dict[str, Any]]
     ) -> Optional[List[Dict[str, Any]]]:
         """Check if parallel compaction completed and can be safely swapped in."""
-        if not self._parallel_compactor:
+        pc = getattr(self, "_parallel_compactor", None)
+        if not pc:
             return None
-        return self._parallel_compactor.try_apply_swap(messages)
+        return pc.try_apply_swap(messages)
 
     def update_from_response(self, usage: Dict[str, Any]):
         """Update tracked token usage from API response."""
@@ -4513,11 +4515,9 @@ Target ~{summary_budget} tokens. Be CONCRETE — include file paths, command out
 {_temporal_anchoring_rule}
 Write only the summary body. Do not include any preamble or prefix."""
 
-        if (
-            self._parallel_compactor
-            and self._parallel_compactor.config.summary_constraint
-        ):
-            _vol_inst = self._parallel_compactor.build_summary_instruction()
+        _pc = getattr(self, "_parallel_compactor", None)
+        if _pc and _pc.config.summary_constraint:
+            _vol_inst = _pc.build_summary_instruction()
             if _vol_inst:
                 _template_sections += f"\n\nSTRUCTURAL CONSTRAINT:\n{_vol_inst}"
 
@@ -4676,11 +4676,9 @@ This compaction should PRIORITISE preserving all information related to the focu
             summary = _reinject_pruned_skill_markers(summary, _pruned_skill_names)
             summary = self._ground_historical_task_snapshot(summary, turns_to_summarize)
             self._validate_summary_user_provenance(summary, has_user_turn)
-            if (
-                self._parallel_compactor
-                and self._parallel_compactor.config.summary_constraint
-            ):
-                _val_res = self._parallel_compactor.validate_summary(summary)
+            _pc = getattr(self, "_parallel_compactor", None)
+            if _pc and _pc.config.summary_constraint:
+                _val_res = _pc.validate_summary(summary)
                 if not _val_res.ok:
                     logger.warning(
                         "Compaction summary violated volume constraints (%s)",
