@@ -43,6 +43,17 @@ from agent.redact import redact_sensitive_text
 from agent.turn_context import drop_stale_api_content
 from tools.todo_tool import TODO_INJECTION_HEADER
 
+try:
+    from evolution.lib.parallel_compaction import (
+        CompactionState,
+        ParallelCompactionConfig,
+        ParallelCompactor,
+    )
+
+    _HAS_PARALLEL_COMPACTOR = True
+except ImportError:
+    _HAS_PARALLEL_COMPACTOR = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -174,8 +185,8 @@ PINNED_CONSTRAINT_METADATA_KEY = "_pinned_constraint"
 PINNED_CONSTRAINT_MARKER = "[PINNED_CONSTRAINT]"
 _PINNED_CONSTRAINT_RE = re.compile(
     re.escape(PINNED_CONSTRAINT_MARKER)
-    + r"\s*(.*?)"                       # capture the constraint text
-    + r"\s*\[/PINNED_CONSTRAINT\]",     # closing tag
+    + r"\s*(.*?)"  # capture the constraint text
+    + r"\s*\[/PINNED_CONSTRAINT\]",  # closing tag
     re.DOTALL,
 )
 
@@ -282,8 +293,7 @@ def _reinject_dropped_pinned_constraints(
         return compressed_messages
 
     dropped = [
-        c for c in pinned
-        if not _pinned_constraint_survives(c, compressed_messages)
+        c for c in pinned if not _pinned_constraint_survives(c, compressed_messages)
     ]
     if not dropped:
         return compressed_messages
@@ -304,6 +314,7 @@ def _reinject_dropped_pinned_constraints(
     if compressed_messages and compressed_messages[0].get("role") == "system":
         return [compressed_messages[0], reinject_msg] + compressed_messages[1:]
     return [reinject_msg] + compressed_messages
+
 
 _NO_USER_TASK_SENTINEL = "None. This session contains no user-authored turns."
 COMPRESSION_CONTINUATION_USER_CONTENT = (
@@ -701,6 +712,7 @@ def _is_clarify_non_response_sentinel(response: Any) -> bool:
         )
     return False
 
+
 # Ghost-skill defense (#32106): when compaction reduces an old ``skill_view``
 # result to a 1-line metadata summary, the model still believes the skill is
 # loaded even though its instructions are gone. The marker below is the ONE
@@ -774,16 +786,30 @@ def _collect_ghosted_skill_names(turns: List[Dict[str, Any]]) -> list[str]:
     for idx, skill in _skill_view_call_sites(turns):
         msg = turns[idx]
         for tc in msg.get("tool_calls") or []:
-            tc_fn = tc.get("function", {}) if isinstance(tc, dict) else getattr(tc, "function", None)
-            tc_name = tc_fn.get("name", "") if isinstance(tc_fn, dict) else getattr(tc_fn, "name", "")
+            tc_fn = (
+                tc.get("function", {})
+                if isinstance(tc, dict)
+                else getattr(tc, "function", None)
+            )
+            tc_name = (
+                tc_fn.get("name", "")
+                if isinstance(tc_fn, dict)
+                else getattr(tc_fn, "name", "")
+            )
             if tc_name != "skill_view":
                 continue
-            cid = tc.get("id", "") if isinstance(tc, dict) else (getattr(tc, "id", "") or "")
+            cid = (
+                tc.get("id", "")
+                if isinstance(tc, dict)
+                else (getattr(tc, "id", "") or "")
+            )
             if cid:
                 call_id_to_skill[cid] = skill
     for msg in turns:
         content = msg.get("content")
-        text = content if isinstance(content, str) else _content_text_for_contains(content)
+        text = (
+            content if isinstance(content, str) else _content_text_for_contains(content)
+        )
         for name in _extract_pruned_skill_names(text):
             _add(name)
         if (
@@ -821,14 +847,15 @@ def _reinject_pruned_skill_markers(summary: str, skill_names: list[str]) -> str:
     if not skill_names:
         return summary
     missing = [
-        name for name in skill_names
-        if _skill_pruned_marker(name) not in summary
+        name for name in skill_names if _skill_pruned_marker(name) not in summary
     ]
     if not missing:
         return summary
     lines = [_skill_pruned_marker(name) for name in missing]
     block = (
-        "\n\n" + _PRUNED_SKILLS_SECTION_HEADING + "\n"
+        "\n\n"
+        + _PRUNED_SKILLS_SECTION_HEADING
+        + "\n"
         + "\n".join(lines)
         + "\n(The listed skills' instructions were pruned during context "
         "compression. Reload with the skill_view call in each marker before "
@@ -877,7 +904,8 @@ def _skill_view_call_sites(
 
 
 def _collect_protected_skill_names(
-    messages: List[Dict[str, Any]], prune_boundary: int,
+    messages: List[Dict[str, Any]],
+    prune_boundary: int,
 ) -> set[str]:
     """Skill names whose skill_view bodies must survive Phase-1 demotion.
 
@@ -915,6 +943,7 @@ def _collect_protected_skill_names(
         elif any(key in text for text in tail_user_texts):
             protected.add(key)
     return protected
+
 
 # Chars per token rough estimate
 _CHARS_PER_TOKEN = 4
@@ -1015,7 +1044,9 @@ def _extract_tool_call_name_and_args(tool_call: Any) -> tuple[str, str]:
     fn = getattr(tool_call, "function", None)
     if fn is None:
         return "unknown", ""
-    return str(getattr(fn, "name", None) or "unknown"), str(getattr(fn, "arguments", None) or "")
+    return str(getattr(fn, "name", None) or "unknown"), str(
+        getattr(fn, "arguments", None) or ""
+    )
 
 
 def _extract_tool_call_id(tool_call: Any) -> str:
@@ -1024,7 +1055,9 @@ def _extract_tool_call_id(tool_call: Any) -> str:
     return str(getattr(tool_call, "id", "") or "")
 
 
-def _collect_path_mentions(text: str, relevant_files: list[str], *, limit: int = 12) -> None:
+def _collect_path_mentions(
+    text: str, relevant_files: list[str], *, limit: int = 12
+) -> None:
     for match in _PATH_MENTION_RE.findall(text):
         _dedupe_append(relevant_files, match.rstrip(".,:;"), limit=limit)
 
@@ -1118,9 +1151,7 @@ _NEWEST_TURN_ONLY_BUDGET_KEYS = (
 # pre-pass: the compaction boundary has already invalidated the prompt-cache
 # prefix, and the conversation_loop already drops these wholesale when
 # ``api_mode != "codex_responses"`` (#71058).
-_STALE_REPLAY_PRUNE_KEYS = (
-    "codex_reasoning_items",
-)
+_STALE_REPLAY_PRUNE_KEYS = ("codex_reasoning_items",)
 
 
 def _reasoning_details_text_chars(value: Any) -> int:
@@ -1517,7 +1548,9 @@ def _summarize_tool_result(tool_name: str, tool_args: str, tool_content: str) ->
         return f"[{tool_name}] ({_len:,} chars result)"
 
 
-def _summarize_tool_result_unguarded(tool_name: str, tool_args: str, tool_content: str) -> str:
+def _summarize_tool_result_unguarded(
+    tool_name: str, tool_args: str, tool_content: str
+) -> str:
     """Build the summary line (unguarded; see ``_summarize_tool_result``)."""
     try:
         args = json.loads(tool_args) if tool_args else {}
@@ -1545,7 +1578,9 @@ def _summarize_tool_result_unguarded(tool_name: str, tool_args: str, tool_conten
 
     if tool_name == "write_file":
         path = args.get("path", "?")
-        written_lines = _str_arg(args, "content").count("\n") + 1 if args.get("content") else "?"
+        written_lines = (
+            _str_arg(args, "content").count("\n") + 1 if args.get("content") else "?"
+        )
         return f"[write_file] wrote to {path} ({written_lines} lines)"
 
     if tool_name == "search_files":
@@ -1561,8 +1596,14 @@ def _summarize_tool_result_unguarded(tool_name: str, tool_args: str, tool_conten
         mode = args.get("mode", "replace")
         return f"[patch] {mode} in {path} ({content_len:,} chars result)"
 
-    if tool_name in {"browser_navigate", "browser_click", "browser_snapshot",
-                     "browser_type", "browser_scroll", "browser_vision"}:
+    if tool_name in {
+        "browser_navigate",
+        "browser_click",
+        "browser_snapshot",
+        "browser_type",
+        "browser_scroll",
+        "browser_vision",
+    }:
         url = args.get("url", "")
         ref = args.get("ref", "")
         detail = f" {url}" if url else (f" ref={ref}" if ref else "")
@@ -1608,7 +1649,9 @@ def _summarize_tool_result_unguarded(tool_name: str, tool_args: str, tool_conten
                         provenance_hint = " → " + " | ".join(summaries[:3])
         except Exception:
             pass
-        return f"[delegate_task] '{goal}' ({content_len:,} chars result){provenance_hint}"
+        return (
+            f"[delegate_task] '{goal}' ({content_len:,} chars result){provenance_hint}"
+        )
 
     if tool_name == "execute_code":
         code_str = _str_arg(args, "code")
@@ -1660,9 +1703,7 @@ def _summarize_tool_result_unguarded(tool_name: str, tool_args: str, tool_conten
         except (json.JSONDecodeError, TypeError):
             result = {}
         response = result.get("user_response") if isinstance(result, dict) else None
-        is_answer_shaped = (
-            isinstance(response, str) and bool(response)
-        ) or (
+        is_answer_shaped = (isinstance(response, str) and bool(response)) or (
             isinstance(response, list)
             and bool(response)
             and all(isinstance(item, str) and item for item in response)
@@ -1672,14 +1713,13 @@ def _summarize_tool_result_unguarded(tool_name: str, tool_args: str, tool_conten
         # "[oneshot mode: ...]", CLI "The user did not provide a
         # response..."). Quoting those as a user answer would be false
         # attribution — keep them on the generic path.
-        resolved = is_answer_shaped and not _is_clarify_non_response_sentinel(
-            response
-        )
+        resolved = is_answer_shaped and not _is_clarify_non_response_sentinel(response)
         if resolved:
             # Keep ordinary Unicode intact while escaping lone UTF-16
             # surrogates so the compacted message remains UTF-8/SQLite safe.
             serialized_response = (
-                json.dumps(response, ensure_ascii=False)
+                json
+                .dumps(response, ensure_ascii=False)
                 .encode("utf-8", errors="backslashreplace")
                 .decode("utf-8")
             )
@@ -1774,7 +1814,9 @@ class ContextCompressor(ContextEngine):
         self._fallback_compression_streak = 0
         self._verify_compaction_cleared_threshold = False
         self._last_compression_made_progress = False
-        self._summary_failure_cooldown_until = 0.0  # transient errors must not block a fresh session
+        self._summary_failure_cooldown_until = (
+            0.0  # transient errors must not block a fresh session
+        )
         self._cooldown_persist_failed = False
         self._last_summary_error = None
         self._last_compress_aborted = False
@@ -1854,9 +1896,15 @@ class ContextCompressor(ContextEngine):
         telemetry = getattr(self, "_active_compression_telemetry", None)
         if not isinstance(telemetry, dict):
             return
-        telemetry["protected_head_tokens"] = estimate_messages_tokens_rough(head_messages)
-        telemetry["middle_window_tokens"] = estimate_messages_tokens_rough(middle_messages)
-        telemetry["protected_tail_tokens"] = estimate_messages_tokens_rough(tail_messages)
+        telemetry["protected_head_tokens"] = estimate_messages_tokens_rough(
+            head_messages
+        )
+        telemetry["middle_window_tokens"] = estimate_messages_tokens_rough(
+            middle_messages
+        )
+        telemetry["protected_tail_tokens"] = estimate_messages_tokens_rough(
+            tail_messages
+        )
 
     def _record_aux_compression_call(
         self,
@@ -1907,10 +1955,14 @@ class ContextCompressor(ContextEngine):
             "Context compressor initialized: model=%s context_length=%d "
             "threshold=%d (%.0f%%) target_ratio=%.0f%% tail_budget=%d "
             "provider=%s base_url=%s",
-            self.model, self._resolved_context_length, self.threshold_tokens,
-            self.threshold_percent * 100, self.summary_target_ratio * 100,
+            self.model,
+            self._resolved_context_length,
+            self.threshold_tokens,
+            self.threshold_percent * 100,
+            self.summary_target_ratio * 100,
             self.tail_token_budget,
-            self.provider or "none", self.base_url or "none",
+            self.provider or "none",
+            self.base_url or "none",
         )
 
     def _resolve_context_length(self) -> int:
@@ -1931,7 +1983,8 @@ class ContextCompressor(ContextEngine):
             # _base_threshold_percent already has the per-model override
             # applied, so the floor stacks on top of it.
             self.threshold_percent = self._effective_threshold_percent(
-                self._resolved_context_length, self._base_threshold_percent,
+                self._resolved_context_length,
+                self._base_threshold_percent,
             )
             self._emit_init_summary_once()
         return self._resolved_context_length
@@ -1959,7 +2012,8 @@ class ContextCompressor(ContextEngine):
         _base = getattr(self, "_base_threshold_percent", None)
         if _base is not None:
             self.threshold_percent = self._effective_threshold_percent(
-                value, _base,
+                value,
+                _base,
             )
         self._threshold_tokens = None
         self._tail_token_budget = None
@@ -1977,7 +2031,9 @@ class ContextCompressor(ContextEngine):
             # if the percentage would suggest a lower value (#14690 handles
             # the degenerate small-window case inside the helper).
             self._threshold_tokens = self._compute_threshold_tokens(
-                _ctx, self.threshold_percent, self.max_tokens,
+                _ctx,
+                self.threshold_percent,
+                self.max_tokens,
             )
             # Apply absolute token cap (compression.threshold_tokens) —
             # takes the lower of the ratio-based threshold and the cap.
@@ -1991,7 +2047,9 @@ class ContextCompressor(ContextEngine):
     @property
     def tail_token_budget(self) -> int:
         if self._tail_token_budget is None:
-            self._tail_token_budget = int(self.threshold_tokens * self.summary_target_ratio)
+            self._tail_token_budget = int(
+                self.threshold_tokens * self.summary_target_ratio
+            )
         return self._tail_token_budget
 
     @tail_token_budget.setter
@@ -2002,7 +2060,8 @@ class ContextCompressor(ContextEngine):
     def max_summary_tokens(self) -> int:
         if self._max_summary_tokens is None:
             self._max_summary_tokens = min(
-                int(self.context_length * 0.05), _SUMMARY_TOKENS_CEILING,
+                int(self.context_length * 0.05),
+                _SUMMARY_TOKENS_CEILING,
             )
         return self._max_summary_tokens
 
@@ -2094,14 +2153,18 @@ class ContextCompressor(ContextEngine):
                     if isinstance(stored_streak, (int, float, str)):
                         previous_fallback_streak = max(0, int(stored_streak))
                 except (TypeError, ValueError, sqlite3.Error) as exc:
-                    logger.debug("compression parent fallback streak lookup failed: %s", exc)
+                    logger.debug(
+                        "compression parent fallback streak lookup failed: %s", exc
+                    )
                 except Exception as exc:
                     logger.debug(
                         "compression parent fallback streak lookup failed (non-sqlite): %s",
                         exc,
                     )
             count_getter = getattr(
-                session_db, "get_compression_ineffective_count", None,
+                session_db,
+                "get_compression_ineffective_count",
+                None,
             )
             if callable(count_getter):
                 try:
@@ -2110,7 +2173,8 @@ class ContextCompressor(ContextEngine):
                         previous_ineffective_count = max(0, int(stored_count))
                 except (TypeError, ValueError, sqlite3.Error) as exc:
                     logger.debug(
-                        "compression parent ineffective count lookup failed: %s", exc,
+                        "compression parent ineffective count lookup failed: %s",
+                        exc,
                     )
                 except Exception as exc:
                     logger.debug(
@@ -2149,7 +2213,9 @@ class ContextCompressor(ContextEngine):
         except (TypeError, ValueError, sqlite3.Error) as exc:
             logger.debug("compression fallback streak lookup failed: %s", exc)
         except Exception as exc:
-            logger.debug("compression fallback streak lookup failed (non-sqlite): %s", exc)
+            logger.debug(
+                "compression fallback streak lookup failed (non-sqlite): %s", exc
+            )
 
     def _load_proactive_prune_rearm_tokens(self) -> None:
         """Restore the cache-boundary runway for a resumed durable session."""
@@ -2197,7 +2263,9 @@ class ContextCompressor(ContextEngine):
         except sqlite3.Error as exc:
             logger.debug("compression fallback streak persist failed: %s", exc)
         except Exception as exc:
-            logger.debug("compression fallback streak persist failed (non-sqlite): %s", exc)
+            logger.debug(
+                "compression fallback streak persist failed (non-sqlite): %s", exc
+            )
 
     def _load_ineffective_compression_count(self) -> None:
         """Load the durable anti-thrash strike count for the bound session.
@@ -2219,14 +2287,14 @@ class ContextCompressor(ContextEngine):
             stored_count = getter(session_id)
             self._ineffective_compression_count = max(
                 0,
-                int(stored_count)
-                if isinstance(stored_count, (int, float, str))
-                else 0,
+                int(stored_count) if isinstance(stored_count, (int, float, str)) else 0,
             )
         except (TypeError, ValueError, sqlite3.Error) as exc:
             logger.debug("compression ineffective count lookup failed: %s", exc)
         except Exception as exc:
-            logger.debug("compression ineffective count lookup failed (non-sqlite): %s", exc)
+            logger.debug(
+                "compression ineffective count lookup failed (non-sqlite): %s", exc
+            )
 
     def _persist_ineffective_compression_count(self) -> None:
         session_db = getattr(self, "_session_db", None)
@@ -2239,7 +2307,9 @@ class ContextCompressor(ContextEngine):
         except sqlite3.Error as exc:
             logger.debug("compression ineffective count persist failed: %s", exc)
         except Exception as exc:
-            logger.debug("compression ineffective count persist failed (non-sqlite): %s", exc)
+            logger.debug(
+                "compression ineffective count persist failed (non-sqlite): %s", exc
+            )
 
     def _record_ineffective_compression_verdict(self, count: int) -> None:
         """Set the anti-thrash strike counter, keeping the durable copy in sync.
@@ -2253,7 +2323,10 @@ class ContextCompressor(ContextEngine):
         self._persist_ineffective_compression_count()
 
     def record_completed_compaction(
-        self, *, used_fallback: bool = False, feasibility_skip: bool = False,
+        self,
+        *,
+        used_fallback: bool = False,
+        feasibility_skip: bool = False,
     ) -> None:
         """Record one completed boundary and its summary quality.
 
@@ -2307,9 +2380,8 @@ class ContextCompressor(ContextEngine):
         local_state = None
         if self._summary_failure_cooldown_until > now_mono:
             local_state = {
-                "cooldown_until": time.time() + (
-                    self._summary_failure_cooldown_until - now_mono
-                ),
+                "cooldown_until": time.time()
+                + (self._summary_failure_cooldown_until - now_mono),
                 "remaining_seconds": self._summary_failure_cooldown_until - now_mono,
                 "error": self._last_summary_error,
             }
@@ -2395,7 +2467,9 @@ class ContextCompressor(ContextEngine):
             logger.debug("compression failure cooldown persist failed: %s", exc)
         except Exception as exc:
             self._cooldown_persist_failed = True
-            logger.debug("compression failure cooldown persist failed (non-sqlite): %s", exc)
+            logger.debug(
+                "compression failure cooldown persist failed (non-sqlite): %s", exc
+            )
 
     def record_timeout_failure(self, error: str) -> None:
         """Record a consecutive timeout failure using the shared cooldown ladder.
@@ -2410,8 +2484,7 @@ class ContextCompressor(ContextEngine):
             getattr(self, "_consecutive_timeout_failures", 0) + 1
         )
         cooldown = _TIMEOUT_COOLDOWN_LADDER[
-            min(self._consecutive_timeout_failures,
-                len(_TIMEOUT_COOLDOWN_LADDER)) - 1
+            min(self._consecutive_timeout_failures, len(_TIMEOUT_COOLDOWN_LADDER)) - 1
         ]
         self._record_compression_failure_cooldown(float(cooldown), error)
 
@@ -2431,9 +2504,7 @@ class ContextCompressor(ContextEngine):
                     )
                     return
             except Exception:
-                logger.debug(
-                    "compression cancellation check failed", exc_info=True
-                )
+                logger.debug("compression cancellation check failed", exc_info=True)
         self._summary_failure_cooldown_until = 0.0
         self._last_summary_error = None
         self._consecutive_timeout_failures = 0
@@ -2452,7 +2523,9 @@ class ContextCompressor(ContextEngine):
         except sqlite3.Error as exc:
             logger.debug("compression failure cooldown clear failed: %s", exc)
         except Exception as exc:
-            logger.debug("compression failure cooldown clear failed (non-sqlite): %s", exc)
+            logger.debug(
+                "compression failure cooldown clear failed (non-sqlite): %s", exc
+            )
 
     def update_model(
         self,
@@ -2482,14 +2555,19 @@ class ContextCompressor(ContextEngine):
         # (the raw config value) so a switch from a model with an override to
         # one without correctly falls back to the global threshold.
         _config_pct = getattr(
-            self, "_config_threshold_percent", self.threshold_percent,
+            self,
+            "_config_threshold_percent",
+            self.threshold_percent,
         )
         _new_base = resolve_model_threshold(
-            model, self.model_thresholds, _config_pct,
+            model,
+            self.model_thresholds,
+            _config_pct,
         )
         self._base_threshold_percent = _new_base
         self.threshold_percent = self._effective_threshold_percent(
-            context_length, _new_base,
+            context_length,
+            _new_base,
         )
         # max_tokens=None here means "caller didn't specify" → keep the existing
         # output reservation. A switch that genuinely changes the output budget
@@ -2497,7 +2575,9 @@ class ContextCompressor(ContextEngine):
         if max_tokens is not None:
             self.max_tokens = self._coerce_max_tokens(max_tokens)
         self.threshold_tokens = self._compute_threshold_tokens(
-            context_length, self.threshold_percent, self.max_tokens,
+            context_length,
+            self.threshold_percent,
+            self.max_tokens,
         )
         # Re-apply the absolute token cap so it survives model switches
         # and fallback activations. The cap is a first-class config value
@@ -2509,7 +2589,8 @@ class ContextCompressor(ContextEngine):
         target_tokens = int(self.threshold_tokens * self.summary_target_ratio)
         self.tail_token_budget = target_tokens
         self.max_summary_tokens = min(
-            int(context_length * 0.05), _SUMMARY_TOKENS_CEILING,
+            int(context_length * 0.05),
+            _SUMMARY_TOKENS_CEILING,
         )
 
         # Reset cross-call calibration state captured under the PREVIOUS model.
@@ -2618,7 +2699,8 @@ class ContextCompressor(ContextEngine):
 
     @staticmethod
     def _effective_threshold_percent(
-        context_length: int, threshold_percent: float,
+        context_length: int,
+        threshold_percent: float,
     ) -> float:
         """Apply the small-context threshold floor (raise-only).
 
@@ -2635,7 +2717,9 @@ class ContextCompressor(ContextEngine):
 
     @staticmethod
     def _compute_threshold_tokens(
-        context_length: int, threshold_percent: float, max_tokens: int | None = None,
+        context_length: int,
+        threshold_percent: float,
+        max_tokens: int | None = None,
     ) -> int:
         """Compute the compaction trigger threshold in tokens.
 
@@ -2671,9 +2755,15 @@ class ContextCompressor(ContextEngine):
         # minimum-context model rides most of its budget before compacting
         # instead of wasting half.
         if effective_window > 0 and floored >= effective_window:
-            return max(1, min(int(effective_window * ContextCompressor._MIN_CTX_TRIGGER_RATIO),
-                              effective_window - 1))
+            return max(
+                1,
+                min(
+                    int(effective_window * ContextCompressor._MIN_CTX_TRIGGER_RATIO),
+                    effective_window - 1,
+                ),
+            )
         return floored
+
     def __init__(
         self,
         model: str,
@@ -2712,7 +2802,9 @@ class ContextCompressor(ContextEngine):
         self._config_threshold_percent = threshold_percent
         # Resolve per-model override first, then apply the small-context floor.
         self._base_threshold_percent = resolve_model_threshold(
-            model, self.model_thresholds, threshold_percent,
+            model,
+            self.model_thresholds,
+            threshold_percent,
         )
         self.threshold_percent = self._base_threshold_percent
         # Absolute token cap from config (compression.threshold_tokens). When
@@ -2897,21 +2989,67 @@ class ContextCompressor(ContextEngine):
         # CLI callers can still warn the user even though compression
         # succeeded.  Silent recovery would hide the broken config.
         self._last_aux_model_failure_error: Optional[str] = None
-        self._last_aux_model_failure_model: Optional[str] = None
         self._last_compression_telemetry: Optional[Dict[str, Any]] = None
         self._active_compression_telemetry: Optional[Dict[str, Any]] = None
         self._compression_telemetry_seed: Optional[Dict[str, Any]] = None
+
+        if _HAS_PARALLEL_COMPACTOR:
+            self._parallel_compactor = ParallelCompactor(
+                ParallelCompactionConfig(
+                    hard_token_limit=self._config_context_length or 100000,
+                    preserve_recent_count=self.protect_last_n or 4,
+                )
+            )
+        else:
+            self._parallel_compactor = None
+
+    @property
+    def parallel_compactor(self) -> Optional[Any]:
+        """Access the attached ParallelCompactor instance."""
+        return self._parallel_compactor
+
+    def start_parallel_compaction(
+        self,
+        messages: List[Dict[str, Any]],
+        current_tokens: int,
+        focus_topic: Optional[str] = None,
+    ) -> bool:
+        """Launch background summarization via ParallelCompactor if enabled."""
+        if not self._parallel_compactor:
+            return False
+        return self._parallel_compactor.start_async_compaction(
+            messages=messages,
+            current_tokens=current_tokens,
+            summarize_fn=lambda msgs: self.compress(
+                msgs, current_tokens=current_tokens, focus_topic=focus_topic
+            ),
+        )
+
+    def try_apply_parallel_swap(
+        self, messages: List[Dict[str, Any]]
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Check if parallel compaction completed and can be safely swapped in."""
+        if not self._parallel_compactor:
+            return None
+        return self._parallel_compactor.try_apply_swap(messages)
 
     def update_from_response(self, usage: Dict[str, Any]):
         """Update tracked token usage from API response."""
         self.last_prompt_tokens = usage.get("prompt_tokens", 0)
         self.last_completion_tokens = usage.get("completion_tokens", 0)
-        self.last_total_tokens = usage.get("total_tokens", self.last_prompt_tokens + self.last_completion_tokens)
+        self.last_total_tokens = usage.get(
+            "total_tokens", self.last_prompt_tokens + self.last_completion_tokens
+        )
         if self.last_prompt_tokens > 0:
             self.last_real_prompt_tokens = self.last_prompt_tokens
             if self.last_prompt_tokens < self.threshold_tokens:
-                if self.awaiting_real_usage_after_compression and self.last_compression_rough_tokens > 0:
-                    self.last_rough_tokens_when_real_prompt_fit = self.last_compression_rough_tokens
+                if (
+                    self.awaiting_real_usage_after_compression
+                    and self.last_compression_rough_tokens > 0
+                ):
+                    self.last_rough_tokens_when_real_prompt_fit = (
+                        self.last_compression_rough_tokens
+                    )
                 elif self._pending_request_rough_tokens > 0:
                     # Pair the provider's real prompt count with the rough
                     # estimate of the request that produced it (recorded via
@@ -2922,7 +3060,9 @@ class ContextCompressor(ContextEngine):
                     # have no baseline and preflight fires on the raw rough
                     # estimate alone, which overcounts CJK text and provider
                     # replay blobs severalfold.
-                    self.last_rough_tokens_when_real_prompt_fit = self._pending_request_rough_tokens
+                    self.last_rough_tokens_when_real_prompt_fit = (
+                        self._pending_request_rough_tokens
+                    )
                 # Any real provider reading below the trigger proves the prompt
                 # fits again. Clear the real-usage effectiveness latch even
                 # when this response was not immediately after compaction. The
@@ -2961,7 +3101,8 @@ class ContextCompressor(ContextEngine):
                             "(system prompt + tool schemas) may already exceed "
                             "it, in which case shrinking messages cannot help. "
                             "ineffective_compression_count=%d",
-                            self.last_prompt_tokens, self.threshold_tokens,
+                            self.last_prompt_tokens,
+                            self.threshold_tokens,
                             self._ineffective_compression_count,
                         )
                 else:
@@ -3055,7 +3196,10 @@ class ContextCompressor(ContextEngine):
         if self.last_real_prompt_tokens >= self.threshold_tokens:
             return False
 
-        baseline = self.last_rough_tokens_when_real_prompt_fit or self.last_compression_rough_tokens
+        baseline = (
+            self.last_rough_tokens_when_real_prompt_fit
+            or self.last_compression_rough_tokens
+        )
         if baseline <= 0:
             return False
 
@@ -3261,7 +3405,9 @@ class ContextCompressor(ContextEngine):
     # ------------------------------------------------------------------
 
     def _prune_old_tool_results(
-        self, messages: List[Dict[str, Any]], protect_tail_count: int,
+        self,
+        messages: List[Dict[str, Any]],
+        protect_tail_count: int,
         protect_tail_tokens: int | None = None,
         min_prune_chars: int = _PRUNE_MIN_CHARS,
     ) -> tuple[List[Dict[str, Any]], int]:
@@ -3305,7 +3451,10 @@ class ContextCompressor(ContextEngine):
                     if isinstance(tc, dict):
                         cid = tc.get("id", "")
                         fn = tc.get("function", {})
-                        call_id_to_tool[cid] = (fn.get("name", "unknown"), fn.get("arguments", ""))
+                        call_id_to_tool[cid] = (
+                            fn.get("name", "unknown"),
+                            fn.get("arguments", ""),
+                        )
                     else:
                         cid = getattr(tc, "id", "") or ""
                         fn = getattr(tc, "function", None)
@@ -3335,7 +3484,10 @@ class ContextCompressor(ContextEngine):
                 msg_tokens = _estimate_msg_budget_tokens(
                     msg, charge_stale_thinking=(i == _newest_asst_idx)
                 )
-                if accumulated + msg_tokens > protect_tail_tokens and (len(result) - i) >= min_protect:
+                if (
+                    accumulated + msg_tokens > protect_tail_tokens
+                    and (len(result) - i) >= min_protect
+                ):
                     boundary = i
                     break
                 accumulated += msg_tokens
@@ -3374,7 +3526,10 @@ class ContextCompressor(ContextEngine):
             h = hashlib.md5(content.encode("utf-8", errors="replace")).hexdigest()[:12]
             if h in content_hashes:
                 # This is an older duplicate — replace with back-reference
-                result[i] = {**msg, "content": "[Duplicate tool output — same content as a more recent call]"}
+                result[i] = {
+                    **msg,
+                    "content": "[Duplicate tool output — same content as a more recent call]",
+                }
                 pruned += 1
             else:
                 content_hashes[h] = (i, msg.get("tool_call_id", "?"))
@@ -3386,7 +3541,9 @@ class ContextCompressor(ContextEngine):
         # while the model still believes its instructions are in context.
         protected_skills = _collect_protected_skill_names(result, prune_boundary)
 
-        def _demote_tool_result_at(idx: int, *, spare_protected_skills: bool = True) -> bool:
+        def _demote_tool_result_at(
+            idx: int, *, spare_protected_skills: bool = True
+        ) -> bool:
             """Replace a bulky tool result at ``idx`` with a 1-line summary.
 
             Returns True when the message was modified.
@@ -3404,8 +3561,14 @@ class ContextCompressor(ContextEngine):
                     return True
                 return False
             if isinstance(content, dict) and content.get("_multimodal"):
-                summary = content.get("text_summary") or "[screenshot removed to save context]"
-                result[idx] = {**msg, "content": f"[screenshot removed] {summary[:200]}"}
+                summary = (
+                    content.get("text_summary")
+                    or "[screenshot removed to save context]"
+                )
+                result[idx] = {
+                    **msg,
+                    "content": f"[screenshot removed] {summary[:200]}",
+                }
                 pruned += 1
                 return True
             if not isinstance(content, str):
@@ -3425,7 +3588,11 @@ class ContextCompressor(ContextEngine):
                 return False
             call_id = msg.get("tool_call_id", "")
             tool_name, tool_args = call_id_to_tool.get(call_id, ("unknown", ""))
-            if spare_protected_skills and tool_name == "skill_view" and protected_skills:
+            if (
+                spare_protected_skills
+                and tool_name == "skill_view"
+                and protected_skills
+            ):
                 # Just-loaded / actively-referenced skills survive verbatim
                 # (#32106). Pass-4 pressure demotion overrides this.
                 try:
@@ -3453,7 +3620,10 @@ class ContextCompressor(ContextEngine):
                     if len(args) > 500:
                         new_args = _truncate_tool_call_args_json(args)
                         if new_args != args:
-                            tc = {**tc, "function": {**tc["function"], "arguments": new_args}}
+                            tc = {
+                                **tc,
+                                "function": {**tc["function"], "arguments": new_args},
+                            }
                             modified = True
                 new_tcs.append(tc)
             if modified:
@@ -3496,7 +3666,10 @@ class ContextCompressor(ContextEngine):
                     for i in range(start, len(result))
                 )
 
-            if demote_end > prune_boundary and _protected_region_tokens() > soft_ceiling:
+            if (
+                demote_end > prune_boundary
+                and _protected_region_tokens() > soft_ceiling
+            ):
                 pressure_hits = 0
                 for i in range(max(0, prune_boundary), demote_end):
                     # Pressure passes override the just-loaded-skill guard:
@@ -3553,7 +3726,9 @@ class ContextCompressor(ContextEngine):
         return result, pruned
 
     def prune_tool_results_only(
-        self, messages: List[Dict[str, Any]], current_tokens: int | None = None,
+        self,
+        messages: List[Dict[str, Any]],
+        current_tokens: int | None = None,
     ) -> tuple[List[Dict[str, Any]], int]:
         """Deterministic, no-LLM tool-result prune for the cost-oriented path.
 
@@ -3683,11 +3858,11 @@ class ContextCompressor(ContextEngine):
     # Truncation limits for the summarizer input.  These bound how much of
     # each message the summary model sees — the budget is the *summary*
     # model's context window, not the main model's.
-    _CONTENT_MAX = 6000       # total chars per message body
-    _CONTENT_HEAD = 4000      # chars kept from the start
-    _CONTENT_TAIL = 1500      # chars kept from the end
-    _TOOL_ARGS_MAX = 1500     # tool call argument chars
-    _TOOL_ARGS_HEAD = 1200    # kept from the start of tool args
+    _CONTENT_MAX = 6000  # total chars per message body
+    _CONTENT_HEAD = 4000  # chars kept from the start
+    _CONTENT_TAIL = 1500  # chars kept from the end
+    _TOOL_ARGS_MAX = 1500  # tool call argument chars
+    _TOOL_ARGS_HEAD = 1200  # kept from the start of tool args
     # Aggregate cap over the whole serialized block, applied AFTER the
     # per-message limits above. Alias of the module-level constant (which
     # carries the full rationale) so subclasses/tests can override per-class.
@@ -3746,14 +3921,22 @@ class ContextCompressor(ContextEngine):
             if role == "tool":
                 tool_id = msg.get("tool_call_id", "")
                 if len(content) > self._CONTENT_MAX:
-                    content = content[:self._CONTENT_HEAD] + "\n...[truncated]...\n" + content[-self._CONTENT_TAIL:]
+                    content = (
+                        content[: self._CONTENT_HEAD]
+                        + "\n...[truncated]...\n"
+                        + content[-self._CONTENT_TAIL :]
+                    )
                 parts.append(f"[TOOL RESULT {tool_id}]: {content}")
                 continue
 
             # Assistant messages: include tool call names AND arguments
             if role == "assistant":
                 if len(content) > self._CONTENT_MAX:
-                    content = content[:self._CONTENT_HEAD] + "\n...[truncated]...\n" + content[-self._CONTENT_TAIL:]
+                    content = (
+                        content[: self._CONTENT_HEAD]
+                        + "\n...[truncated]...\n"
+                        + content[-self._CONTENT_TAIL :]
+                    )
                 tool_calls = msg.get("tool_calls", [])
                 if tool_calls:
                     tc_parts = []
@@ -3764,7 +3947,7 @@ class ContextCompressor(ContextEngine):
                             args = _redact_compaction_text(fn.get("arguments", ""))
                             # Truncate long arguments but keep enough for context
                             if len(args) > self._TOOL_ARGS_MAX:
-                                args = args[:self._TOOL_ARGS_HEAD] + "..."
+                                args = args[: self._TOOL_ARGS_HEAD] + "..."
                             tc_parts.append(f"  {name}({args})")
                         else:
                             fn = getattr(tc, "function", None)
@@ -3776,7 +3959,11 @@ class ContextCompressor(ContextEngine):
 
             # User and other roles
             if len(content) > self._CONTENT_MAX:
-                content = content[:self._CONTENT_HEAD] + "\n...[truncated]...\n" + content[-self._CONTENT_TAIL:]
+                content = (
+                    content[: self._CONTENT_HEAD]
+                    + "\n...[truncated]...\n"
+                    + content[-self._CONTENT_TAIL :]
+                )
             parts.append(f"[{role.upper()}]: {content}")
 
         return "\n\n".join(parts)
@@ -3808,7 +3995,9 @@ class ContextCompressor(ContextEngine):
             text = re.sub(r"\bgh[pousr]_[A-Za-z0-9_]{8,}\b", "[REDACTED]", text)
             text = re.sub(r"\s+", " ", text).strip()
             if len(text) > _FALLBACK_TURN_MAX_CHARS:
-                text = text[: _FALLBACK_TURN_MAX_CHARS - 15].rstrip() + " ...[truncated]"
+                text = (
+                    text[: _FALLBACK_TURN_MAX_CHARS - 15].rstrip() + " ...[truncated]"
+                )
             return re.sub(r"\bgh[pousr]_[A-Za-z0-9_.-]+", "[REDACTED]", text)
 
         def _remember_dropped_turn(label: str, text: str, *, limit: int = 8) -> None:
@@ -3822,7 +4011,12 @@ class ContextCompressor(ContextEngine):
         def _collect_paths_from_jsonish(obj: Any) -> None:
             if isinstance(obj, dict):
                 for key, val in obj.items():
-                    if key in {"path", "workdir", "file_path", "output_path"} and isinstance(val, str):
+                    if key in {
+                        "path",
+                        "workdir",
+                        "file_path",
+                        "output_path",
+                    } and isinstance(val, str):
                         _dedupe_append(relevant_files, val, limit=12)
                     _collect_paths_from_jsonish(val)
             elif isinstance(obj, list):
@@ -3914,16 +4108,16 @@ class ContextCompressor(ContextEngine):
             completed.append(f"{idx}. {item}")
 
         active_task = (
-            f"User asked: {user_asks[-1]!r}"
-            if user_asks
-            else _NO_USER_TASK_SENTINEL
+            f"User asked: {user_asks[-1]!r}" if user_asks else _NO_USER_TASK_SENTINEL
         )
         previous_summary_note = ""
         if self._previous_summary:
             previous_summary = redact_sensitive_text(self._previous_summary.strip())
             if len(previous_summary) > _FALLBACK_PREVIOUS_SUMMARY_MAX_CHARS:
                 previous_summary = (
-                    previous_summary[: _FALLBACK_PREVIOUS_SUMMARY_MAX_CHARS - 45].rstrip()
+                    previous_summary[
+                        : _FALLBACK_PREVIOUS_SUMMARY_MAX_CHARS - 45
+                    ].rstrip()
                     + "\n...[previous summary snapshot truncated]"
                 )
             previous_summary_note = (
@@ -3977,7 +4171,10 @@ Summary generation was unavailable, so this is a best-effort deterministic fallb
         del _pruned_names[_MAX_PRUNED_SKILL_MARKERS:]
         summary = self._with_summary_prefix(_redact_compaction_text(body.strip()))
         if len(summary) > _FALLBACK_SUMMARY_MAX_CHARS:
-            summary = summary[: _FALLBACK_SUMMARY_MAX_CHARS - 42].rstrip() + "\n...[fallback summary truncated]"
+            summary = (
+                summary[: _FALLBACK_SUMMARY_MAX_CHARS - 42].rstrip()
+                + "\n...[fallback summary truncated]"
+            )
         # Re-inject AFTER the size cap: the markers live at the end of the
         # body, exactly where the truncation above cuts.
         summary = _reinject_pruned_skill_markers(summary, _pruned_names)
@@ -4033,7 +4230,10 @@ Summary generation was unavailable, so this is a best-effort deterministic fallb
         logger.warning(
             "Summary model '%s' %s (%s). "
             "Falling back to main model '%s' for compression.",
-            self.summary_model, reason, e, self.model,
+            self.summary_model,
+            reason,
+            e,
+            self.model,
         )
         _err_text = str(e).strip() or e.__class__.__name__
         if len(_err_text) > 220:
@@ -4043,7 +4243,9 @@ Summary generation was unavailable, so this is a best-effort deterministic fallb
         telemetry = getattr(self, "_active_compression_telemetry", None)
         if isinstance(telemetry, dict):
             telemetry["fallback_used"] = True
-            telemetry["failure_class"] = telemetry.get("failure_class") or "aux_model_fallback"
+            telemetry["failure_class"] = (
+                telemetry.get("failure_class") or "aux_model_fallback"
+            )
         self.summary_model = ""  # empty = use main model
         self._clear_compression_failure_cooldown()  # no cooldown — retry immediately
 
@@ -4112,7 +4314,8 @@ Summary generation was unavailable, so this is a best-effort deterministic fallb
             ensure_ascii=False,
         )
         _serialized_memory_context = (
-            _serialized_memory_context.replace("&", "\\u0026")
+            _serialized_memory_context
+            .replace("&", "\\u0026")
             .replace("<", "\\u003c")
             .replace(">", "\\u003e")
         )
@@ -4221,8 +4424,8 @@ Describe agent/tool work only as completed actions, state, or historical work.]"
             "compact record of prior work. "
             "Produce only the structured summary; do not add a greeting, "
             "preamble, or prefix. "
-            + _language_and_provenance_rule +
-            "NEVER include API keys, tokens, passwords, secrets, credentials, "
+            + _language_and_provenance_rule
+            + "NEVER include API keys, tokens, passwords, secrets, credentials, "
             "or connection strings in the summary — replace any that appear "
             "with [REDACTED]. Note that credentials were present, but do not "
             "preserve their values."
@@ -4384,9 +4587,11 @@ This compaction should PRIORITISE preserving all information related to the focu
             try:
                 from agent.auxiliary_client import _resolve_task_provider_model
 
-                _resolved_provider, _resolved_model, _, _, _ = _resolve_task_provider_model(
-                    "compression",
-                    model=(self.summary_model or ""),
+                _resolved_provider, _resolved_model, _, _, _ = (
+                    _resolve_task_provider_model(
+                        "compression",
+                        model=(self.summary_model or ""),
+                    )
                 )
                 _aux_provider = _resolved_provider or ""
                 _aux_model = _resolved_model or _aux_model or self.model or ""
@@ -4450,6 +4655,7 @@ This compaction should PRIORITISE preserving all information related to the focu
             # into every subsequent iterative-update prompt — compounding
             # token bloat across compactions. Mirrors title_generator.py.
             from agent.agent_runtime_helpers import strip_think_blocks
+
             stripped = strip_think_blocks(None, content).strip()
             if stripped:
                 content = stripped
@@ -4481,23 +4687,30 @@ This compaction should PRIORITISE preserving all information related to the focu
             # Only (1) belongs in the long no-provider cooldown; (2) and every
             # other exception flow into the generic fallback logic so they get
             # a main-model retry before any cooldown. (#11978, #11914)
-            if isinstance(e, RuntimeError) and "no llm provider configured" in str(e).lower():
+            if (
+                isinstance(e, RuntimeError)
+                and "no llm provider configured" in str(e).lower()
+            ):
                 # No provider configured — long cooldown, unlikely to self-resolve
                 self._record_compression_failure_cooldown(
                     _SUMMARY_FAILURE_COOLDOWN_SECONDS,
                     "no auxiliary LLM provider configured",
                 )
                 self._last_summary_error = "no auxiliary LLM provider configured"
-                logger.warning("Context compression: no provider available for "
-                                "summary. Middle turns will be dropped without summary "
-                                "for %d seconds.",
-                                _SUMMARY_FAILURE_COOLDOWN_SECONDS)
+                logger.warning(
+                    "Context compression: no provider available for "
+                    "summary. Middle turns will be dropped without summary "
+                    "for %d seconds.",
+                    _SUMMARY_FAILURE_COOLDOWN_SECONDS,
+                )
                 return None
             # If the summary model is different from the main model and the
             # error looks permanent (model not found, 503, 404), fall back to
             # using the main model instead of entering cooldown that leaves
             # context growing unbounded.  (#8620 sub-issue 4)
-            _status = getattr(e, "status_code", None) or getattr(getattr(e, "response", None), "status_code", None)
+            _status = getattr(e, "status_code", None) or getattr(
+                getattr(e, "response", None), "status_code", None
+            )
             _err_str = str(e).lower()
             _is_model_not_found = (
                 _status in {404, 503}
@@ -4519,8 +4732,7 @@ This compaction should PRIORITISE preserving all information related to the focu
             # transient provider failure: one retry on the main model, then a
             # short cooldown.  Issue #22244.
             _is_json_decode = (
-                isinstance(e, json.JSONDecodeError)
-                or "expecting value" in _err_str
+                isinstance(e, json.JSONDecodeError) or "expecting value" in _err_str
             )
             # httpcore / httpx streaming premature-close errors surface as
             # ConnectionError subclasses or plain Exception with characteristic
@@ -4555,7 +4767,12 @@ This compaction should PRIORITISE preserving all information related to the focu
                     e,
                 )
             if (
-                (_is_model_not_found or _is_timeout or _is_json_decode or _is_streaming_closed)
+                (
+                    _is_model_not_found
+                    or _is_timeout
+                    or _is_json_decode
+                    or _is_streaming_closed
+                )
                 and self.summary_model
                 and self.summary_model != self.model
                 and not getattr(self, "_summary_model_fallen_back", False)
@@ -4616,8 +4833,11 @@ This compaction should PRIORITISE preserving all information related to the focu
                 )
                 _TIMEOUT_COOLDOWN_LADDER = (60, 300, 900)
                 _transient_cooldown = _TIMEOUT_COOLDOWN_LADDER[
-                    min(self._consecutive_timeout_failures,
-                        len(_TIMEOUT_COOLDOWN_LADDER)) - 1
+                    min(
+                        self._consecutive_timeout_failures,
+                        len(_TIMEOUT_COOLDOWN_LADDER),
+                    )
+                    - 1
                 ]
             elif _is_json_decode or _is_streaming_closed:
                 _transient_cooldown = 30
@@ -4663,9 +4883,13 @@ This compaction should PRIORITISE preserving all information related to the focu
         # summarizer prompt.
         if _MERGED_SUMMARY_DELIMITER in text:
             text = text.split(_MERGED_SUMMARY_DELIMITER, 1)[1].strip()
-        for prefix in (SUMMARY_PREFIX, LEGACY_SUMMARY_PREFIX, *_HISTORICAL_SUMMARY_PREFIXES):
+        for prefix in (
+            SUMMARY_PREFIX,
+            LEGACY_SUMMARY_PREFIX,
+            *_HISTORICAL_SUMMARY_PREFIXES,
+        ):
             if text.startswith(prefix):
-                text = text[len(prefix):].lstrip()
+                text = text[len(prefix) :].lstrip()
                 break
         # Strip the end marker too — a rehydrated handoff body that keeps it
         # would leak the boundary directive into the iterative-update
@@ -4783,22 +5007,22 @@ This compaction should PRIORITISE preserving all information related to the focu
             _LENGTH_CONTINUATION_OUTPUT_LIMIT,
         )
 
-        return text in {
-            COMPRESSION_CONTINUATION_USER_CONTENT,
-            _LEGACY_COMPRESSION_CONTINUATION_USER_CONTENT,
-            MAX_ITERATIONS_SUMMARY_REQUEST,
-            _CODEX_INCOMPLETE_NUDGE,
-            _CODEX_ACK_CONTINUATION_NUDGE,
-            _DROPPED_TOOLCALL_NUDGE_CONTENT,
-            _EMPTY_TOOL_RESPONSE_NUDGE,
-            _LENGTH_CONTINUATION_NETWORK_STUB,
-            _LENGTH_CONTINUATION_OUTPUT_LIMIT,
-        } or text.startswith(
-            _BACKGROUND_PROCESS_NOTIFICATION_PREFIX
-        ) or text.startswith(
-            TODO_INJECTION_HEADER + "\n"
-        ) or text.startswith(
-            _LENGTH_CONTINUATION_DROPPED_TOOLS_PREFIX
+        return (
+            text
+            in {
+                COMPRESSION_CONTINUATION_USER_CONTENT,
+                _LEGACY_COMPRESSION_CONTINUATION_USER_CONTENT,
+                MAX_ITERATIONS_SUMMARY_REQUEST,
+                _CODEX_INCOMPLETE_NUDGE,
+                _CODEX_ACK_CONTINUATION_NUDGE,
+                _DROPPED_TOOLCALL_NUDGE_CONTENT,
+                _EMPTY_TOOL_RESPONSE_NUDGE,
+                _LENGTH_CONTINUATION_NETWORK_STUB,
+                _LENGTH_CONTINUATION_OUTPUT_LIMIT,
+            }
+            or text.startswith(_BACKGROUND_PROCESS_NOTIFICATION_PREFIX)
+            or text.startswith(TODO_INJECTION_HEADER + "\n")
+            or text.startswith(_LENGTH_CONTINUATION_DROPPED_TOOLS_PREFIX)
         )
 
     @staticmethod
@@ -4817,9 +5041,8 @@ This compaction should PRIORITISE preserving all information related to the focu
         # the existing retry/deterministic-fallback path (which emits the
         # no-user sentinel itself), so a rare false positive costs one retry
         # rather than letting fabricated user attribution persist.
-        if (
-            task_snapshot != _NO_USER_TASK_SENTINEL
-            or re.search(r"\bUser\s+asked\s*:", summary, re.IGNORECASE)
+        if task_snapshot != _NO_USER_TASK_SENTINEL or re.search(
+            r"\bUser\s+asked\s*:", summary, re.IGNORECASE
         ):
             raise RuntimeError(
                 "Context compression summary invented user attribution for a "
@@ -5040,10 +5263,9 @@ This compaction should PRIORITISE preserving all information related to the focu
             return message
 
         content = message.get("content")
-        is_summary = (
-            cls._is_context_summary_content(content)
-            or cls._has_compressed_summary_metadata(message)
-        )
+        is_summary = cls._is_context_summary_content(
+            content
+        ) or cls._has_compressed_summary_metadata(message)
         if not is_summary:
             return message.copy()
 
@@ -5051,7 +5273,7 @@ This compaction should PRIORITISE preserving all information related to the focu
             if _MERGED_SUMMARY_DELIMITER in content:
                 prior = content.split(_MERGED_SUMMARY_DELIMITER, 1)[0].strip()
                 if prior.startswith(_MERGED_PRIOR_CONTEXT_HEADER):
-                    prior = prior[len(_MERGED_PRIOR_CONTEXT_HEADER):].lstrip()
+                    prior = prior[len(_MERGED_PRIOR_CONTEXT_HEADER) :].lstrip()
                 if prior:
                     unwrapped = message.copy()
                     unwrapped["content"] = prior
@@ -5060,7 +5282,9 @@ This compaction should PRIORITISE preserving all information related to the focu
             else:
                 marker_idx = content.find(_SUMMARY_END_MARKER)
                 if marker_idx >= 0:
-                    remainder = content[marker_idx + len(_SUMMARY_END_MARKER):].lstrip()
+                    remainder = content[
+                        marker_idx + len(_SUMMARY_END_MARKER) :
+                    ].lstrip()
                     if remainder:
                         unwrapped = message.copy()
                         unwrapped["content"] = remainder
@@ -5098,7 +5322,13 @@ This compaction should PRIORITISE preserving all information related to the focu
                 legacy_blocks: list[Any] = []
                 found_marker = False
                 for index, item in enumerate(content):
-                    text = item if isinstance(item, str) else item.get("text") if isinstance(item, dict) else None
+                    text = (
+                        item
+                        if isinstance(item, str)
+                        else item.get("text")
+                        if isinstance(item, dict)
+                        else None
+                    )
                     if not isinstance(text, str) or _SUMMARY_END_MARKER not in text:
                         continue
                     remainder = text.split(_SUMMARY_END_MARKER, 1)[1].lstrip()
@@ -5109,8 +5339,10 @@ This compaction should PRIORITISE preserving all information related to the focu
                             legacy_blocks.append(copied)
                         else:
                             legacy_blocks.append(remainder)
-                    for later in content[index + 1:]:
-                        legacy_blocks.append(later.copy() if isinstance(later, dict) else later)
+                    for later in content[index + 1 :]:
+                        legacy_blocks.append(
+                            later.copy() if isinstance(later, dict) else later
+                        )
                     found_marker = True
                     break
                 if found_marker and legacy_blocks:
@@ -5123,7 +5355,9 @@ This compaction should PRIORITISE preserving all information related to the focu
                 for index, item in enumerate(prior_blocks):
                     if isinstance(item, str):
                         if item.lstrip().startswith(_MERGED_PRIOR_CONTEXT_HEADER):
-                            leading = item.lstrip()[len(_MERGED_PRIOR_CONTEXT_HEADER):].lstrip()
+                            leading = item.lstrip()[
+                                len(_MERGED_PRIOR_CONTEXT_HEADER) :
+                            ].lstrip()
                             if leading:
                                 prior_blocks[index] = leading
                             else:
@@ -5132,7 +5366,9 @@ This compaction should PRIORITISE preserving all information related to the focu
                     elif isinstance(item, dict) and isinstance(item.get("text"), str):
                         text = item["text"]
                         if text.lstrip().startswith(_MERGED_PRIOR_CONTEXT_HEADER):
-                            leading = text.lstrip()[len(_MERGED_PRIOR_CONTEXT_HEADER):].lstrip()
+                            leading = text.lstrip()[
+                                len(_MERGED_PRIOR_CONTEXT_HEADER) :
+                            ].lstrip()
                             if leading:
                                 copied = item.copy()
                                 copied["text"] = leading
@@ -5160,7 +5396,9 @@ This compaction should PRIORITISE preserving all information related to the focu
             return tc.get("call_id", "") or tc.get("id", "") or ""
         return getattr(tc, "call_id", "") or getattr(tc, "id", "") or ""
 
-    def _sanitize_tool_pairs(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _sanitize_tool_pairs(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Fix orphaned tool_call / tool_result pairs after compression.
 
         Two failure modes:
@@ -5201,11 +5439,18 @@ This compaction should PRIORITISE preserving all information related to the focu
         orphaned_results = result_call_ids - surviving_call_ids
         if orphaned_results:
             messages = [
-                m for m in messages
-                if not (m.get("role") == "tool" and m.get("tool_call_id") in orphaned_results)
+                m
+                for m in messages
+                if not (
+                    m.get("role") == "tool"
+                    and m.get("tool_call_id") in orphaned_results
+                )
             ]
             if not self.quiet_mode:
-                logger.info("Compression sanitizer: removed %d orphaned tool result(s)", len(orphaned_results))
+                logger.info(
+                    "Compression sanitizer: removed %d orphaned tool result(s)",
+                    len(orphaned_results),
+                )
 
         # 2. Strip orphaned tool_calls from assistant messages whose results
         #    were dropped.  Stripping is preferred over inserting stub results
@@ -5257,7 +5502,11 @@ This compaction should PRIORITISE preserving all information related to the focu
                 tcs = msg.get("tool_calls")
                 if not tcs:
                     continue
-                kept = [tc for tc in tcs if self._get_tool_call_id(tc) not in missing_results]
+                kept = [
+                    tc
+                    for tc in tcs
+                    if self._get_tool_call_id(tc) not in missing_results
+                ]
                 if len(kept) != len(tcs):
                     if kept:
                         msg["tool_calls"] = kept
@@ -5266,7 +5515,9 @@ This compaction should PRIORITISE preserving all information related to the focu
                         # Ensure the assistant message still has visible
                         # content so the API does not reject an empty turn.
                         content = msg.get("content")
-                        if not content or (isinstance(content, str) and not content.strip()):
+                        if not content or (
+                            isinstance(content, str) and not content.strip()
+                        ):
                             msg["content"] = "(tool call removed)"
             if not self.quiet_mode:
                 logger.info(
@@ -5381,7 +5632,11 @@ This compaction should PRIORITISE preserving all information related to the focu
             check -= 1
         # If we landed on the parent assistant with tool_calls, pull the
         # boundary before it so the whole group gets summarised together.
-        if check >= 0 and messages[check].get("role") == "assistant" and messages[check].get("tool_calls"):
+        if (
+            check >= 0
+            and messages[check].get("role") == "assistant"
+            and messages[check].get("tool_calls")
+        ):
             idx = check
         return idx
 
@@ -5400,10 +5655,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         """
         for i in range(len(messages) - 1, head_end - 1, -1):
             msg = messages[i]
-            if (
-                self._is_actionable_user_turn(msg)
-                and not self._is_synthetic_compression_user_turn(msg)
-            ):
+            if self._is_actionable_user_turn(
+                msg
+            ) and not self._is_synthetic_compression_user_turn(msg):
                 return i
         return -1
 
@@ -5511,7 +5765,9 @@ This compaction should PRIORITISE preserving all information related to the focu
                 "Anchoring tail cut to last assistant message at index %d "
                 "(was %d, aligned to %d) to keep the previously-visible "
                 "reply out of the compaction summary (#29824)",
-                last_asst_idx, cut_idx, new_cut,
+                last_asst_idx,
+                cut_idx,
+                new_cut,
             )
         # Safety: never go back into the head region.
         return max(new_cut, head_end + 1)
@@ -5633,10 +5889,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         user_indices = []
         for i in range(len(messages) - 1, head_end - 1, -1):
             msg = messages[i]
-            if (
-                self._is_actionable_user_turn(msg)
-                and not self._is_synthetic_compression_user_turn(msg)
-            ):
+            if self._is_actionable_user_turn(
+                msg
+            ) and not self._is_synthetic_compression_user_turn(msg):
                 user_indices.append(i)
 
         if len(user_indices) == 0:
@@ -5681,7 +5936,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         return idx
 
     def _find_tail_cut_by_tokens(
-        self, messages: List[Dict[str, Any]], head_end: int,
+        self,
+        messages: List[Dict[str, Any]],
+        head_end: int,
         token_budget: int | None = None,
     ) -> int:
         """Walk backward from the end of messages, accumulating tokens until
@@ -5715,7 +5972,8 @@ This compaction should PRIORITISE preserving all information related to the focu
         compressible_tail_cap = max(3, available_tail - 2)
         min_tail = (
             min(min_tail_floor, compressible_tail_cap, available_tail)
-            if available_tail > 1 else 0
+            if available_tail > 1
+            else 0
         )
         soft_ceiling = int(token_budget * 1.5)
         accumulated = 0
@@ -5790,7 +6048,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         # ``[CONTEXT COMPACTION — REFERENCE ONLY]`` block (fixes #29824).
         # Each anchor only walks ``cut_idx`` backward, so chaining them is
         # monotonic — the tail can only grow, never shrink.
-        cut_idx = self._ensure_last_assistant_message_in_tail(messages, cut_idx, head_end)
+        cut_idx = self._ensure_last_assistant_message_in_tail(
+            messages, cut_idx, head_end
+        )
 
         # Extend to the last N actionable user messages when configured
         # (compression.min_tail_user_messages > 1).  This prevents the
@@ -5807,9 +6067,16 @@ This compaction should PRIORITISE preserving all information related to the focu
         # (and plugin engines) skip __init__, so the attribute may be absent
         # (see the compression-path test-double pitfall).
         _min_tail_users = getattr(self, "min_tail_user_messages", 1)
-        if isinstance(_min_tail_users, int) and not isinstance(_min_tail_users, bool) and _min_tail_users > 1:
+        if (
+            isinstance(_min_tail_users, int)
+            and not isinstance(_min_tail_users, bool)
+            and _min_tail_users > 1
+        ):
             cut_idx = self._ensure_last_n_user_messages_in_tail(
-                messages, cut_idx, head_end, _min_tail_users,
+                messages,
+                cut_idx,
+                head_end,
+                _min_tail_users,
             )
 
         # The floor guarantees forward progress — compression must always claim
@@ -5824,7 +6091,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         # exists to prevent.  Re-align FORWARD (never backward, which would give
         # the floor's message back) so a raised cut skips to the end of the
         # group and the whole call/result pair is summarised together.
-        return min(n, self._align_boundary_forward(messages, max(cut_idx, head_end + 1)))
+        return min(
+            n, self._align_boundary_forward(messages, max(cut_idx, head_end + 1))
+        )
 
     # ------------------------------------------------------------------
     # ContextEngine: manual /compress preflight
@@ -5837,7 +6106,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         skip the LLM call when the transcript is still entirely inside
         the protected head/tail.
         """
-        compress_start = self._align_boundary_forward(messages, self._protect_head_size(messages))
+        compress_start = self._align_boundary_forward(
+            messages, self._protect_head_size(messages)
+        )
         compress_end = self._find_tail_cut_by_tokens(messages, compress_start)
         return compress_start < compress_end
 
@@ -5859,7 +6130,10 @@ This compaction should PRIORITISE preserving all information related to the focu
         Otherwise scan from *head_end* through *tail_start* for the last context
         summary marker and set the cursor past it.
         """
-        if self._micro_compact_cursor > head_end and self._micro_compact_cursor < tail_start:
+        if (
+            self._micro_compact_cursor > head_end
+            and self._micro_compact_cursor < tail_start
+        ):
             return self._micro_compact_cursor
         # Scan transcript for the last summary marker
         last_summary_idx = -1
@@ -5887,7 +6161,8 @@ This compaction should PRIORITISE preserving all information related to the focu
                     messages[last_summary_idx][MICRO_COMPACT_MARKER_KEY] = True
                     logger.info(
                         "Micro-compaction: recovered rolling summary from "
-                        "transcript (%d chars)", len(recovered),
+                        "transcript (%d chars)",
+                        len(recovered),
                     )
         else:
             cursor = head_end
@@ -5941,7 +6216,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         # marker that carries the compacted history.
         while idx < tail_start and idx < n:
             msg = messages[idx]
-            if msg.get("role") == "assistant" and not self._is_context_summary_message(msg):
+            if msg.get("role") == "assistant" and not self._is_context_summary_message(
+                msg
+            ):
                 break
             idx += 1
 
@@ -5980,7 +6257,10 @@ This compaction should PRIORITISE preserving all information related to the focu
         if idx >= n:
             return None
         boundary = messages[idx]
-        if not isinstance(boundary, dict) or boundary.get("role") in ("assistant", "tool"):
+        if not isinstance(boundary, dict) or boundary.get("role") in (
+            "assistant",
+            "tool",
+        ):
             return None
         return (exchange_start, idx)
 
@@ -6027,7 +6307,10 @@ This compaction should PRIORITISE preserving all information related to the focu
         )
 
         return [
-            {"role": "system", "content": "You are a conversation summarization assistant."},
+            {
+                "role": "system",
+                "content": "You are a conversation summarization assistant.",
+            },
             {"role": "user", "content": user_prompt},
         ]
 
@@ -6057,13 +6340,16 @@ This compaction should PRIORITISE preserving all information related to the focu
         if self.summary_model:
             call_kwargs["model"] = self.summary_model
         if self.model:
-            call_kwargs.setdefault("main_runtime", {
-                "model": self.model,
-                "provider": self.provider or "",
-                "base_url": self.base_url or "",
-                "api_key": self.api_key or "",
-                "api_mode": getattr(self, "api_mode", "") or "",
-            })
+            call_kwargs.setdefault(
+                "main_runtime",
+                {
+                    "model": self.model,
+                    "provider": self.provider or "",
+                    "base_url": self.base_url or "",
+                    "api_key": self.api_key or "",
+                    "api_mode": getattr(self, "api_mode", "") or "",
+                },
+            )
 
         try:
             with aux_interrupt_protection():
@@ -6085,6 +6371,7 @@ This compaction should PRIORITISE preserving all information related to the focu
             return None
 
         from agent.agent_runtime_helpers import strip_think_blocks
+
         stripped = strip_think_blocks(None, content).strip()
         return stripped if stripped else None
 
@@ -6152,8 +6439,9 @@ This compaction should PRIORITISE preserving all information related to the focu
                 self._flush_scan_cursor_invalidated = True
                 break
         logger.info(
-            "Micro-compaction defrag: rolling summary re-summarized "
-            "(%d -> %d chars)", len(old_summary), len(fresh_summary),
+            "Micro-compaction defrag: rolling summary re-summarized (%d -> %d chars)",
+            len(old_summary),
+            len(fresh_summary),
         )
         return True
 
@@ -6248,7 +6536,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         _cumulative = bool(self._micro_compact_rolling_summary.strip())
 
         # Micro-summarize one exchange
-        exchange_text = self._serialize_one_exchange(messages, exchange_start, exchange_end)
+        exchange_text = self._serialize_one_exchange(
+            messages, exchange_start, exchange_end
+        )
         _exchange_tokens = estimate_tokens_rough(exchange_text)
         updated_summary = self._micro_summarize_one(exchange_text)
         if updated_summary is None:
@@ -6260,11 +6550,15 @@ This compaction should PRIORITISE preserving all information related to the focu
                 self._micro_compact_consecutive_failures = 1
                 self._micro_compact_last_failure_cursor = exchange_start
 
-            if self._micro_compact_consecutive_failures >= _MICRO_COMPACT_MAX_CONSECUTIVE_FAILURES:
+            if (
+                self._micro_compact_consecutive_failures
+                >= _MICRO_COMPACT_MAX_CONSECUTIVE_FAILURES
+            ):
                 logger.info(
                     "Micro-compaction: skipping exchange at cursor %d "
                     "after %d consecutive failures",
-                    exchange_start, self._micro_compact_consecutive_failures,
+                    exchange_start,
+                    self._micro_compact_consecutive_failures,
                 )
                 # Advance the cursor past the stuck exchange so we don't
                 # retry it every turn. The skipped messages remain in the
@@ -6293,9 +6587,14 @@ This compaction should PRIORITISE preserving all information related to the focu
         self._micro_compact_last_failure_cursor = -1
 
         result = self._splice_micro_compact_result(
-            messages, exchange_start, exchange_end, supersede=_cumulative,
+            messages,
+            exchange_start,
+            exchange_end,
+            supersede=_cumulative,
         )
-        self._micro_compact_cursor = self._cursor_after_splice(result, exchange_start + 1)
+        self._micro_compact_cursor = self._cursor_after_splice(
+            result, exchange_start + 1
+        )
         self._sync_micro_compact_to_db(result)
         self._emit_micro_compaction_telemetry(
             outcome="absorbed",
@@ -6325,7 +6624,7 @@ This compaction should PRIORITISE preserving all information related to the focu
         # so the first occurrence is inside the preamble, not the real heading.
         idx = body.rfind(HISTORICAL_TASK_HEADING)
         if idx != -1:
-            body = body[idx + len(HISTORICAL_TASK_HEADING):]
+            body = body[idx + len(HISTORICAL_TASK_HEADING) :]
         end = body.find(_SUMMARY_END_MARKER)
         if end != -1:
             body = body[:end]
@@ -6524,7 +6823,8 @@ This compaction should PRIORITISE preserving all information related to the focu
         #    stale rolling summary; dropping it would destroy that history.
         if supersede:
             marker_idxs = [
-                i for i, m in enumerate(result)
+                i
+                for i, m in enumerate(result)
                 if isinstance(m, dict)
                 and m.get(COMPRESSED_SUMMARY_METADATA_KEY)
                 and m.get(MICRO_COMPACT_MARKER_KEY)
@@ -6690,16 +6990,22 @@ This compaction should PRIORITISE preserving all information related to the focu
                 logger.warning(
                     "Cannot compress: only %d messages (need > %d). "
                     "ineffective_compression_count=%d",
-                    n_messages, _min_for_compress,
+                    n_messages,
+                    _min_for_compress,
                     self._ineffective_compression_count,
                 )
             return messages
 
-        display_tokens = current_tokens if current_tokens else self.last_prompt_tokens or estimate_messages_tokens_rough(messages)
+        display_tokens = (
+            current_tokens
+            if current_tokens
+            else self.last_prompt_tokens or estimate_messages_tokens_rough(messages)
+        )
 
         # Phase 1: Prune old tool results (cheap, no LLM call)
         messages, pruned_count = self._prune_old_tool_results(
-            messages, protect_tail_count=self.protect_last_n,
+            messages,
+            protect_tail_count=self.protect_last_n,
             protect_tail_tokens=self.tail_token_budget,
         )
         if pruned_count and not self.quiet_mode:
@@ -6760,7 +7066,8 @@ This compaction should PRIORITISE preserving all information related to the focu
                     "Compression skipped: compress_start (%d) >= compress_end (%d) "
                     "— transcript fits within tail budget, nothing to compress. "
                     "ineffective_compression_count=%d",
-                    compress_start, compress_end,
+                    compress_start,
+                    compress_end,
                     self._ineffective_compression_count,
                 )
             return messages
@@ -6775,7 +7082,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         # — take the narrow rescan, miss a beyond-window fossil, and discard the
         # rehydrated state as cross-session leakage (#57835).
         _previous_summary_before_scan = self._previous_summary
-        _summary_has_user_turn_before_scan = getattr(self, "_summary_has_user_turn", None)
+        _summary_has_user_turn_before_scan = getattr(
+            self, "_summary_has_user_turn", None
+        )
         # A persisted handoff summary can sit in the protected head after a
         # resume (commonly immediately after the system prompt). Search from
         # the first non-system message through the compression window. On the
@@ -6783,7 +7092,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         # so summaries that landed in the protected tail or drifted past the
         # decay probe still rehydrate iterative-summary state instead of being
         # copied forward as stacked fossils.
-        summary_search_start = 1 if messages and messages[0].get("role") == "system" else 0
+        summary_search_start = (
+            1 if messages and messages[0].get("role") == "system" else 0
+        )
         summary_search_end = compress_end
         if self.compression_count < 1 and not self._previous_summary:
             summary_search_end = len(messages)
@@ -6806,9 +7117,7 @@ This compaction should PRIORITISE preserving all information related to the focu
                 if summary_bodies:
                     self._previous_summary = "\n\n".join(summary_bodies)
             # Zero-user provenance (#64650) rides on the newest handoff hit.
-            provenance = messages[summary_idx].get(
-                COMPRESSED_SUMMARY_HAS_USER_TURN_KEY
-            )
+            provenance = messages[summary_idx].get(COMPRESSED_SUMMARY_HAS_USER_TURN_KEY)
             if real_user_present:
                 self._summary_has_user_turn = True
             elif isinstance(provenance, bool):
@@ -6821,6 +7130,7 @@ This compaction should PRIORITISE preserving all information related to the focu
                     summary_body and _NO_USER_TASK_SENTINEL in summary_body
                 )
             summary_indices = {idx for idx, _ in summary_hits}
+
             # Summary rows are excluded from the summarizer input (their
             # bodies already ride _previous_summary), BUT a merged handoff
             # carries genuine prior-tail user content before the delimiter —
@@ -6833,15 +7143,17 @@ This compaction should PRIORITISE preserving all information related to the focu
                     _fresh_compaction_message_copy(msg)
                 )
                 return stripped  # None for standalone handoffs → dropped
+
             pre_summary_turns = [
-                row for idx, msg in enumerate(
+                row
+                for idx, msg in enumerate(
                     messages[compress_start:summary_idx],
                     start=compress_start,
                 )
                 if (row := _window_row(idx, msg)) is not None
             ]
             turns_to_summarize = (
-                pre_summary_turns + messages[summary_idx + 1:compress_end]
+                pre_summary_turns + messages[summary_idx + 1 : compress_end]
             )
             # The newest hit itself may be a merged handoff too — recover its
             # prior-tail content the same way.
@@ -6852,7 +7164,7 @@ This compaction should PRIORITISE preserving all information related to the focu
                 turns_to_summarize = (
                     pre_summary_turns
                     + [_newest_stripped]
-                    + messages[summary_idx + 1:compress_end]
+                    + messages[summary_idx + 1 : compress_end]
                 )
             if summary_idx >= compress_end:
                 tail_start = summary_idx + 1
@@ -6973,9 +7285,12 @@ This compaction should PRIORITISE preserving all information related to the focu
                         "%d-%d) is below %.0f%% of threshold (%d tokens) — "
                         "skipping LLM summarization, proceeding with "
                         "deterministic message dropping. prellm_skip_count=%d",
-                        middle_tokens, compress_start, compress_end,
+                        middle_tokens,
+                        compress_start,
+                        compress_end,
                         _FEASIBILITY_SKIP_MIDDLE_FRACTION * 100,
-                        self.threshold_tokens, self._prellm_skip_count,
+                        self.threshold_tokens,
+                        self._prellm_skip_count,
                     )
 
         if feasibility_skip:
@@ -7018,10 +7333,14 @@ This compaction should PRIORITISE preserving all information related to the focu
         # of these cases, rotating into a child session with a placeholder
         # summary degrades the conversation for zero benefit. Preserve it
         # unchanged until access is restored or connectivity recovers.
-        if not summary and not feasibility_skip and (
-            self.abort_on_summary_failure
-            or self._last_summary_auth_failure
-            or self._last_summary_network_failure
+        if (
+            not summary
+            and not feasibility_skip
+            and (
+                self.abort_on_summary_failure
+                or self._last_summary_auth_failure
+                or self._last_summary_network_failure
+            )
         ):
             n_skipped = compress_end - compress_start
             self._last_summary_dropped_count = 0  # nothing actually dropped
@@ -7087,7 +7406,9 @@ This compaction should PRIORITISE preserving all information related to the focu
                 if _compression_note not in _content_text_for_contains(existing):
                     msg["content"] = _append_text_to_content(
                         existing,
-                        "\n\n" + _compression_note if isinstance(existing, str) and existing else _compression_note,
+                        "\n\n" + _compression_note
+                        if isinstance(existing, str) and existing
+                        else _compression_note,
                     )
             stripped = self._strip_context_summary_handoff_message(msg)
             if stripped is not None:
@@ -7099,9 +7420,13 @@ This compaction should PRIORITISE preserving all information related to the focu
         if not summary:
             if not self.quiet_mode:
                 if feasibility_skip:
-                    logger.info("Feasibility skip — inserting deterministic fallback context summary")
+                    logger.info(
+                        "Feasibility skip — inserting deterministic fallback context summary"
+                    )
                 else:
-                    logger.warning("Summary generation failed — inserting deterministic fallback context summary")
+                    logger.warning(
+                        "Summary generation failed — inserting deterministic fallback context summary"
+                    )
             n_dropped = compress_end - compress_start
             self._last_summary_dropped_count = n_dropped
             self._last_summary_fallback_used = True
@@ -7110,9 +7435,13 @@ This compaction should PRIORITISE preserving all information related to the focu
                 # Deliberate optimization, not a summary failure — keep the
                 # telemetry class distinct so dashboards don't count skips
                 # as aux-model breakage.
-                telemetry["failure_class"] = telemetry.get("failure_class") or "feasibility_skip"
+                telemetry["failure_class"] = (
+                    telemetry.get("failure_class") or "feasibility_skip"
+                )
             else:
-                telemetry["failure_class"] = telemetry.get("failure_class") or "summary_generation_failed"
+                telemetry["failure_class"] = (
+                    telemetry.get("failure_class") or "summary_generation_failed"
+                )
             summary = self._build_static_fallback_summary(
                 turns_to_summarize,
                 # A stale error from an earlier real failure must not be
@@ -7216,6 +7545,7 @@ This compaction should PRIORITISE preserving all information related to the focu
         # role="user" slot, which is always non-empty (falls back to
         # ``_build_static_fallback_summary`` above when generation fails).
         if not _force_user_leading:
+
             def _is_nonempty_user_turn(message: Dict[str, Any]) -> bool:
                 return message.get("role") == "user" and bool(
                     _content_text_for_contains(message.get("content")).strip()
@@ -7223,9 +7553,7 @@ This compaction should PRIORITISE preserving all information related to the focu
 
             _user_survives = any(
                 _is_nonempty_user_turn(message) for message in compressed
-            ) or any(
-                _is_nonempty_user_turn(message) for message in tail_messages
-            )
+            ) or any(_is_nonempty_user_turn(message) for message in tail_messages)
             if not _user_survives:
                 _force_user_leading = True
         # Pick a role that alternates with both template-visible neighbors.
@@ -7275,9 +7603,7 @@ This compaction should PRIORITISE preserving all information related to the focu
                 "role": summary_role,
                 "content": summary,
                 COMPRESSED_SUMMARY_METADATA_KEY: True,
-                COMPRESSED_SUMMARY_HAS_USER_TURN_KEY: bool(
-                    self._summary_has_user_turn
-                ),
+                COMPRESSED_SUMMARY_HAS_USER_TURN_KEY: bool(self._summary_has_user_turn),
             })
 
         # Default merge target: literal tail index 0. For an ordinary
@@ -7324,8 +7650,11 @@ This compaction should PRIORITISE preserving all information related to the focu
                     # where old head messages survived verbatim and appeared
                     # before the summary.
                     suffix = (
-                        "\n\n" + _MERGED_SUMMARY_DELIMITER + "\n\n"
-                        + summary + "\n\n"
+                        "\n\n"
+                        + _MERGED_SUMMARY_DELIMITER
+                        + "\n\n"
+                        + summary
+                        + "\n\n"
                         + _SUMMARY_END_MARKER
                     )
                     msg["content"] = _append_text_to_content(
@@ -7446,9 +7775,7 @@ This compaction should PRIORITISE preserving all information related to the focu
         self._micro_compact_last_failure_cursor = -1
         self._proactive_prune_rearm_tokens = 0
 
-        compressed = _reinject_dropped_pinned_constraints(
-            messages, compressed
-        )
+        compressed = _reinject_dropped_pinned_constraints(messages, compressed)
 
         return compressed
 
@@ -7495,10 +7822,7 @@ def _handoff_carries_live_user_content(message: Any) -> bool:
     """
     if not isinstance(message, dict):
         return False
-    return (
-        ContextCompressor._strip_context_summary_handoff_message(message)
-        is not None
-    )
+    return ContextCompressor._strip_context_summary_handoff_message(message) is not None
 
 
 def reference_handoff_would_drive_next_model_call(
@@ -7535,14 +7859,13 @@ def reference_handoff_would_drive_next_model_call(
             return False
         if role == "assistant" and message.get("tool_calls"):
             return False
-        if (
-            ContextCompressor._is_actionable_user_turn(message)
-            and not ContextCompressor._is_synthetic_compression_user_turn(message)
-        ):
-            return False
-        if is_compaction_summary_message(message) and _handoff_carries_live_user_content(
+        if ContextCompressor._is_actionable_user_turn(
             message
-        ):
+        ) and not ContextCompressor._is_synthetic_compression_user_turn(message):
+            return False
+        if is_compaction_summary_message(
+            message
+        ) and _handoff_carries_live_user_content(message):
             return False
     return True
 
