@@ -39,6 +39,16 @@ _CITED_PATH_RE = re.compile(
 )
 
 
+# Candidate/issue collection keys the analysis report may carry (#2468/#2494).
+_CANDIDATE_KEYS: Tuple[str, ...] = (
+    "candidates",
+    "proposals",
+    "evaluated_issues",
+    "selected_for_implementation",
+    "issues",
+)
+
+
 def _num(x: Any) -> Optional[float]:
     """Coerce to float, but reject bool (True/False are ints in Python)."""
     if isinstance(x, bool):
@@ -161,13 +171,7 @@ def audit_implemented_claims(
     out: List[str] = []
     # Inspect all possible candidate/issue collection keys
     items_to_check: List[Dict[str, Any]] = []
-    for key in (
-        "candidates",
-        "proposals",
-        "evaluated_issues",
-        "selected_for_implementation",
-        "issues",
-    ):
+    for key in _CANDIDATE_KEYS:
         val = report.get(key)
         if isinstance(val, list):
             for entry in val:
@@ -232,6 +236,73 @@ def reconcile_implemented_candidates(
                 item["already_implemented_unverified"] = True
         reconciled.append(item)
     return reconciled
+
+
+def reconcile_report(
+    report: Dict[str, Any], repo_root: Optional[Path]
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Clear unverified ``already_implemented`` flags across candidate collections (#2494).
+
+    Returns ``(report, notes)``; ``notes`` lists each cleared claim for audit.
+    """
+    if not isinstance(report, dict):
+        return report, []
+    notes: List[str] = []
+    for key in _CANDIDATE_KEYS:
+        val = report.get(key)
+        if not isinstance(val, list):
+            continue
+        reconciled = reconcile_implemented_candidates(val, repo_root)
+        report[key] = reconciled
+        for item in reconciled:
+            if isinstance(item, dict) and item.get("already_implemented_unverified"):
+                issue = (
+                    item.get("issue_number")
+                    or item.get("issue")
+                    or item.get("id")
+                    or "unknown"
+                )
+                notes.append(
+                    f"CLEARED_IMPLEMENTED_CLAIM: issue #{issue} marked "
+                    f"already_implemented but cited artifact does not exist — "
+                    f"flag cleared so it is re-ranked"
+                )
+    return report, notes
+
+
+def _is_dated_report_name(name: str) -> bool:
+    """True for the cycle-report filename ``YYYY-MM-DD.json`` (same set as ``audit_latest``)."""
+    if not name.endswith(".json") or len(name) != 15:
+        return False
+    return name[4] == "-" and name[7] == "-"
+
+
+def reconcile_latest(evolution_dir: Path, repo_root: Optional[Path]) -> List[str]:
+    """Reconcile the latest dated analysis report and write it back atomically (#2494)."""
+    if repo_root is None:
+        return []
+    analysis_dir = evolution_dir / "analysis"
+    try:
+        files = list(analysis_dir.glob("*.json"))
+    except OSError:
+        return []
+    dated = sorted(f for f in files if _is_dated_report_name(f.name))
+    if not dated:
+        return []
+    latest = dated[-1]
+    try:
+        report = json.loads(latest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    report, notes = reconcile_report(report, repo_root)
+    if not notes:
+        return []
+    import os
+
+    tmp = latest.with_name(latest.name + ".reconcile-tmp")
+    tmp.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, latest)
+    return notes
 
 
 def audit_rejections(report: Dict[str, Any], repo_root: Optional[Path]) -> List[str]:

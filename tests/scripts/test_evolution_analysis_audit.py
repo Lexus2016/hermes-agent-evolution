@@ -14,6 +14,8 @@ from evolution_analysis_audit import (  # noqa: E402
     audit_rejections,
     extract_cited_paths,
     reconcile_implemented_candidates,
+    reconcile_latest,
+    reconcile_report,
     verify_implementation_claim,
 )
 
@@ -330,3 +332,97 @@ class TestReconcileImplementedCandidates:
         reconciled = reconcile_implemented_candidates(candidates, tmp_path)
         assert len(reconciled) == 1
         assert reconciled[0]["already_implemented"] is True
+
+
+class TestReconcileReport:
+    def test_clears_unverified_claim_across_candidate_keys(self, tmp_path):
+        report = {
+            "date": "2026-08-16",
+            "candidates": [
+                {
+                    "issue_number": 400,
+                    "already_implemented": True,
+                    "reason": "implemented in tools/ghost.py",
+                    "priority_score": 0.9,
+                }
+            ],
+            "selected_for_implementation": [
+                {
+                    "issue_number": 401,
+                    "already_implemented": True,
+                    "reason": "implemented in scripts/phantom.py",
+                }
+            ],
+        }
+        report, notes = reconcile_report(report, tmp_path)
+        assert report["candidates"][0]["already_implemented"] is False
+        assert report["candidates"][0]["already_implemented_unverified"] is True
+        assert report["selected_for_implementation"][0]["already_implemented"] is False
+        assert len(notes) == 2
+        assert all("CLEARED_IMPLEMENTED_CLAIM" in n for n in notes)
+
+    def test_preserves_valid_claim(self, tmp_path):
+        (tmp_path / "tools").mkdir()
+        (tmp_path / "tools" / "real.py").write_text("x")
+        report = {
+            "candidates": [
+                {
+                    "issue_number": 402,
+                    "already_implemented": True,
+                    "reason": "implemented in tools/real.py",
+                }
+            ]
+        }
+        report, notes = reconcile_report(report, tmp_path)
+        assert report["candidates"][0]["already_implemented"] is True
+        assert notes == []
+
+    def test_non_dict_report_is_safe(self, tmp_path):
+        report, notes = reconcile_report([], tmp_path)  # type: ignore[arg-type]
+        assert report == []
+        assert notes == []
+
+
+class TestReconcileLatest:
+    def _write(self, d, name, report):
+        (d / "analysis").mkdir(parents=True, exist_ok=True)
+        (d / "analysis" / name).write_text(json.dumps(report), encoding="utf-8")
+
+    def test_reconciles_and_writes_back_latest_dated_report(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._write(
+            tmp_path,
+            "2026-08-16.json",
+            {
+                "date": "2026-08-16",
+                "candidates": [
+                    {
+                        "issue_number": 500,
+                        "already_implemented": True,
+                        "reason": "implemented in tools/ghost.py",
+                    }
+                ],
+            },
+        )
+        notes = reconcile_latest(tmp_path, repo)
+        assert any("#500" in n for n in notes)
+        # Written back: flag cleared, marker set.
+        saved = json.loads((tmp_path / "analysis" / "2026-08-16.json").read_text())
+        assert saved["candidates"][0]["already_implemented"] is False
+        assert saved["candidates"][0]["already_implemented_unverified"] is True
+
+    def test_no_repo_is_silent(self, tmp_path):
+        self._write(
+            tmp_path,
+            "2026-08-16.json",
+            {"candidates": [{"issue_number": 1, "already_implemented": True}]},
+        )
+        assert reconcile_latest(tmp_path, None) == []
+
+    def test_ignores_non_dated_snapshots(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        self._write(tmp_path, "issues_2026-08-16.json", {"junk": True})
+        self._write(tmp_path, "prs_2026-08-16.json", [])
+        assert reconcile_latest(tmp_path, repo) == []
