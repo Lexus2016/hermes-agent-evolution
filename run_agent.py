@@ -9049,6 +9049,48 @@ class AIAgent:
         """Evaluate subagent behavioral deviation and obtain steering advice."""
         return self.trust_monitor.evaluate_deviation(subagent_id=subagent_id)
 
+    @property
+    def governed_memory(self) -> Any:
+        """Access governed shared memory singleton."""
+        from evolution.lib.governed_shared_memory import get_global_governed_memory
+
+        return get_global_governed_memory()
+
+    def write_governed_memory(
+        self,
+        key: str,
+        value: Any,
+        scope: str = "task",
+        author_id: Optional[str] = None,
+        source_tool: str = "",
+        sources: Optional[list] = None,
+        supersedes_key: Optional[str] = None,
+    ) -> Any:
+        """Write governed memory with provenance and supersession links."""
+        eff_author = author_id or getattr(self, "session_id", "agent_main")
+        return self.governed_memory.write(
+            key=key,
+            value=value,
+            author_id=eff_author,
+            scope=scope,
+            source_tool=source_tool,
+            sources=sources,
+            supersedes_key=supersedes_key,
+        )
+
+    def read_governed_memory(self, key: str, active_only: bool = True) -> Any:
+        """Read a governed memory record."""
+        return self.governed_memory.read(key=key, active_only=active_only)
+
+    def redistribute_subagent_memory(
+        self, superseded_subagent_id: str, successor_subagent_id: str
+    ) -> int:
+        """Re-home memory from superseded subagent to successor."""
+        return self.governed_memory.redistribute(
+            superseded_subagent_id=superseded_subagent_id,
+            successor_subagent_id=successor_subagent_id,
+        )
+
     def _handle_max_iterations(self, messages: list, api_call_count: int) -> str:
         """Forwarder — see ``agent.chat_completion_helpers.handle_max_iterations``."""
         from agent.chat_completion_helpers import handle_max_iterations
