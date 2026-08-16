@@ -28,6 +28,7 @@ Scorecard schema (both graders produce the same shape):
     "total_max": 52,
     "overall_percentage": float,
     "flags": [str],
+    "claims": [{"statement": str, "source": str, "location": str}],
   }
 """
 
@@ -220,6 +221,71 @@ def _safe_int(v: Any, default: int = 0) -> int:
         return int(v) if v is not None else default
     except (TypeError, ValueError):
         return default
+
+
+# Claim extraction (#2482 Slice A): pull discrete, verifiable assertions out of
+# the stage outputs so a downstream triage stage can classify each one against
+# ground truth instead of trusting a self-assigned aggregate score.
+
+_CLAIM_BULLET_RE = re.compile(
+    r"^[ \t]*(?:[-*+]|[0-9]+[.)])[ \t]+(?P<stmt>\S.*)$", re.MULTILINE
+)
+_CLAIM_HEADING_RE = re.compile(
+    r"^[ \t]*(?:#{1,4})[ \t]+(?P<stmt>\S.*)$", re.MULTILINE
+)
+
+
+def _claim(source: str, location: str, statement: str) -> Dict[str, str]:
+    return {"statement": statement, "source": source, "location": location}
+
+
+def _claims_from_text(source: str, text: str) -> List[Dict[str, str]]:
+    """Bullet/list items and headings become claims, keyed by source + line."""
+    claims: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        m = _CLAIM_BULLET_RE.match(line) or _CLAIM_HEADING_RE.match(line)
+        if not m:
+            continue
+        statement = m.group("stmt").strip()
+        if statement and statement not in seen:
+            seen.add(statement)
+            claims.append(_claim(source, f"line {lineno}", statement))
+    return claims
+
+
+def _claims_from_json(source: str, data: Any) -> List[Dict[str, str]]:
+    """Issue titles / merged count / proposed issues become claims."""
+    d = _as_dict(data) if data is not None else {}
+    claims: List[Dict[str, str]] = []
+    for idx, issue in enumerate(d.get("issues") or []):
+        if isinstance(issue, dict) and issue.get("title"):
+            title = str(issue["title"]).strip()
+            score = issue.get("priority_score")
+            stmt = title if score is None else f"{title} (priority {score})"
+            claims.append(_claim(source, f"issues[{idx}]", stmt))
+    if "merged_count" in d:
+        stmt = f"merged {_safe_int(d.get('merged_count'))} PR(s)"
+        claims.append(_claim(source, "merged_count", stmt))
+    for idx, prop in enumerate(d.get("new_issues_proposed") or []):
+        if isinstance(prop, dict):
+            stmt = str(prop.get("title") or "").strip()
+        else:
+            stmt = str(prop).strip()
+        if stmt:
+            claims.append(_claim(source, f"new_issues_proposed[{idx}]", stmt))
+    return claims
+
+
+def extract_claims(outputs: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Deterministic claim list across all stage outputs (pure regex/JSON)."""
+    claims: List[Dict[str, str]] = []
+    for source, content in outputs.items():
+        if isinstance(content, str):
+            claims.extend(_claims_from_text(source, content))
+        elif isinstance(content, dict):
+            claims.extend(_claims_from_json(source, content))
+    return claims
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -632,6 +698,19 @@ class StrictRubricJudgeGrader:
                     f"({dim_pct:.0f}%) — stage nearly absent or very poor"
                 )
 
+        # Extract discrete claims from the same raw outputs (#2482 Slice A):
+        # a machine-readable claim list downstream triage can verify against
+        # ground truth, instead of trusting the aggregate score alone.
+        claims = extract_claims(
+            {
+                "research": research_md,
+                "issues": issues_json,
+                "introspection": introspection_data,
+                "implementation": implementation_md,
+                "integration": integration_json,
+            }
+        )
+
         return {
             "cycle_date": date,
             "grader": "strict",
@@ -640,6 +719,7 @@ class StrictRubricJudgeGrader:
             "total_max": total_max,
             "overall_percentage": pct,
             "flags": flags,
+            "claims": claims,
         }
 
 
