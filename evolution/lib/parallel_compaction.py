@@ -13,8 +13,11 @@ context is swapped in safely at turn boundaries without mid-turn truncation.
 from __future__ import annotations
 
 import concurrent.futures
+import json
+import time
 from dataclasses import asdict, dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 
@@ -74,6 +77,33 @@ class CompactionSnapshot:
     token_count_at_trigger: int
 
 
+def _default_snapshot_dir() -> Path:
+    return Path.home() / ".hermes" / "compaction" / "snapshots"
+
+
+def write_precompaction_snapshot(
+    messages: List[Dict[str, Any]], snapshot_dir: Optional[str] = None
+) -> str:
+    """Write a pre-compaction snapshot to a re-readable JSON file (#2471).
+
+    Returns the absolute path so the agent can later re-read dropped context via
+    :func:`read_precompaction_snapshot` instead of re-running the original tool
+    calls.
+    """
+    directory = Path(snapshot_dir) if snapshot_dir else _default_snapshot_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"snapshot-{int(time.time() * 1000)}.json"
+    payload = {"messages": messages, "captured_at_unix_ms": int(time.time() * 1000)}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(path)
+
+
+def read_precompaction_snapshot(path: str) -> List[Dict[str, Any]]:
+    """Re-read a snapshot written by :func:`write_precompaction_snapshot`."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    return data["messages"]
+
+
 class ParallelCompactor:
     """Orchestrates early-triggered background context compaction and safe turn swaps."""
 
@@ -81,15 +111,22 @@ class ParallelCompactor:
         self,
         config: Optional[ParallelCompactionConfig] = None,
         executor: Optional[concurrent.futures.Executor] = None,
+        snapshot_dir: Optional[str] = None,
     ) -> None:
         self.config = config or ParallelCompactionConfig()
         self._executor = executor
+        self._snapshot_dir = snapshot_dir
+        self._snapshot_path: Optional[str] = None
         self._state = CompactionState.IDLE
         self._future: Optional[concurrent.futures.Future[List[Dict[str, Any]]]] = None
         self._snapshot: Optional[CompactionSnapshot] = None
         self._compacted_prefix: Optional[List[Dict[str, Any]]] = None
         self._last_error: Optional[str] = None
         self._swap_count: int = 0
+
+    @property
+    def snapshot_path(self) -> Optional[str]:
+        return self._snapshot_path
 
     @property
     def state(self) -> CompactionState:
@@ -124,6 +161,13 @@ class ParallelCompactor:
             return False
 
         snapshot_messages = [dict(m) for m in messages]
+        try:
+            self._snapshot_path = write_precompaction_snapshot(
+                snapshot_messages, self._snapshot_dir
+            )
+        except OSError:
+            # Best-effort recovery aid: never block compaction on a snapshot write.
+            self._snapshot_path = None
         self._snapshot = CompactionSnapshot(
             trigger_index=len(snapshot_messages),
             message_count=len(snapshot_messages),
@@ -208,10 +252,23 @@ class ParallelCompactor:
         self._swap_count += 1
         return new_messages
 
+    def read_snapshot(
+        self, path: Optional[str] = None
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Re-read the pre-compaction snapshot for this pass (or an explicit path).
+
+        Returns None when no snapshot was captured this pass and no path was given.
+        """
+        target = path or self._snapshot_path
+        if target is None:
+            return None
+        return read_precompaction_snapshot(target)
+
     def reset(self) -> None:
         """Reset state for next cycle."""
         self._state = CompactionState.IDLE
         self._future = None
         self._snapshot = None
+        self._snapshot_path = None
         self._compacted_prefix = None
         self._last_error = None
