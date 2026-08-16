@@ -3007,6 +3007,74 @@ def _redact_process_result(result: dict) -> dict:
     return result
 
 
+def _classify_process_error(message: str) -> dict:
+    """Decompose a ``process`` tool error into a reason subclass + recovery hint.
+
+    Issue #2621: the ``process`` tool's ``other`` bucket was the largest
+    undecomposed failure mode — opaque errors with no reason subclass and no
+    recovery hint drove 18-deep retry spirals. This mirrors the decomposition
+    already done for ``tool_call``/``memory``/``tool_describe``: map the error
+    text to a concrete category the agent can act on instead of blind-retrying.
+
+    Returns a dict with ``error_category`` and ``recovery_hint``. The category
+    is one of: ``session-not-found``, ``invalid-action``, ``session-id-required``,
+    ``process-exited``, ``poll-timeout``, or ``other`` (fallback).
+    """
+    low = (message or "").lower()
+    if "no process with id" in low or "no processes are currently registered" in low:
+        return {
+            "error_category": "session-not-found",
+            "recovery_hint": (
+                "The session_id does not match any registered process. Use "
+                "action='list' to see the current processes, then retry with a "
+                "valid session_id. Do NOT retry the same stale ID."
+            ),
+        }
+    if "unknown process action" in low:
+        return {
+            "error_category": "invalid-action",
+            "recovery_hint": (
+                "The action name is not valid. Use one of the listed valid "
+                "actions (list, poll, log, wait, kill, write, submit, close). "
+                "Do NOT retry the same invalid action."
+            ),
+        }
+    if "session_id is required" in low:
+        return {
+            "error_category": "session-id-required",
+            "recovery_hint": (
+                "session_id is required for this action. Use action='list' to "
+                "find the process, then retry with its session_id."
+            ),
+        }
+    if "process has already finished" in low or "already exited" in low:
+        return {
+            "error_category": "process-exited",
+            "recovery_hint": (
+                "The process has already finished. Use action='log' to read its "
+                "final output, or action='list' to see current processes. Do NOT "
+                "retry write/submit/close on a finished process."
+            ),
+        }
+    if "timed out" in low or "timeout" in low:
+        return {
+            "error_category": "poll-timeout",
+            "recovery_hint": (
+                "The wait/poll timed out. The process may still be running — "
+                "poll again later, or use terminal(background=true, "
+                "notify_on_complete=true) for automatic notification."
+            ),
+        }
+    return {
+        "error_category": "other",
+        "recovery_hint": (
+            "The process tool returned an unclassified error. Inspect the "
+            "message, use action='list' to check process state, and adjust "
+            "before retrying."
+        ),
+    }
+
+
 def _handle_process(args, **kw):
     task_id = kw.get("task_id")
     action = args.get("action", "")
@@ -3058,7 +3126,10 @@ def _handle_process(args, **kw):
                     hint = f" {len(active_procs)} processes are running. Specify one of: {ids}"
                 elif len(all_procs) > 1:
                     hint = f" {len(all_procs)} processes exist. Use action='list' to see all."
-                return tool_error(f"session_id is required for {action}.{hint}")
+                return tool_error(
+                    f"session_id is required for {action}.{hint}",
+                    **_classify_process_error(f"session_id is required for {action}"),
+                )
         if session_id:
             _existing = process_registry.get(session_id)
             if _existing is None:
@@ -3079,12 +3150,14 @@ def _handle_process(args, **kw):
                     return tool_error(
                         f"No process with ID '{session_id}'. "
                         f"Available: {', '.join(_avail_ids[:5])}. "
-                        f"Use action='list' to see all processes."
+                        f"Use action='list' to see all processes.",
+                        **_classify_process_error(f"No process with ID '{session_id}'"),
                     )
                 return tool_error(
                     f"No process with ID '{session_id}'. "
                     "No processes are currently registered. "
-                    "Use action='list' to verify."
+                    "Use action='list' to verify.",
+                    **_classify_process_error(f"No process with ID '{session_id}'"),
                 )
         if action == "poll":
             return json.dumps(_redact_process_result(process_registry.poll(session_id)), ensure_ascii=False)
@@ -3110,10 +3183,12 @@ def _handle_process(args, **kw):
         if suggestion:
             return tool_error(
                 f"Unknown process action: {action!r}. Did you mean '{suggestion}'? "
-                f"Valid actions: {valid_list}"
+                f"Valid actions: {valid_list}",
+                **_classify_process_error(f"Unknown process action: {action!r}"),
             )
         return tool_error(
-            f"Unknown process action: {action!r}. Valid actions: {valid_list}"
+            f"Unknown process action: {action!r}. Valid actions: {valid_list}",
+            **_classify_process_error(f"Unknown process action: {action!r}"),
         )
 
 
