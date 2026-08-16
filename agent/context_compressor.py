@@ -6048,9 +6048,8 @@ This compaction should PRIORITISE preserving all information related to the focu
         # ``[CONTEXT COMPACTION — REFERENCE ONLY]`` block (fixes #29824).
         # Each anchor only walks ``cut_idx`` backward, so chaining them is
         # monotonic — the tail can only grow, never shrink.
-        cut_idx = self._ensure_last_assistant_message_in_tail(
-            messages, cut_idx, head_end
-        )
+        # fmt: skip
+        cut_idx = self._ensure_last_assistant_message_in_tail(messages, cut_idx, head_end)
 
         # Extend to the last N actionable user messages when configured
         # (compression.min_tail_user_messages > 1).  This prevents the
