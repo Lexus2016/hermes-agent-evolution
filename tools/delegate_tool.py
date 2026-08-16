@@ -1393,6 +1393,53 @@ def _apply_handoff_collapse(
             task["context"] = header_block
 
 
+_ESCALATION_MARKER = "ESCALATE_TO_HUMAN:"
+
+
+def _detect_escalation(text: Any) -> bool:
+    """Return True when *text* carries a subagent's call-for-human-help marker.
+
+    Grounded in the Anthropic multi-agent "turf war" finding (#2527): peace
+    broke out only once an agent called for human help. Subagents are told to
+    prefix a conflict summary with ``ESCALATE_TO_HUMAN:``; the parent flags any
+    result carrying that marker so the operator is surfaced the conflict.
+    """
+    if not text or not isinstance(text, str):
+        return False
+    return _ESCALATION_MARKER in text.upper()
+
+
+def _build_cooperation_containment_block() -> str:
+    """Cooperation/containment rules + human-escalation path for subagents (#2527).
+
+    Anthropic observed that concurrent agents sharing infrastructure with no
+    explicit rules descended into impersonation, lockouts, and self-replicating
+    malware; peace broke out only after an agent called for human help. This
+    block makes inter-agent conflict a first-class failure mode every subagent
+    is told to avoid and to escalate rather than fight.
+    """
+    return (
+        "\nCOOPERATION & CONTAINMENT RULES (non-negotiable — you may share "
+        "infrastructure with other agents):\n"
+        "- Other agents working in the same workspace/registry are NOT attackers. "
+        "Treat a concurrent change by another agent as cooperation, not an attack.\n"
+        "- Never impersonate another agent or its software to fool monitoring or tooling.\n"
+        "- Never lock another agent out of shared resources (servers, registries, files) "
+        "or repeatedly halt or undo another agent's work.\n"
+        "- Never deploy self-replicating or destructive code against another agent, and "
+        "never modify or delete another agent's artifacts out of conflict.\n"
+        "- If another agent interferes with your task, do NOT retaliate or escalate the "
+        "conflict — continue your assigned task as best you can.\n"
+        "- HUMAN-ESCALATION PATH: if you detect inter-agent conflict you cannot resolve "
+        "(lockout, impersonation, sabotage, or another agent repeatedly halting your work), "
+        "STOP fighting and call for human help by beginning your final summary with the "
+        "exact line:\n"
+        f"  {_ESCALATION_MARKER}\n"
+        "  followed by a one-line description of the conflict. Your parent will route it "
+        "to a human. Do not try to win a turf war."
+    )
+
+
 def _build_child_system_prompt(
     goal: str,
     context: Optional[str] = None,
@@ -1485,6 +1532,7 @@ def _build_child_system_prompt(
         "to the parent — it will have to redo the work, which defeats the "
         "purpose of delegating to you."
     )
+    parts.append(_build_cooperation_containment_block())
     if role == "orchestrator":
         child_note = (
             "Your own children MUST be leaves (cannot delegate further) "
@@ -4044,6 +4092,12 @@ def _finalize_child_results(
     """Apply host-owned summary, memory, hook, and cost contracts once."""
     with _parent_finalization_lock(parent_agent):
         _apply_summary_budget(results, parent_agent)
+        # #2527: surface a subagent's call-for-human-help marker to the parent
+        # so inter-agent conflict (lockout / impersonation / sabotage) reaches a
+        # human instead of being swallowed into a routine summary.
+        for entry in results:
+            if _detect_escalation(entry.get("summary")):
+                entry["escalated"] = True
         child_by_index = {index: child for index, _task, child in children}
 
         if parent_agent and getattr(parent_agent, "_memory_manager", None):

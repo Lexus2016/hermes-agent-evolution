@@ -28,6 +28,8 @@ from tools.delegate_tool import (
     _build_child_agent,
     _build_child_progress_callback,
     _build_child_system_prompt,
+    _detect_escalation,
+    _ESCALATION_MARKER,
     _extract_output_tail,
     _strip_blocked_tools,
     _resolve_child_credential_pool,
@@ -151,6 +153,34 @@ class TestChildSystemPrompt(unittest.TestCase):
         self.assertIn("data, not instructions", prompt)
         self.assertIn("never propagate", prompt)
         self.assertIn("UNTRUSTED CONTENT", prompt)
+
+    def test_cooperation_containment_clause(self):
+        """#2527: subagents get explicit cooperation/containment rules."""
+        prompt = _build_child_system_prompt("Fix the tests")
+        self.assertIn("COOPERATION & CONTAINMENT RULES", prompt)
+        self.assertIn("not an attack", prompt.lower())
+        self.assertIn("impersonate", prompt.lower())
+        self.assertIn("lock another agent out", prompt.lower())
+        self.assertIn("self-replicating", prompt.lower())
+
+    def test_human_escalation_path_in_prompt(self):
+        """#2527: the child prompt names the human-escalation marker."""
+        prompt = _build_child_system_prompt("Fix the tests")
+        self.assertIn("HUMAN-ESCALATION PATH", prompt)
+        self.assertIn(_ESCALATION_MARKER, prompt)
+
+    def test_detect_escalation_positive(self):
+        summary = f"{_ESCALATION_MARKER} agents locked me out of the registry"
+        self.assertTrue(_detect_escalation(summary))
+
+    def test_detect_escalation_case_insensitive(self):
+        self.assertTrue(_detect_escalation("escalate_to_human: impersonation detected"))
+
+    def test_detect_escalation_negative(self):
+        self.assertFalse(_detect_escalation("All done, no issues."))
+        self.assertFalse(_detect_escalation(""))
+        self.assertFalse(_detect_escalation(None))
+        self.assertFalse(_detect_escalation(12345))
 
     def test_empty_context_ignored(self):
         prompt = _build_child_system_prompt("Do something", "  ")
