@@ -3066,6 +3066,19 @@ class ContextCompressor(ContextEngine):
             return pc.read_snapshot_text(snapshot_path)
         return None
 
+    @property
+    def context_store(self) -> Optional[Any]:
+        """Access the ProgrammaticContextStore for context-as-variable persistence."""
+        if not hasattr(self, "_context_store") or self._context_store is None:
+            try:
+                from evolution.lib.programmatic_context import ProgrammaticContextStore
+
+                sid = getattr(self, "_session_id", None)
+                self._context_store = ProgrammaticContextStore(session_id=sid)
+            except Exception:
+                self._context_store = None
+        return self._context_store
+
     def update_from_response(self, usage: Dict[str, Any]):
         """Update tracked token usage from API response."""
         self.last_prompt_tokens = usage.get("prompt_tokens", 0)

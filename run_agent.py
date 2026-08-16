@@ -4883,6 +4883,52 @@ class AIAgent:
             return compressor.read_precompaction_snapshot_text(snapshot_path)
         return None
 
+    @property
+    def context_store(self) -> Optional[Any]:
+        """Access the attached ProgrammaticContextStore instance."""
+        compressor = getattr(self, "context_compressor", None)
+        if compressor and hasattr(compressor, "context_store"):
+            return compressor.context_store
+        if not hasattr(self, "_context_store") or self._context_store is None:
+            try:
+                from evolution.lib.programmatic_context import ProgrammaticContextStore
+
+                self._context_store = ProgrammaticContextStore(
+                    session_id=self.session_id
+                )
+            except Exception:
+                self._context_store = None
+        return self._context_store
+
+    def set_context_var(self, name: str, value: Any, description: str = "") -> None:
+        """Store a named context variable that survives turns and compaction."""
+        store = self.context_store
+        if store:
+            store.set(name, value, description=description)
+
+    def get_context_var(self, name: str, default: Optional[Any] = None) -> Any:
+        """Retrieve a named context variable."""
+        store = self.context_store
+        if store:
+            return store.get(name, default=default)
+        return default
+
+    def slice_context_var(
+        self, name: str, start: Optional[int] = None, end: Optional[int] = None
+    ) -> Optional[Any]:
+        """Slice a stored context variable by start:end bounds."""
+        store = self.context_store
+        if store:
+            return store.slice(name, start=start, end=end)
+        return None
+
+    def list_context_vars(self) -> List[Dict[str, Any]]:
+        """List all stored programmatic context variables."""
+        store = self.context_store
+        if store:
+            return store.list_vars()
+        return []
+
     def _build_system_prompt_parts(self, system_message: str = None) -> Dict[str, str]:
         """Forwarder — see ``agent.system_prompt.build_system_prompt_parts``."""
         from agent.system_prompt import build_system_prompt_parts
