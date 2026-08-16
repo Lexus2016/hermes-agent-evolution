@@ -359,6 +359,17 @@ def check_merge_policy_with_quality(
             )
         except ImportError:
             pass
+    # Safety-review gate (#2575): static analysis on generated/changed code
+    # before any self-modification merge. Opt-in — runs only when source
+    # contents are provided (the same shape as the reachability gate).
+    if source_contents is not None:
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from evolution.lib.safety_review_gate import check_safety_gate  # noqa: E402
+
+            violations.extend(check_safety_gate(files, source_contents=source_contents))
+        except ImportError:
+            pass
     # Flip gate (#1447): per-example P→F regression check. Opt-in per skill —
     # when flip_gate_results is None the gate is skipped entirely.
     if flip_gate_results is not None:
