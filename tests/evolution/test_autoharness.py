@@ -11,11 +11,16 @@ import pytest
 from evolution.lib.autoharness import (
     HARNESS_SPEC_JSON_SCHEMA,
     HARNESS_SYNTHESIS_SYSTEM_PROMPT,
+    AssertionResult,
     HarnessAssertion,
+    HarnessDiagnosticReport,
     HarnessSpec,
+    TestCaseResult,
     TestCaseSpec,
     build_harness_synthesis_prompt,
+    evaluate_assertion,
     parse_skill_capabilities,
+    run_harness,
     synthesize_harness_spec,
 )
 
@@ -176,3 +181,150 @@ def test_schema_and_system_prompt_constants() -> None:
     assert isinstance(HARNESS_SPEC_JSON_SCHEMA, dict)
     assert "properties" in HARNESS_SPEC_JSON_SCHEMA
     assert "AUTOHARNESS" in HARNESS_SYNTHESIS_SYSTEM_PROMPT
+
+
+def test_evaluate_assertion_types() -> None:
+    # 1. exit_code
+    a_exit = HarnessAssertion(
+        assertion_type="exit_code", target="return_value", expected=0
+    )
+    assert evaluate_assertion(a_exit, {"return_value": 0}).passed is True
+    assert evaluate_assertion(a_exit, {"return_value": 1}).passed is False
+
+    # 2. output_contains
+    a_contains = HarnessAssertion(
+        assertion_type="output_contains", target="stdout", expected="success"
+    )
+    assert (
+        evaluate_assertion(
+            a_contains, {"stdout": "Operation completed with success!"}
+        ).passed
+        is True
+    )
+    assert (
+        evaluate_assertion(a_contains, {"stdout": "Operation failed"}).passed is False
+    )
+
+    # 3. regex_match
+    a_regex = HarnessAssertion(
+        assertion_type="regex_match", target="stdout", expected=r"v\d+\.\d+"
+    )
+    assert (
+        evaluate_assertion(a_regex, {"stdout": "version v2.4 released"}).passed is True
+    )
+    assert evaluate_assertion(a_regex, {"stdout": "version unknown"}).passed is False
+
+    # 4. json_valid
+    a_json = HarnessAssertion(
+        assertion_type="json_valid", target="stdout", expected=True
+    )
+    assert evaluate_assertion(a_json, {"stdout": '{"status": "ok"}'}).passed is True
+    assert evaluate_assertion(a_json, {"stdout": "not a json"}).passed is False
+
+    # 5. execution_time_under
+    a_time = HarnessAssertion(
+        assertion_type="execution_time_under", target="state", expected=2.0
+    )
+    assert evaluate_assertion(a_time, {"execution_time_sec": 1.2}).passed is True
+    assert evaluate_assertion(a_time, {"execution_time_sec": 3.5}).passed is False
+
+    # 6. custom_eval
+    a_custom = HarnessAssertion(
+        assertion_type="custom_eval", target="artifacts", expected=lambda x: len(x) > 0
+    )
+    assert evaluate_assertion(a_custom, {"artifacts": ["f1.py"]}).passed is True
+    assert evaluate_assertion(a_custom, {"artifacts": []}).passed is False
+
+
+def test_run_harness_successful_execution() -> None:
+    skill_dict = {
+        "name": "math_solver",
+        "category": "coding",
+        "capabilities": ["Add two numbers", "Multiply numbers"],
+    }
+    spec = synthesize_harness_spec(skill_dict)
+
+    def dummy_runner(input_data: dict) -> dict:
+        return {
+            "stdout": json.dumps({"status": "ok", "result": 42}),
+            "stderr": "",
+            "return_value": 0,
+            "state": {},
+        }
+
+    report = run_harness(spec, dummy_runner)
+    assert isinstance(report, HarnessDiagnosticReport)
+    assert report.skill_name == "math_solver"
+    assert report.total_cases == len(spec.test_cases)
+    # The nominal cases should pass
+    assert report.passed_cases >= 2
+    assert report.overall_score > 0.6
+    assert "per_criterion_diagnostics" in report.to_dict()
+    assert (
+        report.to_dict()["per_criterion_diagnostics"]["exit_code"]["total_assertions"]
+        >= 2
+    )
+
+
+def test_run_harness_diagnostics_and_delta() -> None:
+    skill_dict = {
+        "name": "data_pipeline",
+        "category": "data_processing",
+        "capabilities": ["Normalize payload", "Filter rows"],
+    }
+    spec = synthesize_harness_spec(skill_dict)
+
+    # Prior runner fails one case
+    def prior_runner(input_data: dict) -> dict:
+        op = input_data.get("operation", "")
+        if "Filter" in op:
+            return {"stdout": "invalid non-json", "stderr": "error", "return_value": 1}
+        return {
+            "stdout": '{"clean": true}',
+            "stderr": "",
+            "return_value": 0,
+            "execution_time_sec": 1.0,
+        }
+
+    # Improved runner passes both
+    def improved_runner(input_data: dict) -> dict:
+        return {
+            "stdout": '{"clean": true, "filtered": 5}',
+            "stderr": "",
+            "return_value": 0,
+            "execution_time_sec": 0.5,
+        }
+
+    prior_report = run_harness(spec, prior_runner)
+    improved_report = run_harness(spec, improved_runner, prior_report=prior_report)
+
+    assert prior_report.overall_score < improved_report.overall_score
+    assert improved_report.score_delta is not None
+    assert improved_report.score_delta > 0.0
+    assert improved_report.prior_score == prior_report.overall_score
+    assert improved_report.passed is True
+
+    # Diagnostic serialization
+    report_json = improved_report.to_json()
+    assert "score_delta" in report_json
+    deserialized = HarnessDiagnosticReport.from_json(report_json)
+    assert deserialized.score_delta == improved_report.score_delta
+    assert deserialized.passed is True
+
+
+def test_run_harness_exception_resilience() -> None:
+    skill_dict = {
+        "name": "crashing_skill",
+        "category": "general",
+        "capabilities": ["Safe operation"],
+    }
+    spec = synthesize_harness_spec(skill_dict)
+
+    def crashing_runner(input_data: dict) -> dict:
+        raise RuntimeError("Uncaught fatal crash in skill execution")
+
+    report = run_harness(spec, crashing_runner)
+    assert report.passed is False
+    assert report.failed_cases == 1
+    assert report.test_case_results[0].error is not None
+    assert "Uncaught fatal crash" in str(report.test_case_results[0].error)

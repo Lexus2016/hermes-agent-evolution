@@ -11,19 +11,25 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "HARNESS_SPEC_JSON_SCHEMA",
     "HARNESS_SYNTHESIS_SYSTEM_PROMPT",
+    "AssertionResult",
     "HarnessAssertion",
-    "TestCaseSpec",
+    "HarnessDiagnosticReport",
     "HarnessSpec",
+    "TestCaseResult",
+    "TestCaseSpec",
     "build_harness_synthesis_prompt",
+    "evaluate_assertion",
     "parse_skill_capabilities",
+    "run_harness",
     "synthesize_harness_spec",
 ]
 
@@ -554,5 +560,418 @@ def synthesize_harness_spec(
             "synthesized_by": "AUTOHARNESS",
             "capabilities_count": len(capabilities),
             "test_cases_count": len(test_cases),
+        },
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Slice B: Run improved-skill against synthesized harness + diagnostics (#2517)
+# ──────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class AssertionResult:
+    """Outcome of an assertion evaluation."""
+
+    assertion: HarnessAssertion
+    passed: bool
+    actual: Any = None
+    message: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "assertion": self.assertion.to_dict(),
+            "passed": self.passed,
+            "actual": self.actual,
+            "message": self.message,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> AssertionResult:
+        raw_a = d.get("assertion", {}) or {}
+        a = HarnessAssertion.from_dict(raw_a) if isinstance(raw_a, dict) else raw_a
+        return cls(
+            assertion=a,
+            passed=bool(d.get("passed", False)),
+            actual=d.get("actual"),
+            message=str(d.get("message", "")),
+        )
+
+
+@dataclass
+class TestCaseResult:
+    """Outcome of a single test case execution against a skill."""
+
+    __test__ = False
+
+    test_id: str
+    name: str
+    passed: bool
+    score: float
+    assertion_results: List[AssertionResult] = field(default_factory=list)
+    execution_time_sec: float = 0.0
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "test_id": self.test_id,
+            "name": self.name,
+            "passed": self.passed,
+            "score": round(self.score, 4),
+            "execution_time_sec": round(self.execution_time_sec, 4),
+            "error": self.error,
+            "assertion_results": [ar.to_dict() for ar in self.assertion_results],
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> TestCaseResult:
+        raw_ar = d.get("assertion_results", []) or []
+        ar_list = [
+            AssertionResult.from_dict(ar) if isinstance(ar, dict) else ar
+            for ar in raw_ar
+        ]
+        return cls(
+            test_id=str(d.get("test_id", "")),
+            name=str(d.get("name", "")),
+            passed=bool(d.get("passed", False)),
+            score=float(d.get("score", 0.0)),
+            assertion_results=ar_list,
+            execution_time_sec=float(d.get("execution_time_sec", 0.0)),
+            error=d.get("error"),
+        )
+
+
+@dataclass
+class HarnessDiagnosticReport:
+    """Structured diagnostic report emitted when running a skill against a harness."""
+
+    skill_name: str
+    skill_category: str
+    total_cases: int
+    passed_cases: int
+    failed_cases: int
+    overall_score: float
+    passed: bool
+    test_case_results: List[TestCaseResult] = field(default_factory=list)
+    prior_score: Optional[float] = None
+    score_delta: Optional[float] = None
+    per_criterion_diagnostics: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "skill_name": self.skill_name,
+            "skill_category": self.skill_category,
+            "total_cases": self.total_cases,
+            "passed_cases": self.passed_cases,
+            "failed_cases": self.failed_cases,
+            "overall_score": round(self.overall_score, 4),
+            "passed": self.passed,
+            "prior_score": (
+                round(self.prior_score, 4) if self.prior_score is not None else None
+            ),
+            "score_delta": (
+                round(self.score_delta, 4) if self.score_delta is not None else None
+            ),
+            "per_criterion_diagnostics": self.per_criterion_diagnostics,
+            "test_case_results": [tcr.to_dict() for tcr in self.test_case_results],
+            "metadata": dict(self.metadata),
+        }
+
+    def to_json(self, indent: Optional[int] = 2) -> str:
+        return json.dumps(self.to_dict(), indent=indent)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> HarnessDiagnosticReport:
+        raw_tcr = d.get("test_case_results", []) or []
+        tcr_list = [
+            TestCaseResult.from_dict(tcr) if isinstance(tcr, dict) else tcr
+            for tcr in raw_tcr
+        ]
+        return cls(
+            skill_name=str(d.get("skill_name", "unnamed_skill")),
+            skill_category=str(d.get("skill_category", "general")),
+            total_cases=int(d.get("total_cases", len(tcr_list))),
+            passed_cases=int(d.get("passed_cases", 0)),
+            failed_cases=int(d.get("failed_cases", 0)),
+            overall_score=float(d.get("overall_score", 0.0)),
+            passed=bool(d.get("passed", False)),
+            test_case_results=tcr_list,
+            prior_score=(
+                float(d["prior_score"]) if d.get("prior_score") is not None else None
+            ),
+            score_delta=(
+                float(d["score_delta"]) if d.get("score_delta") is not None else None
+            ),
+            per_criterion_diagnostics=dict(
+                d.get("per_criterion_diagnostics", {}) or {}
+            ),
+            metadata=dict(d.get("metadata", {}) or {}),
+        )
+
+    @classmethod
+    def from_json(cls, json_str: str) -> HarnessDiagnosticReport:
+        data = json.loads(json_str)
+        return cls.from_dict(data)
+
+
+def evaluate_assertion(
+    assertion: HarnessAssertion,
+    execution_output: Dict[str, Any],
+) -> AssertionResult:
+    """Evaluate a single test assertion against execution outputs."""
+    target_val = execution_output.get(assertion.target)
+    atype = assertion.assertion_type
+    expected = assertion.expected
+
+    if atype == "exit_code":
+        try:
+            actual_int = int(target_val) if target_val is not None else -1
+            passed = actual_int == int(expected)
+            msg = (
+                f"Exit code matches ({actual_int})"
+                if passed
+                else f"Exit code mismatch: expected {expected}, got {actual_int}"
+            )
+            return AssertionResult(
+                assertion=assertion,
+                passed=passed,
+                actual=actual_int,
+                message=msg,
+            )
+        except (ValueError, TypeError) as e:
+            return AssertionResult(
+                assertion=assertion,
+                passed=False,
+                actual=target_val,
+                message=f"Invalid exit code value: {e}",
+            )
+
+    elif atype == "output_contains":
+        actual_str = str(target_val or "")
+        exp_str = str(expected or "")
+        passed = exp_str.lower() in actual_str.lower()
+        msg = (
+            f"Output contains '{exp_str}'"
+            if passed
+            else f"Output did not contain '{exp_str}'"
+        )
+        return AssertionResult(
+            assertion=assertion,
+            passed=passed,
+            actual=actual_str[:200],
+            message=msg,
+        )
+
+    elif atype == "regex_match":
+        actual_str = str(target_val or "")
+        pattern_str = str(expected or "")
+        passed = bool(re.search(pattern_str, actual_str))
+        msg = (
+            f"Output matched pattern '{pattern_str}'"
+            if passed
+            else f"Output failed regex match '{pattern_str}'"
+        )
+        return AssertionResult(
+            assertion=assertion,
+            passed=passed,
+            actual=actual_str[:200],
+            message=msg,
+        )
+
+    elif atype == "json_valid":
+        actual_str = str(target_val or "")
+        try:
+            parsed = (
+                target_val
+                if isinstance(target_val, (dict, list))
+                else json.loads(actual_str)
+            )
+            passed = True if expected is True else False
+            msg = "Valid JSON payload"
+            return AssertionResult(
+                assertion=assertion,
+                passed=passed,
+                actual=type(parsed).__name__,
+                message=msg,
+            )
+        except (json.JSONDecodeError, TypeError) as e:
+            passed = False if expected is True else True
+            return AssertionResult(
+                assertion=assertion,
+                passed=passed,
+                actual=actual_str[:100],
+                message=f"JSON validation failed: {e}",
+            )
+
+    elif atype == "execution_time_under":
+        try:
+            actual_time = (
+                float(target_val)
+                if target_val is not None
+                else float(execution_output.get("execution_time_sec", 999.0))
+            )
+            passed = actual_time <= float(expected)
+            msg = (
+                f"Execution time {actual_time:.2f}s <= {expected}s bound"
+                if passed
+                else f"Latency bound exceeded: {actual_time:.2f}s > {expected}s"
+            )
+            return AssertionResult(
+                assertion=assertion,
+                passed=passed,
+                actual=actual_time,
+                message=msg,
+            )
+        except (ValueError, TypeError):
+            return AssertionResult(
+                assertion=assertion,
+                passed=False,
+                actual=target_val,
+                message="Invalid execution time",
+            )
+
+    elif atype == "custom_eval":
+        if callable(expected):
+            try:
+                passed = bool(expected(target_val))
+                msg = (
+                    "Custom evaluation passed" if passed else "Custom evaluation failed"
+                )
+            except Exception as e:
+                passed = False
+                msg = f"Custom evaluation error: {e}"
+        else:
+            passed = target_val == expected
+            msg = (
+                "Value matches expected"
+                if passed
+                else f"Value mismatch: expected {expected}, got {target_val}"
+            )
+        return AssertionResult(
+            assertion=assertion,
+            passed=passed,
+            actual=target_val,
+            message=msg,
+        )
+
+    # Fallback equality
+    passed = target_val == expected
+    return AssertionResult(
+        assertion=assertion,
+        passed=passed,
+        actual=target_val,
+        message="Equality check",
+    )
+
+
+def run_harness(
+    harness_spec: HarnessSpec,
+    skill_runner: Callable[[Dict[str, Any]], Dict[str, Any]],
+    prior_report: Optional[HarnessDiagnosticReport] = None,
+) -> HarnessDiagnosticReport:
+    """Execute a skill against a synthesized HarnessSpec and emit structured diagnostics (Slice B #2517)."""
+    test_case_results: List[TestCaseResult] = []
+    criterion_stats: Dict[str, Dict[str, int]] = {}
+
+    for tc in harness_spec.test_cases:
+        t_start = time.time()
+        err_msg: Optional[str] = None
+        exec_output: Dict[str, Any] = {}
+        try:
+            exec_output = skill_runner(tc.input_data)
+        except Exception as e:
+            err_msg = str(e)
+            logger.warning("Error executing test case %s: %s", tc.test_id, err_msg)
+            exec_output = {
+                "stdout": "",
+                "stderr": err_msg,
+                "return_value": -1,
+                "state": {},
+            }
+        t_elapsed = time.time() - t_start
+
+        assertion_results: List[AssertionResult] = []
+        total_weight = 0.0
+        passed_weight = 0.0
+
+        for assertion in tc.assertions:
+            total_weight += assertion.weight
+            crit = assertion.assertion_type
+            if crit not in criterion_stats:
+                criterion_stats[crit] = {"total": 0, "passed": 0}
+            criterion_stats[crit]["total"] += 1
+
+            if err_msg and assertion.target != "stderr":
+                ar = AssertionResult(
+                    assertion=assertion,
+                    passed=False,
+                    actual=None,
+                    message=f"Execution error: {err_msg}",
+                )
+            else:
+                ar = evaluate_assertion(assertion, exec_output)
+
+            if ar.passed:
+                passed_weight += assertion.weight
+                criterion_stats[crit]["passed"] += 1
+            assertion_results.append(ar)
+
+        tc_score = (passed_weight / total_weight) if total_weight > 0 else 0.0
+        tc_passed = tc_score >= 0.99 and err_msg is None
+
+        test_case_results.append(
+            TestCaseResult(
+                test_id=tc.test_id,
+                name=tc.name,
+                passed=tc_passed,
+                score=tc_score,
+                assertion_results=assertion_results,
+                execution_time_sec=t_elapsed,
+                error=err_msg,
+            )
+        )
+
+    total_cases = len(test_case_results)
+    passed_cases = sum(1 for r in test_case_results if r.passed)
+    failed_cases = total_cases - passed_cases
+    overall_score = (
+        sum(r.score for r in test_case_results) / total_cases
+        if total_cases > 0
+        else 0.0
+    )
+    overall_passed = overall_score >= harness_spec.passing_threshold
+
+    prior_score = prior_report.overall_score if prior_report else None
+    score_delta = (
+        round(overall_score - prior_score, 4) if prior_score is not None else None
+    )
+
+    per_crit_diag: Dict[str, Any] = {}
+    for crit, counts in criterion_stats.items():
+        tot = counts["total"]
+        pas = counts["passed"]
+        pct = round((pas / tot) * 100, 1) if tot > 0 else 0.0
+        per_crit_diag[crit] = {
+            "total_assertions": tot,
+            "passed_assertions": pas,
+            "pass_rate_pct": pct,
+        }
+
+    return HarnessDiagnosticReport(
+        skill_name=harness_spec.skill_name,
+        skill_category=harness_spec.skill_category,
+        total_cases=total_cases,
+        passed_cases=passed_cases,
+        failed_cases=failed_cases,
+        overall_score=overall_score,
+        passed=overall_passed,
+        test_case_results=test_case_results,
+        prior_score=prior_score,
+        score_delta=score_delta,
+        per_criterion_diagnostics=per_crit_diag,
+        metadata={
+            "passing_threshold": harness_spec.passing_threshold,
+            "synthesized_cases_count": len(harness_spec.test_cases),
         },
     )
