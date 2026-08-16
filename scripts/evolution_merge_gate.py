@@ -283,15 +283,17 @@ def check_merge_policy_with_quality(
     flip_gate_override: Optional[str] = None,
     floor_scores: Optional[Dict[str, Any]] = None,
     pr_metrics: Optional[Dict[str, Any]] = None,
+    source_contents: Optional[Dict[str, str]] = None,
 ) -> List[str]:
-    """Extended merge policy: diff-size + high-risk + test-quality + flip + floor gates.
+    """Extended merge policy: diff-size + high-risk + test-quality + reachability + flip + floor gates.
 
     Runs the original :func:`check_merge_policy` (diff-size cap + high-risk
     path blocklist), appends test-quality violations from
     :func:`evolution_test_quality_gate.check_test_quality` (mock-ratio gate
-    + fabricated-reproduction detection), then appends flip-gate violations
-    from :func:`check_flip_gate` (#1447), and finally appends floor-gate
-    violations from :func:`check_floor_gate` (#1809).
+    + fabricated-reproduction detection), dead-code reachability violations
+    from :func:`evolution_reachability_gate.check_reachability` (#2498), then
+    appends flip-gate violations from :func:`check_flip_gate` (#1447), and
+    finally appends floor-gate violations from :func:`check_floor_gate` (#1809).
 
     ``test_contents`` — map of test file path → full content for
     fabricated-reproduction detection.  When empty/None the fabrication check
@@ -316,6 +318,9 @@ def check_merge_policy_with_quality(
     ``pr_metrics`` — optional dict of the PR's aggregate metrics (same shape
     as ``floor_scores``). Required when ``floor_scores`` is provided; if
     missing the gate fails closed.
+
+    ``source_contents`` — optional map of source file path → full content for
+    dead-code reachability checking (#2498).
     """
     violations = check_merge_policy(
         files, max_lines=max_lines, high_risk_globs=high_risk_globs
@@ -343,6 +348,17 @@ def check_merge_policy_with_quality(
             mock_ratio_threshold=mock_ratio_threshold,
         )
     )
+    # Dead-code reachability gate (#2498)
+    if source_contents is not None:
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from evolution_reachability_gate import check_reachability  # noqa: E402
+
+            violations.extend(
+                check_reachability(files, source_contents=source_contents)
+            )
+        except ImportError:
+            pass
     # Flip gate (#1447): per-example P→F regression check. Opt-in per skill —
     # when flip_gate_results is None the gate is skipped entirely.
     if flip_gate_results is not None:
