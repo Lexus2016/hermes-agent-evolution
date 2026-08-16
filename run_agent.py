@@ -9023,6 +9023,32 @@ class AIAgent:
             metadata=metadata,
         )
 
+    @property
+    def trust_monitor(self) -> Any:
+        """Access subagent trust monitor singleton."""
+        from evolution.lib.subagent_trust_monitor import get_global_trust_monitor
+
+        return get_global_trust_monitor()
+
+    def record_subagent_action(
+        self,
+        subagent_id: str,
+        tool_name: str,
+        arguments: dict,
+        provenance_sources: Optional[list] = None,
+    ) -> Any:
+        """Record subagent action with provenance for deviation tracking."""
+        return self.trust_monitor.record_action(
+            subagent_id=subagent_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            provenance_sources=provenance_sources,
+        )
+
+    def check_subagent_trust(self, subagent_id: str) -> Any:
+        """Evaluate subagent behavioral deviation and obtain steering advice."""
+        return self.trust_monitor.evaluate_deviation(subagent_id=subagent_id)
+
     def _handle_max_iterations(self, messages: list, api_call_count: int) -> str:
         """Forwarder — see ``agent.chat_completion_helpers.handle_max_iterations``."""
         from agent.chat_completion_helpers import handle_max_iterations
