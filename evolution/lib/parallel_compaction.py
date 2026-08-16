@@ -13,6 +13,7 @@ context is swapped in safely at turn boundaries without mid-turn truncation.
 from __future__ import annotations
 
 import concurrent.futures
+import re
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
@@ -29,6 +30,89 @@ class CompactionState(Enum):
 
 
 @dataclass
+class SummaryVolumeConstraint:
+    """Hard structural summary-volume target (#2470).
+
+    Emit exactly ``section_count`` sections, each capped at
+    ``per_section_token_cap`` tokens; post-validated by
+    :func:`validate_summary_volume` so violations trigger a re-prompt.
+    """
+
+    section_count: int = 5
+    per_section_token_cap: int = 120
+    enabled: bool = True
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "SummaryVolumeConstraint":
+        return cls(**{k: d[k] for k in d if k in cls.__dataclass_fields__})
+
+
+@dataclass
+class SummaryValidationResult:
+    """Outcome of post-validating a summary against a volume constraint."""
+
+    ok: bool
+    detected_sections: int
+    expected_sections: int
+    overlong_sections: List[int]
+    violations: List[str]
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate (~4 chars/token); 0 for empty input."""
+    if not text:
+        return 0
+    return max(1, (len(text) + 3) // 4)
+
+
+_SECTION_HEADING_RE = re.compile(r"^#{1,6}\s+\S")
+
+
+def split_sections(summary: str) -> List[str]:
+    """Split a summary into sections on markdown headings (``## ...``)."""
+    sections: List[str] = []
+    current: List[str] = []
+    for line in summary.splitlines():
+        if _SECTION_HEADING_RE.match(line.strip()):
+            if current:
+                sections.append("\n".join(current).rstrip())
+            current = [line]
+        else:
+            current.append(line)
+    if current:
+        sections.append("\n".join(current).rstrip())
+    return [s for s in sections if s.strip()]
+
+
+def validate_summary_volume(
+    summary: str,
+    constraint: SummaryVolumeConstraint,
+) -> SummaryValidationResult:
+    """Post-validate a summary against the volume constraint; disabled always ok."""
+    if not constraint.enabled:
+        return SummaryValidationResult(True, 0, constraint.section_count, [], [])
+
+    sections = split_sections(summary)
+    detected = len(sections)
+    violations: List[str] = []
+    overlong: List[int] = []
+    if detected != constraint.section_count:
+        violations.append(
+            f"expected {constraint.section_count} sections, got {detected}"
+        )
+    for i, section in enumerate(sections, start=1):
+        if estimate_tokens(section) > constraint.per_section_token_cap:
+            overlong.append(i)
+            violations.append(
+                f"section {i} exceeds {constraint.per_section_token_cap} tokens"
+            )
+
+    return SummaryValidationResult(
+        not violations, detected, constraint.section_count, overlong, violations
+    )
+
+
+@dataclass
 class ParallelCompactionConfig:
     """Configuration for parallel context compaction.
 
@@ -38,6 +122,7 @@ class ParallelCompactionConfig:
         headroom_ratio: Fraction of hard limit to reserve as early-trigger headroom.
         explicit_headroom_tokens: Optional explicit token count for headroom override.
         preserve_recent_count: Number of recent messages to exclude from compression.
+        summary_constraint: Optional hard structural constraint on summary volume.
     """
 
     enabled: bool = True
@@ -45,6 +130,7 @@ class ParallelCompactionConfig:
     headroom_ratio: float = 0.15
     explicit_headroom_tokens: Optional[int] = None
     preserve_recent_count: int = 4
+    summary_constraint: Optional[SummaryVolumeConstraint] = None
 
     @property
     def headroom_tokens(self) -> int:
@@ -61,7 +147,12 @@ class ParallelCompactionConfig:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ParallelCompactionConfig":
-        return cls(**{k: d[k] for k in d if k in cls.__dataclass_fields__})
+        kwargs = {k: d[k] for k in d if k in cls.__dataclass_fields__}
+        if isinstance(kwargs.get("summary_constraint"), dict):
+            kwargs["summary_constraint"] = SummaryVolumeConstraint.from_dict(
+                kwargs["summary_constraint"]
+            )
+        return cls(**kwargs)
 
 
 @dataclass
@@ -207,6 +298,33 @@ class ParallelCompactor:
         self._state = CompactionState.SWAPPED
         self._swap_count += 1
         return new_messages
+
+    def build_summary_instruction(self) -> str:
+        """Structural summarization instruction; empty when unconfigured."""
+        constraint = self.config.summary_constraint
+        if constraint is None or not constraint.enabled:
+            return ""
+        return (
+            f"Produce a summary with EXACTLY {constraint.section_count} '##' sections, "
+            f"each at most {constraint.per_section_token_cap} tokens; no extra content."
+        )
+
+    def validate_summary(self, summary: str) -> SummaryValidationResult:
+        """Post-validate a produced summary; unconfigured always validates."""
+        constraint = self.config.summary_constraint
+        if constraint is None:
+            return SummaryValidationResult(True, 0, 0, [], [])
+        return validate_summary_volume(summary, constraint)
+
+    def build_reprompt_instruction(self, result: SummaryValidationResult) -> str:
+        """Corrective re-prompt for a violating summary; empty when valid."""
+        if result.ok:
+            return ""
+        return (
+            "Summary violated structural constraints:\n- "
+            + "\n- ".join(result.violations)
+            + "\nRewrite the summary to comply exactly."
+        )
 
     def reset(self) -> None:
         """Reset state for next cycle."""
