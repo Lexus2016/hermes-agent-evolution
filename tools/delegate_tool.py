@@ -5266,6 +5266,15 @@ def _route_subagent_model(
             return None
         _task = {"type": goal, "tags": [context or ""]}
         _routing_table = RoutingTable(models=list(_routing_models))
+        try:  # fail-open: prefer persisted C-A-F experience if present (#2258)
+            from evolution.lib.caf_loop import default_routing_table_path, load_routing_table
+
+            _saved = load_routing_table(default_routing_table_path())
+            if _saved.models:
+                _saved.models = list(dict.fromkeys(_routing_models + _saved.models))
+                _routing_table = _saved
+        except Exception:
+            pass
         _routed = _routing_table.select_model(_task)
         if _routed:
             logger.info(
