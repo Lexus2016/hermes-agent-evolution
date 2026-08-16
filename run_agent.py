@@ -8950,6 +8950,41 @@ class AIAgent:
             self, assistant_message, messages, effective_task_id, api_call_count
         )
 
+    def _execute_tool_calls_coalesced(
+        self,
+        assistant_message,
+        messages: list,
+        effective_task_id: str,
+        api_call_count: int = 0,
+    ) -> Any:
+        """Execute deterministic multi-tool calls in a single CodeAct-style coalesced round-trip."""
+        from evolution.lib.tool_coalescer import ToolCallCoalescer
+
+        def _handler(name, args):
+            return handle_function_call(name, args, effective_task_id)
+
+        coalesced_res = ToolCallCoalescer.coalesce_and_execute(
+            assistant_message.tool_calls, _handler
+        )
+        for msg in coalesced_res.to_tool_messages():
+            messages.append(msg)
+        return coalesced_res
+
+    def coalesce_and_execute_tool_calls(
+        self,
+        tool_calls: list,
+        task_id: Optional[str] = None,
+    ) -> Any:
+        """Coalesce and execute tool calls in a single pass without extra LLM round-trips."""
+        from evolution.lib.tool_coalescer import ToolCallCoalescer
+
+        eff_task_id = task_id or getattr(self, "session_id", "default")
+
+        def _handler(name, args):
+            return handle_function_call(name, args, eff_task_id)
+
+        return ToolCallCoalescer.coalesce_and_execute(tool_calls, _handler)
+
     def _handle_max_iterations(self, messages: list, api_call_count: int) -> str:
         """Forwarder — see ``agent.chat_completion_helpers.handle_max_iterations``."""
         from agent.chat_completion_helpers import handle_max_iterations
