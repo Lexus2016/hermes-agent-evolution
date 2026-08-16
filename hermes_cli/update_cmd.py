@@ -2617,6 +2617,27 @@ _PRE_UPDATE_SNAPSHOT_KEEP = 1
 # of wall time and silently ate 24 GB of disk per update).
 _PRE_UPDATE_SNAPSHOT_MAX_FILE_SIZE = 1 << 30  # 1 GiB
 
+
+def _resolve_pre_update_snapshot_max_file_size() -> int:
+    """Resolve the pre-update quick-snapshot per-file size cap (#2489).
+
+    Defaults to 1 GiB. Overridable via ``updates.pre_update_snapshot_max_file_size_mb``
+    so an operator with a legitimately large ``state.db`` can raise the cap instead
+    of silently losing the primary store's backup every update.
+    """
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config()
+    except Exception:
+        cfg = {}
+    updates_cfg = cfg.get("updates", {}) if isinstance(cfg, dict) else {}
+    raw = updates_cfg.get("pre_update_snapshot_max_file_size_mb")
+    if isinstance(raw, (int, float)) and raw > 0:
+        return int(raw) << 20
+    return _PRE_UPDATE_SNAPSHOT_MAX_FILE_SIZE
+
+
 def _resolve_pre_update_backup_mode(args) -> str:
     """Resolve the pre-update backup mode: ``"off"``, ``"quick"``, or ``"full"``.
 
@@ -2709,7 +2730,7 @@ def _run_pre_update_backup(args) -> Optional[str]:
         snapshot_id = create_quick_snapshot(
             label="pre-update",
             keep=_PRE_UPDATE_SNAPSHOT_KEEP,
-            max_file_size=_PRE_UPDATE_SNAPSHOT_MAX_FILE_SIZE,
+            max_file_size=_resolve_pre_update_snapshot_max_file_size(),
         )
 
         # After the snapshot, verify the source state.db is still intact.

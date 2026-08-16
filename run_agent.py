@@ -679,6 +679,7 @@ class AIAgent:
             _init_model_config = self._session_init_model_config
             try:
                 from tools.approval import is_session_yolo_enabled
+
                 if is_session_yolo_enabled(self.session_id):
                     _init_model_config = dict(_init_model_config or {})
                     _init_model_config["yolo_mode"] = True
@@ -1089,6 +1090,7 @@ class AIAgent:
             from agent.conversation_compression import (
                 CONTEXT_OVERFLOW_BLOCKED_WARNING_TEMPLATE,
             )
+
             # cooldown + anti-thrash (ineffective) are both "compression blocked".
             if _warn_kind in ("cooldown", "ineffective"):
                 self._touch_activity(
@@ -1615,7 +1617,11 @@ class AIAgent:
         the alias spellings, so this is the single owner of the check; the
         Copilot base URL is accepted as a fallback signal.
         """
-        if (self.provider or "").strip().lower() in {"copilot", "github-copilot", "github"}:
+        if (self.provider or "").strip().lower() in {
+            "copilot",
+            "github-copilot",
+            "github",
+        }:
             return True
         return self._is_copilot_url()
 
@@ -1624,8 +1630,7 @@ class AIAgent:
         return (
             getattr(self, "api_mode", None) == "codex_responses"
             and getattr(self, "_base_url_hostname", "") == "chatgpt.com"
-            and "/backend-api/codex"
-            in (getattr(self, "_base_url_lower", "") or "")
+            and "/backend-api/codex" in (getattr(self, "_base_url_lower", "") or "")
         )
 
     def _anthropic_prompt_cache_policy(
@@ -1652,7 +1657,10 @@ class AIAgent:
         model: Optional[str] = None,
     ) -> bool:
         """Forwarder for the request-local native Anthropic tool capability."""
-        from agent.agent_runtime_helpers import _direct_native_anthropic_tool_cache_capability
+        from agent.agent_runtime_helpers import (
+            _direct_native_anthropic_tool_cache_capability,
+        )
+
         return _direct_native_anthropic_tool_cache_capability(
             self,
             provider=provider,
@@ -2703,8 +2711,7 @@ class AIAgent:
         while current is not None and id(current) not in seen:
             seen.add(id(current))
             if any(
-                marker in str(current).lower()
-                for marker in network_resolution_markers
+                marker in str(current).lower() for marker in network_resolution_markers
             ):
                 return (
                     "Hermes can't reach the model provider. You may be offline. "
@@ -3246,8 +3253,9 @@ class AIAgent:
             if self.verbose_logging:
                 logging.warning(f"Failed to save session log: {e}")
 
-
-    def interrupt(self, message: Optional[str] = None, *, hard_cancel: bool = False) -> None:
+    def interrupt(
+        self, message: Optional[str] = None, *, hard_cancel: bool = False
+    ) -> None:
         """
         Request the agent to interrupt its current tool-calling loop.
 
@@ -3274,6 +3282,7 @@ class AIAgent:
             if session_has_running_agent:
                 running_agent.interrupt(new_message.text)
         """
+
         # A hard stop and redirect share one lock so /stop cannot race with an
         # accepted correction and accidentally turn itself into a retry.
         def _admit_hard_cancel() -> None:
@@ -3281,9 +3290,7 @@ class AIAgent:
             if event is None:
                 return
             fence = vars(self).get("_active_compression_commit_fence")
-            cancel_before_commit = getattr(
-                type(fence), "cancel_before_commit", None
-            )
+            cancel_before_commit = getattr(type(fence), "cancel_before_commit", None)
             if callable(cancel_before_commit):
                 try:
                     # This sets the Event while holding the same lock used by
@@ -3990,24 +3997,21 @@ class AIAgent:
             cause = persistence_cause or "unknown"
             if cause == "locked":
                 return (
-                    prefix
-                    + "the turn was stopped because session storage was busy "
+                    prefix + "the turn was stopped because session storage was busy "
                     "(another Hermes process was writing to the state "
                     "database). Your message should already be saved — "
                     "please send it again in a moment."
                 )
             if cause == "disk":
                 return (
-                    prefix
-                    + "the turn was stopped because session storage could not "
+                    prefix + "the turn was stopped because session storage could not "
                     "be written (the transcript would have been lost on "
                     "restart). This is often a full disk — free some space "
                     "(or fix state.db permissions), then send your message "
                     "again."
                 )
             return (
-                prefix
-                + "the turn was stopped because session storage could not be "
+                prefix + "the turn was stopped because session storage could not be "
                 "written (the transcript would have been lost on restart). "
                 "Check the state database health (`hermes doctor`), then "
                 "send your message again."
@@ -4065,6 +4069,7 @@ class AIAgent:
                     heartbeat_current_worker_from_env,
                     inject_new_comments_from_env,
                 )
+
                 heartbeat_current_worker_from_env()
                 # Fold any new operator notes into the running turn (OUT-OF-BAND
                 # steer) so the user can talk to a live task without a restart.
@@ -4405,11 +4410,11 @@ class AIAgent:
             last_activity_description=getattr(self, "_last_activity_desc", None) or "",
             last_activity_provenance=provenance,
             extra={
-            "current_tool": self._current_tool,
-            "api_call_count": self._api_call_count,
-            "max_iterations": self.max_iterations,
-            "budget_used": self.iteration_budget.used,
-            "budget_max": self.iteration_budget.max_total,
+                "current_tool": self._current_tool,
+                "api_call_count": self._api_call_count,
+                "max_iterations": self.max_iterations,
+                "budget_used": self.iteration_budget.used,
+                "budget_max": self.iteration_budget.max_total,
             },
         )
 
@@ -4703,6 +4708,7 @@ class AIAgent:
         # mark until exit.  This helper is a safe no-op on other allocators.
         try:
             from hermes_cli.mem_trim import trim_memory
+
             trim_memory(force=True, reason="agent close")
         except Exception:
             pass
@@ -4843,6 +4849,125 @@ class AIAgent:
     def is_interrupted(self) -> bool:
         """Check if an interrupt has been requested."""
         return self._interrupt_requested
+
+    @property
+    def parallel_compactor(self) -> Optional[Any]:
+        """Access the attached ParallelCompactor instance from the active context compressor."""
+        return getattr(
+            getattr(self, "context_compressor", None), "parallel_compactor", None
+        )
+
+    @property
+    def precompaction_snapshot_path(self) -> Optional[Any]:
+        """Path to the latest pre-compaction snapshot if available."""
+        compressor = getattr(self, "context_compressor", None)
+        if compressor:
+            return getattr(compressor, "snapshot_path", None)
+        return None
+
+    def read_precompaction_snapshot(
+        self, snapshot_path: Optional[Any] = None
+    ) -> Optional[Any]:
+        """Read pre-compaction snapshot if available."""
+        compressor = getattr(self, "context_compressor", None)
+        if compressor and hasattr(compressor, "read_precompaction_snapshot"):
+            return compressor.read_precompaction_snapshot(snapshot_path)
+        return None
+
+    def read_precompaction_snapshot_text(
+        self, snapshot_path: Optional[Any] = None
+    ) -> Optional[str]:
+        """Read pre-compaction snapshot formatted text if available."""
+        compressor = getattr(self, "context_compressor", None)
+        if compressor and hasattr(compressor, "read_precompaction_snapshot_text"):
+            return compressor.read_precompaction_snapshot_text(snapshot_path)
+        return None
+
+    @property
+    def context_store(self) -> Optional[Any]:
+        """Access the attached ProgrammaticContextStore instance."""
+        compressor = getattr(self, "context_compressor", None)
+        if compressor and hasattr(compressor, "context_store"):
+            return compressor.context_store
+        if not hasattr(self, "_context_store") or self._context_store is None:
+            try:
+                from evolution.lib.programmatic_context import ProgrammaticContextStore
+
+                self._context_store = ProgrammaticContextStore(
+                    session_id=self.session_id
+                )
+            except Exception:
+                self._context_store = None
+        return self._context_store
+
+    def set_context_var(self, name: str, value: Any, description: str = "") -> None:
+        """Store a named context variable that survives turns and compaction."""
+        store = self.context_store
+        if store:
+            store.set(name, value, description=description)
+
+    def get_context_var(self, name: str, default: Optional[Any] = None) -> Any:
+        """Retrieve a named context variable."""
+        store = self.context_store
+        if store:
+            return store.get(name, default=default)
+        return default
+
+    def slice_context_var(
+        self, name: str, start: Optional[int] = None, end: Optional[int] = None
+    ) -> Optional[Any]:
+        """Slice a stored context variable by start:end bounds."""
+        store = self.context_store
+        if store:
+            return store.slice(name, start=start, end=end)
+        return None
+
+    def list_context_vars(self) -> List[Dict[str, Any]]:
+        """List all stored programmatic context variables."""
+        store = self.context_store
+        if store:
+            return store.list_vars()
+        return []
+
+    @property
+    def harness_state(self) -> Optional[Any]:
+        """Access the attached VersionedHarnessState instance."""
+        if not hasattr(self, "_harness_state") or self._harness_state is None:
+            try:
+                from evolution.lib.versioned_harness_state import VersionedHarnessState
+
+                init_prompt = getattr(self, "system_prompt", "") or ""
+                self._harness_state = VersionedHarnessState(
+                    initial_instructions=init_prompt, session_id=self.session_id
+                )
+            except Exception:
+                self._harness_state = None
+        return self._harness_state
+
+    def update_harness_instructions(
+        self, instructions: str, reason: str = ""
+    ) -> Optional[Any]:
+        """Update operating instructions with a new version."""
+        hs = self.harness_state
+        if hs:
+            return hs.update(instructions, reason=reason)
+        return None
+
+    def rollback_harness_instructions(
+        self, target_version: Optional[int] = None, reason: str = ""
+    ) -> Optional[Any]:
+        """Rollback operating instructions to a previous version."""
+        hs = self.harness_state
+        if hs:
+            return hs.rollback(target_version=target_version, reason=reason)
+        return None
+
+    def get_harness_instructions(self) -> str:
+        """Get current versioned harness instructions."""
+        hs = self.harness_state
+        if hs:
+            return hs.current_instructions
+        return getattr(self, "system_prompt", "") or ""
 
     def _build_system_prompt_parts(self, system_message: str = None) -> Dict[str, str]:
         """Forwarder — see ``agent.system_prompt.build_system_prompt_parts``."""
@@ -5904,7 +6029,9 @@ class AIAgent:
 
             env_url = ""
             if pconfig.base_url_env_var:
-                env_url = get_env_prefer_dotenv(pconfig.base_url_env_var).strip().rstrip("/")
+                env_url = (
+                    get_env_prefer_dotenv(pconfig.base_url_env_var).strip().rstrip("/")
+                )
             default_base = (pconfig.inference_base_url or "").strip().rstrip("/")
             base_url = env_url or default_base
             if self.provider == "kimi-coding":
@@ -5944,7 +6071,9 @@ class AIAgent:
             # Custom providers pin their endpoint in config, not env — the
             # config base_url is both the resolved and the "default" base, so
             # only key edits are ever adopted here.
-            default_base = str(custom_provider.get("base_url") or "").strip().rstrip("/")
+            default_base = (
+                str(custom_provider.get("base_url") or "").strip().rstrip("/")
+            )
             base_url = default_base
         else:
             return False
@@ -5991,9 +6120,9 @@ class AIAgent:
 
         from hermes_cli.route_identity import normalize_route_base_url
 
-        route_changed = normalize_route_base_url(self.base_url) != normalize_route_base_url(
-            base_url
-        )
+        route_changed = normalize_route_base_url(
+            self.base_url
+        ) != normalize_route_base_url(base_url)
         prior_api_key = self.api_key
         prior_base_url = self.base_url
         prior_client_kwargs = dict(self._client_kwargs)
@@ -6124,7 +6253,9 @@ class AIAgent:
                 if enterprise_base_url:
                     self.base_url = enterprise_base_url.rstrip("/")
         except Exception as exc:
-            logger.debug("Copilot 401 re-exchange failed, using resolved token: %s", exc)
+            logger.debug(
+                "Copilot 401 re-exchange failed, using resolved token: %s", exc
+            )
 
         self.api_key = new_token
         self._client_kwargs["api_key"] = self.api_key
@@ -6197,10 +6328,15 @@ class AIAgent:
         self._client_kwargs["base_url"] = self.base_url
         self._apply_client_headers_for_base_url(str(self.base_url or ""))
 
-        if not self._replace_primary_openai_client(reason="copilot_stale_credential_recovery"):
+        if not self._replace_primary_openai_client(
+            reason="copilot_stale_credential_recovery"
+        ):
             return False
 
-        logger.info("Copilot credentials re-exchanged after stale-credential 400 (source=%s)", token_source)
+        logger.info(
+            "Copilot credentials re-exchanged after stale-credential 400 (source=%s)",
+            token_source,
+        )
         return True
 
     def _try_refresh_anthropic_client_credentials(self) -> bool:
@@ -7669,9 +7805,12 @@ class AIAgent:
                     content[-1]["cache_control"] = {"type": "ephemeral"}
                 break
 
-    def _build_api_kwargs(self, api_messages: list, tools_for_api: Optional[list] = None) -> dict:
+    def _build_api_kwargs(
+        self, api_messages: list, tools_for_api: Optional[list] = None
+    ) -> dict:
         """Forwarder — see ``agent.chat_completion_helpers.build_api_kwargs``."""
         from agent.chat_completion_helpers import build_api_kwargs
+
         return build_api_kwargs(self, api_messages, tools_for_api=tools_for_api)
 
     def _supports_reasoning_extra_body(self) -> bool:
@@ -8085,12 +8224,14 @@ class AIAgent:
             )
             self._active_compression_commit_fence = active_fence
         try:
+
             def _run(fence=None, target_messages=None):
                 return compress_context(
                     self,
                     target_messages if target_messages is not None else messages,
                     system_message,
-                    approx_tokens=approx_tokens, task_id=task_id,
+                    approx_tokens=approx_tokens,
+                    task_id=task_id,
                     focus_topic=focus_topic,
                     force=force,
                     defer_context_engine_notification=(
@@ -8122,9 +8263,7 @@ class AIAgent:
                 # timeout/cancel); durable SessionDB mutation is already
                 # gated behind the commit fence inside compress_context.
                 snapshot = copy.deepcopy(messages)
-                result_msgs, result_prompt = _run(
-                    fence, target_messages=snapshot
-                )
+                result_msgs, result_prompt = _run(fence, target_messages=snapshot)
                 if result_msgs is snapshot:
                     # No-op/abort path returned the snapshot unchanged: hand
                     # back the caller's ORIGINAL list so identity-based
@@ -8180,13 +8319,11 @@ class AIAgent:
                     if callable(record):
                         try:
                             record(
-                                "host compress_context timeout "
-                                "(no summary progress)"
+                                "host compress_context timeout (no summary progress)"
                             )
                         except Exception:
                             logger.debug(
-                                "failed to record compress_context timeout "
-                                "cooldown",
+                                "failed to record compress_context timeout cooldown",
                                 exc_info=True,
                             )
                 emit = getattr(self, "_emit_warning", None)
@@ -8231,6 +8368,7 @@ class AIAgent:
             # thread carry the rotated id (#34089).
             try:
                 from hermes_logging import set_session_context
+
                 set_session_context(self.session_id)
             except Exception:
                 pass
@@ -8243,6 +8381,7 @@ class AIAgent:
             # rotation (idempotent when no rotation happened).
             try:
                 from gateway.session_context import set_current_session_id
+
                 if self.session_id:
                     set_current_session_id(self.session_id)
             except Exception:
@@ -8809,6 +8948,147 @@ class AIAgent:
 
         return execute_tool_calls_sequential(
             self, assistant_message, messages, effective_task_id, api_call_count
+        )
+
+    def _execute_tool_calls_coalesced(
+        self,
+        assistant_message,
+        messages: list,
+        effective_task_id: str,
+        api_call_count: int = 0,
+    ) -> Any:
+        """Execute deterministic multi-tool calls in a single CodeAct-style coalesced round-trip."""
+        from evolution.lib.tool_coalescer import ToolCallCoalescer
+
+        def _handler(name, args):
+            return handle_function_call(name, args, effective_task_id)
+
+        coalesced_res = ToolCallCoalescer.coalesce_and_execute(
+            assistant_message.tool_calls, _handler
+        )
+        for msg in coalesced_res.to_tool_messages():
+            messages.append(msg)
+        return coalesced_res
+
+    def coalesce_and_execute_tool_calls(
+        self,
+        tool_calls: list,
+        task_id: Optional[str] = None,
+    ) -> Any:
+        """Coalesce and execute tool calls in a single pass without extra LLM round-trips."""
+        from evolution.lib.tool_coalescer import ToolCallCoalescer
+
+        eff_task_id = task_id or getattr(self, "session_id", "default")
+
+        def _handler(name, args):
+            return handle_function_call(name, args, eff_task_id)
+
+        return ToolCallCoalescer.coalesce_and_execute(tool_calls, _handler)
+
+    @property
+    def mcp_cache(self) -> Any:
+        """Access MCP result cache singleton."""
+        from evolution.lib.mcp_cache import get_global_mcp_cache
+
+        return get_global_mcp_cache()
+
+    def get_cached_tool_result(
+        self,
+        tool_name: str,
+        params: Any,
+        scope: str = "session",
+    ) -> Optional[Any]:
+        """Retrieve cached tool result respecting ttlMs and cacheScope (SEP-2549)."""
+        sess_id = getattr(self, "session_id", None)
+        return self.mcp_cache.get(tool_name, params, scope=scope, session_id=sess_id)
+
+    def cache_tool_result(
+        self,
+        tool_name: str,
+        params: Any,
+        result: Any,
+        ttl_ms: Optional[int] = None,
+        cache_scope: str = "session",
+        metadata: Optional[dict] = None,
+    ) -> Any:
+        """Cache tool result with ttlMs and cacheScope (SEP-2549)."""
+        sess_id = getattr(self, "session_id", None)
+        return self.mcp_cache.set(
+            tool_name=tool_name,
+            params=params,
+            result=result,
+            ttl_ms=ttl_ms,
+            cache_scope=cache_scope,
+            session_id=sess_id,
+            metadata=metadata,
+        )
+
+    @property
+    def trust_monitor(self) -> Any:
+        """Access subagent trust monitor singleton."""
+        from evolution.lib.subagent_trust_monitor import get_global_trust_monitor
+
+        return get_global_trust_monitor()
+
+    def record_subagent_action(
+        self,
+        subagent_id: str,
+        tool_name: str,
+        arguments: dict,
+        provenance_sources: Optional[list] = None,
+    ) -> Any:
+        """Record subagent action with provenance for deviation tracking."""
+        return self.trust_monitor.record_action(
+            subagent_id=subagent_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            provenance_sources=provenance_sources,
+        )
+
+    def check_subagent_trust(self, subagent_id: str) -> Any:
+        """Evaluate subagent behavioral deviation and obtain steering advice."""
+        return self.trust_monitor.evaluate_deviation(subagent_id=subagent_id)
+
+    @property
+    def governed_memory(self) -> Any:
+        """Access governed shared memory singleton."""
+        from evolution.lib.governed_shared_memory import get_global_governed_memory
+
+        return get_global_governed_memory()
+
+    def write_governed_memory(
+        self,
+        key: str,
+        value: Any,
+        scope: str = "task",
+        author_id: Optional[str] = None,
+        source_tool: str = "",
+        sources: Optional[list] = None,
+        supersedes_key: Optional[str] = None,
+    ) -> Any:
+        """Write governed memory with provenance and supersession links."""
+        eff_author = author_id or getattr(self, "session_id", "agent_main")
+        return self.governed_memory.write(
+            key=key,
+            value=value,
+            author_id=eff_author,
+            scope=scope,
+            source_tool=source_tool,
+            sources=sources,
+            supersedes_key=supersedes_key,
+        )
+
+    def read_governed_memory(self, key: str, active_only: bool = True) -> Any:
+        """Read a governed memory record."""
+        return self.governed_memory.read(key=key, active_only=active_only)
+
+    def redistribute_subagent_memory(
+        self, superseded_subagent_id: str, successor_subagent_id: str
+    ) -> int:
+        """Re-home memory from superseded subagent to successor."""
+        return self.governed_memory.redistribute(
+            superseded_subagent_id=superseded_subagent_id,
+            successor_subagent_id=successor_subagent_id,
         )
 
     def _handle_max_iterations(self, messages: list, api_call_count: int) -> str:

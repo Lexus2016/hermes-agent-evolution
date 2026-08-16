@@ -70,14 +70,23 @@ def _read_sidecar(path: Path) -> dict:
     return {"path": str(path), "char_count": len(text)}
 
 
-def _extract_proposals(issues_sidecar: dict) -> list[dict]:
-    """Extract filed proposals from the latest issues sidecar."""
+def _extract_proposals(
+    issues_sidecar: dict, repo_root: Optional[Path] = None
+) -> list[dict]:
+    """Extract proposals from issues sidecar and reconcile already_implemented claims (#2468/#2494)."""
     data = issues_sidecar.get("data", {})
     proposals = data.get("proposals", [])
-    filed = []
+    raw_candidates = []
     for p in proposals:
-        if p.get("decision") == "filed" and p.get("issue"):
-            filed.append({
+        decision = str(p.get("decision") or "").lower()
+        is_filed = decision == "filed" and p.get("issue")
+        is_already_impl = (
+            decision == "already_implemented"
+            or bool(p.get("already_implemented"))
+            or str(p.get("status") or "").lower() == "already_implemented"
+        )
+        if (is_filed or is_already_impl) and p.get("issue"):
+            raw_candidates.append({
                 "issue_number": p["issue"],
                 "title": p.get("title", ""),
                 "priority_score": p.get("priority_score", 0.0),
@@ -85,7 +94,39 @@ def _extract_proposals(issues_sidecar: dict) -> list[dict]:
                 "effort_score": p.get("effort", 0.0),
                 "category": p.get("category", ""),
                 "selected_reason": "local-triage",
+                "already_implemented": is_already_impl,
+                "status": "already_implemented" if is_already_impl else "open",
+                "reason": p.get("reason", ""),
+                "notes": p.get("notes", ""),
+                "claimed_artifact": p.get("claimed_artifact", ""),
             })
+
+    # Wire verification into candidate selection pipeline (#2494)
+    if repo_root is not None:
+        try:
+            from scripts.evolution_analysis_audit import (
+                reconcile_implemented_candidates,
+            )
+
+            raw_candidates = reconcile_implemented_candidates(raw_candidates, repo_root)
+        except ImportError:
+            try:
+                from evolution_analysis_audit import (
+                    reconcile_implemented_candidates,
+                )
+
+                raw_candidates = reconcile_implemented_candidates(
+                    raw_candidates, repo_root
+                )
+            except ImportError:
+                pass
+
+    filed = []
+    for cand in raw_candidates:
+        if not cand.get("already_implemented"):
+            if cand.get("already_implemented_unverified"):
+                cand["selected_reason"] = "reconciled-unverified-implementation"
+            filed.append(cand)
     return filed
 
 
@@ -113,9 +154,24 @@ def _read_calibration(evolution_dir: Path) -> dict:
     return cal
 
 
-def run_local_triage(evolution_dir: Path) -> dict:
+def _resolve_repo_root(repo_dir: Optional[Path] = None) -> Optional[Path]:
+    if repo_dir and repo_dir.is_dir():
+        return repo_dir
+    import os
+
+    env_repo = os.environ.get("EVOLUTION_REPO_DIR")
+    if env_repo and Path(env_repo).is_dir():
+        return Path(env_repo)
+    candidate = Path(__file__).resolve().parent.parent
+    if (candidate / ".git").exists() or (candidate / "run_agent.py").exists():
+        return candidate
+    return None
+
+
+def run_local_triage(evolution_dir: Path, repo_root: Optional[Path] = None) -> dict:
     """Run the local triage pass and return the analysis JSON dict."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    resolved_repo = _resolve_repo_root(repo_root)
 
     # Read latest sidecars
     sidecars = {}
@@ -127,7 +183,7 @@ def run_local_triage(evolution_dir: Path) -> dict:
     # Extract proposals from issues sidecar
     proposals = []
     if "issues" in sidecars and "data" in sidecars["issues"]:
-        proposals = _extract_proposals(sidecars["issues"])
+        proposals = _extract_proposals(sidecars["issues"], repo_root=resolved_repo)
 
     # Read calibration
     cal = _read_calibration(evolution_dir)
@@ -155,6 +211,24 @@ def run_local_triage(evolution_dir: Path) -> dict:
         "rejected": [],
         "selected_for_implementation": selected,
     }
+
+    # Run claim audit on output (#2494)
+    if resolved_repo is not None:
+        try:
+            from scripts.evolution_analysis_audit import audit_implemented_claims
+
+            claim_warnings = audit_implemented_claims(output, resolved_repo)
+            if claim_warnings:
+                output["unverified_implementation_warnings"] = claim_warnings
+        except ImportError:
+            try:
+                from evolution_analysis_audit import audit_implemented_claims
+
+                claim_warnings = audit_implemented_claims(output, resolved_repo)
+                if claim_warnings:
+                    output["unverified_implementation_warnings"] = claim_warnings
+            except ImportError:
+                pass
 
     # Emit a StageResult at this boundary (AREX #1338 slice A).
     #
@@ -202,7 +276,9 @@ def run_local_triage(evolution_dir: Path) -> dict:
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Local triage pass (no GitHub API calls)")
+    parser = argparse.ArgumentParser(
+        description="Local triage pass (no GitHub API calls)"
+    )
     parser.add_argument(
         "--evolution-dir",
         default=None,
@@ -214,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
         evolution_dir = Path(args.evolution_dir)
     else:
         import os
+
         hermes_home = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
         evolution_dir = Path(hermes_home) / "evolution"
 
@@ -233,10 +310,15 @@ def main(argv: list[str] | None = None) -> int:
         existing = json.loads(output_path.read_text(encoding="utf-8"))
         if not existing.get("local_triage", False):
             # A real analysis exists — don't clobber it with a local-only pass
-            print(f"Skipping: full analysis already exists at {output_path}", file=sys.stderr)
+            print(
+                f"Skipping: full analysis already exists at {output_path}",
+                file=sys.stderr,
+            )
             return 0
 
-    output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    output_path.write_text(
+        json.dumps(output, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     print(f"Local triage written to {output_path}")
     print(f"  Sidecars read: {', '.join(output['sidecars_read'].keys())}")
     print(f"  Selected: {len(output['selected_for_implementation'])} issues")
