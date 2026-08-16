@@ -48,6 +48,7 @@ try:
         CompactionState,
         ParallelCompactionConfig,
         ParallelCompactor,
+        SummaryVolumeConstraint,
     )
 
     _HAS_PARALLEL_COMPACTOR = True
@@ -4512,6 +4513,14 @@ Target ~{summary_budget} tokens. Be CONCRETE — include file paths, command out
 {_temporal_anchoring_rule}
 Write only the summary body. Do not include any preamble or prefix."""
 
+        if (
+            self._parallel_compactor
+            and self._parallel_compactor.config.summary_constraint
+        ):
+            _vol_inst = self._parallel_compactor.build_summary_instruction()
+            if _vol_inst:
+                _template_sections += f"\n\nSTRUCTURAL CONSTRAINT:\n{_vol_inst}"
+
         if self._previous_summary:
             # Iterative update: preserve existing info, add new progress.
             # Bound the previous-summary block with the same aggregate cap as
@@ -4667,6 +4676,16 @@ This compaction should PRIORITISE preserving all information related to the focu
             summary = _reinject_pruned_skill_markers(summary, _pruned_skill_names)
             summary = self._ground_historical_task_snapshot(summary, turns_to_summarize)
             self._validate_summary_user_provenance(summary, has_user_turn)
+            if (
+                self._parallel_compactor
+                and self._parallel_compactor.config.summary_constraint
+            ):
+                _val_res = self._parallel_compactor.validate_summary(summary)
+                if not _val_res.ok:
+                    logger.warning(
+                        "Compaction summary violated volume constraints (%s)",
+                        "; ".join(_val_res.violations),
+                    )
             # Store for iterative updates on next compaction
             self._previous_summary = summary
             self._clear_compression_failure_cooldown()
@@ -6049,7 +6068,9 @@ This compaction should PRIORITISE preserving all information related to the focu
         # Each anchor only walks ``cut_idx`` backward, so chaining them is
         # monotonic — the tail can only grow, never shrink.
         # fmt: skip
-        cut_idx = self._ensure_last_assistant_message_in_tail(messages, cut_idx, head_end)
+        cut_idx = self._ensure_last_assistant_message_in_tail(
+            messages, cut_idx, head_end
+        )
 
         # Extend to the last N actionable user messages when configured
         # (compression.min_tail_user_messages > 1).  This prevents the
