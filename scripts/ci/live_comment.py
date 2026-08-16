@@ -42,6 +42,12 @@ Architecture:
     one array. Recomputed from source every poll cycle, so statuses
     appear as soon as each job uploads its artifact.
 
+  - :func:`merge_review_statuses` — (pure, testable) merges the static
+    ``--review-statuses-file`` array (workflow_call job outputs, prepared
+    by ci.yml before the poller starts) with the dynamically fetched
+    artifact statuses, deduplicating by ``source`` so a status supplied
+    by both mechanisms renders once.
+
   - :func:`run` — the polling loop. Calls the API, classifies,
     fetches artifacts, assembles, upserts, sleeps, repeats. Before
     its final exit, it gives downstream jobs a short grace period
@@ -498,6 +504,28 @@ def fetch_all_review_statuses(
 # ---------------------------------------------------------------------------
 
 
+def merge_review_statuses(static: list[dict], dynamic: list[dict]) -> list[dict]:
+    """Merge static file statuses with dynamically fetched artifact statuses.
+
+    ``static`` holds the workflow_call job outputs ci.yml collected into the
+    ``--review-statuses-file`` before the poller started; ``dynamic`` holds
+    the artifact statuses fetched this poll cycle. Entries whose ``source``
+    appears in both (the same job reporting via both mechanisms) render
+    once — the static entry wins, since it is captured from the job's own
+    output rather than re-parsed from an artifact.
+    """
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for status in [*static, *dynamic]:
+        src = str(status.get("source", ""))
+        if src and src in seen:
+            continue
+        if src:
+            seen.add(src)
+        merged.append(status)
+    return merged
+
+
 def _import_assembler():
     """Import assemble_review_comment.py from the same directory."""
     here = Path(__file__).resolve().parent
@@ -553,6 +581,7 @@ def run(
     timeout: int = 1800,
     dry_run: bool = False,
     watch_workflows: list[str] | None = None,
+    static_statuses: list[dict] | None = None,
 ) -> int:
     """Poll for job statuses and update the PR comment until all done.
 
@@ -602,13 +631,14 @@ def run(
 
         # Dynamically fetch all review-status artifacts from the run.
         artifact_statuses = fetch_all_review_statuses(token, repo, run_id)
-        artifact_count_changed = len(artifact_statuses) != prev_artifact_count
+        all_statuses = merge_review_statuses(static_statuses or [], artifact_statuses)
+        artifact_count_changed = len(all_statuses) != prev_artifact_count
         if artifact_count_changed:
-            print(f"  Found {len(artifact_statuses)} review status entries from artifacts "
+            print(f"  Found {len(all_statuses)} review status entries "
                   f"(was {prev_artifact_count} last poll)")
-        prev_artifact_count = len(artifact_statuses)
+        prev_artifact_count = len(all_statuses)
 
-        merged_json = json.dumps(artifact_statuses) if artifact_statuses else ""
+        merged_json = json.dumps(all_statuses) if all_statuses else ""
         # The run status is authoritative for "done": an empty job list on
         # a run that is still queued/in_progress means GitHub has not
         # spawned the jobs yet, not that everything passed.
@@ -720,6 +750,8 @@ def main() -> int:
                         help="Seconds between polls (default: 15).")
     parser.add_argument("--timeout", type=int, default=1800,
                         help="Max seconds to poll before giving up (default: 1800).")
+    parser.add_argument("--review-statuses-file", type=Path, default=None,
+                        help="Path to a JSON file with merged review statuses from workflow_call jobs.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print comment body instead of posting to PR.")
     args = parser.parse_args()
@@ -744,6 +776,19 @@ def main() -> int:
         if not run_id:
             print("CI_RUN_ID is required", file=sys.stderr)
             return 1
+
+    # Read merged review statuses from file (prepared by the ci.yml step).
+    static_statuses: list[dict] = []
+    if args.review_statuses_file:
+        try:
+            parsed = json.loads(args.review_statuses_file.read_text(encoding="utf-8"))
+            if isinstance(parsed, list):
+                static_statuses = [s for s in parsed if isinstance(s, dict)]
+            else:
+                print("Warning: review statuses file is not a JSON array — ignoring it.",
+                      file=sys.stderr)
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"Warning: could not read review statuses file: {e}", file=sys.stderr)
 
     # Build commit info line from env vars (set by ci-review-comment.yml).
     commit_sha = os.environ.get("COMMIT_SHA", "")
@@ -787,6 +832,7 @@ def main() -> int:
         timeout=args.timeout,
         dry_run=args.dry_run,
         watch_workflows=watch_workflows,
+        static_statuses=static_statuses,
     )
 
 
