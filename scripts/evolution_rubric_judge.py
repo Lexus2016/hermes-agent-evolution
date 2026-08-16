@@ -640,6 +640,11 @@ class StrictRubricJudgeGrader:
             "total_max": total_max,
             "overall_percentage": pct,
             "flags": flags,
+            "claims": extract_claims(
+                ("research", research_md),
+                ("implementation", implementation_md),
+                ("integration", json.dumps(integration_json)),
+            ),
         }
 
 
@@ -729,6 +734,121 @@ class AgentJudgeGrader:
         scorecard["grader"] = "agent"
         scorecard["narratives"] = narratives
         return scorecard
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Claim extraction — machine-readable, deterministic (#2482 Slice A)
+# ──────────────────────────────────────────────────────────────────────
+
+# Outcome signals marking a sentence as a claim (an asserted achievement /
+# enablement / measured result) rather than neutral prose. Kept to strong,
+# measurable words so extraction is stable and doesn't over-fire.
+_CLAIM_SIGNALS = (
+    "improve",
+    "reduced",
+    "reduce",
+    "increase",
+    "faster",
+    "speedup",
+    "latency",
+    "enables",
+    "enabled",
+    "achiev",
+    "fixes",
+    "fixed",
+    "resolves",
+    "merged",
+    "%",
+    "percent",
+    "seconds",
+    "tokens",
+    "cost",
+)
+
+_CLAIM_URL_RE = re.compile(r"https?://\S+")
+
+
+def _markdown_sections(text: str) -> List[Tuple[str, str]]:
+    """Split markdown into ``(section_header, body)`` blocks in order;
+    text before the first ``#`` header is an unnamed preamble block."""
+    blocks: List[Tuple[str, str]] = []
+    current: List[str] = []
+    current_header = ""
+    for line in text.splitlines():
+        if line.startswith("#") and line.strip("# "):
+            if current:
+                blocks.append((current_header, "\n".join(current)))
+            current_header = line.strip("# ").strip()
+            current = []
+        else:
+            current.append(line)
+    if current:
+        blocks.append((current_header, "\n".join(current)))
+    return [(h.strip(), b) for h, b in blocks if b.strip()]
+
+
+def _split_sentences(block: str) -> List[str]:
+    """Deterministic per-line sentence splitter for markdown prose."""
+    sentences: List[str] = []
+    for raw in block.splitlines():
+        raw = raw.strip().lstrip("-* \t")
+        if not raw:
+            continue
+        for p in re.split(r"(?<=[.!?])\s+(?=[A-Z\"#(])", raw):
+            p = p.strip().rstrip(".").strip()
+            if len(p) >= 20:
+                sentences.append(p)
+    return sentences
+
+
+def _is_claim_sentence(sentence: str) -> bool:
+    low = sentence.lower()
+    return any(sig in low for sig in _CLAIM_SIGNALS)
+
+
+def extract_claims(
+    *artifacts: Tuple[str, Optional[str]],
+    max_per_source: int = 12,
+) -> List[Dict[str, Any]]:
+    """Deterministically extract discrete claims from judged artifacts.
+
+    A claim is a sentence asserting an outcome (improvement, reduction,
+    enablement, a merged/fixed issue, a measured result), tagged with its
+    source stage + section and any supporting URL. Returns a machine-readable
+    list of ``{"claim", "source", "evidence_url"}`` dicts, deduplicated and
+    sorted so identical input always yields identical output (Slice A
+    determinism). ``artifacts`` are ``(stage, markdown_text)`` pairs.
+    """
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for stage, text in artifacts:
+        if not text:
+            continue
+        per_source = 0
+        for header, block in _markdown_sections(text):
+            for sentence in _split_sentences(block):
+                if per_source >= max_per_source:
+                    break
+                if not _is_claim_sentence(sentence):
+                    continue
+                urls = _CLAIM_URL_RE.findall(sentence)
+                key = (stage, header, sentence)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(
+                    {
+                        "claim": sentence,
+                        "source": {
+                            "stage": stage,
+                            "section": header or "preamble",
+                        },
+                        "evidence_url": urls[0] if urls else None,
+                    }
+                )
+                per_source += 1
+    out.sort(key=lambda c: (c["source"]["stage"], c["source"]["section"], c["claim"]))
+    return out
 
 
 # ──────────────────────────────────────────────────────────────────────
