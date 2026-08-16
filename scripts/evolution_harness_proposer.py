@@ -59,6 +59,8 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from evolution_harness_code_diff import build_retry_policy_diff
+
 # A weakness ``kind`` (from the trace miner) maps to exactly one harness
 # proposal ``type``. This is the constrained vocabulary the issues stage relies
 # on — anything outside it is dropped rather than passed through as free-form.
@@ -137,6 +139,7 @@ def build_proposal(
     weakness: Dict[str, Any],
     *,
     llm: Optional[LLMFn] = None,
+    surface: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Turn ONE weakness record into ONE structured harness proposal.
 
@@ -148,7 +151,9 @@ def build_proposal(
     (``title``, ``delta``, ``rationale``). When absent the proposal is a
     deterministic ENVELOPE: correct type + evidence + a templated body, with
     ``llm_authored=False`` so a reviewer can see it needs fleshing out. Either
-    way the proposal carries the hard human-gating fields.
+    way the proposal carries the hard human-gating fields. ``surface`` (optional)
+    is the current retry-policy surface; when provided, ``retry_policy_change``
+    proposals also carry a structured ``code_diff``.
     """
     if not isinstance(weakness, dict):
         return None
@@ -191,6 +196,12 @@ def build_proposal(
         proposal["rationale"] = _coerce_str(weakness.get("label"))
         proposal["llm_authored"] = False
 
+    # Attach a structured code diff for the retry-policy surface (#2613).
+    if ptype == "retry_policy_change" and surface is not None:
+        diff = build_retry_policy_diff(weakness, surface)
+        if diff is not None:
+            proposal["code_diff"] = diff
+
     return proposal
 
 
@@ -198,6 +209,7 @@ def generate_proposals(
     weaknesses: List[Dict[str, Any]],
     *,
     llm: Optional[LLMFn] = None,
+    surface: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Map a list of weakness records to harness proposals (best-first).
 
@@ -207,7 +219,7 @@ def generate_proposals(
     proposal. Pure aside from the injected ``llm`` seam."""
     proposals: List[Dict[str, Any]] = []
     for w in weaknesses:
-        p = build_proposal(w, llm=llm)
+        p = build_proposal(w, llm=llm, surface=surface)
         if p is not None:
             proposals.append(p)
     return proposals

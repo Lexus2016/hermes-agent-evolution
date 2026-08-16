@@ -276,3 +276,14 @@ class TestMainCLI:
         rc = main(["evolution_harness_proposer.py", str(p)])
         out = json.loads(capsys.readouterr().out)
         assert rc == 0 and out["count"] == 0 and out["proposals"] == []
+
+
+# --- retry-policy code-diff attachment (#2613) -----------------------------
+
+def test_retry_policy_attaches_code_diff():
+    p = build_proposal(_retry_spiral(), surface={"retry_count": 10})
+    assert p["type"] == "retry_policy_change"
+    assert p["code_diff"]["auto_apply"] is False
+    assert any(c["field"] == "retry_count" for c in p["code_diff"]["changes"])
+    assert "code_diff" not in build_proposal(_retry_spiral())
+    assert "code_diff" not in build_proposal(_tool_failure(), surface={"retry_count": 10})
