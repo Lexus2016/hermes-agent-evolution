@@ -8985,6 +8985,44 @@ class AIAgent:
 
         return ToolCallCoalescer.coalesce_and_execute(tool_calls, _handler)
 
+    @property
+    def mcp_cache(self) -> Any:
+        """Access MCP result cache singleton."""
+        from evolution.lib.mcp_cache import get_global_mcp_cache
+
+        return get_global_mcp_cache()
+
+    def get_cached_tool_result(
+        self,
+        tool_name: str,
+        params: Any,
+        scope: str = "session",
+    ) -> Optional[Any]:
+        """Retrieve cached tool result respecting ttlMs and cacheScope (SEP-2549)."""
+        sess_id = getattr(self, "session_id", None)
+        return self.mcp_cache.get(tool_name, params, scope=scope, session_id=sess_id)
+
+    def cache_tool_result(
+        self,
+        tool_name: str,
+        params: Any,
+        result: Any,
+        ttl_ms: Optional[int] = None,
+        cache_scope: str = "session",
+        metadata: Optional[dict] = None,
+    ) -> Any:
+        """Cache tool result with ttlMs and cacheScope (SEP-2549)."""
+        sess_id = getattr(self, "session_id", None)
+        return self.mcp_cache.set(
+            tool_name=tool_name,
+            params=params,
+            result=result,
+            ttl_ms=ttl_ms,
+            cache_scope=cache_scope,
+            session_id=sess_id,
+            metadata=metadata,
+        )
+
     def _handle_max_iterations(self, messages: list, api_call_count: int) -> str:
         """Forwarder — see ``agent.chat_completion_helpers.handle_max_iterations``."""
         from agent.chat_completion_helpers import handle_max_iterations
