@@ -14,7 +14,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_rubric_judge import _markdown_sections, extract_claims  # noqa: E402
+from evolution_rubric_judge import (  # noqa: E402
+    CLAIM_VERDICTS,
+    StrictRubricJudgeGrader,
+    _markdown_sections,
+    compute_claim_score,
+    extract_claims,
+    triage_claim,
+    triage_claims,
+)
 
 SAMPLE = """\
 # Finding 1
@@ -63,3 +71,83 @@ def test_extract_claims_dedupes_and_sorts() -> None:
 
 def test_extract_claims_ignores_none_and_empty() -> None:
     assert extract_claims(("research", None), ("implementation", "")) == []
+
+
+def test_triage_claim_verdicts_taxonomy() -> None:
+    # 1. Verified via URL or metric
+    c_url = triage_claim({
+        "claim": "Improved speed significantly.",
+        "evidence_url": "https://example.com/speed",
+    })
+    assert c_url["verdict"] == "verified"
+    assert "justification" in c_url
+
+    c_metric = triage_claim({
+        "claim": "Fixed issue #42 and reduced latency by 35%.",
+        "evidence_url": None,
+    })
+    assert c_metric["verdict"] == "verified"
+
+    # 2. Falsified via contradiction/failure
+    c_falsified = triage_claim({
+        "claim": "The integration tests failed with 0 passed.",
+        "evidence_url": "https://example.com",
+    })
+    assert c_falsified["verdict"] == "falsified"
+
+    # 3. Toy-scale
+    c_toy = triage_claim({
+        "claim": "Demonstrated improved performance on a toy mock stub.",
+        "evidence_url": None,
+    })
+    assert c_toy["verdict"] == "toy-scale"
+
+    # 4. No-evidence
+    c_no_ev = triage_claim({
+        "claim": "This approach enables generalized improvements everywhere.",
+        "evidence_url": None,
+    })
+    assert c_no_ev["verdict"] == "no-evidence"
+
+
+def test_triage_claims_all_have_verdict_and_justification() -> None:
+    raw_claims = extract_claims(("research", SAMPLE))
+    triaged = triage_claims(raw_claims)
+    assert len(triaged) == len(raw_claims)
+    for c in triaged:
+        assert c["verdict"] in CLAIM_VERDICTS
+        assert len(c["justification"]) > 5
+
+
+def test_compute_claim_score_calculation() -> None:
+    claims = [
+        {"claim": "A", "verdict": "verified"},  # 1.0
+        {"claim": "B", "verdict": "toy-scale"},  # 0.3
+        {"claim": "C", "verdict": "no-evidence"},  # 0.0
+        {"claim": "D", "verdict": "falsified"},  # 0.0
+    ]
+    res = compute_claim_score(claims, dimension_max=50.0)
+    # (1.0 + 0.3 + 0.0 + 0.0) / 4 = 1.3 / 4 = 32.5%
+    assert res["overall_percentage"] == 32.5
+    # 32.5% of 50.0 = 16.25 -> 16.2 or 16.3
+    assert res["score"] == 16.2 or res["score"] == 16.3
+    assert res["verdict_counts"] == {
+        "verified": 1,
+        "toy-scale": 1,
+        "no-evidence": 1,
+        "falsified": 1,
+    }
+
+
+def test_strict_grader_scores_from_claim_verdicts(tmp_path: Path) -> None:
+    res_dir = tmp_path / "research"
+    res_dir.mkdir(parents=True, exist_ok=True)
+    res_file = res_dir / "2026-06-23.md"
+    res_file.write_text(SAMPLE, encoding="utf-8")
+    grader = StrictRubricJudgeGrader()
+    scorecard = grader.score("2026-06-23", tmp_path)
+    assert "claims" in scorecard
+    assert "claim_verdicts" in scorecard
+    assert scorecard["claim_verdicts"]["verified"] >= 1
+    # Check that total_score was derived from claim verdicts, not self-assigned
+    assert scorecard["overall_percentage"] > 0
