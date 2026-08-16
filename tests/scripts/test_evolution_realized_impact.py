@@ -70,21 +70,28 @@ class TestLoadLedger:
 
 class TestComputeRealized:
     def test_rate_and_confirmed_count(self):
+        # no-signal is unverifiable, not "bad" — it must NOT enter the
+        # rate denominator. Only confirmed vs regressed defines realized_rate.
         recs = [
             _merge(1, "2026-06-01") | _verdict(1, "confirmed"),
             _merge(2, "2026-06-02") | _verdict(2, "confirmed"),
             _merge(3, "2026-06-03") | _verdict(3, "no-signal"),
         ]
         h = compute_realized(recs, today="2026-06-30")
-        assert h["verified"] == 3
+        assert h["verified"] == 2  # confirmed + regressed only
         assert h["confirmed"] == 2
-        assert h["realized_impact_rate"] == round(2 / 3, 3)
+        assert h["unverifiable"] == 1
+        # 2 confirmed / (2 confirmed + 0 regressed) = 1.0
+        assert h["realized_impact_rate"] == 1.0
 
     def test_consecutive_miss_streak_flags_low_impact(self):
+        # Three real regressions in a row (no no-signal in between) — the
+        # streak trips REALIZED_IMPACT_LOW because it is unbroken evidence
+        # of actual harm, not unmeasurable structural work.
         recs = [
             _merge(1, "2026-06-01") | _verdict(1, "confirmed"),
             _merge(2, "2026-06-02") | _verdict(2, "regressed"),
-            _merge(3, "2026-06-03") | _verdict(3, "no-signal"),
+            _merge(3, "2026-06-03") | _verdict(3, "regressed"),
             _merge(4, "2026-06-04") | _verdict(4, "regressed"),
         ]
         h = compute_realized(recs, today="2026-06-30", streak_k=3)
@@ -112,6 +119,64 @@ class TestComputeRealized:
         h = compute_realized(recs, today="2026-06-30")
         assert h["realized_impact_rate"] == 1.0
         assert h["flags"] == []
+
+    def test_no_signal_burst_does_not_depress_realized_rate(self):
+        # Real scenario: 14 confirmed + 16 no-signal (structural changes not
+        # observable in the tool-failure digest) + 0 regressed. Old metric
+        # counted no-signal as bad and reported 14/30 = 47% → REALIZED_RATE_LOW
+        # false alarm. New metric: 14/14 = 100%, no flag.
+        recs = [
+            _merge(i, "2026-06-01") | _verdict(i, "confirmed") for i in range(1, 15)
+        ]
+        recs += [
+            _merge(i, "2026-06-01") | _verdict(i, "no-signal") for i in range(100, 116)
+        ]
+        h = compute_realized(recs, today="2026-06-30")
+        assert h["confirmed"] == 14
+        assert h["unverifiable"] == 16
+        assert h["verified"] == 14  # only measurable verdicts
+        assert h["realized_impact_rate"] == 1.0
+        assert not any("REALIZED_RATE_LOW" in f for f in h["flags"])
+
+    def test_regressed_verdicts_depress_realized_rate_and_flag(self):
+        # 2 confirmed + 3 regressed → 2/5 = 40% < 50%, ≥3 measured → flag fires.
+        # Real regressions still count against the rate.
+        recs = [_merge(i, "2026-06-01") | _verdict(i, "confirmed") for i in range(1, 3)]
+        recs += [_merge(i, "2026-06-02") | _verdict(i, "regressed") for i in range(10, 13)]
+        h = compute_realized(recs, today="2026-06-30")
+        assert h["verified"] == 5
+        assert h["confirmed"] == 2
+        assert h["realized_impact_rate"] == round(2 / 5, 3)
+        assert any("REALIZED_RATE_LOW" in f for f in h["flags"])
+
+    def test_miss_streak_breaks_on_no_signal(self):
+        # A no-signal in the middle of a run of regressions BREAKS the streak
+        # (it is not evidence of failure, so it can't extend or bridge one).
+        recs = [
+            _merge(1, "2026-06-01") | _verdict(1, "regressed"),
+            _merge(2, "2026-06-02") | _verdict(2, "no-signal"),
+            _merge(3, "2026-06-03") | _verdict(3, "regressed"),
+        ]
+        h = compute_realized(recs, today="2026-06-30", streak_k=3)
+        # Tail is regressed(#3) → streak=1; no-signal(#2) breaks it.
+        assert h["miss_streak"] == 1
+        assert not any("REALIZED_IMPACT_LOW" in f for f in h["flags"])
+
+    def test_realized_rate_low_needs_three_measured(self):
+        # Fewer than 3 MEASURED verdicts must not fire REALIZED_RATE_LOW even
+        # if the ratio is bad — small samples are noise, not signal.
+        recs = [
+            _merge(1, "2026-06-01") | _verdict(1, "regressed"),
+            _merge(2, "2026-06-02") | _verdict(2, "regressed"),
+        ]
+        # Add many no-signals to prove they don't bump the "3 measured" gate.
+        recs += [
+            _merge(i, "2026-06-01") | _verdict(i, "no-signal") for i in range(50, 60)
+        ]
+        h = compute_realized(recs, today="2026-06-30")
+        assert h["verified"] == 2
+        assert h["realized_impact_rate"] == 0.0
+        assert not any("REALIZED_RATE_LOW" in f for f in h["flags"])
 
     def test_fresh_merges_do_not_evict_older_verdicts_from_window(self):
         # A dense burst of too-new-to-verify merges must NOT push older,
@@ -164,6 +229,17 @@ class TestFormat:
         assert line.startswith("[evolution-realized-impact]")
         assert "realized_rate=" in line
         assert "healthy" in line
+
+    def test_format_includes_unverifiable_count(self):
+        # unverifiable (no-signal) must surface in the summary line so
+        # operators can see how much of the sample was structural work.
+        recs = [
+            _merge(1, "2026-06-01") | _verdict(1, "confirmed"),
+            _merge(2, "2026-06-02") | _verdict(2, "no-signal"),
+            _merge(3, "2026-06-03") | _verdict(3, "no-signal"),
+        ]
+        line = format_realized(compute_realized(recs, today="2026-06-30"))
+        assert "unverifiable=2" in line
 
 
 class TestAppendLedgerRecord:

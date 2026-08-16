@@ -35,7 +35,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 VERDICTS_GOOD = {"confirmed"}
-VERDICTS_BAD = {"no-signal", "regressed"}
+# ``VERDICTS_BAD`` is a real regression — the change made things worse and
+# counts against ``realized_rate``. ``VERDICTS_NEUTRAL`` is a no-signal:
+# unmeasurable in the session tool-failure digest (e.g. structural changes
+# like skill provenance / compaction wiring). No-signal is NOT evidence the
+# change failed — only evidence we could not observe its effect — so it is
+# excluded from the realized-rate denominator to avoid depressing the rate
+# with structural work. Both still block ``should_close_issue`` (the fix has
+# not been positively confirmed for that specific issue).
+VERDICTS_BAD = {"regressed"}
+VERDICTS_NEUTRAL = {"no-signal"}
+VERDICTS_ANY = VERDICTS_GOOD | VERDICTS_BAD | VERDICTS_NEUTRAL
 
 
 def load_ledger(ledger_file: Path) -> List[Dict[str, Any]]:
@@ -125,8 +135,8 @@ def record_verdict(
     note: str,
 ) -> None:
     """Record a post-merge verification verdict in the ledger."""
-    if verdict not in (VERDICTS_GOOD | VERDICTS_BAD):
-        raise ValueError(f"verdict must be one of {VERDICTS_GOOD | VERDICTS_BAD}")
+    if verdict not in VERDICTS_ANY:
+        raise ValueError(f"verdict must be one of {VERDICTS_ANY}")
     append_ledger_record(
         ledger_file,
         {
@@ -239,7 +249,7 @@ def should_close_issue(
     # at least ``regression_threshold``; flat = no-signal = block (not "held").
     baseline_by_reason = rec.get("baseline_failure_rate_by_reason")
     if (
-        verdict in VERDICTS_BAD
+        verdict in (VERDICTS_BAD | VERDICTS_NEUTRAL)
         and baseline_by_reason
         and current_failure_rate_by_reason
     ):
@@ -296,7 +306,7 @@ def should_close_issue(
                 "not a real regression (#1324)",
             )
 
-    if verdict in VERDICTS_BAD:
+    if verdict in (VERDICTS_BAD | VERDICTS_NEUTRAL):
         return (
             False,
             f"signal NOT verified — verdict: {verdict}. Keep open for regression.",
@@ -354,23 +364,32 @@ def compute_realized(
     mature = [r for r in records if _is_mature(r)]
     window = mature[-last:] if last and last > 0 else list(mature)
 
+    # ``verdicted`` = the MEASURABLE sample for realized_rate: confirmed +
+    # regressed only. ``no-signal`` is unmeasurable (structural changes that
+    # do not show up in the session tool-failure digest — skill provenance,
+    # compaction wiring, etc.) and would falsely depress the rate if kept in
+    # the denominator, so it is tracked separately as ``unverifiable``.
     verdicted = [
         r for r in window if r.get("verdict") in (VERDICTS_GOOD | VERDICTS_BAD)
     ]
     confirmed = [r for r in verdicted if r.get("verdict") in VERDICTS_GOOD]
+    unverifiable = [r for r in window if r.get("verdict") in VERDICTS_NEUTRAL]
 
-    # Every window entry is mature by construction, so any without a verdict
+    # Every window entry is mature by construction, so any without ANY verdict
     # is matured-but-unverified — the verification step never recorded one.
     matured_unverified = [
-        r for r in window
-        if r.get("verdict") not in (VERDICTS_GOOD | VERDICTS_BAD)
+        r for r in window if r.get("verdict") not in VERDICTS_ANY
     ]
 
     realized_rate = (len(confirmed) / len(verdicted)) if verdicted else None
 
-    # Consecutive-miss streak over the most recent verdicted changes (by order).
+    # Consecutive-miss streak over the most recent VERDICTED changes only.
+    # A ``no-signal`` breaks the streak (it's not evidence of failure) — we
+    # iterate over records that carry ANY verdict and stop at anything other
+    # than a real regression.
+    verdict_records = [r for r in window if r.get("verdict") in VERDICTS_ANY]
     streak = 0
-    for r in reversed(verdicted):
+    for r in reversed(verdict_records):
         if r.get("verdict") in VERDICTS_BAD:
             streak += 1
         else:
@@ -385,7 +404,7 @@ def compute_realized(
         )
     if len(verdicted) >= 3 and realized_rate is not None and realized_rate < 0.5:
         flags.append(
-            "REALIZED_RATE_LOW: <50% of verified merges actually helped — predicted "
+            "REALIZED_RATE_LOW: <50% of measured merges actually helped — predicted "
             "impact is over-optimistic; raise the bar and recalibrate"
         )
     if len(matured_unverified) >= streak_k:
@@ -398,6 +417,7 @@ def compute_realized(
         "merged_tracked": len(window),
         "verified": len(verdicted),
         "confirmed": len(confirmed),
+        "unverifiable": len(unverifiable),
         "matured_unverified": len(matured_unverified),
         "realized_impact_rate": round(realized_rate, 3)
         if realized_rate is not None
@@ -416,6 +436,7 @@ def format_realized(h: Dict[str, Any]) -> str:
     return (
         f"[evolution-realized-impact] tracked={h['merged_tracked']} "
         f"verified={h['verified']} confirmed={h['confirmed']} "
+        f"unverifiable={h.get('unverifiable', 0)} "
         f"realized_rate={_pct(h['realized_impact_rate'])} "
         f"miss_streak={h['miss_streak']} unverified_matured={h['matured_unverified']} | {tail}"
     )
