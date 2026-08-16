@@ -4857,6 +4857,32 @@ class AIAgent:
             getattr(self, "context_compressor", None), "parallel_compactor", None
         )
 
+    @property
+    def precompaction_snapshot_path(self) -> Optional[Any]:
+        """Path to the latest pre-compaction snapshot if available."""
+        compressor = getattr(self, "context_compressor", None)
+        if compressor:
+            return getattr(compressor, "snapshot_path", None)
+        return None
+
+    def read_precompaction_snapshot(
+        self, snapshot_path: Optional[Any] = None
+    ) -> Optional[Any]:
+        """Read pre-compaction snapshot if available."""
+        compressor = getattr(self, "context_compressor", None)
+        if compressor and hasattr(compressor, "read_precompaction_snapshot"):
+            return compressor.read_precompaction_snapshot(snapshot_path)
+        return None
+
+    def read_precompaction_snapshot_text(
+        self, snapshot_path: Optional[Any] = None
+    ) -> Optional[str]:
+        """Read pre-compaction snapshot formatted text if available."""
+        compressor = getattr(self, "context_compressor", None)
+        if compressor and hasattr(compressor, "read_precompaction_snapshot_text"):
+            return compressor.read_precompaction_snapshot_text(snapshot_path)
+        return None
+
     def _build_system_prompt_parts(self, system_message: str = None) -> Dict[str, str]:
         """Forwarder — see ``agent.system_prompt.build_system_prompt_parts``."""
         from agent.system_prompt import build_system_prompt_parts

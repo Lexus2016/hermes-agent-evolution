@@ -19,11 +19,12 @@ Improvements over v2:
 import hashlib
 import json
 import logging
-import sqlite3
+from pathlib import Path
 import re
+import sqlite3
 import time
+from typing import Any, Dict, List, Optional, Union
 import uuid
-from typing import Any, Dict, List, Optional
 
 from agent.auxiliary_client import (
     AuxiliaryExplicitCancellation,
@@ -3019,6 +3020,9 @@ class ContextCompressor(ContextEngine):
         pc = getattr(self, "_parallel_compactor", None)
         if not pc:
             return False
+        sid = getattr(self, "_session_id", None)
+        if sid:
+            pc.session_id = sid
         return pc.start_async_compaction(
             messages=messages,
             current_tokens=current_tokens,
@@ -3035,6 +3039,32 @@ class ContextCompressor(ContextEngine):
         if not pc:
             return None
         return pc.try_apply_swap(messages)
+
+    @property
+    def snapshot_path(self) -> Optional[Any]:
+        """Path to the latest pre-compaction snapshot if available."""
+        pc = getattr(self, "_parallel_compactor", None)
+        if pc:
+            return pc.snapshot_path
+        return None
+
+    def read_precompaction_snapshot(
+        self, snapshot_path: Optional[Union[str, Path]] = None
+    ) -> Optional[Any]:
+        """Read pre-compaction snapshot via attached ParallelCompactor."""
+        pc = getattr(self, "_parallel_compactor", None)
+        if pc:
+            return pc.read_snapshot(snapshot_path)
+        return None
+
+    def read_precompaction_snapshot_text(
+        self, snapshot_path: Optional[Union[str, Path]] = None
+    ) -> Optional[str]:
+        """Read pre-compaction snapshot text via attached ParallelCompactor."""
+        pc = getattr(self, "_parallel_compactor", None)
+        if pc:
+            return pc.read_snapshot_text(snapshot_path)
+        return None
 
     def update_from_response(self, usage: Dict[str, Any]):
         """Update tracked token usage from API response."""

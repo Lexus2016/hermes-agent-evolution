@@ -15,8 +15,12 @@ from __future__ import annotations
 import concurrent.futures
 from dataclasses import asdict, dataclass, field
 from enum import Enum
+import json
+from pathlib import Path
 import re
-from typing import Any, Callable, Dict, List, Optional
+import time
+from typing import Any, Callable, Dict, List, Optional, Union
+import uuid
 
 
 class CompactionState(Enum):
@@ -121,6 +125,8 @@ class ParallelCompactionConfig:
         explicit_headroom_tokens: Optional explicit token count for headroom override.
         preserve_recent_count: Number of recent messages to exclude from compression.
         summary_constraint: Optional hard structural constraint on summary volume.
+        save_snapshot: Whether to persist pre-compaction snapshot to disk.
+        snapshot_dir: Optional explicit directory for snapshot storage.
     """
 
     enabled: bool = True
@@ -129,6 +135,8 @@ class ParallelCompactionConfig:
     explicit_headroom_tokens: Optional[int] = None
     preserve_recent_count: int = 4
     summary_constraint: Optional[SummaryVolumeConstraint] = None
+    save_snapshot: bool = True
+    snapshot_dir: Optional[str] = None
 
     @property
     def headroom_tokens(self) -> int:
@@ -161,6 +169,96 @@ class CompactionSnapshot:
     message_count: int
     messages: List[Dict[str, Any]]
     token_count_at_trigger: int
+    snapshot_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    timestamp: float = field(default_factory=time.time)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "snapshot_id": self.snapshot_id,
+            "timestamp": self.timestamp,
+            "trigger_index": self.trigger_index,
+            "message_count": self.message_count,
+            "token_count_at_trigger": self.token_count_at_trigger,
+            "messages": self.messages,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "CompactionSnapshot":
+        return cls(
+            trigger_index=d.get("trigger_index", len(d.get("messages", []))),
+            message_count=d.get("message_count", len(d.get("messages", []))),
+            messages=d.get("messages", []),
+            token_count_at_trigger=d.get("token_count_at_trigger", 0),
+            snapshot_id=d.get("snapshot_id", uuid.uuid4().hex[:12]),
+            timestamp=d.get("timestamp", time.time()),
+        )
+
+    def to_readable_text(self) -> str:
+        """Format messages into clean markdown transcript representation."""
+        lines = [
+            f"# Pre-Compaction Snapshot [{self.snapshot_id}]",
+            f"- Trigger index: {self.trigger_index}",
+            f"- Message count: {self.message_count}",
+            f"- Token count at trigger: {self.token_count_at_trigger}",
+            "",
+            "## Transcript",
+            "",
+        ]
+        for i, msg in enumerate(self.messages, start=1):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            lines.append(f"### Turn {i} ({role})")
+            if content:
+                lines.append(str(content).strip())
+            if msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    fn = tc.get("function", {})
+                    fn_name = fn.get("name", "tool")
+                    fn_args = fn.get("arguments", "")
+                    lines.append(f"```tool_call:{fn_name}\n{fn_args}\n```")
+            lines.append("")
+        return "\n".join(lines).strip()
+
+
+def get_default_snapshot_dir() -> Path:
+    """Resolve default directory for pre-compaction snapshots."""
+    try:
+        from hermes_constants import get_hermes_home
+
+        base = get_hermes_home()
+    except Exception:
+        base = Path.home() / ".hermes"
+    d = base / "snapshots"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def write_precompaction_snapshot(
+    snapshot: CompactionSnapshot,
+    snapshot_dir: Optional[Union[str, Path]] = None,
+    session_id: Optional[str] = None,
+) -> Path:
+    """Persist pre-compaction snapshot to disk as a re-readable virtual file."""
+    target_dir = Path(snapshot_dir) if snapshot_dir else get_default_snapshot_dir()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    prefix = f"{session_id}_" if session_id else ""
+    file_name = f"{prefix}snapshot_{snapshot.snapshot_id}.json"
+    snapshot_path = target_dir / file_name
+    snapshot_path.write_text(json.dumps(snapshot.to_dict(), indent=2), encoding="utf-8")
+    return snapshot_path
+
+
+def read_precompaction_snapshot(snapshot_path: Union[str, Path]) -> CompactionSnapshot:
+    """Read a pre-compaction snapshot from disk."""
+    p = Path(snapshot_path)
+    data = json.loads(p.read_text(encoding="utf-8"))
+    return CompactionSnapshot.from_dict(data)
+
+
+def read_precompaction_snapshot_text(snapshot_path: Union[str, Path]) -> str:
+    """Read pre-compaction snapshot as human/agent-readable transcript."""
+    snap = read_precompaction_snapshot(snapshot_path)
+    return snap.to_readable_text()
 
 
 class ParallelCompactor:
@@ -170,15 +268,26 @@ class ParallelCompactor:
         self,
         config: Optional[ParallelCompactionConfig] = None,
         executor: Optional[concurrent.futures.Executor] = None,
+        session_id: Optional[str] = None,
     ) -> None:
         self.config = config or ParallelCompactionConfig()
         self._executor = executor
+        self._session_id = session_id
         self._state = CompactionState.IDLE
         self._future: Optional[concurrent.futures.Future[List[Dict[str, Any]]]] = None
         self._snapshot: Optional[CompactionSnapshot] = None
+        self._snapshot_path: Optional[Path] = None
         self._compacted_prefix: Optional[List[Dict[str, Any]]] = None
         self._last_error: Optional[str] = None
         self._swap_count: int = 0
+
+    @property
+    def session_id(self) -> Optional[str]:
+        return self._session_id
+
+    @session_id.setter
+    def session_id(self, val: Optional[str]) -> None:
+        self._session_id = val
 
     @property
     def state(self) -> CompactionState:
@@ -191,6 +300,14 @@ class ParallelCompactor:
     @property
     def swap_count(self) -> int:
         return self._swap_count
+
+    @property
+    def snapshot(self) -> Optional[CompactionSnapshot]:
+        return self._snapshot
+
+    @property
+    def snapshot_path(self) -> Optional[Path]:
+        return self._snapshot_path
 
     def should_trigger(self, current_tokens: int) -> bool:
         """Check whether current token usage crossed early trigger threshold."""
@@ -219,6 +336,18 @@ class ParallelCompactor:
             messages=snapshot_messages,
             token_count_at_trigger=current_tokens,
         )
+        if self.config.save_snapshot:
+            try:
+                self._snapshot_path = write_precompaction_snapshot(
+                    self._snapshot,
+                    snapshot_dir=self.config.snapshot_dir,
+                    session_id=self._session_id,
+                )
+            except Exception as exc:
+                self._snapshot_path = None
+        else:
+            self._snapshot_path = None
+
         self._state = CompactionState.COMPACTING
         self._last_error = None
         self._compacted_prefix = None
@@ -297,6 +426,29 @@ class ParallelCompactor:
         self._swap_count += 1
         return new_messages
 
+    def read_snapshot(
+        self, snapshot_path: Optional[Union[str, Path]] = None
+    ) -> Optional[CompactionSnapshot]:
+        """Read a pre-compaction snapshot from disk or memory."""
+        if snapshot_path is not None:
+            return read_precompaction_snapshot(snapshot_path)
+        if self._snapshot is not None:
+            return self._snapshot
+        if self._snapshot_path is not None and self._snapshot_path.exists():
+            return read_precompaction_snapshot(self._snapshot_path)
+        return None
+
+    def read_snapshot_text(
+        self, snapshot_path: Optional[Union[str, Path]] = None
+    ) -> Optional[str]:
+        """Read snapshot as formatted text transcript."""
+        if snapshot_path is not None:
+            return read_precompaction_snapshot_text(snapshot_path)
+        snap = self.read_snapshot()
+        if snap is not None:
+            return snap.to_readable_text()
+        return None
+
     def build_summary_instruction(self) -> str:
         """Structural summarization instruction; empty when unconfigured."""
         constraint = self.config.summary_constraint
@@ -329,5 +481,6 @@ class ParallelCompactor:
         self._state = CompactionState.IDLE
         self._future = None
         self._snapshot = None
+        self._snapshot_path = None
         self._compacted_prefix = None
         self._last_error = None
