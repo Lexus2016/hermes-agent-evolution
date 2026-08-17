@@ -243,6 +243,20 @@ class TestSummary:
     def test_load_records_missing_file(self, tmp_path):
         assert load_records(tmp_path / "nope.jsonl") == []
 
+    def test_load_records_rejects_tampered_records(self, tmp_path):
+        """#2673: a tampered metrics.jsonl line (e.g. negative count) is
+        rejected by the live loader, not silently consumed."""
+        f = tmp_path / "metrics.jsonl"
+        good = {"date": "2026-08-16", "issues_created": 2, "selected": 1,
+                "rejected": 1, "merged": 1, "skipped": 0}
+        tampered = dict(good, date="2026-08-17", selected=-1)
+        f.write_text(
+            json.dumps(good) + "\n" + json.dumps(tampered) + "\n",
+            encoding="utf-8",
+        )
+        recs = load_records(f)
+        assert [r["date"] for r in recs] == ["2026-08-16"]
+
     def test_reject_rate_and_window(self):
         recs = [self._rec(f"d{i}", selected=1, rejected=9, merged=1) for i in range(10)]
         s = summarize(recs, last=7)
@@ -283,9 +297,11 @@ class TestSummarySidecar:
         (tmp_path / "metrics.jsonl").write_text(
             json.dumps({
                 "date": "2026-06-10",
+                "issues_created": 2,
                 "selected": 1,
                 "rejected": 9,
                 "merged": 0,
+                "skipped": 0,
             })
             + "\n",
             encoding="utf-8",
