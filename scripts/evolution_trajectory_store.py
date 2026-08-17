@@ -75,53 +75,13 @@ DEFAULT_MIN_SUPPORT = 3
 # deliberately small and obvious; the evolution loop can extend the vocabulary
 # without touching the store/extract logic.
 _TASK_KEYWORDS: List[Tuple[str, Tuple[str, ...]]] = [
-    (
-        "coding",
-        (
-            "code",
-            "function",
-            "bug",
-            "implement",
-            "refactor",
-            "test",
-            "compile",
-            "python",
-            "javascript",
-            "class",
-            "method",
-            "patch",
-            "write",
-            "fix",
-            "edit",
-        ),
-    ),
-    (
-        "research",
-        (
-            "research",
-            "paper",
-            "papers",
-            "arxiv",
-            "investigate",
-            "compare",
-            "survey",
-            "literature",
-            "study",
-        ),
-    ),
-    (
-        "deployment",
-        (
-            "deploy",
-            "production",
-            "release",
-            "rollout",
-            "ship",
-            "kubernetes",
-            "docker",
-            "pipeline",
-        ),
-    ),
+    ("coding", ("code", "function", "bug", "implement", "refactor", "test",
+                "compile", "python", "javascript", "class", "method", "patch",
+                "write", "fix", "edit")),
+    ("research", ("research", "paper", "papers", "arxiv", "investigate",
+                  "compare", "survey", "literature", "study")),
+    ("deployment", ("deploy", "production", "release", "rollout", "ship",
+                    "kubernetes", "docker", "pipeline")),
 ]
 
 _TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
@@ -331,10 +291,9 @@ class TrajectoryStore:
         self._add_tools(trajectory_tools(conversations), task_type)
 
     def _add_tools(self, tools: List[str], task_type: str) -> None:
-        self._by_type.setdefault(task_type, []).append({
-            "tools": tools,
-            "tool_set": frozenset(tools),
-        })
+        self._by_type.setdefault(task_type, []).append(
+            {"tools": tools, "tool_set": frozenset(tools)}
+        )
 
     def count(self) -> int:
         """Total successful trajectories indexed."""
@@ -416,9 +375,7 @@ def format_proposals(proposals: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _iter_records(
-    store: TrajectoryStore,
-) -> Iterator[Dict[str, Any]]:  # pragma: no cover - convenience
+def _iter_records(store: TrajectoryStore) -> Iterator[Dict[str, Any]]:  # pragma: no cover - convenience
     for task_type in store.task_types():
         for rec in store.by_type(task_type):
             yield {"task_type": task_type, **rec}
@@ -482,9 +439,7 @@ def main(argv: List[str]) -> int:
         prof = os.environ.get("EVOLUTION_PROFILE_DIR")
         if prof:
             out = Path(prof) / "success-patterns-latest.json"
-            out.write_text(
-                json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
-            )
+            out.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
             # QCR (#2694 increment 3): persist the indexed successful
             # trajectories AS target-bound notes — the note store the replay
             # path (reuse_for_target) selects + guardrail-checks against.
