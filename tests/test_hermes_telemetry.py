@@ -92,3 +92,26 @@ class TestEnabled:
         attrs = dict(exp.spans[0].attributes)
         assert attrs.get("hermes.tokens") == 123
         assert attrs.get("hermes.provider") == "anthropic"
+
+    def test_set_mcp_attributes_emit_standard_names(self):
+        """MCP-standard attribute names must be emitted verbatim (no hermes. prefix)."""
+        exp = _Collect()
+        tel._force_enable_with_exporter(exp)
+        with tel.span("execute_tool"):
+            tel.set_mcp_attributes(
+                method_name="tools/call",
+                tool_name="read_file",
+                session_id="sess-1",
+                protocol_version="2025-03-26",
+            )
+        attrs = dict(exp.spans[0].attributes)
+        assert attrs.get("mcp.method.name") == "tools/call"
+        assert attrs.get("mcp.session.id") == "sess-1"
+        assert attrs.get("mcp.protocol.version") == "2025-03-26"
+        # No hermes.-prefixed duplicates for MCP keys.
+        assert not any(k.startswith("hermes.") for k in attrs)
+
+    def test_set_mcp_attributes_noop_when_disabled(self, monkeypatch):
+        monkeypatch.setattr(tel, "_otel_config", lambda: {})
+        # Must not raise and must not touch anything when disabled.
+        tel.set_mcp_attributes(method_name="tools/call", tool_name="x")

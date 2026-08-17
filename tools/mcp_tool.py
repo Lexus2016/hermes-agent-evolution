@@ -6055,6 +6055,26 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                     )
                 return tool_error(f"MCP server '{server_name}' is not connected")
 
+        # OpenTelemetry MCP-standard attributes on the tool invocation (#2634):
+        # emitted verbatim (mcp.method.name / mcp.session.id /
+        # mcp.protocol.version) so execute_tool spans are queryable by standard
+        # OTel MCP conventions. Defensive: telemetry + MCP SDK are both optional
+        # at runtime; session_id only exists on live ClientSessions.
+        try:
+            import hermes_telemetry
+
+            hermes_telemetry.set_mcp_attributes(
+                method_name="tools/call",
+                tool_name=tool_name,
+                server_name=server_name,
+                session_id=getattr(
+                    getattr(server, "session", None), "session_id", None
+                ),
+                protocol_version=LATEST_PROTOCOL_VERSION,
+            )
+        except Exception:
+            pass
+
         async def _call():
             _mark_server_call_started(server)
             async with server._rpc_lock:

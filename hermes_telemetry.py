@@ -60,7 +60,9 @@ def is_enabled() -> bool:
 def _build_exporter(cfg: dict):
     kind = str(cfg.get("exporter") or "console").lower()
     if kind == "otlp":
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
 
         endpoint = cfg.get("endpoint") or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
         return OTLPSpanExporter(endpoint=endpoint) if endpoint else OTLPSpanExporter()
@@ -93,9 +95,10 @@ def _ensure_init() -> None:
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
         provider = TracerProvider(
-            resource=Resource.create(
-                {"service.name": "hermes-agent", "hermes.profile": _profile_name()}
-            )
+            resource=Resource.create({
+                "service.name": "hermes-agent",
+                "hermes.profile": _profile_name(),
+            })
         )
         provider.add_span_processor(BatchSpanProcessor(_build_exporter(cfg)))
         trace.set_tracer_provider(provider)
@@ -123,7 +126,8 @@ def span(name: str, **attributes: Any):
                     continue
                 try:
                     sp.set_attribute(
-                        f"hermes.{k}", v if isinstance(v, (str, int, float, bool)) else str(v)
+                        f"hermes.{k}",
+                        v if isinstance(v, (str, int, float, bool)) else str(v),
                     )
                 except Exception:
                     pass
@@ -150,6 +154,32 @@ def span(name: str, **attributes: Any):
 
 def set_attributes(**attributes: Any) -> None:
     """Attach attributes to the current span if one is active (no-op otherwise)."""
+    _set_span_attributes(attributes, prefix="hermes.")
+
+
+def set_mcp_attributes(**attributes: Any) -> None:
+    """Attach OpenTelemetry MCP-standard attributes to the current span (#2634).
+
+    Kwargs are mapped to the OTel MCP conventions verbatim (``mcp.method.name``,
+    ``mcp.session.id``, ``mcp.protocol.version``) so the spans are queryable by
+    standard OTel MCP queries — no ``hermes.`` prefix. Extra kwargs (e.g.
+    ``tool_name``, ``server_name``) are emitted as ``mcp.<kwarg>``. No-op when
+    telemetry is disabled.
+    """
+    if not _ENABLED:
+        return
+    mapped = {_MCP_STANDARD_KEYS.get(k, k): v for k, v in attributes.items()}
+    _set_span_attributes(mapped, prefix="mcp.")
+
+
+_MCP_STANDARD_KEYS = {
+    "method_name": "method.name",
+    "session_id": "session.id",
+    "protocol_version": "protocol.version",
+}
+
+
+def _set_span_attributes(attributes: Any, *, prefix: str) -> None:
     if not _ENABLED:
         return
     try:
@@ -162,7 +192,8 @@ def set_attributes(**attributes: Any) -> None:
             if v is not None:
                 try:
                     sp.set_attribute(
-                        f"hermes.{k}", v if isinstance(v, (str, int, float, bool)) else str(v)
+                        prefix + k,
+                        v if isinstance(v, (str, int, float, bool)) else str(v),
                     )
                 except Exception:
                     pass
@@ -184,7 +215,9 @@ def _force_enable_with_exporter(exporter) -> None:
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 
-    provider = TracerProvider(resource=Resource.create({"service.name": "hermes-agent-test"}))
+    provider = TracerProvider(
+        resource=Resource.create({"service.name": "hermes-agent-test"})
+    )
     provider.add_span_processor(SimpleSpanProcessor(exporter))
     _PROVIDER = provider
     _TRACER = provider.get_tracer("hermes-test")
