@@ -127,14 +127,14 @@ class TestProcessBucketDecomposition:
     def test_session_id_required(self):
         cat, _ = classify(
             '{"error": "session_id is required for poll. 3 processes are running. '
-            "Specify one of: proc_a, proc_b, proc_c\"}"
+            'Specify one of: proc_a, proc_b, proc_c"}'
         )
         assert cat == "session_not_found"
 
     def test_invalid_action(self):
         cat, hint = classify(
-            '{"error": "Unknown process action: \'create\'. Did you mean \'list\'? '
-            "Valid actions: list, poll, log, wait, kill, write, submit, close\"}"
+            "{\"error\": \"Unknown process action: 'create'. Did you mean 'list'? "
+            'Valid actions: list, poll, log, wait, kill, write, submit, close"}'
         )
         assert cat == "invalid_action"
         assert "list" in hint
@@ -154,6 +154,87 @@ class TestProcessBucketDecomposition:
             '{"status": "already_exited", "error": "Process has already finished"}',
         ):
             assert classify(content)[0] != "runtime_error"
+
+
+class TestTerminalBucketDecomposition:
+    """#2717 — terminal "other" bucket decomposed into reason subclasses.
+
+    Before the fix, terminal failures that weren't caught by the exit-code
+    family (#2306) or missing_command rules fell through to the generic
+    ``runtime_error`` catch-all — retryable, with no terminal-specific
+    recovery hint — leaving the agent to blind-retry (the largest residual
+    failure source, 396/7d). These rules decompose the environment/backend,
+    shell-parse, encoding, and resource-limit shapes into actionable subclasses.
+    """
+
+    def test_env_backend_error(self):
+        cat, hint = classify(
+            '{"error": "Terminal tool disabled: environment creation failed '
+            "(ModuleNotFoundError: No module named 'docker')\"}"
+        )
+        assert cat == "env_backend_error"
+        assert "environment" in hint.lower() or "backend" in hint.lower()
+
+    def test_env_backend_ssh_connection_failed(self):
+        cat, _ = classify(
+            '{"error": "SSH connection failed: Connection refused (host: 10.0.0.5)"}'
+        )
+        assert cat == "env_backend_error"
+
+    def test_env_backend_docker_start_failed(self):
+        cat, _ = classify(
+            '{"error": "Failed to start container: docker daemon not running"}'
+        )
+        assert cat == "env_backend_error"
+
+    def test_shell_parse_error(self):
+        cat, hint = classify(
+            '{"error": "bash: syntax error near unexpected token `)\'"}'
+        )
+        assert cat == "shell_parse_error"
+        assert "syntax" in hint.lower()
+
+    def test_shell_parse_unbalanced_quote(self):
+        cat, _ = classify(
+            '{"error": "bash: unexpected EOF while looking for matching `"\'"}'
+        )
+        assert cat == "shell_parse_error"
+
+    def test_encoding_error(self):
+        cat, hint = classify(
+            '{"error": "UnicodeDecodeError: \'utf-8\' codec can\'t decode byte 0xff"}'
+        )
+        assert cat == "encoding_error"
+        assert "decode" in hint.lower()
+
+    def test_encoding_invalid_continuation_byte(self):
+        cat, _ = classify('{"error": "invalid continuation byte in output stream"}')
+        assert cat == "encoding_error"
+
+    def test_resource_limit_memory(self):
+        cat, hint = classify('{"error": "out of memory: cannot allocate 4096 bytes"}')
+        assert cat == "resource_limit"
+        assert "resource" in hint.lower() or "memory" in hint.lower()
+
+    def test_resource_limit_disk_full(self):
+        cat, _ = classify('{"error": "No space left on device while writing output"}')
+        assert cat == "resource_limit"
+
+    def test_resource_limit_too_many_files(self):
+        cat, _ = classify(
+            '{"error": "too many open files (EMFILE) while running command"}'
+        )
+        assert cat == "resource_limit"
+
+    def test_not_runtime_error(self):
+        # Regression guard: these used to be classified as retryable runtime_error.
+        for content in (
+            '{"error": "Terminal tool disabled: environment creation failed"}',
+            '{"error": "bash: syntax error near unexpected token `)\'"}',
+            '{"error": "UnicodeDecodeError: codec can\'t decode byte 0xff"}',
+            '{"error": "out of memory: cannot allocate"}',
+        ):
+            assert classify(content)[0] != "runtime_error", content
 
 
 class TestInlineDiagnosticsEnabled:

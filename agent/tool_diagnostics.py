@@ -137,6 +137,40 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         "or a different API). If no alternative exists, escalate to the "
         "user with the exact access needed. Do NOT retry the same action.",
     ),
+    # #2717 — terminal "other" bucket decomposition. Terminal is the most-used
+    # tool; its residual 'other' bucket (396 failures/7d, ~0.0139 per-session)
+    # was the largest undecomposed failure source — every sibling tool's
+    # 'other' bucket had already been split (#2333/#2332/#2336/#2244/#2621/
+    # #2310/#2309) but terminal's hadn't. These rules decompose terminal-
+    # specific failure shapes that the exit-code family (#2306) and
+    # missing_command rules above DON'T catch — environment/backend failures,
+    # encoding issues, resource limits, and shell-parse errors — into reason
+    # subclasses with targeted recovery hints BEFORE the runtime_error catch-all.
+    # Ordered most-specific first; must run BEFORE the catch-all (which matches
+    # "error:" / "failed" present in every tool_error envelope).
+    (
+        # Environment/backend creation or connection failure — the sandbox
+        # itself didn't start (Docker/Singularity/SSH/Daytona/Modal). This is
+        # NOT a command failure: the command never ran. Retrying the same
+        # command will hit the same backend failure. Must run BEFORE the
+        # timeout rule (which matches "connection refused") and BEFORE
+        # runtime_error (matches "failed" / "error").
+        re.compile(
+            r"\b(terminal tool disabled|environment creation failed|"
+            r"failed to (start|create|connect).*environment|"
+            r"(docker|singularity|ssh|daytona|modal).*(connection|start|create).*failed|"
+            r"SSH connection failed|scp failed|"
+            r"failed to (start|create|connect) (the )?(container|sandbox|instance)|"
+            r"could not (start|create|connect) (the )?(container|sandbox|instance))\b",
+            re.I,
+        ),
+        "env_backend_error",
+        "The terminal environment/sandbox failed to start or connect — the command never "
+        "ran. This is an infrastructure issue, not a command error: retrying the same "
+        "command will hit the same backend failure. Check the environment configuration "
+        "(docker/singularity/ssh/daytona/modal), verify the backend service is running, "
+        "or switch to a different terminal backend. Do NOT retry the same command unchanged.",
+    ),
     (
         re.compile(
             r"timed out|timeout|deadline exceeded|ClosedResourceError|unreachable|connection refused|ETIMEDOUT",
@@ -273,6 +307,70 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         "The process has already finished — you cannot write/submit/close to a "
         "completed process. Read its final output with action='log', or spawn a new "
         "process. Do NOT retry the write against the finished session.",
+    ),
+    # #2717 — terminal "other" bucket decomposition (continued). The
+    # env_backend_error rule is placed BEFORE the timeout rule above (it
+    # matches "connection refused" / "SSH connection failed" which timeout
+    # would otherwise grab). The remaining terminal-specific subclasses
+    # (shell-parse, encoding, resource-limit) run here, before the
+    # runtime_error catch-all.
+    (
+        # Shell parse / syntax error — the command itself is malformed shell
+        # syntax (unbalanced quotes, bad redirect, unexpected token). This is
+        # deterministic: the same malformed command fails identically on every
+        # retry. Must run BEFORE runtime_error (matches "error").
+        re.compile(
+            r"\b(syntax error.*unexpected|unexpected token|"
+            r"unexpected end of (file|line)|unbalanced.*quote|"
+            r"missing.*closing.*(quote|paren|bracket)|"
+            r"bash:.*syntax error|zsh:.*parse error|"
+            r"(sh|bash|zsh):.*unexpected)\b",
+            re.I,
+        ),
+        "shell_parse_error",
+        "The command has a shell syntax error (unbalanced quotes, unexpected token, bad "
+        "redirect). The same malformed command will fail identically on every retry — fix "
+        "the shell syntax, or simplify the command. Do NOT retry it unchanged.",
+    ),
+    (
+        # Output encoding / decode error — the command produced output that
+        # could not be decoded (binary output, non-UTF-8 bytes, NUL bytes).
+        # Retrying the same command will produce the same undecodable output.
+        re.compile(
+            r"\b(unicode(decode|encode)error|codec can.?t decode|"
+            r"invalid.*encoding|ordinal not in range|"
+            r"(utf-8|ascii).*decode.*(error|failed)|"
+            r"can.?t (encode|decode).*byte|"
+            r"invalid (start|continuation) byte)\b",
+            re.I,
+        ),
+        "encoding_error",
+        "The command produced output that could not be decoded (binary data, non-UTF-8 "
+        "encoding, or NUL bytes). Retrying the same command will produce the same "
+        "undecodable output. Pipe through `cat -v`, `strings`, or `head -c` to make the "
+        "output text-safe, or use a different approach (read_file, execute_code). "
+        "Do NOT retry the same command unchanged.",
+    ),
+    (
+        # Resource limit — the command hit an OS resource cap (memory, file
+        # descriptors, max processes, disk space). Distinct from exit-137
+        # (OOM kill): a resource-limit error may surface as a text message
+        # before the process is killed, or from the shell itself.
+        re.compile(
+            r"\b(out of memory|memory (error|exhausted)|"
+            r"cannot allocate|no space left on device|disk full|"
+            r"too many open files|EMFILE|ENFILE|"
+            r"resource (temporarily )?unavailable|"
+            r"cannot fork|unable to fork|"
+            r"max.*file.*descriptor|"
+            r"too many (processes|links|files))\b",
+            re.I,
+        ),
+        "resource_limit",
+        "The command hit an OS resource limit (memory, file descriptors, disk space, or "
+        "process cap). Reduce the workload (smaller input, fewer parallel processes, less "
+        "output), free the resource first, or run it in the background with a higher limit. "
+        "Do NOT retry the same command unchanged — it will hit the same limit.",
     ),
     (
         re.compile(
