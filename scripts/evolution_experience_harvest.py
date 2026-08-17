@@ -489,6 +489,48 @@ def _maybe_distill() -> Optional[Dict[str, Any]]:
         return None
 
 
+def _maybe_qcr_replay() -> Optional[Dict[str, Any]]:
+    """Produce + replay QCR notes from the trajectory capture dir (#2694).
+
+    Wires the QCR replay path into a real cron-reachable consumer: reads the
+    #1363 capture dir, persists successful trajectories AS target-bound notes
+    (``qcr-notes.jsonl``), then runs the guardrail-checked ``reuse_for_target``
+    selector for a generic target. Best-effort and never raises — a QCR
+    failure must not kill the harvest. Returns a summary dict for the harvest
+    report, or None when the capture dir is absent.
+    """
+    try:
+        from evolution_qcr import (
+            notes_from_capture_dir,
+            reuse_for_target,
+            write_notes,
+        )
+        from evolution_trajectory_store import _default_capture_dir
+
+        capture_dir = _default_capture_dir()
+        if not capture_dir.is_dir():
+            return None
+        notes = notes_from_capture_dir(capture_dir)
+        store_path = capture_dir / "qcr-notes.jsonl"
+        written = write_notes(store_path, notes)
+        verdict = reuse_for_target(
+            store_path,
+            target_task_type="general",
+            target_tools=["read_file", "search_files", "patch", "terminal"],
+        )
+        return {
+            "notes_produced": len(notes),
+            "notes_written": written,
+            "replay": verdict,
+        }
+    except Exception as exc:
+        print(
+            f"[experience-harvest] QCR replay failed (non-fatal): {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+
 def run_harvest(
     db_path: Optional[Path] = None,
     now: Optional[float] = None,
@@ -688,6 +730,10 @@ def run_harvest(
 
     if existing_entries or summary["entries_appended"] > 0:
         summary["distill"] = _maybe_distill()
+
+    # QCR replay (#2694): produce + guardrail-check reusable trajectory notes
+    # from the capture dir. Best-effort; a failure never kills the harvest.
+    summary["qcr"] = _maybe_qcr_replay()
 
     return summary
 
