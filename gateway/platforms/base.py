@@ -5978,10 +5978,12 @@ class BasePlatformAdapter(ABC):
         if needs_topic_recovery:
             await asyncio.to_thread(self._apply_topic_recovery, event)
 
+        _sk_store = getattr(self, "_session_store", None)
         session_key = build_session_key(
             event.source,
             group_sessions_per_user=self.config.extra.get("group_sessions_per_user", True),
             thread_sessions_per_user=self.config.extra.get("thread_sessions_per_user", False),
+            profile=_sk_store._resolve_profile_for_key(event.source) if _sk_store else None,
         )
         expected_session_key = str(
             (event.metadata or {}).get("gateway_session_key") or ""
@@ -6780,7 +6782,7 @@ class BasePlatformAdapter(ABC):
                 outcome = ProcessingOutcome.FAILURE
             await self._run_processing_hook("on_processing_complete", event, outcome)
             raise
-        except Exception as e:
+        except BaseException as e:
             await self._run_processing_hook("on_processing_complete", event, ProcessingOutcome.FAILURE)
             logger.error("[%s] Error handling message: %s", self.name, e, exc_info=True)
             # Send the error to the user so they aren't left with radio silence
@@ -6802,6 +6804,14 @@ class BasePlatformAdapter(ABC):
                     "[%s] Failed to send error notification to user: %s",
                     self.name, notify_err, exc_info=True,
                 )  # Last resort — don't let error reporting crash the handler
+            # Preserve shutdown semantics: SystemExit/KeyboardInterrupt must
+            # still propagate after the user-facing failure notification, so
+            # the loop's own signal handling can shut down cleanly. Other
+            # BaseExceptions (e.g. GeneratorExit) are contained like ordinary
+            # failures — this handler is fire-and-forget, so swallowing them
+            # here prevents "Task exception was never retrieved" radio silence.
+            if isinstance(e, (SystemExit, KeyboardInterrupt)):
+                raise
         finally:
             # Stop typing before any deferred callback work.  Post-delivery
             # callbacks may perform platform I/O; a stuck callback must not

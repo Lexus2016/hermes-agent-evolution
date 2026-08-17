@@ -715,6 +715,7 @@ TOOL_CATEGORIES = {
                     # specific binary (e.g. a local build); there is no
                     # version-pin env var.
                 ],
+                "computer_use_backend": "cua",
                 "post_setup": "cua_driver",
             },
         ],
@@ -1654,26 +1655,29 @@ def _ensure_browser_use_cli(*, verbose_hints: bool = False) -> None:
     "Browser Use" row. Failure is non-fatal: ``browser_exec`` can still run
     zero-install via ``uvx browser-use``, and the built-in browser tools
     remain the final fallback.
-    """
-    if shutil.which("browser-use"):
-        _print_success("    browser-use CLI found on PATH")
-    else:
-        _print_info("    Installing browser-use CLI (uv tool install browser-use)...")
-        try:
-            from tools.browser_use_cli import install_cli
 
-            ok, message = install_cli()
-        except Exception as exc:  # pragma: no cover — defensive
-            ok, message = False, f"install failed: {exc}"
-        if ok:
-            _print_success(f"    {message}")
+    MANAGED-FIRST: a browser-use on the user's PATH does NOT satisfy this
+    check — only the Hermes-managed ``$HERMES_HOME/bin`` copy does.
+    ``install_cli()`` short-circuits on the managed copy and otherwise
+    provisions it, so resolution always lands on a binary Hermes installs
+    and updates rather than a user-level side install.
+    """
+    _print_info("    Ensuring browser-use CLI (managed install)...")
+    try:
+        from tools.browser_use_cli import install_cli
+
+        ok, message = install_cli()
+    except Exception as exc:  # pragma: no cover — defensive
+        ok, message = False, f"install failed: {exc}"
+    if ok:
+        _print_success(f"    {message}")
+    else:
+        for line in str(message).splitlines():
+            _print_warning(f"    {line[:200]}")
+        if shutil.which("uvx"):
+            _print_info("    Falling back to zero-install runs via `uvx browser-use`")
         else:
-            for line in str(message).splitlines():
-                _print_warning(f"    {line[:200]}")
-            if shutil.which("uvx"):
-                _print_info("    Falling back to zero-install runs via `uvx browser-use`")
-            else:
-                _print_info("    Install manually: uv tool install browser-use  (https://docs.astral.sh/uv/)")
+            _print_info("    Install manually: uv tool install browser-use  (https://docs.astral.sh/uv/)")
     if verbose_hints:
         _print_info("    Local Chrome needs remote debugging: chrome://inspect/#remote-debugging")
         _print_info("    Cloud browsers: browser-use auth login  (or set BROWSER_USE_API_KEY)")
@@ -1684,12 +1688,10 @@ def _run_post_setup(post_setup_key: str):
     from hermes_constants import find_node_executable
 
     if post_setup_key in {"agent_browser", "browserbase"}:
-        # Cloud Browser Use / Browserbase rows install the CLI here.
-        # The local agent_browser Chromium path must not run this first:
-        # its tests (and the Chromium-only post-setup) assert a single
-        # npx/agent-browser subprocess.run, not a uv bootstrap.
-        if post_setup_key != "agent_browser":
-            _ensure_browser_use_cli()
+        # Every non-Camofox browser backend drives through the Browser Use
+        # CLI when it's runnable — install it here too, not only on the
+        # explicit "Browser Use" picker row.
+        _ensure_browser_use_cli()
         # agent-browser is no longer a root package.json dependency (#43564)
         # — it resolves lazily via npx (or a global/Hermes-managed install)
         # instead of a local `npm install`, so there's no node_modules/
@@ -2336,18 +2338,22 @@ def _get_platform_tools(
     configurable_keys = {ts_key for ts_key, _, _ in CONFIGURABLE_TOOLSETS}
     plugin_ts_keys = _get_plugin_toolset_keys()
     platform_default_keys = {p["default_toolset"] for p in PLATFORMS.values()}
+    # Plugin-provided toolsets are first-class on a platform-toolsets list —
+    # explicit config like ``[hermes-cli, a2a]`` must survive filtering just
+    # like a built-in configurable toolset would. See issue #81163.
+    explicit_known_keys = configurable_keys | plugin_ts_keys
 
     # If the saved list contains any configurable keys directly, the user
     # has explicitly configured this platform — use direct membership.
     # This avoids the subset-inference bug where composite toolsets like
     # "hermes-cli" (which include all _HERMES_CORE_TOOLS) cause disabled
     # toolsets to re-appear as enabled.
-    has_explicit_config = any(ts in configurable_keys for ts in toolset_names)
+    has_explicit_config = any(ts in explicit_known_keys for ts in toolset_names)
 
     if has_explicit_config:
         enabled_toolsets = {
             ts for ts in toolset_names
-            if ts in configurable_keys and _toolset_allowed_for_platform(ts, platform)
+            if ts in explicit_known_keys and _toolset_allowed_for_platform(ts, platform)
         }
         # Mixed config: composite toolset alongside configurables (e.g.
         # ``[hermes-cli, spotify]`` after enabling Spotify via ``hermes
@@ -2566,11 +2572,17 @@ def _get_platform_tools(
     # Honor agent.disabled_toolsets from config.yaml — allows users to
     # globally suppress specific toolsets (e.g. "memory") across all
     # platforms without per-platform toolset configuration.  This runs
-    # last so it overrides everything above.
+    # last so it overrides everything above.  The value may arrive as a
+    # JSON-array string (e.g. "['memory']") from `hermes config set` or a
+    # JSON-mode editor save; parse it so the list is not silently dead (#86661).
     agent_cfg = config.get("agent") or {}
     disabled_toolsets = agent_cfg.get("disabled_toolsets") or []
     if disabled_toolsets:
-        disabled_set = {str(ts) for ts in disabled_toolsets}
+        from agent.skill_utils import parse_config_string_list
+
+        disabled_set = {
+            name.strip() for name in parse_config_string_list(disabled_toolsets) if name.strip()
+        }
         enabled_toolsets -= disabled_set
 
     # #38798: if this platform was explicitly configured but every toolset name
@@ -2684,14 +2696,16 @@ def _save_platform_tools(config: dict, platform: str, enabled_toolset_keys: Set[
     agent_cfg = config.get("agent")
     if isinstance(agent_cfg, dict):
         disabled_toolsets = agent_cfg.get("disabled_toolsets")
-        if isinstance(disabled_toolsets, list) and disabled_toolsets:
+        if disabled_toolsets:
+            from agent.skill_utils import parse_config_string_list
+
+            parsed_disabled = parse_config_string_list(disabled_toolsets)
             newly_enabled = enabled_toolset_keys - preserved_entries
             if newly_enabled:
                 remaining = [
-                    ts for ts in disabled_toolsets
-                    if str(ts) not in newly_enabled
+                    ts for ts in parsed_disabled if ts not in newly_enabled
                 ]
-                if remaining != disabled_toolsets:
+                if remaining != parsed_disabled:
                     agent_cfg["disabled_toolsets"] = remaining
 
     save_config(config)
@@ -3319,6 +3333,46 @@ def _module_installed(module_name: str) -> bool:
         return False
 
 
+# Python dependencies installed explicitly through ``hermes tools`` are not
+# part of the managed runtime's locked ``all`` sync. A runtime replacement
+# therefore needs a small, static allowlist that can be snapshotted before the
+# old site-packages disappears and restored afterward. Keep these install
+# arguments in sync with the corresponding ``_run_post_setup`` branches.
+_RESTORABLE_PYTHON_TOOL_DEPENDENCIES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "faster_whisper": ("faster_whisper", ("-U", "faster-whisper")),
+    "kittentts": (
+        "kittentts",
+        (
+            "-U",
+            "https://github.com/KittenML/KittenTTS/releases/download/"
+            "0.8.1/kittentts-0.8.1-py3-none-any.whl",
+            "soundfile",
+        ),
+    ),
+    "piper": ("piper", ("-U", "piper-tts")),
+    "ddgs": ("ddgs", ("-U", "ddgs")),
+    "langfuse": ("langfuse", ("langfuse",)),
+}
+
+
+def active_restorable_python_tool_dependencies() -> list[str]:
+    """Return ``hermes tools`` Python dependencies present in this runtime."""
+    return [
+        name
+        for name, (module_name, _install_args) in (
+            _RESTORABLE_PYTHON_TOOL_DEPENDENCIES.items()
+        )
+        if _module_installed(module_name)
+    ]
+
+
+def restorable_python_tool_dependency(
+    name: str,
+) -> tuple[str, tuple[str, ...]] | None:
+    """Return the import probe and pip arguments for an allowlisted tool."""
+    return _RESTORABLE_PYTHON_TOOL_DEPENDENCIES.get(name)
+
+
 def _agent_browser_installed() -> bool:
     """True when everything ``_run_post_setup("agent_browser")`` installs is
     present: the agent-browser CLI *and* the Chromium build it drives (or the
@@ -3647,9 +3701,17 @@ def _is_provider_active(
 ) -> bool:
     """Check if a provider entry matches the currently active config."""
     plugin_name = provider.get("image_gen_plugin_name")
-    if plugin_name:
+    if plugin_name and not provider.get("managed_nous_feature"):
+        # Managed (Nous-subscription) entries fall through to the
+        # managed_feature branch below, which also checks use_gateway —
+        # otherwise a managed FAL pick and a direct-key FAL pick would both
+        # report active for the same provider name (video already guards).
         image_cfg = config.get("image_gen", {})
-        return isinstance(image_cfg, dict) and image_cfg.get("provider") == plugin_name
+        if not (isinstance(image_cfg, dict) and image_cfg.get("provider") == plugin_name):
+            return False
+        # A direct-key entry is only active when the managed route is OFF —
+        # mirror of the managed branch's use_gateway check.
+        return not is_truthy_value(image_cfg.get("use_gateway"), default=False)
 
     video_plugin_name = provider.get("video_gen_plugin_name")
     if video_plugin_name and not provider.get("managed_nous_feature"):
@@ -3747,6 +3809,9 @@ def _is_provider_active(
     if provider.get("web_backend"):
         current = cfg_get(config, "web", "backend")
         return current == provider["web_backend"]
+    if provider.get("computer_use_backend"):
+        current = cfg_get(config, "computer_use", "backend")
+        return current == provider["computer_use_backend"]
     if provider.get("imagegen_backend"):
         image_cfg = config.get("image_gen", {})
         if not isinstance(image_cfg, dict):
@@ -4002,14 +4067,22 @@ def _configure_xai_imagine_storage(section_name: str, config: dict) -> None:
         _print_success("  xAI stored public URLs enabled without automatic expiry")
 
 
-def _select_plugin_image_gen_provider(plugin_name: str, config: dict) -> None:
-    """Persist a plugin-backed image generation provider selection."""
+def _select_plugin_image_gen_provider(plugin_name: str, config: dict, *, use_gateway: bool = False) -> None:
+    """Persist a plugin-backed image generation provider selection.
+
+    ``use_gateway`` mirrors :func:`_select_plugin_video_gen_provider`: a
+    provider picked through the Nous-managed flow must keep routing through
+    the gateway. Hardcoding ``False`` here silently flipped Nous-managed FAL
+    picks onto the user's personal FAL_KEY — _write_provider_config sets
+    ``image_gen.use_gateway = True`` for a managed pick, and this function
+    runs AFTER it, so the hardcoded value clobbered the managed flag.
+    """
     img_cfg = config.setdefault("image_gen", {})
     if not isinstance(img_cfg, dict):
         img_cfg = {}
         config["image_gen"] = img_cfg
     img_cfg["provider"] = plugin_name
-    img_cfg["use_gateway"] = False
+    img_cfg["use_gateway"] = use_gateway
     _print_success(f"  image_gen.provider set to: {plugin_name}")
     _configure_imagegen_model_for_plugin(plugin_name, config)
     if plugin_name == "xai":
@@ -4203,6 +4276,11 @@ def _write_provider_config(provider: dict, config: dict, *, managed_feature) -> 
         web_cfg["backend"] = provider["web_backend"]
         web_cfg["use_gateway"] = bool(managed_feature)
 
+    # Set computer_use backend in config if applicable
+    if provider.get("computer_use_backend"):
+        cu_cfg = config.setdefault("computer_use", {})
+        cu_cfg["backend"] = provider["computer_use_backend"]
+
     # For tools without a specific config key (e.g. image_gen), still
     # track use_gateway so the runtime knows the user's intent.
     if managed_feature and managed_feature not in {"web", "tts", "stt", "browser"}:
@@ -4362,7 +4440,7 @@ def _configure_provider(
         # and route model selection to the plugin's own catalog.
         plugin_name = provider.get("image_gen_plugin_name")
         if plugin_name:
-            _select_plugin_image_gen_provider(plugin_name, config)
+            _select_plugin_image_gen_provider(plugin_name, config, use_gateway=bool(managed_feature))
             return
         # Plugin-registered video_gen provider — same flow, different
         # registry.
@@ -4447,7 +4525,7 @@ def _configure_provider(
         _print_success(f"  {provider['name']} configured!")
         plugin_name = provider.get("image_gen_plugin_name")
         if plugin_name:
-            _select_plugin_image_gen_provider(plugin_name, config)
+            _select_plugin_image_gen_provider(plugin_name, config, use_gateway=bool(managed_feature))
             return
         video_plugin = provider.get("video_gen_plugin_name")
         if video_plugin:
@@ -4871,6 +4949,12 @@ def _reconfigure_provider(
         web_cfg["use_gateway"] = bool(managed_feature)
         _print_success(f"  Web backend set to: {provider['web_backend']}")
 
+    # Set computer_use backend in config if applicable
+    if provider.get("computer_use_backend"):
+        cu_cfg = config.setdefault("computer_use", {})
+        cu_cfg["backend"] = provider["computer_use_backend"]
+        _print_success(f"  Computer Use backend set to: {provider['computer_use_backend']}")
+
     if managed_feature and managed_feature not in {"web", "tts", "stt", "browser"}:
         section = config.setdefault(managed_feature, {})
         if not isinstance(section, dict):
@@ -4893,7 +4977,7 @@ def _reconfigure_provider(
             _print_info("  Requests for this tool will be billed to your Nous subscription.")
         plugin_name = provider.get("image_gen_plugin_name")
         if plugin_name:
-            _select_plugin_image_gen_provider(plugin_name, config)
+            _select_plugin_image_gen_provider(plugin_name, config, use_gateway=bool(managed_feature))
             return
         # Plugin-registered video_gen provider — same flow, different registry.
         video_plugin = provider.get("video_gen_plugin_name")
@@ -4908,7 +4992,13 @@ def _reconfigure_provider(
                 img_cfg = config.setdefault("image_gen", {})
                 if isinstance(img_cfg, dict):
                     img_cfg["provider"] = "fal"
-                    img_cfg["use_gateway"] = False
+                    # A managed (Nous Subscription) row also carries
+                    # imagegen_backend="fal" — the model picker runs AFTER
+                    # _write_provider_config set use_gateway=True, so an
+                    # unconditional False here silently flipped managed
+                    # picks onto the user's personal FAL_KEY (same class
+                    # as fe63353cb, which fixed the plugin-provider path).
+                    img_cfg["use_gateway"] = bool(managed_feature)
         # STT providers prompt for model selection on reconfig too.
         if provider.get("stt_provider") and not managed_feature:
             _configure_stt_model(provider["stt_provider"], config)
@@ -4935,7 +5025,7 @@ def _reconfigure_provider(
     # Imagegen backends prompt for model selection on reconfig too.
     plugin_name = provider.get("image_gen_plugin_name")
     if plugin_name:
-        _select_plugin_image_gen_provider(plugin_name, config)
+        _select_plugin_image_gen_provider(plugin_name, config, use_gateway=bool(managed_feature))
         return
 
     # Plugin-registered video_gen provider — same flow, different registry.
@@ -4951,7 +5041,9 @@ def _reconfigure_provider(
             img_cfg = config.setdefault("image_gen", {})
             if isinstance(img_cfg, dict):
                 img_cfg["provider"] = "fal"
-                img_cfg["use_gateway"] = False
+                # Same managed-row guard as the no-env-vars branch above:
+                # never clobber a Nous-managed pick back onto direct keys.
+                img_cfg["use_gateway"] = bool(managed_feature)
 
     # STT providers prompt for model selection on reconfig too.
     if provider.get("stt_provider") and not managed_feature:
@@ -5531,6 +5623,27 @@ def _print_tools_list(enabled_toolsets: set, mcp_servers: dict, platform: str = 
                 _print_info(f"{srv_name}  {color('all tools enabled', Colors.DIM)}")
 
 
+def _known_tool_platforms() -> set[str]:
+    """Return built-in plus discovered plugin platform names.
+
+    Plugin platforms are registered at runtime rather than in the static CLI
+    display registry. Tool introspection/configuration must recognize those
+    names too, otherwise an active plugin platform cannot audit its authority.
+    """
+    known = set(PLATFORMS)
+    try:
+        from hermes_cli.plugins import discover_plugins
+        from gateway.platform_registry import platform_registry
+
+        discover_plugins()  # idempotent
+        known.update(platform_registry.registered_names())
+    except Exception:
+        # Plugin discovery is optional. Preserve the built-in CLI path when a
+        # third-party plugin is malformed or its dependencies are unavailable.
+        pass
+    return known
+
+
 def tools_disable_enable_command(args):
     """Enable, disable, or list tools for a platform.
 
@@ -5541,8 +5654,9 @@ def tools_disable_enable_command(args):
     platform = getattr(args, "platform", "cli")
     config = load_config()
 
-    if platform not in PLATFORMS:
-        _print_error(f"Unknown platform '{platform}'. Valid: {', '.join(PLATFORMS)}")
+    valid_platforms = _known_tool_platforms()
+    if platform not in valid_platforms:
+        _print_error(f"Unknown platform '{platform}'. Valid: {', '.join(sorted(valid_platforms))}")
         return
 
     if action == "list":
