@@ -1,4 +1,4 @@
-"""Tests for the QCR target-bound note schema (#2694)."""
+"""Tests for the QCR target-bound note schema + summary-reranking selector (#2694)."""
 
 from __future__ import annotations
 
@@ -13,6 +13,9 @@ from evolution_qcr import (  # noqa: E402
     QCR_FIELDS,
     QcrNote,
     build_qcr_note,
+    rank_notes_for_target,
+    score_note_for_target,
+    select_reusable_memory,
 )
 
 
@@ -60,3 +63,109 @@ def test_note_roundtrip_dict() -> None:
     d = note.to_dict()
     assert set(QCR_FIELDS) <= set(d)
     assert QcrNote.from_dict(d).to_dict() == d
+
+
+# ── increment 2: summary-reranking selector ──────────────────────────────────
+
+
+def _make_note(
+    task_type: str,
+    tools: list[str],
+    bindings: list[str] | None = None,
+    any_env: bool = True,
+) -> QcrNote:
+    """Fixture-style helper: a note with the requested task type / tools."""
+    return QcrNote(
+        workflow_invariant=f"Workflow is known to succeed for {task_type} tasks",
+        bindings_to_obtain=bindings or [f"{t}-target" for t in tools],
+        applicability_conditions=(
+            ["Applies to any environment with the standard toolset."]
+            if any_env
+            else ["Requires the same environment (terminal/browser) as the source run."]
+        ),
+        verification_guardrail="Re-run the verification step.",
+        source_task_type=task_type,
+        source_tools=list(tools),
+    )
+
+
+def test_score_prefers_task_type_match() -> None:
+    coding = _make_note("coding", ["read_file", "patch"])
+    research = _make_note("research", ["web_search", "web_extract"])
+    target_tools = ["read_file", "patch", "terminal"]
+
+    coding_score = score_note_for_target(coding, "coding", target_tools)
+    research_score = score_note_for_target(research, "coding", target_tools)
+
+    # Same tools available to both; only task-type match differs.
+    assert coding_score > research_score
+    assert coding_score >= 0.5  # task-type match alone clears the floor
+
+
+def test_score_penalizes_unresolvable_bindings() -> None:
+    note = _make_note("coding", ["read_file", "web_search"])
+    # Target lacks web_search -> binding cannot be re-resolved.
+    with_tools = score_note_for_target(note, "coding", ["read_file", "patch"])
+    without_tools = score_note_for_target(note, "coding", ["read_file", "web_search"])
+    assert with_tools < without_tools
+    # Overlap-only score must be below a fully-overlapping target.
+    full = score_note_for_target(note, "coding", ["read_file", "web_search", "patch"])
+    assert full > with_tools
+
+
+def test_score_penalizes_binding_count() -> None:
+    few = _make_note("coding", ["read_file"], bindings=["re-resolve file targets"])
+    many = _make_note(
+        "coding",
+        ["read_file"],
+        bindings=["a", "b", "c", "d", "e", "f", "g", "h"],
+    )
+    assert score_note_for_target(few, "coding", ["read_file"]) > score_note_for_target(
+        many, "coding", ["read_file"]
+    )
+
+
+def test_score_clamped_to_unit_interval() -> None:
+    best = _make_note("coding", ["read_file"], bindings=[])
+    score = score_note_for_target(best, "coding", ["read_file"])
+    assert 0.0 <= score <= 1.0
+    worst = _make_note("ops", ["web_search"], bindings=["x"] * 10)
+    low = score_note_for_target(worst, "coding", ["terminal"])
+    assert 0.0 <= low <= 1.0
+
+
+def test_rank_notes_best_first_deterministic() -> None:
+    coding = _make_note("coding", ["read_file"])
+    research = _make_note("research", ["web_search"])
+    notes = [research, coding]
+
+    ranked = rank_notes_for_target(notes, "coding", ["read_file", "patch"])
+    assert [n.source_task_type for _, n in ranked] == ["coding", "research"]
+    # Same input twice -> same output (deterministic).
+    assert ranked == rank_notes_for_target(notes, "coding", ["read_file", "patch"])
+
+
+def test_rank_accepts_dict_projections() -> None:
+    coding = _make_note("coding", ["read_file"]).to_dict()
+    ranked = rank_notes_for_target([coding], "coding", ["read_file"])
+    assert len(ranked) == 1
+    assert isinstance(ranked[0][1], QcrNote)
+    assert ranked[0][1].source_task_type == "coding"
+
+
+def test_select_reusable_memory_picks_best_above_floor() -> None:
+    coding = _make_note("coding", ["read_file"])
+    research = _make_note("research", ["web_search"])
+    picked = select_reusable_memory(
+        [research, coding], "coding", ["read_file", "patch"]
+    )
+    assert picked is not None
+    assert picked.source_task_type == "coding"
+
+
+def test_select_reusable_memory_none_below_floor() -> None:
+    research = _make_note("research", ["web_search"])
+    picked = select_reusable_memory(
+        [research], "coding", ["read_file", "patch"], min_score=0.5
+    )
+    assert picked is None

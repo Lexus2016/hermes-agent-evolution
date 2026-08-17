@@ -12,14 +12,16 @@ a deliberately simple **target-bound note** with four fields:
 
 This module adds the note schema and a deterministic builder that derives a
 note from a successful trajectory (the ``TrajectoryStore`` projection in
-``evolution_trajectory_store``). Pure functions, import-safe, deterministic,
-no LLM, no network. First coherent slice of #2694: schema + builder.
+``evolution_trajectory_store``), plus the summary-reranking selector that
+picks the reusable memory for a new target. Pure functions, import-safe,
+deterministic, no LLM, no network. Increments of #2694: schema + builder
+(increment 1, PR #2703); summary-reranking selector (increment 2).
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 #: The four QCR note fields, in canonical order.
 QCR_FIELDS: tuple = (
@@ -136,3 +138,83 @@ def build_qcr_note(
         source_task_type=task_type,
         source_tools=tools,
     )
+
+
+def _note_from(obj: Union[QcrNote, Dict[str, Any]]) -> QcrNote:
+    """Coerce a :class:`QcrNote` or its dict projection to a :class:`QcrNote`."""
+    if isinstance(obj, QcrNote):
+        return obj
+    return QcrNote.from_dict(obj)
+
+
+def score_note_for_target(
+    note: Union[QcrNote, Dict[str, Any]],
+    target_task_type: str = "",
+    target_tools: Optional[Sequence[str]] = None,
+) -> float:
+    """Deterministic reuse score (clamped 0.0–1.0) for one note vs a new target.
+
+    Summary-reranking signal (#2694 increment 2): prefer the note whose
+    workflow invariant still applies and whose bindings re-resolve cheaply
+    with the tools the target actually has. No LLM — pure arithmetic:
+
+    * ``+0.5`` task-type match; ``+0.3`` × source-tool overlap share;
+      ``−0.2`` per binding tool missing from the target (cap −0.6);
+      ``−0.05`` per binding to re-obtain; ``+0.1`` any-environment note.
+    """
+    n = _note_from(note)
+    target_tool_set = {t.lower() for t in (target_tools or [])}
+    src_tool_set = {t.lower() for t in n.source_tools}
+
+    score = 0.0
+    if target_task_type and n.source_task_type:
+        if target_task_type.lower() == n.source_task_type.lower():
+            score += 0.5
+
+    if target_tool_set and src_tool_set:
+        score += 0.3 * (len(src_tool_set & target_tool_set) / len(src_tool_set))
+        missing = src_tool_set - target_tool_set
+        score -= 0.2 * min(len(missing), 3)
+
+    score -= 0.05 * len(n.bindings_to_obtain)
+
+    conditions = " ".join(n.applicability_conditions).lower()
+    if "any environment" in conditions:
+        score += 0.1
+
+    return max(0.0, min(1.0, score))
+
+
+def rank_notes_for_target(
+    notes: Sequence[Union[QcrNote, Dict[str, Any]]],
+    target_task_type: str = "",
+    target_tools: Optional[Sequence[str]] = None,
+) -> List[Tuple[float, QcrNote]]:
+    """Rank candidate notes for a new target, best first.
+
+    Stable sort — ties keep input order, so the result is deterministic for
+    the same input list. Returns ``[(score, note), ...]``.
+    """
+    scored = [
+        (score_note_for_target(n, target_task_type, target_tools), _note_from(n))
+        for n in notes
+    ]
+    return sorted(scored, key=lambda pair: pair[0], reverse=True)
+
+
+def select_reusable_memory(
+    notes: Sequence[Union[QcrNote, Dict[str, Any]]],
+    target_task_type: str = "",
+    target_tools: Optional[Sequence[str]] = None,
+    min_score: float = 0.5,
+) -> Optional[QcrNote]:
+    """Pick the best reusable memory for a new target, or ``None`` below threshold.
+
+    ``min_score`` (default 0.5) is the floor: when no candidate reaches it the
+    caller should fall back to a fresh execution instead of forcing a
+    mismatched reuse (the QCR "does not apply" branch).
+    """
+    ranked = rank_notes_for_target(notes, target_task_type, target_tools)
+    if ranked and ranked[0][0] >= min_score:
+        return ranked[0][1]
+    return None
