@@ -38,6 +38,13 @@ except ImportError:  # pragma: no cover - exercised by the standalone-copy tests
     # being written.
     _HAS_STAGE_RESULT = False
 
+try:
+    from evolution.lib.telemetry_guard import validate_health_text
+
+    _HAS_TELEMETRY_GUARD = True
+except ImportError:  # pragma: no cover - standalone copy without the guard
+    _HAS_TELEMETRY_GUARD = False
+
 # Sidecar subdirectories to scan
 _SIDECAR_DIRS = ("issues", "introspection", "research")
 
@@ -137,6 +144,9 @@ def _read_calibration(evolution_dir: Path) -> dict:
     health_file = evolution_dir / "evolution-health.txt"
     if health_file.exists():
         text = health_file.read_text(encoding="utf-8")
+        # #2637: fail closed on tampered steering telemetry.
+        if _HAS_TELEMETRY_GUARD and not validate_health_text(text).safe:
+            text = ""
         for token in ("effort_budget=1.5", "effort_budget=1.5"):
             if token in text:
                 cal["effort_budget"] = 1.5
