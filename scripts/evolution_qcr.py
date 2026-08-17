@@ -233,34 +233,8 @@ _ENV_TOOL_ALIASES: Dict[str, str] = {
 }
 
 
-def notes_from_capture_dir(directory: Any) -> List[QcrNote]:
-    """Distill captured successful trajectories AS target-bound notes.
-
-    Reads the #1363 capture dir via ``TrajectoryStore`` — the note IS the
-    stored form of the trajectory, not an annotation beside the raw trace.
-    """
-    from evolution_trajectory_store import TrajectoryStore  # sibling import
-
-    store = TrajectoryStore.from_capture_dir(directory)
-    return [
-        build_qcr_note(rec, task_type=t)
-        for t in store.task_types()
-        for rec in store.by_type(t)
-    ]
-
-
-def persist_notes(notes: Sequence[Union[QcrNote, Dict[str, Any]]], store_path: Any) -> int:
-    """Append notes to the JSONL note store; returns the count written."""
-    path = Path(store_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as fh:
-        for n in notes:
-            fh.write(json.dumps(_note_from(n).to_dict(), sort_keys=True) + "\n")
-    return len(notes)
-
-
 def load_notes(store_path: Any) -> List[QcrNote]:
-    """Read the note store back (missing/unreadable/malformed → skip)."""
+    """Read the QCR note store (JSONL; missing/unreadable/malformed → skip)."""
     path = Path(store_path)
     if not path.is_file():
         return []

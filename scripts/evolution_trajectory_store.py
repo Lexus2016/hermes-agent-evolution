@@ -415,7 +415,6 @@ def main(argv: List[str]) -> int:
     # no live source (#1474).
     if path:
         store = TrajectoryStore.from_jsonl(path)
-        capture_dir = None
     else:
         capture_dir = _default_capture_dir()
         path = str(capture_dir)
@@ -440,16 +439,6 @@ def main(argv: List[str]) -> int:
         if prof:
             out = Path(prof) / "success-patterns-latest.json"
             out.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-            # QCR (#2694 increment 3): persist the indexed successful
-            # trajectories AS target-bound notes — the note store the replay
-            # path (reuse_for_target) selects + guardrail-checks against.
-            from evolution_qcr import notes_from_capture_dir, persist_notes
-
-            if capture_dir is not None:
-                persist_notes(
-                    notes_from_capture_dir(capture_dir),
-                    Path(prof) / "qcr-notes.jsonl",
-                )
     except Exception:  # pragma: no cover - environment dependent
         pass
     return 0

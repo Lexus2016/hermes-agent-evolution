@@ -16,8 +16,6 @@ from evolution_qcr import (  # noqa: E402
     build_qcr_note,
     check_reuse_guardrail,
     load_notes,
-    notes_from_capture_dir,
-    persist_notes,
     rank_notes_for_target,
     reuse_for_target,
     score_note_for_target,
@@ -177,32 +175,17 @@ def test_select_reusable_memory_none_below_floor() -> None:
     assert picked is None
 
 
-# -- increment 3: persistence + replay guardrail ------------------------------
+# -- increment 3: note store + replay guardrail -------------------------------
 
 
-def _capture(tmp_path, entries) -> None:
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    with open(tmp_path / "cap.jsonl", "a", encoding="utf-8") as fh:
-        for e in entries:
-            fh.write(json.dumps(e) + "\n")
-
-
-def test_notes_from_capture_dir_and_roundtrip(tmp_path) -> None:
-    _capture(tmp_path, [
-        {"completed": True, "entries": [{"tool": "read_file"}, {"tool": "patch"},
-                                        {"tool": "terminal"}]},
-        {"completed": False, "entries": [{"tool": "web_search"}]},
-    ])
-    notes = notes_from_capture_dir(tmp_path)
-    assert [n.source_task_type for n in notes] == ["coding"]
-    assert "read_file" in notes[0].bindings_to_obtain
-
+def test_load_notes_tolerant(tmp_path) -> None:
     store = tmp_path / "qcr-notes.jsonl"
-    assert persist_notes(notes, store) == 1
-    assert load_notes(store) == notes
-    assert load_notes(tmp_path / "missing.jsonl") == []
-    store.write_text("not json\n\n{bad}\n", encoding="utf-8")
-    assert load_notes(store) == []  # malformed lines skipped, never raise
+    assert load_notes(store) == []  # missing → empty
+    note = build_qcr_note({"tools": ["read_file", "patch"]}, "coding")
+    store.write_text(
+        json.dumps(note.to_dict()) + "\nnot json\n\n{bad}\n", encoding="utf-8"
+    )
+    assert load_notes(store) == [note]  # malformed lines skipped, never raise
 
 
 def test_guardrail_blocks_and_allows() -> None:
@@ -236,10 +219,13 @@ def test_guardrail_blocks_and_allows() -> None:
 
 def test_reuse_for_target_composed_path(tmp_path) -> None:
     store = tmp_path / "qcr-notes.jsonl"
-    persist_notes([
-        build_qcr_note({"tools": ["read_file", "patch"]}, "coding"),
-        build_qcr_note({"tools": ["web_search"]}, "research"),
-    ], store)
+    store.write_text(
+        json.dumps(build_qcr_note({"tools": ["read_file", "patch"]}, "coding").to_dict())
+        + "\n"
+        + json.dumps(build_qcr_note({"tools": ["web_search"]}, "research").to_dict())
+        + "\n",
+        encoding="utf-8",
+    )
     ok = reuse_for_target(store, target_task_type="coding",
                           target_tools=["read_file", "patch"])
     assert ok["reusable"] is True and ok["note"]["source_task_type"] == "coding"
