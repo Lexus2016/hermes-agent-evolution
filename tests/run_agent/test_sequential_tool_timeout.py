@@ -170,6 +170,13 @@ def test_sequential_tool_timeout_suppresses_late_terminal_event(tmp_path, monkey
     import hermes_cli.lifecycle as lifecycle
     import model_tools
 
+    # Fork: the deterministic tool-argument contract (#904) would reject the
+    # empty-args call against the REAL web_extract schema before the mocked
+    # dispatch runs — this test pins timeout mechanics, not arg validation.
+    monkeypatch.setattr(
+        "agent.tool_arg_contract.tool_arg_contract_enabled", lambda: False
+    )
+
     agent = _make_agent(tmp_path)
     release_first = threading.Event()
     first_returned = threading.Event()

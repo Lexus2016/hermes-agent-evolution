@@ -13369,6 +13369,34 @@ def main():
 
     sessions_subparsers.add_parser("stats", help="Show session store statistics")
 
+    # Fork: per-session spend with per-tool/per-subagent attribution.
+    sessions_cost = sessions_subparsers.add_parser(
+        "cost",
+        help="Show per-session spend plus per-tool and per-subagent cost breakdown",
+        description=(
+            "Per-session estimated spend with per-tool and per-subagent "
+            "(delegate) cost attribution. Reuses the same cost model as "
+            "'hermes insights' / /insights."
+        ),
+    )
+    sessions_cost.add_argument(
+        "--days", type=int, default=30, help="Number of days to analyze (default: 30)"
+    )
+    sessions_cost.add_argument(
+        "--source", help="Filter by platform (cli, telegram, subagent, etc.)"
+    )
+    sessions_cost.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Max per-session rows to show (0 for all; default: 20)",
+    )
+    sessions_cost.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the raw cost report as JSON instead of a table",
+    )
+
     sessions_rename = sessions_subparsers.add_parser(
         "rename", help="Set or change a session's title"
     )

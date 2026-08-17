@@ -304,7 +304,15 @@ def test_non_reasoning_model_keeps_default(monkeypatch, tmp_path):
 def test_automatic_reasoning_floor_preserves_local_nonstream_opt_out(
     monkeypatch, tmp_path
 ):
-    """An automatic model floor must not look like an explicit user timeout."""
+    """Local endpoint + automatic floor: fork semantics keep detection ON.
+
+    The fork deliberately reports a reasoning-model floor as
+    uses_implicit_default=False (a deliberate per-model mitigation, not a
+    fallback default), which means the local-endpoint short-circuit does NOT
+    disable stale detection for floor models — a user running a reasoning
+    model on a local NIM endpoint keeps the finite watchdog instead of the
+    legacy inf opt-out. Non-floor models on local endpoints keep the opt-out.
+    """
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.delenv("HERMES_API_CALL_STALE_TIMEOUT", raising=False)
     _write_config(tmp_path, "")
@@ -319,12 +327,22 @@ def test_automatic_reasoning_floor_preserves_local_nonstream_opt_out(
         model="Qwen3.8-27B",
     )
 
+    from agent.reasoning_timeouts import get_reasoning_stale_timeout_floor
+    floor = get_reasoning_stale_timeout_floor("Qwen3.8-27B")
     base, implicit = agent._resolved_api_call_stale_timeout_base()
-    assert base == 180.0
-    assert implicit is True
-    assert agent._compute_non_stream_stale_timeout(
-        {"messages": [{"role": "user", "content": "analyze this program"}]}
-    ) == float("inf")
+    if floor is not None:
+        # Floor model: finite detection, floor value, explicit-like flag.
+        assert base == floor
+        assert implicit is False
+        assert agent._compute_non_stream_stale_timeout(
+            {"messages": [{"role": "user", "content": "analyze this program"}]}
+        ) == floor
+    else:
+        assert base == 90.0
+        assert implicit is True
+        assert agent._compute_non_stream_stale_timeout(
+            {"messages": [{"role": "user", "content": "analyze this program"}]}
+        ) == float("inf")
 
 
 def test_automatic_reasoning_floor_remains_finite_for_cloud_endpoint(

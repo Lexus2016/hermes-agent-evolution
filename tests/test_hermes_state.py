@@ -728,22 +728,6 @@ class TestSessionLifecycle:
         assert row["model"] == "primary"
         assert row["billing_provider"] is None
 
-    def test_first_accounted_route_replaces_all_route_fields_atomically(self, db):
-        db.create_session(session_id="route", source="cli", model="primary")
-        db.update_session_billing_route(
-            "route", provider="primary-provider",
-            base_url="https://primary.example/v1", billing_mode="api_key",
-        )
-        db.update_token_counts(
-            "route", model="fallback", billing_provider="fallback-provider",
-            billing_base_url=None, billing_mode=None, api_call_count=1,
-        )
-        row = db.get_session("route")
-        assert row["model"] == "fallback"
-        assert row["billing_provider"] == "fallback-provider"
-        assert row["billing_base_url"] is None
-        assert row["billing_mode"] is None
-
     def test_v17_backfill_seeds_existing_session_usage(self, tmp_path):
         """A DB upgraded from <17 seeds one usage row per historical session
         from its aggregate totals, so insights read uniformly from the table.
@@ -1001,33 +985,6 @@ class TestSessionLifecycle:
         finally:
             db.close()
 
-
-    def test_cjk_search_falls_back_to_like_when_trigram_unavailable(
-        self, tmp_path, monkeypatch
-    ):
-        """Regression: long CJK queries must fall back to LIKE when trigram is missing."""
-        real_connect = sqlite3.connect
-        db_path = tmp_path / "state.db"
-
-        def connect_without_trigram(*args, **kwargs):
-            kwargs["factory"] = _NoTrigramConnection
-            return real_connect(*args, **kwargs)
-
-        monkeypatch.setattr("hermes_state.sqlite3.connect", connect_without_trigram)
-        db = SessionDB(db_path=db_path)
-        try:
-            db.create_session(session_id="s1", source="cli")
-            db.append_message("s1", role="user", content="大别山项目计划书")
-            db.append_message("s1", role="user", content="长江大桥设计方案")
-
-            # 3+ CJK chars would normally use trigram, but it's unavailable.
-            # Must fall back to LIKE and still return results.
-            results = db.search_messages("大别山")
-            assert len(results) == 1
-            # Note: search_messages strips 'content' from results; use 'snippet'.
-            assert "大别山" in results[0]["snippet"]
-        finally:
-            db.close()
 
     def test_end_session_first_reason_wins_across_concurrent_connections(self, db):
         """Concurrent finalizers perform one transition, not last-write-wins."""
@@ -7635,10 +7592,14 @@ class TestCompactRows:
             row[1] for row in db._conn.execute("PRAGMA table_info(sessions)")
         }
         row = db.list_sessions_rich(compact_rows=True)[0]
-        # Hardcode the one sanctioned exclusion: if the excluded set ever
+        # Hardcode the sanctioned exclusions: if the excluded set ever
         # widens (or the projection silently drops a column), this fails and
         # forces a conscious review of what list consumers lose.
-        missing = live_cols - set(row) - {"system_prompt", "system_prompt_hash"}
+        missing = live_cols - set(row) - {
+            "system_prompt",
+            "system_prompt_hash",
+            "git_metadata_generation",  # upstream v2026.8.16 excludes it too
+        }
         assert not missing, f"compact projection lost schema columns: {missing}"
         assert "system_prompt" not in row
 

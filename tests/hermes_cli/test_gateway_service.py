@@ -240,10 +240,19 @@ class TestSystemdServiceRefresh:
 
         monkeypatch.setattr("gateway.run.start_gateway", fake_start_gateway)
 
+        # Upstream's run_gateway ends with a hard os._exit (wedge-proof
+        # teardown) — stub it or the test runner process dies with the test.
+        exit_codes = []
+        monkeypatch.setattr(
+            "gateway.run._exit_after_graceful_shutdown",
+            lambda code: exit_codes.append(code),
+        )
+
         gateway_cli.run_gateway()
 
         assert unit_path.read_text(encoding="utf-8") == "new unit\n"
         assert ["systemctl", "--user", "daemon-reload"] in calls
+        assert exit_codes == [0]
 
     def test_refresh_refuses_to_bake_pytest_tmpdir_into_real_user_unit(
         self, tmp_path, monkeypatch

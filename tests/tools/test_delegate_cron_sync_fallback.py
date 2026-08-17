@@ -94,7 +94,12 @@ def test_cron_sync_fallback_returns_and_spawns_no_review_fork(monkeypatch):
     background-review fork (``fork_constructed`` fires).  With the
     ``_delegate_depth`` guard the fork is never built, removing the wedge site
     entirely, and ``delegate_task`` returns the child's result promptly.
+
+    Fork note: shallow-result auto-retry is disabled for this test — the mock
+    child legitimately completes with a narration-only summary, and this test
+    exercises the delivery path, not the shallow-result heuristic.
     """
+    monkeypatch.setattr("tools.delegate_tool._get_shallow_retry_budget", lambda: 0)
     fork_spawned = threading.Event()
     release_fork = threading.Event()
 
@@ -163,7 +168,12 @@ def test_cron_sync_fallback_returns_and_spawns_no_review_fork(monkeypatch):
         results = parsed["results"]
         assert len(results) == 1
         assert results[0]["status"] == "completed"
-        assert results[0]["summary"] == "child work done"
+        # Fork semantics (#102 shallow-delegation annotator): a zero-tool-call
+        # child gets the SHALLOW DELEGATION warning PREPENDED to its summary.
+        # The delivery contract under test is that the child's own output is
+        # returned verbatim in the summary body, not the raw summary shape.
+        assert results[0]["shallow_result"] is True
+        assert results[0]["summary"].endswith("child work done")
 
         # 2) The wedge site must not exist at all: a delegated child
         #    (_delegate_depth > 0) must never spawn the automatic background
