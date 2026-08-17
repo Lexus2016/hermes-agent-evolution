@@ -20,10 +20,9 @@ These tests pin the floor's behavior:
    ``run_agent.py:AIAgent._resolved_api_call_stale_timeout_base``
    consults the floor at priority 4 (after explicit user config,
    provider config, and env var; before the 90s default), and
-   returns ``uses_implicit_default=False`` so the local-endpoint
-   short-circuit in ``_compute_non_stream_stale_timeout`` does not
-   disable stale detection for a reasoning model running on a local
-   NIM endpoint.
+   keeps it implicit so the local-endpoint short-circuit in
+   ``_compute_non_stream_stale_timeout`` remains active. Explicitly configured
+   local timeouts and cloud reasoning-model floors remain finite.
 3. The stream stale-timeout resolution (mirrored here as in
    ``test_stream_read_timeout_floor.py`` because the real builder
    lives inside a worker thread) consults the floor after the
@@ -300,6 +299,90 @@ def test_non_reasoning_model_keeps_default(monkeypatch, tmp_path):
     base, implicit = agent._resolved_api_call_stale_timeout_base()
     assert base == 90.0
     assert implicit is True
+
+
+def test_automatic_reasoning_floor_preserves_local_nonstream_opt_out(
+    monkeypatch, tmp_path
+):
+    """Local endpoint + automatic floor: fork semantics keep detection ON.
+
+    The fork deliberately reports a reasoning-model floor as
+    uses_implicit_default=False (a deliberate per-model mitigation, not a
+    fallback default), which means the local-endpoint short-circuit does NOT
+    disable stale detection for floor models — a user running a reasoning
+    model on a local NIM endpoint keeps the finite watchdog instead of the
+    legacy inf opt-out. Non-floor models on local endpoints keep the opt-out.
+    """
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.delenv("HERMES_API_CALL_STALE_TIMEOUT", raising=False)
+    _write_config(tmp_path, "")
+
+    import run_agent
+    monkeypatch.setattr(run_agent, "get_provider_stale_timeout", lambda *a, **k: None)
+
+    agent = _make_agent(
+        tmp_path,
+        provider="openai-api",
+        base_url="http://localhost:5001/v1",
+        model="Qwen3.8-27B",
+    )
+
+    from agent.reasoning_timeouts import get_reasoning_stale_timeout_floor
+    floor = get_reasoning_stale_timeout_floor("Qwen3.8-27B")
+    base, implicit = agent._resolved_api_call_stale_timeout_base()
+    if floor is not None:
+        # Floor model: finite detection, floor value, explicit-like flag.
+        assert base == floor
+        assert implicit is False
+        assert agent._compute_non_stream_stale_timeout(
+            {"messages": [{"role": "user", "content": "analyze this program"}]}
+        ) == floor
+    else:
+        assert base == 90.0
+        assert implicit is True
+        assert agent._compute_non_stream_stale_timeout(
+            {"messages": [{"role": "user", "content": "analyze this program"}]}
+        ) == float("inf")
+
+
+def test_automatic_reasoning_floor_remains_finite_for_cloud_endpoint(
+    monkeypatch, tmp_path
+):
+    """The local opt-out must not disable the same floor for hosted models."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.delenv("HERMES_API_CALL_STALE_TIMEOUT", raising=False)
+    _write_config(tmp_path, "")
+
+    import run_agent
+    monkeypatch.setattr(run_agent, "get_provider_stale_timeout", lambda *a, **k: None)
+
+    agent = _make_agent(
+        tmp_path,
+        provider="openai-api",
+        base_url="https://models.example.com/v1",
+        model="Qwen3.8-27B",
+    )
+
+    assert agent._compute_non_stream_stale_timeout({"messages": []}) == 180.0
+
+
+def test_explicit_local_reasoning_timeout_remains_finite(monkeypatch, tmp_path):
+    """A user-configured local timeout must continue to override the opt-out."""
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.delenv("HERMES_API_CALL_STALE_TIMEOUT", raising=False)
+    _write_config(tmp_path, "")
+
+    import run_agent
+    monkeypatch.setattr(run_agent, "get_provider_stale_timeout", lambda *a, **k: 420.0)
+
+    agent = _make_agent(
+        tmp_path,
+        provider="openai-api",
+        base_url="http://localhost:5001/v1",
+        model="Qwen3.8-27B",
+    )
+
+    assert agent._compute_non_stream_stale_timeout({"messages": []}) == 420.0
 
 
 # ── stream-side mirror (the real builder lives in a worker thread) ────────

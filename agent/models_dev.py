@@ -464,9 +464,7 @@ def _commit_registry(data: Dict[str, Any], *, etag: str = "", where: str) -> Non
     immediately after a successful ``force_refresh``).
     """
     global _models_dev_cache, _models_dev_cache_time, _models_dev_retry_after
-    _save_disk_cache(data)
-    if etag:
-        _save_etag(etag)
+    _save_disk_cache(data, etag)
     _models_dev_cache = data
     _models_dev_cache_time = time.time()
     _models_dev_retry_after = 0

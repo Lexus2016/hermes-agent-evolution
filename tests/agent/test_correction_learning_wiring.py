@@ -282,7 +282,7 @@ def test_spawn_threads_block_flag_into_review(monkeypatch):
 
     captured = {}
 
-    def _fake_run(agent, messages_snapshot, prompt, block_durable_writes=False):
+    def _fake_run(agent, messages_snapshot, prompt, block_durable_writes=False, **_kw):
         captured["block"] = block_durable_writes
 
     monkeypatch.setattr(br, "_run_review_in_thread", _fake_run)
