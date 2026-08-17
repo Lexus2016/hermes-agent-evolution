@@ -2552,9 +2552,23 @@ class TestEnsureUserSystemdEnv:
 
         assert os.environ["DBUS_SESSION_BUS_ADDRESS"] == f"unix:path={bus_socket}"
 
-    def test_preserves_existing_env_vars(self, monkeypatch):
+    def test_preserves_existing_env_vars(self, tmp_path, monkeypatch):
+        """An OWNED custom XDG_RUNTIME_DIR is preserved (#86558 semantics).
+
+        An unowned/unreadable dir would be replaced by /run/user/<uid>; the
+        preserve contract only holds when stat says the dir is ours — fake
+        that so the assertion tests preservation, not CI uid luck.
+        """
         monkeypatch.setenv("XDG_RUNTIME_DIR", "/custom/runtime")
         monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/custom/bus")
+        _orig_stat = gateway_cli.Path.stat
+        monkeypatch.setattr(
+            gateway_cli.Path,
+            "stat",
+            lambda self, **kw: SimpleNamespace(st_uid=os.getuid())
+            if str(self) == "/custom/runtime"
+            else _orig_stat(self, **kw),
+        )
 
         gateway_cli._ensure_user_systemd_env()
 

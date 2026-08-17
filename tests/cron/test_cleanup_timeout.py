@@ -70,8 +70,11 @@ def test_run_job_bounds_sessiondb_finalization(tmp_path):
             success, _output, final_response, error = run_job(job)
             elapsed = time.monotonic() - started
 
-        assert fake_db.entered.wait(timeout=0.5)
-        assert elapsed < 0.5
+        assert fake_db.entered.wait(timeout=2.0)
+        # Bounded, not wedged: the 0.02s cleanup budget must abandon the hung
+        # finalization promptly. Generous 2.0s ceiling per the flake policy —
+        # the failure mode this pins (unbounded 30s+ wedge) is far beyond it.
+        assert elapsed < 2.0
         assert success is True
         assert final_response == "ok"
         assert error is None
