@@ -29,7 +29,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -56,7 +56,10 @@ def _mtime(path: Path) -> float:
 
 
 def _today() -> str:
-    return datetime.now().date().isoformat()
+    # Derive the gate date from UTC, not the naive local clock (#2664): in
+    # UTC+ timezones a local date drift near midnight fired spurious wakes /
+    # mislabeled the gate day.
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 def _today_paths(evo_dir: Path, stage: str, ext: str = ".json") -> Tuple[Path, Path]:
@@ -296,7 +299,6 @@ def _check_pool(evo_dir: Path) -> Dict[str, bool]:
         ("introspection", "analysis"),  # new patterns → need analysis
         ("analysis", "implementation"),  # new selections → need impl
         ("implementation", "integration"),  # new PRs → need merge
-        ("integration", "upstream-sync"),  # new merges → need sync
     ]
 
     results: Dict[str, bool] = {}
@@ -323,7 +325,6 @@ def _has_work(evo_dir: Path) -> Tuple[bool, str]:
         "introspection→analysis": "introspection",
         "analysis→implementation": "analysis",
         "implementation→integration": "implementation",
-        "integration→upstream-sync": "integration",
     }
     fresh_pairs = []
     suppressed = []

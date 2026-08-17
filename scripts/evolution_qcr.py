@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""Query-conditioned trajectory reuse (QCR) — target-bound note schema (#2694).
+
+arXiv:2608.12847 isolates the post-retrieval reuse step as the bottleneck for
+long-horizon trajectory memory. Instead of injecting a raw trace, QCR delivers
+a deliberately simple **target-bound note** with four fields:
+
+1. ``workflow_invariant`` — what must stay true for the approach to apply,
+2. ``bindings_to_obtain`` — values that must be re-resolved against the target,
+3. ``applicability_conditions`` — when the memory applies / when it does not,
+4. ``verification_guardrail`` — what must be checked before trusting the outcome.
+
+This module adds the note schema and a deterministic builder that derives a
+note from a successful trajectory (the ``TrajectoryStore`` projection in
+``evolution_trajectory_store``), plus the summary-reranking selector that
+picks the reusable memory for a new target. Pure functions, import-safe,
+deterministic, no LLM, no network. Increments of #2694: schema + builder
+(increment 1, PR #2703); summary-reranking selector (increment 2).
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+
+#: The four QCR note fields, in canonical order.
+QCR_FIELDS: tuple = (
+    "workflow_invariant",
+    "bindings_to_obtain",
+    "applicability_conditions",
+    "verification_guardrail",
+)
+
+#: Tools that read/search external state whose targets must be re-resolved
+#: against a new target (bindings).
+_BINDING_TOOLS = frozenset({
+    "read_file",
+    "search_files",
+    "web_search",
+    "web_extract",
+    "browser_navigate",
+})
+
+#: Tools that mutate/execute and therefore require a verification step.
+_VERIFY_TOOLS = frozenset({
+    "terminal",
+    "execute_code",
+    "patch",
+    "write_file",
+    "browser_navigate",
+})
+
+#: Tools that imply the workflow is environment-specific.
+_ENV_TOOLS = frozenset({"terminal", "browser_navigate", "docker", "ssh"})
+
+
+@dataclass
+class QcrNote:
+    """A target-bound note distilled from a successful trajectory."""
+
+    workflow_invariant: str = ""
+    bindings_to_obtain: List[str] = field(default_factory=list)
+    applicability_conditions: List[str] = field(default_factory=list)
+    verification_guardrail: str = ""
+    source_task_type: str = ""
+    source_tools: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "QcrNote":
+        return cls(
+            workflow_invariant=str(d.get("workflow_invariant", "")),
+            bindings_to_obtain=list(d.get("bindings_to_obtain", []) or []),
+            applicability_conditions=list(d.get("applicability_conditions", []) or []),
+            verification_guardrail=str(d.get("verification_guardrail", "")),
+            source_task_type=str(d.get("source_task_type", "")),
+            source_tools=list(d.get("source_tools", []) or []),
+        )
+
+
+def _tool_names(record: Dict[str, Any]) -> List[str]:
+    tools = record.get("tools") or []
+    if isinstance(tools, (list, tuple, set, frozenset)):
+        return [str(t) for t in tools]
+    return []
+
+
+def build_qcr_note(
+    record: Dict[str, Any],
+    task_type: str = "",
+) -> QcrNote:
+    """Derive a target-bound note from a successful trajectory record.
+
+    ``record`` is a ``TrajectoryStore`` projection (``{"tools": [...], ...}``).
+    Deterministic: the same record always yields the same note. The four
+    fields are derived from the tool set: the task type becomes the workflow
+    invariant; read/search tools become bindings to re-resolve; env-dependent
+    tools make applicability conditional; mutating/executing tools require a
+    verification guardrail.
+    """
+    tools = _tool_names(record)
+    tool_set = {t.lower() for t in tools}
+
+    invariant = (
+        f"Workflow is known to succeed for {task_type or 'general'} tasks; "
+        "reuse only when the new target is of the same task type."
+    )
+
+    bindings = sorted(t for t in tools if t.lower() in _BINDING_TOOLS)
+    if not bindings:
+        bindings = ["re-resolve any file/URL/entity targets against the current task"]
+
+    conditions: List[str] = []
+    if tool_set & _ENV_TOOLS:
+        conditions.append(
+            "Requires the same environment (terminal/browser) as the source run."
+        )
+    if not conditions:
+        conditions.append("Applies to any environment with the standard toolset.")
+
+    guardrail = (
+        "Before trusting the outcome, verify the final artifact exists and "
+        "matches the task's success criteria."
+    )
+    if tool_set & _VERIFY_TOOLS:
+        guardrail += (
+            " Re-run the verification step (tests/exit code) since the workflow "
+            "mutates or executes."
+        )
+
+    return QcrNote(
+        workflow_invariant=invariant,
+        bindings_to_obtain=bindings,
+        applicability_conditions=conditions,
+        verification_guardrail=guardrail,
+        source_task_type=task_type,
+        source_tools=tools,
+    )
+
+
+def _note_from(obj: Union[QcrNote, Dict[str, Any]]) -> QcrNote:
+    """Coerce a :class:`QcrNote` or its dict projection to a :class:`QcrNote`."""
+    if isinstance(obj, QcrNote):
+        return obj
+    return QcrNote.from_dict(obj)
+
+
+def score_note_for_target(
+    note: Union[QcrNote, Dict[str, Any]],
+    target_task_type: str = "",
+    target_tools: Optional[Sequence[str]] = None,
+) -> float:
+    """Deterministic reuse score (clamped 0.0–1.0) for one note vs a new target.
+
+    Summary-reranking signal (#2694 increment 2): prefer the note whose
+    workflow invariant still applies and whose bindings re-resolve cheaply
+    with the tools the target actually has. No LLM — pure arithmetic:
+
+    * ``+0.5`` task-type match; ``+0.3`` × source-tool overlap share;
+      ``−0.2`` per binding tool missing from the target (cap −0.6);
+      ``−0.05`` per binding to re-obtain; ``+0.1`` any-environment note.
+    """
+    n = _note_from(note)
+    target_tool_set = {t.lower() for t in (target_tools or [])}
+    src_tool_set = {t.lower() for t in n.source_tools}
+
+    score = 0.0
+    if target_task_type and n.source_task_type:
+        if target_task_type.lower() == n.source_task_type.lower():
+            score += 0.5
+
+    if target_tool_set and src_tool_set:
+        score += 0.3 * (len(src_tool_set & target_tool_set) / len(src_tool_set))
+        missing = src_tool_set - target_tool_set
+        score -= 0.2 * min(len(missing), 3)
+
+    score -= 0.05 * len(n.bindings_to_obtain)
+
+    conditions = " ".join(n.applicability_conditions).lower()
+    if "any environment" in conditions:
+        score += 0.1
+
+    return max(0.0, min(1.0, score))
+
+
+def rank_notes_for_target(
+    notes: Sequence[Union[QcrNote, Dict[str, Any]]],
+    target_task_type: str = "",
+    target_tools: Optional[Sequence[str]] = None,
+) -> List[Tuple[float, QcrNote]]:
+    """Rank candidate notes for a new target, best first.
+
+    Stable sort — ties keep input order, so the result is deterministic for
+    the same input list. Returns ``[(score, note), ...]``.
+    """
+    scored = [
+        (score_note_for_target(n, target_task_type, target_tools), _note_from(n))
+        for n in notes
+    ]
+    return sorted(scored, key=lambda pair: pair[0], reverse=True)
+
+
+def select_reusable_memory(
+    notes: Sequence[Union[QcrNote, Dict[str, Any]]],
+    target_task_type: str = "",
+    target_tools: Optional[Sequence[str]] = None,
+    min_score: float = 0.5,
+) -> Optional[QcrNote]:
+    """Pick the best reusable memory for a new target, or ``None`` below threshold.
+
+    ``min_score`` (default 0.5) is the floor: when no candidate reaches it the
+    caller should fall back to a fresh execution instead of forcing a
+    mismatched reuse (the QCR "does not apply" branch).
+    """
+    ranked = rank_notes_for_target(notes, target_task_type, target_tools)
+    if ranked and ranked[0][0] >= min_score:
+        return ranked[0][1]
+    return None

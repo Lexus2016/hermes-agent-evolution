@@ -18,7 +18,10 @@ from evolution_rubric_judge import (  # noqa: E402
     CLAIM_VERDICTS,
     StrictRubricJudgeGrader,
     _markdown_sections,
+    assess_stat_validity,
+    assess_stat_validity_claims,
     compute_claim_score,
+    compute_stat_validity_stats,
     detect_rejection_bias,
     extract_claims,
     triage_claim,
@@ -195,3 +198,71 @@ def test_strict_grader_rejection_bias_flag(tmp_path: Path) -> None:
     assert scorecard["rejection_bias_flag"] is True
     assert len(scorecard["rejection_bias"]) >= 1
     assert any("REJECTION_BIAS" in flag for flag in scorecard["flags"])
+
+
+# ── Statistical-validity gate (#2696, P-Bench lesson) ────────────────
+
+GROUNDED_CLAIM = (
+    "Compared to the previous run, latency fell from 220ms to 140ms "
+    "(t-test, p < 0.01, n=40). Source: https://example.com/bench"
+)
+
+WRONG_BUT_FLUENT = [
+    (
+        "The new retry policy significantly improved success (p = 0.031).",
+        "pvalue-without-method",
+    ),
+    (
+        "Adopting the parallel compactor improved merge latency by 52.7%.",
+        "missing-baseline",
+    ),
+    (
+        "Prefetching correlated with 12% lower latency, caused by better cache use.",
+        "causal-from-correlation",
+    ),
+    # Weak qualifier precedes the decisive verb — order must not matter.
+    ("Preliminary results prove a 40% cost reduction.", "decisive-from-weak"),
+]
+
+
+@pytest.mark.parametrize("claim_text,expected_flag", WRONG_BUT_FLUENT)
+def test_stat_validity_wrong_but_fluent_flagged(
+    claim_text: str, expected_flag: str
+) -> None:
+    verdict = assess_stat_validity({"claim": claim_text})["stat_validity"]
+    assert verdict["verdict"] == "suspect"
+    assert expected_flag in verdict["flags"]
+
+
+def test_stat_validity_grounded_claim_passes() -> None:
+    verdict = assess_stat_validity({
+        "claim": GROUNDED_CLAIM,
+        "evidence_url": "https://example.com/bench",
+    })["stat_validity"]
+    assert verdict == {"verdict": "ok", "flags": []}
+
+
+def test_stat_validity_batch_and_stats() -> None:
+    claims = assess_stat_validity_claims([
+        {"claim": "p = 0.031, no method named."},
+        {"claim": GROUNDED_CLAIM},
+        {"claim": "This enables broad improvements."},
+    ])
+    assert all("stat_validity" in c for c in claims)
+    assert any(c["stat_validity"]["verdict"] == "non-quantitative" for c in claims)
+    assert compute_stat_validity_stats(claims) == {"checked": 2, "suspect": 1}
+
+
+def test_strict_grader_surfaces_stat_validity(tmp_path: Path) -> None:
+    res_dir = tmp_path / "research"
+    res_dir.mkdir(parents=True, exist_ok=True)
+    (res_dir / "2026-06-23.md").write_text(
+        "# Finding\nPreliminary results prove a 40% cost reduction.\n",
+        encoding="utf-8",
+    )
+    scorecard = StrictRubricJudgeGrader().score("2026-06-23", tmp_path)
+    assert scorecard["stat_validity"]["checked"] >= 1
+    assert scorecard["stat_validity"]["suspect"] >= 1
+    assert any("STAT_VALIDITY" in flag for flag in scorecard["flags"])
+    for c in scorecard["claims"]:
+        assert "stat_validity" in c
