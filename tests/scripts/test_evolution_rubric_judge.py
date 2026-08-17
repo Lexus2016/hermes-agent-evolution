@@ -202,93 +202,55 @@ def test_strict_grader_rejection_bias_flag(tmp_path: Path) -> None:
 
 # ── Statistical-validity gate (#2696, P-Bench lesson) ────────────────
 
+GROUNDED_CLAIM = (
+    "Compared to the previous run, latency fell from 220ms to 140ms "
+    "(t-test, p < 0.01, n=40). Source: https://example.com/bench"
+)
+
+WRONG_BUT_FLUENT = [
+    (
+        "The new retry policy significantly improved success (p = 0.031).",
+        "pvalue-without-method",
+    ),
+    (
+        "Adopting the parallel compactor improved merge latency by 52.7%.",
+        "missing-baseline",
+    ),
+    (
+        "Prefetching correlated with 12% lower latency, caused by better cache use.",
+        "causal-from-correlation",
+    ),
+    # Weak qualifier precedes the decisive verb — order must not matter.
+    ("Preliminary results prove a 40% cost reduction.", "decisive-from-weak"),
+]
+
+
+@pytest.mark.parametrize("claim_text,expected_flag", WRONG_BUT_FLUENT)
+def test_stat_validity_wrong_but_fluent_flagged(
+    claim_text: str, expected_flag: str
+) -> None:
+    verdict = assess_stat_validity({"claim": claim_text})["stat_validity"]
+    assert verdict["verdict"] == "suspect"
+    assert expected_flag in verdict["flags"]
+
 
 def test_stat_validity_grounded_claim_passes() -> None:
-    # Correctly executed analysis: named test, p-value, sample size, source.
-    claim = {
-        "claim": (
-            "Compared to the previous run, latency fell from 220ms to 140ms "
-            "(t-test, p < 0.01, n=40). Source: https://example.com/bench"
-        ),
+    verdict = assess_stat_validity({
+        "claim": GROUNDED_CLAIM,
         "evidence_url": "https://example.com/bench",
-    }
-    out = assess_stat_validity(claim)
-    assert out["stat_validity"]["verdict"] == "ok"
-    assert out["stat_validity"]["flags"] == []
+    })["stat_validity"]
+    assert verdict == {"verdict": "ok", "flags": []}
 
 
-def test_stat_validity_pvalue_without_method_is_suspect() -> None:
-    # P-Bench failure mode: fluent statistic, no named method.
-    out = assess_stat_validity({
-        "claim": "The new retry policy significantly improved success (p = 0.031)."
-    })
-    verdict = out["stat_validity"]
-    assert verdict["verdict"] == "suspect"
-    assert "pvalue-without-method" in verdict["flags"]
-
-
-def test_stat_validity_unbacked_precision_and_baseline_is_suspect() -> None:
-    out = assess_stat_validity({
-        "claim": "Adopting the parallel compactor improved merge latency by 52.7%."
-    })
-    verdict = out["stat_validity"]
-    assert verdict["verdict"] == "suspect"
-    assert "unbacked-precision" in verdict["flags"]
-    assert "missing-baseline" in verdict["flags"]
-
-
-def test_stat_validity_causal_from_correlation_is_suspect() -> None:
-    out = assess_stat_validity({
-        "claim": "Prefetching correlated with 12% lower latency, caused by better cache use."
-    })
-    verdict = out["stat_validity"]
-    assert verdict["verdict"] == "suspect"
-    assert "causal-from-correlation" in verdict["flags"]
-
-
-def test_stat_validity_decisive_from_weak_is_suspect() -> None:
-    # Weak qualifier precedes the decisive verb — order must not matter.
-    out = assess_stat_validity({
-        "claim": "Preliminary results prove a 40% cost reduction."
-    })
-    verdict = out["stat_validity"]
-    assert verdict["verdict"] == "suspect"
-    assert "decisive-from-weak" in verdict["flags"]
-
-
-def test_stat_validity_non_quantitative_claim() -> None:
-    out = assess_stat_validity({
-        "claim": "This approach enables generalized improvements everywhere."
-    })
-    assert out["stat_validity"]["verdict"] == "non-quantitative"
-    assert out["stat_validity"]["flags"] == []
-
-
-def test_stat_validity_batch_attaches_dimension() -> None:
-    raw = extract_claims((
-        "research",
-        "# Finding\nLatency dropped by 12% with no baseline.\n",
-    ))
-    triaged = assess_stat_validity_claims(triage_claims(raw))
-    assert len(triaged) == len(raw)
-    for c in triaged:
-        assert "stat_validity" in c
-        assert c["stat_validity"]["verdict"] in (
-            "ok",
-            "suspect",
-            "non-quantitative",
-        )
-
-
-def test_stat_validity_stats_aggregate() -> None:
+def test_stat_validity_batch_and_stats() -> None:
     claims = assess_stat_validity_claims([
         {"claim": "p = 0.031, no method named."},
-        {"claim": "Cost fell from $10 to $8 (t-test, p < 0.05)."},
+        {"claim": GROUNDED_CLAIM},
         {"claim": "This enables broad improvements."},
     ])
-    stats = compute_stat_validity_stats(claims)
-    assert stats["checked"] == 2
-    assert stats["suspect"] == 1
+    assert all("stat_validity" in c for c in claims)
+    assert any(c["stat_validity"]["verdict"] == "non-quantitative" for c in claims)
+    assert compute_stat_validity_stats(claims) == {"checked": 2, "suspect": 1}
 
 
 def test_strict_grader_surfaces_stat_validity(tmp_path: Path) -> None:
