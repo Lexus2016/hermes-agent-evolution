@@ -664,7 +664,65 @@ def _empty_record() -> Dict[str, Any]:
         # Provisional→trusted lifecycle (#2256)
         "trust_state": "provisional",
         "consecutive_successes": 0,
+        # Instruction provenance — structured rationale (#2629).
+        # A skill must carry the *why* behind its creation (failure that
+        # triggered it, hypothesis, observed outcome) so the curator can
+        # flag it when the rationale has decayed after the skill evolved.
+        # ``rationale_generation`` is the patch_generation at which the
+        # rationale was last (re)captured; decay = patch_generation has
+        # advanced beyond it without a rationale refresh.
+        "rationale": None,
+        "rationale_generation": 0,
     }
+
+
+def set_rationale(
+    skill_name: str,
+    rationale: str,
+    *,
+    failure: str = "",
+    hypothesis: str = "",
+    outcome: str = "",
+) -> None:
+    """Persist a structured rationale block for a skill (#2629).
+
+    The block records the *why* behind a skill/instruction so it can be
+    evaluated for decay later. ``rationale`` is the freeform narrative;
+    the structured ``failure``/``hypothesis``/``outcome`` fields let callers
+    encode the paper's three-part model explicitly. Called from the
+    skill_manage create path. Best-effort: never breaks the tool call.
+    """
+    narrative = (rationale or "").strip()[:1000]
+    block = {
+        "failure": (failure or "").strip()[:1000],
+        "hypothesis": (hypothesis or "").strip()[:1000],
+        "outcome": (outcome or "").strip()[:1000],
+        "why": narrative,
+    }
+
+    def _apply(rec: Dict[str, Any]) -> None:
+        rec["rationale"] = block
+        rec["rationale_generation"] = _non_negative_int(rec.get("patch_generation"))
+
+    _mutate(skill_name, _apply)
+
+
+def rationale_decayed(record: Dict[str, Any], *, generations_gap: int = 1) -> bool:
+    """Whether a skill's rationale is missing or has decayed (#2629).
+
+    Decay model (arXiv:2608.11095 "catastrophic remembering"): a rationale
+    captured at generation G is *stale* once the skill has been patched
+    ``generations_gap`` or more times since. A missing rationale is decayed
+    by definition — an instruction with no recorded *why* is the failure mode
+    the paper identifies as the source of unbounded prompt growth.
+    """
+    if not isinstance(record, dict):
+        return True
+    if not record.get("rationale"):
+        return True
+    patch_gen = _non_negative_int(record.get("patch_generation"))
+    rationale_gen = _non_negative_int(record.get("rationale_generation"))
+    return (patch_gen - rationale_gen) >= generations_gap
 
 
 def load_usage() -> Dict[str, Dict[str, Any]]:

@@ -160,6 +160,21 @@ def _span_attrs(ev: Dict[str, Any]) -> Dict[str, Any]:
                 except Exception:
                     v = "[redaction-unavailable]"
             attrs[f"hermes.{col}"] = v
+    # Per-action cost attribution: surface numeric token/latency/cost usage and
+    # cost-anomaly signals (redundant calls, retry loops) on the span. Both are
+    # content-free and fail-closed (return {} on any error), preserving the
+    # no-content, never-block invariant.
+    try:
+        from agent.monitoring.cost_attribution import (
+            anomaly_attributes,
+            cost_attributes,
+            detect_cost_anomaly,
+        )
+
+        attrs.update(cost_attributes(ev))
+        attrs.update(anomaly_attributes(detect_cost_anomaly(ev)))
+    except Exception:
+        pass
     return attrs
 
 
