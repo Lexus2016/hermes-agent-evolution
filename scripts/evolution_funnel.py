@@ -29,6 +29,13 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+try:
+    from evolution.lib.telemetry_guard import validate_metrics_record
+
+    _HAS_TELEMETRY_GUARD = True
+except ImportError:  # pragma: no cover - standalone copy without the guard
+    _HAS_TELEMETRY_GUARD = False
+
 
 def _load_json(path: Path) -> Any | None:
     try:
@@ -200,7 +207,9 @@ def append_funnel(metrics_file: Path, record: Dict[str, Any]) -> None:
 
 def load_records(metrics_file: Path) -> list[Dict[str, Any]]:
     """Read all funnel records (one JSON object per line), oldest-first,
-    skipping blank/malformed lines."""
+    skipping blank/malformed lines. Tampered records (#2673) that fail the
+    telemetry integrity check are REJECTED, never silently consumed — they
+    must not steer selection."""
     out: list[Dict[str, Any]] = []
     if not metrics_file.exists():
         return out
@@ -212,8 +221,12 @@ def load_records(metrics_file: Path) -> list[Dict[str, Any]]:
             obj = json.loads(ln)
         except ValueError:
             continue
-        if isinstance(obj, dict):
-            out.append(obj)
+        if not isinstance(obj, dict):
+            continue
+        if _HAS_TELEMETRY_GUARD and not validate_metrics_record(obj).safe:
+            logger.warning("funnel rejecting tampered metrics record: %s", obj.get("date"))
+            continue
+        out.append(obj)
     return out
 
 

@@ -41,13 +41,16 @@ entrypoint orchestrates IO (git diff, subprocess, file logging).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Set
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set
+
+from evolution_validation_subset import select_subset, track_validation_cost
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -181,6 +184,7 @@ SRC_TO_TEST_PREFIX = (
     # is a different mapping: scripts/foo.py → tests/scripts/test_foo.py
     ("scripts/", "tests/scripts/"),
     ("cron/", "tests/cron/"),
+    ("evolution/", "tests/evolution/"),
 )
 
 
@@ -222,6 +226,7 @@ class GateReport:
     results: List[TestResult] = field(default_factory=list)
     passed: bool = False
     note: str = ""
+    validation_cost: Dict[str, Any] = field(default_factory=dict)
 
 
 # ── File → test mapping (pure, injectable) ─────────────────────────────────────
@@ -424,6 +429,12 @@ def run_shard(
     )
 
 
+def _append_cost_record(cost_file: Path, record: Dict[str, Any]) -> None:
+    cost_file.parent.mkdir(parents=True, exist_ok=True)
+    with cost_file.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, sort_keys=True) + "\n")
+
+
 def get_fallback_shard() -> TestShard:
     """Last-resort shard when no specific test files are found."""
     return TestShard(
@@ -502,26 +513,28 @@ def run_gate(
     existing_paths: Optional[Set[str]] = None,
     runner: Optional[Callable] = None,
     log_path: Optional[Path] = None,
+    validation_subset_ratio: Optional[float] = 0.5,
 ) -> GateReport:
     """Core gate logic: map, run, report. Pure except for subprocess + log IO.
 
     Returns a ``GateReport`` whose ``.passed`` is True when all shards pass.
 
     Also records a per-cycle tool-cost trace (#1874) — fire-and-forget so a
-    cost write never takes the gate down.
+    cost write never takes the gate down.  When ``validation_subset_ratio`` is
+    set, the regression batch runs on a cost-reduced task subset (#2638).
     """
     report = GateReport(changed_files=list(changed_files))
 
     # Wire #1874: cost tracker for this cycle.
     _has_tracker = False
     _tracker = None
-    _evo_dir = None
     _save_report = None
+    # Evolution state dir for per-cycle metrics (#1874 + #2638).
+    _hh = os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
+    _evo_dir = Path(_hh) / "evolution"
     try:
         from scripts.evolution_tool_cost import ToolCallCostTracker, save_report as _sr
-        import os as _os
-        _hh = _os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
-        _evo_dir = Path(_hh) / "evolution"
+
         _tracker = ToolCallCostTracker(date=time.strftime("%Y-%m-%d"))
         _save_report = _sr
         _has_tracker = True
@@ -548,6 +561,21 @@ def run_gate(
         shards = [fallback]
         report.note = "no specific test shards found; falling back to filtered full suite"
 
+    # Wire #2638: run the regression batch on a deterministic SUBSET (task selection).
+    total_shards = len(shards)
+    if validation_subset_ratio is not None and total_shards > 1:
+        taskified = [{"id": " ".join(s.pytest_args)} for s in shards]
+        selection = select_subset(
+            taskified, budget_ratio=validation_subset_ratio, seed=7
+        )
+        chosen_ids = {t["id"] for t in selection["tasks"]}
+        shards = [s for s in shards if " ".join(s.pytest_args) in chosen_ids]
+        report.note = (
+            f"validation subset: {selection['stats']['subset']}/"
+            f"{selection['stats']['total']} shards "
+            f"(savings {selection['stats']['savings_ratio']})"
+        )
+
     report.shards = shards
 
     all_passed = True
@@ -558,6 +586,21 @@ def run_gate(
         report.results.append(result)
         if result.returncode != 0:
             all_passed = False
+
+    # Wire #2638: aggregate + append the per-cycle validation cost.
+    if report.results:
+        record = {
+            "cycle": time.strftime("%Y-%m-%d"),
+            "stage": "pre_pr_validation",
+            "validation_cost": int(round(sum(r.elapsed_sec for r in report.results))),
+            "shards_run": len(report.results),
+            "shards_total": total_shards,
+        }
+        report.validation_cost = track_validation_cost([record])
+        try:
+            _append_cost_record(_evo_dir / "validation-cost.jsonl", record)
+        except OSError:
+            pass
 
     report.passed = all_passed
     if not all_passed:
@@ -618,6 +661,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="store_true",
         default=False,
         help="Stop after the first failing shard (default: run all shards)",
+    )
+    parser.add_argument(
+        "--validation-subset-ratio",
+        type=float,
+        default=0.5,
+        help="Cost-reduced task subset ratio for the regression batch (#2638)",
     )
     parser.add_argument(
         "--check-pushed",
@@ -707,7 +756,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ts = time.strftime("%Y%m%dT%H%M%S")
     log_path = log_dir / f"{ts}.log"
 
-    report = run_gate(changed_files, repo_root, log_path=log_path)
+    report = run_gate(
+        changed_files,
+        repo_root,
+        log_path=log_path,
+        validation_subset_ratio=args.validation_subset_ratio,
+    )
 
     print(f"\n{'='*60}")
     print(f"Pre-PR Test Runner — {'PASSED' if report.passed else 'FAILED'}")
