@@ -175,6 +175,20 @@ def _span_attrs(ev: Dict[str, Any]) -> Dict[str, Any]:
         attrs.update(anomaly_attributes(detect_cost_anomaly(ev)))
     except Exception:
         pass
+    # Process-level quality metrics + experience-reuse audit (#2661): surface
+    # normalized phase scores (solution framing / execution / feedback control)
+    # and a bounded reuse counter. Content-free and fail-closed, same invariant.
+    try:
+        from agent.monitoring.process_metrics import (
+            audit_experience_reuse,
+            process_attributes,
+            reuse_attributes,
+        )
+
+        attrs.update(process_attributes(ev))
+        attrs.update(reuse_attributes(audit_experience_reuse(ev)))
+    except Exception:
+        pass
     return attrs
 
 
