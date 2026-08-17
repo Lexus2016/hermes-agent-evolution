@@ -1,10 +1,12 @@
 """Tests for hermes_cli.cron command handling."""
 
 from argparse import Namespace
+from types import SimpleNamespace
 
 import pytest
 
 from cron.jobs import create_job, get_job, list_jobs
+from hermes_cli import cron as cron_cli
 from hermes_cli.cron import cron_command
 
 

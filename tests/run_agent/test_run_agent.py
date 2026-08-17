@@ -3658,8 +3658,8 @@ class TestConcurrentToolExecution:
         """Agent-owned tool paths should close observer tool spans."""
         hook_calls = []
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *args, **kwargs: None,
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *args, **kwargs: (None, None),
         )
         monkeypatch.setattr(
             "hermes_cli.plugins.invoke_hook",
@@ -3688,8 +3688,8 @@ class TestConcurrentToolExecution:
     ):
         """_invoke_tool should return error JSON when a plugin blocks the tool."""
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *args, **kwargs: "Blocked by test policy",
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *args, **kwargs: ("Blocked by test policy", None),
         )
         with patch(
             "tools.todo_tool.todo_tool", side_effect=AssertionError("should not run")
@@ -3702,8 +3702,8 @@ class TestConcurrentToolExecution:
     def test_invoke_tool_blocked_skips_handle_function_call(self, agent, monkeypatch):
         """Blocked registry tools should not reach handle_function_call."""
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *args, **kwargs: "Blocked",
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *args, **kwargs: ("Blocked", None),
         )
         with patch(
             "run_agent.handle_function_call",
@@ -3763,8 +3763,8 @@ class TestConcurrentToolExecution:
         hook_calls = []
 
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *args, **kwargs: "Blocked by policy",
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *args, **kwargs: ("Blocked by policy", None),
         )
         monkeypatch.setattr(
             "hermes_cli.plugins.invoke_hook",
@@ -3846,8 +3846,8 @@ class TestConcurrentToolExecution:
         hook_calls = []
 
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *args, **kwargs: None,
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *args, **kwargs: (None, None),
         )
         monkeypatch.setattr(
             "hermes_cli.plugins.invoke_hook",
@@ -3903,8 +3903,8 @@ class TestConcurrentToolExecution:
             ),
         )
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *args, **kwargs: None,
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *args, **kwargs: (None, None),
         )
         monkeypatch.setattr(
             "hermes_cli.plugins.invoke_hook",
@@ -3955,8 +3955,8 @@ class TestConcurrentToolExecution:
             ),
         )
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *args, **kwargs: None,
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *args, **kwargs: (None, None),
         )
         monkeypatch.setattr(
             "hermes_cli.plugins.invoke_hook",
@@ -4020,8 +4020,8 @@ class TestConcurrentToolExecution:
         self, agent, monkeypatch
     ):
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *args, **kwargs: None,
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *args, **kwargs: (None, None),
         )
         calls = []
 
@@ -4056,8 +4056,8 @@ class TestConcurrentToolExecution:
         self, agent, monkeypatch
     ):
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *args, **kwargs: None,
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *args, **kwargs: (None, None),
         )
         notify = MagicMock(side_effect=AssertionError("should not notify"))
 
@@ -4098,8 +4098,8 @@ class TestConcurrentToolExecution:
         messages = []
 
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *args, **kwargs: "Blocked" if args[0] == "write_file" else None,
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *args, **kwargs: ("Blocked", None) if args[0] == "write_file" else (None, None),
         )
 
         agent._checkpoint_mgr.enabled = True
@@ -4125,8 +4125,8 @@ class TestConcurrentToolExecution:
         messages = []
 
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *args, **kwargs: "Blocked" if args[0] == "patch" else None,
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *args, **kwargs: ("Blocked", None) if args[0] == "patch" else (None, None),
         )
 
         agent._checkpoint_mgr.enabled = True
@@ -4152,8 +4152,8 @@ class TestConcurrentToolExecution:
         messages = []
 
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *args, **kwargs: "Blocked" if args[0] == "terminal" else None,
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *args, **kwargs: ("Blocked", None) if args[0] == "terminal" else (None, None),
         )
 
         agent._checkpoint_mgr.enabled = True
@@ -4192,10 +4192,10 @@ class TestConcurrentToolExecution:
 
         def block_first_only(*args, **kwargs):
             call_count["n"] += 1
-            return "Blocked" if call_count["n"] == 1 else None
+            return ("Blocked", None) if call_count["n"] == 1 else (None, None)
 
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
             block_first_only,
         )
 
@@ -4243,8 +4243,8 @@ class TestConcurrentToolExecution:
             lambda _name, args, callback, **_kwargs: callback(args),
         )
         monkeypatch.setattr(
-            "hermes_cli.plugins.resolve_pre_tool_block",
-            lambda *_args, **_kwargs: None,
+            "hermes_cli.plugins._dispatch_pre_tool_call_hooks",
+            lambda *_args, **_kwargs: (None, None),
         )
         monkeypatch.setattr(
             "agent.tool_executor._begin_tool_execution",
