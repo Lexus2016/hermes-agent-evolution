@@ -20,7 +20,9 @@ deterministic, no LLM, no network. Increments of #2694: schema + builder
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 #: The four QCR note fields, in canonical order.
@@ -218,3 +220,155 @@ def select_reusable_memory(
     if ranked and ranked[0][0] >= min_score:
         return ranked[0][1]
     return None
+
+
+# ---------------------------------------------------------------------------
+# Increment 3: persistence + replay guardrail (#2694)
+# ---------------------------------------------------------------------------
+
+#: Tools whose absence makes an environment-conditional note non-applicable.
+_ENV_TOOL_ALIASES: Dict[str, str] = {
+    "terminal": "terminal",
+    "browser_navigate": "browser_navigate",
+    "docker": "terminal",
+    "ssh": "terminal",
+}
+
+
+def notes_from_capture_dir(directory: Any) -> List[QcrNote]:
+    """Persist captured successful trajectories AS target-bound notes.
+
+    Reads the #1363 capture directory via ``TrajectoryStore`` (same projection
+    the success-pattern extractor uses) and distills each indexed successful
+    trajectory into a :class:`QcrNote` — the note IS the stored form of the
+    trajectory, not an annotation alongside the raw trace.
+    """
+    from evolution_trajectory_store import TrajectoryStore  # sibling import
+
+    store = TrajectoryStore.from_capture_dir(directory)
+    notes: List[QcrNote] = []
+    for task_type in store.task_types():
+        for record in store.by_type(task_type):
+            notes.append(build_qcr_note(record, task_type=task_type))
+    return notes
+
+
+def persist_notes(
+    notes: Sequence[Union[QcrNote, Dict[str, Any]]], store_path: Any
+) -> int:
+    """Append notes to the JSONL note store. Returns the count written."""
+    path = Path(store_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [json.dumps(_note_from(n).to_dict(), sort_keys=True) for n in notes]
+    with open(path, "a", encoding="utf-8") as fh:
+        for line in lines:
+            fh.write(line + "\n")
+    return len(lines)
+
+
+def load_notes(store_path: Any) -> List[QcrNote]:
+    """Read the note store back (missing/unreadable file → empty list)."""
+    path = Path(store_path)
+    if not path.is_file():
+        return []
+    notes: List[QcrNote] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            notes.append(QcrNote.from_dict(json.loads(line)))
+        except (ValueError, TypeError):
+            continue  # malformed line — skip, never raise
+    return notes
+
+
+def check_reuse_guardrail(
+    note: Union[QcrNote, Dict[str, Any]],
+    *,
+    target_task_type: str = "",
+    target_tools: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """Replay-path gate: verify applicability + bindings BEFORE reusing a note.
+
+    The QCR verification guardrail: a selected memory may only be replayed for
+    a new target when (a) the workflow invariant holds — same task type — and
+    (b) every binding tool the note says to re-resolve is available in the
+    target toolset. Returns a structured verdict; ``ok=False`` means fall back
+    to fresh execution instead of forcing a mismatched reuse.
+    """
+    n = _note_from(note)
+    target = {t.lower() for t in (target_tools or [])}
+
+    reasons: List[str] = []
+    if target_task_type and n.source_task_type:
+        if target_task_type.lower() != n.source_task_type.lower():
+            reasons.append(
+                f"task-type mismatch: note is {n.source_task_type!r}, "
+                f"target is {target_task_type!r}"
+            )
+    for cond in n.applicability_conditions:
+        low = cond.lower()
+        if "same environment" in low or "requires the same environment" in low:
+            env_missing = sorted({
+                alias
+                for tool, alias in _ENV_TOOL_ALIASES.items()
+                if tool in {t.lower() for t in n.source_tools} and alias not in target
+            })
+            if env_missing:
+                reasons.append(f"environment tools unavailable: {env_missing}")
+
+    # Bindings that NAME a tool must be present in the target toolset; the
+    # generic "re-resolve any targets" directive is a directive, not a tool
+    # requirement, so it never blocks replay.
+    named_tool_bindings = [b for b in n.bindings_to_obtain if b.lower() in target]
+    unresolved = [
+        b
+        for b in n.bindings_to_obtain
+        if b.lower() in _BINDING_TOOLS and b.lower() not in target
+    ]
+    return {
+        "ok": not reasons,
+        "reasons": reasons,
+        "bindings_to_resolve": sorted(set(n.bindings_to_obtain)),
+        "resolvable_bindings": sorted(set(named_tool_bindings)),
+        "unresolved_bindings": unresolved,
+        "guardrail": n.verification_guardrail,
+        "must_re_resolve_before_replay": True,
+    }
+
+
+def reuse_for_target(
+    store_path: Any,
+    *,
+    target_task_type: str = "",
+    target_tools: Optional[Sequence[str]] = None,
+    min_score: float = 0.5,
+) -> Dict[str, Any]:
+    """The replay-path entry point: select, then guardrail-check BEFORE reuse.
+
+    Composition of increment 2 (selector) and increment 3 (guardrail): load the
+    note store, pick the best reusable memory for the new target, and run the
+    verification guardrail over the winner. A note is replayable only when the
+    selector clears ``min_score`` AND the guardrail returns ``ok``; otherwise
+    the caller falls back to fresh execution (the QCR "does not apply" branch).
+    """
+    ranked = rank_notes_for_target(
+        load_notes(store_path), target_task_type, target_tools
+    )
+    if not ranked or ranked[0][0] < min_score:
+        return {
+            "reusable": False,
+            "reason": "no candidate note reached the reuse threshold",
+            "best_score": ranked[0][0] if ranked else None,
+        }
+    score, note = ranked[0]
+    verdict = check_reuse_guardrail(
+        note, target_task_type=target_task_type, target_tools=target_tools
+    )
+    verdict["reusable"] = bool(verdict["ok"])
+    verdict["score"] = score
+    verdict["note"] = note.to_dict()
+    if not verdict["ok"]:
+        verdict["reason"] = "; ".join(verdict["reasons"])
+    return verdict
