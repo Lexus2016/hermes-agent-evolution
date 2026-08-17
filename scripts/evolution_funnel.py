@@ -682,6 +682,23 @@ def main(argv: list[str]) -> int:
     except Exception:
         pass
 
+    # QCR producer + consumer wiring (#2694) — real cron-reachable call site
+    # (dead-code review on PR #2713); record the replay-or-fallback decision.
+    try:
+        from evolution_qcr import notes_from_capture_dir, reuse_for_target, write_notes
+
+        _qcr_store = evolution_dir / "qcr-notes.jsonl"
+        _captured = notes_from_capture_dir(evolution_dir / "trajectories")
+        if _captured:
+            write_notes(_qcr_store, _captured)
+        record["qcr_reuse"] = reuse_for_target(
+            _qcr_store,
+            target_task_type="funnel",
+            target_tools=["read_file", "search_files", "terminal"],
+        )
+    except Exception:
+        pass
+
     # MAS-FIRE coordination fault-injection wiring (#1211) — run the fault
     # injection suite each cycle as a periodic coordination health check so
     # the harness is exercised from within the pipeline, not just standalone.

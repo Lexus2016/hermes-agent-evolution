@@ -13,9 +13,14 @@ from evolution_qcr import (  # noqa: E402
     QCR_FIELDS,
     QcrNote,
     build_qcr_note,
+    check_reuse_guardrail,
+    load_notes,
+    notes_from_capture_dir,
     rank_notes_for_target,
+    reuse_for_target,
     score_note_for_target,
     select_reusable_memory,
+    write_notes,
 )
 
 
@@ -169,3 +174,55 @@ def test_select_reusable_memory_none_below_floor() -> None:
         [research], "coding", ["read_file", "patch"], min_score=0.5
     )
     assert picked is None
+
+
+# -- increment 3 rework: producer -> store -> guardrail -> replay-or-fallback ---
+
+
+@pytest.mark.parametrize(
+    "note_tools,note_type,target_type,target_tools,ok",
+    [
+        (["read_file", "patch"], "coding", "coding", ["read_file", "patch"], True),
+        (["web_search"], "research", "coding", ["web_search"], False),
+        (["terminal", "patch"], "coding", "coding", ["patch"], False),
+        (["read_file", "web_search"], "research", "research", ["web_search"], True),
+    ],
+)
+def test_guardrail_blocks_and_allows(
+    note_tools, note_type, target_type, target_tools, ok
+) -> None:
+    verdict = check_reuse_guardrail(
+        build_qcr_note({"tools": note_tools}, note_type),
+        target_task_type=target_type,
+        target_tools=target_tools,
+    )
+    assert verdict["ok"] is ok
+    assert verdict["must_re_resolve_before_replay"] is True
+    assert bool(verdict["reasons"]) == (not ok)  # blocked ⇔ has reasons
+    assert verdict["bindings_to_resolve"]
+
+
+def test_producer_to_consumer_end_to_end(tmp_path) -> None:
+    """Producer -> store -> load -> guardrail -> replay-or-fallback (one slice)."""
+    capture = tmp_path / "captures"
+    capture.mkdir()
+    (capture / "a.jsonl").write_text(
+        '{"entries": [{"tool": "read_file"}, {"tool": "patch"}], "completed": true}\n'
+        '{"entries": [{"tool": "web_search"}], "completed": false}\n',
+        encoding="utf-8",
+    )
+    store = tmp_path / "qcr-notes.jsonl"
+    notes = notes_from_capture_dir(capture)
+    assert notes  # only the completed trajectory is distilled
+    assert write_notes(store, notes) == len(notes)
+    store.write_text(store.read_text() + "not json\n", encoding="utf-8")
+    assert load_notes(store) == notes  # tolerant read round-trips
+    decision = reuse_for_target(
+        store,
+        target_task_type="coding",
+        target_tools=["read_file", "patch", "terminal"],
+    )
+    # read_file/patch classify as 'coding' (classify_by_tools), so the reuse
+    # branch fires end-to-end against the matching target.
+    assert decision["reusable"] is True
+    assert decision["note"]["source_task_type"] == "coding"
