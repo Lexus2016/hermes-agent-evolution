@@ -81,7 +81,6 @@ class TestDispatchLedger:
             "introspection→analysis": ("introspection", "analysis"),
             "analysis→implementation": ("analysis", "implementation"),
             "implementation→integration": ("implementation", "integration"),
-            "integration→upstream-sync": ("integration", "upstream-sync"),
         }
         up, down = up_for[edge]
         up_dir = tmp_path / up
@@ -129,7 +128,7 @@ class TestDispatchLedger:
     def test_first_tick_wakes_and_records_dispatch(self, tmp_path, capsys, monkeypatch):
         """First fresh tick wakes the orchestrator AND writes a ledger entry."""
         monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
-        self._make_edge_fresh(tmp_path, "integration→upstream-sync")
+        self._make_edge_fresh(tmp_path, "implementation→integration")
         with patch.object(
             hydra, "_check_github_write_access", return_value=(True, "ok")
         ):
@@ -140,8 +139,8 @@ class TestDispatchLedger:
         assert json.loads(out.strip().splitlines()[-1]) == {"wakeAgent": True}
         # Ledger now has an entry for the edge, dated today.
         ledger = hydra._read_ledger(tmp_path)
-        assert "integration→upstream-sync" in ledger
-        assert ledger["integration→upstream-sync"]["date"] == hydra._today()
+        assert "implementation→integration" in ledger
+        assert ledger["implementation→integration"]["date"] == hydra._today()
 
     def test_second_tick_same_day_same_mtime_suppressed(
         self, tmp_path, capsys, monkeypatch
@@ -154,8 +153,8 @@ class TestDispatchLedger:
         stage — is fine and out of scope for this test; the fix targets
         repeat-dispatch of an already-adjudicated edge.)"""
         monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
-        self._make_edge_fresh(tmp_path, "integration→upstream-sync")
-        edge = "integration→upstream-sync"
+        self._make_edge_fresh(tmp_path, "implementation→integration")
+        edge = "implementation→integration"
         with patch.object(
             hydra, "_check_github_write_access", return_value=(True, "ok")
         ):
@@ -201,13 +200,13 @@ class TestDispatchLedger:
             d = tmp_path / stage
             d.mkdir(parents=True, exist_ok=True)
             (d / f"{hydra._today()}.json").write_text("{}", encoding="utf-8")
-        # Make ONLY integration newer than its downstream → the single fresh edge.
-        up_file = tmp_path / "integration" / f"{hydra._today()}.json"
-        up_file.write_text('{"merges": ["#2400"]}', encoding="utf-8")
+        # Make ONLY implementation newer than its downstream → the single fresh edge.
+        up_file = tmp_path / "implementation" / f"{hydra._today()}.json"
+        up_file.write_text('{"tasks": ["#2400"]}', encoding="utf-8")
         # Same-tick writes share an mtime (fs granularity) — back-date the
         # downstream file so the edge is strictly fresh.
         old_ts = time.time() - 3600
-        ds_file = tmp_path / "upstream-sync" / f"{hydra._today()}.json"
+        ds_file = tmp_path / "integration" / f"{hydra._today()}.json"
         os.utime(ds_file, (old_ts, old_ts))
         with patch.object(
             hydra, "_check_github_write_access", return_value=(True, "ok")
@@ -252,7 +251,7 @@ class TestDispatchLedger:
         """A corrupt ledger must fail-open: the first fresh tick still wakes the
         orchestrator (never suppress a genuine wake-up due to a corrupt file)."""
         monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
-        self._make_edge_fresh(tmp_path, "integration→upstream-sync")
+        self._make_edge_fresh(tmp_path, "implementation→integration")
         hydra._ledger_path(tmp_path).write_text("{broken json", encoding="utf-8")
         with patch.object(
             hydra, "_check_github_write_access", return_value=(True, "ok")
@@ -260,3 +259,51 @@ class TestDispatchLedger:
             hydra.main()
             out = capsys.readouterr().out
         assert json.loads(out.strip().splitlines()[-1]) == {"wakeAgent": True}
+
+
+class TestTodayUtc:
+    """#2664: ``_today()`` must derive the gate date from UTC, not the naive
+    local clock. In UTC+ timezones a local date drift near midnight fired
+    spurious wakes / mislabeled the gate day."""
+
+    def test_today_uses_utc_date_when_local_is_ahead(self):
+        import datetime as _dt
+
+        class _FakeDatetime(_dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is _dt.timezone.utc:
+                    # 2026-08-17 22:30 UTC — the fixed code asks for UTC.
+                    return cls(2026, 8, 17, 22, 30, tzinfo=_dt.timezone.utc)
+                # Naive local clock in UTC+2: already 2026-08-18 00:30 — the
+                # buggy code (datetime.now().date()) would mislabel the day.
+                return cls(
+                    2026, 8, 18, 0, 30, tzinfo=_dt.timezone(_dt.timedelta(hours=2))
+                )
+
+        with patch.object(hydra, "datetime", _FakeDatetime):
+            assert hydra._today() == "2026-08-17"
+
+    def test_today_uses_utc_date_when_local_is_behind(self):
+        import datetime as _dt
+
+        class _FakeDatetime(_dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is _dt.timezone.utc:
+                    # 2026-08-17 01:30 UTC — still the 17th.
+                    return cls(2026, 8, 17, 1, 30, tzinfo=_dt.timezone.utc)
+                # Local clock in UTC-10: still 2026-08-16 15:30.
+                return cls(
+                    2026, 8, 16, 15, 30, tzinfo=_dt.timezone(_dt.timedelta(hours=-10))
+                )
+
+        with patch.object(hydra, "datetime", _FakeDatetime):
+            assert hydra._today() == "2026-08-17"
+
+    def test_check_pool_has_no_spurious_upstream_sync_edge(self):
+        """The spurious integration→upstream-sync edge (#2664) must stay gone:
+        the freshness pool contains only real pipeline consumer edges."""
+        fresh_keys = set(hydra._check_pool(Path("/nonexistent/evolution-dir")).keys())
+        assert "integration→upstream-sync" not in fresh_keys
+        assert "implementation→integration" in fresh_keys
