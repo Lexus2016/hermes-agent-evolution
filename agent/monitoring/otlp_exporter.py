@@ -160,6 +160,15 @@ def _span_attrs(ev: Dict[str, Any]) -> Dict[str, Any]:
                 except Exception:
                     v = "[redaction-unavailable]"
             attrs[f"hermes.{col}"] = v
+    if kind == "execute_tool":
+        # OTel MCP semantic conventions: mcp.method.name, mcp.session.id,
+        # mcp.protocol.version on execute_tool spans. Fail-closed on the hot path.
+        try:
+            from agent.monitoring.mcp_tracing import mcp_span_attrs
+
+            attrs.update(mcp_span_attrs(ev))
+        except Exception:
+            pass
     return attrs
 
 
