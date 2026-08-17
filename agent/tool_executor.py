@@ -369,6 +369,37 @@ def _cancelled_tool_result(reason: str = "user interrupt") -> str:
     )
 
 
+def _harm_gate_block_reason(function_name: str, function_args: Any) -> Optional[str]:
+    """Score a pre-execution call with the AgentProcessBench harm rules.
+
+    Fail-open: a broken bench module yields None (tool allowed); only a
+    high-harm verdict (>= BLOCK_THRESHOLD) rejects the call.
+    """
+    name = str(function_name or "").lower()
+    if name not in ("shell", "terminal", "bash") and not (
+        isinstance(function_args, dict)
+        and any(k in function_args for k in ("path", "file_path", "filename", "command"))
+    ):
+        return None
+    try:
+        from evolution.lib.agent_process_bench import harm_verdict_for_tool_call
+
+        return harm_verdict_for_tool_call(name, function_args)
+    except Exception:
+        return None
+
+
+def _harm_blocked_tool_result(reason: str) -> str:
+    return json.dumps(
+        {
+            "error": f"Tool execution blocked by safety gate: {reason}",
+            "status": "blocked",
+            "harm_gate": "agent_process_bench",
+        },
+        ensure_ascii=False,
+    )
+
+
 def _emit_cancelled_terminal_post_tool_call(
     agent,
     *,
@@ -1096,6 +1127,16 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
         try:
             try:
                 def _execute(next_args: dict[str, Any]) -> Any:
+                    # AgentProcessBench harm gate (#2662): reject high-impact
+                    # calls (delete/overwrite/credential access) pre-execution.
+                    block_reason = _harm_gate_block_reason(function_name, next_args)
+                    if block_reason is not None:
+                        logger.warning(
+                            "tool %s blocked by AgentProcessBench harm gate: %s",
+                            function_name,
+                            block_reason,
+                        )
+                        return _harm_blocked_tool_result(block_reason)
                     return agent._invoke_tool(
                         function_name,
                         next_args,
