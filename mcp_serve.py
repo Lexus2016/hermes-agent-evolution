@@ -584,6 +584,132 @@ class EventBridge:
 
 
 # ---------------------------------------------------------------------------
+# SEP-2640 Skills Extension (extension id: io.modelcontextprotocol/skills)
+# ---------------------------------------------------------------------------
+
+#: SEP-2640 extension identifier declared in server capabilities.
+SKILLS_EXTENSION_ID = "io.modelcontextprotocol/skills"
+
+#: Spec bounds per skill (SEP-2640): ≤5 skills/server enforced at listing.
+MAX_SKILLS_PER_SERVER = 5
+
+_SKILL_URI_RE = re.compile(r"^skill://([^/]+)/SKILL\.md$")
+
+
+def _iter_repo_skills(roots: Optional[List[Path]] = None) -> List[dict]:
+    """Index servable skills from skills/ directories (SEP-2640).
+
+    A skill is a directory with a SKILL.md whose YAML frontmatter carries at
+    least ``name`` and ``description`` (Agent Skills spec). Servable entries
+    are exposed under ``skill://<name>/SKILL.md``. Kept to the spec bounds:
+    at most MAX_SKILLS_PER_SERVER skills per server. ``roots`` overrides the
+    default repo + HERMES_HOME roots (tests inject a temp tree).
+    """
+    if roots is None:
+        roots = [Path(__file__).resolve().parent / "skills"]
+        try:
+            from hermes_constants import get_hermes_home
+
+            home = get_hermes_home()
+            if home and (home / "skills").is_dir():
+                roots.append(home / "skills")
+        except ImportError:
+            pass
+
+    entries: List[dict] = []
+    seen: set = set()
+    import yaml  # PyYAML ships with Hermes (config parsing)
+
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for skill_md in sorted(root.glob("*/SKILL.md")):
+            try:
+                text = skill_md.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            m = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
+            if not m:
+                continue
+            try:
+                fm = yaml.safe_load(m.group(1)) or {}
+            except yaml.YAMLError:
+                continue
+            name, desc = str(fm.get("name") or ""), str(fm.get("description") or "")
+            if not name or not desc or name in seen:
+                continue
+            seen.add(name)
+            entries.append({
+                "name": name,
+                "description": desc,
+                "uri": f"skill://{name}/SKILL.md",
+                "path": str(skill_md),
+            })
+            if len(entries) >= MAX_SKILLS_PER_SERVER:
+                return entries
+    return entries
+
+
+async def _skills_list(arguments: dict) -> dict:
+    """SEP-2640 ``skills/list``: enumerate the skills this server serves."""
+    skills = _iter_repo_skills()
+    return {
+        "skills": [
+            {
+                "name": s["name"],
+                "description": s["description"],
+                "uri": s["uri"],
+                "mimeType": "text/markdown",
+            }
+            for s in skills
+        ]
+    }
+
+
+async def _skills_get(arguments: dict) -> dict:
+    """SEP-2640 ``skills/get``: return one skill's entry by URI."""
+    uri = str((arguments or {}).get("uri") or "")
+    m = _SKILL_URI_RE.match(uri)
+    if not m:
+        raise ValueError(f"not a skill://<name>/SKILL.md URI: {uri!r}")
+    for s in _iter_repo_skills():
+        if s["name"] == m.group(1):
+            return {
+                "name": s["name"],
+                "description": s["description"],
+                "uri": s["uri"],
+                "mimeType": "text/markdown",
+            }
+    raise ValueError(f"no such skill: {uri!r}")
+
+
+def _register_sep2640(mcp: "FastMCP") -> None:
+    """Declare the skills extension + register the skills/list / skills/get path.
+
+    Handshake: ``Server.get_capabilities`` is what the transport consults at
+    initialize; wrap it so the experimental capabilities always advertise
+    ``io.modelcontextprotocol/skills``. Registration path: this SDK dispatches
+    ``request_handlers`` by request *type* and does not yet ship the typed
+    Ext-requests (SEP-2133), so the string-keyed entries below are the
+    forward-compat markers — the handler functions themselves are the
+    canonical implementation (exercised by tests, ready for the typed request
+    classes when the SDK gains them). Slice A scope: handshake + registration
+    only; skill-content exposure via resources is Slice B.
+    """
+    server = mcp._mcp_server
+    orig = server.get_capabilities
+
+    def _caps_with_skills(notification_options, experimental_capabilities=None, **kw):
+        merged = dict(experimental_capabilities or {})
+        merged.setdefault(SKILLS_EXTENSION_ID, {})
+        return orig(notification_options, merged, **kw)
+
+    server.get_capabilities = _caps_with_skills
+    server.request_handlers["skills/list"] = _skills_list
+    server.request_handlers["skills/get"] = _skills_get
+
+
+# ---------------------------------------------------------------------------
 # MCP Server
 # ---------------------------------------------------------------------------
 
@@ -603,6 +729,7 @@ def create_mcp_server(event_bridge: Optional[EventBridge] = None) -> "FastMCP":
             "Matrix, and other connected platforms."
         ),
     )
+    _register_sep2640(mcp)  # SEP-2640 skills extension (#2708)
 
     bridge = event_bridge or EventBridge()
 
