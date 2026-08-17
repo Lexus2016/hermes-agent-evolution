@@ -359,6 +359,31 @@ def _emit_terminal_post_tool_call(
         pass
 
 
+def _emit_execute_tool_event(agent, function_name: str) -> None:
+    """Emit a content-free ExecuteToolEvent for the live tool-execution path.
+
+    Carries only the OTel MCP identifiers — never tool args/results.
+    Fail-closed on the hot path: a monitoring fault must never affect tool
+    execution.
+    """
+    try:
+        from agent.monitoring.events import ExecuteToolEvent
+        from agent.monitoring.emitter import get_emitter
+
+        session_id = str(getattr(agent, "session_id", "") or "")
+        get_emitter().emit(
+            ExecuteToolEvent(
+                name=function_name,
+                tool_name=function_name,
+                mcp_method_name=function_name,
+                mcp_session_id=session_id or None,
+                mcp_protocol_version="2025-06-18",
+            )
+        )
+    except Exception:
+        pass
+
+
 def _cancelled_tool_result(reason: str = "user interrupt") -> str:
     return json.dumps(
         {
@@ -1096,6 +1121,7 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
         try:
             try:
                 def _execute(next_args: dict[str, Any]) -> Any:
+                    _emit_execute_tool_event(agent, function_name)
                     return agent._invoke_tool(
                         function_name,
                         next_args,

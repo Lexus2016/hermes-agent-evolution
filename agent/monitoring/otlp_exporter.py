@@ -189,6 +189,16 @@ def _span_attrs(ev: Dict[str, Any]) -> Dict[str, Any]:
         attrs.update(reuse_attributes(audit_experience_reuse(ev)))
     except Exception:
         pass
+    if kind == "execute_tool":
+        # OTel MCP semantic conventions: mcp.method.name, mcp.session.id,
+        # mcp.protocol.version on execute_tool spans. Fail-closed on the
+        # hot path like every other attribute enrichment.
+        try:
+            from agent.monitoring.mcp_tracing import mcp_span_attrs
+
+            attrs.update(mcp_span_attrs(ev))
+        except Exception:
+            pass
     return attrs
 
 

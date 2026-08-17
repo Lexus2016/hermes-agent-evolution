@@ -79,8 +79,31 @@ class CronExecutionEvent:
         return {"event": "cron_execution", **asdict(self)}
 
 
+@dataclass(slots=True)
+class ExecuteToolEvent:
+    """Content-free tool-execution span projection for OTel MCP tracing.
+
+    Carries only the low-cardinality OTel MCP identifiers — never tool
+    args/results.
+    """
+
+    name: str
+    tool_name: Optional[str] = None
+    mcp_method_name: Optional[str] = None
+    mcp_session_id: Optional[str] = None
+    mcp_protocol_version: Optional[str] = None
+    status: str = "completed"
+    duration_ms: Optional[int] = None
+    error_class: Optional[str] = None
+    ts_ns: int = field(default_factory=_now_ns)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"event": "execute_tool", **asdict(self)}
+
+
 __all__ = [
     "GatewayHealthEvent",
     "GatewayDiagnosticEvent",
     "CronExecutionEvent",
+    "ExecuteToolEvent",
 ]
