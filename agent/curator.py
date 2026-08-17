@@ -345,13 +345,28 @@ def apply_automatic_transitions(now: Optional[datetime] = None) -> Dict[str, int
 
     cron_referenced = _cron_referenced_skills()
 
-    counts = {"marked_stale": 0, "archived": 0, "reactivated": 0, "checked": 0, "seeded": 0}
+    counts = {
+        "marked_stale": 0,
+        "archived": 0,
+        "reactivated": 0,
+        "checked": 0,
+        "seeded": 0,
+        "rationale_decayed": 0,
+    }
 
     for row in _u.curated_report():
         counts["checked"] += 1
         name = row["name"]
         if row.get("pinned"):
             continue
+        # Instruction provenance (#2629): flag skills whose rationale is
+        # missing or has decayed (patched since the rationale was captured).
+        # Non-destructive — flags for review rather than auto-pruning, so
+        # the evolution loop can consolidate/prune with the *why* in hand
+        # instead of guessing at intent (the paper's divergence guard
+        # against unbounded prompt growth).
+        if _u.rationale_decayed(row):
+            counts["rationale_decayed"] += 1
 
         # A skill referenced by any cron job (incl. paused/disabled) is in
         # use by definition — resuming or the next fire must find it. The
@@ -1589,6 +1604,10 @@ def run_curator_review(
         auto_summary_parts.append(f"{counts['archived']} archived")
     if counts["reactivated"]:
         auto_summary_parts.append(f"{counts['reactivated']} reactivated")
+    if counts.get("rationale_decayed"):
+        auto_summary_parts.append(
+            f"{counts['rationale_decayed']} rationale-decayed (review needed)"
+        )
     auto_summary = ", ".join(auto_summary_parts) if auto_summary_parts else "no changes"
 
     # Persist state before the LLM pass so a crash mid-review still records
