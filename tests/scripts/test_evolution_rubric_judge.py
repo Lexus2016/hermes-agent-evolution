@@ -18,7 +18,10 @@ from evolution_rubric_judge import (  # noqa: E402
     CLAIM_VERDICTS,
     StrictRubricJudgeGrader,
     _markdown_sections,
+    assess_stat_validity,
+    assess_stat_validity_claims,
     compute_claim_score,
+    compute_stat_validity_stats,
     detect_rejection_bias,
     extract_claims,
     triage_claim,
@@ -195,3 +198,109 @@ def test_strict_grader_rejection_bias_flag(tmp_path: Path) -> None:
     assert scorecard["rejection_bias_flag"] is True
     assert len(scorecard["rejection_bias"]) >= 1
     assert any("REJECTION_BIAS" in flag for flag in scorecard["flags"])
+
+
+# ── Statistical-validity gate (#2696, P-Bench lesson) ────────────────
+
+
+def test_stat_validity_grounded_claim_passes() -> None:
+    # Correctly executed analysis: named test, p-value, sample size, source.
+    claim = {
+        "claim": (
+            "Compared to the previous run, latency fell from 220ms to 140ms "
+            "(t-test, p < 0.01, n=40). Source: https://example.com/bench"
+        ),
+        "evidence_url": "https://example.com/bench",
+    }
+    out = assess_stat_validity(claim)
+    assert out["stat_validity"]["verdict"] == "ok"
+    assert out["stat_validity"]["flags"] == []
+
+
+def test_stat_validity_pvalue_without_method_is_suspect() -> None:
+    # P-Bench failure mode: fluent statistic, no named method.
+    out = assess_stat_validity({
+        "claim": "The new retry policy significantly improved success (p = 0.031)."
+    })
+    verdict = out["stat_validity"]
+    assert verdict["verdict"] == "suspect"
+    assert "pvalue-without-method" in verdict["flags"]
+
+
+def test_stat_validity_unbacked_precision_and_baseline_is_suspect() -> None:
+    out = assess_stat_validity({
+        "claim": "Adopting the parallel compactor improved merge latency by 52.7%."
+    })
+    verdict = out["stat_validity"]
+    assert verdict["verdict"] == "suspect"
+    assert "unbacked-precision" in verdict["flags"]
+    assert "missing-baseline" in verdict["flags"]
+
+
+def test_stat_validity_causal_from_correlation_is_suspect() -> None:
+    out = assess_stat_validity({
+        "claim": "Prefetching correlated with 12% lower latency, caused by better cache use."
+    })
+    verdict = out["stat_validity"]
+    assert verdict["verdict"] == "suspect"
+    assert "causal-from-correlation" in verdict["flags"]
+
+
+def test_stat_validity_decisive_from_weak_is_suspect() -> None:
+    # Weak qualifier precedes the decisive verb — order must not matter.
+    out = assess_stat_validity({
+        "claim": "Preliminary results prove a 40% cost reduction."
+    })
+    verdict = out["stat_validity"]
+    assert verdict["verdict"] == "suspect"
+    assert "decisive-from-weak" in verdict["flags"]
+
+
+def test_stat_validity_non_quantitative_claim() -> None:
+    out = assess_stat_validity({
+        "claim": "This approach enables generalized improvements everywhere."
+    })
+    assert out["stat_validity"]["verdict"] == "non-quantitative"
+    assert out["stat_validity"]["flags"] == []
+
+
+def test_stat_validity_batch_attaches_dimension() -> None:
+    raw = extract_claims((
+        "research",
+        "# Finding\nLatency dropped by 12% with no baseline.\n",
+    ))
+    triaged = assess_stat_validity_claims(triage_claims(raw))
+    assert len(triaged) == len(raw)
+    for c in triaged:
+        assert "stat_validity" in c
+        assert c["stat_validity"]["verdict"] in (
+            "ok",
+            "suspect",
+            "non-quantitative",
+        )
+
+
+def test_stat_validity_stats_aggregate() -> None:
+    claims = assess_stat_validity_claims([
+        {"claim": "p = 0.031, no method named."},
+        {"claim": "Cost fell from $10 to $8 (t-test, p < 0.05)."},
+        {"claim": "This enables broad improvements."},
+    ])
+    stats = compute_stat_validity_stats(claims)
+    assert stats["checked"] == 2
+    assert stats["suspect"] == 1
+
+
+def test_strict_grader_surfaces_stat_validity(tmp_path: Path) -> None:
+    res_dir = tmp_path / "research"
+    res_dir.mkdir(parents=True, exist_ok=True)
+    (res_dir / "2026-06-23.md").write_text(
+        "# Finding\nPreliminary results prove a 40% cost reduction.\n",
+        encoding="utf-8",
+    )
+    scorecard = StrictRubricJudgeGrader().score("2026-06-23", tmp_path)
+    assert scorecard["stat_validity"]["checked"] >= 1
+    assert scorecard["stat_validity"]["suspect"] >= 1
+    assert any("STAT_VALIDITY" in flag for flag in scorecard["flags"])
+    for c in scorecard["claims"]:
+        assert "stat_validity" in c
