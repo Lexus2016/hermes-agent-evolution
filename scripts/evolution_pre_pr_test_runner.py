@@ -181,6 +181,7 @@ SRC_TO_TEST_PREFIX = (
     # is a different mapping: scripts/foo.py → tests/scripts/test_foo.py
     ("scripts/", "tests/scripts/"),
     ("cron/", "tests/cron/"),
+    ("evolution/", "tests/evolution/"),
 )
 
 
