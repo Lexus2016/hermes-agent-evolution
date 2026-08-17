@@ -1254,7 +1254,7 @@ class MemoryStore:
             for i, op in enumerate(operations):
                 op = op or {}
                 act = op.get("action")
-                content = (op.get("content") or "").strip()
+                content = (op.get("content") or op.get("new_text") or "").strip()
                 old_text = (op.get("old_text") or "").strip()
                 pos = f"Operation {i + 1} ({act or 'unknown'})"
 
@@ -1702,14 +1702,15 @@ def _apply_batch_write_gate(
     for op in operations:
         op = op or {}
         act = op.get("action", "?")
+        _op_content = op.get("content") or op.get("new_text") or ""
         if act == "remove":
             detail_lines.append(f"- remove: {op.get('old_text', '')}")
         elif act == "replace":
             detail_lines.append(
-                f"- replace: {op.get('old_text', '')} -> {op.get('content', '')}"
+                f"- replace: {op.get('old_text', '')} -> {_op_content}"
             )
         else:
-            detail_lines.append(f"- {act}: {op.get('content', '')}")
+            detail_lines.append(f"- {act}: {_op_content}")
     detail = "\n".join(detail_lines)
 
     decision = wa.evaluate_gate(wa.MEMORY, inline_summary=summary, inline_detail=detail)
@@ -1860,6 +1861,7 @@ def memory_tool(
     target: str = "memory",
     content: str = None,
     old_text: str = None,
+    new_text: str = None,
     source_class: str = DEFAULT_SOURCE_CLASS,
     trust_tier: str = DEFAULT_TRUST_TIER,
     source_filter: Optional[object] = None,
@@ -1883,6 +1885,13 @@ def memory_tool(
     ``memory_char_limit`` is an optional per-batch override for target='memory'
     that is only honoured when ``store.allow_batch_override`` is True (issue #517).
 
+    ``new_text`` is accepted as an alias for ``content`` on both shapes. The
+    replace/remove ops target by ``old_text`` and supply the replacement via
+    ``content``; callers naturally reach for ``new_text`` to mirror
+    ``old_text`` (it's the patch tool's ``old_string``/``new_string`` shape),
+    which silently left ``content`` empty and errored. Coalescing here removes
+    that trap.
+
     Returns JSON string with results.
     """
     if store is None:
@@ -1890,6 +1899,10 @@ def memory_tool(
             "Memory is not available. It may be disabled in config or this environment.",
             success=False,
         )
+
+    # Accept new_text as an alias for content (single-op path). See docstring.
+    if content is None and new_text is not None:
+        content = new_text
 
     # Some strict providers fill optional schema fields with JSON null rather
     # than omitting them.  Treat ``target: null`` as omitted so memory writes
@@ -2100,11 +2113,15 @@ MEMORY_SCHEMA = {
             },
             "content": {
                 "type": "string",
-                "description": "The entry content. Required for 'add' and 'replace' (single-op shape).",
+                "description": "The entry content. Required for 'add' and 'replace' (single-op shape). Alias: 'new_text' is also accepted (mirrors old_text)."
             },
             "old_text": {
                 "type": "string",
                 "description": "REQUIRED for 'replace' and 'remove' (single-op shape): a short unique substring identifying the existing entry to modify. Omit only for 'add'.",
+            },
+            "new_text": {
+                "type": "string",
+                "description": "Alias for 'content' (single-op shape). Provided so the replace/remove old_text/new_text pairing works; if both are set, 'content' wins."
             },
             "operations": {
                 "type": "array",
@@ -2116,18 +2133,10 @@ MEMORY_SCHEMA = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "action": {
-                            "type": "string",
-                            "enum": ["add", "replace", "remove"],
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "Entry content for add/replace.",
-                        },
-                        "old_text": {
-                            "type": "string",
-                            "description": "Substring identifying the entry for replace/remove.",
-                        },
+                        "action": {"type": "string", "enum": ["add", "replace", "remove"]},
+                        "content": {"type": "string", "description": "Entry content for add/replace. Alias: 'new_text'."},
+                        "new_text": {"type": "string", "description": "Alias for 'content' in a batch op."},
+                        "old_text": {"type": "string", "description": "Substring identifying the entry for replace/remove."},
                     },
                     "required": ["action"],
                 },
@@ -2198,6 +2207,7 @@ registry.register(
         target=args.get("target", "memory"),
         content=args.get("content"),
         old_text=args.get("old_text"),
+        new_text=args.get("new_text"),
         source_class=args.get("source_class", DEFAULT_SOURCE_CLASS),
         trust_tier=args.get("trust_tier", DEFAULT_TRUST_TIER),
         source_filter=args.get("source_filter"),

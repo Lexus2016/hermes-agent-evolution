@@ -1,6 +1,7 @@
 """Tests for gateway service management helpers."""
 
 import os
+import plistlib
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -239,10 +240,19 @@ class TestSystemdServiceRefresh:
 
         monkeypatch.setattr("gateway.run.start_gateway", fake_start_gateway)
 
+        # Upstream's run_gateway ends with a hard os._exit (wedge-proof
+        # teardown) — stub it or the test runner process dies with the test.
+        exit_codes = []
+        monkeypatch.setattr(
+            "gateway.run._exit_after_graceful_shutdown",
+            lambda code: exit_codes.append(code),
+        )
+
         gateway_cli.run_gateway()
 
         assert unit_path.read_text(encoding="utf-8") == "new unit\n"
         assert ["systemctl", "--user", "daemon-reload"] in calls
+        assert exit_codes == [0]
 
     def test_refresh_refuses_to_bake_pytest_tmpdir_into_real_user_unit(
         self, tmp_path, monkeypatch
@@ -806,11 +816,12 @@ class TestLaunchdServiceRecovery:
         assert "--replace" in plist_path.read_text(encoding="utf-8")
         # No DIRECT bootout/bootstrap ran (those would kill us mid-sequence).
         assert not [c for c in run_calls if "bootout" in c or "bootstrap" in c]
-        # Exactly one detached helper was spawned, in a new session, and it
-        # performs both bootout and bootstrap.
+        # Exactly one detached helper was spawned — a transient launchd job
+        # via `launchctl submit` (#69098: a setsid child stays in the
+        # coalition and dies with the bootout; a submitted job does not).
         assert len(popen_calls) == 1
         cmd, kwargs = popen_calls[0]
-        assert kwargs.get("start_new_session") is True
+        assert cmd[0] == "launchctl" and cmd[1] == "submit"
         script = cmd[-1]
         assert "bootout" in script and "bootstrap" in script
         assert str(plist_path) in script
@@ -1743,10 +1754,16 @@ class TestGatewaySystemServiceRouting:
     def test_systemd_restart_uses_systemd_main_pid_when_pid_file_is_missing(self, monkeypatch, capsys):
         calls = []
 
+        # Container/CI hosts have no user systemd/D-Bus — skip the preflight
+        # (the test drives the restart machinery directly with mocks below).
+        monkeypatch.setattr(gateway_cli, "_preflight_user_systemd", lambda: None)
         monkeypatch.setattr(gateway_cli, "_select_systemd_scope", lambda system=False: False)
         monkeypatch.setattr(gateway_cli, "_require_service_installed", lambda action, system=False: None)
         monkeypatch.setattr(gateway_cli, "refresh_systemd_unit_if_needed", lambda system=False: None)
         monkeypatch.setattr(gateway_cli, "_get_restart_drain_timeout", lambda: 10.0)
+        # Exit-wait budget = drain + after_turn + headroom(15) — pin
+        # after_turn to 0 so the expected graceful budget is exactly 25.0.
+        monkeypatch.setattr(gateway_cli, "_get_restart_after_turn_timeout", lambda: 0.0)
         monkeypatch.setattr("gateway.status.get_running_pid", lambda: None)
         monkeypatch.setattr(
             gateway_cli,
@@ -1773,7 +1790,7 @@ class TestGatewaySystemServiceRouting:
 
         gateway_cli.systemd_restart()
 
-        assert ("graceful", 777, 15.0) in calls
+        assert ("graceful", 777, 25.0) in calls
         assert ("wait", False, 777) in calls
         assert "restarting gracefully (pid 777)" in capsys.readouterr().out.lower()
 
@@ -1802,6 +1819,7 @@ class TestGatewaySystemServiceRouting:
     def test_systemd_restart_reports_start_limit_hit(self, monkeypatch, capsys):
         calls = []
 
+        monkeypatch.setattr(gateway_cli, "_preflight_user_systemd", lambda **kw: None)
         monkeypatch.setattr(gateway_cli, "_select_systemd_scope", lambda system=False: False)
         monkeypatch.setattr(gateway_cli, "_require_service_installed", lambda action, system=False: None)
         monkeypatch.setattr(gateway_cli, "refresh_systemd_unit_if_needed", lambda system=False: None)
@@ -1832,6 +1850,7 @@ class TestGatewaySystemServiceRouting:
         assert "reset-failed" in out
 
     def test_systemd_restart_recovers_failed_planned_restart(self, monkeypatch, capsys):
+        monkeypatch.setattr(gateway_cli, "_preflight_user_systemd", lambda **kw: None)
         monkeypatch.setattr(gateway_cli, "_select_systemd_scope", lambda system=False: False)
         monkeypatch.setattr(gateway_cli, "_require_service_installed", lambda action, system=False: None)
         monkeypatch.setattr(gateway_cli, "refresh_systemd_unit_if_needed", lambda system=False: None)
@@ -2145,6 +2164,54 @@ class TestDetectVenvDir:
 class TestSystemUnitHermesHome:
     """HERMES_HOME in system units must reference the target user, not root."""
 
+    def test_managed_node_makes_system_unit_independent_of_callers_path(
+        self, monkeypatch, tmp_path
+    ):
+        """A target-managed Node must suppress caller-specific PATH fallbacks."""
+        target_home = tmp_path / "home" / "alice"
+        target_hermes = target_home / ".hermes"
+        root_home = tmp_path / "root"
+        root_hermes = root_home / ".hermes"
+        managed_bin = target_hermes / "node" / "bin"
+        managed_bin.mkdir(parents=True)
+        root_hermes.mkdir(parents=True)
+
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: root_home))
+        monkeypatch.setenv("HERMES_HOME", str(root_hermes))
+        monkeypatch.setattr(
+            gateway_cli,
+            "_system_service_identity",
+            lambda run_as_user=None: ("alice", "alice", str(target_home)),
+        )
+        monkeypatch.setattr(gateway_cli, "get_hermes_home", lambda: root_hermes)
+        monkeypatch.setattr(gateway_cli, "_build_service_path_dirs", lambda: [])
+
+        monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/root/bin/node")
+        root_unit = gateway_cli.generate_systemd_unit(system=True, run_as_user="alice")
+
+        monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/home/alice/.local/bin/node")
+        user_unit = gateway_cli.generate_systemd_unit(system=True, run_as_user="alice")
+
+        assert root_unit == user_unit
+        assert str(managed_bin) in root_unit
+        assert "/root/bin" not in root_unit
+
+    def test_node_path_lookup_remains_fallback_without_managed_node(
+        self, monkeypatch, tmp_path
+    ):
+        """External Node installs still work when the managed tree is absent."""
+        monkeypatch.setattr(
+            "hermes_constants.iter_hermes_node_dirs", lambda root=None: []
+        )
+        monkeypatch.setattr(
+            gateway_cli.shutil, "which", lambda name: "/opt/external-node/bin/node"
+        )
+        entries: list[str] = []
+
+        gateway_cli._append_node_dir_for_service(entries, tmp_path / ".hermes")
+
+        assert entries == ["/opt/external-node/bin"]
+
     def test_system_unit_uses_target_user_home_not_calling_user(self, monkeypatch):
         # Simulate sudo: Path.home() returns /root, target user is alice
         monkeypatch.setattr(Path, "home", staticmethod(lambda: Path("/root")))
@@ -2456,13 +2523,15 @@ class TestEnsureUserSystemdEnv:
         monkeypatch.delenv("DBUS_SESSION_BUS_ADDRESS", raising=False)
         monkeypatch.setattr(os, "getuid", lambda: 42)
 
-        # Patch Path.exists so /run/user/42 appears to exist.
-        # Using a FakePath subclass breaks on Python 3.12+ where
-        # PosixPath.__new__ ignores the redirected path argument.
-        _orig_exists = gateway_cli.Path.exists
+        # _runtime_dir_is_ours verifies OWNERSHIP via stat (a leaked foreign
+        # XDG_RUNTIME_DIR must not be trusted, #86558) — fake an owned dir.
+        _orig_stat = gateway_cli.Path.stat
         monkeypatch.setattr(
-            gateway_cli.Path, "exists",
-            lambda self: True if str(self) == "/run/user/42" else _orig_exists(self),
+            gateway_cli.Path,
+            "stat",
+            lambda self, **kw: SimpleNamespace(st_uid=42)
+            if str(self) == "/run/user/42"
+            else _orig_stat(self, **kw),
         )
 
         gateway_cli._ensure_user_systemd_env()
@@ -2483,9 +2552,23 @@ class TestEnsureUserSystemdEnv:
 
         assert os.environ["DBUS_SESSION_BUS_ADDRESS"] == f"unix:path={bus_socket}"
 
-    def test_preserves_existing_env_vars(self, monkeypatch):
+    def test_preserves_existing_env_vars(self, tmp_path, monkeypatch):
+        """An OWNED custom XDG_RUNTIME_DIR is preserved (#86558 semantics).
+
+        An unowned/unreadable dir would be replaced by /run/user/<uid>; the
+        preserve contract only holds when stat says the dir is ours — fake
+        that so the assertion tests preservation, not CI uid luck.
+        """
         monkeypatch.setenv("XDG_RUNTIME_DIR", "/custom/runtime")
         monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/custom/bus")
+        _orig_stat = gateway_cli.Path.stat
+        monkeypatch.setattr(
+            gateway_cli.Path,
+            "stat",
+            lambda self, **kw: SimpleNamespace(st_uid=os.getuid())
+            if str(self) == "/custom/runtime"
+            else _orig_stat(self, **kw),
+        )
 
         gateway_cli._ensure_user_systemd_env()
 
@@ -2750,6 +2833,8 @@ class TestProfileArg:
 
     def test_launchd_plist_includes_profile(self, tmp_path, monkeypatch):
         """generate_launchd_plist should include --profile in ProgramArguments for named profiles."""
+
+    def test_launchd_plist_wraps_gateway_stderr_with_timestamps(self, tmp_path, monkeypatch):
         profile_dir = tmp_path / ".hermes" / "profiles" / "mybot"
         profile_dir.mkdir(parents=True)
         monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -2759,7 +2844,8 @@ class TestProfileArg:
         assert "<string>--profile</string>" in plist
         assert "<string>mybot</string>" in plist
 
-    def test_launchd_plist_supports_aqua_and_background_sessions(self):
+    def test_launchd_plist_supports_aqua_and_background_sessions(self, monkeypatch):
+        monkeypatch.setattr(gateway_cli, "get_python_path", lambda: "/usr/bin/python3")
         # macOS 26+ only loads the agent in non-Aqua sessions when the plist
         # opts into Background as well (issue #23387).
         plist = gateway_cli.generate_launchd_plist()
@@ -3913,6 +3999,8 @@ class TestRetryLaunchctlBootstrapUntilRegistered:
             deadline=gateway_cli.time.monotonic() - 1,
         )
         assert ok is False
+
+
 
     def test_registered_but_not_running_is_not_success(self, monkeypatch):
         """A definition with no PID must not end the loop.
