@@ -457,6 +457,7 @@ from cron.jobs import (
     claim_job_for_fire,
     fire_claim_fence,
     get_due_jobs,
+    get_latest_failure,
     heartbeat_fire_claim,
     heartbeat_run_claim,
     list_job_failures,
@@ -465,6 +466,7 @@ from cron.jobs import (
     mark_job_started,
     save_job_failure,
     save_job_output,
+    save_jobs,
     use_cron_store,
     DELIVERY_VERBOSITY_LEVELS,
 )
@@ -4417,6 +4419,8 @@ def run_job(
             kwargs["defer_agent_teardown"] = defer_agent_teardown
         if extra_prompt is not None:
             kwargs["extra_prompt"] = extra_prompt
+        if cancel_event is not None:
+            kwargs["cancel_event"] = cancel_event
         result = _run_job_impl(job, **kwargs)
         hermes_telemetry.set_attributes(
             success=bool(result[0]),
@@ -4428,6 +4432,7 @@ def run_job(
 def _run_job_impl(
     job: dict, *, defer_agent_teardown: Optional[list] = None,
     extra_prompt: Optional[str] = None,
+    cancel_event: Optional[_CancelEventLike] = None,
 ) -> tuple[bool, str, str, Optional[str]]:
     """
     Execute a single cron job.

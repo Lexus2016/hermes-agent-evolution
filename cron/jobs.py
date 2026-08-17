@@ -115,6 +115,9 @@ _fire_fence_locks_guard = threading.Lock()
 # worst-case stall well under one status-alarm threshold.
 _JOBS_LOCK_TIMEOUT_SECONDS = 30.0
 OUTPUT_DIR = CRON_DIR / "output"
+# Failure-record store (save_job_failure / list_job_failures). Referenced by
+# scheduler failure summaries as ~/.hermes/cron/failures/<job_id>/<ts>.json.
+FAILURE_DIR = CRON_DIR / "failures"
 ONESHOT_GRACE_SECONDS = 120
 
 

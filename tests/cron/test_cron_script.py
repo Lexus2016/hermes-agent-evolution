@@ -261,15 +261,27 @@ class TestRunJobScript:
 
         captured = {}
 
-        def fake_run(argv, **kwargs):
-            captured["argv"] = argv
-            captured["kwargs"] = kwargs
-            return SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
+        class FakeProc:
+            def __init__(self, argv, **kwargs):
+                captured["argv"] = argv
+                captured["kwargs"] = kwargs
+                self.returncode = 0
+
+            def poll(self):
+                return self.returncode
+
+            def communicate(self, timeout=None):
+                return ("ok\n", "")
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        fake_popen = FakeProc
 
         monkeypatch.setattr(sched_mod.sys, "platform", "win32")
         monkeypatch.setattr(sched_mod.sys, "executable", str(pythonw))
         monkeypatch.setattr(sched_mod, "windows_hide_flags", lambda: 0x08000000)
-        monkeypatch.setattr(sched_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(sched_mod.subprocess, "Popen", fake_popen)
 
         success, output = _run_job_script("probe.py")
 
