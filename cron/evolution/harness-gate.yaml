@@ -1,0 +1,24 @@
+name: evolution-harness-gate
+# Weekly (Sun 04:11) — the gate re-gates retry-policy proposals only when new
+# recurring-failure clusters have accumulated. Off the :00/:30 marks and every
+# other stage's tick.
+schedule: "11 4 * * 0"
+enabled: true
+mode: PRIVATE
+
+# Deterministic gate pass — NO LLM. Reads the trace miner's
+# weaknesses-latest.json (EVOLUTION_PROFILE_DIR), generates retry-policy
+# code-diff proposals (offline), sandbox-validates each through the
+# regression gate, writes harness-gate-latest.json. REPORT-ONLY: applying a
+# validated surface is an explicit manual --apply action (#2615 — never a
+# silent self-modifying loop). Empty stdout = silent tick.
+no_agent: true
+script: evolution_harness_gate.py
+
+deliver: local
+
+prompt: |
+  Deterministic harness-gate pass (no LLM). Reads weaknesses-latest.json,
+  gates retry-policy code-diff proposals, writes harness-gate-latest.json.
+  Applying stays manual (--apply). See scripts/evolution_harness_gate.py
+  (#2615, parent #2525).

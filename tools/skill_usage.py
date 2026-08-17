@@ -642,6 +642,7 @@ def adopt_skill(skill_name: str) -> Tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 def _empty_record() -> Dict[str, Any]:
+    now = _now_iso()
     return {
         "created_by": None,
         "use_count": 0,
@@ -652,10 +653,21 @@ def _empty_record() -> Dict[str, Any]:
         "patch_generation": 0,
         "last_reused_patch_generation": 0,
         "last_patched_at": None,
-        "created_at": _now_iso(),
+        "created_at": now,
         "state": STATE_ACTIVE,
         "pinned": False,
         "archived_at": None,
+        # Temporal validity window (#2700, Zep-style temporal KG): skills
+        # are invalidated, not deleted. The sidecar records when each
+        # validity window opened/closed so demotion and consolidation
+        # decisions stay auditable and reversible with context. Legacy
+        # records leave valid_from unset; readers backfill it from
+        # created_at rather than fabricating a fresh timestamp.
+        "valid_from": None,
+        "valid_to": None,
+        "invalid_at": None,
+        "invalidation_reason": None,
+        "validity_history": [],
         # Provenance record fields (#2190)
         "source_run_id": None,
         "recent_failure_rate": 0.0,
@@ -1017,6 +1029,7 @@ def record_created(
         # state survived an earlier deletion or manual filesystem change.
         rec.clear()
         rec.update(_empty_record())
+        rec["valid_from"] = rec["created_at"]  # open the validity window (#2700)
         if agent_created:
             rec["created_by"] = "agent"
         return {"created_by": rec["created_by"]}
@@ -1163,9 +1176,59 @@ def _get_demotion_failure_rate() -> float:
         return DEFAULT_TRUST_DEMOTION_FAILURE_RATE
 
 
-def set_state(skill_name: str, state: str) -> None:
+def _default_invalidation_reason(state: str) -> str:
+    return {
+        STATE_STALE: "demoted:stale",
+        STATE_ARCHIVED: "demoted:archived",
+    }.get(state, f"transition:{state}")
+
+
+def _apply_validity_transition(rec: Dict[str, Any], new_state: str, reason: str) -> None:
+    """Close/reopen the record's validity window (#2700).
+
+    Entering stale/archived closes the current window (invalidate, not
+    delete); returning to active moves the closed window into
+    ``validity_history`` and opens a fresh one, so the skill lifecycle
+    keeps a queryable temporal history.
+    """
+    now = _now_iso()
+    if new_state in (STATE_STALE, STATE_ARCHIVED):
+        if rec.get("valid_to") is None:
+            if not rec.get("valid_from"):
+                rec["valid_from"] = rec.get("created_at") or now
+            rec["valid_to"] = now
+            rec["invalid_at"] = now
+            rec["invalidation_reason"] = (
+                reason or _default_invalidation_reason(new_state)
+            )[:200]
+    elif new_state == STATE_ACTIVE:
+        if rec.get("valid_to") is not None:
+            history = rec.get("validity_history")
+            if not isinstance(history, list):
+                history = []
+            history.append(
+                {
+                    "valid_from": rec.get("valid_from"),
+                    "valid_to": rec.get("valid_to"),
+                    "invalid_at": rec.get("invalid_at"),
+                    "reason": rec.get("invalidation_reason"),
+                }
+            )
+            rec["validity_history"] = history[-50:]
+        rec["valid_from"] = now
+        rec["valid_to"] = None
+        rec["invalid_at"] = None
+        rec["invalidation_reason"] = None
+
+
+def set_state(skill_name: str, state: str, *, reason: str = "") -> None:
     """Set lifecycle state. No-op if *state* is invalid or the skill isn't
-    curator-manageable (hub skills, or built-ins with pruning disabled)."""
+    curator-manageable (hub skills, or built-ins with pruning disabled).
+
+    ``reason`` (optional) records why the validity window closed — e.g.
+    ``consolidated into <skill>`` or ``contradicted by <evidence>`` — so
+    demotion decisions can be audited (#2700).
+    """
     if state not in _VALID_STATES:
         logger.debug("set_state: invalid state %r for %s", state, skill_name)
         return
@@ -1173,6 +1236,7 @@ def set_state(skill_name: str, state: str) -> None:
         previous_state = rec.get("state")
         if previous_state == state:
             return {"changed": False, "created_by": rec.get("created_by")}
+        _apply_validity_transition(rec, state, reason)
         rec["state"] = state
         if state == STATE_ARCHIVED:
             rec["archived_at"] = _now_iso()
@@ -1195,6 +1259,83 @@ def set_state(skill_name: str, state: str) -> None:
         action = "restored"
     if action is not None:
         _emit_skill_lifecycle(skill_name, action, record=facts)
+
+
+def _stored_record(skill_name: str) -> Optional[Dict[str, Any]]:
+    """The persisted sidecar record, or None when the skill has none.
+
+    Unlike ``get_record`` this does NOT fabricate a fresh record for
+    unknown skills — temporal queries must distinguish "never tracked"
+    from "tracked with an empty history" (#2700).
+    """
+    rec = load_usage().get(skill_name)
+    return rec if isinstance(rec, dict) else None
+
+
+def skill_validity(skill_name: str) -> Dict[str, Any]:
+    """Current validity window for a skill (#2700).
+
+    Legacy records created before validity tracking backfill
+    ``valid_from`` from ``created_at`` so every skill has a window.
+    Returns {} when no sidecar record exists.
+    """
+    rec = _stored_record(skill_name)
+    if rec is None:
+        return {}
+    return {
+        "valid_from": rec.get("valid_from") or rec.get("created_at"),
+        "valid_to": rec.get("valid_to"),
+        "invalid_at": rec.get("invalid_at"),
+        "invalidation_reason": rec.get("invalidation_reason"),
+        "state": rec.get("state"),
+    }
+
+
+def skill_validity_history(skill_name: str) -> List[Dict[str, Any]]:
+    """Prior (closed) validity windows for a skill, oldest first (#2700).
+
+    Answers "what did this skill look like before it was demoted or
+    consolidated?" without resurrecting filesystem state.
+    """
+    rec = _stored_record(skill_name)
+    if rec is None:
+        return []
+    history = rec.get("validity_history")
+    if not isinstance(history, list):
+        return []
+    return [w for w in history if isinstance(w, dict)]
+
+
+def skill_state_at(skill_name: str, at_iso: str) -> str:
+    """Point-in-time validity query (#2700).
+
+    Returns ``"valid"`` when an open-or-closed window covers ``at_iso``,
+    ``"invalid"`` when the record exists but no window covers the instant,
+    and ``"unknown"`` when there is no record or the timestamps are
+    unparseable.
+    """
+    rec = _stored_record(skill_name)
+    if rec is None:
+        return "unknown"
+    at = _parse_iso_timestamp(at_iso)
+    if at is None:
+        return "unknown"
+    windows: List[Dict[str, Any]] = []
+    history = rec.get("validity_history")
+    if isinstance(history, list):
+        windows.extend(w for w in history if isinstance(w, dict))
+    windows.append(
+        {
+            "valid_from": rec.get("valid_from") or rec.get("created_at"),
+            "valid_to": rec.get("valid_to"),
+        }
+    )
+    for w in windows:
+        start = _parse_iso_timestamp(w.get("valid_from"))
+        end = _parse_iso_timestamp(w.get("valid_to"))
+        if start is not None and start <= at and (end is None or at <= end):
+            return "valid"
+    return "invalid"
 
 
 def set_pinned(skill_name: str, pinned: bool) -> None:
