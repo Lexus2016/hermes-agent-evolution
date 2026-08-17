@@ -617,7 +617,9 @@ class StrictRubricJudgeGrader:
             ("integration", json.dumps(integration_json)),
         )
         claims = triage_claims(raw_claims)
+        claims = assess_stat_validity_claims(claims)
         claim_stats = compute_claim_score(claims, total_max)
+        stat_stats = compute_stat_validity_stats(claims)
 
         # Derive aggregate score from claim verdicts when claims are present
         if claims:
@@ -656,6 +658,11 @@ class StrictRubricJudgeGrader:
                 f"REJECTION_BIAS: {len(rejection_bias_detections)} post-hoc rationalization pattern(s) detected"
             )
 
+        if stat_stats["suspect"]:
+            flags.append(
+                f"STAT_VALIDITY: {stat_stats['suspect']} suspect quantitative claim(s)"
+            )
+
         return {
             "cycle_date": date,
             "grader": "strict",
@@ -666,6 +673,7 @@ class StrictRubricJudgeGrader:
             "flags": flags,
             "claims": claims,
             "claim_verdicts": claim_stats["verdict_counts"] if claims else {},
+            "stat_validity": stat_stats,
             "rejection_bias": rejection_bias_detections,
             "rejection_bias_flag": rejection_bias_flag,
         }
@@ -976,6 +984,122 @@ def compute_claim_score(
         "max": dimension_max,
         "overall_percentage": percentage,
         "verdict_counts": counts,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Statistical-validity gate — Slice D (#2696, P-Bench lesson)
+# ──────────────────────────────────────────────────────────────────────
+# P-Bench: agents emit wrong-but-fluent quantitative claims (correct
+# execution, invalid inference). A named test clears method-level flags.
+
+_QUANT_CLAIM_RE = re.compile(
+    r"\d+(?:\.\d+)?\s*(?:%|x\b|×|ms\b|s\b|sec\b|seconds?\b|tokens?\b|bytes?\b|kb\b|mb\b|gb\b|rpm\b|tps\b)"
+    r"|\bp\s*[<>=]\s*0?\.\d+\b"
+    r"|\b(?:accuracy|f1|latency|throughput|cost|score)\s*[:=]\s*\d",
+    re.IGNORECASE,
+)
+
+_TEST_NAME_RE = re.compile(
+    r"\b(?:t[- ]?test|chi[- ]?squared|anova|regression|wilcoxon|mann[- ]?whitney|"
+    r"kruskal|bootstrap|permutation|hdi\b|credible|bayesian|likelihood|cohen|durbin|shapiro)\b",
+    re.IGNORECASE,
+)
+
+# (flag, pattern) — one pattern per inferential violation.
+_STAT_VALIDITY_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
+    (
+        "significance-without-test",
+        re.compile(
+            r"\b(?:statistically\s+)?significant(?:ly)?\b(?!.*\b(?:test|p\s*[<>=]|interval|hdi)\b)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "pvalue-without-method",
+        re.compile(
+            r"\bp\s*[<>=]\s*0?\.\d+\b(?!.*\b(?:test|regression|anova|chi|wilcoxon|mann)\b)"
+        ),
+    ),
+    (
+        "unbacked-precision",
+        re.compile(
+            r"\d+\.\d+\s*%(?!.*\b(?:n\s*[=:]|sample|baseline|compared|vs\.?|from|to|source|http|#\d+)\b)"
+        ),
+    ),
+    (
+        "missing-baseline",
+        re.compile(
+            r"\b(?:improved|reduced|increased|decreased|cut|boosted|slashed|fell|dropped|rose|grew)\b[^.]*"
+            r"\bby\s+\d+(?:\.\d+)?\s*%(?!.*\b(?:from|to|vs\.?|compared|baseline|previous|before|http|#\d+)\b)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "pvalue-ungrounded",
+        re.compile(
+            r"\bp\s*[<>=]\s*0?\.\d+\b(?!.*\b(?:n\s*[=:]|df\s*[=:]|statistic|http|#\d+)\b)"
+        ),
+    ),
+    (
+        "causal-from-correlation",
+        re.compile(
+            r"\b(?:correlat\w+|associat\w+)\b[^.]*\b(?:caused?|due to|leads? to|because of|results? from)\b",
+            re.IGNORECASE,
+        ),
+    ),
+]
+
+_DECISIVE_RE = re.compile(
+    r"\b(?:proves?|conclusively|demonstrat\w+|definitively|certainly)\b", re.IGNORECASE
+)
+_WEAK_EVIDENCE_RE = re.compile(
+    r"\b(?:preliminary|initial|single run|one example|anecdotal|suggests?|may|might|could|pilot)\b",
+    re.IGNORECASE,
+)
+
+_GROUNDING_FLAGS = {
+    "unbacked-precision",
+    "missing-baseline",
+    "causal-from-correlation",
+    "decisive-from-weak",
+}
+
+
+def assess_stat_validity(claim_item: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach a deterministic inferential-sanity verdict to a claim.
+
+    ``non-quantitative`` is skipped; ``ok`` passes; ``suspect`` lists
+    violation flag names under ``stat_validity.flags``.
+    """
+    out = dict(claim_item)
+    text = out.get("claim", "")
+    if not _QUANT_CLAIM_RE.search(text):
+        out["stat_validity"] = {"verdict": "non-quantitative", "flags": []}
+        return out
+    flags = [flag for flag, pat in _STAT_VALIDITY_PATTERNS if pat.search(text)]
+    if _DECISIVE_RE.search(text) and _WEAK_EVIDENCE_RE.search(text):
+        flags.append("decisive-from-weak")
+    if _TEST_NAME_RE.search(text):
+        flags = [f for f in flags if f in _GROUNDING_FLAGS]
+    out["stat_validity"] = {
+        "verdict": "suspect" if flags else "ok",
+        "flags": sorted(set(flags)),
+    }
+    return out
+
+
+def assess_stat_validity_claims(claims: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Batch variant: attach ``stat_validity`` to every extracted claim."""
+    return [assess_stat_validity(c) for c in claims]
+
+
+def compute_stat_validity_stats(claims: List[Dict[str, Any]]) -> Dict[str, int]:
+    """Scorecard aggregate: ``checked`` = quantitative, ``suspect`` = flagged."""
+    verdicts = [c.get("stat_validity", {}).get("verdict") for c in claims]
+    return {
+        "checked": sum(v != "non-quantitative" for v in verdicts),
+        "suspect": sum(v == "suspect" for v in verdicts),
     }
 
 
