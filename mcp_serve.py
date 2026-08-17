@@ -686,17 +686,16 @@ async def _skills_get(arguments: dict) -> dict:
 def _register_sep2640(mcp: "FastMCP") -> None:
     """Declare the skills extension + register the skills/list / skills/get path.
 
-    Handshake: ``Server.get_capabilities`` is what the transport consults at
-    initialize; wrap it so the experimental capabilities always advertise
-    ``io.modelcontextprotocol/skills``. Registration path: this SDK dispatches
-    ``request_handlers`` by request *type* and does not yet ship the typed
-    Ext-requests (SEP-2133), so the string-keyed entries below are the
-    forward-compat markers — the handler functions themselves are the
-    canonical implementation (exercised by tests, ready for the typed request
-    classes when the SDK gains them). Slice A scope: handshake + registration
-    only; skill-content exposure via resources is Slice B.
+    The transport consults ``Server.get_capabilities`` at initialize, so wrap
+    it to always advertise ``io.modelcontextprotocol/skills``. This SDK keys
+    ``request_handlers`` by request *type* (no typed Ext-requests yet), so the
+    string-keyed entries are forward-compat markers — the handler functions
+    are the canonical, tested implementation. Slice A: handshake +
+    registration only (skill-content exposure via resources is Slice B).
     """
-    server = mcp._mcp_server
+    server = getattr(mcp, "_mcp_server", None)
+    if server is None or not hasattr(server, "request_handlers"):
+        return  # test stub / exotic backend — nothing to register onto
     orig = server.get_capabilities
 
     def _caps_with_skills(notification_options, experimental_capabilities=None, **kw):
