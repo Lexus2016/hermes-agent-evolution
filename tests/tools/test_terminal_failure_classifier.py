@@ -154,9 +154,7 @@ class TestClassifySyntaxError:
     def test_grep_exit_2_not_syntax(self):
         """grep exit 2 is a generic error (file-not-found), NOT a syntax
         error — must not get the syntax hint."""
-        result = classifier.classify_terminal_failure(
-            "grep foo missing.txt", 2, "", ""
-        )
+        result = classifier.classify_terminal_failure("grep foo missing.txt", 2, "", "")
         assert result.category == classifier.FailureCategory.unknown
         assert "Syntax" not in result.hint
 
@@ -428,9 +426,7 @@ class TestClassifySignalExits:
         ],
     )
     def test_signal_exit_classified_with_name(self, exit_code, expected_signal):
-        result = classifier.classify_terminal_failure(
-            "somecmd", exit_code, "", ""
-        )
+        result = classifier.classify_terminal_failure("somecmd", exit_code, "", "")
         assert result.category == classifier.FailureCategory.persistent_error
         assert result.should_retry is False
         assert expected_signal in result.hint
@@ -438,16 +434,12 @@ class TestClassifySignalExits:
     def test_unknown_signal_still_classified(self):
         """Exit codes >= 128 that aren't in the known map still get a
         generic 'signal N' hint."""
-        result = classifier.classify_terminal_failure(
-            "somecmd", 159, "", ""
-        )
+        result = classifier.classify_terminal_failure("somecmd", 159, "", "")
         assert result.category == classifier.FailureCategory.persistent_error
         assert "signal" in result.hint.lower()
 
     def test_signal_exit_hint_mentions_investigation(self):
-        result = classifier.classify_terminal_failure(
-            "somecmd", 137, "", ""
-        )
+        result = classifier.classify_terminal_failure("somecmd", 137, "", "")
         assert "investigate" in result.hint.lower() or "switch" in result.hint.lower()
 
 
@@ -546,3 +538,92 @@ class TestErrorFieldPopulation:
 
         assert data["exit_code"] == 0
         assert data.get("error") is None
+
+
+# ---------------------------------------------------------------------------
+# Residual-bucket decomposition (#2717): output_encoding / resource_limit /
+# env_not_found subclasses for the terminal 'other' bucket.
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyOutputEncoding:
+    def test_python_unicode_decode_error(self):
+        result = classifier.classify_terminal_failure(
+            "python3 script.py",
+            1,
+            "",
+            "UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff",
+        )
+        assert result.category == classifier.FailureCategory.output_encoding
+        assert result.should_retry is False
+
+    def test_invalid_start_byte(self):
+        result = classifier.classify_terminal_failure(
+            "cat binary.dat", 1, "", "invalid start byte"
+        )
+        assert result.category == classifier.FailureCategory.output_encoding
+        assert result.should_retry is False
+
+
+class TestClassifyResourceLimit:
+    def test_disk_full(self):
+        result = classifier.classify_terminal_failure(
+            "cp big.iso /mnt", 1, "", "cp: error writing: No space left on device"
+        )
+        assert result.category == classifier.FailureCategory.resource_limit
+        assert result.should_retry is False
+
+    def test_out_of_memory(self):
+        result = classifier.classify_terminal_failure(
+            "sort huge.txt", 1, "", "sort: cannot allocate memory"
+        )
+        assert result.category == classifier.FailureCategory.resource_limit
+
+    def test_too_many_open_files(self):
+        result = classifier.classify_terminal_failure(
+            "cat *.log", 1, "", "bash: cat: Too many open files"
+        )
+        assert result.category == classifier.FailureCategory.resource_limit
+
+
+class TestClassifyEnvNotFound:
+    def test_unbound_variable(self):
+        result = classifier.classify_terminal_failure(
+            "run.sh", 1, "", "run.sh: line 3: FOO: unbound variable"
+        )
+        assert result.category == classifier.FailureCategory.env_not_found
+        assert result.should_retry is False
+
+    def test_environment_variable_not_set(self):
+        result = classifier.classify_terminal_failure(
+            "deploy", 1, "", "Error: environment variable API_KEY is not set"
+        )
+        assert result.category == classifier.FailureCategory.env_not_found
+
+    def test_hint_suggests_setting_env(self):
+        result = classifier.classify_terminal_failure(
+            "cmd", 1, "", "The environment variable PATH is not set"
+        )
+        assert "Export" in result.hint or "export" in result.hint.lower()
+
+
+class TestResidualBucketNonRegression:
+    def test_unrelated_output_not_reclassified(self):
+        """A generic failure with none of the new signatures stays
+        persistent_error — the new subclasses must not swallow it."""
+        result = classifier.classify_terminal_failure(
+            "build", 1, "", "make: *** [Makefile:3: all] Error 1"
+        )
+        assert result.category == classifier.FailureCategory.persistent_error
+
+    def test_killed_word_boundary_only(self):
+        """'killed' must be a whole word — 'not_killed_here' must not match."""
+        result = classifier.classify_terminal_failure("cmd", 1, "nokilled", "")
+        assert result.category != classifier.FailureCategory.resource_limit
+
+    def test_signal_exit_still_has_precedence(self):
+        """exit 137 (SIGKILL) is still the signal branch, not resource_limit,
+        so existing signal hints keep priority over the new subclass."""
+        result = classifier.classify_terminal_failure("memhog", 137, "", "")
+        assert result.category == classifier.FailureCategory.persistent_error
+        assert "SIGKILL" in result.hint

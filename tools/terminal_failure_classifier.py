@@ -29,6 +29,17 @@ class FailureCategory(str, Enum):
     # (#2243).  Distinct from a non-zero exit caused by the command running
     # and failing at runtime.
     shell_syntax_error = "shell_syntax_error"
+    # Output bytes cannot be decoded — encoding/locale mismatch, mojibake,
+    # invalid UTF-8.  Deterministic; the fix is the encoding, not the command
+    # logic (#2717).
+    output_encoding = "output_encoding"
+    # Host resource exhaustion — disk full, OOM, fd/ulimit ceiling, oversized
+    # argv.  Recovery is freeing/raising the resource, not blind retry (#2717).
+    resource_limit = "resource_limit"
+    # Environment the command needs is missing — unset variable, absent
+    # interpreter environment, or undefined name.  Deterministic until fixed
+    # (#2717).
+    env_not_found = "env_not_found"
     unknown = "unknown"
 
 
@@ -85,6 +96,46 @@ _TRANSIENT_PATTERNS = (
     re.compile(r"connection refused", re.IGNORECASE),
     re.compile(r"could not resolve host", re.IGNORECASE),
     re.compile(r"device or resource busy", re.IGNORECASE),
+)
+
+# Output-encoding failures — bytes that cannot be decoded/encoded with the
+# active locale/codec (invalid UTF-8, mojibake, Python UnicodeDecodeError).
+# Deterministic: the same command reproduces the same decode failure.
+_ENCODING_PATTERNS = (
+    re.compile(r"unicodeencodeerror", re.IGNORECASE),
+    re.compile(r"unicodedecodeerror", re.IGNORECASE),
+    re.compile(r"codec can't decode", re.IGNORECASE),
+    re.compile(r"codec can't encode", re.IGNORECASE),
+    re.compile(r"invalid start byte", re.IGNORECASE),
+    re.compile(r"invalid continuation byte", re.IGNORECASE),
+    re.compile(r"character maps to <undefined>", re.IGNORECASE),
+    re.compile(r"unknown encoding", re.IGNORECASE),
+    re.compile(r"cannot decode", re.IGNORECASE),
+    re.compile(r"decode error", re.IGNORECASE),
+)
+
+# Resource-limit failures — host limits exhausted (disk, memory, fd, argv).
+_RESOURCE_LIMIT_PATTERNS = (
+    re.compile(r"no space left on device", re.IGNORECASE),
+    re.compile(r"disk quota exceeded", re.IGNORECASE),
+    re.compile(r"cannot allocate memory", re.IGNORECASE),
+    re.compile(r"out of memory", re.IGNORECASE),
+    re.compile(r"memory exhausted", re.IGNORECASE),
+    re.compile(r"too many open files", re.IGNORECASE),
+    re.compile(r"argument list too long", re.IGNORECASE),
+    re.compile(r"\bkilled\b", re.IGNORECASE),
+    re.compile(r"resource limit", re.IGNORECASE),
+)
+
+# Environment-not-found failures — an env var / interpreter environment the
+# command needs is absent or unset.
+_ENV_NOT_FOUND_PATTERNS = (
+    re.compile(r"unbound variable", re.IGNORECASE),
+    re.compile(r"environment variable", re.IGNORECASE),
+    re.compile(r"is not set", re.IGNORECASE),
+    re.compile(r"not defined in the environment", re.IGNORECASE),
+    re.compile(r"no such environment", re.IGNORECASE),
+    re.compile(r"no such interpreter", re.IGNORECASE),
 )
 
 # Commands where a non-zero exit code is often informational rather than an
@@ -325,6 +376,49 @@ def classify_terminal_failure(
                 "backoff may succeed."
             ),
             should_retry=True,
+        )
+
+    # Output-encoding failure — bytes cannot be decoded with the active
+    # locale/codec (invalid UTF-8, mojibake, Python UnicodeDecodeError).
+    # Deterministic: retrying unchanged is futile; fix the encoding/locale.
+    if any(p.search(text) for p in _ENCODING_PATTERNS):
+        return TerminalFailureClassification(
+            category=FailureCategory.output_encoding,
+            hint=(
+                "The command produced output that could not be decoded with "
+                "the active locale/codec (invalid UTF-8 or another encoding "
+                "mismatch). Re-running unchanged will fail identically. Set "
+                "a UTF-8 locale (LANG=C.UTF-8), pipe output through iconv, "
+                "or read the file as binary — do not retry the same command."
+            ),
+            should_retry=False,
+        )
+
+    # Host resource limit — disk full, OOM, fd ceiling, oversized argv.
+    if any(p.search(text) for p in _RESOURCE_LIMIT_PATTERNS):
+        return TerminalFailureClassification(
+            category=FailureCategory.resource_limit,
+            hint=(
+                "The command hit a host resource limit (disk space, memory, "
+                "open-file count, or argument size). Check `df -h`/`free -h`/"
+                "`ulimit -a`, free the constrained resource, or split the "
+                "work — then retry. Do not loop the same command unchanged."
+            ),
+            should_retry=False,
+        )
+
+    # Environment not found — an env var or interpreter environment the
+    # command needs is absent/unset. Deterministic until the env is fixed.
+    if any(p.search(text) for p in _ENV_NOT_FOUND_PATTERNS):
+        return TerminalFailureClassification(
+            category=FailureCategory.env_not_found,
+            hint=(
+                "The command needs an environment value that is missing or "
+                "unset (env var, interpreter, or environment). Export/set it "
+                "explicitly or activate the right environment before retrying; "
+                "the same command unchanged will fail identically."
+            ),
+            should_retry=False,
         )
 
     # Default: persistent non-zero error.
