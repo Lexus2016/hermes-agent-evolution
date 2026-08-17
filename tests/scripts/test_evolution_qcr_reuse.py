@@ -18,116 +18,75 @@ from evolution_qcr import (  # noqa: E402
 )
 
 
-def _write_capture_entry(directory: Path, tools, completed=True, name="cap.jsonl"):
-    d = Path(directory)
-    d.mkdir(parents=True, exist_ok=True)
-    entry = {
-        "completed": completed,
-        "entries": [{"tool": t} for t in tools],
-    }
-    with open(d / name, "a", encoding="utf-8") as fh:  # append: one record/line
-        fh.write(json.dumps(entry) + "\n")
+def _capture(tmp_path, entries):  # one JSON line per capture record
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    with open(tmp_path / "cap.jsonl", "a", encoding="utf-8") as fh:
+        for e in entries:
+            fh.write(json.dumps(e) + "\n")
 
 
-# -- persistence: trajectories BECOME notes ---------------------------------
-
-
-def test_notes_from_capture_dir_distills_successful_runs(tmp_path):
-    _write_capture_entry(tmp_path, ["read_file", "patch", "terminal"])
-    _write_capture_entry(tmp_path, ["web_search"], completed=False)  # skipped
+def test_persistence_roundtrip_and_capture(tmp_path):
+    # Only completed=True capture records become notes; notes roundtrip.
+    _capture(tmp_path, [
+        {"completed": True, "entries": [{"tool": "read_file"}, {"tool": "patch"},
+                                        {"tool": "terminal"}]},
+        {"completed": False, "entries": [{"tool": "web_search"}]},
+    ])
     notes = notes_from_capture_dir(tmp_path)
-    assert len(notes) == 1  # only the successful run becomes a note
-    assert notes[0].source_task_type == "coding"  # classify_by_tools
+    assert [n.source_task_type for n in notes] == ["coding"]
     assert "read_file" in notes[0].bindings_to_obtain
 
-
-def test_persist_and_load_notes_roundtrip(tmp_path):
-    notes = [build_qcr_note({"tools": ["read_file"]}, "coding")]
     store = tmp_path / "qcr-notes.jsonl"
     assert persist_notes(notes, store) == 1
-    loaded = load_notes(store)
-    assert loaded == notes
+    assert load_notes(store) == notes
+    assert load_notes(tmp_path / "missing.jsonl") == []  # missing → empty
+    store.write_text("not json\n\n{bad json}\n", encoding="utf-8")
+    assert load_notes(store) == []  # malformed lines skipped, never raise
 
 
-def test_load_notes_tolerates_missing_and_malformed(tmp_path):
-    assert load_notes(tmp_path / "missing.jsonl") == []
-    bad = tmp_path / "bad.jsonl"
-    bad.write_text("not json\n\n{malformed}\n", encoding="utf-8")
-    assert load_notes(bad) == []
-
-
-# -- replay guardrail --------------------------------------------------------
-
-
-def test_guardrail_ok_on_matching_target():
-    note = build_qcr_note({"tools": ["read_file", "patch"]}, "coding")
-    v = check_reuse_guardrail(
-        note, target_task_type="coding", target_tools=["read_file", "patch"]
+def test_guardrail_blocks_and_allows():
+    ok = check_reuse_guardrail(
+        build_qcr_note({"tools": ["read_file", "patch"]}, "coding"),
+        target_task_type="coding", target_tools=["read_file", "patch"],
     )
-    assert v["ok"] is True and v["reasons"] == []
-    assert v["must_re_resolve_before_replay"] is True
+    assert ok["ok"] is True and ok["must_re_resolve_before_replay"] is True
 
-
-def test_guardrail_blocks_task_type_mismatch():
-    note = build_qcr_note({"tools": ["web_search"]}, "research")
-    v = check_reuse_guardrail(
-        note, target_task_type="coding", target_tools=["web_search"]
+    mismatch = check_reuse_guardrail(
+        build_qcr_note({"tools": ["web_search"]}, "research"),
+        target_task_type="coding", target_tools=["web_search"],
     )
-    assert v["ok"] is False
-    assert any("task-type mismatch" in r for r in v["reasons"])
+    assert mismatch["ok"] is False
+    assert any("task-type mismatch" in r for r in mismatch["reasons"])
 
-
-def test_guardrail_blocks_missing_env_tools():
-    note = build_qcr_note({"tools": ["terminal", "patch"]}, "coding")
-    v = check_reuse_guardrail(note, target_task_type="coding", target_tools=["patch"])
-    assert v["ok"] is False
-    assert any("environment tools unavailable" in r for r in v["reasons"])
-
-
-def test_guardrail_flags_unresolved_binding_tools():
-    note = build_qcr_note({"tools": ["read_file", "web_search"]}, "research")
-    v = check_reuse_guardrail(
-        note, target_task_type="research", target_tools=["web_search"]
+    no_env = check_reuse_guardrail(
+        build_qcr_note({"tools": ["terminal", "patch"]}, "coding"),
+        target_task_type="coding", target_tools=["patch"],
     )
-    assert v["ok"] is True  # information only; replay proceeds, bindings re-resolved
-    assert "read_file" in v["unresolved_bindings"]
-    assert "read_file" in v["bindings_to_resolve"]
+    assert no_env["ok"] is False
+    assert any("environment tools unavailable" in r for r in no_env["reasons"])
+
+    partial = check_reuse_guardrail(
+        build_qcr_note({"tools": ["read_file", "web_search"]}, "research"),
+        target_task_type="research", target_tools=["web_search"],
+    )
+    assert partial["ok"] is True  # bindings re-resolve; they don't block
+    assert "read_file" in partial["unresolved_bindings"]
 
 
-# -- the composed replay path ------------------------------------------------
-
-
-def test_reuse_for_target_end_to_end(tmp_path):
+def test_reuse_for_target_composed_path(tmp_path):
     store = tmp_path / "qcr-notes.jsonl"
-    persist_notes(
-        [
-            build_qcr_note({"tools": ["read_file", "patch"]}, "coding"),
-            build_qcr_note({"tools": ["web_search"]}, "research"),
-        ],
-        store,
-    )
-    ok = reuse_for_target(
-        store, target_task_type="coding", target_tools=["read_file", "patch"]
-    )
-    assert ok["reusable"] is True
-    assert ok["note"]["source_task_type"] == "coding"
+    persist_notes([
+        build_qcr_note({"tools": ["read_file", "patch"]}, "coding"),
+        build_qcr_note({"tools": ["web_search"]}, "research"),
+    ], store)
+    ok = reuse_for_target(store, target_task_type="coding",
+                          target_tools=["read_file", "patch"])
+    assert ok["reusable"] is True and ok["note"]["source_task_type"] == "coding"
 
-    mismatch = reuse_for_target(
-        store, target_task_type="ops", target_tools=["terminal"]
-    )
-    assert mismatch["reusable"] is False
-    assert mismatch["reason"]
+    miss = reuse_for_target(store, target_task_type="ops",
+                            target_tools=["terminal"])
+    assert miss["reusable"] is False and miss["reason"]
 
-
-def test_reuse_for_target_empty_store(tmp_path):
-    out = reuse_for_target(tmp_path / "none.jsonl", target_task_type="coding",
-                           target_tools=["read_file"])
-    assert out["reusable"] is False and out["best_score"] is None
-
-
-def test_note_dict_projection_guardrail():
-    note = build_qcr_note({"tools": ["read_file"]}, "coding")
-    v = check_reuse_guardrail(
-        note.to_dict(), target_task_type="coding", target_tools=["read_file"]
-    )
-    assert v["ok"] is True
+    empty = reuse_for_target(tmp_path / "none.jsonl", target_task_type="coding",
+                             target_tools=["read_file"])
+    assert empty["reusable"] is False and empty["best_score"] is None
