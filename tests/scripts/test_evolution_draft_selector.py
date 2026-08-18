@@ -10,6 +10,7 @@ from evolution_draft_selector import (  # noqa: E402  # fmt: skip
     DEFAULT_MAX_DRAFTERS,
     _CMAP,
     _TIERS,
+    _distinctness,
     build_draft_tasks,
     route_cost_tier,
     select_best_draft,
@@ -129,3 +130,48 @@ def test_route_cli_positional(capsys):
 
 def test_route_cli_missing_complexity(capsys):
     assert main(["x", "route"]) == 2
+
+
+# ── Anti-conformity pressure tests (#2761) ───────────────────────────────────
+
+
+def test_contrarian_kept_alive_when_draft_differs():
+    out = {"results": [
+        {"task_index": 0, "status": "completed", "summary": "## A\n\nUse hash map for the cache lookup in the main loop with a retry."},
+        {"task_index": 1, "status": "completed", "summary": "## B\n\nUse hash map for the cache lookup in the main loop with a retry."},
+        {"task_index": 2, "status": "completed", "summary": "## C\n\nZebra rocket noodles teleport quietly through the quantum garden."},
+    ]}  # fmt: skip
+    _, _, drafts = select_best_draft(out)
+    # The near-identical pair is the norm; the most distinct draft (later
+    # index wins the tie) is the contrarian kept alive against consensus.
+    assert drafts[0]["contrarian"] is False
+    assert drafts[1]["contrarian"] is True
+    assert drafts[2]["contrarian"] is False
+
+
+def test_no_contrarian_when_single_ok_draft():
+    out = {"results": [
+        {"task_index": 0, "status": "completed", "summary": "## A\n\nSolo draft with a summary and a link https://x.com"},
+        {"task_index": 1, "status": "timeout", "summary": ""},
+    ]}  # fmt: skip
+    _, _, drafts = select_best_draft(out)
+    assert drafts[0]["contrarian"] is False
+
+
+def test_distinctness_symmetric_and_bounded():
+    assert _distinctness("same same same", "same same same") == 0.0
+    assert _distinctness("aaa bbb ccc", "xxx yyy zzz") == 1.0
+    # 3 of 5 tokens shared → Jaccard 0.6 → distinctness 0.4.
+    assert _distinctness("alpha beta gamma", "alpha beta gamma delta epsilon") == 0.4
+
+
+def test_contrarian_surfaces_in_cli(capsys, monkeypatch):
+    payload = json.dumps({"results": [
+        {"task_index": 0, "status": "completed", "summary": "Use cache for the lookup loop"},
+        {"task_index": 1, "status": "completed", "summary": "Use cache for the lookup loop"},
+        {"task_index": 2, "status": "completed", "summary": "Zebra rockets teleport quantum noodles"},
+    ]})  # fmt: skip
+    monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+    assert main(["x", "select"]) == 0
+    drafts = json.loads(capsys.readouterr().out)["drafts"]
+    assert [d["contrarian"] for d in drafts] == [False, True, False]

@@ -117,6 +117,41 @@ def _score(text: str) -> float:
     return round(s, 4)
 
 
+def _tokens(text: str) -> set:
+    """Lowercased word tokens for distinctness comparison (anti-conformity)."""
+    return set(re.findall(r"[a-z0-9_]{3,}", (text or "").lower()))
+
+
+def _distinctness(a: str, b: str) -> float:
+    """1 - Jaccard similarity of two summaries' tokens. 1.0 = fully distinct."""
+    ta, tb = _tokens(a), _tokens(b)
+    if not ta or not tb:
+        return 1.0
+    return 1.0 - len(ta & tb) / len(ta | tb)
+
+
+def _contrarian_index(drafts: List[Dict[str, Any]]) -> int:
+    """Index of the most distinct (least similar) OK draft — the contrarian
+    kept alive against spontaneous consensus (conformity law, #2761).
+
+    Pairs every draft against the highest-scoring draft (the would-be norm):
+    the one with the largest distinctness is the contrarian. Returns -1 when
+    there is nothing to compare.
+    """
+    ok = [d for d in drafts if d.get("ok")]
+    if len(ok) < 2:
+        return -1
+    best = max(ok, key=lambda d: d.get("score", 0.0))
+    # Tie-break on index so the LAST most-distinct draft wins — max() would
+    # otherwise return the first draft on equal distinctness.
+    contrarian = max(
+        ok, key=lambda d: (_distinctness(d["summary"], best["summary"]), d["index"])
+    )
+    if contrarian is best:
+        return -1
+    return contrarian["index"]
+
+
 def select_best_draft(delegate_output: Any) -> Tuple[int, float, List[Dict[str, Any]]]:
     """Score drafts, pick winner: (best_index, best_score, drafts)."""
     results = (
@@ -142,6 +177,11 @@ def select_best_draft(delegate_output: Any) -> Tuple[int, float, List[Dict[str, 
             "score": _score(sm) if ok else 0.0,
         })
     drafts.sort(key=lambda d: d["index"])
+    # Anti-conformity pressure (#2761): mark the most distinct OK draft as the
+    # contrarian so callers can keep >=1 non-consensus variant alive per cycle.
+    ci = _contrarian_index(drafts)
+    for d in drafts:
+        d["contrarian"] = d["ok"] and d["index"] == ci
     bi, bs = -1, 0.0
     for d in drafts:
         if d["ok"] and d["score"] > bs:
