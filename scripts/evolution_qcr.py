@@ -344,3 +344,105 @@ def notes_from_capture_dir(capture_dir: Any) -> List[QcrNote]:
             if tools:
                 notes.append(build_qcr_note({"tools": tools}, task_type))
     return notes
+
+
+# ── Skill-distillation consumer (QCR → new skills) (#2694 next increment) ──
+
+_DISTILL_TRACE_GOAL = (
+    "Reusable workflow distilled from captured successful trajectories"
+)
+
+
+def distill_skill(
+    notes: Sequence[Union[QcrNote, Dict[str, Any]]],
+    *,
+    target_task_type: str = "funnel",
+    target_tools: Optional[Sequence[str]] = None,
+    min_score: float = 0.5,
+) -> Dict[str, Any]:
+    """Reuse distilled QCR notes when building a NEW skill (#2694).
+
+    The QCR replay path already feeds ``reuse_for_target`` (reuse-or-fallback
+    in the funnel). This is the *distillation* consumer: it routes the selected
+    note into the skill-crystallizer (#2359) so a freshly built skill carries
+    the note's four target-bound fields (workflow invariant, bindings,
+    applicability, verification guardrail) as an explicit ``Reuse Notes (QCR)``
+    section instead of being minted from the raw trace alone.
+
+    Deterministic, import-safe, no LLM, no network:
+
+    1. Select the best reusable note via :func:`select_reusable_memory`.
+    2. If none reaches ``min_score`` → ``{"skill_created": False, ...}``
+       (fresh-execution fallback, same branch as the replay path).
+    3. Otherwise synthesize a minimal trace from the note's source tools and
+       crystallize it (``SkillCrystallizer.reflect_on_trace``), then append
+       the note's four fields to the skill markdown.
+
+    Returns a summary dict (never raises — the crystallizer is best-effort).
+    """
+    note = select_reusable_memory(
+        notes,
+        target_task_type=target_task_type,
+        target_tools=target_tools,
+        min_score=min_score,
+    )
+    if note is None:
+        ranked = rank_notes_for_target(notes, target_task_type, target_tools)
+        return {
+            "skill_created": False,
+            "reason": "no candidate note reached the reuse threshold",
+            "best_score": ranked[0][0] if ranked else None,
+        }
+    try:
+        from evolution.lib.skill_crystallizer import SkillCrystallizer
+    except Exception:
+        return {
+            "skill_created": False,
+            "reason": "skill_crystallizer unavailable",
+            "note_task_type": note.source_task_type,
+        }
+
+    trace = {
+        "status": "success",
+        "session_id": f"qcr-{note.source_task_type or 'note'}",
+        "goal": _DISTILL_TRACE_GOAL,
+        "tool_calls": [
+            {"name": t, "arguments": "{}"} for t in (note.source_tools or ["terminal"])
+        ],
+    }
+    candidate = SkillCrystallizer.reflect_on_trace(trace)
+    if candidate is None:
+        return {
+            "skill_created": False,
+            "reason": "crystallizer rejected the trace",
+            "note_task_type": note.source_task_type,
+        }
+
+    section = build_qcr_skill_section(note)
+    candidate.skill_markdown = candidate.skill_markdown.rstrip() + "\n\n" + section
+    if "qcr-reuse" not in candidate.tags:
+        candidate.tags.append("qcr-reuse")
+    return {
+        "skill_created": True,
+        "skill_name": candidate.name,
+        "note_task_type": note.source_task_type,
+        "source_tools": sorted(note.source_tools),
+        "qcr_fields": list(QCR_FIELDS),
+    }
+
+
+def build_qcr_skill_section(note: Union[QcrNote, Dict[str, Any]]) -> str:
+    """Render a note's four fields as the markdown section embedded in a skill."""
+    n = _note_from(note)
+    return (
+        "## Reuse Notes (QCR)\n"
+        "- Workflow invariant: {invariant}\n"
+        "- Bindings to obtain: {bindings}\n"
+        "- Applicability: {conditions}\n"
+        "- Verification guardrail: {guardrail}\n"
+    ).format(
+        invariant=n.workflow_invariant,
+        bindings="; ".join(n.bindings_to_obtain) or "none",
+        conditions="; ".join(n.applicability_conditions) or "none",
+        guardrail=n.verification_guardrail,
+    )

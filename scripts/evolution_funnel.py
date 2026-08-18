@@ -685,7 +685,12 @@ def main(argv: list[str]) -> int:
     # QCR producer + consumer wiring (#2694) — real cron-reachable call site
     # (dead-code review on PR #2713); record the replay-or-fallback decision.
     try:
-        from evolution_qcr import notes_from_capture_dir, reuse_for_target, write_notes
+        from evolution_qcr import (
+            distill_skill,
+            notes_from_capture_dir,
+            reuse_for_target,
+            write_notes,
+        )
 
         _qcr_store = evolution_dir / "qcr-notes.jsonl"
         _captured = notes_from_capture_dir(evolution_dir / "trajectories")
@@ -693,6 +698,13 @@ def main(argv: list[str]) -> int:
             write_notes(_qcr_store, _captured)
         record["qcr_reuse"] = reuse_for_target(
             _qcr_store,
+            target_task_type="funnel",
+            target_tools=["read_file", "search_files", "terminal"],
+        )
+        # Skill-distillation consumer (#2694): reuse the distilled notes when
+        # building NEW skills (SkillCrystallizer path) — not just replay.
+        record["qcr_distillation"] = distill_skill(
+            _captured,
             target_task_type="funnel",
             target_tools=["read_file", "search_files", "terminal"],
         )

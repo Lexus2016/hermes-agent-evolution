@@ -13,7 +13,9 @@ from evolution_qcr import (  # noqa: E402
     QCR_FIELDS,
     QcrNote,
     build_qcr_note,
+    build_qcr_skill_section,
     check_reuse_guardrail,
+    distill_skill,
     load_notes,
     notes_from_capture_dir,
     rank_notes_for_target,
@@ -226,3 +228,68 @@ def test_producer_to_consumer_end_to_end(tmp_path) -> None:
     # branch fires end-to-end against the matching target.
     assert decision["reusable"] is True
     assert decision["note"]["source_task_type"] == "coding"
+
+
+# ── next increment: skill-distillation consumer (QCR notes → new skills) ────
+
+
+def test_distill_skill_with_no_notes() -> None:
+    result = distill_skill(
+        [],
+        target_task_type="coding",
+        target_tools=["read_file", "terminal"],
+    )
+    assert result["skill_created"] is False
+    assert "no candidate note" in result["reason"]
+
+
+def test_distill_skill_creates_enriched_skill() -> None:
+    notes = [
+        build_qcr_note(
+            {"tools": ["read_file", "patch", "terminal", "write_file"]},
+            task_type="coding",
+        )
+    ]
+    result = distill_skill(
+        notes,
+        target_task_type="coding",
+        target_tools=["read_file", "patch", "terminal", "write_file"],
+    )
+    assert result["skill_created"] is True
+    assert result["skill_name"]
+    assert result["note_task_type"] == "coding"
+    assert result["source_tools"] == sorted({
+        "read_file",
+        "patch",
+        "terminal",
+        "write_file",
+    })
+    # The four QCR fields are the ones carried into the skill markdown.
+    assert result["qcr_fields"] == list(QCR_FIELDS)
+
+
+def test_distill_skill_writes_qcr_section_into_markdown() -> None:
+    notes = [build_qcr_note({"tools": ["read_file", "terminal"]}, task_type="ops")]
+    result = distill_skill(
+        notes,
+        target_task_type="ops",
+        target_tools=["read_file", "terminal"],
+        min_score=0.0,
+    )
+    assert result["skill_created"] is True
+    # The QCR section (rendered by build_qcr_skill_section) is what carries
+    # the note's four fields into the skill; its rendering is asserted below.
+    assert result["note_task_type"] == "ops"
+
+
+def test_build_qcr_skill_section_renders_all_four_fields() -> None:
+    note = build_qcr_note(
+        {"tools": ["read_file", "terminal", "write_file"]}, task_type="ops"
+    )
+    section = build_qcr_skill_section(note)
+    assert section.startswith("## Reuse Notes (QCR)")
+    assert "Workflow invariant" in section
+    assert "Bindings to obtain" in section
+    assert "Applicability" in section
+    assert "Verification guardrail" in section
+    assert "read_file" in section  # a binding tool is listed
