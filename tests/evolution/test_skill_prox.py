@@ -59,3 +59,57 @@ def test_input_keys_are_used_when_provided():
 def test_verdict_is_a_dataclass():
     v = ReExecutionVerdict(passed=True)
     assert v.per_input == {} and v.edited_body == "" and v.error is None
+
+
+# ── Slice 2: accept/reject memory (#2778) ──────────────────────────────
+
+from evolution.lib.skill_prox import (  # noqa: E402
+    edit_key,
+    is_rejected,
+    record_verdict,
+    verify_skill_edit_with_memory,
+)
+
+
+def test_rejected_edit_is_recorded_and_not_reproposed(tmp_path):
+    store = tmp_path / "verdicts.jsonl"
+    calls = []
+
+    def runner(body: str, inp) -> bool:
+        calls.append(inp)
+        return False  # always fails → rejected
+
+    v1 = verify_skill_edit_with_memory(
+        "my-skill", "body", lambda b: b + "!", [1], runner, store_path=store
+    )
+    assert v1.passed is False and calls == [1]
+    assert is_rejected("my-skill", "body!", store_path=store)
+
+    # Identical re-proposal: NOT re-verified (the batch never re-runs).
+    v2 = verify_skill_edit_with_memory(
+        "my-skill", "body", lambda b: b + "!", [1], runner, store_path=store
+    )
+    assert v2.passed is False
+    assert "previously rejected" in (v2.error or "")
+    assert calls == [1]  # runner never re-ran
+
+
+def test_later_accept_supersedes_earlier_reject(tmp_path):
+    store = tmp_path / "verdicts.jsonl"
+    body = "edited"
+    record_verdict("s", body, False, store_path=store)
+    record_verdict("s", body, True, store_path=store)
+    assert is_rejected("s", body, store_path=store) is False
+
+
+def test_distinct_edits_are_independent(tmp_path):
+    store = tmp_path / "verdicts.jsonl"
+    record_verdict("s", "edit-A", False, store_path=store)
+    assert is_rejected("s", "edit-A", store_path=store)
+    assert is_rejected("s", "edit-B", store_path=store) is False
+
+
+def test_edit_key_is_stable_and_content_addressed():
+    assert edit_key("s", "b") == edit_key("s", "b")
+    assert edit_key("s", "b") != edit_key("s2", "b")
+    assert edit_key("s", "b") != edit_key("s", "b2")
