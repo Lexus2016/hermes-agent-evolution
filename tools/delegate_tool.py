@@ -1658,6 +1658,58 @@ _SHELL_DEPENDENT_VERBS = frozenset({
 })
 
 
+def _should_auto_add_terminal(
+    goal: str,
+    context: Optional[str],
+    child_toolsets: List[str],
+    parent_toolsets: set,
+) -> bool:
+    """Decision helper for the #1369/#2826 auto-add: should ``terminal`` be
+    added to the child toolset before dispatch?
+
+    True when the goal/context references shell-dependent verbs, the child
+    toolset omits ``terminal``, AND at least one of:
+      - the parent can provide terminal (its toolset or a composite expands
+        to it) — the original #1369 guard; or
+      - the HOST can execute shell work (git on PATH) — the #2826 fallback
+        for orchestrator parents (e.g. the evolution Hydra: file+delegation
+        only) that legitimately lack terminal while their host can still run
+        git/gh, as proven by the #2758 P-001 preflight gate.
+
+    Pure and unit-testable; ``_host_has_shell_capability`` is consulted via
+    the module so tests can patch it.
+    """
+    if not _goal_needs_terminal(goal, context):
+        return False
+    if "terminal" in child_toolsets:
+        return False
+    if "terminal" in _expand_parent_toolsets(parent_toolsets):
+        return True
+    return _host_has_shell_capability()
+
+
+def _host_has_shell_capability() -> bool:
+    """Return True when the HOST can actually execute shell work (P-001).
+
+    Orchestrator parents (e.g. the evolution Hydra) deliberately run without
+    the ``terminal`` toolset — they must never run stage scripts themselves —
+    but their delegated children still need a shell for git/gh/test work.
+    The preflight gate (#2758, evolution_hydra_gate.py P-001) already proved
+    the host has execution capability before such a parent is woken, so the
+    auto-add decision can consult the host directly instead of requiring the
+    parent toolset to include ``terminal``.
+
+    Returns True on positive evidence of capability; fails open (True) if the
+    probe itself errors, matching the gate's fail-open policy.
+    """
+    import shutil
+
+    try:
+        return shutil.which("git") is not None
+    except (OSError, ValueError):
+        return True
+
+
 def _goal_needs_terminal(goal: str, context: Optional[str] = None) -> bool:
     """Return True if the task goal/context text references shell-dependent work.
 
@@ -2044,22 +2096,28 @@ def _build_child_agent(
     # but the resolved toolset omits `terminal`, auto-add it.  Without this,
     # leaf subagents arrive without a shell and emit "I have no shell tool"
     # spirals, wasting a full delegation cycle.  The parent intersection
-    # already bounded the child to parent-capable toolsets, so we only add
-    # `terminal` when the parent itself can provide it (parent_toolsets has
-    # it or a composite that expands to it).  This prevents widening the
-    # child beyond the parent's real capabilities.
+    # already bounded the child to parent-capable toolsets, so we prefer to
+    # add `terminal` only when the parent itself can provide it
+    # (parent_toolsets has it or a composite that expands to it) — this
+    # prevents widening the child beyond the parent's real capabilities.
+    # BUT an orchestrator parent (e.g. the evolution Hydra: file+delegation
+    # only) legitimately lacks `terminal` while its HOST can still execute
+    # git/gh (proven by the #2758 P-001 preflight gate).  Refusing to
+    # provision the shell for that parent's children left implementation /
+    # integration subagents terminal-less (#2826), so when the parent lacks
+    # terminal we fall back to the live host probe instead of denying.
     _toolset_adjusted = False
-    if _goal_needs_terminal(goal, context) and "terminal" not in child_toolsets:
-        expanded_parent = _expand_parent_toolsets(parent_toolsets)
-        if "terminal" in expanded_parent:
-            child_toolsets.append("terminal")
-            _toolset_adjusted = True
-            logger.info(
-                "delegate_task: auto-added 'terminal' toolset for task %d "
-                "(goal references shell-dependent verbs but resolved toolset "
-                "omitted it) — #1369 regression fix",
-                task_index,
-            )
+    if _should_auto_add_terminal(goal, context, child_toolsets, parent_toolsets):
+        child_toolsets.append("terminal")
+        _toolset_adjusted = True
+        logger.info(
+            "delegate_task: auto-added 'terminal' toolset for task %d "
+            "(goal references shell-dependent verbs but resolved toolset "
+            "omitted it; parent-can=%s host-can=%s) — #1369/#2826 fix",
+            task_index,
+            "terminal" in _expand_parent_toolsets(parent_toolsets),
+            _host_has_shell_capability(),
+        )
 
     # Blocked tools also live inside mixed platform bundles (hermes-cli,
     # hermes-telegram, etc.) that _strip_blocked_tools must keep because they

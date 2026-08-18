@@ -9,7 +9,11 @@ Verifies that:
 
 from types import SimpleNamespace
 
-from tools.delegate_tool import _goal_needs_terminal, _strip_blocked_tools
+from tools.delegate_tool import (
+    _goal_needs_terminal,
+    _host_has_shell_capability,
+    _strip_blocked_tools,
+)
 
 
 class TestGoalNeedsTerminal:
@@ -63,15 +67,43 @@ class TestAutoAddTerminalLogic:
         expanded = _expand_parent_toolsets(parent_toolsets)
         assert "terminal" in expanded
 
-    def test_no_auto_add_when_parent_lacks_terminal(self):
-        """Goal needs shell, parent also lacks terminal → no widening."""
-        from tools.delegate_tool import _expand_parent_toolsets
+    def test_no_auto_add_when_parent_and_host_lack_terminal(self):
+        """Goal needs shell, parent lacks terminal AND host cannot execute →
+        no widening (guard preserved for genuinely host-less environments)."""
+        from unittest.mock import patch
 
-        parent_toolsets = {"file", "web"}
-        child_toolsets = _strip_blocked_tools(["file", "web"])
-        assert _goal_needs_terminal("Run git log")
-        expanded = _expand_parent_toolsets(parent_toolsets)
-        assert "terminal" not in expanded  # guard prevents add
+        from tools.delegate_tool import _should_auto_add_terminal
+
+        with patch(
+            "tools.delegate_tool._host_has_shell_capability", return_value=False
+        ):
+            assert not _should_auto_add_terminal(
+                goal="Run git log",
+                context=None,
+                child_toolsets=_strip_blocked_tools(["file", "web"]),
+                parent_toolsets={"file", "web"},
+            )
+
+    def test_auto_add_when_parent_lacks_terminal_but_host_can_shell(self):
+        """#2826: an orchestrator parent (e.g. evolution Hydra: file +
+        delegation) lacks `terminal`, but its host can execute git/gh
+        (proven by the #2758 P-001 preflight gate). A shell-dependent child
+        must still be provisioned with `terminal` — otherwise delegated
+        implementation/integration stages cannot run git/gh/pytest at all."""
+        from unittest.mock import patch
+
+        from tools.delegate_tool import _should_auto_add_terminal
+
+        with patch("tools.delegate_tool._host_has_shell_capability", return_value=True):
+            assert _should_auto_add_terminal(
+                goal="Run git log and open a PR with gh",
+                context=None,
+                child_toolsets=_strip_blocked_tools(["file", "delegation"]),
+                parent_toolsets={"file", "delegation"},
+            ), (
+                "shell-dependent child of a terminal-less orchestrator parent "
+                "must be provisioned with terminal when the host can execute"
+            )
 
     def test_no_auto_add_when_already_present(self):
         """Goal needs shell, child already has terminal → no-op."""
