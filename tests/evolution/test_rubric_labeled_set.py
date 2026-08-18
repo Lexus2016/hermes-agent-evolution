@@ -60,7 +60,15 @@ def test_default_store_path_is_what_the_judge_reads(tmp_path, monkeypatch):
     monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
     assert default_store_path() == tmp_path / "rubric-forge" / "labeled.json"
     # Round-trip with the S1 consumer: collect, then the judge reads it.
-    append_labeled_examples([{"requires": ["sources"], "label": True}])
+    # 4 examples so the S3 held-out gate has a tail to prove parity on.
+    append_labeled_examples(
+        [
+            {"requires": ["sources"], "label": True},
+            {"requires": ["sources"], "label": True},
+            {"forbids": ["vibes"], "label": False},
+            {"forbids": ["guesses"], "label": False},
+        ]
+    )
     (tmp_path / "rubric-forge" / "candidates.json").write_text(
         json.dumps(["mentions sources"]), encoding="utf-8"
     )

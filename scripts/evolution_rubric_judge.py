@@ -176,6 +176,15 @@ def _total_max() -> int:
     return sum(dim["max"] for dim in RUBRIC_DIMENSIONS.values())
 
 
+# Generic-judge baseline for the held-out gate (#2782): the shipped rubric
+# stated as text the keyword-requirements judge can apply — its criteria
+# labels are the requirements the generic judge has always enforced.
+_SHIPPED_RUBRIC_TEXT = "\n".join(
+    f"{dim}:\n" + "\n".join(f"  {c['label']}" for c in spec["criteria"].values())
+    for dim, spec in RUBRIC_DIMENSIONS.items()
+)
+
+
 def _keyword_requirements_judge(rubric_text: str, example: Any) -> bool:
     """Deterministic default judge for RubricForge agreement (#2780).
 
@@ -231,14 +240,44 @@ def resolve_active_rubric(evolution_dir: Path) -> Optional[Dict[str, Any]]:
         m = re.match(r"^([a-z_]+)\s*:\s*(\d+)\s*$", line.strip())
         if m and m.group(1) in RUBRIC_DIMENSIONS:
             max_overrides[m.group(1)] = float(m.group(2))
+    # Held-out false-pass gate (#2782): the winner was selected ON this
+    # labeled set, so before its overrides become the ACTIVE rubric it must
+    # prove false-pass parity on a held-out tail it never saw. Refusal
+    # means the shipped rubric runs (recorded as gate=blocked).
+    gate_verdict = None
+    active_text, active_agreement, active_overrides = best_text, agreement, max_overrides
+    try:
+        from evolution.lib.rubric_heldout_gate import held_out_false_pass_gate
+
+        gate_verdict = held_out_false_pass_gate(
+            best_text,
+            _SHIPPED_RUBRIC_TEXT,
+            labeled,
+            labels,
+            _keyword_requirements_judge,
+        )
+        if not gate_verdict.adopt:
+            active_text, active_agreement, active_overrides = "", 0.0, {}
+    except ImportError:
+        gate_verdict = None  # standalone deployment — no gate, run the winner
+
     try:
         rf_dir.mkdir(parents=True, exist_ok=True)
         (rf_dir / "selected.json").write_text(
             json.dumps(
                 {
-                    "rubric": best_text[:2000],
-                    "agreement": agreement,
-                    "max_overrides": max_overrides,
+                    "rubric": active_text[:2000],
+                    "agreement": active_agreement,
+                    "max_overrides": active_overrides,
+                    "held_out_gate": {
+                        "adopt": gate_verdict.adopt,
+                        "evolved_false_pass_rate": gate_verdict.evolved_false_pass_rate,
+                        "baseline_false_pass_rate": gate_verdict.baseline_false_pass_rate,
+                        "held_out_size": gate_verdict.held_out_size,
+                        "reason": gate_verdict.reason,
+                    }
+                    if gate_verdict is not None
+                    else None,
                     "selected_at": datetime.now().isoformat(),
                 },
                 indent=2,
@@ -247,7 +286,14 @@ def resolve_active_rubric(evolution_dir: Path) -> Optional[Dict[str, Any]]:
         )
     except OSError:
         pass
-    return {"rubric": best_text, "agreement": agreement, "max_overrides": max_overrides}
+    if not active_text:
+        return None  # gate blocked — the judge runs the shipped rubric
+    return {
+        "rubric": active_text,
+        "agreement": active_agreement,
+        "max_overrides": active_overrides,
+        "held_out_gate": gate_verdict,
+    }
 
 
 def _hot_path(evolution_dir: Path) -> Path:

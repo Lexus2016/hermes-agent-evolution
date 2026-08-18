@@ -84,10 +84,16 @@ def test_resolve_active_rubric_absent_inputs_is_none(tmp_path):
 def test_score_applies_override_max(tmp_path, monkeypatch):
     """The judge's score() CONSUMES the winning rubric: dimension max follows
     the override line, and the run carries the rubric_forge verdict."""
+    # 4 examples: 2 train + 2 held-out (S3 gate needs a non-empty tail).
     _seed_rf(
         tmp_path,
         candidates=["research: 3\nmentions sources"],
-        labeled=[{"requires": ["sources"], "label": True}],
+        labeled=[
+            {"requires": ["sources"], "label": True},
+            {"requires": ["sources"], "label": True},
+            {"forbids": ["vibes"], "label": False},
+            {"forbids": ["guesses"], "label": False},
+        ],
     )
     judge = StrictRubricJudgeGrader()
     result = judge.score("2026-08-18", evolution_dir=tmp_path)
