@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Unit tests for Agentic Transaction Slice 1 — transaction envelope (#2762)."""
 
+import pytest
+
 from evolution.lib.agentic_tx import CompensationRegistry, TransactionEnvelope, begin
 
 
@@ -78,3 +80,37 @@ def test_begin_helper_returns_envelope():
     tx = begin(enabled=True)
     assert tx.enabled is True
     assert isinstance(tx.registry, CompensationRegistry)
+
+
+# ── Slice 3: compensation for non-rollbackable mutations (#2764) ────────
+# A merged PR cannot be un-merged; the compensate-don't-rollback branch
+# registers a mitigation action at merge time and invokes it when a LATER
+# failure in the same transaction makes the merge harmful.
+
+def test_merged_pr_registers_compensation_invoked_on_later_failure():
+    tx = begin(enabled=True)
+    events = []
+
+    with pytest.raises(RuntimeError):
+        with tx.begin():
+            # Mutation 1: a non-rollbackable side effect SUCCEEDS (PR merged).
+            events.append("pr-123 merged")
+            # Compensate-don't-rollback: register the mitigation NOW.
+            tx.register("pr-123", lambda: events.append("revert PR opened"))
+            # Mutation 2 (later): post-merge validation fails.
+            raise RuntimeError("post-merge validation failed")
+
+    # The merge is not un-merged — the compensation mitigates instead.
+    assert events == ["pr-123 merged", "revert PR opened"]
+
+
+def test_merged_pr_compensation_not_invoked_when_transaction_succeeds():
+    tx = begin(enabled=True)
+    events = []
+
+    with tx.begin():
+        events.append("pr-124 merged")
+        tx.register("pr-124", lambda: events.append("revert PR opened"))
+        # No later failure — commit clears the compensation silently.
+
+    assert events == ["pr-124 merged"]
