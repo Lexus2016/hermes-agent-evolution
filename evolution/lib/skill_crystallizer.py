@@ -25,6 +25,15 @@ __all__ = [
 
 MAX_SKILL_SIZE_BYTES = 15 * 1024  # 15 KB strict gate
 
+# Evidence bar for promoting a memory/trace into a reusable skill (#2746).
+# A candidate must clear ALL of these to be promoted — the explicit guardrail
+# governing the memory->skill distillation path, so a single lucky trace does
+# not silently become a persistent skill that compounds its errors.
+MIN_REUSABILITY_SCORE = 0.6  # reusability heuristic must clear this
+MIN_DISTINCT_TOOLS = 2  # must exercise more than one tool (real workflow)
+MIN_ACTIONS = 3  # must be a non-trivial multi-step workflow
+REQUIRE_VERIFIED = True  # trace must be a verified success, not just "ok"
+
 
 @dataclass
 class CrystallizedSkillCandidate:
@@ -69,6 +78,48 @@ class SkillCrystallizer:
         clean = re.sub(r"[^a-zA-Z0-9_-]", "-", name.strip().lower())
         clean = re.sub(r"-+", "-", clean).strip("-")
         return clean or "crystallized-skill"
+
+    @classmethod
+    def meets_evidence_bar(
+        cls,
+        candidate: CrystallizedSkillCandidate,
+        *,
+        distinct_tools: int = 0,
+        action_count: int = 0,
+        verified: bool = True,
+    ) -> Tuple[bool, str]:
+        """Check a candidate against the memory->skill evidence bar (#2746).
+
+        The explicit guardrail governing which memories/traces may be promoted
+        to persistent skills. A candidate must clear ALL of:
+          - reusability score >= MIN_REUSABILITY_SCORE
+          - exercised >= MIN_DISTINCT_TOOLS distinct tools
+          - >= MIN_ACTIONS total actions (non-trivial workflow)
+          - verified success (REQUIRE_VERIFIED)
+
+        Returns (passes, reason). A candidate that fails is NOT promoted —
+        it stays a provisional memory rather than becoming a persistent skill
+        that could compound its errors.
+        """
+        if candidate.reusability_score < MIN_REUSABILITY_SCORE:
+            return (
+                False,
+                f"reusability {candidate.reusability_score:.2f} < "
+                f"{MIN_REUSABILITY_SCORE}",
+            )
+        if distinct_tools < MIN_DISTINCT_TOOLS:
+            return (
+                False,
+                f"only {distinct_tools} distinct tool(s), need >= {MIN_DISTINCT_TOOLS}",
+            )
+        if action_count < MIN_ACTIONS:
+            return (
+                False,
+                f"only {action_count} action(s), need >= {MIN_ACTIONS}",
+            )
+        if REQUIRE_VERIFIED and not verified:
+            return False, "trace not verified as a success"
+        return True, "meets evidence bar"
 
     @classmethod
     def reflect_on_trace(
@@ -148,7 +199,20 @@ tags:
         )
 
         ok, _ = cls.validate_candidate(candidate)
-        return candidate if ok else None
+        if not ok:
+            return None
+
+        # Evidence bar (#2746): only promote traces that clear the explicit
+        # memory->skill guardrail. A trace that is too thin, too single-tool,
+        # or not verified stays a provisional memory, not a persistent skill.
+        verified = status in {"success", "completed"}
+        bar_ok, _ = cls.meets_evidence_bar(
+            candidate,
+            distinct_tools=len(tools_used),
+            action_count=total_actions,
+            verified=verified,
+        )
+        return candidate if bar_ok else None
 
     @classmethod
     def validate_candidate(
