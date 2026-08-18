@@ -176,6 +176,80 @@ def _total_max() -> int:
     return sum(dim["max"] for dim in RUBRIC_DIMENSIONS.values())
 
 
+def _keyword_requirements_judge(rubric_text: str, example: Any) -> bool:
+    """Deterministic default judge for RubricForge agreement (#2780).
+
+    A labeled example is ``{"requires": [..keywords..], "forbids": [..]}``:
+    the rubric accepts it when it mentions every required keyword and at
+    least one forbidden one. ``label: True`` examples encode requirements a
+    good rubric must state; ``label: False`` examples encode anti-requirements
+    (a rubric containing them disagrees and loses agreement).
+    """
+    ex = example if isinstance(example, dict) else {}
+    requires = [k for k in (ex.get("requires") or []) if isinstance(k, str)]
+    forbids = [k for k in (ex.get("forbids") or []) if isinstance(k, str)]
+    verdict = all(k in rubric_text for k in requires)
+    if forbids:
+        verdict = verdict and any(k in rubric_text for k in forbids)
+    return bool(verdict)
+
+
+def resolve_active_rubric(evolution_dir: Path) -> Optional[Dict[str, Any]]:
+    """RubricForge consumer (#2780): pick the agreement-maximizing rubric.
+
+    Reads ``rubric-forge/candidates.json`` (list of rubric texts — each may
+    carry ``<dimension>: <int>`` override lines) and ``rubric-forge/labeled.json``
+    (keyword-requirement examples with ground-truth labels), selects the best
+    candidate via :func:`evolution.lib.rubric_forge.select_best_rubric`,
+    records the verdict to ``rubric-forge/selected.json`` for audit, and
+    returns ``{"rubric", "agreement", "max_overrides"}``. Returns ``None``
+    when either input is absent — the judge then runs the shipped rubric,
+    byte-identical to pre-RubricForge behavior.
+    """
+    rf_dir = evolution_dir / "rubric-forge"
+    candidates = _load_json(rf_dir / "candidates.json")
+    labeled = _load_json(rf_dir / "labeled.json")
+    if not isinstance(candidates, list) or not candidates:
+        return None
+    if not isinstance(labeled, list) or not labeled:
+        return None
+    try:
+        from evolution.lib.rubric_forge import select_best_rubric
+    except ImportError:
+        # Standalone-script deployment (HERMES_HOME/scripts without the repo
+        # tree): the primitive is unavailable — run the shipped rubric.
+        return None
+
+    labels = [
+        bool(e.get("label")) if isinstance(e, dict) else False for e in labeled
+    ]
+    best_text, agreement = select_best_rubric(
+        [str(c) for c in candidates], labeled, labels, _keyword_requirements_judge
+    )
+    max_overrides: Dict[str, float] = {}
+    for line in best_text.splitlines():
+        m = re.match(r"^([a-z_]+)\s*:\s*(\d+)\s*$", line.strip())
+        if m and m.group(1) in RUBRIC_DIMENSIONS:
+            max_overrides[m.group(1)] = float(m.group(2))
+    try:
+        rf_dir.mkdir(parents=True, exist_ok=True)
+        (rf_dir / "selected.json").write_text(
+            json.dumps(
+                {
+                    "rubric": best_text[:2000],
+                    "agreement": agreement,
+                    "max_overrides": max_overrides,
+                    "selected_at": datetime.now().isoformat(),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+    return {"rubric": best_text, "agreement": agreement, "max_overrides": max_overrides}
+
+
 def _hot_path(evolution_dir: Path) -> Path:
     """Canonical path: $EVOLUTION_PROFILE_DIR or ~/.hermes/evolution."""
     env = os.environ.get("EVOLUTION_PROFILE_DIR", "")
@@ -588,13 +662,19 @@ class StrictRubricJudgeGrader:
         integration_scores = self._score_integration(integration_json)
         health_scores = self._score_pipeline_health(date, evolution_dir)
 
+        # RubricForge (#2780): if candidate rubrics + a labeled set exist in
+        # the evolution profile, the agreement-maximizing candidate's
+        # dimension-max overrides are the ACTIVE rubric for this scoring run.
+        active_rubric = resolve_active_rubric(evolution_dir)
+        max_overrides = (active_rubric or {}).get("max_overrides") or {}
+
         # Build dimension records
         def _build_dimension(dim_name: str, scores: Dict[str, float]) -> Dict[str, Any]:
             dim_def = RUBRIC_DIMENSIONS[dim_name]
             total = sum(scores.values())
             return {
                 "score": round(total, 1),
-                "max": float(dim_def["max"]),
+                "max": float(max_overrides.get(dim_name, dim_def["max"])),
                 "criteria": scores,
             }
 
@@ -671,6 +751,7 @@ class StrictRubricJudgeGrader:
             "total_max": total_max,
             "overall_percentage": pct,
             "flags": flags,
+            "rubric_forge": active_rubric,
             "claims": claims,
             "claim_verdicts": claim_stats["verdict_counts"] if claims else {},
             "stat_validity": stat_stats,
