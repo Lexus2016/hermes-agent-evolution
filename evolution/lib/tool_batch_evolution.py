@@ -27,6 +27,7 @@ New module, no changes to existing tool loading. Module ≤ 200 lines.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence
@@ -42,6 +43,8 @@ __all__ = [
     "select_best",
     "transferability_score",
     "accept_best",
+    "variant_distinctness",
+    "select_with_anti_conformity",
 ]
 
 # Deterministic mutation hints cycled across variants; the variant index
@@ -153,3 +156,55 @@ def accept_best(
     if transferability_score(origin_results, held_out_results) < threshold:
         return None
     return best
+
+
+def variant_distinctness(variants: Sequence[SynthesizedTool]) -> float:
+    """Diversity metric over a candidate set (anti-conformity, #2761).
+
+    Returns the fraction of variants whose description is pairwise distinct
+    from every other variant's description. 1.0 = all variants are unique
+    (maximal diversity); 0.0 = every variant is a duplicate of another. A
+    population that has converged on one common description scores 0.0 — the
+    signal that anti-conformity pressure should kick in.
+    """
+    if len(variants) < 2:
+        return 1.0
+    descs = [v.description for v in variants]
+    unique = 0
+    for i, d in enumerate(descs):
+        if all(d != descs[j] for j in range(len(descs)) if j != i):
+            unique += 1
+    return unique / len(descs)
+
+
+def select_with_anti_conformity(
+    results: Sequence[VariantResult],
+    *,
+    min_distinctness: float = 0.5,
+) -> Optional[SynthesizedTool]:
+    """Select the best variant while keeping ≥1 contrarian variant alive.
+
+    Anti-conformity pressure (#2761): once a mediocre variant becomes common
+    in shared state, downstream agents conform to it without any selection
+    pressure forcing that choice (the conformity law). To resist premature
+    convergence, this selection keeps the highest-scoring variant whose
+    description is NOT the most common one — a contrarian — when the
+    population's distinctness falls below *min_distinctness*.
+
+    Returns the best passing variant, or the best contrarian passing variant
+    when the population has converged. None if nothing passes.
+    """
+    passing = [r for r in results if r.passed]
+    if not passing:
+        return None
+    best = max(passing, key=lambda r: r.score)
+    if variant_distinctness([r.variant for r in passing]) >= min_distinctness:
+        return best.variant
+    # Population has converged — keep a contrarian variant alive.
+    descs = [r.variant.description for r in passing]
+    counts = Counter(descs)
+    most_common = counts.most_common(1)[0][0]
+    contrarians = [r for r in passing if r.variant.description != most_common]
+    if not contrarians:
+        return best.variant
+    return max(contrarians, key=lambda r: r.score).variant
