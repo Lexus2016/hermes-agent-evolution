@@ -10,7 +10,9 @@ def _judge(rubric: str, example: str) -> bool:
 
 
 def test_scores_perfect_agreement():
-    score = score_rubric("must handle alpha and beta", ["alpha", "beta"], [True, True], _judge)
+    score = score_rubric(
+        "must handle alpha and beta", ["alpha", "beta"], [True, True], _judge
+    )
     assert score.agreement == 1.0
     assert score.correct == 2 and score.total == 2
     assert score.per_example == {"0": True, "1": True}

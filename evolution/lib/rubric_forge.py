@@ -74,7 +74,9 @@ def score_rubric(
     correct = 0
     per_example: Dict[str, bool] = {}
     for pos, (example, label) in enumerate(zip(labeled, labels)):
-        key = example_keys[pos] if example_keys and pos < len(example_keys) else str(pos)
+        key = (
+            example_keys[pos] if example_keys and pos < len(example_keys) else str(pos)
+        )
         try:
             verdict = bool(judge(rubric, example))
         except Exception as exc:  # noqa: BLE001 - a judge that throws is a mismatch
