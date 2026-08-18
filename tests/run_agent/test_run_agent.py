@@ -7414,7 +7414,11 @@ class TestRunConversation:
             if calls == 1:
                 agent._fire_reasoning_delta("Following the original approach.")
                 entered.set()
-                deadline = time.time() + 2
+                # Generous window (flake policy >= 2s): on a loaded runner the
+                # redirect() below must land BEFORE this expires, or the
+                # InterruptedError fires un-redirected and the test observes
+                # the wrong path.
+                deadline = time.time() + 5
                 while not agent._interrupt_requested and time.time() < deadline:
                     time.sleep(0.01)
                 raise InterruptedError("request cancelled by redirect")

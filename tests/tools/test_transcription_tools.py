@@ -1198,7 +1198,7 @@ class TestRunCommandSttIdleTimeout:
                 "import sys, time",
                 "for idx in range(4):",
                 "    print(f'tick {idx}', file=sys.stderr, flush=True)",
-                "    time.sleep(0.04)",
+                "    time.sleep(0.2)",
                 "print('done', flush=True)",
             ]),
             encoding="utf-8",
@@ -1206,7 +1206,7 @@ class TestRunCommandSttIdleTimeout:
 
         result = _run_command_stt(
             self._shell_command(sys.executable, "-u", str(script)),
-            timeout=0.1,
+            timeout=1.0,
         )
 
         assert result.returncode == 0
@@ -1231,7 +1231,7 @@ class TestRunCommandSttIdleTimeout:
         with pytest.raises(subprocess.TimeoutExpired) as excinfo:
             _run_command_stt(
                 self._shell_command(sys.executable, "-u", str(script)),
-                timeout=0.1,
+                timeout=1.0,
             )
 
         assert "starting pass 1" in (excinfo.value.stderr or "")

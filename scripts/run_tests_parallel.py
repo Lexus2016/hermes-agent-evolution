@@ -4,7 +4,7 @@
 The minimum-viable replacement for pytest-xdist + a subprocess-isolation
 plugin. Discovers test files under ``tests/`` (excluding integration/e2e
 unless explicitly requested), then runs one ``python -m pytest <file>``
-subprocess per file, with bounded parallelism (default: ``os.cpu_count()``).
+subprocess per file, with bounded parallelism (default: ``os.cpu_count()``, capped at 16).
 
 Why per-file rather than per-test?
     Per-test spawn overhead (~250ms × 17k tests = 70min CPU minimum)
@@ -31,7 +31,7 @@ Usage:
     a literal ``--`` is also passed through, and stacks with bare flags.
 
 Environment:
-    HERMES_TEST_WORKERS  Override worker count (default: os.cpu_count())
+    HERMES_TEST_WORKERS  Override worker count (default: cpu_count, cap 16)
     HERMES_TEST_PATHS    Override discovery roots (colon-sep; on Windows
                          ';' also works and drive letters are handled;
                          default: 'tests')
@@ -828,8 +828,19 @@ def main() -> int:
         "-j",
         "--jobs",
         type=int,
-        default=int(os.environ.get("HERMES_TEST_WORKERS") or (os.cpu_count() or 4) * 2),
-        help="Parallel worker count (default: $HERMES_TEST_WORKERS or cpu_count*2)",
+        default=int(
+            os.environ.get("HERMES_TEST_WORKERS")
+            or min((os.cpu_count() or 4), 16)
+        ),
+        help=(
+            "Parallel worker count (default: $HERMES_TEST_WORKERS or cpu_count, "
+            "capped at 16). Deliberately NOT oversubscribed: each worker is a "
+            "full pytest subprocess (threads + SQLite + mocks), so cpu*2 "
+            "workers on CI's 4-vCPU runners starved timing-sensitive tests "
+            "into flakes and pushed heavy files past the per-file timeout — "
+            "a retry-loop tax on every PR. Set HERMES_TEST_WORKERS higher "
+            "yourself on a machine that can actually feed the workers."
+        ),
     )
     parser.add_argument(
         "--paths",

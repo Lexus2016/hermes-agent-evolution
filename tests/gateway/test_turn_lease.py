@@ -113,7 +113,7 @@ def test_timeout_fails_closed_instead_of_authorizing_an_unserialized_turn():
 
         with pytest.raises(TurnLeaseTimeoutError):
             await registry.acquire(
-                "sess-timeout", owner_key="key-b", generation=1, timeout=0.02
+                "sess-timeout", owner_key="key-b", generation=1, timeout=0.1
             )
 
         # The timeout neither steals nor releases the live holder's lease.
@@ -342,7 +342,7 @@ def test_timed_out_acquire_does_not_pin_idle_registry_entry():
 
         with pytest.raises(TurnLeaseTimeoutError):
             await registry.acquire(
-                "shared", owner_key="timeout", generation=2, timeout=0.02
+                "shared", owner_key="timeout", generation=2, timeout=0.1
             )
 
         assert registry.release(holder) is True

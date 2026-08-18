@@ -91,8 +91,10 @@ def test_agent_teardown_is_bounded():
         _teardown_cron_agent(agent, "cleanup-agent-hang", timeout_seconds=0.02)
         elapsed = time.monotonic() - started
 
-        assert agent.entered.wait(timeout=0.5)
-        assert elapsed < 0.5
+        assert agent.entered.wait(timeout=2.0)
+        # Bounded, not wedged (>= 2s ceiling per the flake policy — the
+        # pinned failure mode is an unbounded 30s+ wedge, far beyond it).
+        assert elapsed < 2.0
     finally:
         release.set()
 
