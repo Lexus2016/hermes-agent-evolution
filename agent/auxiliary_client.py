@@ -9153,6 +9153,9 @@ def call_llm(
     if semaphore is not None:
         semaphore.acquire()
     try:
+        from agent.agentopt_telemetry import record_llm_call
+
+        _t0 = time.time()
         response = _call_llm_impl(
             task=task,
             provider=provider,
@@ -9177,6 +9180,18 @@ def call_llm(
             stream_semaphore = semaphore
             semaphore = None
             return _release_sync_semaphore_after_stream(response, stream_semaphore)
+        try:
+            usage = getattr(response, "usage", None)
+        except Exception:
+            usage = None
+        record_llm_call(
+            model=model or task or "aux",
+            tool=task or "aux",
+            step="llm",
+            latency_ms=(time.time() - _t0) * 1000.0,
+            outcome="ok",
+            usage=usage,
+        )
         return response
     finally:
         if semaphore is not None:
