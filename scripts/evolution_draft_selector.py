@@ -20,6 +20,14 @@ DEFAULT_MAX_DRAFTERS = 3
 _OK = frozenset({"completed", "success", "ok"})
 _PAT = r"(?:^|\n)\s*(?:#{1,3}\s|```|[-*]\s|\d+\.\s)"
 
+# ── Anti-conformity pressure (#2761) ─────────────────────────────────────────
+# A draft population has "converged" when the consensus winner has a near-twin
+# (another OK draft whose summary is >= ANTICONFORMITY_SIMILARITY similar).
+# Selection then keeps the highest-scoring CONTRARIAN (distinct) OK draft alive
+# instead of the consensus one, so what the next stage receives still contains
+# candidate diversity (conformity law).
+ANTICONFORMITY_SIMILARITY = 0.8
+
 # ── Cost-aware routing (#798 inc 2) ──────────────────────────────────────────
 # Map complexity bucket -> (tier label, config hint for delegation.model).
 # The hint is a *suggestion*: the orchestrator passes it to delegate_task's
@@ -117,6 +125,45 @@ def _score(text: str) -> float:
     return round(s, 4)
 
 
+def _summary_similarity(a: str, b: str) -> float:
+    """Word-set Jaccard similarity between two summaries (0.0–1.0)."""
+    if not a or not b:
+        return 0.0
+    wa = set(re.findall(r"[a-z0-9]+", a.lower()))
+    wb = set(re.findall(r"[a-z0-9]+", b.lower()))
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
+def _distinct_variants(drafts: List[Dict[str, Any]]) -> Tuple[int, float]:
+    """Pick the winner with anti-conformity pressure applied (#2761).
+
+    Baseline is the best-scoring OK draft. When the population has converged
+    — the baseline has a near-twin (>= ANTICONFORMITY_SIMILARITY similar) —
+    and a genuinely distinct OK variant exists, the highest-scoring distinct
+    variant wins instead. Every OK draft gets a ``contrarian`` flag (distinct
+    from the consensus) so the orchestrator's output shows which variant the
+    pressure kept alive. Returns (best_index, best_score).
+    """
+    ok = [d for d in drafts if d["ok"]]
+    if not ok:
+        return -1, 0.0
+    best = max(ok, key=lambda d: d["score"])
+    for d in ok:
+        d["contrarian"] = (
+            _summary_similarity(d["summary"], best["summary"])
+            < ANTICONFORMITY_SIMILARITY
+        )
+    if not any(d["index"] != best["index"] and not d["contrarian"] for d in ok):
+        return best["index"], best["score"]
+    contrarians = [d for d in ok if d["contrarian"]]
+    if not contrarians:
+        return best["index"], best["score"]
+    alt = max(contrarians, key=lambda d: d["score"])
+    return alt["index"], alt["score"]
+
+
 def select_best_draft(delegate_output: Any) -> Tuple[int, float, List[Dict[str, Any]]]:
     """Score drafts, pick winner: (best_index, best_score, drafts)."""
     results = (
@@ -142,10 +189,7 @@ def select_best_draft(delegate_output: Any) -> Tuple[int, float, List[Dict[str, 
             "score": _score(sm) if ok else 0.0,
         })
     drafts.sort(key=lambda d: d["index"])
-    bi, bs = -1, 0.0
-    for d in drafts:
-        if d["ok"] and d["score"] > bs:
-            bs, bi = d["score"], d["index"]
+    bi, bs = _distinct_variants(drafts)
     return bi, bs, drafts
 
 

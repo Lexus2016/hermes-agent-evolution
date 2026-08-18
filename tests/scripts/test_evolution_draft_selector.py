@@ -42,6 +42,47 @@ def test_select():
         assert select_best_draft(bad)[0] == -1
 
 
+# ── Anti-conformity pressure (#2761) ─────────────────────────────────────────
+_CONSENSUS = "## Plan\n\n```python\nx = 1\n```\n\nhttps://a.example.com\n" * 3
+_TWIN = "## Plan\n\n```python\nx = 1\n```\n\nhttps://a.example.com\n" * 3
+_CONTRARIAN = "## Alt\n\n```python\ny = 2\n```\n\nhttps://b.example.com\n" * 3
+
+
+def test_select_keeps_contrarian_when_population_converged():
+    out = {"results": [
+        {"task_index": 0, "status": "completed", "summary": _CONSENSUS},
+        {"task_index": 1, "status": "completed", "summary": _TWIN},
+        {"task_index": 2, "status": "completed", "summary": _CONTRARIAN},
+    ]}  # fmt: skip
+    bi, bs, drafts = select_best_draft(out)
+    # The converged consensus (0/1) does NOT win; the distinct variant does.
+    assert bi == 2 and bs > 0.0
+    flags = {d["index"]: d.get("contrarian", None) for d in drafts}
+    assert flags[0] is False and flags[1] is False and flags[2] is True
+
+
+def test_select_unchanged_when_population_diverse():
+    # No near-twin of the winner → anti-conformity is a no-op (best wins).
+    out = {"results": [
+        {"task_index": 0, "status": "completed", "summary": _CONSENSUS},
+        {"task_index": 2, "status": "completed", "summary": _CONTRARIAN},
+    ]}  # fmt: skip
+    bi, _, drafts = select_best_draft(out)
+    assert bi == 0
+    assert drafts[0]["contrarian"] is False and drafts[1]["contrarian"] is True
+
+
+def test_select_unchanged_when_all_converged():
+    # Every OK draft is a twin of the consensus → nothing distinct to keep.
+    out = {"results": [
+        {"task_index": 0, "status": "completed", "summary": _CONSENSUS},
+        {"task_index": 1, "status": "completed", "summary": _TWIN},
+    ]}  # fmt: skip
+    bi, _, drafts = select_best_draft(out)
+    assert bi == 0
+    assert all(d["contrarian"] is False for d in drafts)
+
+
 def test_cli(capsys, monkeypatch):
     assert main(["x", "build", "--goal", "g", "--drafters", "2"]) == 0
     assert len(json.loads(capsys.readouterr().out)["tasks"]) == 2

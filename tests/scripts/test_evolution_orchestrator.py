@@ -335,6 +335,30 @@ class TestDraftCommands:
         out = json.loads(capsys.readouterr().out)
         assert out["best_index"] == 0
 
+    def test_draft_select_keeps_contrarian_winner(self, capsys, tmp_path):
+        # Anti-conformity pressure (#2761) on the REAL wired path: the
+        # orchestrator's draft-select must hand the next stage the contrarian
+        # variant when the population has converged on one consensus idea.
+        consensus = "## Plan\n\n```python\nx = 1\n```\n\nhttps://a.example.com\n" * 3
+        twin = "## Plan\n\n```python\nx = 1\n```\n\nhttps://a.example.com\n" * 3
+        contrarian = "## Alt\n\n```python\ny = 2\n```\n\nhttps://b.example.com\n" * 3
+        results = tmp_path / "results.json"
+        results.write_text(
+            json.dumps({
+                "results": [
+                    {"task_index": 0, "status": "completed", "summary": consensus},
+                    {"task_index": 1, "status": "completed", "summary": twin},
+                    {"task_index": 2, "status": "completed", "summary": contrarian},
+                ]
+            }),
+            encoding="utf-8",
+        )
+        rc = main(["evolution_orchestrator.py", "draft-select", str(results)])
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["best_index"] == 2
+        assert out["drafts"][2]["contrarian"] is True
+
     def test_draft_select_bad_json(self, capsys, monkeypatch):
         monkeypatch.setattr("sys.stdin", io.StringIO("{not json"))
         rc = main(["evolution_orchestrator.py", "draft-select"])
