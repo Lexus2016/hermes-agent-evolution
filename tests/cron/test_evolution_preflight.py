@@ -621,3 +621,49 @@ class TestSchedulerHaltGate:
         assert success is True
         assert final_response == "ok"
         mock_agent_cls.assert_called_once()
+
+
+class TestExecCapabilityGate:
+    """Env-exec capability gate (P-001, #2826): implementation/integration
+    stages need a real execution environment; introspection/analysis are
+    read-only and never exec-gated."""
+
+    def test_stage_requires_exec_implementation(self):
+        assert ep.stage_requires_exec("implementation") is True
+
+    def test_stage_requires_exec_integration(self):
+        assert ep.stage_requires_exec("integration") is True
+
+    def test_stage_requires_exec_read_only_stages_false(self):
+        for stage in ("introspection", "analysis", "research", "funnel"):
+            assert ep.stage_requires_exec(stage) is False
+
+    def test_stage_requires_exec_none_false(self):
+        assert ep.stage_requires_exec(None) is False
+
+    def test_check_exec_capability_git_present(self, monkeypatch):
+        fake = MagicMock()
+        fake.returncode = 0
+        fake.stdout.strip.return_value = "True"
+        monkeypatch.setattr(ep.subprocess, "run", lambda *a, **k: fake)
+        capable, reason = ep._check_exec_capability()
+        assert capable is True
+        assert "present" in reason
+
+    def test_check_exec_capability_git_absent_blocks(self, monkeypatch):
+        fake = MagicMock()
+        fake.returncode = 0
+        fake.stdout.strip.return_value = "False"
+        monkeypatch.setattr(ep.subprocess, "run", lambda *a, **k: fake)
+        capable, reason = ep._check_exec_capability()
+        assert capable is False
+        assert "no execution capability" in reason
+
+    def test_check_exec_capability_probe_error_fail_open(self, monkeypatch):
+        def boom(*a, **k):
+            raise OSError("probe failed")
+
+        monkeypatch.setattr(ep.subprocess, "run", boom)
+        capable, reason = ep._check_exec_capability()
+        assert capable is True
+        assert "inconclusive" in reason

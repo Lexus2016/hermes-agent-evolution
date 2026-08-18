@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from hermes_constants import get_hermes_home
 from hermes_cli.config import load_config_readonly
@@ -43,6 +44,18 @@ _HALT_GATED_STAGES = frozenset({
     "analysis",
     "implementation",
     "research",
+})
+
+# Stages whose deliverable REQUIRES a real execution environment (git/gh/
+# tests) — the subagent must be able to run commands, not just read/write
+# files. If the environment lacks the execution tooling (no git on PATH),
+# dispatching these stages is doomed: the subagent returns BLOCKED and writes
+# no artifact. `implementation` writes code+PRs (needs git/gh/ruff/pytest);
+# `integration` merges PRs (needs git/gh/hermes update). Introspection and
+# analysis are read-only (file/web) and never exec-gated (#2826).
+_EXEC_REQUIRED_STAGES = frozenset({
+    "implementation",
+    "integration",
 })
 
 
@@ -130,6 +143,52 @@ def should_skip_for_halt(
     if stage not in _HALT_GATED_STAGES:
         return False
     return _halt_state_active(hermes_home)
+
+
+def stage_requires_exec(stage: Optional[str]) -> bool:
+    """Return True if ``stage`` needs a real execution environment.
+
+    Implementation/integration stages must run git/gh/tests to produce their
+    deliverable. Introspection/analysis are read-only (file/web) and never
+    exec-gated (#2826).
+    """
+    return stage in _EXEC_REQUIRED_STAGES
+
+
+def _check_exec_capability() -> Tuple[bool, str]:
+    """Probe whether the environment can actually EXECUTE work (P-001).
+
+    Mirrors ``scripts/evolution_hydra_gate.py::_check_env_capability``. The
+    Hydra gate already blocks doomed orchestrator subagent spawns, but the
+    DIRECT stage crons (evolution-implementation, evolution-integration) run
+    through the scheduler and bypass that gate — so a terminal-less env would
+    still dispatch a stage that immediately returns BLOCKED and writes nothing.
+
+    Subagents inherit the parent environment, so a missing git here means any
+    spawned subagent cannot run the pipeline's git/gh/ruff/pytest workflow
+    either. Fail fast with an explicit BLOCKED verdict.
+
+    Returns (capable, reason). Conservative: we only BLOCK on POSITIVE
+    evidence of absence (git genuinely not on PATH). If the probe errors or is
+    inconclusive, we assume capable so a transient probe failure never starves
+    a genuine stage run (#2826).
+    """
+    try:
+        r = subprocess.run(
+            ["python3", "-c", "import shutil; print(bool(shutil.which('git')))"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if r.returncode == 0:
+            if r.stdout.strip() == "True":
+                return True, "execution capability present (git on PATH)"
+            # Positive evidence of absence → BLOCKED (P-001 fast-fail).
+            return False, "no execution capability (git not on PATH)"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    # Fail-open: if we can't determine capability, assume capable.
+    return True, "capability probe inconclusive — assuming capable (fail-open)"
 
 
 def _preflight_timeout_seconds(cfg: Optional[Any] = None) -> float:

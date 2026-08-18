@@ -4685,6 +4685,52 @@ def _run_job_impl(
         )
         return True, silent_doc, SILENT_MARKER, None
 
+    # Env-exec capability gate (P-001, #2826): implementation/integration
+    # stages must run git/gh/tests to produce their deliverable. If the
+    # environment lacks the execution tooling (no git on PATH), dispatching
+    # the stage is doomed — the subagent returns BLOCKED and writes nothing.
+    # The Hydra gate already blocks orchestrator spawns; extend the same
+    # fail-fast to the direct stage crons that bypass it. Read-only stages
+    # (introspection/analysis) are never exec-gated. Fail-open on probe
+    # error so a transient failure never starves a genuine run.
+    exec_blocked = False
+    exec_reason = ""
+    try:
+        if evolution_preflight.stage_requires_exec(stage):
+            _capable, _cap_reason = evolution_preflight._check_exec_capability()
+            exec_blocked = not _capable
+            exec_reason = _cap_reason
+    except Exception as exc:  # pragma: no cover - defense in depth
+        logger.debug(
+            "Job '%s': exec-capability gate check failed, proceeding without "
+            "it: %s",
+            job_id,
+            exc,
+        )
+        exec_blocked = False
+        exec_reason = ""
+
+    if exec_blocked:
+        logger.warning(
+            "Job '%s' (evolution-%s): SKIPPED — %s. No LLM agent was spawned "
+            "(P-001 fail-fast, #2826).",
+            job_id,
+            stage,
+            exec_reason,
+        )
+        now_iso = _hermes_now().strftime("%Y-%m-%d %H:%M:%S")
+        silent_doc = (
+            f"# Cron Job: {job_name}\n\n"
+            f"**Job ID:** {job_id}\n"
+            f"**Run Time:** {now_iso}\n"
+            f"**Status:** silent (no execution capability)\n\n"
+            f"The '{stage}' evolution stage requires a real execution "
+            f"environment (git/gh/tests) but the environment cannot provide "
+            f"it: {exec_reason}. Dispatching would produce a BLOCKED subagent "
+            f"and no artifact. The stage was skipped (P-001 fail-fast, #2826).\n"
+        )
+        return True, silent_doc, SILENT_MARKER, None
+
     from run_agent import AIAgent
 
     # Initialize SQLite session store so cron job messages are persisted
