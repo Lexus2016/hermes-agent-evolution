@@ -269,11 +269,20 @@ def test_distill_skill_creates_enriched_skill() -> None:
 
 
 def test_distill_skill_writes_qcr_section_into_markdown() -> None:
-    notes = [build_qcr_note({"tools": ["read_file", "terminal"]}, task_type="ops")]
+    # Evidence bar (#2746, PR #2771) governs EVERY promotion path, including
+    # QCR distillation: a note's synthesized trace carries one action per
+    # source tool, so the note must exercise >= MIN_DISTINCT_TOOLS tools and
+    # >= MIN_ACTIONS (3) actions to be promoted. This test pins the markdown
+    # RENDERING — so its note clears the bar (3 tools -> 3 actions).
+    notes = [
+        build_qcr_note(
+            {"tools": ["read_file", "terminal", "search_files"]}, task_type="ops"
+        )
+    ]
     result = distill_skill(
         notes,
         target_task_type="ops",
-        target_tools=["read_file", "terminal"],
+        target_tools=["read_file", "terminal", "search_files"],
         min_score=0.0,
     )
     assert result["skill_created"] is True
