@@ -167,3 +167,97 @@ class TestRefusalNudgeCron:
         assert still_refusal
         assert tool_calls == 0
         assert not (tool_calls or not still_refusal)  # adopt gate is False
+
+
+class TestRefusalNudgeWiring:
+    """The nudge must be wired into _run_job_impl (not just tested in
+    isolation) — this was the #2240 regression: the recovery directive was
+    never surfaced to cron-context agents, so the recovery rate stayed flat."""
+
+    def _make_job(self, stage):
+        return {
+            "id": f"evolution-{stage}",
+            "name": f"evolution-{stage}",
+            "prompt": "do work",
+        }
+
+    def test_run_job_impl_wires_refusal_nudge(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+
+        from cron.scheduler import _run_job_impl
+
+        (tmp_path / "evolution").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "config.yaml").write_text(
+            "model:\n  default: cfg-model\n  provider: anthropic\n",
+            encoding="utf-8",
+        )
+        job = self._make_job("implementation")
+
+        refusal_msg = {
+            "role": "assistant",
+            "content": "I can't help with that.",
+        }
+        recovery_msg = {
+            "role": "assistant",
+            "content": "Running the task now.",
+            "tool_calls": [{"function": {"name": "terminal", "arguments": "{}"}}],
+        }
+        tool_msg = {"role": "tool", "content": "done"}
+
+        first_result = {
+            "final_response": "I can't help with that.",
+            "completed": True,
+            "messages": [
+                {"role": "user", "content": "do work"},
+                refusal_msg,
+            ],
+        }
+        recovery_result = {
+            "final_response": "Running the task now.",
+            "completed": True,
+            "messages": [
+                {"role": "user", "content": "do work"},
+                refusal_msg,
+                {"role": "user", "content": "[loop-guard] take action"},
+                recovery_msg,
+                tool_msg,
+            ],
+        }
+
+        class FakeAgent:
+            def __init__(self, *a, **k):
+                self._call = 0
+
+            def run_conversation(self, *a, **k):
+                self._call += 1
+                if self._call == 1:
+                    return first_result
+                return recovery_result
+
+        with (
+            patch("cron.scheduler._get_hermes_home", return_value=tmp_path),
+            patch("cron.scheduler._resolve_origin", return_value=None),
+            patch("dotenv.load_dotenv"),
+            patch("hermes_state.SessionDB", return_value=MagicMock()),
+            patch(
+                "hermes_cli.runtime_provider.resolve_runtime_provider",
+                return_value={
+                    "api_key": "test-key",
+                    "base_url": "https://example.invalid/v1",
+                    "provider": "openrouter",
+                    "api_mode": "chat_completions",
+                    "model": "openrouter/model",
+                },
+            ),
+            patch("cron.evolution_preflight.preflight_provider", return_value=None),
+            patch("run_agent.AIAgent", FakeAgent),
+        ):
+            success, output, final_response, error = _run_job_impl(job)
+
+        # The refusal was recovered via the wired nudge — the re-run's tool
+        # calls replaced the original refusal response.
+        assert success is True
+        assert error is None
+        assert final_response == "Running the task now."
+        assert "Running the task now." in output
+        assert "I can't help with that." not in output

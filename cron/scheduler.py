@@ -5754,7 +5754,87 @@ def _run_job_impl(
         # Use a separate variable for log display; keep final_response clean
         # for delivery logic (empty response = no delivery).
         logged_response = final_response if final_response else "(No response generated)"
-        
+
+        # ── Refusal-recovery nudge for cron dispatch (#2240) ──────────────
+        # The conversation loop wires maybe_refusal_nudge (loop_guard.py) to
+        # detect over-refusal and inject recovery directives. Cron jobs run
+        # through _run_job_impl directly and bypass conversation_loop.py, so
+        # refusals in cron contexts (where the evolution stages run) were
+        # unrecoverable — the recovery rate stayed flat after #2168 because
+        # the nudge was never surfaced here. Mirror the delegate_tool.py
+        # nudge: if the run completed with a text-only refusal (no tool
+        # calls), re-run the SAME job's agent once with the recovery
+        # directive. Adopt only on actual recovery (tool calls made or the
+        # summary no longer reads as a refusal). Bounded: 1 re-run.
+        if (
+            result.get("completed") is True
+            and _count_tool_calls(result.get("messages") or []) == 0
+        ):
+            _child_messages = result.get("messages") or []
+            _refusal_nudge = None
+            try:
+                from agent.loop_guard import maybe_refusal_nudge as _maybe_refusal
+
+                _refusal_nudge = _maybe_refusal(_child_messages, already_nudged=False)
+            except Exception:
+                _refusal_nudge = None
+            if _refusal_nudge:
+                logger.info(
+                    "Job '%s': refusal detected; re-running once with recovery "
+                    "nudge (#2240)",
+                    job_name,
+                )
+                _refusal_result = None
+                try:
+                    # Reassert the job workdir (same as the original run) and
+                    # re-run the agent with the recovery directive injected as
+                    # the new user turn. run_conversation(task_id=None) is the
+                    # cron default — we do not thread a subagent task_id here.
+                    _cron_run_reassert_workdir()
+                    _refusal_result = agent.run_conversation(_refusal_nudge)
+                except Exception as _rf_exc:
+                    logger.warning(
+                        "Job '%s': refusal-recovery re-run raised %s; keeping "
+                        "original",
+                        job_name,
+                        type(_rf_exc).__name__,
+                    )
+                    _refusal_result = None
+                if _refusal_result and isinstance(_refusal_result, dict):
+                    _rf_still_refusal = False
+                    try:
+                        from agent.loop_guard import maybe_refusal_nudge as _mr2
+
+                        _rf_still_refusal = (
+                            _mr2(
+                                _refusal_result.get("messages") or [],
+                                already_nudged=True,
+                            )
+                            is not None
+                        )
+                    except Exception:
+                        pass
+                    _rf_tool_calls = _count_tool_calls(
+                        _refusal_result.get("messages") or []
+                    )
+                    if _rf_tool_calls > 0 or not _rf_still_refusal:
+                        # Recovery happened — adopt the re-run.
+                        result = _refusal_result
+                        final_response = (
+                            _refusal_result.get("final_response") or ""
+                        )
+                        if final_response.strip() == "(No response generated)":
+                            final_response = ""
+                        logged_response = (
+                            final_response
+                            if final_response
+                            else "(No response generated)"
+                        )
+                        logger.info(
+                            "Job '%s': refusal recovered via nudge — adopting "
+                            "re-run result (#2240)",
+                            job_name,
+                        )
         output = f"""# Cron Job: {job_name}
 
 **Job ID:** {job_id}
