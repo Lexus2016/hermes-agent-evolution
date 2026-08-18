@@ -98,6 +98,126 @@ class TestDispatchLedger:
         hydra._ledger_path(tmp_path).write_text("{not json", encoding="utf-8")
         assert hydra._read_ledger(tmp_path) == {}
 
+    def test_ledger_round_trip_byte_stable(self, tmp_path):
+        """P-002: two consecutive write→read cycles produce byte-identical
+        file content (the ledger must be byte-stable so a patch matching the
+        unicode arrow matches the on-disk bytes)."""
+        hydra._write_ledger(
+            tmp_path, {"analysis→implementation": {"date": "2026-01-01"}}
+        )
+        first = hydra._ledger_path(tmp_path).read_bytes()
+        hydra._write_ledger(
+            tmp_path, {"analysis→implementation": {"date": "2026-01-01"}}
+        )
+        second = hydra._ledger_path(tmp_path).read_bytes()
+        assert first == second
+        # The on-disk key must be the REAL unicode arrow (ensure_ascii=False),
+        # not the literal \\u2192 escape sequence.
+        assert b"\\u2192" not in first
+        assert "→".encode("utf-8") in first
+
+    def test_ledger_migrates_legacy_escaped_key(self, tmp_path):
+        """P-002: a legacy ledger written with the \\u2192-escaped key must be
+        read back under the unicode arrow key (json.loads decodes the escape)."""
+        # Simulate a legacy file: json.dumps with ensure_ascii escapes the arrow.
+        legacy = json.dumps(
+            {"analysis→implementation": {"date": "2026-01-01"}},
+            ensure_ascii=True,
+        )
+        hydra._ledger_path(tmp_path).write_text(legacy, encoding="utf-8")
+        ledger = hydra._read_ledger(tmp_path)
+        assert "analysis→implementation" in ledger
+
+    def test_env_capability_present(self, monkeypatch):
+        """P-001: an environment with git on PATH is capable."""
+        import subprocess as _sp
+
+        class _FakeRun:
+            def __init__(self, out):
+                self.returncode = 0
+                self.stdout = out
+
+        monkeypatch.setattr(_sp, "run", lambda *a, **k: _FakeRun("True\n"))
+        capable, reason = hydra._check_env_capability()
+        assert capable is True
+        assert "git on PATH" in reason
+
+    def test_env_capability_absent_blocks(self, monkeypatch):
+        """P-001: positive evidence of absence (git NOT on PATH) → BLOCKED."""
+        import subprocess as _sp
+
+        class _FakeRun:
+            def __init__(self, out):
+                self.returncode = 0
+                self.stdout = out
+
+        monkeypatch.setattr(_sp, "run", lambda *a, **k: _FakeRun("False\n"))
+        capable, reason = hydra._check_env_capability()
+        assert capable is False
+        assert "no execution capability" in reason
+
+    def test_env_capability_fail_open(self, monkeypatch):
+        """P-001: a probe error must NOT block (fail-open)."""
+        import subprocess as _sp
+
+        def _boom(*a, **k):
+            raise _sp.TimeoutExpired(cmd="x", timeout=10)
+
+        monkeypatch.setattr(_sp, "run", _boom)
+        capable, reason = hydra._check_env_capability()
+        assert capable is True
+        assert "fail-open" in reason
+
+    def test_legacy_escaped_key_ledger_suppresses_re_fire(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """P-002: a stale ledger whose edge key is stored as the literal
+        \\u2192 escape sequence (the bug) must still suppress a same-day re-fire
+        once normalized on read — the key mismatch must not cause the gate to
+        re-dispatch an already-run stage."""
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
+        self._make_edge_fresh(tmp_path, "implementation→integration")
+        edge = "implementation→integration"
+        # Give EVERY stage a today-output so no time trigger / safety wake can
+        # fire — isolating the ledger's verdict on this single edge.
+        for stage in (
+            "research",
+            "issues",
+            "introspection",
+            "analysis",
+            "implementation",
+            "integration",
+            "upstream-sync",
+        ):
+            d = tmp_path / stage
+            d.mkdir(parents=True, exist_ok=True)
+            (d / f"{hydra._today()}.json").write_text("{}", encoding="utf-8")
+        # Make implementation strictly newer than integration so the edge is
+        # genuinely fresh — the ledger entry is what must suppress it.
+        up_file = tmp_path / "implementation" / f"{hydra._today()}.json"
+        up_file.write_text('{"tasks": ["#2400"]}', encoding="utf-8")
+        old_ts = time.time() - 3600
+        ds_file = tmp_path / "integration" / f"{hydra._today()}.json"
+        os.utime(ds_file, (old_ts, old_ts))
+        # Write a LEGACY ledger: json.dumps with ensure_ascii escapes the arrow
+        # to the literal 6-char \\u2192 sequence in the file bytes. Use a large
+        # recorded mtime (a real dispatch records the upstream mtime, which is
+        # ~now) so the mtime comparison alone would suppress — the point is that
+        # the KEY normalization lets the entry be found at all.
+        legacy = json.dumps(
+            {edge: {"date": hydra._today(), "upstream_mtime": time.time() + 1e6}},
+            ensure_ascii=True,
+        )
+        hydra._ledger_path(tmp_path).write_text(legacy, encoding="utf-8")
+        with patch.object(
+            hydra, "_check_github_write_access", return_value=(True, "ok")
+        ):
+            hydra.main()
+            out = capsys.readouterr().out
+        # The normalized read must find the entry and suppress the re-fire.
+        assert json.loads(out.strip().splitlines()[-1]) == {"wakeAgent": False}
+        assert "already dispatched today" in out
+
     def test_already_dispatched_false_when_no_entry(self, tmp_path):
         assert hydra._already_dispatched_today(tmp_path, "edge", 100.0) is False
 

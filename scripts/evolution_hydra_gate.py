@@ -110,6 +110,9 @@ def _read_ledger(evo_dir: Path) -> Dict[str, dict]:
     Schema: ``{"<edge>": {"date": "YYYY-MM-DD", "upstream_mtime": <float>,
     "verdict": <str|None>}}``. Corrupt files are treated as empty rather than
     raising — a corrupt ledger must never block a genuine wake-up (fail-open).
+    ``json.loads`` decodes both a real unicode arrow and a legacy ``\\u2192``
+    escape back to ``→`` in memory, so reads are stable regardless of how the
+    file was written.
     """
     path = _ledger_path(evo_dir)
     try:
@@ -124,12 +127,20 @@ def _write_ledger(evo_dir: Path, ledger: Dict[str, dict]) -> None:
     """Persist the ledger atomically. Best-effort: a write failure is logged to
     stderr but never raised — the ledger is an optimization, not a correctness
     requirement, so a failed write degrades to "may re-wake once" rather than
-    crashing the gate."""
+    crashing the gate.
+
+    P-002: written with ``ensure_ascii=False`` so edge keys containing the
+    unicode arrow ``→`` are stored as the real UTF-8 character in the file
+    bytes, NOT as the literal 6-char ``\\u2192`` escape sequence. The escaped
+    form made the on-disk bytes differ from what a patch matching ``→``
+    expects, so a re-deploy restoring a stale ledger re-fired an already-run
+    stage. With the real character on disk, writes match reads byte-for-byte.
+    """
     path = _ledger_path(evo_dir)
     tmp = path.with_suffix(".tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps(ledger), encoding="utf-8")
+        tmp.write_text(json.dumps(ledger, ensure_ascii=False), encoding="utf-8")
         tmp.replace(path)
     except OSError as exc:
         # Don't leave a .tmp littering the dir on a failed rename.
@@ -272,6 +283,44 @@ def _check_github_write_access() -> Tuple[bool, str]:
         user = "?"
 
     return True, f"gh CLI {user}: auth OK, repo {repo} readable, write assumed"
+
+
+def _check_env_capability() -> Tuple[bool, str]:
+    """Probe whether the current environment can actually EXECUTE work (P-001).
+
+    Implementation/integration subagent environments sometimes expose no
+    terminal/shell tool at all — the kickoff context asserts shell access the
+    env does not have, so a dispatch is spawned and immediately returns BLOCKED
+    (wasting an orchestrator tick and writing no artifact). Before dispatching
+    any implementation/integration task, verify a real execution capability
+    exists. Subagents inherit the parent environment, so if THIS environment
+    lacks the shell tooling (git/terminal), any spawned subagent will too — we
+    fail fast with an explicit BLOCKED verdict instead of spawning a doomed run.
+
+    Returns (capable, reason). Conservative: we only BLOCK on POSITIVE evidence
+    of absence (git genuinely not on PATH). If the probe itself errors or is
+    inconclusive, we assume capable so a transient probe failure never starves
+    a genuine wake-up.
+    """
+    # Primary signal: git on PATH. Subagents inherit the parent env, so a
+    # missing git here means a spawned subagent cannot run the pipeline's
+    # git/gh/ruff/pytest workflow either — the P-001 failure signature.
+    try:
+        r = subprocess.run(
+            ["python3", "-c", "import shutil; print(bool(shutil.which('git')))"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if r.returncode == 0:
+            if r.stdout.strip() == "True":
+                return True, "execution capability present (git on PATH)"
+            # Positive evidence of absence → BLOCKED (P-001 fast-fail).
+            return False, "no execution capability (git not on PATH)"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    # Fail-open: if we can't determine capability, assume capable.
+    return True, "capability probe inconclusive — assuming capable (fail-open)"
 
 
 def _check_halt(evo_dir: Path) -> Tuple[bool, Path]:
@@ -419,6 +468,16 @@ def main() -> int:
     halted, halt_file = _check_halt(evo_dir)
     if halted:
         print(f"[hydra-gate] pipeline HALTED ({halt_file}) — sleeping")
+        print('{"wakeAgent": false}')
+        return 0
+
+    # 2b) Env-capability preflight (P-001): if the environment cannot actually
+    # execute work (no terminal/shell tool), dispatching an implementation or
+    # integration subagent is doomed — it returns BLOCKED and writes nothing.
+    # Fail fast with an explicit BLOCKED verdict instead of spawning it.
+    capable, cap_reason = _check_env_capability()
+    if not capable:
+        print(f"[hydra-gate] BLOCKED: {cap_reason} — sleeping (no subagent spawn)")
         print('{"wakeAgent": false}')
         return 0
 
