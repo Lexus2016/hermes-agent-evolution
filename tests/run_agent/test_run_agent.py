@@ -8023,7 +8023,12 @@ class TestNousCredentialRefresh:
         closed = {"value": False}
         retired = {"value": False}
         rebuilt = {"kwargs": None}
-        captured = {}
+        # Append-only call log: a leaked background refresher from an earlier
+        # test may ALSO hit the patched resolve mid-test (order-dependent,
+        # observed 3x on CI runners). A single dict got clobbered by that
+        # extra force_refresh=False call; a log lets the assertions target
+        # OUR call without assuming a quiet runner.
+        resolve_calls: list = []
 
         class _ExistingClient:
             def close(self):
@@ -8033,7 +8038,7 @@ class TestNousCredentialRefresh:
             pass
 
         def _fake_resolve(**kwargs):
-            captured.update(kwargs)
+            resolve_calls.append(kwargs)
             return {
                 "api_key": "new-nous-key",
                 "base_url": "https://inference-api.nousresearch.com/v1",
@@ -8069,7 +8074,9 @@ class TestNousCredentialRefresh:
         # TLS-FD→SQLite corruption vector.
         assert retired["value"] is True
         assert closed["value"] is False
-        assert captured["force_refresh"] is True
+        assert any(
+            c.get("force_refresh") is True for c in resolve_calls
+        ), f"our force=True call missing from {resolve_calls!r}"
         assert rebuilt["kwargs"]["api_key"] == "new-nous-key"
         assert (
             rebuilt["kwargs"]["base_url"] == "https://inference-api.nousresearch.com/v1"
