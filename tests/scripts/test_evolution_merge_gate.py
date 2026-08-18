@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from evolution_merge_gate import (  # noqa: E402
     check_flip_gate,
+    check_merge_method_policy,
     check_merge_policy,
     check_merge_policy_with_quality,
     _pr_snapshot,
@@ -151,32 +152,35 @@ class TestPrSnapshot:
         runner = self._runner(
             0, {"files": [_f("a.py", 1, 0)], "headRefOid": "deadbeef01"}
         )
-        files, head = _pr_snapshot(7, "O/r", runner)
+        files, head, branch = _pr_snapshot(7, "O/r", runner)
         assert head == "deadbeef01"
         assert files == [_f("a.py", 1, 0)]
-        # Exactly ONE gh read, requesting BOTH fields together (the atomic snapshot).
+        assert branch == ""  # absent headRefName degrades to "" (not an error)
+        # Exactly ONE gh read, requesting ALL fields together (the atomic snapshot).
         assert len(runner.calls) == 1  # type: ignore[attr-defined]
-        assert "files,headRefOid" in runner.calls[0]  # type: ignore[attr-defined]
+        assert any(
+            "files,headRefOid" in a for a in runner.calls[0]  # type: ignore[attr-defined]
+        )
 
     def test_missing_files_key_fails_closed(self):
         # exit 0 but no "files" key — the original fail-open bug (`.get() or []`
         # treated this as an empty, safe diff). Must now refuse.
         runner = self._runner(0, {"headRefOid": "abc"})
-        assert _pr_snapshot(7, None, runner) == (None, None)
+        assert _pr_snapshot(7, None, runner)[:2] == (None, None)
 
     def test_files_not_a_list_fails_closed(self):
         runner = self._runner(0, {"files": "oops", "headRefOid": "abc"})
-        assert _pr_snapshot(7, None, runner) == (None, None)
+        assert _pr_snapshot(7, None, runner)[:2] == (None, None)
 
     def test_gh_error_fails_closed(self):
-        assert _pr_snapshot(7, None, self._runner(1, "")) == (None, None)
+        assert _pr_snapshot(7, None, self._runner(1, ""))[:2] == (None, None)
 
     def test_non_json_fails_closed(self):
-        assert _pr_snapshot(7, None, self._runner(0, "not json")) == (None, None)
+        assert _pr_snapshot(7, None, self._runner(0, "not json"))[:2] == (None, None)
 
     def test_files_readable_but_head_absent(self):
         runner = self._runner(0, {"files": []})
-        files, head = _pr_snapshot(7, None, runner)
+        files, head, _branch = _pr_snapshot(7, None, runner)
         assert files == [] and head is None
 
 
@@ -257,7 +261,7 @@ class TestMainWiring:
         # clean, mergeable diff (files present, head resolved) — post-#1244 the
         # gh IO is _pr_snapshot (files + head in one call), not _pr_files.
         monkeypatch.setattr(
-            emg, "_pr_snapshot", lambda pr, repo, runner: ([], "deadbeef")
+            emg, "_pr_snapshot", lambda pr, repo, runner: ([], "deadbeef", "evolution/issue-x")
         )
         monkeypatch.setattr(emg, "_run", lambda cmd: (0, "[]", ""))
 
@@ -469,3 +473,26 @@ class TestReachabilityIntegration:
             source_contents=source_contents,
         )
         assert violations == []
+
+
+class TestCheckMergeMethodPolicy:
+    """#2783: sync/* PRs must land as true merge commits, never squash."""
+
+    def test_sync_branch_squash_blocked(self):
+        v = check_merge_method_policy("sync/upstream-v2026.8.16.2", "squash")
+        assert v and "MERGE_METHOD" in v[0] and "merge" in v[0]
+
+    def test_sync_branch_rebase_blocked(self):
+        assert check_merge_method_policy("sync/upstream-release-x", "rebase")
+
+    def test_sync_branch_true_merge_allowed(self):
+        assert check_merge_method_policy("sync/upstream-release-x", "merge") == []
+
+    def test_evolution_branch_keeps_squash_default(self):
+        assert check_merge_method_policy("evolution/issue-1-foo", "squash") == []
+
+    def test_missing_branch_is_not_sync(self):
+        # headRefName absent (degraded snapshot) — never matches sync/, so the
+        # method policy opts out rather than blocking on missing data.
+        assert check_merge_method_policy(None, "squash") == []
+        assert check_merge_method_policy("", "squash") == []

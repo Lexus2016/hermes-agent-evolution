@@ -213,6 +213,12 @@ gh pr list --repo "$REPO" --state open --limit 50 \
 ```bash
 python3 scripts/evolution_merge_gate.py --pr <N> --repo "$REPO" --merge --method squash
 ```
+   **Exception — upstream sync PRs (#2783):** a PR whose head branch is `sync/*`
+   MUST merge with `--method merge` (a TRUE merge commit), never squash/rebase —
+   squash makes the upstream release SHA unreachable from `main`'s ancestry, so
+   every later sync re-counts integrated commits and multi-release catch-ups
+   with 90+ conflicts recur. The gate enforces this: `--method squash` on a
+   `sync/*` branch is a BLOCKED verdict (`MERGE_METHOD`).
    Non-zero exit = BLOCKED (policy violation, or the head moved since review). Do
    NOT merge blind. If the head moved, re-run the 2a code review + dead-code grep
    against the FULL current diff and retry; if the policy blocked it (oversized /

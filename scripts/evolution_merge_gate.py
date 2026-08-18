@@ -101,6 +101,30 @@ def _norm(path: Any) -> str:
     return p.lower()
 
 
+def check_merge_method_policy(
+    head_branch: Optional[str], method: str
+) -> List[str]:
+    """Enforce the merge METHOD per PR class (#2783).
+
+    Upstream release-sync PRs (``sync/*`` branches) must land as TRUE MERGE
+    commits (``merge_method=merge``). A squash/rebase fold makes the upstream
+    release SHA unreachable from ``main``'s ancestry, so the next sync's
+    ``git rev-list --count main..<release>`` re-counts every integrated commit
+    (~979 at v2026.8.16) and multi-release catch-ups with 90+ conflicts keep
+    recurring. Everything else keeps the squash default (one commit per
+    evolution PR — the readable-mainline policy).
+    """
+    branch = (head_branch or "").strip()
+    if branch.startswith("sync/") and method != "merge":
+        return [
+            f"MERGE_METHOD: sync PR branch '{branch}' must merge with "
+            f"'--method merge' (true merge commit), not '{method}' — squash "
+            "breaks upstream-release ancestry and re-surfaces integrated "
+            "commits in every later sync (#2783)"
+        ]
+    return []
+
+
 def check_merge_policy(
     files: Sequence[Dict[str, Any]],
     max_lines: int = DEFAULT_MAX_LINES,
@@ -418,13 +442,14 @@ def _pr_snapshot(
     first, head later) leave open — a push landing between them would otherwise
     be merged with a SHA whose diff was never reviewed.
 
-    Returns ``(files, head)``. Fails CLOSED — ``(None, None)`` on a gh error, non-
-    JSON output, or a response that does not carry a proper ``files`` LIST. A
+    Returns ``(files, head, head_branch)``. Fails CLOSED — all-``None`` on a gh
+    error, non-JSON output, or a response that does not carry a proper ``files``
+    LIST. A
     missing ``files`` key is an unreadable PR, NOT "an empty, therefore safe,
     diff": the caller refuses to merge. ``head`` is ``None`` only when the files
     were readable but the SHA was absent.
     """
-    cmd = ["gh", "pr", "view", str(pr), "--json", "files,headRefOid"]
+    cmd = ["gh", "pr", "view", str(pr), "--json", "files,headRefOid,headRefName"]
     if repo:
         cmd += ["--repo", repo]
     code, out, _ = runner(cmd)
@@ -435,12 +460,13 @@ def _pr_snapshot(
     except ValueError:
         return None, None
     if not isinstance(data, dict) or not isinstance(data.get("files"), list):
-        return None, None
+        return None, None, None
     files = data["files"]
     head = data.get("headRefOid")
+    branch = data.get("headRefName") or ""
     if not isinstance(head, str) or not head:
-        return files, None
-    return files, head
+        return files, None, branch
+    return files, head, branch
 
 
 def _looks_like_test(path: str) -> bool:
@@ -557,7 +583,7 @@ def main(argv: List[str]) -> int:
     runner = _run
     # One snapshot: the files we review and the SHA we merge come from the SAME
     # gh read, so the policy is checked against exactly the commit that lands.
-    files, head = _pr_snapshot(pr, repo, runner)
+    files, head, head_branch = _pr_snapshot(pr, repo, runner)
     if files is None:
         print(
             f"[merge-gate] could not read PR #{pr} files (gh error / malformed response) — refusing to merge"
@@ -578,6 +604,7 @@ def main(argv: List[str]) -> int:
         floor_scores=floor_scores,
         pr_metrics=pr_metrics,
     )
+    violations += check_merge_method_policy(head_branch, method)
     if violations:
         print(f"[merge-gate] PR #{pr} BLOCKED from autonomous self-merge:")
         for v in violations:
