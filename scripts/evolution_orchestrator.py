@@ -456,22 +456,30 @@ def _cmd_draft_select(argv: List[str]) -> int:
     """Select the best draft from parallel draft results (#798).
 
     Real call site for ``select_best_draft``.  Reads delegate_task's JSON
-    output (from stdin or a file path) and prints the winner.
+    output (from stdin or a file path) and prints the winner.  With
+    ``--anti-conformity``, a converged population keeps the contrarian
+    (non-consensus) OK draft alive instead of the best-scoring common one
+    (#2761).
     """
     path: Optional[str] = None
+    anti_conformity = False
     i = 0
     while i < len(argv):
         arg = argv[i]
-        if arg.startswith("-"):
+        if arg == "--anti-conformity":
+            anti_conformity = True
+            i += 1
+        elif arg.startswith("-"):
             print(f"[evolution-orchestrator] unknown flag: {arg}", file=sys.stderr)
             return 2
-        path = arg
-        i += 1
+        else:
+            path = arg
+            i += 1
     data, err = _load_json(path)
     if err:
         print(f"[evolution-orchestrator] {err}", file=sys.stderr)
         return 2
-    bi, bs, drafts = select_best_draft(data)
+    bi, bs, drafts = select_best_draft(data, anti_conformity=anti_conformity)
     print(
         json.dumps(
             {"best_index": bi, "best_score": bs, "drafts": drafts}, ensure_ascii=False
@@ -521,7 +529,7 @@ def main(argv: List[str]) -> int:
             '  build         --subtask S --angle A [--angle A ...] [--max-workers N] [--toolsets a,b] [--complexity "task desc"]\n'
             "  collect       [results.json] [--angles angles.json]   (reads stdin if no path)\n"
             "  draft         --goal G [--drafters N] [--context C] [--toolsets a,b]\n"
-            "  draft-select  [results.json]   (reads stdin if no path)\n"
+            "  draft-select  [results.json] [--anti-conformity]   (reads stdin if no path)\n"
             '  route         --complexity "task desc"',
             file=sys.stderr,
         )

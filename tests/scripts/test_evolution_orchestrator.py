@@ -340,6 +340,38 @@ class TestDraftCommands:
         rc = main(["evolution_orchestrator.py", "draft-select"])
         assert rc == 2
 
+    def test_draft_select_anti_conformity_keeps_contrarian(self, capsys, monkeypatch):
+        """The real wired path (draft-select --anti-conformity) keeps the
+        contrarian OK draft alive in a converged population (#2761)."""
+        payload = json.dumps({
+            "results": [
+                {"task_index": 0, "status": "completed", "summary": "## H\n\nhttps://e.com\n" * 3},
+                {"task_index": 1, "status": "completed", "summary": "## H\n\nhttps://e.com\n" * 3},
+                {"task_index": 2, "status": "completed", "summary": "## X\n\nhttps://y.com\n" * 3},
+            ]
+        })  # fmt: skip
+        monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+        rc = main(["evolution_orchestrator.py", "draft-select", "--anti-conformity"])
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        # Converged population -> contrarian (draft 2) wins, not best-score draft 0.
+        assert out["best_index"] == 2
+
+    def test_draft_select_anti_conformity_off_picks_best(self, capsys, monkeypatch):
+        """Without the flag, the same converged population picks best score."""
+        payload = json.dumps({
+            "results": [
+                {"task_index": 0, "status": "completed", "summary": "## H\n\nhttps://e.com\n" * 3},
+                {"task_index": 1, "status": "completed", "summary": "## H\n\nhttps://e.com\n" * 3},
+                {"task_index": 2, "status": "completed", "summary": "## X\n\nhttps://y.com\n" * 3},
+            ]
+        })  # fmt: skip
+        monkeypatch.setattr("sys.stdin", io.StringIO(payload))
+        rc = main(["evolution_orchestrator.py", "draft-select"])
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["best_index"] == 0
+
     def test_route_maps_complexity(self, capsys):
         rc = main(["evolution_orchestrator.py", "route", "--complexity", "fix typo"])
         assert rc == 0

@@ -129,3 +129,57 @@ def test_route_cli_positional(capsys):
 
 def test_route_cli_missing_complexity(capsys):
     assert main(["x", "route"]) == 2
+
+
+# ── anti-conformity tests (#2761) ────────────────────────────────────────────
+
+
+def test_converged_population_keeps_contrarian_with_flag():
+    """When drafts are near-identical (converged), anti-conformity picks
+    the contrarian outlier instead of the best-scoring common draft."""
+    # All OK; drafts 0-1 are near-identical, draft 2 is the contrarian.
+    out = {"results": [
+        {"task_index": 0, "status": "completed", "summary": "## H\n\nhttps://e.com\n" * 3},
+        {"task_index": 1, "status": "completed", "summary": "## H\n\nhttps://e.com\n" * 3},
+        {"task_index": 2, "status": "completed", "summary": "## X\n\nhttps://y.com\n" * 3},
+    ]}  # fmt: skip
+    bi, bs, drafts = select_best_draft(out, anti_conformity=True)
+    # Draft 0 and 1 are identical -> consensus sim = 1.0 -> converged.
+    # Contrarian is the one least similar to the consensus -> draft 2.
+    assert bi == 2
+
+
+def test_diverse_population_ignores_flag():
+    """When drafts are diverse (not converged), anti-conformity falls back
+    to the normal best-scoring winner — the flag does not distort a healthy
+    population."""
+    out = {"results": [
+        {"task_index": 0, "status": "completed", "summary": "## H\n\nhttps://a.com\n" * 3},
+        {"task_index": 1, "status": "completed", "summary": "## Q\n\nhttps://b.com\n" * 3},
+        {"task_index": 2, "status": "completed", "summary": "## Z\n\nhttps://c.com\n" * 3},
+    ]}  # fmt: skip
+    bi, bs, drafts = select_best_draft(out, anti_conformity=True)
+    # All three are disjoint -> consensus sim = 0.0 -> not converged -> best score wins.
+    bi_no_flag, _, _ = select_best_draft(out)
+    assert bi == bi_no_flag
+
+
+def test_flag_off_picks_best_score():
+    """Without the flag, converged populations pick best score (status quo)."""
+    out = {"results": [
+        {"task_index": 0, "status": "completed", "summary": "## H\n\nhttps://e.com\n" * 3},
+        {"task_index": 1, "status": "completed", "summary": "## H\n\nhttps://e.com\n" * 3},
+        {"task_index": 2, "status": "completed", "summary": "## X\n\nhttps://y.com\n" * 3},
+    ]}  # fmt: skip
+    bi, _, _ = select_best_draft(out, anti_conformity=False)
+    # Draft 0 and 1 have the same score; the first one with score > bs wins.
+    assert bi == 0
+
+
+def test_no_ok_drafts_returns_none_with_flag():
+    out = {"results": [
+        {"task_index": 0, "status": "timeout", "summary": ""},
+        {"task_index": 1, "status": "timeout", "summary": ""},
+    ]}  # fmt: skip
+    bi, bs, _ = select_best_draft(out, anti_conformity=True)
+    assert bi == -1 and bs == 0.0

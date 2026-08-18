@@ -117,8 +117,63 @@ def _score(text: str) -> float:
     return round(s, 4)
 
 
-def select_best_draft(delegate_output: Any) -> Tuple[int, float, List[Dict[str, Any]]]:
-    """Score drafts, pick winner: (best_index, best_score, drafts)."""
+def _text_similarity(a: str, b: str) -> float:
+    """Jaccard similarity over word sets, 0..1 (0 = disjoint, 1 = identical)."""
+    wa, wb = set(a.lower().split()), set(b.lower().split())
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
+def _consensus_similarity(drafts: List[Dict[str, Any]]) -> float:
+    """Top-2 similarity among OK drafts; 1.0 = the two best agree completely.
+
+    Convergence is measured by whether the *top contenders* (highest-scoring
+    OK drafts) are near-identical — not by the mean of all pairs, which is
+    diluted by the contrarian outlier itself (#2761).
+    """
+    ok = sorted([d for d in drafts if d["ok"]], key=lambda d: d["score"], reverse=True)
+    if len(ok) < 2:
+        return 0.0
+    return _text_similarity(ok[0]["summary"], ok[1]["summary"])
+
+
+def _contrarian_index(drafts: List[Dict[str, Any]]) -> int:
+    """Index of the OK draft least similar to the best-scoring draft.
+
+    The contrarian is the OK draft whose summary is farthest (lowest Jaccard)
+    from the consensus winner — the one that would be lost if we only kept
+    the best-scoring common draft.  Returns -1 when there are no OK drafts.
+    """
+    ok = sorted([d for d in drafts if d["ok"]], key=lambda d: d["score"], reverse=True)
+    if not ok:
+        return -1
+    best_summary = ok[0]["summary"]
+    if not best_summary:
+        return -1
+    worst, worst_sim = ok[0]["index"], 1.0
+    for d in ok:
+        sim = _text_similarity(d["summary"], best_summary)
+        if sim < worst_sim:
+            worst_sim, worst = sim, d["index"]
+    return worst
+
+
+def select_best_draft(
+    delegate_output: Any,
+    anti_conformity: bool = False,
+    distinctness_threshold: float = 0.2,
+) -> Tuple[int, float, List[Dict[str, Any]]]:
+    """Score drafts, pick winner: (best_index, best_score, drafts).
+
+    With ``anti_conformity=True``, a *converged* population (mean pairwise
+    similarity ≥ 1 - distinctness_threshold, i.e. distinctness below the
+    threshold) keeps the contrarian (non-consensus) OK draft alive instead of
+    the best-scoring common one — so a converged candidate population does not
+    collapse onto a single norm (anti-conformity, #2761).  When the population
+    is NOT converged, or anti_conformity is off, the highest-scoring OK draft
+    wins exactly as before.
+    """
     results = (
         delegate_output.get("results", [])
         if isinstance(delegate_output, dict)
@@ -143,9 +198,17 @@ def select_best_draft(delegate_output: Any) -> Tuple[int, float, List[Dict[str, 
         })
     drafts.sort(key=lambda d: d["index"])
     bi, bs = -1, 0.0
-    for d in drafts:
-        if d["ok"] and d["score"] > bs:
-            bs, bi = d["score"], d["index"]
+    if (
+        anti_conformity
+        and _consensus_similarity(drafts) >= 1.0 - distinctness_threshold
+    ):
+        bi = _contrarian_index(drafts)
+        if bi >= 0:
+            bs = next(d["score"] for d in drafts if d["index"] == bi)
+    if bi < 0:
+        for d in drafts:
+            if d["ok"] and d["score"] > bs:
+                bs, bi = d["score"], d["index"]
     return bi, bs, drafts
 
 
