@@ -128,6 +128,62 @@ class TestSchemaRoundTrip:
         assert _is_schema_valid_entry(reloaded)
 
 
+class TestModelCallsPersistence:
+    """#2877 — the rework wired real tool-call metadata into the live writer.
+
+    ``agent.trajectory.save_trajectory`` now accepts an optional ``model_calls``
+    list and persists it under that key. When absent, the pre-#2877 shape is
+    preserved byte-for-byte (callers that never supplied it, and old files,
+    must load unchanged).
+    """
+
+    def test_absent_model_calls_keeps_legacy_shape(self, tmp_path):
+        """No model_calls argument -> no model_calls key (legacy callers)."""
+        from agent.trajectory import save_trajectory
+
+        ep = generate_episode("tool_augmented_planning", {"seed": 5})
+        out = tmp_path / "trajectory_samples.jsonl"
+        save_trajectory(ep["conversations"], model=ep["model"],
+                        completed=ep["completed"], filename=str(out))
+        reloaded = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
+        assert "model_calls" not in reloaded
+
+    def test_empty_model_calls_is_omitted(self, tmp_path):
+        """An empty list is not written — matches ``extract_tool_calls`` for a
+        turn with no tool calls, which must not add a noisy empty key."""
+        from agent.trajectory import save_trajectory
+
+        ep = generate_episode("tool_augmented_planning", {"seed": 7})
+        out = tmp_path / "trajectory_samples.jsonl"
+        save_trajectory(ep["conversations"], model=ep["model"],
+                        completed=ep["completed"], filename=str(out),
+                        model_calls=[])
+        reloaded = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
+        assert "model_calls" not in reloaded
+
+    def test_model_calls_are_persisted_verbatim(self, tmp_path):
+        """The structured per-call metadata survives the round-trip exactly —
+        this is what the evolution pipeline's consumers read."""
+        from agent.trajectory import save_trajectory
+
+        ep = generate_episode("tool_augmented_planning", {"seed": 11})
+        calls = [
+            {"tool": "read_file", "args": {"path": "a.py"},
+             "result": "ok", "status": "success", "duration_ms": None},
+            {"tool": "patch", "args": {"path": "a.py"},
+             "result": "applied", "status": "success", "duration_ms": 250},
+        ]
+        out = tmp_path / "trajectory_samples.jsonl"
+        save_trajectory(ep["conversations"], model=ep["model"],
+                        completed=ep["completed"], filename=str(out),
+                        model_calls=calls)
+        reloaded = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
+        assert reloaded["model_calls"] == calls
+        # The ShareGPT conversations are untouched by the extra metadata.
+        assert reloaded["conversations"] == ep["conversations"]
+        assert _is_schema_valid_entry(reloaded)
+
+
 class TestLabels:
     def test_labels_present_and_typed(self):
         ep = generate_episode("tool_augmented_planning", {"seed": 1})

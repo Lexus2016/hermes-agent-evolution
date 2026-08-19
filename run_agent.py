@@ -2650,8 +2650,24 @@ class AIAgent:
         if not self.save_trajectories:
             return
 
+        # Fold the real tool-call metadata into the saved entry (#2877).
+        # ``extract_tool_calls`` reads the RAW internal messages, which carry
+        # structured ``tool_calls`` + per-call results; by the time the
+        # ShareGPT trajectory form is produced those calls are flattened into
+        # XML text and the per-call status/args are gone. Emitting the
+        # structured form alongside keeps the evolution pipeline's consumers
+        # working against real per-call data instead of re-parsing prose.
+        try:
+            from agent.tool_call_capture import extract_tool_calls
+
+            model_calls = extract_tool_calls(messages)
+        except Exception:
+            # Instrumentation must never be able to discard a completed turn.
+            model_calls = None
+
         trajectory = self._convert_to_trajectory_format(messages, user_query, completed)
-        _save_trajectory_to_file(trajectory, self.model, completed)
+        _save_trajectory_to_file(trajectory, self.model, completed,
+                                 model_calls=model_calls)
 
     @staticmethod
     def _is_entitlement_failure(
