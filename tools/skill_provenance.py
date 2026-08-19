@@ -151,3 +151,38 @@ def record_promotion(skill_name: str, reason: str = "") -> None:
         _mutate(skill_name, _apply)
     except Exception as exc:
         logger.warning("record_promotion(%s) failed: %s", skill_name, exc)
+
+    # #2898 (memory-reward trap, RoMeRL arXiv:2608.02508): promotion events
+    # must carry CAUSAL attribution, not co-occurrence. Record the skill's
+    # load-bearing (trusted) sources on the version ledger and bound outcome
+    # credit to them via the de-biasing rule — a promotion whose sources are
+    # all untrusted gets NO credit (fluke-success guard). Best-effort like
+    # the stamp above: a promotion must not fail because the ledger write did.
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        _scripts = _Path(__file__).resolve().parents[1] / "scripts"
+        if str(_scripts) not in _sys.path:
+            _sys.path.insert(0, str(_scripts))
+        from evolution_skill_version import (
+            debias_outcome_credit,
+            record_promotion as record_version,
+        )
+        from tools.skill_usage import _mutate
+
+        chain = get_skill_provenance(skill_name)
+        pairs = [(e, str(e.get("source_id") or e.get("source_type")))
+                 for e in chain if e.get("source_id") or e.get("source_type")]
+        ids = [i for _, i in pairs]
+        load_bearing = sorted({i for e, i in pairs if e.get("trusted")})
+        credit = debias_outcome_credit(ids, load_bearing, outcome_reward=1.0)
+        record_version(
+            skill_name,
+            note=(reason or "provenance_ok")[:200],
+            attribution=load_bearing,
+        )
+        if credit:
+            _mutate(skill_name, lambda rec: rec.update({"attribution_credit": credit}))
+    except Exception as exc:
+        logger.warning("record_version(%s) failed: %s", skill_name, exc)
