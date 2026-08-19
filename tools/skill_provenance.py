@@ -158,16 +158,13 @@ def record_promotion(skill_name: str, reason: str = "") -> None:
     # credit to them; all-untrusted -> NO credit (fluke-success guard).
     # Best-effort: a ledger failure never fails the promotion.
     try:
-        import sys as _sys
-        from pathlib import Path as _Path
+        import pathlib, sys
 
-        _scripts = _Path(__file__).resolve().parents[1] / "scripts"
-        if str(_scripts) not in _sys.path:
-            _sys.path.insert(0, str(_scripts))
-        from evolution_skill_version import (
-            debias_outcome_credit,
-            record_promotion as record_version,
-        )
+        _scripts = str(pathlib.Path(__file__).resolve().parents[1] / "scripts")
+        if _scripts not in sys.path:
+            sys.path.insert(0, _scripts)
+        from evolution_skill_version import (debias_outcome_credit,
+                                             record_promotion as record_version)
         from tools.skill_usage import _mutate
 
         chain = get_skill_provenance(skill_name)
