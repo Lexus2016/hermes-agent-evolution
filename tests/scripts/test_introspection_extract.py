@@ -14,6 +14,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from introspection_extract import build_digest, scan_session  # noqa: E402
@@ -202,71 +204,36 @@ class TestScanSession:
 class TestInformationalExitCodeMeaning:
     """#2873 part 3 — a non-zero exit_code that the terminal tool already
     annotated as informational (via ``exit_code_meaning``) must NOT be counted
-    as a tool failure.  grep/diff/test/git return 1 for "no matches"/"files
+    as a tool failure.  grep/diff/test return 1 for "no matches"/"files
     differ"/"condition false" — expected, not a failure.  Before this fix,
-    ``_tool_result_failed`` counted every exit_code != 0 as a failure,
-    corrupting the introspection signal with false positives."""
+    ``_tool_result_failed`` counted every exit_code != 0 as a failure.
+    A bare non-zero exit (no informational note) and a curl timeout note
+    (no "not an error"/"expected" markers) still count as failures.
+    """
 
-    def test_grep_no_matches_not_a_failure(self, tmp_path):
+    @pytest.mark.parametrize(
+        "meaning",
+        [
+            "No matches found (not an error)",
+            "Files differ (expected, not an error)",
+            "Condition evaluated to false (expected, not an error)",
+        ],
+    )
+    def test_informational_exit_code_meaning_not_a_failure(self, tmp_path, meaning):
         p = _session(
             tmp_path,
-            "grep_ok",
+            "info_ok",
             [
                 _asst("terminal", "c1"),
-                _tool(
-                    "c1",
-                    _term(
-                        "",
-                        exit_code=1,
-                        exit_code_meaning="No matches found (not an error)",
-                    ),
-                ),
+                _tool("c1", _term("", exit_code=1, exit_code_meaning=meaning)),
             ],
         )
         s = scan_session(p)
         assert s["tool_failures"] == {}
         assert s["tool_failures_by_reason"] == {}
 
-    def test_diff_files_differ_not_a_failure(self, tmp_path):
-        p = _session(
-            tmp_path,
-            "diff_ok",
-            [
-                _asst("terminal", "c1"),
-                _tool(
-                    "c1",
-                    _term(
-                        "",
-                        exit_code=1,
-                        exit_code_meaning="Files differ (expected, not an error)",
-                    ),
-                ),
-            ],
-        )
-        s = scan_session(p)
-        assert s["tool_failures"] == {}
-
-    def test_test_condition_false_not_a_failure(self, tmp_path):
-        p = _session(
-            tmp_path,
-            "test_ok",
-            [
-                _asst("terminal", "c1"),
-                _tool(
-                    "c1",
-                    _term(
-                        "",
-                        exit_code=1,
-                        exit_code_meaning="Condition evaluated to false (expected, not an error)",
-                    ),
-                ),
-            ],
-        )
-        s = scan_session(p)
-        assert s["tool_failures"] == {}
-
-    def test_non_zero_without_meaning_still_failure(self, tmp_path):
-        """A bare non-zero exit (no informational note) is still a failure."""
+    def test_bare_non_zero_without_meaning_still_failure(self, tmp_path):
+        """A non-zero exit with no informational note is still a failure."""
         p = _session(
             tmp_path,
             "no_meaning",
@@ -280,8 +247,8 @@ class TestInformationalExitCodeMeaning:
         assert s["tool_failures_by_reason"] == {"terminal": {"non-zero-exit": 1}}
 
     def test_curl_timeout_meaning_still_failure(self, tmp_path):
-        """curl exit 28 'Operation timed out' carries a note WITHOUT the
-        informational markers — it is still a real failure, not suppressed."""
+        """curl exit 28 'Operation timed out' lacks the informational markers
+        — it is still a real failure, not suppressed."""
         p = _session(
             tmp_path,
             "curl_timeout",
