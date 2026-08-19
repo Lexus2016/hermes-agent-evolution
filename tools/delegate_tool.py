@@ -2959,6 +2959,50 @@ def _apply_summary_budget(results: List[Dict[str, Any]], parent_agent) -> None:
         )
 
 
+def _child_blocked_no_terminal(task_index: int, goal: str, child) -> Optional[Dict[str, Any]]:
+    """#2826 exec-capability gate: visible BLOCKED outcome for shell-requiring
+    subagents whose resolved toolset lacks `terminal`.
+
+    Returns a blocked result dict when the goal needs shell access but the
+    child cannot run with it, else None (proceed). Checks the ACTUAL toolset
+    the child was provisioned with — not the parent's environment — which is
+    the exact gap #2826 documents (subagents provisioned without shell while
+    the task needs one). The _build_child_agent auto-add already widened the
+    child when the parent could provide terminal; reaching here without it
+    means dispatch would be doomed, so we block visibly instead.
+    """
+    if not _goal_needs_terminal(goal):
+        return None
+    _child_ts = getattr(child, "enabled_toolsets", None)
+    # Fail-open: only gate when the child declares a concrete toolset list.
+    # Real children built by _build_child_agent always carry one; bare mocks
+    # (used by heartbeat/observability tests) do not, and blocking them would
+    # be a false positive.
+    if not isinstance(_child_ts, (list, tuple, set, frozenset)):
+        return None
+    if "terminal" in _expand_parent_toolsets(set(_child_ts)):
+        return None
+    logger.warning(
+        "delegate_task: subagent %d goal requires shell access but child "
+        "toolset lacks 'terminal' — blocking dispatch (#2826)", task_index,
+    )
+    return {
+        "task_index": task_index,
+        "status": "blocked",
+        "summary": None,
+        "error": (
+            "Subagent goal requires shell/terminal access but the resolved "
+            "child toolset does not include 'terminal', so dispatch cannot "
+            "succeed. The parent could not provision terminal for the "
+            "subagent. (#2826 exec-capability gate)"
+        ),
+        "exit_reason": "blocked_no_terminal",
+        "api_calls": 0,
+        "duration_seconds": 0.0,
+        "_child_role": getattr(child, "_delegate_role", None),
+    }
+
+
 def _run_single_child(
     task_index: int,
     goal: str,
@@ -2975,6 +3019,12 @@ def _run_single_child(
     Returns a structured result dict.
     """
     child_start = time.monotonic()
+
+    # #2826: block a doomed dispatch before any thread/credential setup so
+    # nothing (heartbeat thread, subagent contextvar, credential lease) leaks.
+    _blocked = _child_blocked_no_terminal(task_index, goal, child)
+    if _blocked is not None:
+        return _blocked
 
     # Agent-team identity (issue #252): rebind this worker thread's team
     # identity so the team tools resolve the right team + member when the
