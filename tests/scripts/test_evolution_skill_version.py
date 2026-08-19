@@ -8,8 +8,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from evolution_skill_version import (  # noqa: E402
+    MAX_OUTCOME_UTILITY,
     SkillVersion,
     current_version,
+    debias_outcome_credit,
     format_current,
     load_versions,
     main,
@@ -185,3 +187,88 @@ class TestCli:
     def test_help_exits_zero(self, capsys):
         assert main(["--help"]) == 0
         assert "usage" in capsys.readouterr().out
+
+
+class TestAttribution:
+    """#2898 — promotion events carry causal attribution, not co-occurrence."""
+
+    def test_attribution_stored_and_round_tripped(self, tmp_path):
+        v = record_promotion(
+            "s", attribution=["mem-1", "mem-2"], store_dir=tmp_path
+        )
+        assert v.attribution == ["mem-1", "mem-2"]
+        loaded = load_versions("s", store_dir=tmp_path)[0]
+        assert loaded.attribution == ["mem-1", "mem-2"]
+
+    def test_attribution_defaults_empty(self, tmp_path):
+        """No attribution recorded == fluke-success risk, never fabricated."""
+        v = record_promotion("s", store_dir=tmp_path)
+        assert v.attribution == []
+
+    def test_legacy_records_load_without_attribution(self, tmp_path):
+        """Old JSONL entries without the field must not crash loaders."""
+        path = tmp_path / "s.jsonl"
+        path.write_text(
+            json.dumps({"skill": "s", "version": 1, "flip_verdict": "promote"})
+            + "\n",
+            encoding="utf-8",
+        )
+        loaded = load_versions("s", store_dir=tmp_path)[0]
+        assert loaded.attribution == []
+
+    def test_cli_record_attribution(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
+        assert main(["record", "s", "--attribution", "mem-1,mem-2"]) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["attribution"] == ["mem-1", "mem-2"]
+
+
+class TestDebiasOutcomeCredit:
+    """#2898 — the co-retrieval de-biasing rule (memory-reward trap)."""
+
+    def test_credits_only_load_bearing_memories(self):
+        credit = debias_outcome_credit(
+            co_retrieved=["a", "b", "c"],
+            load_bearing=["a"],
+            outcome_reward=1.0,
+        )
+        assert credit == {"a": 1.0}
+        # 'b' and 'c' were co-retrieved but never load-bearing — no credit.
+        assert "b" not in credit and "c" not in credit
+
+    def test_splits_bounded_reward_across_relevant_memories(self):
+        credit = debias_outcome_credit(
+            co_retrieved=["a", "b", "c"],
+            load_bearing=["a", "b"],
+            outcome_reward=1.0,
+        )
+        assert credit == {"a": 0.5, "b": 0.5}
+
+    def test_ignores_load_bearing_not_in_retrieved_set(self):
+        credit = debias_outcome_credit(
+            co_retrieved=["x"],
+            load_bearing=["a"],  # claimed load-bearing but never retrieved
+            outcome_reward=1.0,
+        )
+        assert credit == {}
+
+    def test_reward_bounded_by_max_utility(self):
+        credit = debias_outcome_credit(
+            co_retrieved=["a"],
+            load_bearing=["a"],
+            outcome_reward=10.0,  # a fluke windfall must not inflate utility
+        )
+        assert credit["a"] == MAX_OUTCOME_UTILITY
+        assert credit["a"] <= MAX_OUTCOME_UTILITY
+
+    def test_no_load_bearing_means_no_credit(self):
+        assert debias_outcome_credit(["a", "b"], [], 1.0) == {}
+
+    def test_negative_reward_means_no_credit(self):
+        assert debias_outcome_credit(["a"], ["a"], -1.0) == {}
+
+    def test_custom_ceiling_respected(self):
+        credit = debias_outcome_credit(
+            ["a"], ["a"], 5.0, max_utility=2.0
+        )
+        assert credit == {"a": 2.0}

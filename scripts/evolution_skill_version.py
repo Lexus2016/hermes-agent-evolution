@@ -39,6 +39,12 @@ from typing import Any, Dict, List, Optional
 
 SCHEMA_VERSION = "1"
 
+#: Bounded utility space for outcome credit (#2898, RoMeRL arXiv:2608.02508).
+#: The memory-reward trap disperses feedback over an unbounded history; every
+#: credit assignment must live inside this ceiling so a single fluke success
+#: cannot inflate a memory's utility without limit.
+MAX_OUTCOME_UTILITY = 1.0
+
 
 def _default_store() -> Path:
     env = os.environ.get("EVOLUTION_PROFILE_DIR", "").strip()
@@ -65,6 +71,10 @@ class SkillVersion:
     diff_ref: str = ""
     critic_ref: str = ""
     note: str = ""
+    # #2898: which memories/skills were actually load-bearing for the outcome
+    # the promotion is crediting. Empty means no causal attribution was
+    # recorded — a fluke-success promotion must NOT be treated as evidence.
+    attribution: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -78,6 +88,7 @@ class SkillVersion:
             "diff_ref": self.diff_ref,
             "critic_ref": self.critic_ref,
             "note": self.note,
+            "attribution": list(self.attribution),
         }
 
     @classmethod
@@ -92,6 +103,7 @@ class SkillVersion:
             diff_ref=str(data.get("diff_ref", "")),
             critic_ref=str(data.get("critic_ref", "")),
             note=str(data.get("note", "")),
+            attribution=list(data.get("attribution", []) or []),
         )
 
 
@@ -151,6 +163,7 @@ def record_promotion(
     diff_ref: str = "",
     critic_ref: str = "",
     note: str = "",
+    attribution: Optional[List[str]] = None,
     promoted_at: Optional[str] = None,
     store_dir: Optional[Path] = None,
 ) -> SkillVersion:
@@ -158,6 +171,12 @@ def record_promotion(
 
     The version number is derived from what is on disk, not passed in, so two
     callers cannot disagree about which number is next.
+
+    ``attribution`` (#2898) names the memories/skills that were actually
+    load-bearing for the credited outcome. It is deliberately NOT filled in
+    from co-occurrence: a promotion with no attribution recorded is a
+    fluke-success risk, and callers that care (the misevolution gate) check
+    it explicitly.
     """
     previous = current_version(skill, store_dir)
     version = (previous.version + 1) if previous else 1
@@ -171,12 +190,43 @@ def record_promotion(
         diff_ref=diff_ref,
         critic_ref=critic_ref,
         note=note,
+        attribution=list(attribution or []),
     )
     path = _path(skill, store_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry.to_dict(), sort_keys=True) + "\n")
     return entry
+
+
+def debias_outcome_credit(
+    co_retrieved: List[str],
+    load_bearing: List[str],
+    outcome_reward: float,
+    *,
+    max_utility: float = MAX_OUTCOME_UTILITY,
+) -> Dict[str, float]:
+    """Assign outcome credit ONLY to memories that were actually load-bearing.
+
+    The memory-reward trap (#2898, RoMeRL arXiv:2608.02508): when trajectory
+    rewards are jointly assigned to every co-retrieved memory, an incidentally
+    co-retrieved memory receives a misleading utility bump that raises its own
+    retrieval probability — a self-reinforcing loop. The de-biasing rule is
+    causal attribution: credit is bounded to ``max_utility`` and split ONLY
+    across ``load_bearing`` memories that were also co-retrieved, never across
+    the full retrieved set.
+
+    Returns ``{}`` when nothing was load-bearing — a fluke success must not
+    reward any memory.
+    """
+    if not load_bearing or outcome_reward <= 0:
+        return {}
+    relevant = [m for m in load_bearing if m in set(co_retrieved)]
+    if not relevant:
+        return {}
+    bounded = min(outcome_reward, max_utility)
+    share = bounded / len(relevant)
+    return {m: share for m in relevant}
 
 
 def rollback_target(
@@ -213,7 +263,7 @@ def _usage() -> str:
     return (
         "usage: evolution_skill_version.py <command> [args]\n"
         "  record <skill> [--verdict V] [--diff REF] [--critic REF] [--note N]\n"
-        "         [--fixes a,b] [--regressions c,d]\n"
+        "         [--fixes a,b] [--regressions c,d] [--attribution m1,m2]\n"
         "  current <skill>          which version is live, and what approved it\n"
         "  rollback <skill>         the version to revert to\n"
         "  history <skill>          every promotion, oldest first\n"
@@ -250,6 +300,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             note=_opt(args, "--note"),
             fixes=[x for x in _opt(args, "--fixes").split(",") if x],
             regressions=[x for x in _opt(args, "--regressions").split(",") if x],
+            attribution=[x for x in _opt(args, "--attribution").split(",") if x],
         )
         print(json.dumps(entry.to_dict(), indent=2, sort_keys=True))
         return 0
