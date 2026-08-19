@@ -155,9 +155,8 @@ def record_promotion(skill_name: str, reason: str = "") -> None:
     # #2898 (memory-reward trap, RoMeRL arXiv:2608.02508): promotion events
     # must carry CAUSAL attribution, not co-occurrence. Record the skill's
     # load-bearing (trusted) sources on the version ledger and bound outcome
-    # credit to them via the de-biasing rule — a promotion whose sources are
-    # all untrusted gets NO credit (fluke-success guard). Best-effort like
-    # the stamp above: a promotion must not fail because the ledger write did.
+    # credit to them; all-untrusted -> NO credit (fluke-success guard).
+    # Best-effort: a ledger failure never fails the promotion.
     try:
         import sys as _sys
         from pathlib import Path as _Path

@@ -253,22 +253,18 @@ class TestDebiasOutcomeCredit:
         assert credit == {}
 
     def test_reward_bounded_by_max_utility(self):
-        credit = debias_outcome_credit(
-            co_retrieved=["a"],
-            load_bearing=["a"],
-            outcome_reward=10.0,  # a fluke windfall must not inflate utility
-        )
+        credit = debias_outcome_credit(["a"], ["a"], 10.0)  # fluke windfall
         assert credit["a"] == MAX_OUTCOME_UTILITY
         assert credit["a"] <= MAX_OUTCOME_UTILITY
+        # Custom ceiling is respected too.
+        assert debias_outcome_credit(["a"], ["a"], 5.0, max_utility=2.0) == {"a": 2.0}
 
-    def test_no_load_bearing_means_no_credit(self):
+    def test_no_load_bearing_or_negative_reward_means_no_credit(self):
         assert debias_outcome_credit(["a", "b"], [], 1.0) == {}
-
-    def test_negative_reward_means_no_credit(self):
         assert debias_outcome_credit(["a"], ["a"], -1.0) == {}
 
-    def test_custom_ceiling_respected(self):
-        credit = debias_outcome_credit(
-            ["a"], ["a"], 5.0, max_utility=2.0
-        )
-        assert credit == {"a": 2.0}
+    def test_reward_bounded_by_max_utility(self):
+        credit = debias_outcome_credit(["a"], ["a"], 10.0)  # fluke windfall
+        assert credit["a"] == MAX_OUTCOME_UTILITY
+        # Custom ceiling is respected too.
+        assert debias_outcome_credit(["a"], ["a"], 5.0, max_utility=2.0) == {"a": 2.0}
