@@ -173,10 +173,9 @@ def record_promotion(
     callers cannot disagree about which number is next.
 
     ``attribution`` (#2898) names the memories/skills that were actually
-    load-bearing for the credited outcome. It is deliberately NOT filled in
-    from co-occurrence: a promotion with no attribution recorded is a
-    fluke-success risk, and callers that care (the misevolution gate) check
-    it explicitly.
+    load-bearing for the credited outcome. Deliberately NOT filled from
+    co-occurrence: a promotion with no attribution recorded is a fluke-success
+    risk, and callers that care (the misevolution gate) check it explicitly.
     """
     previous = current_version(skill, store_dir)
     version = (previous.version + 1) if previous else 1
