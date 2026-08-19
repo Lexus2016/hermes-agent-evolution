@@ -6,7 +6,6 @@ into the REAL promotion flow (tools.skill_provenance.record_promotion,
 called from tools/skill_manager_tool.py:1882) — real functions, temp
 HERMES_HOME, real usage record and version ledger.
 """
-
 from __future__ import annotations
 
 import json
