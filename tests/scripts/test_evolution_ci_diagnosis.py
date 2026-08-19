@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.parse
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -211,7 +212,10 @@ def test_diagnose_prs_detects_failure_and_creates_child_issue(hermes_home, monke
     # Verify state was recorded.
     assert state_path.is_file()
     recorded = json.loads(state_path.read_text(encoding="utf-8"))
-    assert recorded["Lexus2016/hermes-agent-evolution#42"] == issue_response["html_url"]
+    assert (
+        recorded["Lexus2016/hermes-agent-evolution#42:key-error"]
+        == issue_response["html_url"]
+    )
 
 
 def test_diagnose_prs_dry_run_does_not_create_issue(hermes_home, monkeypatch):
@@ -408,7 +412,9 @@ def test_create_child_issue_surfaces_unclassified_raw_excerpt(hermes_home):
             },
         ),
     ])
-    url = diag.create_child_issue(client, pr, [(check, failure)], dry_run=False)
+    url = diag.create_child_issue(
+        client, pr, [(check, failure)], "unknown", dry_run=False
+    )
     assert url == "https://github.com/Lexus2016/hermes-agent-evolution/issues/999"
     post_body = json.loads(client.calls[-1][2] or "{}")
     assert "opaque detail" in post_body["body"]
@@ -433,7 +439,9 @@ def test_classify_mast_mode_by_error_class():
 
 def test_classify_mast_mode_message_hint_overrides():
     # a "timeout" keyword in the message wins over a non-timeout error class
-    assert diag.classify_mast_mode("exit-code", "Operation timed out after 120s") == "3.1"
+    assert (
+        diag.classify_mast_mode("exit-code", "Operation timed out after 120s") == "3.1"
+    )
     assert diag.classify_mast_mode("key-error", "assert x == y failed") == "3.3"
 
 
@@ -466,3 +474,91 @@ def test_extract_failure_tags_mast_mode():
     )
     failure = diag.extract_failure(check)
     assert failure.mast_mode == "2.6"  # key-error -> reasoning-action mismatch
+
+
+# --- #2952: dedup by (PR, root-cause signature) ---
+
+
+def test_issue_key_includes_error_class():
+    assert diag._issue_key(42, "key-error") == (
+        "Lexus2016/hermes-agent-evolution#42:key-error"
+    )
+    assert diag._issue_key(42, "test-failure") != diag._issue_key(42, "key-error")
+
+
+def test_find_existing_issue_searches_error_class_in_query():
+    item = {
+        "html_url": "https://github.com/Lexus2016/hermes-agent-evolution/issues/777"
+    }
+    client = FakeClient([(200, {"total_count": 1, "items": [item]})])
+    url = diag._find_existing_issue(client, 42, "key-error")
+    assert url == item["html_url"]
+    query_url = client.calls[-1][1]
+    assert urllib.parse.quote('"CI failure on PR #42"') in query_url
+    assert urllib.parse.quote('"key-error"') in query_url
+
+
+def test_create_child_issue_separate_issues_per_error_class(hermes_home, monkeypatch):
+    """Distinct root causes on the same PR must create distinct issues."""
+    monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
+    report_dir = hermes_home / "reports"
+
+    pr = _pr_payload(61, "feat: multi failure", "sha61")
+    # fmt: off
+    checks = _check_runs_payload([
+        {"id": 1, "name": "tests", "conclusion": "failure", "details_url": "https://d/1"},
+        {"id": 2, "name": "build", "conclusion": "failure", "details_url": "https://d/2"},
+    ])
+    ann_key = [{"path": "tests/x.py", "start_line": 1, "annotation_level": "failure",
+                "message": "KeyError: 'missing'", "title": "t"}]
+    ann_timeout = [{"path": "tests/y.py", "start_line": 1, "annotation_level": "failure",
+                    "message": "Operation timed out after 120s", "title": "t"}]
+    issue1 = {"html_url": "https://github.com/Lexus2016/hermes-agent-evolution/issues/500"}
+    issue2 = {"html_url": "https://github.com/Lexus2016/hermes-agent-evolution/issues/501"}
+    # fmt: on
+
+    client = FakeClient([
+        (200, [pr]),
+        (200, checks),
+        (200, ann_key),  # check 1 -> key-error
+        (200, ann_timeout),  # check 2 -> timeout
+        (200, {"total_count": 0, "items": []}),  # search key-error
+        (201, issue1),
+        (200, {"total_count": 0, "items": []}),  # search timeout
+        (201, issue2),
+    ])
+
+    results = diag.diagnose_prs(dry_run=False, client=client, report_dir=report_dir)
+    assert len(results) == 2
+    urls = {r["error_class"]: r["child_issue_url"] for r in results}
+    assert urls["key-error"] == issue1["html_url"]
+    assert urls["timeout"] == issue2["html_url"]
+    assert urls["key-error"] != urls["timeout"]
+    posts = [(m, u) for m, u, _ in client.calls if m == "POST" and "/issues" in u]
+    assert len(posts) == 2
+
+
+def test_dry_run_two_failures_shared_error_creates_one_issue(hermes_home, monkeypatch):
+    """Two failures sharing a root cause group into ONE issue, not two."""
+    monkeypatch.setenv("GITHUB_TOKEN", "fake-token")
+    report_dir = hermes_home / "reports"
+
+    pr = _pr_payload(62, "pr: dup root cause", "sha62")
+    # fmt: off
+    checks = _check_runs_payload([
+        {"id": 1, "name": "tests (slice 1)", "conclusion": "failure", "details_url": "https://d/1"},
+        {"id": 2, "name": "tests (slice 2)", "conclusion": "failure", "details_url": "https://d/2"},
+    ])
+    ann = [{"path": "tests/x.py", "start_line": 1, "annotation_level": "failure",
+            "message": "KeyError: 'missing'", "title": "t"}]
+    # fmt: on
+    client = FakeClient([
+        (200, [pr]),
+        (200, checks),
+        (200, ann),  # check 1 -> key-error
+        (200, ann),  # check 2 -> key-error
+        (200, {"total_count": 0, "items": []}),  # single dedup search
+    ])
+    diag.diagnose_prs(dry_run=True, client=client, report_dir=report_dir)
+    searches = [u for m, u, _ in client.calls if m == "GET" and "/search/issues" in u]
+    assert len(searches) == 1  # one group -> one dedup search -> one issue

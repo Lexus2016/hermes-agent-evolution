@@ -619,22 +619,25 @@ def _extract_from_text(text: str) -> Tuple[str, str]:
 # -----------------------------------------------------------------------------
 
 
-def _issue_key(pr_number: int) -> str:
-    """One dedup key per PR (not per check run)."""
-    return f"{_REPO}#{pr_number}"
+def _issue_key(pr_number: int, error_class: str) -> str:
+    """One dedup key per (PR, root-cause signature)."""
+    return f"{_REPO}#{pr_number}:{error_class}"
 
 
 def _find_existing_issue(
     client: Client,
     pr_number: int,
+    error_class: str,
     repo: str = _REPO,
 ) -> Optional[str]:
     recorded = _load_recorded()
-    key = _issue_key(pr_number)
+    key = _issue_key(pr_number, error_class)
     if key in recorded:
         return recorded[key]
-    # Search open issues referencing the PR number in the title/body.
-    query = f'is:issue is:open repo:{repo} "CI failure on PR #{pr_number}"'
+    # Search open issues referencing the PR number AND error_class in the title.
+    query = (
+        f'is:issue is:open repo:{repo} "CI failure on PR #{pr_number}" "{error_class}"'
+    )
     encoded = urllib.parse.quote(query)
     url = f"{_GITHUB_API}/search/issues?q={encoded}"
     data = _get(client, url)
@@ -648,19 +651,47 @@ def _find_existing_issue(
     return None
 
 
+def _comment_on_existing(
+    client: Client,
+    existing_url: str,
+    pr: PRInfo,
+    failures: List[Tuple[FailedCheck, FailureDetails]],
+    error_class: str,
+) -> None:
+    """Attach additional failing check runs to an existing issue."""
+    match = re.search(r"/issues/(\d+)$", existing_url)
+    if not match:
+        return
+    lines = [
+        f"Additional failing check run(s) for `{error_class}` on PR "
+        f"#{pr.number} (HEAD `{pr.head_sha}`):",
+        "",
+    ]
+    for check, failure in failures:
+        lines.append(f"- {check.name}: {check.details_url}")
+    url = f"{_GITHUB_API}/repos/{_REPO}/issues/{match.group(1)}/comments"
+    status, response = client("POST", url, json.dumps({"body": "\n".join(lines)}))
+    if status not in {201, 200}:
+        print(
+            f"[ci-diagnosis] failed to comment on existing issue: {status} {response}",
+            file=sys.stderr,
+        )
+
+
 def create_child_issue(
     client: Client,
     pr: PRInfo,
     failures: List[Tuple[FailedCheck, FailureDetails]],
+    error_class: str,
     dry_run: bool = False,
     recorded_state_path: Optional[Path] = None,
 ) -> Optional[str]:
-    """Create ONE aggregated issue for all failed checks on a PR.
+    """Create ONE focused issue for a single root cause on a PR.
 
-    Classified (complex, root-caused) failures get a focused section; failures
-    whose pattern is still unrecognised get their raw log/annotation excerpt
-    surfaced so a human or LLM can diagnose them (rather than being silently
-    dropped). Skips entirely only when nothing is actionable (all trivial).
+    Dedups by (PR, error_class): if an open CI-failure issue for the same
+    root cause already exists, no new issue is created — the extra failing
+    check runs are attached as a comment instead. Returns None when nothing
+    actionable is present.
     """
     # Complex failures with a recognised root cause.
     classified = [
@@ -680,16 +711,21 @@ def create_child_issue(
         )
         return None
 
-    key = _issue_key(pr.number)
-    existing = _find_existing_issue(client, pr.number)
+    key = _issue_key(pr.number, error_class)
+    existing = _find_existing_issue(client, pr.number, error_class)
     if existing:
-        print(f"[ci-diagnosis] issue already exists for PR #{pr.number}: {existing}")
+        print(
+            f"[ci-diagnosis] issue already exists for PR #{pr.number} "
+            f"({error_class}): {existing}"
+        )
+        if not dry_run:
+            _comment_on_existing(client, existing, pr, failures, error_class)
         return existing
 
     # Aggregate error classes for the title
     error_classes = sorted({f.error_class for _, f in classified})
     if not error_classes:
-        error_classes = ["unrecognized"]
+        error_classes = [error_class or "unrecognized"]
     title = f"CI failure on PR #{pr.number}: {', '.join(error_classes)}"
 
     # Build body with all failed checks
@@ -877,7 +913,7 @@ def diagnose_prs(
             print(f"  PR #{pr.number}: no failed checks")
             continue
 
-        # Collect all failures for this PR, then create ONE aggregated issue.
+        # Collect all failures for this PR, then create ONE issue per root cause.
         all_failures: List[Tuple[FailedCheck, FailureDetails]] = []
         for check in failed_checks:
             failure = extract_failure(check)
@@ -886,15 +922,22 @@ def diagnose_prs(
                 f"  PR #{pr.number} check '{check.name}': {failure.classification} ({failure.error_class})"
             )
 
-        # Create a single issue per PR (aggregates all classified failures,
-        # skips entirely if all are 'unknown').
-        child_issue_url: Optional[str] = create_child_issue(
-            api,
-            pr,
-            all_failures,
-            dry_run=dry_run,
-            recorded_state_path=recorded_state_path,
-        )
+        # Group complex failures by root-cause signature; each group becomes
+        # one focused issue, deduped by (PR, error_class).
+        groups: Dict[str, List[Tuple[FailedCheck, FailureDetails]]] = {}
+        for check, failure in all_failures:
+            if failure.classification == "complex":
+                groups.setdefault(failure.error_class, []).append((check, failure))
+        issue_by_error: Dict[str, Optional[str]] = {}
+        for error_class, group in sorted(groups.items()):
+            issue_by_error[error_class] = create_child_issue(
+                api,
+                pr,
+                group,
+                error_class,
+                dry_run=dry_run,
+                recorded_state_path=recorded_state_path,
+            )
 
         for check, failure in all_failures:
             results.append({
@@ -909,7 +952,7 @@ def diagnose_prs(
                 "error_class": failure.error_class,
                 "mast_mode": failure.mast_mode,
                 "message": failure.message,
-                "child_issue_url": child_issue_url,
+                "child_issue_url": issue_by_error.get(failure.error_class),
             })
 
     save_diagnosis_report(results, report_dir=report_dir)
