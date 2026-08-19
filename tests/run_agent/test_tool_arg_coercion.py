@@ -405,3 +405,54 @@ class TestCoerceToolArgsNested:
         }
         result = coerce_tool_args("todo", args)
         assert result["todos"][0] == {"id": "1", "content": "x", "status": "pending"}
+
+
+# ── #2953: JSON-parse-failure warning names tool.param ────────────────────
+
+
+class TestCoerceJsonWarning:
+    """The _coerce_json list-failure warning must include tool.param context."""
+
+    def _mock_schema(self, properties):
+        return {
+            "name": "test_tool",
+            "description": "test",
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+            },
+        }
+
+    def test_non_json_string_wrapped_and_warning_names_tool_param(self, caplog):
+        """#2953 — a non-JSON string on an array param falls back to a
+        single-element list (no double-wrap) and the warning names the tool
+        and parameter instead of being ambiguous."""
+        schema = self._mock_schema({
+            "urls": {"type": "array", "items": {"type": "string"}}
+        })
+        with patch("model_tools.registry.get_schema", return_value=schema):
+            with caplog.at_level("WARNING", logger="model_tools"):
+                result = coerce_tool_args("test_tool", {"urls": "https://a.com"})
+
+        # Single-element fallback, NOT double-wrapped into a nested list.
+        assert result["urls"] == ["https://a.com"]
+
+        # The list-failure warning must name both the tool and the parameter.
+        assert any(
+            "test_tool.urls" in record.getMessage()
+            and "failed to parse string as JSON" in record.getMessage()
+            for record in caplog.records
+        )
+
+    def test_directly_called_json_failure_warns(self, caplog):
+        """_coerce_json names the tool.param when called directly with them."""
+        from model_tools import _coerce_json
+
+        with caplog.at_level("WARNING", logger="model_tools"):
+            out = _coerce_json("not json", list, tool_name="fake_tool", key="items")
+        assert out == "not json"  # raw string on failure, no wrap here
+        assert any(
+            "fake_tool.items" in record.getMessage()
+            and "failed to parse string as JSON" in record.getMessage()
+            for record in caplog.records
+        )
