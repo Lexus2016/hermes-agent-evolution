@@ -3879,6 +3879,11 @@ def _guard_job_credential_exfil(job: dict) -> None:
 # a previous tick — do not deliver again".
 BLOCKED_CONFIG_MARKER = "[blocked_config]"
 BLOCKED_CONFIG_SILENT_MARKER = "[blocked_config:silent]"
+# Provider-balance exhaustion (HTTP 402) — distinct from a config block so
+# `cronjob list` shows the account is out of balance, not that the job's
+# configuration is broken (#2872). Alert-once shape mirrors blocked_config.
+BALANCE_LOW_MARKER = "[balance_low]"
+BALANCE_LOW_SILENT_MARKER = "[balance_low:silent]"
 
 # Marker prefix for a #44585 drift-guard skip. Same alert-once contract as
 # blocked_config: run_one_job keys off it to record last_status and the
@@ -4044,6 +4049,61 @@ def _preflight_check_provider_key(job: dict, cfg: dict) -> Optional[str]:
     return None
 
 
+def _preflight_check_provider_balance(job: dict, cfg: dict) -> Optional[str]:
+    """Billing-exhaustion preflight: would this job's provider 402 on wake?
+
+    HTTP 402 Insufficient Balance is non-retryable billing exhaustion — the
+    08-19 incident shape where 50 cron failures across 6 jobs and the whole
+    evolution pipeline sat dead for 6.5h because the scheduler kept waking
+    agents that immediately 402'd. This check mirrors the provider-key
+    probe (same resolution, same fail-open discipline) and asks the
+    evolution-preflight module for the provider's BALANCE verdict, which is
+    cached on disk with a TTL so repeated wake attempts are suppressed
+    (``BALANCE_LOW`` in jobs.json) instead of burning scheduler cycles.
+
+    Fail-open: ANY error here (resolution failure, cache error, non-402 ping
+    failure) returns None — balance preflight must never block a runnable
+    job on a transient condition, only on an affirmative 402 verdict.
+    """
+    try:
+        if get_fallback_chain(cfg):
+            return None  # a fallback may carry a funded account
+    except Exception:
+        return None
+
+    if job.get("no_agent"):
+        return None  # no LLM call — nothing to preflight
+
+    try:
+        from cron import evolution_preflight
+        from hermes_cli.runtime_provider import resolve_runtime_provider
+
+        requested = (
+            job.get("provider")
+            or str((cfg.get("cron") or {}).get("model_provider") or "").strip()
+            or None
+        )
+        model = job.get("model") or os.getenv("HERMES_MODEL") or ""
+        kwargs = {"requested": requested, "target_model": model}
+        if job.get("base_url"):
+            kwargs["explicit_base_url"] = job.get("base_url")
+        runtime = resolve_runtime_provider(**kwargs)
+        hermes_home = _get_hermes_home()
+        reason = evolution_preflight.preflight_provider_balance(
+            runtime, cfg=cfg, hermes_home=hermes_home
+        )
+    except Exception:
+        logger.debug(
+            "Job '%s': provider-balance preflight errored — failing open",
+            job.get("id"),
+            exc_info=True,
+        )
+        return None
+    if reason is None:
+        return None
+    return f"{BALANCE_LOW_MARKER} {reason}"
+
+
 def _preflight_check_delivery(job: dict) -> Optional[str]:
     """Check the job's delivery target(s) resolve to configured platforms.
 
@@ -4174,6 +4234,9 @@ def _preflight_job_config(job: dict, cfg: dict) -> Optional[str]:
         ("provider_key", lambda: _preflight_check_provider_key(job, cfg)),
         ("skills", lambda: _preflight_check_skills(job)),
         ("delivery", lambda: _preflight_check_delivery(job)),
+        # Provider-balance (HTTP 402) preflight — cheap config checks first,
+        # then the TTL-cached balance verdict (#2872). Fails open.
+        ("provider_balance", lambda: _preflight_check_provider_balance(job, cfg)),
     ):
         try:
             reason = check()
@@ -5204,23 +5267,43 @@ def _run_job_impl(
                     "Job '%s': could not persist preflight alert marker",
                     job_id, exc_info=True,
                 )
-            marker = (
-                BLOCKED_CONFIG_SILENT_MARKER if already_alerted
-                else BLOCKED_CONFIG_MARKER
-            )
-            blocked_doc = (
-                f"# Cron Job: {job_name}\n\n"
-                f"**Job ID:** {job_id}\n"
-                f"**Run Time:** {_hermes_now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                f"**Status:** BLOCKED (configuration)\n\n"
-                "Pre-dispatch validation found a configuration problem and "
-                "the agent was NOT run (no tokens spent).\n\n"
-                f"**Reason:** {_pf_reason}\n\n"
-                "The job will stay blocked (without re-alerting) until the "
-                "configuration is fixed; the next healthy run clears this "
-                "state. Set `cron.preflight: false` in config.yaml to "
-                "disable this validation."
-            )
+            is_balance_low = BALANCE_LOW_MARKER in str(_pf_reason)
+            if is_balance_low:
+                marker = (
+                    BALANCE_LOW_SILENT_MARKER if already_alerted
+                    else BALANCE_LOW_MARKER
+                )
+                blocked_doc = (
+                    f"# Cron Job: {job_name}\n\n"
+                    f"**Job ID:** {job_id}\n"
+                    f"**Run Time:** {_hermes_now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"**Status:** BLOCKED (provider balance low)\n\n"
+                    "The provider account is out of balance (HTTP 402) and "
+                    "the agent was NOT run (no tokens spent, no 402 burn).\n\n"
+                    f"**Reason:** {_pf_reason}\n\n"
+                    "The job is parked in `balance_low` state and will retry "
+                    "automatically when the balance recheck succeeds. "
+                    "Set `cron.preflight: false` in config.yaml to disable "
+                    "this validation."
+                )
+            else:
+                marker = (
+                    BLOCKED_CONFIG_SILENT_MARKER if already_alerted
+                    else BLOCKED_CONFIG_MARKER
+                )
+                blocked_doc = (
+                    f"# Cron Job: {job_name}\n\n"
+                    f"**Job ID:** {job_id}\n"
+                    f"**Run Time:** {_hermes_now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"**Status:** BLOCKED (configuration)\n\n"
+                    "Pre-dispatch validation found a configuration problem and "
+                    "the agent was NOT run (no tokens spent).\n\n"
+                    f"**Reason:** {_pf_reason}\n\n"
+                    "The job will stay blocked (without re-alerting) until the "
+                    "configuration is fixed; the next healthy run clears this "
+                    "state. Set `cron.preflight: false` in config.yaml to "
+                    "disable this validation."
+                )
             return False, blocked_doc, "", f"{marker} {_pf_reason}"
 
         primary_model_for_drift = model
@@ -6315,6 +6398,7 @@ def _run_one_job_body(
         # deferred agent is still torn down. Otherwise the outer `except` would
         # swallow the error and leak the agent's subprocesses/clients (#10200).
         blocked_config = False
+        balance_low = False
         side_effect_ownership_lost = False
         try:
             with _side_effect_fence() as owns_output:
@@ -6353,6 +6437,15 @@ def _run_one_job_body(
             blocked_config = blocked_config_silent or (
                 bool(error) and BLOCKED_CONFIG_MARKER in str(error)
             )
+            # Provider-balance (HTTP 402) block — same alert-once contract as
+            # blocked_config, but recorded as a DISTINCT last_status so
+            # `cronjob list` shows the account is out of balance (#2872).
+            balance_low_silent = (
+                bool(error) and BALANCE_LOW_SILENT_MARKER in str(error)
+            )
+            balance_low = balance_low_silent or (
+                bool(error) and BALANCE_LOW_MARKER in str(error)
+            )
             # Drift-guard skip (#44585): same alert-once contract as
             # blocked_config — the silent marker means the operator already
             # got the alert on a previous tick.
@@ -6362,21 +6455,29 @@ def _run_one_job_body(
             drift_skip = drift_skip_silent or (
                 bool(error) and DRIFT_SKIP_MARKER in str(error)
             )
-            if blocked_config and not success:
+            if (blocked_config or balance_low) and not success:
                 # Blocked-config alert: bypass the generic failure summarizer
                 # (whose auth/timeout heuristics would mislabel this as a
                 # provider runtime failure) — say plainly that config
                 # validation blocked the run and nothing was spent.
                 _pf_text = re.sub(
-                    r"\[blocked_config[^\]]*\]\s*", "", str(error)
+                    r"\[(?:blocked_config|balance_low)[^\]]*\]\s*", "", str(error)
                 ).strip()
-                deliver_content = (
-                    f"⛔ Cron '{job.get('name') or job['id']}' blocked by "
-                    f"configuration validation (no LLM call was made): "
-                    f"{_pf_text} "
-                    "This alert is sent once; the job stays blocked until "
-                    "the configuration is fixed."
-                )
+                if balance_low:
+                    deliver_content = (
+                        f"🪫 Cron '{job.get('name') or job['id']}' paused: "
+                        f"provider account balance is low (HTTP 402) — no LLM "
+                        f"call was made: {_pf_text} This alert is sent once; "
+                        "the job retries automatically when balance returns."
+                    )
+                else:
+                    deliver_content = (
+                        f"⛔ Cron '{job.get('name') or job['id']}' blocked by "
+                        f"configuration validation (no LLM call was made): "
+                        f"{_pf_text} "
+                        "This alert is sent once; the job stays blocked until "
+                        "the configuration is fixed."
+                    )
             else:
                 deliver_content = final_response if success else _summarize_cron_failure_for_delivery(job, error)
                 if drift_skip and not success:
@@ -6395,7 +6496,7 @@ def _run_one_job_body(
             # responses: do not deliver a blank message, and let the
             # empty-response guard below mark the run as a soft failure.
             should_deliver = bool(deliver_content.strip())
-            if blocked_config_silent or drift_skip_silent:
+            if blocked_config_silent or balance_low_silent or drift_skip_silent:
                 should_deliver = False
             unresolved_origin = False
             # Cron silence suppression — see _is_cron_silence_response.  Replaces the
@@ -6526,6 +6627,8 @@ def _run_one_job_body(
             mark_kwargs["expected_fire_owner"] = fire_owner
         if blocked_config:
             mark_kwargs["status"] = "blocked_config"
+        elif balance_low:
+            mark_kwargs["status"] = "balance_low"
         marked = mark_job_run(job["id"], success, error, **mark_kwargs)
         if fire_owner is not None and not marked:
             finish_execution(

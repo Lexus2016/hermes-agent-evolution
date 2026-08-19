@@ -1,6 +1,7 @@
 """Tests for cron/evolution_preflight.py."""
 
 import json
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -298,6 +299,97 @@ class TestPreflightProvider:
         assert err is not None
         assert "connection refused" in err
 
+
+class TestBalancePreflight:
+    """Provider-balance preflight (#2872): HTTP 402 billing exhaustion must
+    be detected before a cron wake, cached with a TTL, and exposed as a
+    distinct BALANCE_LOW verdict so the scheduler suppresses wakes."""
+
+    def _runtime(self, provider="deepseek"):
+        return {
+            "api_key": "k",
+            "model": "m",
+            "provider": provider,
+            "api_mode": "chat_completions",
+        }
+
+    def test_no_marker_means_not_low(self, tmp_path):
+        assert ep.provider_balance_low("deepseek", hermes_home=tmp_path) is False
+
+    def test_mark_then_low(self, tmp_path):
+        ep.mark_provider_balance_low("deepseek", hermes_home=tmp_path, ttl_seconds=60)
+        assert ep.provider_balance_low("deepseek", hermes_home=tmp_path) is True
+
+    def test_marker_expires(self, tmp_path):
+        ep.mark_provider_balance_low("deepseek", hermes_home=tmp_path, ttl_seconds=60)
+        assert ep.provider_balance_low(
+            "deepseek", hermes_home=tmp_path, now=time.time() + 61
+        ) is False
+
+    def test_marker_is_provider_scoped(self, tmp_path):
+        ep.mark_provider_balance_low("deepseek", hermes_home=tmp_path, ttl_seconds=60)
+        assert ep.provider_balance_low("openrouter", hermes_home=tmp_path) is False
+
+    def test_corrupt_cache_fails_safe_to_not_low(self, tmp_path):
+        evo_dir = tmp_path / "evolution"
+        evo_dir.mkdir(parents=True, exist_ok=True)
+        (evo_dir / "balance-low.json").write_text("{not json", encoding="utf-8")
+        assert ep.provider_balance_low("deepseek", hermes_home=tmp_path) is False
+
+    def test_cached_low_returns_reason_without_ping(self, tmp_path):
+        ep.mark_provider_balance_low("deepseek", hermes_home=tmp_path, ttl_seconds=60)
+        with patch.object(ep, "preflight_provider") as mock_ping:
+            reason = ep.preflight_provider_balance(
+                self._runtime(), hermes_home=tmp_path
+            )
+        assert reason is not None
+        assert ep.BALANCE_LOW_ERROR_MARKER in reason
+        mock_ping.assert_not_called()  # TTL cache suppresses the wake
+
+    def test_402_ping_marks_low_and_returns_reason(self, tmp_path):
+        with patch.object(
+            ep,
+            "preflight_provider",
+            return_value=f"{ep.BALANCE_LOW_ERROR_MARKER}: test",
+        ):
+            reason = ep.preflight_provider_balance(
+                self._runtime(), hermes_home=tmp_path
+            )
+        assert reason is not None
+        assert ep.provider_balance_low("deepseek", hermes_home=tmp_path) is True
+
+    def test_ok_ping_clears_and_returns_none(self, tmp_path):
+        # No pre-existing low marker: a successful ping marks ok and passes.
+        with patch.object(ep, "preflight_provider", return_value=None):
+            reason = ep.preflight_provider_balance(
+                self._runtime(), hermes_home=tmp_path
+            )
+        assert reason is None
+        assert ep.provider_balance_low("deepseek", hermes_home=tmp_path) is False
+
+    def test_non_402_failure_fails_open(self, tmp_path):
+        with patch.object(ep, "preflight_provider", return_value="connection refused"):
+            reason = ep.preflight_provider_balance(
+                self._runtime(), hermes_home=tmp_path
+            )
+        assert reason is None  # only an affirmative 402 verdict blocks
+        assert ep.provider_balance_low("deepseek", hermes_home=tmp_path) is False
+
+
+class TestHttpStatusClassification:
+    def test_openai_402_error_classified(self):
+        err = MagicMock()
+        err.status_code = 402
+        assert ep._is_http_status(err, 402) is True
+        assert ep._is_http_status(err, 429) is False
+
+    def test_runtime_error_string_classified(self):
+        err = RuntimeError("Job failed: RuntimeError: HTTP 402")
+        assert ep._is_http_status(err, 402) is True
+
+    def test_other_status_not_classified(self):
+        assert ep._is_http_status(RuntimeError("timeout"), 402) is False
+
     def test_anthropic_success(self):
         pytest.importorskip("anthropic")
         fake_client = MagicMock()
@@ -390,7 +482,11 @@ class TestSchedulerIntegration:
         assert kwargs["api_key"] is None
         assert kwargs["base_url"] is None
 
-    def test_non_evolution_job_skips_preflight(self, tmp_path):
+    def test_non_evolution_job_balance_preflight_fails_open(self, tmp_path):
+        # A non-evolution job DOES get the provider-balance preflight (#2872:
+        # any LLM cron must not wake into an exhausted account), but a
+        # NON-402 ping failure is fail-open — the job proceeds as before and
+        # the old preflight digest-fallback behavior stays evolution-only.
         from cron.scheduler import _run_job_impl
 
         job = {"id": "morning-digest", "name": "morning-digest", "prompt": "hi"}
@@ -422,7 +518,8 @@ class TestSchedulerIntegration:
 
         assert success is True
         assert final_response == "ok"
-        mock_preflight.assert_not_called()
+        # Balance preflight ran (one ping, fail-open on non-402).
+        mock_preflight.assert_called_once()
         mock_agent_cls.assert_called_once()
 
 class TestSchedulerHaltGate:
