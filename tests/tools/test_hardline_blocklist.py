@@ -431,6 +431,31 @@ def test_check_all_command_guards_blocks_hardline(clean_session):
     assert "BLOCKED (hardline)" in result["message"]
 
 
+def test_hardline_message_echoes_command_and_forbids_retry(clean_session):
+    """#2873 part 1 — the hardline message must name the offending command
+    (redacted + truncated) and explicitly forbid retrying it, so the agent can
+    tell what caused the block and stop blindly re-attempting.  The old message
+    only named the category, leaving the agent to guess whether the command
+    itself, its payload, or an unrelated parser limit caused the block."""
+    result = check_all_command_guards("rm -rf /", "local")
+    assert result["approved"] is False
+    assert "BLOCKED (hardline): recursive delete of root filesystem" in result["message"]
+    assert "Command (redacted):" in result["message"]
+    assert "rm -rf /" in result["message"]
+    assert "Do NOT retry this command or any variant of it" in result["message"]
+    assert "change approach entirely" in result["message"]
+
+
+def test_hardline_message_truncates_long_commands(clean_session):
+    """A very long hardline command is truncated (not dumped raw) in the
+    message, and redaction does not error."""
+    long_cmd = "rm -rf / " + "x" * 500
+    result = check_all_command_guards(long_cmd, "local")
+    assert result["approved"] is False
+    assert "Command (redacted):" in result["message"]
+    assert len(result["message"].split("Command (redacted):", 1)[1].split("\n")[0]) <= 130
+
+
 def test_yolo_env_var_cannot_bypass_hardline(clean_session, monkeypatch):
     """HERMES_YOLO_MODE=1 must not bypass the hardline floor."""
     monkeypatch.setenv("HERMES_YOLO_MODE", "1")

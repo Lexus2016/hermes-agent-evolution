@@ -296,6 +296,16 @@ _BUILTIN_RULES: list[_Rule] = [
     _rule(r"\btimeout\b", ToolFailureCategory.timeout),
     # Security/policy block (after transient/timeout so a "blocked: <transient>"
     # message is not misread as a hard permission failure).
+    # #2873 part 2 — the unconditional hardline block (tools/approval.py) was
+    # previously classified as generic persistent_error. Make it an explicit,
+    # non-retryable permission_denied so the agent knows no command variant can
+    # pass and must change approach entirely (mirrors #2228's non-retryable
+    # diagnostic for the retry-spiral family).
+    _rule(
+        r"BLOCKED \(hardline\)",
+        ToolFailureCategory.permission_denied,
+        should_retry=False,
+    ),
     _rule(r"^\s*blocked:", ToolFailureCategory.permission_denied),
     # Tool / dependency unavailable (includes the "command not found" text form
     # before the generic not_found rule). "<component> not available" is scoped

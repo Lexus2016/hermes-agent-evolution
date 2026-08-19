@@ -774,13 +774,33 @@ def _save_blocked_payload(command: str) -> Optional[str]:
 
 def _hardline_block_result(description: str, command: str = "") -> dict:
     """Build the standard block result for a hardline match."""
+    # Echo which command was blocked (redacted + truncated) so the failure
+    # signal is actionable: #2873 part 1 — the previous message named the
+    # category but not the offending command, so the agent could not tell
+    # whether the command itself, its payload, or an unrelated parser limit
+    # caused the block.  Redaction is display-only, reusing the same
+    # redact_sensitive_text pass the approval prompts use.
+    preview = ""
+    if command:
+        try:
+            from agent.redact import redact_sensitive_text
+
+            preview = redact_sensitive_text(command, force=True)
+        except Exception:
+            preview = command
+        preview = preview if len(preview) <= 120 else preview[:117] + "..."
     message = (
         f"BLOCKED (hardline): {description}. "
         "This command is on the unconditional blocklist and cannot "
         "be executed via the agent — not even with --yolo, /yolo, "
-        "approvals.mode=off, or cron approve mode. If you genuinely "
-        "need to run it, run it yourself in a terminal outside the "
-        "agent."
+        "approvals.mode=off, or cron approve mode. Do NOT retry this "
+        "command or any variant of it — change approach entirely."
+    )
+    if preview:
+        message += f" Command (redacted):\n{preview}"
+    message += (
+        " If you genuinely need to run it, run it yourself in a "
+        "terminal outside the agent."
     )
     # The parser-limit block is almost always a giant inline payload
     # (heredoc script, base64 blob, one-line python -c program) — not a

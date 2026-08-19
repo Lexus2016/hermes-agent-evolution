@@ -71,7 +71,15 @@ def _tool_result_failed(content: Any) -> bool:
     genuine errors (read_file/skill_view), corrupting the introspection signal.
 
     A result counts as a failure ONLY when its structured status says so:
-      * ``exit_code`` present (terminal/code-exec) → failure iff it is not 0;
+      * ``exit_code`` present (terminal/code-exec) → failure iff it is not 0,
+        UNLESS the envelope carries an ``exit_code_meaning`` note marking the
+        non-zero code as informational (e.g. grep=1 "No matches found (not an
+        error)", diff=1 "Files differ", test=1 "condition is false").  The
+        terminal tool sets ``exit_code_meaning`` via ``_interpret_exit_code``
+        precisely so downstream consumers can distinguish an expected
+        non-zero exit from a genuine failure — #2873 part 3.  Without this
+        honor, every grep/diff/test "no match" exit was counted as a terminal
+        failure, corrupting the introspection signal with false positives;
       * a truthy ``error`` field, or ``status == "error"``;
       * an explicit ``success``/``ok`` field that is falsy.
     A result with no recognised status field — including any non-JSON / plain
@@ -93,9 +101,27 @@ def _tool_result_failed(content: Any) -> bool:
         return False
     if "exit_code" in data:
         try:
-            return int(data["exit_code"]) != 0
+            code = int(data["exit_code"])
         except (TypeError, ValueError):
             return False
+        if code == 0:
+            return False
+        # Honor the terminal tool's informational exit-code note (#2873 part
+        # 3).  When the envelope carries ``exit_code_meaning`` the terminal
+        # tool has already interpreted the code: grep/diff/test/git return 1
+        # for "no matches"/"files differ"/"false" — expected, not a failure.
+        meaning = data.get("exit_code_meaning")
+        if isinstance(meaning, str) and meaning:
+            # The note text from _interpret_exit_code is phrased as "not an
+            # error" / "expected" for the informational cases.  Only the
+            # informational notes suppress failure counting; genuine errors
+            # (permission denied, command not found, timeouts) either have no
+            # exit_code_meaning at all or carry a note that does NOT contain
+            # the "not an error"/"expected" markers.
+            low = meaning.lower()
+            if "not an error" in low or "expected" in low:
+                return False
+        return True
     if data.get("error") or str(data.get("status", "")).lower() == "error":
         return True
     for ok_key in ("success", "ok"):
