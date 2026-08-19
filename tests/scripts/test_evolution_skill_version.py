@@ -200,21 +200,18 @@ class TestAttribution:
         loaded = load_versions("s", store_dir=tmp_path)[0]
         assert loaded.attribution == ["mem-1", "mem-2"]
 
-    def test_attribution_defaults_empty(self, tmp_path):
+    def test_attribution_defaults_empty_including_legacy_records(self, tmp_path):
         """No attribution recorded == fluke-success risk, never fabricated."""
         v = record_promotion("s", store_dir=tmp_path)
         assert v.attribution == []
-
-    def test_legacy_records_load_without_attribution(self, tmp_path):
-        """Old JSONL entries without the field must not crash loaders."""
-        path = tmp_path / "s.jsonl"
+        # Old JSONL entries without the field must not crash loaders.
+        path = tmp_path / "old.jsonl"
         path.write_text(
-            json.dumps({"skill": "s", "version": 1, "flip_verdict": "promote"})
+            json.dumps({"skill": "old", "version": 1, "flip_verdict": "promote"})
             + "\n",
             encoding="utf-8",
         )
-        loaded = load_versions("s", store_dir=tmp_path)[0]
-        assert loaded.attribution == []
+        assert load_versions("old", store_dir=tmp_path)[0].attribution == []
 
     def test_cli_record_attribution(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(tmp_path))
