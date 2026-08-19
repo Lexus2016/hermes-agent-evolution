@@ -1877,10 +1877,24 @@ def skill_manage(
                             _mutate(name, lambda rec: rec.update({"source_chain": chain[:50]}))
                     except Exception:
                         pass
-                    # Record promotion audit trail (#2288).
+                    # Record promotion audit trail (#2288) with causal
+                    # attribution (#2898). The load-bearing sources are the
+                    # trusted entries already accumulated in ``chain`` above —
+                    # attribution is populated from THOSE, never from
+                    # co-occurrence, so a fluke success with no trusted
+                    # evidence gets no credit.
                     try:
                         from tools.skill_provenance import record_promotion
-                        record_promotion(name, reason="provenance_ok: trusted sources present")
+                        _attribution = [
+                            e.get("source_id") or e.get("source_type", "")
+                            for e in (locals().get("chain") or [])
+                            if e.get("trusted")
+                        ]
+                        record_promotion(
+                            name,
+                            reason="provenance_ok: trusted sources present",
+                            attribution=_attribution or None,
+                        )
                     except Exception:
                         pass
                 else:
