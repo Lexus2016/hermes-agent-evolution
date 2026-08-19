@@ -4,7 +4,7 @@
 PR #2903 was bounced: debias_outcome_credit() was dead code. This wires it
 into the REAL promotion flow (tools.skill_provenance.record_promotion,
 called from tools/skill_manager_tool.py:1882) — real functions, temp
-HERMES_HOME, real usage record and version ledger.
+HERMES_HOME, real records.
 """
 from __future__ import annotations
 
@@ -35,6 +35,5 @@ class TestPromotionWiring:
         entry = json.loads(ledger.read_text(encoding="utf-8").strip())
         assert entry["attribution"] == ["cmd-1", "file-a"]
         assert "page-x" not in entry["attribution"]
-        # Usage record: credit bounded, split across load-bearing only.
         usage = json.loads((tmp_path / "skills" / ".usage.json").read_text(encoding="utf-8"))
         assert usage["wired-skill"]["attribution_credit"] == {"cmd-1": 0.5, "file-a": 0.5}
