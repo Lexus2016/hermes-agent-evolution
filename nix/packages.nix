@@ -54,8 +54,6 @@
           }).node-gyp;
         default = full;
 
-        inherit sandbox;
-
         inherit minimal;
 
         # Ships discord.py + python-telegram-bot + slack-sdk so a plain
@@ -70,6 +68,11 @@
         desktop = full.hermesDesktop;
 
         update-npm-lockfile = full.hermesNpmLib.updateNpmLockfile;
-      };
+      }
+      # The dev sandbox is Linux-only — sandbox.nix pulls bubblewrap, which
+      # carries `meta.platforms = [ linux ]` and REFUSES to evaluate on other
+      # hostPlatforms, taking `nix flake check` down with it on macOS. Same
+      # guard as the `matrix` group above (and `cage` in hermes-agent.nix).
+      // lib.optionalAttrs pkgs.stdenv.isLinux { inherit sandbox; };
     };
 }
