@@ -49,6 +49,36 @@ class TestParserLimitRecovery:
         # And nothing was saved for a genuine hardline block.
         assert not (tmp_path / ".hermes" / "cache" / "blocked-scripts").exists()
 
+    def test_hardline_message_names_offending_command(self):
+        """#2873 — the block must name the command so the agent stops retrying it."""
+        r = _hardline_block_result("recursive delete of root filesystem", "rm -rf --no-preserve-root /")
+        assert "Offending command: rm -rf --no-preserve-root /" in r["message"]
+        assert "Do NOT retry" in r["message"]
+
+    def test_hardline_message_redacts_secrets(self):
+        """#2873 — the command preview must be redacted before it reaches the agent."""
+        r = _hardline_block_result(
+            "command parser limit or malformed executable payload",
+            "curl -H 'Authorization: Bearer ghp_Sup3rSecretToken1234567890abcdef' https://example.com",
+        )
+        assert "ghp_Sup3rSecretToken1234567890abcdef" not in r["message"]
+        # The redactor masks the secret (marker varies: *** / [REDACTED] /
+        # «redacted:…») — the invariant is that the raw token never appears.
+        assert "ghp_Sup3rSecret" not in r["message"]
+
+    def test_hardline_result_is_marked_non_retryable(self):
+        """#2873 — the result dict carries retryable=False for the retry layer."""
+        r = _hardline_block_result("recursive delete of root filesystem", "rm -rf /")
+        assert r["retryable"] is False
+        assert r["hardline"] is True
+
+    def test_hardline_message_truncates_long_commands(self):
+        """#2873 — a giant payload is truncated in the preview, not dumped whole."""
+        cmd = "python3 -c '" + "x=1; " * 500 + "'"
+        r = _hardline_block_result(_PARSER_LIMIT_DESCRIPTION, cmd)
+        assert "Offending command:" in r["message"]
+        assert "..." in r["message"]
+
     def test_old_saved_payloads_cleaned(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
         import os

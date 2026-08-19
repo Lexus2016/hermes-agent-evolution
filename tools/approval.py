@@ -774,11 +774,29 @@ def _save_blocked_payload(command: str) -> Optional[str]:
 
 def _hardline_block_result(description: str, command: str = "") -> dict:
     """Build the standard block result for a hardline match."""
+    # #2873: name the offending command (redacted) so the agent can tell
+    # *which* command was blocked instead of blindly re-trying the same
+    # payload. The parser-limit/malformed-exec families were observed
+    # retrying identical blocked commands 3x in one subagent session.
+    command_hint = ""
+    if command:
+        try:
+            from agent.redact import redact_sensitive_text
+
+            shown = redact_sensitive_text(command, force=True)
+        except Exception:
+            shown = command
+        shown = shown.replace("\n", "\\n").replace("\r", "")
+        if len(shown) > 300:
+            shown = shown[:300] + "...[truncated]"
+        command_hint = f"\nOffending command: {shown}"
     message = (
-        f"BLOCKED (hardline): {description}. "
+        f"BLOCKED (hardline): {description}.{command_hint} "
         "This command is on the unconditional blocklist and cannot "
         "be executed via the agent — not even with --yolo, /yolo, "
-        "approvals.mode=off, or cron approve mode. If you genuinely "
+        "approvals.mode=off, or cron approve mode. Do NOT retry it — "
+        "the block is permanent for this command; change your approach "
+        "instead of re-running the same command. If you genuinely "
         "need to run it, run it yourself in a terminal outside the "
         "agent."
     )
@@ -809,6 +827,8 @@ def _hardline_block_result(description: str, command: str = "") -> dict:
     return {
         "approved": False,
         "hardline": True,
+        "retryable": False,  # #2873: BLOCKED (hardline) is permanent for this
+        # command — the retry/breaker layer must not re-run the same payload.
         "message": message,
     }
 

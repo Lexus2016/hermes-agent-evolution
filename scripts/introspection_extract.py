@@ -93,9 +93,21 @@ def _tool_result_failed(content: Any) -> bool:
         return False
     if "exit_code" in data:
         try:
-            return int(data["exit_code"]) != 0
+            code = int(data["exit_code"])
         except (TypeError, ValueError):
             return False
+        if code == 0:
+            return False
+        # #2873: the terminal tool annotates informational non-zero exits
+        # (grep/rg/diff "no matches", test false) with
+        # exit_code_meaning="... (not an error)". Those are NOT failures —
+        # counting them as failures polluted the trace-miner signal and sent
+        # the agent re-investigating expected exit codes.
+        if code == 1:
+            meaning = str(data.get("exit_code_meaning") or "").lower()
+            if "not an error" in meaning:
+                return False
+        return True
     if data.get("error") or str(data.get("status", "")).lower() == "error":
         return True
     for ok_key in ("success", "ok"):
