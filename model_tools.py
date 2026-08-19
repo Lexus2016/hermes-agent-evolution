@@ -848,7 +848,9 @@ def coerce_tool_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         # (e.g. read_file's normalize_read_pagination) already handle it.
         if expected == "array" and value is not None and not isinstance(value, (list, tuple)):
             if isinstance(value, str):
-                coerced = _coerce_value(value, expected, schema=prop_schema)
+                coerced = _coerce_value(
+                    value, expected, schema=prop_schema, context=f"{tool_name}.{key}"
+                )
                 if coerced is not value:
                     # _coerce_value handled it (JSON-parsed list or
                     # nullable "null" → None).
@@ -932,13 +934,34 @@ def coerce_tool_args(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             continue
         if not expected and not _schema_allows_null(prop_schema):
             continue
-        coerced = _coerce_value(value, expected, schema=prop_schema)
+        coerced = _coerce_value(
+            value, expected, schema=prop_schema, context=f"{tool_name}.{key}"
+        )
         if coerced is not value:
             args[key] = coerced
             # If we just JSON-parsed a string into a container, recurse so
             # nested JSON-encoded elements/fields get normalized as well.
             if isinstance(coerced, (list, tuple, dict)):
                 args[key] = _normalize_json_strings_for_schema(coerced, prop_schema)
+            continue
+        # Bare string on an array-accepting schema that does NOT accept string
+        # (e.g. ``["array", "null"]``): every branch of _coerce_value failed,
+        # and without this the malformed string would reach the tool. Mirror
+        # the single-element wrap of the pure-array path so the tool still
+        # receives a valid argument (issue #2953).
+        if (
+            _schema_accepts_kind(prop_schema, "array")
+            and not _schema_accepts_kind(prop_schema, "string")
+        ):
+            args[key] = [value]
+            logger.warning(
+                "coerce_tool_args: %s.%s JSON-parse failed for list-typed param "
+                "(value %.80r) — wrapping in single-element list as recovery "
+                "fallback",
+                tool_name,
+                key,
+                value,
+            )
 
     return args
 
@@ -1041,10 +1064,17 @@ def _normalize_json_strings_for_schema(value: Any, schema: Any) -> Any:
     return value
 
 
-def _coerce_value(value: str, expected_type, schema: dict | None = None):
+def _coerce_value(
+    value: str,
+    expected_type,
+    schema: dict | None = None,
+    context: str = "",
+):
     """Attempt to coerce a string *value* to *expected_type*.
 
     Returns the original string when coercion is not applicable or fails.
+    ``context`` (e.g. ``"tool_name.param"``) is forwarded into parse-failure
+    warnings so the agent gets a deterministic recovery hint.
     """
     if _schema_allows_null(schema) and value.strip().lower() == "null":
         return None
@@ -1052,7 +1082,7 @@ def _coerce_value(value: str, expected_type, schema: dict | None = None):
     if isinstance(expected_type, list):
         # Union type — try each in order, return first successful coercion
         for t in expected_type:
-            result = _coerce_value(value, t, schema=schema)
+            result = _coerce_value(value, t, schema=schema, context=context)
             if result is not value:
                 return result
         return value
@@ -1062,9 +1092,9 @@ def _coerce_value(value: str, expected_type, schema: dict | None = None):
     if expected_type == "boolean":
         return _coerce_boolean(value)
     if expected_type == "array":
-        return _coerce_json(value, list)
+        return _coerce_json(value, list, context=context)
     if expected_type == "object":
-        return _coerce_json(value, dict)
+        return _coerce_json(value, dict, context=context)
     if expected_type == "null" and value.strip().lower() == "null":
         return None
     return value
@@ -1210,8 +1240,12 @@ def _split_path_list(value: str) -> Optional[List[str]]:
     return None
 
 
-def _coerce_json(value: str, expected_python_type: type):
-    """Parse *value* as JSON when the schema expects an array or object."""
+def _coerce_json(value: str, expected_python_type: type, context: str = ""):
+    """Parse *value* as JSON when the schema expects an array or object.
+
+    ``context`` (e.g. ``"tool_name.param"``) is included in the parse-failure
+    WARNING so the agent gets a deterministic recovery hint (issue #2953).
+    """
     if not value or not value.strip():
         if expected_python_type is list:
             return []
@@ -1231,9 +1265,13 @@ def _coerce_json(value: str, expected_python_type: type):
                     items,
                 )
                 return items
+        ctx = f"{context} " if context else ""
         logger.warning(
-            "coerce_tool_args: failed to parse string as JSON for expected type %s: %s",
+            "coerce_tool_args: %sfailed to parse string as JSON for expected type %s "
+            "(value %.80r): %s",
+            ctx,
             expected_python_type.__name__,
+            value,
             exc,
         )
         return value

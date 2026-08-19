@@ -223,6 +223,48 @@ class TestCoerceToolArgs:
             result = coerce_tool_args("test_tool", args)
             assert result["path"] == ["a.py", "b.py"]
 
+    # ── #2953 regression: JSON-parse failure on list-typed params ──────────
+
+    def test_union_array_null_wraps_bare_string(self):
+        """#2953 — a bare string on an array|null union must be wrapped into
+        a single-element list instead of reaching the tool malformed."""
+        schema = self._mock_schema({"tags": {"type": ["array", "null"]}})
+        with patch("model_tools.registry.get_schema", return_value=schema):
+            args = {"tags": "urgent"}
+            result = coerce_tool_args("test_tool", args)
+            assert result["tags"] == ["urgent"]
+
+    def test_union_array_null_comma_list_still_split(self):
+        """#2953 — a comma-separated string on an array|null union is still
+        split into a real list (existing path preserved)."""
+        schema = self._mock_schema({"tags": {"type": ["array", "null"]}})
+        with patch("model_tools.registry.get_schema", return_value=schema):
+            args = {"tags": "urgent, review"}
+            result = coerce_tool_args("test_tool", args)
+            assert result["tags"] == ["urgent", "review"]
+
+    def test_union_array_string_bare_string_unchanged(self):
+        """#2953 — a bare string on a string|array union stays a string
+        (string branch is type-valid; do not mangle it)."""
+        schema = self._mock_schema({"path": {"type": ["array", "string"]}})
+        with patch("model_tools.registry.get_schema", return_value=schema):
+            args = {"path": "src/main.py"}
+            result = coerce_tool_args("test_tool", args)
+            assert result["path"] == "src/main.py"
+
+    def test_parse_failure_warning_names_tool_and_param(self, caplog):
+        """#2953 — the parse-failure WARNING names tool_name.param so the
+        agent gets a deterministic recovery hint."""
+        import logging
+
+        schema = self._mock_schema({"tags": {"type": ["array", "null"]}})
+        with patch("model_tools.registry.get_schema", return_value=schema):
+            with caplog.at_level(logging.WARNING, logger="model_tools"):
+                result = coerce_tool_args("test_tool", {"tags": "urgent"})
+            assert result["tags"] == ["urgent"]
+            joined = "\n".join(r.message for r in caplog.records)
+            assert "test_tool.tags" in joined
+
     # ── #1681 regression: union-type guard for read_file's path param ──
 
     def test_real_read_file_stringified_json_array_parses_to_list(self):
