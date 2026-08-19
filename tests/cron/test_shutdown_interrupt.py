@@ -196,7 +196,7 @@ class TestRunningFireOwnerRegistry:
             release.wait(timeout=2)
             return True
 
-        def mark(_job_id, _success, _reason, *, expected_fire_owner):
+        def mark(_job_id, _success, _reason, *, expected_fire_owner, status=None):
             marked_owners.append(expected_fire_owner)
             return True
 
@@ -234,7 +234,7 @@ class TestRunningFireOwnerRegistry:
             object(): ("owner-b", profile_b),
         }
 
-        def mark(job_id, success, reason, *, expected_fire_owner):
+        def mark(job_id, success, reason, *, expected_fire_owner, status=None):
             observed.append(
                 (
                     job_id,
