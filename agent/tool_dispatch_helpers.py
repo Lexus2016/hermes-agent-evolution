@@ -588,7 +588,6 @@ def make_tool_result_message(
                 wrapped = str(wrapped) + sig
     except Exception:
         pass
-
     message = stamp_message_timestamp({
         "role": "tool",
         "name": name,

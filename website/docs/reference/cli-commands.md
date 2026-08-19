@@ -113,7 +113,7 @@ Common options:
 | `-q`, `--query "..."` | One-shot, non-interactive prompt. |
 | `-m`, `--model <model>` | Override the model for this run. |
 | `-t`, `--toolsets <csv>` | Enable a comma-separated set of toolsets. |
-| `--provider <provider>` | Force a provider: `auto`, `openrouter`, `nous`, `openai-codex`, `copilot-acp`, `copilot`, `anthropic`, `gemini`, `huggingface`, `novita` (aliases `novita-ai`, `novitaai`), `openai-api`, `zai`, `kimi-coding`, `kimi-coding-cn`, `minimax`, `minimax-cn`, `minimax-oauth`, `kilocode`, `xiaomi`, `arcee`, `gmi`, `upstage` (alias `solar`), `alibaba`, `alibaba-coding-plan` (alias `alibaba_coding`), `deepseek`, `nvidia`, `ollama-cloud`, `xai` (alias `grok`), `xai-oauth` (alias `grok-oauth`), `qwen-oauth`, `bedrock`, `opencode-zen`, `opencode-go`, `ai-gateway`, `azure-foundry`, `lmstudio`, `stepfun`, `tencent-tokenhub` (alias `tencent`, `tokenhub`). |
+| `--provider <provider>` | Force a provider: `auto`, `openrouter`, `nous`, `openai-codex`, `copilot-acp`, `copilot`, `anthropic`, `gemini`, `huggingface`, `novita` (aliases `novita-ai`, `novitaai`), `openai-api`, `zai`, `kimi-coding`, `kimi-coding-cn`, `minimax`, `minimax-cn`, `minimax-oauth`, `kilocode`, `xiaomi`, `arcee`, `gmi`, `upstage` (alias `solar`), `alibaba`, `alibaba-coding-plan` (alias `alibaba_coding`), `deepseek`, `nvidia`, `ollama-cloud`, `xai` (alias `grok`), `xai-oauth` (alias `grok-oauth`), `qwen-oauth`, `bedrock`, `opencode-zen`, `opencode-go`, `commandcode`, `commandcode-anthropic`, `ai-gateway`, `azure-foundry`, `lmstudio`, `stepfun`, `tencent-tokenhub` (alias `tencent`, `tokenhub`). |
 | `-s`, `--skills <name>` | Preload one or more skills for the session (can be repeated or comma-separated). |
 | `-v`, `--verbose` | Verbose output. |
 | `-Q`, `--quiet` | Programmatic mode: suppress banner/spinner/tool previews. |
@@ -1422,6 +1422,9 @@ Subcommands:
 | `install` | Run the upstream cua-driver installer (macOS, Windows, and Linux). |
 | `install --upgrade` | Re-run the installer even if cua-driver is already on PATH. The upstream script always pulls the latest release, so this performs an in-place upgrade. |
 | `status` | Print whether `cua-driver` is on `$PATH` and which version is installed. |
+| `doctor [--include CHECK] [--skip CHECK] [--json]` | Run cua-driver's health report and show its platform checks. |
+| `permissions status [--json]` | Report macOS Accessibility and Screen Recording grants. |
+| `permissions grant` | Ask macOS to grant Accessibility and Screen Recording to Cua Driver. |
 
 `hermes computer-use install` is the stable entry point for installing the
 [cua-driver](https://github.com/trycua/cua) binary used by the
@@ -1429,6 +1432,24 @@ Subcommands:
 `hermes tools` invokes when you first enable Computer Use, so it's safe
 to use for re-running the install if the toolset toggle didn't trigger
 it (for example, on returning-user setups).
+
+If cua-driver is already present, Hermes checks its version and runtime
+manifest. A compatible 0.20.0 or newer installation is left in place. An old or
+incomplete standard installation is repaired with the current upstream
+installer. Hermes never replaces a custom binary selected through
+`HERMES_CUA_DRIVER_CMD`; update that binary directly or remove the override.
+`hermes computer-use status` reports when repair is required.
+
+The built-in `computer_use` toolset is the recommended Hermes integration.
+Registering raw Cua MCP tools is an alternative when you need Cua's low-level
+tool vocabulary. `cua-driver skills install` detects Hermes and links Cua's
+skill pack into the Hermes skills directory automatically.
+
+Permission mode, capability-manifest approval, and the existing-profile grant
+belong to runtime launch. In bounded mode Hermes passes Cua's canonical
+`--capability-manifest` and `--approve-capability-manifest` flags. Every MCP
+transport owns a private lifecycle session inside its runtime. Public session
+names label cursor and session state; they do not own or share the runtime.
 
 `hermes update` automatically re-runs the upstream installer at the end
 of the update if cua-driver is on PATH, so most users will not need to

@@ -1,5 +1,5 @@
 import type { BillingBlock } from '@hermes/shared'
-import { backendScopeKey } from '@hermes/shared'
+import { registryBackendScopeKey } from '@hermes/shared'
 import type { HermesSkin } from '@hermes/shared/skin'
 import type { QueryClient } from '@tanstack/react-query'
 import { type MutableRefObject, useCallback, useEffect, useRef } from 'react'
@@ -77,7 +77,7 @@ import {
   setWorkspaceCwdOwner,
   setYoloActive
 } from '@/store/session'
-import { dropSessionState } from '@/store/session-states'
+import { dropSessionState, unbindTileRuntime } from '@/store/session-states'
 import { pruneDelegateFallbackSubagents, pruneFinishedSessionSubagents, upsertSubagent } from '@/store/subagents'
 import { reportMcpToolResult } from '@/store/suggestion-providers/repair'
 import { invalidateSkillSuggestionIndex } from '@/store/suggestion-providers/skill'
@@ -95,7 +95,13 @@ import type { RpcEvent } from '@/types/hermes'
 import type { ClientSessionState } from '../../../types'
 import { finalizeInterruptedMessages } from '../use-prompt-actions/rewind'
 
-import { hasSessionInfoStatePatch, sessionInfoStatePatch, SUBAGENT_EVENT_TYPES, toTodoPayload } from './utils'
+import {
+  hasSessionInfoStatePatch,
+  PRE_TURN_LIVE_SETTLE_GRACE_MS,
+  sessionInfoStatePatch,
+  SUBAGENT_EVENT_TYPES,
+  toTodoPayload
+} from './utils'
 
 function firstBillingLine(text: string): string {
   return (text || '').split('\n')[0]?.trim() ?? ''
@@ -340,12 +346,12 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
       // registered connection exposes a 'default' profile, so a bare profile
       // comparison attributes gateway B's 'default' events to gateway A's
       // 'default'. Compare the composite (connectionId, profile) scope with
-      // backendScopeKey — untagged (local/primary) events keep the legacy
+      // registryBackendScopeKey — untagged primary events keep the legacy
       // bare-profile behavior byte-identical.
       const fromActiveSource = (): boolean =>
         (!event.profile || normalizeProfileKey(event.profile) === normalizeProfileKey($activeGatewayProfile.get())) &&
-        backendScopeKey(event.connectionId ?? null, event.profile ?? null) ===
-          backendScopeKey(activeGatewayConnectionId(), event.profile ?? null)
+        registryBackendScopeKey(event.connectionId ?? null, event.profile ?? null) ===
+          registryBackendScopeKey(activeGatewayConnectionId(), event.profile ?? null)
 
       const occurredAt =
         typeof payload?.timestamp === 'number' && Number.isFinite(payload.timestamp)
@@ -473,6 +479,15 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
 
         if (reclaimedRuntimeId) {
           dropSessionState(reclaimedRuntimeId)
+          // A tile bound to the reclaimed runtime would otherwise render an
+          // empty transcript forever: its view reads $sessionStates[runtime]
+          // (just dropped) and its resume effect is gated on !runtimeId, so a
+          // bound tile never re-resumes (#82620). Unbind it so the effect
+          // refires against the intact stored session — and purge the wiring
+          // cache's entry, or resumeTile's warm path would hand the dead
+          // runtime straight back instead of cold-resuming a live one.
+          unbindTileRuntime(reclaimedRuntimeId)
+          sessionStateByRuntimeIdRef.current.delete(reclaimedRuntimeId)
         }
 
         // The row's ended_at moved, so refresh the lists that render it.
@@ -649,7 +664,24 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
               // here is exactly "no turn has been reported running yet".
               // (turnStartedAt can't discriminate — it is optimistically
               // seeded at submit so the visible timer starts at Enter.)
-              if (state.awaitingResponse && !state.sawAssistantPayload && !state.turnLive) {
+              //
+              // BOUNDED (#86795): an armed turn that never goes live — a
+              // restore/edit whose rewind was refused after the optimistic
+              // arm, a submit response lost to a gateway bounce, a terminal
+              // error event that never arrived — would otherwise hold this
+              // gate forever. busy then latches until app restart:
+              // isTargetSessionBusy refuses every send, the composer queues
+              // each message, and the queue drain (gated on busy→false) never
+              // fires. turnStartedAt is seeded at the optimistic arm, so its
+              // age bounds the hold; past the grace window (or with no clock
+              // at all) the gateway's running=false is authoritative and the
+              // settle below releases the session.
+              const armedAt = state.turnStartedAt
+
+              const withinPreStartGrace =
+                typeof armedAt === 'number' && Date.now() - armedAt < PRE_TURN_LIVE_SETTLE_GRACE_MS
+
+              if (state.awaitingResponse && !state.sawAssistantPayload && !state.turnLive && withinPreStartGrace) {
                 return state
               }
 

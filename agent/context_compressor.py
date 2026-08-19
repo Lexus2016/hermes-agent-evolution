@@ -7558,6 +7558,19 @@ This compaction should PRIORITISE preserving all information related to the focu
         else:
             self._lean_pristine_tools = {}
 
+        # Lean mode: snapshot pristine tool contents BEFORE Phase-1 pruning so
+        # the chunk digests summarize what actually happened, not the pruned
+        # stubs (#compaction-v2). Bounded per entry to keep memory sane.
+        if getattr(self, "tail_mode", "legacy") == "lean":
+            self._lean_pristine_tools = {
+                str(m.get("tool_call_id") or ""): (m.get("content") or "")[:80_000]
+                for m in messages
+                if m.get("role") == "tool" and isinstance(m.get("content"), str)
+                and len(m.get("content") or "") > 400
+            }
+        else:
+            self._lean_pristine_tools = {}
+
         # Phase 1: Prune old tool results (cheap, no LLM call)
         messages, pruned_count = self._prune_old_tool_results(
             messages,

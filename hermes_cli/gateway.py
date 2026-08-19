@@ -3261,10 +3261,13 @@ def _append_node_dir_for_service(
 
     PATH lookup remains the fallback rung for installs with no managed Node.
     """
-    from hermes_constants import iter_hermes_node_dirs
+    from hermes_constants import (
+        hermes_managed_node_tree_present,
+        iter_hermes_node_dirs,
+    )
 
-    managed_node_present = False
-    for directory in iter_hermes_node_dirs(hermes_root):
+    managed_node_present = hermes_managed_node_tree_present(hermes_root)
+    for directory in iter_hermes_node_dirs(hermes_root) if managed_node_present else ():
         entry = str(directory)
         try:
             present = directory.is_dir()
@@ -3274,6 +3277,12 @@ def _append_node_dir_for_service(
             managed_node_present = True
             if entry not in path_entries:
                 path_entries.append(entry)
+
+    # Ambient PATH lookup is a fallback, not an additional rung. Once the
+    # target Hermes home provides managed Node, consulting the invoker's PATH
+    # makes a system unit differ between sudo/root and its service user.
+    if managed_node_present:
+        return
 
     # Ambient PATH lookup is a fallback, not an additional rung. Once the
     # target Hermes home provides managed Node, consulting the invoker's PATH

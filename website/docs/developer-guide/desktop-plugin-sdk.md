@@ -411,11 +411,33 @@ host.onEvent(type, fn)                     // gateway event stream ('*' = all); 
 host.logs(...)                             // tail an app log file
 host.status()                              // one-shot system status snapshot
 host.restartGateway()                      // restart the backend gateway
-host.request<T>(method, params?)           // gateway JSON-RPC — the real power
+host.profileRoutes()                       // [{ profile, targetProfile, connectionId, mode }]
+host.requestProfile<T>(route, method, params?)   // registry-routed RPC; no foreground swap
+host.requestProfile<T>(profile, method, params?) // legacy v1/local overload
+host.request<T>(method, params?)           // active-gateway JSON-RPC — the real power
 ```
 
 `host.request` is the same JSON-RPC the app itself uses (sessions, config, skills,
-cron, kanban, …). Profile-shaped plugins get first-class methods too:
+cron, kanban, …). `host.requestProfile` accepts a descriptor from
+`host.profileRoutes()` and routes that RPC through its exact registry source and
+profile without changing the active chat or gateway. The profile-only overload is
+retained only for the sole-local/legacy topology; registry-aware plugins should pass
+the descriptor so two sources exposing the same profile name cannot collide.
+
+`host.profileRoutes()` inventories every registered source in the current connection
+registry. Connect-on-demand SSH sources expose a credential-free `default` seed
+route without opening a tunnel, so a plugin can be the first caller that dials them;
+an SSH `remoteProfile` remains the route's backend `targetProfile`. `connectionId`
+is the registry routing identity;
+pair it with `profile` for keys and persistence. Endpoint, token, SSH host/key, and
+other raw connection fields never cross the plugin IPC boundary. `profile` is the
+source-local route used
+for requests; `targetProfile` is the backend Hermes profile served by that route.
+They differ when a route explicitly maps to another backend profile (for example an
+SSH `remoteProfile` override or a legacy per-profile URL alias). This distinction
+preserves backend identity without exposing connection secrets.
+
+Profile-shaped plugins get first-class methods too:
 `profiles.list` (each profile + its most recent conversation as
 `last_session`; pass `include_sessions: false` to skip the per-profile DB
 probe) and `profiles.create` (`name`, `description`, `clone_from`,

@@ -1463,7 +1463,6 @@ def spawn_background_review_thread(
     ``block_durable_writes`` (X1 enforcement): threaded into the thread target so
     a transient correction-triggered review runs with the durable memory/skill
     writers stripped from its runtime tool whitelist.
-
     ``task_cfg`` is the already-loaded ``auxiliary.background_review`` block
     from :func:`load_background_review_settings`. When omitted, config is
     read once here and shared with the worker (aux routing) so a single

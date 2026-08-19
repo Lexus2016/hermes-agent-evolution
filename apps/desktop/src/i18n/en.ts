@@ -68,6 +68,7 @@ export const en: Translations = {
       connectingGateway: 'Connecting live desktop gateway',
       loadingSettings: 'Loading Hermes settings',
       loadingSessions: 'Loading recent sessions',
+      retryingRemoteBackend: 'Reconnecting to the remote Hermes backend…',
       startingDesktopConnection: 'Starting desktop connection',
       startingHermesDesktop: 'Starting Hermes Desktop…'
     },
@@ -684,6 +685,13 @@ export const en: Translations = {
       labelPlaceholder: 'Homelab',
       urlTitle: 'Gateway URL',
       sshHostTitle: 'SSH host',
+      headersTitle: 'Extra gateway headers',
+      headersDesc:
+        'Sent with every HTTP and WebSocket request to this gateway — for access proxies such as Cloudflare Access (CF-Access-Client-Id / CF-Access-Client-Secret). Values are stored encrypted. Headers Hermes manages (Authorization, Cookie, Host…) are ignored.',
+      headerValuePlaceholder: 'Value',
+      headerValueSaved: 'Saved — leave blank to keep',
+      headerAdd: 'Add header',
+      headerRemove: 'Remove',
       save: 'Save connection',
       saving: 'Saving…',
       cancel: 'Cancel',
@@ -2033,6 +2041,8 @@ export const en: Translations = {
       baseBranchPlaceholder: 'Search branches…',
       baseBranchNone: 'No branches found',
       startWorkFailed: 'Could not create worktree',
+      worktreeStaleBackend:
+        'Update the Hermes backend to create worktrees over this remote connection — it predates the git worktree API.',
       worktreeProjectLabel: 'Project',
       worktreeProjectPlaceholder: 'Search projects…',
       worktreeProjectNone: 'No projects with a folder',
@@ -2642,6 +2652,7 @@ export const en: Translations = {
       inferenceNotReady: 'Inference not ready',
       checkingInference: 'Checking inference',
       disconnected: 'Disconnected',
+      reconnectGateway: 'Reconnect gateway',
       openSystem: 'Open system panel',
       connection: label => `Connection: ${label}`,
       recentActivity: 'Recent activity',

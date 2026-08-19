@@ -2209,25 +2209,24 @@ def _build_child_agent(
         effective_api_mode = None  # force re-derivation from provider's defaults
     else:
         effective_api_mode = getattr(parent_agent, "api_mode", None)
-    # Defensive: validate override_acp_command exists on PATH before honoring
-    # it. Models occasionally pass acp_command="copilot" / "claude" / etc. in
-    # delegate_task tool calls despite the schema saying not to, which forces
-    # the subagent onto the copilot-acp transport below and crashes the
-    # gateway when the binary is missing (e.g. headless container deploys).
+    # Defensive: models occasionally hallucinate acp_command="copilot" /
+    # "claude" in delegate_task calls despite the schema. Forcing the child
+    # onto the copilot-acp transport then crashes the gateway when the
+    # binary is missing (headless container deploys — 3 retries then the
+    # asyncio teardown takes the process down). A MODEL-supplied override is
+    # not trusted intent: silently clear it and fall back to the parent's
+    # transport. USER-pinned commands (delegation.command in config.yaml)
+    # are pre-validated loudly in _resolve_delegation_credentials (#80450)
+    # and never reach this clearing path.
+    effective_acp_command = override_acp_command or getattr(
+        parent_agent, "acp_command", None
+    )
     if override_acp_command:
         import shutil as _shutil
 
         if not _shutil.which(override_acp_command):
-            logger.warning(
-                "Ignoring acp_command=%r: binary not found on PATH; "
-                "falling back to default transport.",
-                override_acp_command,
-            )
-            override_acp_command = None
+            effective_acp_command = None
             override_acp_args = None
-    effective_acp_command = override_acp_command or getattr(
-        parent_agent, "acp_command", None
-    )
     effective_acp_args = list(
         override_acp_args
         if override_acp_args is not None
@@ -2242,9 +2241,11 @@ def _build_child_agent(
         effective_acp_command = None
         effective_acp_args = []
 
-    if override_acp_command:
-        # If explicitly forcing an ACP transport override, the provider MUST be copilot-acp
-        # so run_agent.py initializes the CopilotACPClient.
+    if override_acp_command and effective_acp_command:
+        # If an ACP transport override SURVIVED the binary check above, the
+        # provider MUST be copilot-acp so run_agent.py initializes the
+        # CopilotACPClient. When the check cleared a hallucinated command,
+        # fall through to the parent's provider instead.
         effective_provider = "copilot-acp"
         effective_api_mode = "chat_completions"
 
@@ -2271,7 +2272,19 @@ def _build_child_agent(
     # from rate-limits and credential exhaustion exactly like the top-level
     # agent does.  _fallback_chain is a list accepted by AIAgent's
     # fallback_model parameter (which handles both list and dict forms).
-    parent_fallback = getattr(parent_agent, "_fallback_chain", None) or None
+    #
+    # EXCEPT when the user pinned delegation.provider: an explicit pin means
+    # "children run on THIS provider".  Inheriting the parent chain would let
+    # a mid-run auth/429 failure silently reroute the quiet-mode child onto
+    # the parent's fallback models with no surfaced signal (#80450) — the
+    # same class of silent-drag the override_provider filter-clearing below
+    # already prevents for OpenRouter routing preferences.  Predictability >
+    # liveness for explicit pins: the pinned child fails loudly instead.
+    parent_fallback = (
+        None
+        if override_provider
+        else (getattr(parent_agent, "_fallback_chain", None) or None)
+    )
 
     # Inherit the parent's OpenRouter provider-preference filters by default
     # (so subagents routed to the same provider honour the same routing
@@ -3223,8 +3236,35 @@ def _run_single_child(
                 subagent_worktree.finalize_subagent_worktree(_worktree_info)
             )
         except Exception as e:
-            logger.debug("worktree finalize failed: %s", e)
-            entry_dict["worktree"] = dict(_worktree_info)
+            # finalize is written hard not to raise, but if it ever does the
+            # state is unknown — emit the SAME schema the parent expects,
+            # flagged, via the shared factory so the two producers of this
+            # payload can never drift.
+            logger.warning("worktree finalize failed: %s", e)
+            try:
+                from tools import subagent_worktree as _sw
+
+                entry_dict["worktree"] = _sw.unproven_worktree_payload(
+                    _worktree_info, f"finalize raised: {e}"
+                )
+            except Exception:
+                # Import itself failed — inline the same shape rather than
+                # dropping the flag (the parent must still see the warning).
+                entry_dict["worktree"] = {
+                    "path": _worktree_info.get("path", ""),
+                    "branch": _worktree_info.get("branch", ""),
+                    "commits": 0,
+                    "dirty": False,
+                    "pruned": False,
+                    "inspection_failed": True,
+                    "note": (
+                        f"worktree finalize raised ({e}) and the reporting "
+                        "helper was unavailable: 'commits' and 'dirty' are "
+                        "UNKNOWN, not zero/clean. Inspect "
+                        f"{_worktree_info.get('path', '')} before assuming "
+                        "no work."
+                    ),
+                }
 
     try:
         _heartbeat_thread.start()
@@ -4779,7 +4819,7 @@ def delegate_task(
     )
 
     live_deleg_id, live_writers, live_paths = create_live_transcripts(
-        task_list, context
+        task_list, context, model=creds.get("model"), provider=creds.get("provider")
     )
 
     # Capture the ORIGINATING session's wake target BEFORE any child agent is
@@ -5622,6 +5662,20 @@ def _resolve_delegation_credentials(cfg: dict, parent_agent) -> dict:
             f"Delegation provider '{configured_provider}' resolved but has no API key. "
             f"Set the appropriate environment variable or run 'hermes auth'."
         )
+
+    # A pinned ACP transport command must exist — refuse the spawn loudly
+    # rather than letting the child silently fall back to another transport
+    # (#80450).
+    pinned_command = runtime.get("command")
+    if pinned_command:
+        import shutil as _shutil
+
+        if not _shutil.which(pinned_command):
+            raise ValueError(
+                f"Delegation provider '{configured_provider}' is pinned to the "
+                f"'{pinned_command}' command, which was not found on PATH. "
+                f"Install it or choose a different delegation provider."
+            )
 
     return {
         "model": configured_model or runtime.get("model") or None,

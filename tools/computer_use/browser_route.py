@@ -39,7 +39,7 @@ def _positive_int(value: Any) -> Optional[int]:
 
 
 def _tool_payload(out: Dict[str, Any]) -> Dict[str, Any]:
-    """Return the structured driver payload without discarding refusals."""
+    """Return structured data without discarding refusals or MCP images."""
     structured = out.get("structuredContent")
     data = out.get("data")
     payload: Dict[str, Any] = {}
@@ -49,6 +49,23 @@ def _tool_payload(out: Dict[str, Any]) -> Dict[str, Any]:
         payload["message"] = data
     if isinstance(structured, dict):
         payload.update(structured)
+    images = out.get("images")
+    mime_types = out.get("image_mime_types")
+    if isinstance(images, list):
+        preserved_images = []
+        for index, image in enumerate(images):
+            if not isinstance(image, str) or not image:
+                continue
+            mime_type = ""
+            if (
+                isinstance(mime_types, list)
+                and index < len(mime_types)
+                and isinstance(mime_types[index], str)
+            ):
+                mime_type = mime_types[index]
+            preserved_images.append({"data": image, "mime_type": mime_type})
+        if preserved_images:
+            payload["_mcp_images"] = preserved_images
     if out.get("isError") is True:
         payload.setdefault("isError", True)
     return payload
@@ -225,6 +242,7 @@ class CuaTypedBrowserRoute:
         query: Optional[str] = None,
         scope_ref: Optional[str] = None,
         continuation: Optional[str] = None,
+        include_screenshot: bool = False,
     ) -> Dict[str, Any]:
         """Bind an exact native window or snapshot a bound tab."""
         missing = self._require_tool("get_browser_state")
@@ -242,10 +260,13 @@ class CuaTypedBrowserRoute:
                     "Typed browser binding requires an exact positive pid and window_id pair.",
                     native_fallback=True,
                 )
-            payload = self._call(
-                "get_browser_state",
-                {"pid": exact_pid, "window_id": exact_window},
-            )
+            bind_args: Dict[str, Any] = {
+                "pid": exact_pid,
+                "window_id": exact_window,
+            }
+            if include_screenshot:
+                bind_args["include_screenshot"] = True
+            payload = self._call("get_browser_state", bind_args)
             if payload.get("status") != "ok":
                 code = _refusal_code(payload)
                 payload.setdefault("ok", False)
@@ -273,6 +294,26 @@ class CuaTypedBrowserRoute:
             # Binding mints the target/tab capabilities but is not a page
             # snapshot. Require one fresh tab read before any mutation.
             self.state.verification_required = True
+            # ...and say so in the payload. Any call carrying pid/window_id
+            # lands here, so a caller that keeps re-sending them re-binds
+            # forever: every bind clears state and mints new tab_ids, so the
+            # tab_id it just received is already unbound on the next call and
+            # every mutation stays refused. The way out is to drop
+            # pid/window_id, which is not otherwise discoverable from a bind
+            # response that looks like a successful read.
+            payload["snapshot_required"] = True
+            payload["next_step"] = "fresh_browser_state"
+            payload["hint"] = (
+                "Binding only, no page content. Call cua_browser_state again "
+                "WITHOUT pid or window_id (optionally with tab_id, query, "
+                "snapshot_format, include_screenshot) to take the snapshot "
+                "this binding requires before any mutation."
+            )
+            if include_screenshot and not payload.get("_mcp_images"):
+                # A bind normally carries no page content. Report deferral
+                # only when the driver did not attach the requested image;
+                # some driver versions do return a native screenshot here.
+                payload["screenshot_deferred"] = True
             payload["exact_binding"] = quality == "exact"
             if quality != "exact" or not mutation_allowed:
                 payload["native_fallback_required"] = True
@@ -318,6 +359,8 @@ class CuaTypedBrowserRoute:
             args["scope_ref"] = scope_ref
         if continuation:
             args["continuation"] = continuation
+        if include_screenshot:
+            args["include_screenshot"] = True
 
         continuing = continuation is not None
         if not continuing:
@@ -351,7 +394,8 @@ class CuaTypedBrowserRoute:
         profile_mode: str,
         profile_name: Optional[str] = None,
         allow_launch: bool = False,
-        approval_token: Optional[str] = None,
+        grant_existing_profile: bool = False,
+        permission_mode: str = "standard",
     ) -> Dict[str, Any]:
         """Run explicit setup through the driver's authoritative mode gate."""
         missing = self._require_tool("browser_prepare")
@@ -369,22 +413,31 @@ class CuaTypedBrowserRoute:
                     "browser_exact_target_required",
                     "Existing-profile attachment requires an exact positive pid and window_id pair.",
                 )
-            # The driver owns the immutable standard/bounded/unrestricted
-            # decision. Standard fails closed without a certified host,
-            # a user-minted single-use approval token, or an approved
-            # bounded manifest; explicit Hermes YOLO owns a private
-            # unrestricted daemon.
+            # Host-side floor for the config grant.  The driver owns the
+            # immutable standard/bounded/unrestricted decision, but an
+            # unrestricted daemon answers every prepare — so relying on the
+            # driver alone let an approval bypass (`--yolo`, `-z`) silently
+            # nullify `computer_use.grant_existing_profile: false` and expose
+            # the live profile's pages, cookies, and storage over CDP.
+            # Approval bypass is consent to skip *prompts*, not consent to
+            # read an existing browser profile, so this key is enforced here
+            # regardless of permission mode.  bounded is exempt: its reviewed
+            # capability manifest is the authorization boundary.
+            if permission_mode != "bounded" and not grant_existing_profile:
+                return _refusal(
+                    "browser_existing_profile_not_granted",
+                    "Attaching to an existing browser profile requires the "
+                    "one-time opt-in `computer_use.grant_existing_profile: "
+                    "true` in config.yaml. Hermes cannot grant this at "
+                    "runtime, and an approval bypass does not substitute for "
+                    "it. Use profile_mode=isolated_new to browse without it.",
+                )
             self.state.clear()
             args: Dict[str, Any] = {
                 "pid": exact_pid,
                 "window_id": exact_window,
                 "strategy": {"kind": "existing_profile"},
             }
-            if isinstance(approval_token, str) and approval_token:
-                # Minted out-of-band by `hermes computer-use browser-approve`
-                # (cua-driver browser-approve): five-minute, single-use. The
-                # user, never the model, is the source of this value.
-                args["approval_token"] = approval_token
             return self._call("browser_prepare", args)
         if profile_mode not in {"isolated_new", "isolated_named"}:
             return _refusal(
@@ -450,7 +503,11 @@ class CuaTypedBrowserRoute:
         if self.state.verification_required and not allow_without_snapshot:
             return None, _refusal(
                 "browser_verification_required",
-                "Take a fresh cua_browser_state snapshot before another browser mutation.",
+                "Take a fresh cua_browser_state snapshot before another "
+                "browser mutation: call cua_browser_state WITHOUT pid or "
+                "window_id. Re-sending pid/window_id re-binds instead of "
+                "snapshotting, which mints new tab_ids and leaves this "
+                "mutation refused.",
             )
         return selected_tab, None
 

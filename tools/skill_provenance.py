@@ -9,9 +9,19 @@ later slices can taint-flag untrusted provenance sources.
 
 import contextvars
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+#: Bounded utility space for outcome credit (#2898, RoMeRL arXiv:2608.02508).
+#:
+#: The memory-reward trap disperses feedback over an unbounded history; every
+#: credit assignment must live inside this ceiling so a single fluke success
+#: cannot inflate a memory's utility without limit. The constant lives here —
+#: next to the function that enforces it — rather than in the rejected PR's
+#: ``evolution_skill_version.py``, so the live promotion path carries the bound.
+MAX_OUTCOME_UTILITY = 1.0
 
 _write_origin: contextvars.ContextVar[str] = contextvars.ContextVar(
     "skill_write_origin",
@@ -136,17 +146,70 @@ def provenance_ok(
     return True, ""
 
 
-def record_promotion(skill_name: str, reason: str = "") -> None:
+def debias_outcome_credit(
+    co_retrieved: List[str],
+    load_bearing: List[str],
+    outcome_reward: float,
+    *,
+    max_utility: float = MAX_OUTCOME_UTILITY,
+) -> Dict[str, float]:
+    """Assign outcome credit ONLY to memories that were actually load-bearing.
+
+    The memory-reward trap (#2898, RoMeRL arXiv:2608.02508): when trajectory
+    rewards are jointly assigned to every co-retrieved memory, an incidentally
+    co-retrieved memory receives a misleading utility bump that raises its own
+    retrieval probability — a self-reinforcing loop. The de-biasing rule is
+    causal attribution: credit is bounded to ``max_utility`` and split ONLY
+    across ``load_bearing`` memories that were also co-retrieved, never across
+    the full retrieved set.
+
+    Returns ``{}`` when nothing was load-bearing — a fluke success must not
+    reward any memory.
+    """
+    if not load_bearing or outcome_reward <= 0:
+        return {}
+    relevant = [m for m in load_bearing if m in set(co_retrieved)]
+    if not relevant:
+        return {}
+    bounded = min(outcome_reward, max_utility)
+    share = bounded / len(relevant)
+    return {m: share for m in relevant}
+
+
+def record_promotion(
+    skill_name: str,
+    reason: str = "",
+    *,
+    attribution: Optional[List[str]] = None,
+    outcome_reward: float = 0.0,
+) -> None:
     """Stamp the usage record that this skill passed the provenance gate and
     was promoted to trusted.  Best-effort audit trail (#2288).
+
+    ``attribution`` (#2898) names the memories/skills that were actually
+    load-bearing for the credited outcome. It is deliberately NOT filled in
+    from co-occurrence: a promotion with no attribution recorded is a
+    fluke-success risk, and callers that care (the misevolution gate, #2521)
+    check it explicitly. When an ``outcome_reward`` is supplied, the record
+    also carries the bounded credit assigned by ``debias_outcome_credit``.
     """
     try:
         from datetime import datetime, timezone
         from tools.skill_usage import _mutate
 
+        credit = debias_outcome_credit(
+            co_retrieved=list(attribution or []),
+            load_bearing=list(attribution or []),
+            outcome_reward=outcome_reward,
+        )
+
         def _apply(rec: dict) -> None:
             rec["promoted_at"] = datetime.now(timezone.utc).isoformat()
             rec["promotion_reason"] = (reason or "provenance_ok")[:200]
+            if attribution:
+                rec["attribution"] = list(attribution)
+            if credit:
+                rec["outcome_credit"] = credit
 
         _mutate(skill_name, _apply)
     except Exception as exc:

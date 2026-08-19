@@ -13,7 +13,6 @@ def test_grok_4_6_is_default_pin():
     models = _PROVIDER_MODELS["xai-oauth"]
     assert "grok-build-0.1" in models
     assert "grok-composer-2.5-fast" in models
-
     assert models[0] == "grok-4.6"
 
 

@@ -1892,6 +1892,13 @@ def memory_tool(
     which silently left ``content`` empty and errored. Coalescing here removes
     that trap.
 
+    ``new_text`` is accepted as an alias for ``content`` on both shapes. The
+    replace/remove ops target by ``old_text`` and supply the replacement via
+    ``content``; callers naturally reach for ``new_text`` to mirror
+    ``old_text`` (it's the patch tool's ``old_string``/``new_string`` shape),
+    which silently left ``content`` empty and errored. Coalescing here removes
+    that trap.
+
     Returns JSON string with results.
     """
     if store is None:
@@ -1899,6 +1906,10 @@ def memory_tool(
             "Memory is not available. It may be disabled in config or this environment.",
             success=False,
         )
+
+    # Accept new_text as an alias for content (single-op path). See docstring.
+    if content is None and new_text is not None:
+        content = new_text
 
     # Accept new_text as an alias for content (single-op path). See docstring.
     if content is None and new_text is not None:
@@ -2118,6 +2129,10 @@ MEMORY_SCHEMA = {
             "old_text": {
                 "type": "string",
                 "description": "REQUIRED for 'replace' and 'remove' (single-op shape): a short unique substring identifying the existing entry to modify. Omit only for 'add'.",
+            },
+            "new_text": {
+                "type": "string",
+                "description": "Alias for 'content' (single-op shape). Provided so the replace/remove old_text/new_text pairing works; if both are set, 'content' wins."
             },
             "new_text": {
                 "type": "string",

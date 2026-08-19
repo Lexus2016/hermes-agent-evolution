@@ -296,7 +296,6 @@ class TestRunJobScript:
         overlay mode exists is that PYTHONPATH alone cannot (editable
         installs would raise ModuleNotFoundError in cron scripts)."""
         import subprocess
-
         from cron.scheduler import _windows_cron_bootstrap_argv
 
         venv = tmp_path / "venv"
@@ -469,7 +468,6 @@ class TestRunJobScript:
         success, output = _run_job_script("read_env.py")
         assert success is True
         assert output == "eu-west"
-
     def test_non_overlay_branch_keeps_plain_argv(self, cron_env, monkeypatch):
         """When the Windows uv-venv overlay is NOT active, the invocation must
         stay a plain `python script.py` — the bootstrap is overlay-only.

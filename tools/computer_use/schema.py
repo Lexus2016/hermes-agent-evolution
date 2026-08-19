@@ -283,6 +283,16 @@ COMPUTER_USE_SCHEMA: Dict[str, Any] = {
                 "enum": ["semantic_v2", "dom_refs_v1"],
                 "description": "Typed-browser snapshot format; semantic_v2 is the default.",
             },
+            "include_screenshot": {
+                "type": "boolean",
+                "description": (
+                    "For cua_browser_state, include the current browser screenshot "
+                    "as image content in the tool result. Defaults to false. "
+                    "Applies to snapshot calls only: passing pid/window_id makes "
+                    "the call a binding, which carries no page content and "
+                    "reports screenshot_deferred instead."
+                ),
+            },
             "query": {"type": "string", "description": "Optional browser-state query."},
             "scope_ref": {"type": "string", "description": "Optional current ref to scope a snapshot."},
             "continuation": {"type": "string", "description": "Continuation minted by the current snapshot."},
@@ -329,6 +339,14 @@ COMPUTER_USE_SCHEMA: Dict[str, Any] = {
                 "type": "string",
                 "enum": ["insert_text", "keystrokes"],
                 "description": "Delivery form for cua_browser_type; defaults to insert_text.",
+            },
+            "replace": {
+                "type": "boolean",
+                "description": (
+                    "For cua_browser_type, select the target's complete value "
+                    "before typing so the supplied text replaces it. Defaults "
+                    "to false; true with empty text clears the field."
+                ),
             },
             "dialog_id": {"type": "string", "description": "Opaque page-dialog capability."},
             "prompt_text": {"type": "string", "description": "Optional text for a page prompt dialog."},

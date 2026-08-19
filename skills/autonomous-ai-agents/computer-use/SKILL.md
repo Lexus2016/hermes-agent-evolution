@@ -24,11 +24,13 @@ Everything here works with any tool-capable model — Claude, GPT, Gemini,
 or an open model on a local OpenAI-compatible endpoint. There is no
 Anthropic-native schema to learn.
 
-Hermes drives [cua-driver](https://github.com/trycua/cua) under the hood
-for the platform plumbing. The Hermes-side `computer_use` tool exposed
-in this skill is a higher-level Hermes vocabulary; the raw cua-driver
-MCP tools (which a different agent harness would see) are NOT what you
-call — call the `computer_use` actions documented below.
+Hermes drives [cua-driver](https://github.com/trycua/cua) under the hood.
+This wrapper skill teaches the Hermes `computer_use` workflow and action
+vocabulary. Call the actions documented below instead of raw cua-driver MCP
+tools. For driver internals and platform-specific behavior, follow the Cua
+skill installed by `cua-driver skills install`. Hermes autodetection is a
+planned cua-driver follow-up, so currently point Hermes at the resulting
+`~/.cua-driver/skills/cua-driver` directory or symlink it into your skill space.
 
 ## The canonical workflow
 
@@ -195,27 +197,30 @@ Prefer `isolated_new` unless the task genuinely needs the user's signed-in
 session — attaching to an existing profile exposes its live pages, cookies,
 and storage over the browser protocol.
 
-Authorization paths for `existing_profile`, in preference order:
+Authorization paths for `existing_profile`:
 
-1. **Config grant (standard mode).** When
+1. **Config grant (standard and unrestricted modes).** When
    `computer_use.grant_existing_profile: true` is set, the runtime is
-   launched pre-authorized (`--grant existing-profile`) and the prepare
-   succeeds against the exact proven `(pid, window_id)`. If it's not set,
-   the prepare fails closed — tell the user to flip that config key (and
-   restart the session) if they want this; do not retry or work around it.
+   launched pre-authorized in standard mode (`--grant existing-profile`) and
+   Hermes applies the same host-side floor in unrestricted mode. If it is not
+   set, both modes fail closed. Tell the user to flip that config key and
+   restart the session if they want this; do not retry or work around it.
 2. **Bounded manifest.** When `computer_use.permission_mode: bounded` is
    configured with a reviewed `capability_manifest`, prepares inside the
    manifest's scope succeed without prompts and everything else fails closed.
-3. **Explicit Hermes YOLO** (`--yolo`, `/yolo`, or `approvals.mode: off`)
-   launches a private embedded cua-driver in `unrestricted` after that risk
-   acceptance, so there are no runtime Cua approval prompts.
 
-A user may also paste a token from `hermes computer-use browser-approve`
-(pass it as `approval_token`); current cua-driver builds treat that as a
-disabled legacy path, so expect the config grant to be the working route.
-Without any of these, `existing_profile` fails closed — report the refusal
-and name the config key; do not retry, downgrade trust, or work around it.
-Never invent, store, log, or reuse a grant token.
+Explicit Hermes YOLO (`--yolo`, `/yolo`, or `approvals.mode: off`) launches an
+unrestricted runtime with no runtime Cua approval prompts, but it does not
+substitute for `grant_existing_profile: true`.
+
+These settings belong to runtime launch. The agent cannot add or change them
+after the runtime starts. Without the applicable grant or bounded manifest,
+`existing_profile` fails closed. Report the refusal and name the config key;
+do not retry, downgrade trust, or work around it.
+
+Every MCP transport owns a private lifecycle session inside the runtime. The
+public session name only labels cursor identity and session-scoped state. It
+does not select, share, or keep a runtime alive.
 
 Use the native capture/AX/pixel/foreground ladder for browser chrome, browser
 permission UI, OS prompts, native dialogs, extension surfaces, unsupported
@@ -378,7 +383,6 @@ These are platform deep dives, not duplicates — when the user reports
 `WINDOWS.md` for the UIA / UWP context that explains why and what to
 do differently.
 
-When `cua-driver skills install` autodetects Hermes (planned follow-up
-in trycua/cua), this happens automatically on install. Until then, ask
-the user to run the command and the pack lands in their agent skill
-space alongside this skill.
+Hermes autodetection is a planned follow-up in trycua/cua. For now, the command
+installs the pack under `~/.cua-driver/skills/cua-driver`; point Hermes at that
+directory or symlink it into the user's skill space.

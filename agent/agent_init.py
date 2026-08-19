@@ -1975,6 +1975,16 @@ def init_agent(
         _agent_section = {}
     agent._tool_use_enforcement = _agent_section.get("tool_use_enforcement", "auto")
 
+    # Empty-response retry guard config (NS-503): additive
+    # ``agent.empty_response_guard`` subsection. Resolution is tolerant —
+    # a malformed section falls back to the schema defaults (guard on,
+    # $0.25 threshold), matching the guard's overall fail-open posture.
+    from agent.empty_response_guard import resolve_guard_settings
+    (
+        agent._empty_guard_enabled,
+        agent._empty_guard_cost_threshold_usd,
+    ) = resolve_guard_settings(_agent_section.get("empty_response_guard"))
+
     # Intent-ack continuation config: "auto" (default — codex_responses only,
     # the historical gate), true (all api_modes), false (never), or a list of
     # model-name substrings.  Resolved against the active api_mode/model in the
@@ -2035,6 +2045,14 @@ def init_agent(
     # explicit problem model before planning non-trivial tasks.  Stable
     # prefix — no prompt-cache break.
     agent._model_first_reasoning = bool(_agent_section.get("model_first_reasoning", False))
+
+    # Bot Mode teammate protocol section (tools/bot_mode_probe.py) — pure
+    # filesystem reads, no warm needed. Silent on non-Bot-Mode installs.
+    agent._bot_mode_protocol = bool(_agent_section.get("bot_mode_protocol", True))
+    # Session-title hint for the "Bot Chat" gate: hosts that defer the DB
+    # title write past the first prompt build (tui_gateway pending_title)
+    # set this so the gate doesn't depend on write ordering.
+    agent._session_title_hint = None
 
     # Per-platform prompt-hint overrides (config.yaml → platform_hints).
     # Lets an enterprise admin append to or replace Hermes' built-in

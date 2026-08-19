@@ -304,7 +304,6 @@ class TestSessionLifecycle:
 
     def test_get_nonexistent_session(self, db):
         assert db.get_session("nonexistent") is None
-
     def test_branch_resume_does_not_include_parent_messages_added_after_fork(self, db):
         """A branch owns its copied transcript, not the parent's later turns."""
         db.create_session("parent", source="tui")

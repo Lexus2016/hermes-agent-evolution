@@ -598,6 +598,39 @@ class TestUnifiedSearchDedup:
         results = unified_search("query", [failing, ok])
         assert len(results) == 1
 
+    def test_retrieval_event_logged_to_sidecar(self, tmp_path, monkeypatch):
+        """#2918: a retrieval must append one JSONL event (query + retrieved
+        identifiers) so a later slice can compute used-when-retrieved rate."""
+        import tools.skills_hub as hub
+
+        sidecar = tmp_path / "retrieval_events.jsonl"
+        monkeypatch.setattr(hub, "RETRIEVAL_EVENTS_FILE", sidecar)
+        s1 = SkillMeta(name="s1", description="d", source="ok",
+                       identifier="a/one", trust_level="community")
+        results = unified_search("find me", [self._make_source("a", [s1])])
+        assert results == [s1]
+        line = sidecar.read_text(encoding="utf-8").strip().splitlines()
+        assert len(line) == 1
+        event = json.loads(line[0])
+        assert event["query"] == "find me"
+        assert event["retrieved"] == ["a/one"]
+        assert "ts" in event
+
+    def test_retrieval_never_fails_on_log_io_error(self, tmp_path, monkeypatch):
+        """Best-effort logging: an unwritable sidecar must not break a search."""
+        import tools.skills_hub as hub
+
+        # Make the sidecar's parent a regular file so opening it raises OSError.
+        blocker = tmp_path / "blocker"
+        blocker.write_text("i am a file")
+        monkeypatch.setattr(hub, "RETRIEVAL_EVENTS_FILE", blocker / "events.jsonl")
+        s1 = SkillMeta(name="s1", description="d", source="ok",
+                       identifier="x", trust_level="community")
+        results = unified_search("query", [self._make_source("a", [s1])])
+        assert len(results) == 1
+        # Nothing written, nothing raised.
+        assert not (blocker / "events.jsonl").exists()
+
 
 # ---------------------------------------------------------------------------
 # GitHub tap provider labeling + index search/filter

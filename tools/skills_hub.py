@@ -89,6 +89,11 @@ def _audit_log() -> Path:
     return Path(forced) if forced is not None else _hub_dir() / "audit.log"
 
 
+def _retrieval_events_file() -> Path:
+    forced = _override("RETRIEVAL_EVENTS_FILE")
+    return Path(forced) if forced is not None else _skills_dir() / "retrieval_events.jsonl"
+
+
 def _taps_file() -> Path:
     forced = _override("TAPS_FILE")
     return Path(forced) if forced is not None else _hub_dir() / "taps.json"
@@ -108,6 +113,7 @@ _DYNAMIC_PATH_RESOLVERS = {
     "AUDIT_LOG": _audit_log,
     "TAPS_FILE": _taps_file,
     "INDEX_CACHE_DIR": _index_cache_dir,
+    "RETRIEVAL_EVENTS_FILE": _retrieval_events_file,
 }
 
 
@@ -4618,4 +4624,33 @@ def unified_search(query: str, sources: List[SkillSource],
             seen[r.identifier] = r
     deduped = list(seen.values())
 
+    _record_retrieval(query, deduped)
+
     return deduped[:limit]
+
+
+def _record_retrieval(query: str, results: List[SkillMeta]) -> None:
+    """Append one retrieval event to the sidecar for future precision math.
+
+    Issue #2918 (slice 1 of #2897): actual-use gating exists (#2286), but
+    actual-use *precision* (used-when-retrieved rate) needs a log of which
+    skills were retrieved for which query — none exists. This writes one JSONL
+    line per retrieval so a later slice can compute retrieved∩used over pool
+    growth. Records the retrieved identifiers, not full descriptions, to keep
+    the sidecar small. Best-effort: a retrieval must never fail because
+    logging did — IO/encode errors are swallowed.
+    """
+    if not query:
+        return
+    try:
+        path = _retrieval_events_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        event = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "query": query,
+            "retrieved": [r.identifier for r in results if r.identifier],
+        }
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event, ensure_ascii=False) + "\n")
+    except (OSError, ValueError, TypeError):
+        return

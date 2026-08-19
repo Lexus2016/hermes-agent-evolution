@@ -340,3 +340,116 @@ class TestDeliveryPlatform:
 
         assert success is True
         assert agent_constructed is True
+
+
+class TestBalanceLowBlock:
+    """Provider-balance exhaustion (#2872): HTTP 402 must block the run with
+    a DISTINCT `balance_low` status (not blocked_config) and alert exactly
+    once, so an exhausted account suppresses wakes instead of burning
+    scheduler cycles on agents that would immediately 402."""
+
+    def _balance_reason(self):
+        from cron.evolution_preflight import BALANCE_LOW_ERROR_MARKER
+
+        return (
+            f"[balance_low] {BALANCE_LOW_ERROR_MARKER} — provider 'deepseek' "
+            "account balance is exhausted"
+        )
+
+    def test_balance_low_blocks_before_agent(self, tmp_path):
+        job = _job()
+        with cron_jobs.use_cron_store(tmp_path):
+            cron_jobs.save_jobs([job])
+            with patch(
+                "cron.scheduler._preflight_check_provider_balance",
+                return_value=self._balance_reason(),
+            ):
+                success, output, final_response, error, agent_constructed = \
+                    _run_job_patched(job, tmp_path)
+
+        assert agent_constructed is False
+        assert success is False
+        assert error is not None and "[balance_low]" in error
+        assert "[blocked_config]" not in error
+        assert "balance" in output.lower() or "balance" in str(error).lower()
+
+    def test_balance_low_not_treated_as_config_block(self, tmp_path):
+        """The BALANCE_LOW marker must NOT also trip blocked_config — the
+        status recorded downstream is distinct (`balance_low`)."""
+        job = _job()
+        with cron_jobs.use_cron_store(tmp_path):
+            cron_jobs.save_jobs([job])
+            with patch(
+                "cron.scheduler._preflight_check_provider_balance",
+                return_value=self._balance_reason(),
+            ):
+                success, _output, _final_response, error, _agent = \
+                    _run_job_patched(job, tmp_path)
+
+        assert success is False
+        assert error is not None and "[balance_low]" in error
+        assert sched.BLOCKED_CONFIG_MARKER not in error
+        assert sched.BALANCE_LOW_MARKER in error
+
+    def test_single_alert_across_two_ticks_and_balance_low_status(self, tmp_path):
+        """Two ticks of a balance-low job deliver exactly ONE alert and
+        persist last_status='balance_low' in jobs.json (#2872)."""
+        job = _job()
+        deliveries = []
+
+        def fake_deliver(job, content, adapters=None, loop=None):
+            deliveries.append(content)
+            return None
+
+        with cron_jobs.use_cron_store(tmp_path):
+            cron_jobs.save_jobs([job])
+            fake_db = MagicMock()
+            for _tick in range(2):
+                fresh = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
+                with patch("cron.scheduler._hermes_home", tmp_path), \
+                     patch("cron.scheduler._resolve_origin", return_value=None), \
+                     patch("cron.scheduler._preflight_check_provider_key",
+                           return_value=None), \
+                     patch("hermes_cli.env_loader.load_hermes_dotenv"), \
+                     patch("hermes_cli.env_loader.reset_secret_source_cache"), \
+                     patch("hermes_state.SessionDB", return_value=fake_db), \
+                     patch("tools.mcp_tool.discover_mcp_tools", return_value=[]), \
+                     patch(
+                         "cron.scheduler._preflight_check_provider_balance",
+                         return_value=self._balance_reason(),
+                     ), \
+                     patch.object(sched, "_deliver_result", side_effect=fake_deliver), \
+                     patch("run_agent.AIAgent") as mock_agent_cls:
+                    ok = sched.run_one_job(fresh)
+                    assert ok is True
+                    assert mock_agent_cls.called is False
+
+            stored = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
+
+        assert stored["last_status"] == "balance_low"
+        assert len(deliveries) == 1, (
+            f"expected exactly one alert across two ticks, got {len(deliveries)}: "
+            f"{deliveries!r}"
+        )
+        assert "balance" in deliveries[0].lower()
+
+    def test_healthy_run_clears_balance_alert_marker(self, tmp_path):
+        """After a balance-low tick, a healthy tick clears the alert-dedup
+        marker so a FUTURE balance drop re-alerts."""
+        job = _job()
+        with cron_jobs.use_cron_store(tmp_path):
+            cron_jobs.save_jobs([job])
+            with patch(
+                "cron.scheduler._preflight_check_provider_balance",
+                return_value=self._balance_reason(),
+            ):
+                _run_job_patched(job, tmp_path)
+            stored = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
+            assert stored.get("preflight_alerted")
+            # Balance restored → healthy run clears the marker.
+            fresh = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
+            success, *_rest, agent_constructed = _run_job_patched(fresh, tmp_path)
+            assert success is True
+            assert agent_constructed is True
+            stored = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
+            assert not stored.get("preflight_alerted")

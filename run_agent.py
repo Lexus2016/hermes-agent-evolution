@@ -2651,7 +2651,18 @@ class AIAgent:
             return
 
         trajectory = self._convert_to_trajectory_format(messages, user_query, completed)
-        _save_trajectory_to_file(trajectory, self.model, completed)
+        # #2877: decision-level model-call metadata rides the same entry.
+        # Extracted from the RAW messages (pre-ShareGPT-conversion — converted
+        # messages carry only from/value and would yield nothing). Never
+        # raises: trajectory saving must not fail because capture did.
+        model_calls = None
+        try:
+            from agent.tool_call_capture import extract_model_calls
+
+            model_calls = extract_model_calls(messages)
+        except Exception:
+            model_calls = None
+        _save_trajectory_to_file(trajectory, self.model, completed, model_calls=model_calls)
 
     @staticmethod
     def _is_entitlement_failure(
@@ -3784,11 +3795,19 @@ class AIAgent:
             return
         landed = file_mutation_result_landed(tool_name, result)
         if landed:
+            landed_paths = _extract_landed_file_mutation_paths(tool_name, args, result)
             changed = getattr(self, "_turn_file_mutation_paths", None)
             if changed is not None:
-                changed.update(
-                    _extract_landed_file_mutation_paths(tool_name, args, result)
-                )
+                changed.update(landed_paths)
+            # Feed the checkpoint agent-write ledger so /rollback's safe mode
+            # can tell Hermes-authored content from later user hand-edits.
+            mgr = getattr(self, "_checkpoint_mgr", None)
+            if mgr is not None and getattr(mgr, "enabled", False):
+                for _p in landed_paths:
+                    try:
+                        mgr.record_agent_write(_p)
+                    except Exception:
+                        pass
         if is_error and not landed:
             preview = _extract_error_preview(result)
             for path in targets:
@@ -4183,6 +4202,19 @@ class AIAgent:
                     "(another Hermes process was writing to the state "
                     "database). Your message should already be saved — "
                     "please send it again in a moment."
+                )
+            if cause == "corrupt":
+                return (
+                    prefix
+                    + "the turn was stopped because the state database "
+                    "reported structural corruption (the transcript would "
+                    "have been lost on restart). Freeing disk space will "
+                    "not help. Recovery options:\n"
+                    "1. Run `hermes doctor --fix`\n"
+                    "2. Salvage with: sqlite3 ~/.hermes/state.db \".recover\" "
+                    "(then replace state.db)\n"
+                    "3. Restore from a backup in ~/.hermes/backups/\n"
+                    "Then send your message again."
                 )
             if cause == "disk":
                 return (
@@ -5385,7 +5417,6 @@ class AIAgent:
                 logger.warning("Removed duplicate tool call: %s", tc.function.name)
                 continue
             seen_raw.add(raw_key)
-
             arguments = tc.function.arguments
             try:
                 arguments = json.dumps(

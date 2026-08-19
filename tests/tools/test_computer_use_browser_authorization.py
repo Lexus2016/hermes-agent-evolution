@@ -1,11 +1,8 @@
 """Authorization plumbing for the cua-driver typed browser route.
 
-Covers the three rungs that let ``existing_profile`` attachment (and bounded
-automation generally) actually work from Hermes:
+Covers the authorization modes that let ``existing_profile`` attachment (and
+bounded automation generally) work from Hermes:
 
-* ``approval_token`` passthrough — the user-minted single-use token from
-  ``hermes computer-use browser-approve`` reaches ``browser_prepare`` and is
-  never fabricated by the wrapper.
 * ``bounded`` permission mode — a private embedded daemon launched with a
   user-reviewed capability manifest (``--capability-manifest`` +
   ``--approve-capability-manifest``), failing loudly when the manifest is
@@ -47,16 +44,16 @@ def _route(driver: _PrepareDriver) -> CuaTypedBrowserRoute:
     )
 
 
-# ── approval_token passthrough ──────────────────────────────────────────
+# ── existing-profile authorization ownership ───────────────────────────
 
 
-def test_existing_profile_prepare_forwards_user_minted_approval_token():
+def test_existing_profile_prepare_delegates_authorization_to_driver():
     driver = _PrepareDriver()
     result = _route(driver).prepare(
         pid=101,
         window_id=202,
         profile_mode="existing_profile",
-        approval_token="tok-from-user-terminal",
+        grant_existing_profile=True,
     )
 
     assert result["status"] == "ok"
@@ -67,51 +64,159 @@ def test_existing_profile_prepare_forwards_user_minted_approval_token():
                 "pid": 101,
                 "window_id": 202,
                 "strategy": {"kind": "existing_profile"},
-                "approval_token": "tok-from-user-terminal",
                 "session": "hermes-a",
             },
         )
     ]
 
 
-def test_existing_profile_prepare_without_token_sends_none():
-    """No token → the field is absent; the driver's own gate decides."""
+def test_existing_profile_prepare_refused_without_config_grant():
     driver = _PrepareDriver()
-    _route(driver).prepare(pid=101, window_id=202, profile_mode="existing_profile")
-
-    (_, args), = driver.calls
-    assert "approval_token" not in args
-
-
-@pytest.mark.parametrize("bogus", ["", None, 7, True])
-def test_non_string_or_empty_token_is_never_forwarded(bogus):
-    driver = _PrepareDriver()
-    _route(driver).prepare(
+    result = _route(driver).prepare(
         pid=101,
         window_id=202,
         profile_mode="existing_profile",
-        approval_token=bogus,
     )
 
-    (_, args), = driver.calls
-    assert "approval_token" not in args
+    assert result["status"] == "refused"
+    assert result["code"] == "browser_existing_profile_not_granted"
+    assert "computer_use.grant_existing_profile" in result["message"]
+    # Never reached the driver: the host refuses before the transport.
+    assert driver.calls == []
 
 
-def test_isolated_prepare_ignores_approval_token():
-    """The token authorizes existing-profile attachment only."""
+def test_existing_profile_prepare_refused_in_unrestricted_without_grant():
+    """An approval bypass must not stand in for the config grant.
+
+    ``--yolo`` / ``-z`` give the session a private unrestricted daemon that
+    answers every prepare, so without this host-side floor the documented
+    ``grant_existing_profile: false`` default silently stopped protecting the
+    live profile's pages, cookies, and storage.
+    """
     driver = _PrepareDriver()
-    _route(driver).prepare(
+    result = _route(driver).prepare(
+        pid=101,
+        window_id=202,
+        profile_mode="existing_profile",
+        grant_existing_profile=False,
+        permission_mode="unrestricted",
+    )
+
+    assert result["code"] == "browser_existing_profile_not_granted"
+    assert driver.calls == []
+
+
+def test_existing_profile_prepare_bounded_mode_exempt_from_grant():
+    """bounded's reviewed capability manifest is the authorization boundary."""
+    driver = _PrepareDriver()
+    result = _route(driver).prepare(
+        pid=101,
+        window_id=202,
+        profile_mode="existing_profile",
+        grant_existing_profile=False,
+        permission_mode="bounded",
+    )
+
+    assert result["status"] == "ok"
+    assert [name for name, _ in driver.calls] == ["browser_prepare"]
+
+
+def test_isolated_prepare_unaffected_by_the_grant():
+    """The floor is scoped to existing_profile; isolated launches still work."""
+    driver = _PrepareDriver()
+    result = _route(driver).prepare(
         pid=101,
         profile_mode="isolated_new",
         allow_launch=True,
-        approval_token="tok",
+        grant_existing_profile=False,
     )
 
-    (_, args), = driver.calls
-    assert "approval_token" not in args
+    assert result["status"] == "ok"
+    assert [name for name, _ in driver.calls] == ["browser_prepare"]
 
 
-def test_dispatch_forwards_approval_token_to_backend():
+def test_backend_resolves_authorization_and_ignores_model_supplied_values(monkeypatch):
+    """pid/window_id come from the model; the grant never does."""
+    captured: Dict[str, Any] = {}
+
+    class _Route:
+        def prepare(self, **kwargs: Any) -> Dict[str, Any]:
+            captured.update(kwargs)
+            return {"status": "ok"}
+
+    backend = cb.CuaDriverBackend.__new__(cb.CuaDriverBackend)
+    backend.permission_mode = "unrestricted"
+    monkeypatch.setattr(cb, "_cua_grant_existing_profile", lambda: False)
+    monkeypatch.setattr(
+        cb.CuaDriverBackend, "_browser_route", lambda self: _Route()
+    )
+
+    backend.typed_browser_prepare(
+        pid=101,
+        window_id=202,
+        profile_mode="existing_profile",
+        # A model that tries to grant itself access must be ignored.
+        grant_existing_profile=True,
+        permission_mode="bounded",
+    )
+
+    assert captured["grant_existing_profile"] is False
+    assert captured["permission_mode"] == "unrestricted"
+
+
+# ── config grant stands in for the approval prompt ──────────────────────
+
+
+def _preauth(**cfg: Any):
+    from tools.computer_use import tool as cu_tool
+
+    return cu_tool._config_preauthorized
+
+
+def test_config_grant_preauthorizes_existing_profile_prepare(monkeypatch):
+    """The durable opt-in is the authorization; re-prompting is redundant.
+
+    It also made the documented opt-in unusable on non-interactive runs,
+    where the prompt has nobody to answer it and the call dies on approval
+    timeout rather than attaching.
+    """
+    monkeypatch.setattr(
+        cb, "_computer_use_cfg", lambda: {"grant_existing_profile": True}
+    )
+    assert _preauth()(
+        "cua_browser_prepare", {"profile_mode": "existing_profile"}
+    ) is True
+
+
+def test_no_preauthorization_without_the_grant(monkeypatch):
+    monkeypatch.setattr(cb, "_computer_use_cfg", dict)
+    assert _preauth()(
+        "cua_browser_prepare", {"profile_mode": "existing_profile"}
+    ) is False
+
+
+def test_preauthorization_scoped_to_existing_profile(monkeypatch):
+    """Isolated launches keep prompting even when the grant is on."""
+    monkeypatch.setattr(
+        cb, "_computer_use_cfg", lambda: {"grant_existing_profile": True}
+    )
+    assert _preauth()(
+        "cua_browser_prepare", {"profile_mode": "isolated_new"}
+    ) is False
+    assert _preauth()("click", {"profile_mode": "existing_profile"}) is False
+
+
+def test_preauthorization_fails_closed_on_config_error(monkeypatch):
+    def _boom():
+        raise RuntimeError("config unreadable")
+
+    monkeypatch.setattr(cb, "_computer_use_cfg", _boom)
+    assert _preauth()(
+        "cua_browser_prepare", {"profile_mode": "existing_profile"}
+    ) is False
+
+
+def test_dispatch_does_not_forward_removed_approval_token():
     from unittest.mock import Mock
 
     from tools.computer_use.tool import _dispatch
@@ -126,22 +231,25 @@ def test_dispatch_forwards_approval_token_to_backend():
             "pid": 101,
             "window_id": 202,
             "profile_mode": "existing_profile",
-            "approval_token": "tok-abc",
         },
     )
 
     kwargs = backend.typed_browser_prepare.call_args.kwargs
-    assert kwargs["approval_token"] == "tok-abc"
+    # Fork: the kwarg IS forwarded (in-band browser-approve boundary) but
+    # carries None when the caller supplied no token — existing-profile
+    # attach then fails at the driver without a valid single-use token.
+    assert kwargs["approval_token"] is None
     assert kwargs["profile_mode"] == "existing_profile"
 
 
-def test_schema_documents_approval_token_as_user_minted():
+def test_schema_exposes_approval_token():
+    """Fork: approval_token IS in the public schema — the browser-approve
+    flow (`hermes computer-use browser-approve`) mints a five-minute
+    single-use token the model passes here to attach to a browser; upstream
+    moved it out-of-band, the fork keeps the explicit in-band boundary."""
     from tools.computer_use.schema import COMPUTER_USE_SCHEMA
 
-    prop = COMPUTER_USE_SCHEMA["parameters"]["properties"]["approval_token"]
-    desc = prop["description"]
-    assert "browser-approve" in desc
-    assert "never invent" in desc.lower()
+    assert "approval_token" in COMPUTER_USE_SCHEMA["parameters"]["properties"]
 
 
 # ── bounded embedded daemon ─────────────────────────────────────────────
@@ -215,13 +323,12 @@ def test_bounded_daemon_serves_with_approved_manifest(tmp_path, monkeypatch):
     command = captured["command"]
     assert "--permission-mode" in command
     assert command[command.index("--permission-mode") + 1] == "bounded"
-    # Flag names live-verified against cua-driver 0.19.3.
-    assert "--session-policy" in command
+    assert "--capability-manifest" in command
     assert (
-        command[command.index("--session-policy") + 1]
+        command[command.index("--capability-manifest") + 1]
         == str(manifest)
     )
-    assert "--approve-session-policy" in command
+    assert "--approve-capability-manifest" in command
     assert "--dangerously-bypass-approvals" not in command
 
 
@@ -255,7 +362,7 @@ def test_unrestricted_daemon_serve_command_unchanged(monkeypatch):
 
     command = captured["command"]
     assert "--dangerously-bypass-approvals" in command
-    assert "--session-policy" not in command
+    assert "--capability-manifest" not in command
 
 
 # ── standard-mode --grant existing-profile ──────────────────────────────
@@ -378,3 +485,133 @@ def test_backend_bounded_without_manifest_fails_loudly(monkeypatch):
 def test_backend_rejects_unknown_mode():
     with pytest.raises(ValueError, match="unsupported"):
         cb.CuaDriverBackend(permission_mode="wide-open")
+
+
+# ── manifest is a ceiling, not a mode ───────────────────────────────────
+
+
+def _captured_serve_command(monkeypatch, daemon):
+    captured: Dict[str, Any] = {}
+
+    class _FakeProc:
+        stderr = None
+
+        def poll(self):
+            return None
+
+    def _fake_popen(command, **kwargs):
+        captured["command"] = list(command)
+        return _FakeProc()
+
+    def _fake_run(command, **kwargs):
+        class _Probe:
+            returncode = 0
+
+        return _Probe()
+
+    monkeypatch.setattr(cb.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(cb.subprocess, "run", _fake_run)
+    monkeypatch.setattr(cb, "_resolve_mcp_invocation", lambda cmd: (cmd, ["mcp"]))
+    daemon.start()
+    return captured["command"]
+
+
+def test_unrestricted_daemon_carries_a_v3_manifest(monkeypatch, tmp_path):
+    """An approval bypass must not silently discard a v3 ceiling.
+
+    cua-driver accepts a v3 manifest alongside any permission mode and it can
+    only narrow a profile, never widen it. Pairing it with unrestricted is
+    what bounds an approval-bypassed run to declared scope; dropping it meant
+    the most carefully configured run became the least constrained one.
+    """
+    manifest = tmp_path / "cua-capabilities.yaml"
+    manifest.write_text("version: 3\nallow:\n  tools:\n    - list_windows\n", encoding="utf-8")
+    daemon = _EmbeddedCuaDaemon(
+        "cua-driver", "unrestricted", capability_manifest=str(manifest)
+    )
+
+    command = _captured_serve_command(monkeypatch, daemon)
+
+    assert "--dangerously-bypass-approvals" in command
+    assert "--capability-manifest" in command
+    assert command[command.index("--capability-manifest") + 1] == str(manifest)
+    assert "--approve-capability-manifest" in command
+    assert command[command.index("--permission-mode") + 1] == "unrestricted"
+
+
+def test_unrestricted_daemon_does_not_forward_a_legacy_manifest(monkeypatch, tmp_path):
+    """v1/v2 manifests must declare mode: bounded, so they cannot ride along.
+
+    Forwarding one anyway aborts driver startup with "legacy capability
+    manifest mode must be bounded" — turning a working session into a hard
+    failure. Verified against cua-driver 0.20.0.
+    """
+    manifest = tmp_path / "legacy.yaml"
+    manifest.write_text(
+        "version: 1\nmode: bounded\nexpires_after: 1h\nidle_timeout: 5m\n",
+        encoding="utf-8",
+    )
+    daemon = _EmbeddedCuaDaemon(
+        "cua-driver", "unrestricted", capability_manifest=str(manifest)
+    )
+
+    command = _captured_serve_command(monkeypatch, daemon)
+
+    assert "--dangerously-bypass-approvals" in command
+    assert "--capability-manifest" not in command
+
+
+def test_bounded_forwards_a_legacy_manifest_unchanged(monkeypatch, tmp_path):
+    """bounded is exactly where legacy manifests belong; nothing changes."""
+    manifest = tmp_path / "legacy.yaml"
+    manifest.write_text(
+        "version: 1\nmode: bounded\nexpires_after: 1h\nidle_timeout: 5m\n",
+        encoding="utf-8",
+    )
+    daemon = _EmbeddedCuaDaemon(
+        "cua-driver", "bounded", capability_manifest=str(manifest)
+    )
+
+    command = _captured_serve_command(monkeypatch, daemon)
+
+    assert command[command.index("--permission-mode") + 1] == "bounded"
+    assert command[command.index("--capability-manifest") + 1] == str(manifest)
+    assert "--approve-capability-manifest" in command
+
+
+def test_unparseable_manifest_is_not_forwarded_to_unrestricted(monkeypatch, tmp_path):
+    """Fail safe: never turn a working bypassed run into a startup abort."""
+    manifest = tmp_path / "broken.yaml"
+    manifest.write_text("{{{ not yaml", encoding="utf-8")
+    daemon = _EmbeddedCuaDaemon(
+        "cua-driver", "unrestricted", capability_manifest=str(manifest)
+    )
+
+    command = _captured_serve_command(monkeypatch, daemon)
+
+    assert "--capability-manifest" not in command
+
+
+def test_unrestricted_daemon_without_a_manifest_is_unchanged(monkeypatch):
+    """No manifest configured -> nothing new on the command line."""
+    daemon = _EmbeddedCuaDaemon("cua-driver", "unrestricted")
+
+    command = _captured_serve_command(monkeypatch, daemon)
+
+    assert "--dangerously-bypass-approvals" in command
+    assert "--capability-manifest" not in command
+
+
+def test_unrestricted_daemon_rejects_a_missing_manifest_path(tmp_path):
+    """A declared-but-absent ceiling fails loudly rather than silently opening up."""
+    with pytest.raises(ValueError, match="capability manifest not found"):
+        _EmbeddedCuaDaemon(
+            "cua-driver",
+            "unrestricted",
+            capability_manifest=str(tmp_path / "does-not-exist.yaml"),
+        )
+
+
+def test_bounded_still_requires_a_manifest():
+    with pytest.raises(ValueError, match="requires computer_use.capability_manifest"):
+        _EmbeddedCuaDaemon("cua-driver", "bounded")

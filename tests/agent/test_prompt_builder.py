@@ -776,6 +776,34 @@ class TestBuildContextFilesPrompt:
 
         assert _load_agents_md(sub) == ""
 
+    # --- AGENTS.override.md personal override (port of pi#7681) ---
+
+    def test_agents_override_md_appended_after_agents_md(self, tmp_path):
+        """Fork semantics: BOTH load — the override is appended after the
+        base AGENTS.md content, giving it the final word (upstream v2
+        replaces the base file entirely; the fork keeps both so shared team
+        rules stay visible alongside personal overrides)."""
+        (tmp_path / "AGENTS.md").write_text("Use Ruff for linting.")
+        (tmp_path / "AGENTS.override.md").write_text("Use Black instead.")
+        result = build_context_files_prompt(cwd=str(tmp_path))
+        assert "Use Black instead" in result
+        assert "Ruff for linting" in result
+        assert "AGENTS.override.md" in result
+        assert result.index("Ruff for linting") < result.index("Use Black instead")
+
+    def test_agents_override_md_loads_alone(self, tmp_path):
+        (tmp_path / "AGENTS.override.md").write_text("Override-only context.")
+        result = build_context_files_prompt(cwd=str(tmp_path))
+        assert "Override-only context" in result
+        assert "Project Context" in result
+
+    def test_hermes_md_still_wins_over_agents_override(self, tmp_path):
+        (tmp_path / ".hermes.md").write_text("Hermes-first context.")
+        (tmp_path / "AGENTS.override.md").write_text("Override context.")
+        result = build_context_files_prompt(cwd=str(tmp_path))
+        assert "Hermes-first context" in result
+        assert "Override context" not in result
+
     def test_skips_agents_md_in_install_tree_on_fallback(self, monkeypatch, tmp_path):
         # A backend that FALLS BACK into the install tree (cwd=None → getcwd,
         # the desktop default) must not load that tree's contributor AGENTS.md

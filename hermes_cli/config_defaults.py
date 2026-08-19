@@ -123,6 +123,22 @@ DEFAULT_CONFIG = {
         # on flaky primaries; raise it if you prefer to tolerate longer
         # provider hiccups on a single provider.
         "api_max_retries": 3,
+        # Empty-response retry guard (NS-503).  The empty-retry loop
+        # re-sends the full conversation input at full price on every
+        # attempt; these settings stop it from re-billing *deterministic*
+        # empties (unsignaled provider refusals with zero output tokens)
+        # while failing open on any ambiguous evidence (missing usage,
+        # any generated tokens, model/provider change mid-streak).
+        "empty_response_guard": {
+            # Master switch for both guards below. False restores the
+            # legacy fixed 3-retry behaviour unconditionally.
+            "enabled": True,
+            # When the estimated input cost of a single empty attempt
+            # meets or exceeds this many USD, the retry budget for the
+            # streak drops from 3 to 1. Unknown pricing or missing usage
+            # leaves the budget untouched.
+            "cost_threshold_usd": 0.25,
+        },
         "service_tier": "",
         # Tool-use enforcement: injects system prompt guidance that tells the
         # model to actually call tools instead of describing intended actions.
@@ -163,6 +179,9 @@ DEFAULT_CONFIG = {
         # (docker/modal/ssh — they have their own probe).  Set False to
         # disable entirely.
         "environment_probe": True,
+        # Bot Mode teammate-messaging protocol section (silent unless a
+        # profile is managed by the desktop's Bot Mode).
+        "bot_mode_protocol": True,
         # Embedder-supplied environment description appended to the system
         # prompt's environment-hints block. Lets a host that wraps Hermes
         # (sandbox runner, managed platform) explain the runtime environment
@@ -1946,6 +1965,16 @@ DEFAULT_CONFIG = {
     # always goes to ~/.hermes/skills/.
     "skills": {
         "external_dirs": [],   # e.g. ["~/.agents/skills", "/shared/team-skills"]
+        # Project-local skill discovery: when a session starts inside a git
+        # checkout, ``<root>/.hermes/skills/`` and ``<root>/.agents/skills/``
+        # are sourced as the highest-precedence skill tier — but ONLY when the
+        # project root is listed in trusted_project_dirs below. Trust a repo
+        # with ``hermes skills trust`` (run from inside it). Set to false to
+        # disable discovery entirely (no scan, no untrusted-skills notice).
+        "project_discovery": True,
+        # Absolute paths of project roots whose repo-local skills may load.
+        # Managed by ``hermes skills trust`` / ``hermes skills untrust``.
+        "trusted_project_dirs": [],
         # Substitute ${HERMES_SKILL_DIR} and ${HERMES_SESSION_ID} in SKILL.md
         # content with the absolute skill directory and the active session id
         # before the agent sees it.  Lets skill authors reference bundled
@@ -1983,6 +2012,14 @@ DEFAULT_CONFIG = {
         #                     never crammed into a chat bubble), apply with
         #                     /skills approve <id> or drop with /skills reject <id>.
         "write_approval": False,
+        # Per-mutation audit ledger (tracker #79686 P3). Every skill mutation
+        # — curator, agent, or user — appends one JSONL entry to
+        # ~/.hermes/skills/.curator_ledger.jsonl with before/after file
+        # hashes; file contents are stored content-addressed (deduped) under
+        # ~/.hermes/.curator_backups/blobs/. Enables `hermes curator ledger`
+        # and single-mutation `hermes curator rollback <entry-id>`.
+        # Telemetry, never a gate: ledger failures cannot block a mutation.
+        "ledger": True,
     },
 
     # Curator — background skill maintenance.
@@ -2025,6 +2062,11 @@ DEFAULT_CONFIG = {
         # genuine non-use (never a mass-prune on the first run). Set to false
         # to keep all bundled built-ins permanently.
         "prune_builtins": True,
+        # TTL purge of skills/.archive/. 0 (default) = never purge — archived
+        # skills are kept forever. When > 0, `hermes curator purge` deletes
+        # archived skills older than this many days (explicit command only,
+        # never automatic; every purge is recorded in the audit ledger).
+        "archive_ttl_days": 0,
         # Pre-run backup: before every real curator pass (dry-run is
         # skipped), snapshot ~/.hermes/skills/ into
         # ~/.hermes/skills/.curator_backups/<utc-iso>/skills.tar.gz so the
@@ -2519,6 +2561,19 @@ DEFAULT_CONFIG = {
         # assignee to any installed profile. When unset, falls back to the
         # default profile. A task never ends up with assignee=None.
         "default_assignee": "",
+        # Global concurrency cap (#33488): when set to a positive int, the
+        # HOST never has more than N tasks in 'running' at once — counted
+        # across every active board and across both the ready and review
+        # dispatch lanes (workers are OS processes sharing one machine's
+        # memory, so the cap bounds the machine, not each board; OOF-30).
+        # Unset (None) means
+        # "derive from system memory" (OOF-30/OOF-77): the dispatcher caps
+        # concurrency at roughly MemTotal / 512 MiB, clamped to [2, 8] —
+        # e.g. 2 workers on a 1 GiB VM. On hosts where total memory can't
+        # be read (macOS/Windows), unset falls back to no cap. Set an
+        # explicit value to override the derived default in either
+        # direction.
+        "max_in_progress": None,
         # Per-profile concurrency cap (#21582). When set to a positive int,
         # no single profile can have more than N workers running at once,
         # even if the global max_in_progress / max_spawn caps would allow
@@ -3347,21 +3402,23 @@ DEFAULT_CONFIG = {
         #   True  = always disable the overlay
         #   False = always enable the overlay
         "no_overlay": None,
-        # cua-driver permission mode for this Hermes install.
+        # cua-driver permission mode for each Hermes computer-use runtime.
         #   standard (default) — cua-driver's own approval boundary. Protected
         #     operations (e.g. attaching to an existing signed-in browser
         #     profile) fail closed unless grant_existing_profile is enabled
         #     below.
         #   bounded — repeatable automation under a user-reviewed session
-        #     policy manifest (set capability_manifest below). No runtime
+        #     capability manifest (set capability_manifest below). No runtime
         #     prompts; anything outside the manifest fails closed inside
         #     cua-driver.
         # `unrestricted` is intentionally NOT accepted here: it stays bound to
         # the explicit per-session YOLO toggle so a config line can never
         # silently bypass approvals.
         "permission_mode": "standard",
-        # Absolute or ~ path to the reviewed cua-driver session-policy
-        # manifest YAML used when permission_mode is "bounded". See
+        # Absolute or ~ path to the reviewed cua-driver capability
+        # manifest used when permission_mode is "bounded". Hermes passes the
+        # canonical --capability-manifest and --approve-capability-manifest
+        # flags when it launches the runtime. See
         # https://cua.ai/docs/reference/cua-driver/permission-modes
         "capability_manifest": "",
         # Pre-authorize existing-profile browser attachment in standard mode
@@ -3518,7 +3575,7 @@ DEFAULT_CONFIG = {
     },
 
     # Config schema version - bump this when adding new required fields
-    "_config_version": 37,
+    "_config_version": 38,
 }
 
 # Optional environment variables that enhance functionality
@@ -3826,6 +3883,14 @@ OPTIONAL_ENV_VARS = {
         "description": "OpenCode Zen API key (pay-as-you-go access to curated models)",
         "prompt": "OpenCode Zen API key",
         "url": "https://opencode.ai/auth",
+        "password": True,
+        "category": "provider",
+        "advanced": True,
+    },
+    "COMMANDCODE_API_KEY": {
+        "description": "CommandCode API key (GOAT/Pro/Max/Provider plans — 30+ models via one key)",
+        "prompt": "CommandCode API key",
+        "url": "https://commandcode.ai/studio/",
         "password": True,
         "category": "provider",
         "advanced": True,

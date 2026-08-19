@@ -669,8 +669,16 @@ def _reload_process_scan_modules() -> None:
                 )
 
 
-def _finish_dashboard_update_cleanup(node_failures: list[str]) -> None:
-    """Refresh managed dashboards or stop stale manual ones after an update."""
+def _finish_dashboard_update_cleanup(
+    node_failures: list[str], already_restarted_units: "set[str] | None" = None
+) -> None:
+    """Refresh managed dashboards or stop stale manual ones after an update.
+
+    *already_restarted_units* forwards the systemd unit names (no
+    ``.service`` suffix) that the fleet-restart loop already restarted
+    directly, so a Serve-only install's freshly restarted process isn't
+    found and restarted a second time here (review on #83595).
+    """
     if node_failures:
         print()
         print("  ℹ Leaving running dashboard process(es) untouched because the")
@@ -681,7 +689,9 @@ def _finish_dashboard_update_cleanup(node_failures: list[str]) -> None:
     # both modules reflect the freshly-updated source before touching them.
     _reload_process_scan_modules()
 
-    stop_result = _m()._kill_stale_dashboard_processes(restart_managed=True)
+    stop_result = _m()._kill_stale_dashboard_processes(
+        restart_managed=True, already_restarted_units=already_restarted_units
+    )
     if not stop_result.get("unrecovered"):
         return
 
@@ -828,6 +838,41 @@ def _print_update_completion(message: str) -> None:
         print(f"=== hermes-update completed {action_id} ===")
 
 
+def _read_project_version() -> str | None:
+    """Read the ``version`` field from the checkout's pyproject.toml.
+
+    Reads the on-disk file (not importlib.metadata) because after a git
+    pull the installed distribution metadata still describes the OLD
+    version; the file is the only source that reflects what was just
+    pulled. Returns None on any failure — version reporting is cosmetic
+    and must never break an update.
+    """
+    try:
+        import tomllib
+
+        with open(_m().PROJECT_ROOT / "pyproject.toml", "rb") as fh:  # windows-footgun: ok — binary mode, tomllib requires bytes
+            version = tomllib.load(fh).get("project", {}).get("version")
+        return str(version) if version else None
+    except Exception:
+        return None
+
+
+def _update_complete_message(pre_version: str | None) -> str:
+    """Completion line with the version transition when it is known.
+
+    Ported from PrimeIntellect-ai/prime-agent#630: after a successful
+    self-update, show both versions (``v0.19.4 → v0.20.0``) so the user
+    can see what they actually got. Falls back to the plain message when
+    either side is unknown or the version did not change (e.g. several
+    commits landed within one release).
+    """
+    post_version = _read_project_version()
+    if pre_version and post_version and pre_version != post_version:
+        return f"✓ Update complete! (v{pre_version} → v{post_version})"
+    if post_version:
+        return f"✓ Update complete! (v{post_version})"
+    return "✓ Update complete!"
+
 def _update_via_zip(args, *, had_desktop_app_before_update: bool = False):
     """Update Hermes Agent by downloading a ZIP archive.
 
@@ -839,6 +884,10 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False):
     import tempfile
     import zipfile
     from urllib.request import urlretrieve
+
+    # Snapshot the pre-update version before files are replaced so the
+    # completion line can report the transition (prime-agent#630 port).
+    pre_update_version = _read_project_version()
 
     # The ZIP fallback exists for Windows git-file-I/O breakage. It pulls a
     # static archive from GitHub, which is fine for the default "main"
@@ -1195,7 +1244,7 @@ def _update_via_zip(args, *, had_desktop_app_before_update: bool = False):
         print("  Code and Python deps are updated, but the dashboard/TUI may")
         print("  be in a mixed state until the Node deps are rebuilt.")
     else:
-        _print_update_completion("✓ Update complete!")
+        _print_update_completion(_update_complete_message(pre_update_version))
     try:
         _print_curator_first_run_notice()
     except Exception as e:
@@ -3891,7 +3940,8 @@ def _for_each_systemd_gateway_unit(
     process_unit,
     on_unit_timeout,
 ) -> None:
-    """Process each ``hermes-gateway*.service`` from ``systemctl list-units``.
+    """Process each ``hermes-gateway*.service``/``hermes-serve*.service`` unit
+    from ``systemctl list-units``.
 
     ``subprocess.TimeoutExpired`` raised by ``process_unit`` is isolated to
     that unit via ``on_unit_timeout`` so one wedged systemctl call cannot
@@ -3905,14 +3955,40 @@ def _for_each_systemd_gateway_unit(
         if not unit.endswith(".service"):
             continue
         # list-units is already pattern-filtered, but keep the name gate so a
-        # stray non-gateway line cannot enter the restart path.
-        if not unit.startswith("hermes-gateway"):
+        # stray non-gateway/serve line cannot enter the restart path.
+        # ``unit.startswith("hermes-serve")`` alone would also accept the
+        # unrelated ``hermes-server.service`` — require the exact base unit
+        # or the hyphenated profile family instead (review on #83595).
+        if not (
+            unit == "hermes-gateway.service"
+            or unit.startswith("hermes-gateway-")
+            or unit == "hermes-serve.service"
+            or unit.startswith("hermes-serve-")
+        ):
             continue
         svc_name = unit.removesuffix(".service")
         try:
             process_unit(svc_name)
         except subprocess.TimeoutExpired as exc:
             on_unit_timeout(svc_name, exc)
+
+def _service_unit_supports_graceful_sigusr1_restart(svc_name: str) -> bool:
+    """Whether *svc_name* wires SIGUSR1 to a graceful drain-then-restart.
+
+    Only ``hermes-gateway*`` units run ``gateway/run.py``, which installs the
+    SIGUSR1 handler. ``hermes-serve*`` units (#83438) don't, so sending them
+    SIGUSR1 would just invoke the default terminate action and burn the full
+    drain budget waiting for an exit that was never graceful — go straight to
+    the blunt ``systemctl restart`` path for those instead.
+
+    Uses the same strict exact/hyphenated shape as the unit-name gate in
+    ``_for_each_systemd_gateway_unit`` so a hypothetical near-prefix unit
+    (``hermes-gateway-helper`` is fine — profile units are
+    ``hermes-gateway-<profile>`` — but ``hermes-gatewayd``-style names are
+    not) can't be sent a SIGUSR1 it doesn't handle.
+    """
+    return svc_name == "hermes-gateway" or svc_name.startswith("hermes-gateway-")
+
 
 def _warn_incomplete_gateway_fleet_restart(failed_units: list) -> None:
     """Print an explicit incomplete-update warning for unrestarted units."""
@@ -3927,7 +4003,7 @@ def _warn_incomplete_gateway_fleet_restart(failed_units: list) -> None:
         seen.add(name)
         ordered.append(name)
     print()
-    print("⚠ Update incomplete — some gateway units were not restarted:")
+    print("⚠ Update incomplete — some units were not restarted:")
     for name in ordered:
         print(f"    - {name}")
     print("  Skipped units may still be running pre-update code (mixed")
@@ -4393,6 +4469,9 @@ def _cmd_update_impl(args, gateway_mode: bool):
     active_lazy_features = _m()._capture_active_lazy_features()
     active_tool_dependencies = _m()._capture_active_tool_dependencies()
 
+    # Snapshot the pre-update version before any code is pulled so the
+    # completion line can report the transition (prime-agent#630 port).
+    pre_update_version = _read_project_version()
     # In gateway mode, use file-based IPC for prompts instead of stdin
     gw_input_fn = (
         (lambda prompt, default="": _gateway_prompt(prompt, default))
@@ -5593,7 +5672,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             print("  Code and Python deps are updated, but the dashboard/TUI may")
             print("  be in a mixed state until the Node deps are rebuilt.")
         else:
-            _print_update_completion("✓ Update complete!")
+            _print_update_completion(_update_complete_message(pre_update_version))
 
         # Search-index optimization notice (v23). Existing installs keep their
         # working search index untouched on update; the compact v23 layout —
@@ -5714,6 +5793,12 @@ def _cmd_update_impl(args, gateway_mode: bool):
         # discovered gateway lets the handler fail closed on an empty survivor
         # probe rather than reporting a clean update (#78574).
         _pre_restart_gateway_pids: list | None = []
+        # Declared outside the restart try/except below (and never reset
+        # to None) so it's always safe to read afterwards even if that
+        # block raises before reaching its own restart bookkeeping —
+        # needed to forward already-restarted units to
+        # ``_finish_dashboard_update_cleanup`` (review on #83595).
+        restarted_services: list = []
 
         # Auto-restart ALL gateways after update.
         # The code update (git pull) is shared across all profiles, so every
@@ -5887,7 +5972,6 @@ def _cmd_update_impl(args, gateway_mode: bool):
             except Exception:
                 _drain_budget = 45.0
 
-            restarted_services = []
             failed_or_stale_units = []
             killed_pids = set()
             relaunched_profiles = []
@@ -5905,7 +5989,8 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 _pre_restart_gateway_pids = None
 
             # --- Systemd services (Linux) ---
-            # Discover all hermes-gateway* units (default + profiles)
+            # Discover all hermes-gateway* units (default + profiles) plus
+            # hermes-serve* units (the Desktop app's backend, #83438).
             if supports_systemd_services():
                 try:
                     _ensure_user_systemd_env()
@@ -5922,6 +6007,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                             + [
                                 "list-units",
                                 "hermes-gateway*",
+                                "hermes-serve*",
                                 "--plain",
                                 "--no-legend",
                                 "--no-pager",
@@ -5968,27 +6054,33 @@ def _cmd_update_impl(args, gateway_mode: bool):
                         # The gateway's SIGUSR1 handler calls
                         # request_restart(via_service=True) → drain →
                         # exit; systemd's Restart=always respawns the unit.
+                        # hermes-serve has no such handler (it isn't
+                        # gateway/run.py), so skip straight to the blunt
+                        # restart below rather than sending it an unhandled
+                        # signal and waiting out the drain budget for
+                        # nothing.
                         _main_pid = 0
-                        try:
-                            _show = subprocess.run(
-                                scope_cmd
-                                + [
-                                    "show",
-                                    svc_name,
-                                    "--property=MainPID",
-                                    "--value",
-                                ],
-                                capture_output=True,
-                                text=True, encoding="utf-8", errors="replace",
-                                timeout=5,
-                            )
-                            _main_pid = int((_show.stdout or "").strip() or 0)
-                        except (
-                            ValueError,
-                            subprocess.TimeoutExpired,
-                            FileNotFoundError,
-                        ):
-                            _main_pid = 0
+                        if _service_unit_supports_graceful_sigusr1_restart(svc_name):
+                            try:
+                                _show = subprocess.run(
+                                    scope_cmd
+                                    + [
+                                        "show",
+                                        svc_name,
+                                        "--property=MainPID",
+                                        "--value",
+                                    ],
+                                    capture_output=True,
+                                    text=True, encoding="utf-8", errors="replace",
+                                    timeout=5,
+                                )
+                                _main_pid = int((_show.stdout or "").strip() or 0)
+                            except (
+                                ValueError,
+                                subprocess.TimeoutExpired,
+                                FileNotFoundError,
+                            ):
+                                _main_pid = 0
 
                         _graceful_ok = False
                         if _main_pid > 0:
@@ -6493,7 +6585,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
         # systemd treat it as a clean stop, leaving the Cloudflare origin dead.
         # Preserve the safety rule above: a failed Node refresh leaves the
         # currently running dashboard untouched.
-        _finish_dashboard_update_cleanup(node_failures)
+        #
+        # Forward the systemd units restarted above (includes hermes-serve*,
+        # #83438) so a Serve-only install's freshly restarted process isn't
+        # found and restarted again below (review on #83595).
+        _finish_dashboard_update_cleanup(
+            node_failures, already_restarted_units=set(restarted_services)
+        )
 
         print()
         print("Tip: You can now select a provider and model:")

@@ -149,8 +149,6 @@ def _neuter_agent_prewarm_timer(request, monkeypatch):
     yield
 
 
-
-
 @pytest.fixture(autouse=True)
 def _reap_leaked_notification_pollers():
     """Stop and join notification pollers leaked by each test.
@@ -694,8 +692,6 @@ def _write_profile_cfg(home: Path, cwd: str | None) -> Path:
     cfg = {"terminal": {"cwd": cwd}} if cwd is not None else {}
     (home / "config.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
     return home
-
-
 
 
 def test_profile_configured_cwd_reads_target_profile(tmp_path):
@@ -9516,7 +9512,6 @@ def test_session_redirect_rpc_drops_queued_duplicate_of_inflight_user():
     }
     assert not session.get("queued_prompts")
 
-
 def test_session_redirect_build_window_scrubs_stale_p_when_queuing_q():
     """#84417: build-window queue of Q must not leave P ahead of Q."""
     original = "live original P"
@@ -9569,12 +9564,14 @@ def test_inflight_snapshot_carries_arrival_order_offsets():
     assert snapshot["correction_offsets"] == [len("Moving."), len("Moving.Still.")]
 
 
+
 def test_inflight_snapshot_omits_offsets_when_not_fully_recorded():
     """A pre-upgrade in-memory turn may carry corrections without offsets.
 
     The parallel list is only sent when every correction has one, so clients
     can trust the pairing and older snapshots degrade to the no-offset path.
     """
+
     session = {}
     server._start_inflight_turn(session, "prompt")
     turn = session["inflight_turn"]

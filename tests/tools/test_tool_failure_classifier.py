@@ -116,6 +116,20 @@ class TestPermissionDenied:
         assert result.category == tfc.ToolFailureCategory.permission_denied
         assert result.should_retry is False
 
+    def test_hardline_blocked_is_permission_denied_non_retryable(self):
+        """#2873 part 2 — the unconditional hardline block was previously
+        classified as a generic persistent_error, which left retry machinery
+        free to attempt command variants.  It must be classified as
+        ``permission_denied`` with ``should_retry=False`` so the agent stops
+        immediately."""
+        error = (
+            "BLOCKED (hardline): rm -rf / hits the unconditional blocklist. "
+            "Do NOT retry this command or any variant of it — change approach entirely."
+        )
+        result = tfc.classify_tool_failure("terminal", error)
+        assert result.category == tfc.ToolFailureCategory.permission_denied
+        assert result.should_retry is False
+
 
 class TestRateLimited:
     @pytest.mark.parametrize(

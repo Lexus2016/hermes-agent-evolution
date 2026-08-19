@@ -583,7 +583,6 @@ def _prompt_cache_scope_for_agent(agent) -> "str | None":
     Fork union: an explicit ``agent.cache_key`` (the stable per-job scope
     recurring callers like cron pass at construction) IS the logical scope by
     definition — honor it before the lineage-based resolution below.
-
     Guarded-import wrapper over the never-raising
     ``agent.prompt_cache_scope.resolve_prompt_cache_scope_safe`` — the
     transports treat a None/empty value as "fall back to the physical

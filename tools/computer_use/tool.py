@@ -196,6 +196,47 @@ _session_auto_approve: Dict[str, bool] = {}
 _always_allow: Dict[str, set] = {}
 
 
+# Sessions already told that their approval bypass widened the driver mode.
+# The resolver runs per dispatch, so without this the warning would repeat on
+# every single tool call.
+_escalation_warned: set = set()
+
+
+def _warn_bypass_escalation(session_id: str) -> None:
+    """Say out loud that an approval bypass just widened the driver's mode.
+
+    ``-z`` / ``--yolo`` read as "don't prompt me", but they also swap the
+    driver onto a private ``unrestricted`` daemon, dropping the ceiling the
+    configured mode would have applied. That is deliberate (see
+    ``_cua_permission_mode``) and ``unrestricted`` is reachable no other way
+    — it is intentionally not a config value, so a stale config line cannot
+    silently bypass approvals. But it is easy to trigger without meaning to:
+    a script gets ``-z`` for quiet output and loses its limits as a side
+    effect. So the widening is at least stated, once per session.
+    """
+    key = str(session_id or "")
+    with _approval_lock:
+        if key in _escalation_warned:
+            return
+        _escalation_warned.add(key)
+    try:
+        from tools.computer_use.cua_backend import _cua_configured_permission_mode
+
+        configured = _cua_configured_permission_mode()
+    except Exception:
+        configured = "standard"
+    logger.warning(
+        "computer_use: approval bypass (--yolo / -z) escalated the cua-driver "
+        "permission mode from the configured '%s' to 'unrestricted' for this "
+        "session. Runtime approval prompts are disabled and the driver's "
+        "residual ceilings no longer apply. Drop the bypass flag to keep '%s', "
+        "or declare a version-3 computer_use.capability_manifest to keep a "
+        "ceiling on bypassed runs.",
+        configured,
+        configured,
+    )
+
+
 def _cua_permission_mode(session_id: str) -> str:
     """Map Hermes's explicit approval bypass onto Cua's immutable mode.
 
@@ -216,9 +257,11 @@ def _cua_permission_mode(session_id: str) -> str:
         )
 
         if is_approval_bypass_active_for_session(session_id):
+            _warn_bypass_escalation(session_id)
             return "unrestricted"
         current_key = get_current_session_key(default="")
         if current_key and is_approval_bypass_active_for_session(current_key):
+            _warn_bypass_escalation(session_id)
             return "unrestricted"
     except Exception:
         # Approval state must fail closed if it cannot be resolved.
@@ -232,6 +275,32 @@ def _cua_permission_mode(session_id: str) -> str:
         return _cua_configured_permission_mode()
     except Exception:
         return "standard"
+
+
+def _config_preauthorized(action: str, args: Dict[str, Any]) -> bool:
+    """True when config already carries the authorization for this action.
+
+    ``computer_use.grant_existing_profile`` is a durable, file-backed opt-in
+    that the model can never set. When it is on, an extra runtime prompt for
+    the existing-profile prepare asks the user to re-authorize what they
+    already authorized — and it makes the documented opt-in unusable on any
+    non-interactive run, where the prompt has nobody to answer it and the
+    call dies on approval timeout instead of attaching.
+
+    Scope is deliberately narrow: only the existing-profile prepare, only
+    when the grant is present. Isolated-profile launches still prompt, and
+    any resolution failure falls closed to prompting.
+    """
+    if action != "cua_browser_prepare":
+        return False
+    if args.get("profile_mode") != "existing_profile":
+        return False
+    try:
+        from tools.computer_use.cua_backend import _cua_grant_existing_profile
+
+        return _cua_grant_existing_profile() is True
+    except Exception:
+        return False
 
 
 def _get_backend(session_id: str = "") -> ComputerUseBackend:
@@ -386,6 +455,7 @@ def _shutdown_backend_atexit() -> None:
     with _approval_lock:
         _session_auto_approve.clear()
         _always_allow.clear()
+        _escalation_warned.clear()
 
     for backend, call_lock in unique.values():
         try:
@@ -512,8 +582,9 @@ def handle_computer_use(args: Dict[str, Any], **kwargs) -> Any:
             "code": "bring_to_front_requires_foreground",
         })
 
-    # Approval gate (destructive actions only).
-    if action in _DESTRUCTIVE_ACTIONS:
+    # Approval gate (destructive actions only). A durable config grant is
+    # already the user's authorization, so it stands in for the prompt.
+    if action in _DESTRUCTIVE_ACTIONS and not _config_preauthorized(action, args):
         err = _request_approval(action, args, session_id)
         if err is not None:
             return err
@@ -673,10 +744,11 @@ def _dispatch(backend: ComputerUseBackend, action: str, args: Dict[str, Any]) ->
             ("query", "query"),
             ("scope_ref", "scope_ref"),
             ("continuation", "continuation"),
+            ("include_screenshot", "include_screenshot"),
         ):
             if args.get(public) is not None:
                 state_args[internal] = args[public]
-        return json.dumps(backend.typed_browser_state(**state_args))
+        return _browser_state_response(backend.typed_browser_state(**state_args))
 
     if action == "cua_browser_prepare":
         return json.dumps(backend.typed_browser_prepare(
@@ -685,6 +757,9 @@ def _dispatch(backend: ComputerUseBackend, action: str, args: Dict[str, Any]) ->
             profile_mode=args.get("profile_mode", "isolated_new"),
             profile_name=args.get("profile_name"),
             allow_launch=bool(args.get("allow_launch")),
+            # Fork: browser-approve in-band boundary — the five-minute
+            # single-use token authorizing ONE attach, esp. to an existing
+            # signed-in profile.
             approval_token=args.get("approval_token"),
         ))
 
@@ -703,7 +778,7 @@ def _dispatch(backend: ComputerUseBackend, action: str, args: Dict[str, Any]) ->
         allowed_fields = {
             "browser_navigate": ("url",),
             "browser_click": ("ref", "input_route", "x", "y"),
-            "browser_type": ("ref", "text"),
+            "browser_type": ("ref", "text", "replace"),
             "browser_pointer": (
                 "ref", "destination_ref", "input_route", "x", "y",
                 "to_x", "to_y", "delta_x", "delta_y",
@@ -871,6 +946,41 @@ def _dispatch(backend: ComputerUseBackend, action: str, args: Dict[str, Any]) ->
 # ---------------------------------------------------------------------------
 # Response shaping
 # ---------------------------------------------------------------------------
+
+def _browser_state_response(payload: Dict[str, Any]) -> Any:
+    """Return browser state as JSON, preserving requested MCP image parts."""
+    state = dict(payload)
+    raw_images = state.pop("_mcp_images", None)
+    if not isinstance(raw_images, list) or not raw_images:
+        return json.dumps(state)
+
+    text_summary = json.dumps(state)
+    content: List[Dict[str, Any]] = [
+        {"type": "text", "text": text_summary},
+    ]
+    image_count = 0
+    for image in raw_images:
+        if not isinstance(image, dict):
+            continue
+        data = image.get("data")
+        if not isinstance(data, str) or not data:
+            continue
+        mime_type = image.get("mime_type")
+        if not isinstance(mime_type, str) or not mime_type.startswith("image/"):
+            mime_type = "image/jpeg" if data.startswith("/9j/") else "image/png"
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime_type};base64,{data}"},
+        })
+        image_count += 1
+    if image_count == 0:
+        return text_summary
+    return {
+        "_multimodal": True,
+        "content": content,
+        "text_summary": text_summary,
+        "meta": {"action": "cua_browser_state", "images": image_count},
+    }
 
 def _classify_action_result(res: ActionResult) -> Dict[str, Any]:
     """Choose the next ladder step from semantic evidence, in precedence order.

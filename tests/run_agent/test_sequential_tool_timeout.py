@@ -176,7 +176,6 @@ def test_sequential_tool_timeout_suppresses_late_terminal_event(tmp_path, monkey
     monkeypatch.setattr(
         "agent.tool_arg_contract.tool_arg_contract_enabled", lambda: False
     )
-
     agent = _make_agent(tmp_path)
     release_first = threading.Event()
     first_returned = threading.Event()

@@ -14,6 +14,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from introspection_extract import build_digest, scan_session  # noqa: E402
@@ -42,11 +44,18 @@ def _tool(cid, content):
 
 
 # --- realistic tool-result envelopes (#347) ----------------------------------
-def _term(output="", *, exit_code=0, error=None):
-    """Terminal / code-exec envelope: failure is signalled by exit_code != 0."""
-    return json.dumps(
-        {"output": output, "exit_code": exit_code, "error": error}, ensure_ascii=False
-    )
+def _term(output="", *, exit_code=0, error=None, exit_code_meaning=None):
+    """Terminal / code-exec envelope: failure is signalled by exit_code != 0.
+
+    ``exit_code_meaning`` carries the terminal tool's informational note for
+    expected non-zero exits (grep=1 "No matches found (not an error)"). When
+    present and phrased as informational, ``_tool_result_failed`` must NOT
+    count the result as a failure (#2873 part 3).
+    """
+    envelope = {"output": output, "exit_code": exit_code, "error": error}
+    if exit_code_meaning is not None:
+        envelope["exit_code_meaning"] = exit_code_meaning
+    return json.dumps(envelope, ensure_ascii=False)
 
 
 def _ok(**fields):
@@ -190,6 +199,75 @@ class TestScanSession:
         # names — never the raw content/error text.
         assert s["tool_failures"] == {"terminal": 1}
         assert secret not in json.dumps(s)
+
+
+class TestInformationalExitCodeMeaning:
+    """#2873 part 3 — a non-zero exit_code that the terminal tool already
+    annotated as informational (via ``exit_code_meaning``) must NOT be counted
+    as a tool failure.  grep/diff/test return 1 for "no matches"/"files
+    differ"/"condition false" — expected, not a failure.  Before this fix,
+    ``_tool_result_failed`` counted every exit_code != 0 as a failure.
+    A bare non-zero exit (no informational note) and a curl timeout note
+    (no "not an error"/"expected" markers) still count as failures.
+    """
+
+    @pytest.mark.parametrize(
+        "meaning",
+        [
+            "No matches found (not an error)",
+            "Files differ (expected, not an error)",
+            "Condition evaluated to false (expected, not an error)",
+        ],
+    )
+    def test_informational_exit_code_meaning_not_a_failure(self, tmp_path, meaning):
+        p = _session(
+            tmp_path,
+            "info_ok",
+            [
+                _asst("terminal", "c1"),
+                _tool("c1", _term("", exit_code=1, exit_code_meaning=meaning)),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures"] == {}
+        assert s["tool_failures_by_reason"] == {}
+
+    def test_bare_non_zero_without_meaning_still_failure(self, tmp_path):
+        """A non-zero exit with no informational note is still a failure."""
+        p = _session(
+            tmp_path,
+            "no_meaning",
+            [
+                _asst("terminal", "c1"),
+                _tool("c1", _term("something went wrong", exit_code=2)),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures"] == {"terminal": 1}
+        assert s["tool_failures_by_reason"] == {"terminal": {"non-zero-exit": 1}}
+
+    def test_curl_timeout_meaning_still_failure(self, tmp_path):
+        """curl exit 28 'Operation timed out' lacks the informational markers
+        — it is still a real failure, not suppressed."""
+        p = _session(
+            tmp_path,
+            "curl_timeout",
+            [
+                _asst("terminal", "c1"),
+                _tool(
+                    "c1",
+                    _term(
+                        "",
+                        exit_code=28,
+                        error="Operation timed out",
+                        exit_code_meaning="Operation timed out",
+                    ),
+                ),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures"] == {"terminal": 1}
+        assert s["tool_failures_by_reason"] == {"terminal": {"timeout": 1}}
 
 
 class TestFailureReasonClassification:

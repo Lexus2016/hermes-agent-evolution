@@ -38,7 +38,6 @@ from tools.delegate_tool import (
 )
 import types
 from tools.delegate_tool import _load_config
-
 from hermes_state import SessionDB
 
 
@@ -694,7 +693,6 @@ class TestDelegateTask(unittest.TestCase):
         self.assertTrue(callable(mock_child.thinking_callback))
         mock_child.thinking_callback("deliberating...")
         parent.tool_progress_callback.assert_not_called()
-
     def test_child_dedicated_db_follows_parents_db_path(self):
         """Per-profile parents: the child's dedicated handle must target the
         parent's database FILE, not the launch profile's default state.db.
@@ -3621,6 +3619,56 @@ class TestFallbackModelInheritance(unittest.TestCase):
 
         _, kwargs = MockAgent.call_args
         self.assertIsNone(kwargs["fallback_model"])
+
+    def test_pinned_provider_disables_parent_fallback_chain(self):
+        """An explicit delegation.provider pin must NOT inherit the parent
+        fallback chain — a mid-run failure on the pin would otherwise silently
+        reroute the quiet-mode child onto parent fallback models (#80450)."""
+        parent = _make_mock_parent(depth=0)
+        parent._fallback_chain = [
+            {"provider": "openrouter", "model": "gpt-4o-mini", "api_key": "sk-or-x"}
+        ]
+
+        with patch("run_agent.AIAgent") as MockAgent:
+            MockAgent.return_value = MagicMock()
+            _build_child_agent(
+                task_index=0,
+                goal="test pinned provider",
+                context=None,
+                toolsets=None,
+                model="minimax/m2",
+                max_iterations=10,
+                parent_agent=parent,
+                task_count=1,
+                override_provider="minimax",
+                override_base_url="https://api.minimax.example/v1",
+                override_api_key="sk-mm-x",
+            )
+
+        _, kwargs = MockAgent.call_args
+        self.assertIsNone(kwargs["fallback_model"])
+
+    def test_resolve_credentials_rejects_missing_pinned_command(self):
+        """_resolve_delegation_credentials refuses a provider whose pinned
+        command is not installed (#80450)."""
+        cfg = {"provider": "acp-provider", "model": "some-model"}
+        parent = _make_mock_parent(depth=0)
+        runtime = {
+            "api_key": "sk-x",
+            "base_url": "https://api.example/v1",
+            "api_mode": "chat_completions",
+            "provider": "acp-provider",
+            "command": "missing-acp-binary",
+            "args": [],
+        }
+        with patch(
+            "hermes_cli.runtime_provider.resolve_runtime_provider",
+            return_value=runtime,
+        ):
+            with patch("shutil.which", return_value=None):
+                with self.assertRaises(ValueError) as ctx:
+                    _resolve_delegation_credentials(cfg, parent)
+        self.assertIn("missing-acp-binary", str(ctx.exception))
 
 
 if __name__ == "__main__":

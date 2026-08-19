@@ -818,6 +818,74 @@ def _migrate_to_37(results: Dict[str, Any], quiet: bool) -> None:
 #: Registry of (target_version, migration_fn), strictly ascending. The driver
 #: applies every entry whose target version is greater than the on-disk
 #: observe earlier steps' writes via read_raw_config() (filesystem state).
+def _migrate_to_38(results: Dict[str, Any], quiet: bool) -> None:
+    # ── Version 37 → 38: rewrite legacy toolset names in tools.<platform> ──
+    # The toolset registry renamed the old generic names to per-platform
+    # `hermes-*` toolsets (messaging → hermes-telegram/hermes-cli, etc.).
+    # Existing configs still referencing the legacy names degrade silently:
+    # the platform toolset resolver drops the unknown entry and logs a
+    # warning at startup ("references unknown toolset"). Rewrite each
+    # legacy entry to the platform's own toolset when one exists
+    # (`messaging` under `telegram` → `hermes-telegram`), drop unknown
+    # per-platform spellings (`hermes-google_chat`, `hermes-teams` — those
+    # platforms ship no dedicated toolset), and keep everything valid
+    # untouched. Idempotent: a second run finds nothing to rewrite.
+    _c = _cfg()
+    read_raw_config = _c.read_raw_config
+    _persist_migration = _c._persist_migration
+
+    try:
+        from toolsets import TOOLSETS
+    except Exception:
+        return
+
+    config = read_raw_config()
+    raw_tools = config.get("tools")
+    if not isinstance(raw_tools, dict):
+        return
+
+    def _rewrite(names, platform):
+        if not isinstance(names, list):
+            return None
+        changed = []
+        for name in names:
+            if not isinstance(name, str):
+                changed.append(name)
+                continue
+            if name in TOOLSETS:
+                changed.append(name)
+                continue
+            suggestion = f"hermes-{platform}"
+            if name == "messaging" and suggestion in TOOLSETS:
+                changed.append(suggestion)
+                continue
+            # Unknown and unresolvable — drop (the resolver ignored it
+            # anyway; keeping it just re-fires the startup warning).
+            continue
+        return changed if changed != list(names) else None
+
+    any_change = False
+    for platform, block in raw_tools.items():
+        if not isinstance(platform, str) or not isinstance(block, dict):
+            continue
+        for key in ("enabled", "disabled"):
+            rewritten = _rewrite(block.get(key), platform)
+            if rewritten is not None:
+                block[key] = rewritten
+                any_change = True
+                results["config_added"].append(
+                    f"tools.{platform}.{key}: legacy toolset names rewritten"
+                )
+    if any_change:
+        _persist_migration(config)
+        if not quiet:
+            print(
+                "  ✓ Rewrote legacy toolset names (messaging → hermes-*) in "
+                "tools.<platform> lists — platform toolset picks that silently "
+                "degraded after the rename now resolve again."
+            )
+
+
 MIGRATIONS: Tuple[Tuple[int, Callable[[Dict[str, Any], bool], None]], ...] = (
     # v12 is the support floor: configs already AT v12 (or newer) still get
     # every remaining step below. Only configs BELOW 12 are refused by the
@@ -839,6 +907,7 @@ MIGRATIONS: Tuple[Tuple[int, Callable[[Dict[str, Any], bool], None]], ...] = (
     (35, _migrate_to_35),
     (36, _migrate_to_36),
     (37, _migrate_to_37),
+    (38, _migrate_to_38),
 )
 
 

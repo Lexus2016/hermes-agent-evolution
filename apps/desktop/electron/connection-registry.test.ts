@@ -28,6 +28,7 @@ import {
   removeConnection,
   resolveRegistryLocalRoute,
   setPrimaryConnection,
+  shouldDeferLocalEnumeration,
   uniqueLabel,
   updateEligibility,
   upsertConnection
@@ -159,6 +160,28 @@ test('registry local route: a per-profile remote override also forces local', ()
   assert.deepEqual(route, { delegate: false, poolKey: 'conn:local::research' })
 })
 
+// --- shouldDeferLocalEnumeration (roster's connect-on-demand for 'local') ---
+
+test('local enumeration: delegate route (local-primary desktop) always enumerates', () => {
+  const route = resolveRegistryLocalRoute('default', {})
+
+  assert.equal(shouldDeferLocalEnumeration(route, []), false)
+  assert.equal(shouldDeferLocalEnumeration(route, ['conn:local::default']), false)
+})
+
+test('local enumeration: forced-local route defers until a local child exists (remote-primary desktop)', () => {
+  // Remote-gateway-only desktops: enumerating "This device" here would SPAWN
+  // a local backend the user never asked for — a phantom `default` agent
+  // that duplicates their real one and forces -device handles onto it.
+  const route = resolveRegistryLocalRoute('default', { globalRemote: true })
+
+  assert.equal(shouldDeferLocalEnumeration(route, []), true)
+  // The v1 remote descriptor cached at the BARE profile key is not a local child.
+  assert.equal(shouldDeferLocalEnumeration(route, ['default', 'research']), true)
+  // Once the user has genuinely opened a forced-local child, it enumerates.
+  assert.equal(shouldDeferLocalEnumeration(route, ['conn:local::default']), false)
+})
+
 // --- buildAgentRoster (union roster + @name-device rule) ---
 
 test('roster: unique profiles keep bare handles; duplicates get @name-device', () => {
@@ -193,6 +216,32 @@ test('roster: unreachable sources contribute no rows and cannot fake duplicates'
   assert.equal(roster.length, 1)
   // Only one live source has research → bare handle, no phantom duplicate.
   assert.equal(roster[0].handle, 'research')
+})
+
+test('roster: duplicate profiles from one connection remain one routable agent', () => {
+  const local = { id: 'local', kind: 'local' as const, label: 'This device' }
+  const homelab = { id: 'homelab', kind: 'remote' as const, label: 'Homelab', url: 'http://h:1' }
+
+  const roster = buildAgentRoster([
+    { connection: local, profiles: ['default', 'research', 'default'] },
+    // A duplicate registry enumeration must not make local/research a second
+    // bot identity either.
+    { connection: local, profiles: ['research'] },
+    { connection: homelab, profiles: ['research', 'research'] }
+  ])
+
+  assert.deepEqual(
+    roster.map(agent => `${agent.connectionId}/${agent.profile}`),
+    ['local/default', 'local/research', 'homelab/research']
+  )
+  assert.equal(
+    roster.find(agent => agent.connectionId === 'local' && agent.profile === 'research')?.handle,
+    'research-this-device'
+  )
+  assert.equal(
+    roster.find(agent => agent.connectionId === 'homelab' && agent.profile === 'research')?.handle,
+    'research-homelab'
+  )
 })
 
 // --- updateEligibility ---
@@ -602,4 +651,131 @@ test('connectionDialFieldsChanged: ssh routing fields recycle, kind change recyc
     connectionDialFieldsChanged(before, { id: 'box', kind: 'remote', label: 'Box', url: 'http://x:1' }),
     true
   )
+})
+
+// --- remote gateway headers (Cloudflare Access etc., #74466 / PR #74468) ---
+
+test('normalizeConnectionInput keeps filtered headers on remote/cloud, drops them elsewhere', () => {
+  const registry = emptyRegistry()
+
+  const remote = normalizeConnectionInput(
+    {
+      kind: 'remote',
+      label: 'CF box',
+      url: 'https://hermes.example.com',
+      authMode: 'token',
+      token: { enc: 'x' },
+      headers: {
+        'CF-Access-Client-Id': { encoding: 'safeStorage', value: 'id' },
+        Authorization: { encoding: 'plain', value: 'blocked' }
+      }
+    },
+    registry
+  )
+
+  assert.deepEqual(remote.headers, {
+    'CF-Access-Client-Id': { encoding: 'safeStorage', value: 'id' }
+  })
+
+  const ssh = normalizeConnectionInput(
+    {
+      kind: 'ssh',
+      label: 'Box',
+      host: 'box.lan',
+      headers: { 'CF-Access-Client-Id': { encoding: 'plain', value: 'id' } }
+    } as any,
+    registry
+  )
+
+  assert.equal((ssh as any).headers, undefined)
+})
+
+test('mergeConnectionInput inherits stored headers when the editor payload omits them', () => {
+  const stored = {
+    id: 'cf',
+    kind: 'remote' as const,
+    label: 'CF box',
+    url: 'https://hermes.example.com',
+    authMode: 'token' as const,
+    headers: { 'CF-Access-Client-Id': { encoding: 'safeStorage', value: 'id' } }
+  }
+
+  const renamed = mergeConnectionInput({ id: 'cf', kind: 'remote', label: 'Renamed' }, stored)
+
+  assert.deepEqual(renamed.headers, stored.headers)
+
+  // An explicit headers payload (even empty) is authoritative — clearing works.
+  const cleared = mergeConnectionInput({ id: 'cf', kind: 'remote', label: 'CF box', headers: {} }, stored)
+
+  assert.deepEqual(cleared.headers, {})
+})
+
+test('connectionDialFieldsChanged: a header change recycles live backends', () => {
+  const before = {
+    id: 'cf',
+    kind: 'remote',
+    label: 'CF box',
+    url: 'https://hermes.example.com',
+    authMode: 'token',
+    token: { enc: 'x' },
+    headers: { 'CF-Access-Client-Id': { encoding: 'safeStorage', value: 'id' } }
+  } as const
+
+  assert.equal(connectionDialFieldsChanged(before, { ...before }), false)
+  assert.equal(
+    connectionDialFieldsChanged(before, {
+      ...before,
+      headers: { 'CF-Access-Client-Id': { encoding: 'safeStorage', value: 'OTHER' } }
+    }),
+    true
+  )
+  assert.equal(connectionDialFieldsChanged(before, { ...before, headers: undefined }), true)
+})
+
+test('normalizeRegistry preserves stored headers on remote entries (v2 additive field)', () => {
+  const registry = normalizeRegistry({
+    version: REGISTRY_VERSION,
+    primary: 'cf',
+    connections: [
+      { id: 'local', kind: 'local', label: 'This device' },
+      {
+        id: 'cf',
+        kind: 'remote',
+        label: 'CF box',
+        url: 'https://hermes.example.com',
+        authMode: 'token',
+        token: { enc: 'x' },
+        headers: {
+          'CF-Access-Client-Id': { encoding: 'safeStorage', value: 'id' },
+          Cookie: { encoding: 'plain', value: 'blocked' }
+        }
+      }
+    ]
+  })
+
+  const remote = registry.connections.find(c => c.id === 'cf')
+
+  assert.ok(remote)
+  assert.deepEqual(remote.headers, {
+    'CF-Access-Client-Id': { encoding: 'safeStorage', value: 'id' }
+  })
+})
+
+test('migrateV1ToRegistry carries v1 remote headers into the registry entry', () => {
+  const registry = migrateV1ToRegistry({
+    mode: 'remote',
+    remote: {
+      url: 'https://hermes.example.com',
+      authMode: 'token',
+      token: { enc: 'x' },
+      headers: { 'CF-Access-Client-Id': { encoding: 'safeStorage', value: 'id' } }
+    }
+  })
+
+  const remote = registry.connections.find(c => c.kind === 'remote')
+
+  assert.ok(remote)
+  assert.deepEqual(remote.headers, {
+    'CF-Access-Client-Id': { encoding: 'safeStorage', value: 'id' }
+  })
 })
