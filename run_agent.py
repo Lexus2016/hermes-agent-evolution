@@ -2651,7 +2651,18 @@ class AIAgent:
             return
 
         trajectory = self._convert_to_trajectory_format(messages, user_query, completed)
-        _save_trajectory_to_file(trajectory, self.model, completed)
+        # #2877: decision-level model-call metadata rides the same entry.
+        # Extracted from the RAW messages (pre-ShareGPT-conversion — converted
+        # messages carry only from/value and would yield nothing). Never
+        # raises: trajectory saving must not fail because capture did.
+        model_calls = None
+        try:
+            from agent.tool_call_capture import extract_model_calls
+
+            model_calls = extract_model_calls(messages)
+        except Exception:
+            model_calls = None
+        _save_trajectory_to_file(trajectory, self.model, completed, model_calls=model_calls)
 
     @staticmethod
     def _is_entitlement_failure(

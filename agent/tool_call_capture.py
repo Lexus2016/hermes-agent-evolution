@@ -68,6 +68,7 @@ __all__ = [
     "capture_enabled",
     "task_key",
     "extract_tool_calls",
+    "extract_model_calls",
     "build_trajectory_log",
     "capture_turn",
 ]
@@ -228,6 +229,46 @@ def extract_tool_calls(
                     "duration_ms": timings.get(cid) if cid else None,
                 }
             )
+    return calls
+
+
+def _classify_model_decision(msg: Dict[str, Any]) -> str:
+    """Classify an assistant message's decision: tool_call / refusal / content."""
+    if msg.get("tool_calls"):
+        return "tool_call"
+    content = msg.get("content")
+    if isinstance(content, str):
+        lowered = content.strip().lower()
+        if "i can't" in lowered or "i cannot" in lowered or "i won't" in lowered:
+            return "refusal"
+    return "content"
+
+
+def extract_model_calls(
+    messages: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Pull decision-level model-call metadata out of a finished turn (#2877).
+
+    Walks assistant messages — each is one model call — and records *what the
+    model decided*: model name (when present on the message), decision class
+    (tool_call / refusal / content), and the number of tool calls emitted.
+    No prompt text and no completion prose: this is the structured
+    distillation signal OpenForgeRL's proxy-recording pattern feeds on, scoped
+    to metadata so the privacy floor from #1363 is preserved.
+    """
+    if not isinstance(messages, list):
+        return []
+    calls: List[Dict[str, Any]] = []
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        calls.append(
+            {
+                "model": str(msg.get("model") or ""),
+                "decision": _classify_model_decision(msg),
+                "tool_call_count": len(msg.get("tool_calls") or []),
+            }
+        )
     return calls
 
 
