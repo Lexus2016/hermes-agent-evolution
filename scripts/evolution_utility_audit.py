@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -33,6 +34,12 @@ from typing import Any, Dict, List, Optional, Tuple
 HALF_LIFE_DAYS = 30.0
 KEEP_FRACTION = 0.10
 REDUNDANT_OVERLAP = 0.35
+
+# Actual-use precision gate (issue #2954, slice 2 of #2897).  Research
+# (arXiv:2608.14036): used-when-retrieved precision falls 29.6% -> 3.3% as
+# pools grow 5 -> 100; below-threshold precision at/above min pool = signal.
+PRECISION_MIN_POOL = 5
+PRECISION_COLLAPSE_THRESHOLD = 0.15
 
 # Non-stationary audit bar (issue #63): the audit standard rises with the
 # system instead of freezing.  The bar carries the previous audit's accepted
@@ -231,6 +238,104 @@ def apply_demotions(
     return demoted
 
 
+@dataclass
+class RetrievalPrecision:
+    """Actual-use precision over skill-retrieval events (#2954).
+
+    Precision is the used-when-retrieved rate; ``gate_triggered`` flags
+    pool-growth collapse (pool >= PRECISION_MIN_POOL while precision <
+    PRECISION_COLLAPSE_THRESHOLD) — the misevolution signal from
+    arXiv:2608.14036.
+    """
+
+    events_analyzed: int
+    retrieved_total: int
+    used_total: int
+    precision: float
+    pool_size: int
+    gate_triggered: bool
+
+
+def _load_retrieval_events() -> List[Dict[str, Any]]:
+    """Load retrieval events (JSONL: ts/query/retrieved) from the sidecar.
+
+    Best-effort: missing/corrupt lines are skipped — the precision report
+    must never crash the audit.
+    """
+    hh = os.environ.get("HERMES_HOME", "").strip()
+    base = Path(hh) if hh else Path.home() / ".hermes"
+    path = base / "skills" / "retrieval_events.jsonl"
+    if not path.exists():
+        return []
+    events: List[Dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(event, dict) and isinstance(event.get("retrieved"), list):
+                    events.append(event)
+    except OSError:
+        return []
+    return events
+
+
+def _used_names(usage: Dict[str, Dict[str, Any]]) -> set:
+    """Skill names with recorded actual use (use_count/patch_count > 0)."""
+    used = set()
+    for name, rec in usage.items():
+        if not isinstance(rec, dict):
+            continue
+        for key in ("use_count", "patch_count"):
+            try:
+                if int(rec.get(key) or 0) > 0:
+                    used.add(name)
+                    break
+            except (TypeError, ValueError):
+                continue
+    return used
+
+
+def _normalize_identifier(value: str) -> str:
+    """Slugify an identifier/name so both sides of the join compare.
+
+    Events store source identifiers (``openai/skills/foo``) while the curator
+    sidecar is keyed by name (``foo``); both collapse to the same slug.
+    """
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+def retrieval_precision(
+    events: List[Dict[str, Any]], usage: Dict[str, Dict[str, Any]]
+) -> RetrievalPrecision:
+    """Actual-use precision over retrieval events joined to usage (used =
+    identifier slug/tail matches a usage name with recorded actual use)."""
+    used_norms = {_normalize_identifier(n) for n in _used_names(usage)}
+    retrieved_total = 0
+    used_total = 0
+    identifiers = set()
+    for event in events:
+        retrieved = [r for r in event.get("retrieved", []) if isinstance(r, str) and r]
+        retrieved_total += len(retrieved)
+        for ident in retrieved:
+            identifiers.add(ident)
+            slug = _normalize_identifier(ident)
+            tail = _normalize_identifier(ident.rsplit("/", 1)[-1])
+            if slug in used_norms or tail in used_norms:
+                used_total += 1
+    precision = (used_total / retrieved_total) if retrieved_total else 0.0
+    pool_size = len(identifiers)
+    gate = pool_size >= PRECISION_MIN_POOL and precision < PRECISION_COLLAPSE_THRESHOLD
+    return RetrievalPrecision(
+        len(events), retrieved_total, used_total, precision, pool_size, gate
+    )
+
+
 def _usage() -> str:
     return (
         "usage: evolution_utility_audit.py [--apply] [--json] [--bar-prompt] "
@@ -390,6 +495,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     demoted = apply_demotions(audits, usage) if apply else []
     evolution_dir = _evolution_dir()
 
+    precision = retrieval_precision(_load_retrieval_events(), usage)
+
     bar_state, _, _ = _run_audit_bar(
         audits,
         evolution_dir,
@@ -437,6 +544,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                     },
                     "demoted": demoted,
                     "audit_bar": bar_payload,
+                    "retrieval_precision": {
+                        "events": precision.events_analyzed,
+                        "retrieved": precision.retrieved_total,
+                        "used": precision.used_total,
+                        "precision": round(precision.precision, 4),
+                        "pool_size": precision.pool_size,
+                        "gate_triggered": precision.gate_triggered,
+                    },
                 },
                 indent=2,
                 sort_keys=True,
@@ -450,6 +565,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
     if demoted:
         print(f"[utility-audit] demoted {len(demoted)} skill(s): {', '.join(demoted)}")
+    print(
+        f"[utility-audit][precision] events={precision.events_analyzed} "
+        f"retrieved={precision.retrieved_total} used={precision.used_total} "
+        f"precision={precision.precision:.1%} pool={precision.pool_size}"
+        + (
+            " [GATE: pool-growth precision collapse]"
+            if precision.gate_triggered
+            else ""
+        )
+    )
     print(f"[utility-audit] audited {len(audits)} skill(s)")
     return 0
 

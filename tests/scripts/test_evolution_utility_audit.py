@@ -13,6 +13,7 @@ from evolution_utility_audit import (  # noqa: E402
     apply_demotions,
     audit_corpus,
     main,
+    retrieval_precision,
     skill_utility,
 )
 
@@ -158,6 +159,80 @@ class TestCli:
     def test_help_exits_zero(self, capsys):
         assert main(["--help"]) == 0
         assert "usage" in capsys.readouterr().out
+
+
+class TestRetrievalPrecision:
+    """Actual-use precision over retrieval events (issue #2954, slice 2 of
+    #2897): used-when-retrieved rate joined against the curator sidecar,
+    with the pool-growth-collapse gate."""
+
+    @staticmethod
+    def _events(*retrieved_lists):
+        return [
+            {"ts": "2026-08-19T00:00:00Z", "query": f"q{i}", "retrieved": list(r)}
+            for i, r in enumerate(retrieved_lists)
+        ]
+
+    def test_all_retrieved_used_precision_one(self):
+        events = self._events(
+            ["openai/skills/json-parse"],
+            ["json-parse"],  # identifier tail matches usage name
+            ["viewed-only"],
+        )
+        usage = {
+            "json-parse": _rec(use=3),
+            "viewed-only": _rec(view=5),  # viewed but never used/patched
+        }
+        rp = retrieval_precision(events, usage)
+        assert rp.retrieved_total == 3
+        assert rp.used_total == 2  # viewed-only does NOT count as use
+        assert rp.precision == 2 / 3
+        assert rp.pool_size == 3
+        assert rp.gate_triggered is False
+
+    def test_unused_retrieved_precision_collapse_gate(self):
+        # 8 identifiers, one used → precision 1/8 < 15% threshold → gate.
+        events = self._events(
+            ["s/a1", "s/a2", "s/a3", "s/a4", "s/a5"],
+            ["s/a6", "s/a7", "s/a8"],
+        )
+        usage = {"a1": _rec(use=1), **{f"a{i}": _rec() for i in range(2, 9)}}
+        rp = retrieval_precision(events, usage)
+        assert rp.retrieved_total == 8
+        assert rp.used_total == 1
+        assert abs(rp.precision - 1 / 8) < 1e-9
+        assert rp.pool_size == 8
+        assert rp.gate_triggered is True
+
+    def test_insufficient_data_never_gates(self):
+        # Empty events and pools below the minimum size never trip the gate.
+        assert retrieval_precision([], {}).gate_triggered is False
+        small = retrieval_precision(self._events(["s/a1"]), {"a1": _rec()})
+        assert small.precision == 0.0
+        assert small.pool_size == 1
+        assert small.gate_triggered is False
+
+    def test_json_output_includes_precision(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        sidecar = tmp_path / "skills" / "retrieval_events.jsonl"
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        sidecar.write_text(
+            '{"ts": "t", "query": "q", "retrieved": ["a/foo"]}\n'
+            "this-is-not-json\n"  # corrupt line must be skipped by the loader
+            '{"ts": "t", "query": "q", "retrieved": ["b/bar"]}\n',
+            encoding="utf-8",
+        )
+        (tmp_path / "skills" / ".usage.json").write_text(
+            json.dumps({"foo": _rec(use=1)}), encoding="utf-8"
+        )
+        assert main(["--json"]) == 0
+        data = json.loads(capsys.readouterr().out)
+        rp = data["retrieval_precision"]
+        assert rp["events"] == 2
+        assert rp["retrieved"] == 2
+        assert rp["used"] == 1
+        assert abs(rp["precision"] - 0.5) < 1e-9
+        assert rp["gate_triggered"] is False
 
 
 class TestNonStationaryAuditBar:
