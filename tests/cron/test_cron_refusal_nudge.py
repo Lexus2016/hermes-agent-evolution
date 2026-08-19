@@ -167,3 +167,91 @@ class TestRefusalNudgeCron:
         assert still_refusal
         assert tool_calls == 0
         assert not (tool_calls or not still_refusal)  # adopt gate is False
+
+
+class TestMaybeCronRefusalRecovery:
+    """Exercises _maybe_cron_refusal_recovery (#2240 re-implementation).
+
+    The original #2240 Slice B tests verified the adopt-gate LOGIC in
+    isolation. These test the REAL helper wired into _run_job_impl: a
+    text-only refusal triggers ONE grounded re-run (conversation_history
+    passthrough — defect #2), and adoption requires a genuine recovery —
+    completed AND not failed (defect #3) AND made tool calls OR no longer
+    reads as a refusal.
+    """
+
+    class _FakeAgent:
+        """Minimal fake exposing the run_conversation method the helper calls."""
+
+        def __init__(self, fn):
+            self._fn = fn
+
+        def run_conversation(self, user_message=None, conversation_history=None, **kw):
+            return self._fn(user_message, conversation_history)
+
+    def test_refusal_triggers_grounded_rerun_and_adopts(self):
+        from cron.scheduler import _maybe_cron_refusal_recovery
+
+        refusal = _make_result(
+            "I'm sorry, I can't help with that.",
+            messages=[
+                {"role": "user", "content": "do the cron task"},
+                {
+                    "role": "assistant",
+                    "content": "I'm sorry, I can't help with that.",
+                },
+            ],
+        )
+
+        calls = []
+
+        def fake_run(user_message, conversation_history):
+            calls.append((user_message, conversation_history))
+            # Recovery re-run that made a tool call
+            return _make_result(
+                "Done! I ran the cron task.",
+                messages=[
+                    {"role": "user", "content": "do the cron task"},
+                    {"role": "assistant", "content": "I cannot assist."},
+                    {"role": "user", "content": "[loop-guard] re-check tools"},
+                    {
+                        "role": "assistant",
+                        "content": "Running the task now.",
+                        "tool_calls": [
+                            {"function": {"name": "terminal", "arguments": "{}"}}
+                        ],
+                    },
+                    {"role": "tool", "content": "output"},
+                ],
+            )
+
+        out = _maybe_cron_refusal_recovery(
+            refusal,
+            agent=self._FakeAgent(fake_run),
+            job_name="job1",
+            run_in_context=lambda f: f(),
+        )
+        assert len(calls) == 1
+        user_msg, history = calls[0]
+        # Defect #2: the re-run is grounded — original history is passed through
+        assert history == refusal["messages"]
+        assert _count_tool_calls(out["messages"]) > 0
+
+    def test_failed_rerun_is_not_adopted(self):
+        """A re-run that does not complete must not be adopted —
+        otherwise a refusal is laundered into a fake completion."""
+        from cron.scheduler import _maybe_cron_refusal_recovery
+
+        refusal = _make_result("I can't help.")
+
+        def fake_run(user_message, conversation_history):
+            return {"completed": False, "failed": True, "messages": []}
+
+        out = _maybe_cron_refusal_recovery(
+            refusal,
+            agent=self._FakeAgent(fake_run),
+            job_name="job1",
+            run_in_context=lambda f: f(),
+        )
+        # Original preserved; failed re-run NOT adopted
+        assert out is refusal

@@ -5704,6 +5704,17 @@ def _run_job_impl(
                 job_name,
             )
 
+        # ── Refusal-recovery nudge for cron dispatch (#2240) ────────────────
+        # The main conversation loop wires maybe_refusal_nudge (loop_guard.py)
+        # to detect over-refusal and inject recovery directives. Cron dispatch
+        # bypasses conversation_loop.py, so refusals in cron contexts were
+        # unrecoverable (76% of refusals/7d unrecovered, majority in cron).
+        # Re-run ONCE with the recovery directive and adopt only on a genuine
+        # recovery (see _maybe_cron_refusal_recovery). Bounded: 1 re-run.
+        result = _maybe_cron_refusal_recovery(
+            result, agent, job_name, _cron_context.run
+        )
+
         final_response = result.get("final_response", "") or ""
         # Strip leaked placeholder text that upstream may inject on empty completions.
         if final_response.strip() == "(No response generated)":
@@ -7124,6 +7135,105 @@ def _count_tool_calls(messages) -> int:
     if not isinstance(messages, list):
         return 0
     return sum(1 for m in messages if isinstance(m, dict) and m.get("role") == "tool")
+
+
+def _maybe_cron_refusal_recovery(
+    result: Dict[str, Any],
+    agent: Optional[Any],
+    job_name: str,
+    run_in_context,
+) -> Dict[str, Any]:
+    """Attempt a single refusal-recovery re-run for a cron dispatch result.
+
+    Cron dispatch bypasses ``conversation_loop.py``, so refusals in cron
+    contexts never received the loop-guard recovery nudge (#2240). If the
+    original run completed text-only with refusal language, re-run ONCE with
+    the recovery directive and adopt the re-run ONLY on a genuine recovery:
+    completed AND not failed AND (made tool calls OR no longer reads as a
+    refusal). A re-run that raises, returns non-dict, fails, or still reads
+    as a refusal leaves the original result untouched.
+    """
+    if not isinstance(result, dict):
+        return result
+    if agent is None:
+        return result
+    if not result.get("completed") or result.get("failed"):
+        return result
+    if _count_tool_calls(result.get("messages")) != 0:
+        return result
+
+    _cron_messages = result.get("messages") or []
+    _refusal_nudge = None
+    try:
+        from agent.loop_guard import maybe_refusal_nudge as _maybe_refusal
+
+        _refusal_nudge = _maybe_refusal(_cron_messages, already_nudged=False)
+    except Exception:
+        _refusal_nudge = None
+    if not _refusal_nudge:
+        return result
+
+    logger.info(
+        "Cron job '%s' refusal detected; re-running once with recovery nudge",
+        job_name,
+    )
+    _refusal_result = None
+    try:
+        _refusal_result = run_in_context(
+            lambda: agent.run_conversation(
+                user_message=_refusal_nudge,
+                conversation_history=_cron_messages,
+            )
+        )
+    except Exception as _rf_exc:
+        logger.warning(
+            "Cron job '%s' refusal-recovery re-run raised %s; keeping original",
+            job_name,
+            type(_rf_exc).__name__,
+        )
+    if not isinstance(_refusal_result, dict):
+        return result
+
+    # Adopt ONLY a genuine completion (defect #3): a failed re-run
+    # (completed=False / failed=True) must never be laundered into a success.
+    if not (_refusal_result.get("completed") is True) or bool(
+        _refusal_result.get("failed")
+    ):
+        logger.info(
+            "Cron job '%s' refusal-recovery re-run did not complete; keeping original",
+            job_name,
+        )
+        return result
+
+    _rf_tool_calls = _count_tool_calls(_refusal_result.get("messages"))
+    # Recovery must be real: tool calls in the re-run OR the response no
+    # longer reads as a refusal.
+    _rf_still_refusal = False
+    try:
+        from agent.loop_guard import maybe_refusal_nudge as _mr2
+
+        _rf_still_refusal = (
+            _mr2(
+                _refusal_result.get("messages") or [],
+                already_nudged=True,
+            )
+            is not None
+        )
+    except Exception:
+        pass
+    if not (_rf_tool_calls or not _rf_still_refusal):
+        logger.info(
+            "Cron job '%s' refusal-recovery re-run still a refusal; keeping original",
+            job_name,
+        )
+        return result
+
+    logger.info(
+        "Cron job '%s' refusal recovery adopted (%d tool calls in re-run)",
+        job_name,
+        _rf_tool_calls,
+    )
+    return _refusal_result
 
 
 # Tool-call counts per job id for the CURRENT run, written by _run_job_impl
