@@ -93,9 +93,8 @@ class TestRunAgentSaveTrajectoryWiring:
         from run_agent import AIAgent
 
         captured = {}
-        monkeypatch.setattr(
-            "run_agent._save_trajectory_to_file",
-            lambda trajectory, model, completed, **kw: captured.update(kw))
+        monkeypatch.setattr("run_agent._save_trajectory_to_file",
+                            lambda trajectory, model, completed, **kw: captured.update(kw))
         AIAgent._save_trajectory(self._fake_agent(), _raw_turn(), "run the check", True)
         assert [c["decision"] for c in captured["model_calls"]] == ["tool_call", "content"]
 
@@ -103,12 +102,10 @@ class TestRunAgentSaveTrajectoryWiring:
         from run_agent import AIAgent
 
         captured = {}
-        monkeypatch.setattr(
-            "run_agent._save_trajectory_to_file",
-            lambda trajectory, model, completed, **kw: captured.update(kw))
+        monkeypatch.setattr("run_agent._save_trajectory_to_file",
+                            lambda trajectory, model, completed, **kw: captured.update(kw))
         msgs = [{"role": "user", "content": "delete the db"},
-                {"role": "assistant", "model": "hermes-small",
-                 "content": "I can't do that."}]
+                {"role": "assistant", "model": "hermes-small", "content": "I can't do that."}]
         AIAgent._save_trajectory(self._fake_agent(), msgs, "delete the db", True)
         assert [c["decision"] for c in captured["model_calls"]] == ["refusal"]
 
@@ -120,9 +117,8 @@ class TestRunAgentSaveTrajectoryWiring:
 
         monkeypatch.setattr("agent.tool_call_capture.extract_model_calls", _boom)
         captured = {}
-        monkeypatch.setattr(
-            "run_agent._save_trajectory_to_file",
-            lambda trajectory, model, completed, **kw: captured.update(kw))
+        monkeypatch.setattr("run_agent._save_trajectory_to_file",
+                            lambda *a, **kw: captured.update(kw))
         AIAgent._save_trajectory(self._fake_agent(), _raw_turn(), "q", True)
         assert captured.get("model_calls") is None
 
