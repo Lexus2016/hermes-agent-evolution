@@ -36,6 +36,6 @@ class TestPromotionWiring:
         entry = json.loads(ledger.read_text(encoding="utf-8").strip())
         assert entry["attribution"] == ["cmd-1", "file-a"]
         assert "page-x" not in entry["attribution"]
-        # Usage record: outcome credit bounded, split across load-bearing only.
+        # Usage record: credit bounded, split across load-bearing only.
         usage = json.loads((tmp_path / "skills" / ".usage.json").read_text(encoding="utf-8"))
         assert usage["wired-skill"]["attribution_credit"] == {"cmd-1": 0.5, "file-a": 0.5}

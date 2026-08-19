@@ -221,8 +221,6 @@ class TestAttribution:
 
 
 class TestDebiasOutcomeCredit:
-    """#2898 — the co-retrieval de-biasing rule (memory-reward trap)."""
-
     def test_credits_only_load_bearing_memories(self):
         credit = debias_outcome_credit(
             co_retrieved=["a", "b", "c"],
