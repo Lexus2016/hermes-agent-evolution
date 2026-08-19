@@ -16,6 +16,7 @@ from agent.tool_call_capture import (  # noqa: E402
     build_trajectory_log,
     capture_enabled,
     capture_turn,
+    extract_model_calls,
     extract_tool_calls,
     task_key,
 )
@@ -349,3 +350,78 @@ class TestPerCallTimings:
     def test_extract_without_timings_still_works(self):
         calls = extract_tool_calls([_call("read_file", {}, "c1"), _ok("c1")])
         assert calls[0]["duration_ms"] is None
+
+
+class TestModelCallCapture:
+    """#2877 — decision-level model-call metadata on the trajectory seam."""
+
+    def _turn(self):
+        return [
+            {"role": "user", "content": "run the check"},
+            {
+                "role": "assistant",
+                "model": "hermes-small",
+                "tool_calls": [
+                    {"id": "c1", "type": "function",
+                     "function": {"name": "terminal", "arguments": "{}"}}
+                ],
+            },
+            _ok("c1"),
+            {"role": "assistant", "model": "hermes-small", "content": "done"},
+        ]
+
+    def test_extract_records_one_entry_per_assistant_message(self):
+        calls = extract_model_calls(self._turn())
+        assert len(calls) == 2
+        assert calls[0]["model"] == "hermes-small"
+        assert calls[0]["decision"] == "tool_call"
+        assert calls[0]["tool_call_count"] == 1
+        assert calls[1]["decision"] == "content"
+
+    def test_extract_classifies_refusal(self):
+        calls = extract_model_calls(
+            [{"role": "assistant", "content": "I can't run that without approval."}]
+        )
+        assert calls[0]["decision"] == "refusal"
+
+    def test_extract_ignores_non_assistant_messages(self):
+        calls = extract_model_calls(
+            [{"role": "user", "content": "hi"}, {"role": "tool", "tool_call_id": "x", "content": "{}"}]
+        )
+        assert calls == []
+
+    def test_extract_never_raises_on_bad_input(self):
+        assert extract_model_calls(None) == []
+        assert extract_model_calls("not a list") == []
+
+    def test_model_calls_ride_the_trajectory(self, tmp_path, capture_on):
+        path = capture_turn(self._turn(), session_id="s", trajectory_dir=tmp_path)
+        data = json.loads(path.read_text(encoding="utf-8").strip())
+        assert "model_calls" in data
+        assert len(data["model_calls"]) == 2
+        assert data["model_calls"][0]["decision"] == "tool_call"
+        assert data["model_calls"][1]["decision"] == "content"
+        # No prompt/completion prose — metadata only.
+        assert "run the check" not in json.dumps(data)
+
+    def test_logger_round_trips_model_calls(self, tmp_path):
+        from evolution_trajectory_logger import TrajectoryLog, load_trajectory
+
+        log = TrajectoryLog(session_id="s")
+        log.add_model_call(model="m", decision="tool_call", tool_call_count=2)
+        path = log.save(tmp_path)
+        loaded = load_trajectory(path)
+        assert loaded is not None
+        assert len(loaded.model_calls) == 1
+        assert loaded.model_calls[0].model == "m"
+        assert loaded.model_calls[0].tool_call_count == 2
+
+    def test_old_trajectories_without_model_calls_load_clean(self, tmp_path):
+        from evolution_trajectory_logger import TrajectoryLog, load_trajectory
+
+        log = TrajectoryLog(session_id="s")
+        log.add_tool_call("terminal", {})
+        path = log.save(tmp_path)
+        loaded = load_trajectory(path)
+        assert loaded is not None
+        assert loaded.model_calls == []

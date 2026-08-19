@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 __all__ = [
     "TrajectoryEntry",
+    "ModelCallEntry",
     "TrajectoryLog",
     "redact_args",
     "summarize_result",
@@ -125,6 +126,41 @@ class TrajectoryEntry:
         )
 
 
+@dataclass
+class ModelCallEntry:
+    """One model-call record on the evolution-run telemetry seam (#2877).
+
+    OpenForgeRL (arXiv:2607.21557) records the harness's model-call traffic
+    as training data — same pattern here, scoped to structured *metadata*:
+    which model was asked, what it decided, how long it took. No prompt or
+    completion text — only decision-level signal for trajectory→skill
+    distillation.
+    """
+
+    model: str = ""
+    decision: str = "unknown"  # tool_call | refusal | content | unknown
+    tool_call_count: int = 0
+    summary: str = ""
+    timestamp: str = ""
+    duration_ms: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if not self.timestamp:
+            self.timestamp = datetime.now(timezone.utc).isoformat()
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = {
+            "model": self.model,
+            "decision": self.decision,
+            "tool_call_count": self.tool_call_count,
+            "summary": self.summary,
+            "timestamp": self.timestamp,
+        }
+        if self.duration_ms is not None:
+            d["duration_ms"] = self.duration_ms
+        return d
+
+
 class TrajectoryLog:
     """In-memory trajectory log for a single cron session."""
 
@@ -138,6 +174,10 @@ class TrajectoryLog:
         self.session_id = session_id
         self.date = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self.entries: List[TrajectoryEntry] = []
+        # #2877: decision-level model-call metadata alongside the tool calls.
+        # Optional so the existing cron-stage caller is unaffected, and only
+        # emitted in to_dict() when recorded (old readers see the same shape).
+        self.model_calls: List[ModelCallEntry] = []
         # Task-level outcome and pairing key (#1363). Both are optional so the
         # existing cron-stage caller is unaffected, and both are omitted from
         # to_dict() when unset so old readers see the exact shape they expect.
@@ -165,6 +205,26 @@ class TrajectoryLog:
             TrajectoryEntry.from_tool_call(tool, args, result, status, duration_ms)
         )
 
+    def add_model_call(
+        self,
+        model: str = "",
+        decision: str = "unknown",
+        tool_call_count: int = 0,
+        result: Any = None,
+        duration_ms: Optional[int] = None,
+    ) -> None:
+        """Record one decision-level model call (#2877): model, decision,
+        tool-call count, short result summary, latency. Metadata only."""
+        self.model_calls.append(
+            ModelCallEntry(
+                model=model,
+                decision=decision,
+                tool_call_count=tool_call_count,
+                summary=summarize_result(result),
+                duration_ms=duration_ms,
+            )
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {
             "date": self.date,
@@ -174,6 +234,8 @@ class TrajectoryLog:
         # Only emitted when set, so a reader written against the pre-#1363
         # shape sees no new keys on the cron-stage trajectories it already
         # handles.
+        if self.model_calls:
+            out["model_calls"] = [m.to_dict() for m in self.model_calls]
         if self.completed is not None:
             out["completed"] = bool(self.completed)
         if self.task_key:
@@ -271,6 +333,18 @@ def load_trajectory(path: Path) -> Optional[TrajectoryLog]:
                     result_summary=ed.get("result_summary", ""),
                     timestamp=ed.get("timestamp", ""),
                     duration_ms=ed.get("duration_ms"),
+                )
+            )
+    for mc in data.get("model_calls", []):
+        if isinstance(mc, dict):
+            log.model_calls.append(
+                ModelCallEntry(
+                    model=str(mc.get("model", "")),
+                    decision=str(mc.get("decision", "unknown")),
+                    tool_call_count=int(mc.get("tool_call_count", 0) or 0),
+                    summary=str(mc.get("summary", "")),
+                    timestamp=str(mc.get("timestamp", "")),
+                    duration_ms=mc.get("duration_ms"),
                 )
             )
     return log
