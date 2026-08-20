@@ -1809,6 +1809,14 @@ def init_agent(
                 agent._hypothesis_history = HypothesisHistory()
     except Exception as _fd_err:
         _ra().logger.warning("Failure diagnosis config ignored: %s", _fd_err)
+    # #3010 — opaque-`other` drill-down (session-scoped, feeds introspection).
+    agent._unhandled_drilldown = None
+    try:
+        from tools.tool_failure_classifier import UnhandledDrilldown
+
+        agent._unhandled_drilldown = UnhandledDrilldown()
+    except Exception as _ud_err:
+        _ra().logger.warning("Unhandled-failure drilldown init failed: %s", _ud_err)
     # Cache only the derived auxiliary compression context override that is
     # needed later by the startup feasibility check.  Avoid exposing a
     # broad pseudo-public config object on the agent instance.

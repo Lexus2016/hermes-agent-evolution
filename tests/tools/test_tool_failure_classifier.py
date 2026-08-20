@@ -395,3 +395,80 @@ class TestExtensibility:
         result = tfc.classify_tool_failure("web_search", "kaboom sentinel pattern")
         assert result.category == tfc.ToolFailureCategory.rate_limited
         assert result.should_retry is True
+
+
+# ---------------------------------------------------------------------------
+# #3010 — opaque-`other` bucket diagnostics
+# ---------------------------------------------------------------------------
+
+
+class TestOtherBucketHint:
+
+    def test_persistent_error_hint_is_actionable_and_names_fingerprint(self):
+        result = tfc.classify_tool_failure(
+            "memory", "SomethingUnusual blew up inside the vault"
+        )
+        assert result.category == tfc.ToolFailureCategory.persistent_error
+        assert result.should_retry is False
+        assert "do not blind-retry" in result.hint.lower()
+        assert "Fingerprint:" in result.hint
+        assert "SomethingUnusual blew up" in result.hint
+
+    def test_empty_error_is_unknown_not_persistent(self):
+        result = tfc.classify_tool_failure("memory", "   ")
+        assert result.category == tfc.ToolFailureCategory.unknown
+        assert result.should_retry is False
+
+
+class TestErrorFingerprint:
+    def test_exception_type_is_used(self):
+        assert tfc.error_fingerprint("RuntimeError: boom in worker") == "RuntimeError"
+
+    def test_first_line_used_when_no_exception_type(self):
+        assert tfc.error_fingerprint("vault rejected the operation\nsecond line") == (
+            "vault rejected the operation"
+        )
+
+    def test_normalizes_whitespace_and_trailing_punct(self):
+        assert tfc.error_fingerprint("  vault    rejected  the  op.  ") == (
+            "vault rejected the op"
+        )
+
+    def test_empty_is_empty_marker(self):
+        assert tfc.error_fingerprint("") == "<empty>"
+        assert tfc.error_fingerprint("\n\n") == "<empty>"
+
+    def test_length_cap(self):
+        assert len(tfc.error_fingerprint("x" * 500)) <= 120
+
+
+class TestUnhandledDrilldown:
+    def test_records_and_ranks_per_tool(self):
+        dd = tfc.UnhandledDrilldown()
+        dd.record("memory", "VaultKeyError: no such key")
+        dd.record("memory", "VaultKeyError: no such key")
+        dd.record("memory", "OtherThingError: no such key")
+        dd.record("process", "VaultKeyError: no such key")
+        top = dd.top()
+        assert top[0].tool_name == "memory"
+        assert top[0].fingerprint == "VaultKeyError"
+        assert top[0].count == 2
+        assert top[1].count == 1
+        assert top[2].tool_name == "process"
+        assert top[2].count == 1
+
+    def test_reset_clears(self):
+        dd = tfc.UnhandledDrilldown()
+        dd.record("x", "boom")
+        assert dd.top()
+        dd.reset()
+        assert dd.top() == []
+
+    def test_to_dict_roundtrip(self):
+        dd = tfc.UnhandledDrilldown()
+        dd.record("x", "RuntimeError: boom")
+        assert dd.top()[0].to_dict() == {
+            "tool_name": "x",
+            "fingerprint": "RuntimeError",
+            "count": 1,
+        }

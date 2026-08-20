@@ -8851,7 +8851,10 @@ class AIAgent:
         # appends a single-line diagnostic ONLY for non-retryable failures,
         # telling the agent not to retry the same call unchanged.
         if failed and not decision.should_halt:
-            from tools.tool_failure_classifier import classify_tool_failure
+            from tools.tool_failure_classifier import (
+                ToolFailureCategory,
+                classify_tool_failure,
+            )
 
             # #2335 — pass the terminal exit code through so the classifier uses
             # its rich exit-code/signal logic instead of falling back to text
@@ -8876,6 +8879,17 @@ class AIAgent:
             _nr = classify_tool_failure(
                 tool_name, function_result, exit_code=_exit_code
             )
+            # #3010 — drill-down: tally `other`-bucket failures per tool+fp.
+            if _nr.category in {
+                ToolFailureCategory.persistent_error,
+                ToolFailureCategory.unknown,
+            }:
+                _dd = getattr(self, "_unhandled_drilldown", None)
+                if _dd is not None:
+                    try:
+                        _dd.record(tool_name, function_result or "")
+                    except Exception:
+                        pass
             if not _nr.should_retry:
                 _nr_line = f"\n\n⚠️ Non-retryable: {_nr.category.value}. {_nr.hint}"
                 if "Non-retryable:" not in function_result:

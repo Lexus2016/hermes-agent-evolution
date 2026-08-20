@@ -156,6 +156,16 @@ _CATEGORY_RETRYABLE: dict[ToolFailureCategory, bool] = {
     ToolFailureCategory.unknown: False,
 }
 
+# #3010 — opaque `other` bucket: name fingerprint, instruct no blind retry.
+_PERSISTENT_OTHER_HINT: str = (
+    "The failure could not be matched to a known category — treat it as "
+    "non-retryable. Do NOT blind-retry the identical call. Verify the "
+    "arguments and call syntax against the tool's contract, check for a "
+    "missing/expired credential or dependency, or switch to an alternative "
+    "tool. If this recurs, report the exact error text (see fingerprint) so "
+    "it can be decomposed into a named bucket."
+)
+
 _CATEGORY_HINTS: dict[ToolFailureCategory, str] = {
     ToolFailureCategory.tool_unavailable: (
         "The tool or one of its dependencies is unavailable (not installed, not "
@@ -397,6 +407,70 @@ def _retry_for(category: ToolFailureCategory, override: bool | None) -> bool:
     return _CATEGORY_RETRYABLE[category] if override is None else override
 
 
+# ---------------------------------------------------------------------------
+# #3010 — opaque-`other` diagnostics: fingerprint + per-tool drill-down
+# ---------------------------------------------------------------------------
+def error_fingerprint(text: str, *, max_len: int = 120) -> str:
+    """Short stable key for an unclassified error (same cause -> same key)."""
+    if not text or not text.strip():
+        return "<empty>"
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    first = lines[0] if lines else text.strip()
+    # Normalize: collapse whitespace, drop trailing punctuation / numbers.
+    key = re.sub(r"\s+", " ", first).strip(" .,;:'\"()[]{}")
+    # Exception-type form: "ModuleError: detail" -> fingerprint on the type.
+    m = re.match(r"^([A-Za-z_][A-Za-z0-9_.]*Error|Exception)\b", key)
+    if m:
+        return m.group(1)
+    return key[:max_len]
+
+
+_MAX_DRILLDOWN_PER_TOOL = 20
+
+
+@dataclass(frozen=True)
+class UnhandledDrilldownEntry:
+    """One recurring unclassified failure, per tool (#3010)."""
+
+    tool_name: str
+    fingerprint: str
+    count: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "tool_name": self.tool_name,
+            "fingerprint": self.fingerprint,
+            "count": self.count,
+        }
+
+
+class UnhandledDrilldown:
+    """Bounded per-tool tally of unclassified fingerprints (#3010)."""
+
+    def __init__(self) -> None:
+        self._counts: dict[str, dict[str, int]] = {}
+
+    def record(self, tool_name: str, text: str) -> None:
+        fp = error_fingerprint(text)
+        self._counts.setdefault(tool_name, {}).setdefault(fp, 0)
+        self._counts[tool_name][fp] += 1
+
+    def top(
+        self, per_tool: int = _MAX_DRILLDOWN_PER_TOOL
+    ) -> list[UnhandledDrilldownEntry]:
+        out: list[UnhandledDrilldownEntry] = []
+        for tool_name, counts in self._counts.items():
+            for fp, count in sorted(
+                counts.items(), key=lambda kv: (-kv[1], kv[0])
+            )[:per_tool]:
+                out.append(UnhandledDrilldownEntry(tool_name, fp, count))
+        out.sort(key=lambda e: (-e.count, e.tool_name, e.fingerprint))
+        return out
+
+    def reset(self) -> None:
+        self._counts.clear()
+
+
 def _classify_text(text: str, tool_type: ToolType) -> ToolFailureClassification:
     for rule in (*_CUSTOM_RULES, *_BUILTIN_RULES):
         if rule.pattern.search(text):
@@ -411,10 +485,15 @@ def _classify_text(text: str, tool_type: ToolType) -> ToolFailureClassification:
         if not text.strip()
         else ToolFailureCategory.persistent_error
     )
+    # #3010 — actionable fall-through: name the fingerprint, no blind retry.
+    hint = _CATEGORY_HINTS[category]
+    if category is ToolFailureCategory.persistent_error:
+        fp = error_fingerprint(text)
+        hint = f"{_PERSISTENT_OTHER_HINT}\n  Fingerprint: {fp!r}"
     return ToolFailureClassification(
         category=category,
         tool_type=tool_type,
-        hint=_CATEGORY_HINTS[category],
+        hint=hint,
         should_retry=_CATEGORY_RETRYABLE[category],
     )
 
