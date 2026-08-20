@@ -349,6 +349,61 @@ ctx.register({ id: 'noir', area: THEMES_AREA, data: myDesktopTheme })
 attachment source, or transform a draft before it is sent (`ComposerMiddleware`
 with a `handler(draft) => draft | null`).
 
+### Transcript directives — inline components the model addresses
+
+`TRANSCRIPT_DIRECTIVE_AREA` makes the transcript itself a contribution area.
+Register a named directive and the agent can render your component inline in
+an assistant message by emitting a paragraph of the form `::name{key="value"}`:
+
+```javascript
+import { TRANSCRIPT_DIRECTIVE_AREA } from '@hermes/plugin-sdk'
+
+ctx.register({
+  id: 'task-card',
+  area: TRANSCRIPT_DIRECTIVE_AREA,
+  data: {
+    name: 'task', // the model writes ::task{id="BB-12"}
+    render: ({ attrs, streaming }) => jsx(TaskCard, { taskId: attrs.id, streaming })
+  }
+})
+```
+
+Rules the host enforces so the surface stays safe:
+
+- The directive must be the **entire paragraph** — `::name` mid-prose stays
+  prose, so plugin components can never hijack running text.
+- Attributes are **untrusted model output** (`key="value"` pairs, string-only).
+  Validate your own fields; render nothing on garbage rather than guessing.
+- An **unclaimed** directive (no plugin registered for the name) renders as
+  the plain paragraph it always was — nothing breaks when a plugin is off.
+- Renders are wrapped in the contribution error boundary: a throw degrades to
+  an inline error chip, never a dead message.
+- First registration wins on a name collision; namespace adventurous names
+  with your slug (`myplugin-board`, not `board`).
+
+Core ships one directive as the reference consumer: `::preview{file="…"}`
+renders the workspace HTML file **live inside the message** — a sandboxed
+`srcdoc` iframe with an opaque origin (scripts run and the widget is fully
+interactive; no reach into the app, its storage, or the bridge). The frame
+sizes itself to the content (height live, width adopted from the content's
+intrinsic span, flush left in the message flow), and a theme prelude hands
+the document the app's resolved tokens (`--foreground`, `--muted-foreground`,
+`--accent`, `--border`, `--card`), the app font, and a transparent
+background — so widget-shaped HTML reads as native while a full page keeps
+its own design. Non-HTML targets and remote gateways fall back to the
+classic preview card. Tell the agent about your directive in a skill (that's
+how it learns to emit it).
+
+Previewed widgets can also **talk back**. Inside the frame,
+`window.hermes.send('get-price eth')` (or a declarative
+`<button data-hermes-send="get-price eth">` — no script needed) hands that
+prompt to the agent as a user turn, off-screen: no bubble takes up the
+transcript, the widget updating is the visible response. The turn is still
+real — it wakes the agent, rides the composer's steer/queue rules, and
+persists (typed `hidden`) so resume and the session DB keep the full record.
+Prompts are trimmed, capped at 500 chars, and throttled to one per second
+per frame.
+
 ### Mount-scoped chrome (`Contribute`)
 
 `ctx.register` is for **permanent** contributions. When chrome should live and
@@ -407,6 +462,11 @@ host.openSession(id, { profile?, intent? }) // open a stored session core-style;
                                            //   profile: soft-swap to that profile's backend first
                                            //   intent: 'in-place' (default) | 'stack' | 'tab' | 'window'
 host.newChat(profile?)                     // fresh chat draft, optionally in another profile
+host.openWorkspace(id, { render, title?, minWidth?, onClose? })
+                                           // dock a plugin-rendered tab into the MAIN
+                                           //   workspace zone and reveal it; returns a disposer
+host.paneVisibility(paneId)                // ReadableAtom<boolean> — is a contributed pane
+                                           //   actually on screen (its zone's active tab)?
 host.onEvent(type, fn)                     // gateway event stream ('*' = all); returns disposer
 host.logs(...)                             // tail an app log file
 host.status()                              // one-shot system status snapshot
@@ -424,6 +484,29 @@ profile without changing the active chat or gateway. The profile-only overload i
 retained only for the sole-local/legacy topology; registry-aware plugins should pass
 the descriptor so two sources exposing the same profile name cannot collide.
 
+`host.openWorkspace(id, { render, title?, minWidth?, onClose? })` docks a
+plugin-rendered view into the **main workspace zone** — the same center area
+session tiles and previews use — as a tab, and reveals it. Re-calling it with
+the same `id` refreshes the content in place and re-fronts the tab instead of
+opening a duplicate. Closing the tab (the tab's Close control or ⌘W) tears the
+registration down and fires your `onClose`; the returned disposer closes it
+programmatically. Feature-detect it (`typeof host.openWorkspace ===
+'function'`) and fall back to a regular contributed pane on older desktop
+builds — Bot Mode's group-chat rooms are the reference consumer (main-window
+takeover when available, in-panel view otherwise).
+
+`host.paneVisibility(paneId)` returns a readonly reactive atom that is `true`
+while a contributed pane is actually on screen: present in the layout tree,
+not dismissed or hidden, its zone un-minimized, and holding its zone's active
+tab slot (a lone pane in its own zone counts). The id is the
+contribution-scoped pane id, `<pluginId>:<paneId>`. Atoms are memoized per id,
+so calling it in render is safe. Use it to register companion UI only while
+your pane is visible — Bot Mode's Cronjobs pane is the reference consumer: it
+registers while the Bots pane holds the sidebar tab and unregisters when the
+user tabs back to Sessions. Feature-detect on older desktops
+(`typeof host.paneVisibility === 'function'`) and fall back to
+always-registered behavior.
+
 `host.profileRoutes()` inventories every registered source in the current connection
 registry. Connect-on-demand SSH sources expose a credential-free `default` seed
 route without opening a tunnel, so a plugin can be the first caller that dials them;
@@ -440,7 +523,12 @@ preserves backend identity without exposing connection secrets.
 Profile-shaped plugins get first-class methods too:
 `profiles.list` (each profile + its most recent conversation as
 `last_session`; pass `include_sessions: false` to skip the per-profile DB
-probe) and `profiles.create` (`name`, `description`, `clone_from`,
+probe; pass `preferred_session_ids: { profileName: sessionId }` for an
+exact, existence-checked lookup of one pinned session per profile — each
+named row gains a `preferred_session` summary that resolves hidden rows
+and compression lineages to their live tip, or `null` when the id is
+definitively gone; older gateways ignore the param and omit the field)
+and `profiles.create` (`name`, `description`, `clone_from`,
 `clone_all`, `no_skills`, `soul`, optional `model` + `provider` pin) — the
 ws twins of the dashboard's `/api/profiles` REST routes.
 `host.state.busy` is the focused chat's live turn (thinking and streaming).
