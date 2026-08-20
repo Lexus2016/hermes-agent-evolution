@@ -70,10 +70,18 @@ _REASONING_STALE_TIMEOUT_FLOORS: tuple[tuple[str, int], ...] = (
     # DeepSeek — R1 and V4 reasoning models on hosted NIM / DeepSeek direct.
     # V4 series emits reasoning_content in a separate delta field before
     # final content, requiring the same extended stale timeout floor.
+    # 2026-08-20 (evolution deepseek-failfast-verify): the 600s floor for the
+    # V4 series was empirically excessive — deepseek-v4-flash turns in this
+    # fleet complete in 3-9s (agent.log latency column), and a hung provider
+    # call was instead stalling the whole turn for the full 600s before the
+    # stale detector fired (three such 600s stalls in the 08-18/08-19 window).
+    # v4-flash keeps a 180s floor (equals the stream stale-detector default);
+    # v4-pro — the deeper-thinking variant — keeps a 300s floor. R1/reasoner
+    # genuinely need the extended thinking phase and stay at 600.
     ("deepseek-r1", 600),
     ("deepseek-reasoner", 600),
-    ("deepseek-v4-flash", 600),
-    ("deepseek-v4-pro", 600),
+    ("deepseek-v4-flash", 180),
+    ("deepseek-v4-pro", 300),
     # Qwen — QwQ reasoning + Qwen3 thinking variants.  QwQ-32B
     # preview is the stable slug; ``qwen3`` covers the family of
     # thinking-mode Qwen3 models (qwen3-235b-a22b, qwen3-32b, etc.)
@@ -201,10 +209,10 @@ def get_reasoning_stale_timeout_floor(model: object) -> Optional[float]:
     300.0
     >>> get_reasoning_stale_timeout_floor("deepseek/deepseek-r1")
     600.0
-    >>> get_reasoning_stale_timeout_floor("deepseek/deepseek-v4-flash")
-    600.0
-    >>> get_reasoning_stale_timeout_floor("deepseek/deepseek-v4-pro")
-    600.0
+    >>> get_reasoning_stale_timeout_floor('deepseek/deepseek-v4-flash')
+    180.0
+    >>> get_reasoning_stale_timeout_floor('deepseek/deepseek-v4-pro')
+    300.0
     >>> get_reasoning_stale_timeout_floor("qwen/qwen3-235b-a22b-thinking")
     180.0
     >>> get_reasoning_stale_timeout_floor("x-ai/grok-4-fast-reasoning")

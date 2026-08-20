@@ -47,14 +47,17 @@ import pytest
     ("nvidia/nemotron-3-super-120b-a12b", 600.0),
     ("nvidia/nemotron-3-nano-30b-a3b", 300.0),
     # DeepSeek R1 + DeepSeek reasoner + V4 reasoning series.
-    # V4 emits reasoning_content in a separate delta before final
-    # content (same shape as R1), so it needs the same 600s floor.
+    # R1/reasoner genuinely need the extended thinking phase (600s).
+    # V4 turns in this fleet complete in 3-9s (agent.log latency), so the
+    # 600s floor only made a hung provider call stall the whole turn —
+    # evolution issue #81: v4-flash floor lowered to the stream
+    # stale-detector default (180s), v4-pro keeps headroom at 300s.
     ("deepseek/deepseek-r1", 600.0),
     ("deepseek/deepseek-r1-distill-llama-70b", 600.0),
     ("deepseek/deepseek-reasoner", 600.0),
-    ("deepseek/deepseek-v4-flash", 600.0),
-    ("deepseek/deepseek-v4-pro", 600.0),
-    ("deepseek-v4-flash-free", 600.0),   # catalog -free variant inherits via separator anchor
+    ("deepseek/deepseek-v4-flash", 180.0),
+    ("deepseek/deepseek-v4-pro", 300.0),
+    ("deepseek-v4-flash-free", 180.0),   # catalog -free variant inherits via separator anchor
     # Qwen QwQ + Qwen3 thinking variants (qwen3 family entry matches all).
     ("qwen/qwq-32b-preview", 300.0),
     ("qwen/qwen3-235b-a22b-thinking", 180.0),
