@@ -573,9 +573,7 @@ TOOL_USE_ENFORCEMENT_MODELS = ("gpt", "codex", "gemini", "gemma", "grok", "glm",
 #      the blocker.  (Observed on DeepSeek v4-flash on the same task:
 #      pushed through PEP-668 wall, then returned fabricated listings.)
 #
-# Short on purpose.  This block is shipped to every user, every session,
-# in the cached system prompt — token cost is paid once at install and
-# then amortised across all sessions via prefix caching.  Keep it tight.
+# Universal task-completion guidance. Short on purpose: shipped in cached prompt.
 TASK_COMPLETION_GUIDANCE = (
     "# Finishing the job\n"
     "When the user asks you to build, run, or verify something, the deliverable is "
@@ -589,6 +587,25 @@ TASK_COMPLETION_GUIDANCE = (
     "output (made-up data, invented file contents, synthesised API responses) "
     "for results you couldn't actually produce. Reporting a blocker honestly "
     "is always better than inventing a result."
+)
+
+# Scoped / restricted toolset guidance (#3093).
+# Injected when the session has tools loaded but lacks execution and file-write
+# capabilities (e.g. web-only, safe mode, webhook safe toolset). Tells the model
+# upfront that it cannot run commands or edit files directly, so it declines local
+# execution immediately and provides complete runnable code snippets/artifacts for
+# the user instead of attempting non-existent tools or promising execution.
+RESTRICTED_TOOLSET_GUIDANCE = (
+    "# Scoped / Read-only toolset boundaries\n"
+    "This session is operating with a scoped toolset without local command execution "
+    "or filesystem write tools (no `terminal`, `write_file`, or `patch`).\n"
+    "When the user requests tasks that require local builds, command execution, "
+    "or file modifications:\n"
+    "1. Decline action execution upfront and clearly: state that this session is "
+    "configured in a scoped / read-only mode without local execution or file-writing tools.\n"
+    "2. Do NOT attempt to invoke missing execution tools or promise background execution.\n"
+    "3. Provide complete, verified, self-contained code snippets, commands, or "
+    "artifacts directly in your response so the user can execute them directly."
 )
 
 # Universal anti-fixation guidance.  A behavioural instruction the model itself
@@ -656,6 +673,7 @@ RECOVERY_BEFORE_REFUSAL_GUIDANCE = (
     "- No `grep` tool → use `search_files` with a regex pattern.\n"
     "- No direct database access → write a script via `terminal` that queries it.\n"
     "- No image editor → use `terminal` to invoke ImageMagick or Python PIL.\n"
+    "- Scoped toolset without terminal/write access → state the restriction upfront and provide complete, runnable code/commands for the user.\n"
     "The goal is to exhaust available capabilities before declining a request."
 )
 

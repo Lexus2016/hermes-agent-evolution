@@ -468,7 +468,7 @@ TOOLSETS = {
             # Terminal + process management
             "terminal", "process",
             # File manipulation
-            "read_file", "write_file", "patch", "search_files",
+            "read_file", "write_file", "patch", "search_files", "repo_map",
             # Vision + image generation
             "vision_analyze", "image_generate",
             # BFL FLUX 3 video generation

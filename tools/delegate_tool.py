@@ -1786,6 +1786,25 @@ _SHELL_DEPENDENT_VERBS = frozenset({
     "check",
 })
 
+# Verbs that strongly indicate the task requires filesystem access (#3093).
+_FILESYSTEM_DEPENDENT_VERBS = frozenset({
+    "file",
+    "files",
+    "write",
+    "patch",
+    "edit",
+    "create",
+    "modify",
+    "read_file",
+    "write_file",
+    "save",
+    "update_file",
+    "overwrite",
+    "append",
+    "search_files",
+    "repo_map",
+})
+
 
 def _goal_needs_terminal(goal: str, context: Optional[str] = None) -> bool:
     """Return True if the task goal/context text references shell-dependent work.
@@ -1808,6 +1827,22 @@ def _goal_needs_terminal(goal: str, context: Optional[str] = None) -> bool:
     # Word-boundary match so "git" doesn't match "digit" / "fidget".
     pattern = re.compile(
         r"\b(" + "|".join(re.escape(v) for v in _SHELL_DEPENDENT_VERBS) + r")\b",
+        re.IGNORECASE,
+    )
+    return bool(pattern.search(text))
+
+
+def _goal_needs_file(goal: str, context: Optional[str] = None) -> bool:
+    """Return True if the task goal/context text references filesystem-dependent work (#3093)."""
+    import re
+
+    text = goal or ""
+    if context:
+        text = f"{text}\n{context}"
+    if not text:
+        return False
+    pattern = re.compile(
+        r"\b(" + "|".join(re.escape(v) for v in _FILESYSTEM_DEPENDENT_VERBS) + r")\b",
         re.IGNORECASE,
     )
     return bool(pattern.search(text))
@@ -2187,6 +2222,17 @@ def _build_child_agent(
                 "delegate_task: auto-added 'terminal' toolset for task %d "
                 "(goal references shell-dependent verbs but resolved toolset "
                 "omitted it) — #1369 regression fix",
+                task_index,
+            )
+    if _goal_needs_file(goal, context) and "file" not in child_toolsets:
+        expanded_parent = _expand_parent_toolsets(parent_toolsets)
+        if "file" in expanded_parent:
+            child_toolsets.append("file")
+            _toolset_adjusted = True
+            logger.info(
+                "delegate_task: auto-added 'file' toolset for task %d "
+                "(goal references filesystem-dependent verbs but resolved toolset "
+                "omitted it) — #3093",
                 task_index,
             )
 

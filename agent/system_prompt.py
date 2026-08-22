@@ -44,6 +44,7 @@ from agent.prompt_builder import (
     PARALLEL_TOOL_CALL_GUIDANCE,
     PLATFORM_HINTS,
     RECOVERY_BEFORE_REFUSAL_GUIDANCE,
+    RESTRICTED_TOOLSET_GUIDANCE,
     SELFCOMPACT_RUBRIC_GUIDANCE,
     SESSION_SEARCH_GUIDANCE,
     SKILLS_GUIDANCE,
@@ -399,14 +400,22 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     # Pointer to the hermes-agent skill + docs for user questions about Hermes itself.
     stable_parts.append(HERMES_AGENT_HELP_GUIDANCE)
 
-    # Universal task-completion / no-fabrication guidance.  Applied to ALL
-    # models regardless of tool_use_enforcement gating — the failure modes
-    # this targets (stopping after a stub; fabricating output when a real
-    # path is blocked) are not model-family specific.  Gated only by
-    # config.yaml ``agent.task_completion_guidance`` (default True) so
-    # users who want a leaner prompt can turn it off.
+    # Universal task-completion / no-fabrication guidance (#3093).
+    # When the session has execution/write capabilities (terminal, process,
+    # write_file, patch, execute_code), enforce finishing the job with real tool output.
+    # When the session has tools loaded but is intentionally scoped/read-only (e.g.
+    # web-only, safe, webhook safe), inject RESTRICTED_TOOLSET_GUIDANCE to decline
+    # execution upfront and provide complete runnable artifacts directly.
+    # Gated by config.yaml ``agent.task_completion_guidance`` (default True).
     if getattr(agent, "_task_completion_guidance", True) and agent.valid_tool_names:
-        stable_parts.append(TASK_COMPLETION_GUIDANCE)
+        _has_execution_or_write = any(
+            t in agent.valid_tool_names
+            for t in ("terminal", "process", "write_file", "patch", "execute_code")
+        )
+        if _has_execution_or_write:
+            stable_parts.append(TASK_COMPLETION_GUIDANCE)
+        else:
+            stable_parts.append(RESTRICTED_TOOLSET_GUIDANCE)
 
     # Universal anti-fixation guidance (issue #45): a reset the model performs
     # itself to break tunnel vision. Always on — cheap, static text, helps every
