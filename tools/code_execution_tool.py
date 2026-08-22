@@ -63,6 +63,62 @@ _MISSING_PKG_RE = re.compile(
 _SYNTAX_RE = re.compile(r"(?:SyntaxError|IndentationError|TabError)", re.IGNORECASE)
 
 
+_EXCEPTION_RE = re.compile(
+    r"^(?:[A-Za-z0-9_.]+\.)?([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Exit|Interrupt|Warning)): (.*)$",
+    re.MULTILINE,
+)
+
+_EXCEPTION_SUGGESTIONS: Dict[str, str] = {
+    "NameError": (
+        "A variable, function, or module is not defined. Ensure it is imported "
+        "or assigned before use."
+    ),
+    "TypeError": (
+        "Type mismatch or incorrect arguments. Check function signatures and "
+        "argument types."
+    ),
+    "ValueError": (
+        "Invalid value passed to function. Check argument values and format."
+    ),
+    "KeyError": (
+        "Dictionary key not found. Use `.get(key, default)` or verify keys with `in`."
+    ),
+    "IndexError": (
+        "List/sequence index out of range. Check sequence length before indexing."
+    ),
+    "AttributeError": (
+        "Object has no attribute. Check object type and available attributes with `dir()`."
+    ),
+    "ZeroDivisionError": (
+        "Division by zero occurred. Add a guard check before division."
+    ),
+    "AssertionError": (
+        "Assertion failed. Inspect asserted condition and intermediate variables."
+    ),
+    "FileNotFoundError": (
+        "File not found. Verify the file path with `search_files` or `read_file` first."
+    ),
+    "PermissionError": (
+        "Permission denied accessing file/resource. Check path permissions or use a user-accessible directory."
+    ),
+    "RecursionError": (
+        "Maximum recursion depth exceeded. Use an iterative approach or check recursion base cases."
+    ),
+    "MemoryError": (
+        "Out of memory. Stream or chunk data instead of holding the entire payload in RAM."
+    ),
+    "JSONDecodeError": (
+        "Failed to parse JSON string. Validate JSON formatting and escaping before parsing."
+    ),
+    "TimeoutError": (
+        "Operation timed out. Optimize network/IO calls or use smaller chunks."
+    ),
+    "ConnectionError": (
+        "Network connection failed. Verify host reachability and URL schema."
+    ),
+}
+
+
 def _classify_execution_failure(
     exit_code: int,
     stderr_text: str,
@@ -81,9 +137,45 @@ def _classify_execution_failure(
         diag["classification"] = "timeout"
         diag["error"] = f"Script timed out after {timeout_value}s and was killed."
         diag["suggestion"] = (
-            "The script exceeded the timeout. "
-            "Increase the timeout in config.yaml (code_execution.timeout), "
-            "or split the work into smaller steps."
+            f"Script exceeded the {timeout_value}s timeout. To recover:\n"
+            "1. Break loops or heavy processing into smaller chunked steps.\n"
+            "2. Add limits or pagination to data queries instead of processing full datasets at once.\n"
+            "3. If long execution is required, increase timeout in config.yaml (`code_execution.timeout`)."
+        )
+        return diag
+
+    # Signal & crash code classification
+    if exit_code in (137, -9):
+        diag["status"] = "error"
+        diag["classification"] = "killed_oom"
+        diag["error"] = (
+            "Script was terminated by SIGKILL (exit code 137 / -9, likely out-of-memory or external kill)."
+        )
+        diag["suggestion"] = (
+            "The process was killed due to excessive memory usage or resource limits. "
+            "Stream or chunk data in smaller batches instead of loading large datasets into memory."
+        )
+        return diag
+
+    if exit_code in (139, -11):
+        diag["status"] = "error"
+        diag["classification"] = "segmentation_fault"
+        diag["error"] = (
+            "Script crashed with a Segmentation Fault (SIGSEGV, exit code 139 / -11)."
+        )
+        diag["suggestion"] = (
+            "A native library or C-extension crashed. Avoid the faulty native call or isolate operations."
+        )
+        return diag
+
+    if exit_code in (134, -6):
+        diag["status"] = "error"
+        diag["classification"] = "aborted"
+        diag["error"] = (
+            "Script was aborted by runtime (SIGABRT, exit code 134 / -6)."
+        )
+        diag["suggestion"] = (
+            "An unhandled assertion or runtime abort occurred. Inspect the stderr trace."
         )
         return diag
 
@@ -112,8 +204,24 @@ def _classify_execution_failure(
         )
         return diag
 
+    # Specific exception extraction from stderr traceback
+    exc_matches = list(_EXCEPTION_RE.finditer(stderr_text))
+    if exc_matches:
+        last_exc = exc_matches[-1]
+        exc_name = last_exc.group(1)
+        exc_msg = last_exc.group(2)
+        diag["status"] = "error"
+        diag["classification"] = exc_name.lower()
+        diag["exception_type"] = exc_name
+        diag["error"] = f"{exc_name}: {exc_msg}"
+        diag["suggestion"] = _EXCEPTION_SUGGESTIONS.get(
+            exc_name,
+            f"Inspect the {exc_name} traceback above, fix the root cause in the code, and rerun.",
+        )
+        return diag
+
     if exit_code == 0:
-        # Should not reach here, but keep safe
+        # Safe fallback
         diag["status"] = "error"
         diag["classification"] = "unknown"
         diag["error"] = "Execution finished with unexpected status"
@@ -1444,6 +1552,43 @@ def execute_code(
             "No code provided. execute_code requires a non-empty 'code' "
             "parameter containing Python source. To run shell commands, use "
             "terminal(command=...) instead."
+        )
+
+    # Pre-execute parse validation (#3107)
+    import ast
+    try:
+        ast.parse(code)
+    except SyntaxError as exc:
+        line_snippet = exc.text.strip() if exc.text else ""
+        err_msg = (
+            f"SyntaxError: {exc.msg} (line {exc.lineno}, column {exc.offset})"
+            if exc.lineno
+            else f"SyntaxError: {exc.msg}"
+        )
+        suggestion_lines = [f"Fix the syntax error on line {exc.lineno} before running execute_code."]
+        if line_snippet:
+            suggestion_lines.append(f"  {line_snippet}")
+            if exc.offset is not None:
+                suggestion_lines.append(f"  {' ' * max(0, exc.offset - 1)}^")
+        suggestion_lines.append(
+            "Ensure valid Python syntax, matching brackets, quotes, and proper indentation."
+        )
+        return json.dumps(
+            {
+                "status": "error",
+                "classification": "parse-error",
+                "error": err_msg,
+                "syntax_error": {
+                    "message": exc.msg,
+                    "lineno": exc.lineno,
+                    "offset": exc.offset,
+                    "text": line_snippet,
+                },
+                "suggestion": "\n".join(suggestion_lines),
+                "tool_calls_made": 0,
+                "duration_seconds": 0,
+            },
+            ensure_ascii=False,
         )
 
     # Dispatch: remote backends use file-based RPC, local uses UDS
