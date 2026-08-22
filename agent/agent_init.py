@@ -1498,7 +1498,13 @@ def init_agent(
     elif isinstance(fallback_model, dict) and fallback_model.get("provider") and fallback_model.get("model"):
         agent._fallback_chain = [fallback_model]
     else:
-        agent._fallback_chain = []
+        try:
+            from hermes_cli.config import load_config_readonly
+            from hermes_cli.fallback_config import get_fallback_chain
+
+            agent._fallback_chain = get_fallback_chain(load_config_readonly())
+        except Exception:
+            agent._fallback_chain = []
     agent._fallback_index = 0
     agent._fallback_activated = getattr(agent, "_fallback_activated", False)
     # Legacy attribute kept for backward compat (tests, external callers)

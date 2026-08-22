@@ -3685,7 +3685,7 @@ def _run_conversation_impl(
                         # Try fallback before giving up
                         if agent._has_pending_fallback():
                             agent._buffer_status(f"⚠️ Max retries ({max_retries}) for invalid responses — trying fallback...")
-                        if agent._try_activate_fallback():
+                        if agent._try_activate_fallback(reason=FailoverReason.format_error):
                             active_system_prompt = _sync_failover_system_message(
                                 agent, api_messages, active_system_prompt)
                             retry_count = 0
@@ -3696,7 +3696,7 @@ def _run_conversation_impl(
                         # Terminal — flush buffered retry trace so user sees what happened.
                         agent._flush_status_buffer()
                         agent._emit_status(f"❌ Max retries ({max_retries}) exceeded for invalid responses. Giving up.")
-                        logger.error("%sInvalid API response after %d retries.", agent.log_prefix, max_retries)
+                        logger.error("%sInvalid API response after %d retries (max_retries_exhausted). provider=%s", agent.log_prefix, max_retries, provider_name)
                         agent._persist_session(messages, conversation_history)
                         _final_response = f"Invalid API response after {max_retries} retries: {_failure_hint}"
                         return {
@@ -5389,9 +5389,10 @@ def _run_conversation_impl(
                 error_msg = str(api_error).lower()
                 _error_summary = agent._summarize_api_error(api_error)
                 logger.warning(
-                    "API call failed (attempt %s/%s) error_type=%s %s summary=%s",
+                    "API call retry attempt %s/%s (retryable=%s) error_type=%s %s summary=%s",
                     retry_count,
                     max_retries,
+                    classified.retryable,
                     error_type,
                     agent._client_log_context(),
                     _error_summary,
@@ -6406,7 +6407,7 @@ def _run_conversation_impl(
                             agent._buffer_status("⚠️ TLS certificate verification failed — trying fallback...")
                         else:
                             agent._buffer_status(f"⚠️ Non-retryable error (HTTP {status_code}) — trying fallback...")
-                    if agent._try_activate_fallback():
+                    if agent._try_activate_fallback(reason=classified.reason, api_error=api_error):
                         active_system_prompt = _sync_failover_system_message(
                             agent, api_messages, active_system_prompt)
                         retry_count = 0
@@ -6549,7 +6550,15 @@ def _run_conversation_impl(
                             f"{agent.log_prefix}        for localhost, or add the server's cert to your trust store.",
                             force=True,
                         )
-                    logger.error("%sNon-retryable client error: %s", agent.log_prefix, api_error)
+                    logger.error(
+                        "%sAPI call aborted on non-retryable client error (reason=%s HTTP %s): %s | provider=%s model=%s",
+                        agent.log_prefix,
+                        classified.reason.value,
+                        status_code,
+                        api_error,
+                        _provider,
+                        _model,
+                    )
                     # Skip session persistence when the error is likely
                     # context-overflow related (status 400 + large session).
                     # Persisting the failed user message would make the
@@ -6637,7 +6646,7 @@ def _run_conversation_impl(
                     # Try fallback before giving up entirely
                     if agent._has_pending_fallback():
                         agent._buffer_status(f"⚠️ Max retries ({max_retries}) exhausted — trying fallback...")
-                    if agent._try_activate_fallback():
+                    if agent._try_activate_fallback(reason=classified.reason, api_error=api_error):
                         active_system_prompt = _sync_failover_system_message(
                             agent, api_messages, active_system_prompt)
                         retry_count = 0
@@ -6768,7 +6777,7 @@ def _run_conversation_impl(
                         )
 
                     logger.error(
-                        "%sAPI call failed after %s retries. %s | provider=%s model=%s msgs=%s tokens=~%s",
+                        "%sAPI call failed permanently after %s retries (max_retries_exhausted). %s | provider=%s model=%s msgs=%s tokens=~%s",
                         agent.log_prefix, max_retries, _final_summary,
                         _provider, _model, len(api_messages), f"{approx_tokens:,}",
                     )

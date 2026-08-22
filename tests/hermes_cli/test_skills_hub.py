@@ -416,3 +416,54 @@ def test_do_list_displays_colliding_skills_notice(monkeypatch, three_source_env)
     assert "match core commands and use namespaced slash commands" in out
     assert "/skill-config" in out
     assert "/skill config" in out
+
+
+class TestInstallTimeCollisionWarning:
+    """#3096: installing a skill whose slug collides with a core slash
+    command must emit an install-time warning pointing at the namespaced
+    command, instead of the user discovering it only at runtime."""
+
+    def test_warns_for_core_collision(self):
+        from hermes_cli.skills_hub import _slugify_skill_command, _warn_skill_command_collision
+
+        sink = StringIO()
+        console = Console(file=sink, force_terminal=False, color_system=None)
+
+        _warn_skill_command_collision(console, "config")
+
+        out = sink.getvalue()
+        assert "maps to the core command" in out
+        assert "/skill-config" in out
+        assert "/skill config" in out
+
+    def test_no_warning_for_non_colliding_slug(self):
+        from hermes_cli.skills_hub import _warn_skill_command_collision
+
+        sink = StringIO()
+        console = Console(file=sink, force_terminal=False, color_system=None)
+
+        _warn_skill_command_collision(console, "totally-not-a-core-command-xyz")
+
+        assert "maps to the core command" not in sink.getvalue()
+
+    def test_slugify_matches_runtime_normalization(self):
+        from hermes_cli.skills_hub import _slugify_skill_command
+
+        # Must agree with agent.skill_commands.scan_skill_commands
+        assert _slugify_skill_command("My Skill") == "my-skill"
+        assert _slugify_skill_command("git_helper") == "git-helper"
+        assert _slugify_skill_command("weird+name//x") == "weirdnamex"
+        assert _slugify_skill_command("") == ""
+        assert _slugify_skill_command(None) == ""
+
+    def test_warning_is_best_effort_on_resolver_failure(self):
+        from hermes_cli.skills_hub import _warn_skill_command_collision
+
+        sink = StringIO()
+        console = Console(file=sink, force_terminal=False, color_system=None)
+
+        # Simulate resolver import failure — must not raise.
+        with patch.dict("sys.modules", {"hermes_cli.commands": None}):
+            _warn_skill_command_collision(console, "config")
+
+        assert "maps to the core command" not in sink.getvalue()

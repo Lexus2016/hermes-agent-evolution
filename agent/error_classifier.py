@@ -234,6 +234,19 @@ _OVERLOADED_PATTERNS = [
     "currently overloaded",
     "at capacity",
     "over capacity",
+    "server is temporarily unavailable",
+    "temporarily unavailable",
+    "service unavailable",
+    "service is unavailable",
+    "bad gateway",
+    "gateway timeout",
+    "upstream connect error",
+    "upstream request timeout",
+    "engine is overloaded",
+    "model is currently overloaded",
+    "model is overloaded",
+    "high traffic",
+    "temporarily high load",
 ]
 
 # Usage-limit patterns that need disambiguation (could be billing OR rate_limit)
@@ -370,6 +383,15 @@ _MODEL_NOT_FOUND_PATTERNS = [
     "no such model",
     "unknown model",
     "unsupported model",
+    "model not supported",
+    "model is deprecated",
+    "model has been deprecated",
+    "model is decommissioned",
+    "model has been disabled",
+    "model is disabled",
+    "model is not accessible",
+    "not permitted to access this model",
+    "access to model denied",
     # OpenRouter returns 404 with this message when none of the candidate
     # endpoints for the selected model support tool/function calling.
     # Classifying this as model_not_found triggers fallback to a different
@@ -473,6 +495,17 @@ _REQUEST_VALIDATION_PATTERNS = [
     "invalid_request_error",
     "unknown_parameter",
     "unsupported_parameter",
+    "extra_forbidden",
+    "extra fields not permitted",
+    "missing required argument",
+    "validation error for",
+    "input should be a valid",
+    "value is not a valid",
+    "invalid schema for function",
+    "invalid json schema",
+    "tools schema is invalid",
+    "unprocessable entity",
+    "error code: 422",
 ]
 
 # OpenRouter aggregator policy-block patterns.
@@ -1899,6 +1932,32 @@ def _classify_by_message(
             FailoverReason.context_overflow,
             retryable=True,
             should_compress=True,
+        )
+
+    # Content-policy / safety-filter blocks
+    if any(p in error_msg for p in _CONTENT_POLICY_BLOCKED_PATTERNS):
+        return result_fn(
+            FailoverReason.content_policy_blocked,
+            retryable=False,
+            should_fallback=True,
+        )
+
+    # Request validation patterns (unsupported parameter, invalid schema, etc.)
+    # Checked before auth so structured validation tokens (e.g. extra_forbidden)
+    # aren't misclassified as auth rejections.
+    if any(p in error_msg for p in _REQUEST_VALIDATION_PATTERNS):
+        return result_fn(
+            FailoverReason.format_error,
+            retryable=False,
+            should_fallback=True,
+        )
+
+    # Malformed message body patterns (empty content, missing fields, etc.)
+    if any(p in error_msg for p in _INVALID_MESSAGE_BODY_PATTERNS):
+        return result_fn(
+            FailoverReason.format_error,
+            retryable=False,
+            should_fallback=True,
         )
 
     # Auth patterns

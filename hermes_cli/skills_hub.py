@@ -523,6 +523,41 @@ def do_browse(page: int = 1, page_size: int = 20, source: str = "all",
             "'hermes skills search <query>' to search deeper[/]\n")
 
 
+def _slugify_skill_command(skill_name: str) -> str:
+    """Normalize a skill name to the slash-command slug used at scan time.
+
+    Mirrors the normalization in ``agent.skill_commands.scan_skill_commands``
+    (lowercase, spaces/underscores to hyphens, strip non-alnum chars) so the
+    install-time collision check agrees with what the runtime scan will do.
+    """
+    slug = str(skill_name or "").strip().lower().replace(" ", "-").replace("_", "-")
+    slug = re.sub(r"[^a-z0-9-]", "", slug)
+    return re.sub(r"-{2,}", "-", slug).strip("-")
+
+
+def _warn_skill_command_collision(console: Console, skill_name: str) -> None:
+    """Warn when an installed skill's slash command collides with a core command (#3096).
+
+    The runtime skill-command scan namespaces such skills under
+    ``/skill-<name>``; surface that here, at install time, so users learn the
+    namespaced invocation immediately instead of discovering it later via
+    ``hermes skills list``. Best-effort: never blocks or fails the install.
+    """
+    try:
+        from hermes_cli.commands import resolve_command
+
+        slug = _slugify_skill_command(skill_name)
+        if not slug or resolve_command(slug) is None:
+            return
+        console.print(
+            f"[yellow]ℹ️  Skill '{skill_name}' maps to the core command "
+            f"[bold]/{slug}[/]; invoke it as [cyan]/skill-{slug}[/] "
+            f"or [cyan]/skill {skill_name}[/].[/]"
+        )
+    except Exception:  # pragma: no cover - warning is best-effort
+        pass
+
+
 def do_install(identifier: str, category: str = "", force: bool = False,
                console: Optional[Console] = None, skip_confirm: bool = False,
                invalidate_cache: bool = True,
@@ -781,6 +816,11 @@ def do_install(identifier: str, category: str = "", force: bool = False,
     from tools.skills_hub import SKILLS_DIR
     c.print(f"[bold green]Installed:[/] {install_dir.resolve().relative_to(Path(SKILLS_DIR).resolve()).as_posix()}")
     c.print(f"[dim]Files: {', '.join(bundle.files.keys())}[/]\n")
+
+    # #3096: if the freshly installed skill's auto-generated slash command
+    # collides with a core Hermes command, tell the user now — the runtime
+    # scan will register it under the namespaced /skill-<name> form.
+    _warn_skill_command_collision(c, bundle.name)
 
     # Blueprint detection: if the installed skill declares a
     # metadata.hermes.blueprint block, it is a runnable automation. Register it as

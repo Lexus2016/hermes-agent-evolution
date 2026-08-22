@@ -2656,4 +2656,63 @@ class Test504GatewayTimeout:
         assert r_overload.reason != r_timeout.reason
 
 
+class TestIssue3097ProviderClassification:
+    """Tests for Issue #3097 provider-specific error classification and fast-failover."""
+
+    def test_422_status_classified_as_format_error(self):
+        e = MockAPIError("Unprocessable Entity", status_code=422)
+        r = classify_api_error(e)
+        assert r.reason == FailoverReason.format_error
+        assert r.retryable is False
+        assert r.should_fallback is True
+
+    def test_request_validation_message_without_status_code(self):
+        e = Exception("Request validation error: extra fields not permitted (extra_forbidden)")
+        r = classify_api_error(e)
+        assert r.reason == FailoverReason.format_error
+        assert r.retryable is False
+        assert r.should_fallback is True
+
+    def test_invalid_schema_message_without_status_code(self):
+        e = Exception("invalid schema for function 'run_agent': tools schema is invalid")
+        r = classify_api_error(e)
+        assert r.reason == FailoverReason.format_error
+        assert r.retryable is False
+        assert r.should_fallback is True
+
+    def test_model_deprecation_patterns(self):
+        e = Exception("The model is deprecated and has been disabled by the provider")
+        r = classify_api_error(e)
+        assert r.reason == FailoverReason.model_not_found
+        assert r.retryable is False
+        assert r.should_fallback is True
+
+    def test_model_access_denied_patterns(self):
+        e = Exception("Access to model denied: you are not permitted to access this model")
+        r = classify_api_error(e)
+        assert r.reason == FailoverReason.model_not_found
+        assert r.retryable is False
+        assert r.should_fallback is True
+
+    def test_overload_extended_patterns(self):
+        e = Exception("The engine is overloaded: model is currently overloaded with high traffic")
+        r = classify_api_error(e)
+        assert r.reason == FailoverReason.overloaded
+        assert r.retryable is True
+
+    def test_content_policy_message_without_status_code(self):
+        e = Exception("The prompt was flagged by our safety system: content_filter triggered")
+        r = classify_api_error(e)
+        assert r.reason == FailoverReason.content_policy_blocked
+        assert r.retryable is False
+        assert r.should_fallback is True
+
+    def test_invalid_message_body_without_status_code(self):
+        e = Exception("messages must have non-empty content for assistant turn")
+        r = classify_api_error(e)
+        assert r.reason == FailoverReason.format_error
+        assert r.retryable is False
+        assert r.should_fallback is True
+
+
 
