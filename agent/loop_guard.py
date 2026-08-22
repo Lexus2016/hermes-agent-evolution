@@ -1297,13 +1297,13 @@ def run_warrants_cron_hard_stop(messages: List[Dict[str, Any]]) -> bool:
 
 _REFUSAL_PAT = re.compile(
     "|".join([  # fmt: skip
-        r"i can'?t",
-        r"i can not",
+        r"i can'?t\b",
+        r"i can not\b",
+        r"i cannot\b",
         r"i don'?t have (?:access|permission)",
         r"no access",
         r"i'?m unable to",
         r"i don'?t have (?:a |the )?(?:tool|skill|feature|plugin|ability|capability)",
-        r"i cannot (?:help|assist|do|provide|access)",
         r"not (?:able|allowed) to",
     ]),
     re.IGNORECASE,
@@ -1315,25 +1315,46 @@ _FP_REFUSAL_PAT = re.compile(
 )
 
 _REFUSAL_CATEGORIES = {
+    "safety_refusal": (
+        r"safety|policy|content filter|harmful|restricted|guidelines|terms of service|unacceptable",
+        "A safety or policy boundary was cited. Verify if the request can "
+        "be fulfilled safely by rephrasing, focusing on technical/"
+        "educational aspects, or exploring permitted alternatives. If "
+        "truly unsafe, explain the exact boundary concisely.",
+    ),
+    "rate_limit": (
+        r"rate limit|too many requests|quota|429|throttl",
+        "A rate limit or quota boundary was encountered. Do not retry "
+        "identically — switch to an alternative local source or cached "
+        "data, or chunk the request into smaller batches.",
+    ),
+    "unsupported_parameter": (
+        r"invalid (?:argument|parameter|schema|option)|unknown (?:flag|parameter|argument)|unsupported (?:parameter|argument|format)",
+        "An unsupported parameter or invalid argument was cited. Check the "
+        "tool schema or documentation, simplify the arguments, or use a "
+        "standard alternative approach.",
+    ),
+    "permission_boundary": (
+        r"permission|security|unauthorized|forbidden|access denied|403",
+        "An access-denied or permission boundary was cited. Check if the "
+        "action is achievable with alternative available tools (e.g. "
+        "`read_file` vs `terminal`, local commands vs remote APIs). If "
+        "essential access is missing, name the exact credential or "
+        "permission needed.",
+    ),
     "true_capability_gap": (
-        r"don'?t have (?:a |the )?(?:tool|skill|plugin|feature)",
+        r"don'?t have (?:a |the )?(?:tool|skill|plugin|feature|ability)|cannot (?:browse|run|execute|access the web)",
         "A capability gap was cited. Check whether the capability exists "
         "locally (use `hermes tools` or check skills) before accepting the "
         "refusal. If a tool/skill is available, use it directly. If genuinely "
         "missing, suggest how to install or configure it rather than stopping.",
     ),
-    "permission_boundary": (
-        r"permission|security|unauthorized|forbidden",
-        "A permission/security boundary was cited. Verify this is a genuine "
-        "security boundary and not an over-refusal — check whether the "
-        "action is safe and permitted in the current context. If legitimate, "
-        "explain the boundary and suggest an alternative approach.",
-    ),
     "over_refusal": (
         r"",
         "The capability likely exists locally. Before accepting this refusal, "
         "re-check available tools and skills — the requested action may be "
-        "achievable with the tools already configured. Use them directly.",
+        "achievable with the tools already configured. Break down the task into "
+        "concrete steps and execute them directly.",
     ),
 }
 
@@ -1378,6 +1399,7 @@ def maybe_refusal_nudge(
     messages: List[Dict[str, Any]],
     *,
     already_nudged: bool = False,
+    nudge_count: int = 1,
 ) -> Optional[str]:
     """Return a recovery directive if the last assistant message contains
     refusal language, else None.
@@ -1388,14 +1410,9 @@ def maybe_refusal_nudge(
     message — giving the model a chance to course-correct before the
     refusal is accepted as the final answer.
 
-    #1243 — ``already_nudged`` no longer suppresses the nudge entirely.
-    The caller now passes ``already_nudged=True`` on the 2nd refusal to
-    get the same detection (the caller handles escalation language).
+    Stage 1 (nudge_count=1, already_nudged=False): advisory category directive.
+    Stage 2 (nudge_count>=2, already_nudged=True): escalated alternative/escalate directive.
     """
-    if already_nudged:
-        # #1243 — Still detect; the caller builds the escalated directive.
-        # We just need to confirm the last message is still a refusal.
-        pass
     # Find the last assistant message with text content
     last_assistant_text = None
     for msg in reversed(messages):
@@ -1426,7 +1443,17 @@ def maybe_refusal_nudge(
     category = _classify_refusal(snippet)
     if not category:
         return None
-    # Build recovery directive
+
+    if already_nudged or nudge_count >= 2:
+        return (
+            f"[loop-guard] Second refusal detected ({category}). If an alternative "
+            f"approach, narrower scope, or alternative tool can satisfy the request, "
+            f"take action now. Otherwise, explain clearly and factually what is needed "
+            f"(e.g. missing credentials, exact permissions, or specific user clarification) "
+            f"so the turn can conclude cleanly."
+        )
+
+    # Build 1st-stage advisory recovery directive
     _, recovery = _REFUSAL_CATEGORIES.get(category, _REFUSAL_CATEGORIES["over_refusal"])
     return (
         f"[loop-guard] Refusal detected ({category}). {recovery} "

@@ -7308,6 +7308,12 @@ def _run_conversation_impl(
             
             # Check for tool calls
             if assistant_message.tool_calls:
+                try:
+                    from agent import refusal_telemetry
+                    refusal_telemetry.record_transition_if_pending(agent, category_after="", took_action=True)
+                    agent._refusal_recovery_nudges = 0
+                except Exception:
+                    pass
                 if not agent.quiet_mode:
                     agent._vprint(f"{agent.log_prefix}🔧 Processing {len(assistant_message.tool_calls)} tool call(s)...")
                 
@@ -8468,6 +8474,7 @@ def _run_conversation_impl(
                         or messages[-1].get("_empty_recovery_synthetic")
                         or messages[-1].get("_empty_terminal_sentinel")
                         or messages[-1].get("_dropped_toolcall_nudge")
+                        or messages[-1].get("_refusal_recovery_synthetic")
                     )
                 ):
                     messages.pop()
@@ -8636,6 +8643,85 @@ def _run_conversation_impl(
                     # final_response while continuing so a later budget
                     # exhaustion path does not treat the narrated stop as
                     # a completed answer.
+                    _pending_verification_response = final_response
+                    _pending_verification_response_previewed = (
+                        agent._interim_content_was_streamed(final_response or "")
+                    )
+                    final_response = None
+                    continue
+
+                # ── Refusal / Access-denied recovery guard (#3106) ───
+                # When the model produces a text-only refusal without tool calls,
+                # give it a structured 2-stage opportunity to course-correct:
+                # 1st nudge (advisory): taxonomy-specific recovery guidance.
+                # 2nd nudge (directive): alternative tool / narrow scope / escalate.
+                # Capped at 2 nudges per turn to prevent refusal loops.
+                _refusal_nudge = None
+                try:
+                    from agent import refusal_telemetry
+                    from agent.loop_guard import (
+                        detect_refusal_category,
+                        maybe_refusal_nudge,
+                    )
+
+                    _refusal_cat = detect_refusal_category(final_response)
+                    if _refusal_cat and bool(agent.valid_tool_names):
+                        _refusal_attempts = getattr(
+                            agent, "_refusal_recovery_nudges", 0
+                        )
+                        if _refusal_attempts < 2:
+                            _nudge_tier = (
+                                "advisory" if _refusal_attempts == 0 else "directive"
+                            )
+                            _refusal_nudge = maybe_refusal_nudge(
+                                [*messages, final_msg],
+                                already_nudged=(_refusal_attempts > 0),
+                                nudge_count=(_refusal_attempts + 1),
+                            )
+                            if _refusal_nudge:
+                                refusal_telemetry.record_nudge_and_set_pending(
+                                    agent,
+                                    _refusal_cat,
+                                    _nudge_tier,
+                                    _refusal_attempts + 1,
+                                )
+                        else:
+                            # Max refusal attempts reached — record final unrecovered transition
+                            refusal_telemetry.record_transition_if_pending(
+                                agent, _refusal_cat, took_action=False
+                            )
+                            agent._refusal_recovery_nudges = 0
+                    else:
+                        # No refusal detected in text — record transition if a nudge was pending
+                        refusal_telemetry.record_transition_if_pending(
+                            agent, "", took_action=False
+                        )
+                        agent._refusal_recovery_nudges = 0
+                except Exception:
+                    logger.debug("refusal recovery check failed", exc_info=True)
+                    _refusal_nudge = None
+
+                if _refusal_nudge:
+                    agent._refusal_recovery_nudges = (
+                        getattr(agent, "_refusal_recovery_nudges", 0) + 1
+                    )
+                    final_msg["finish_reason"] = "refusal_recovery_required"
+                    final_msg["_refusal_recovery_synthetic"] = True
+                    append_message(messages, final_msg)
+                    append_message(messages, {
+                        "role": "user",
+                        "content": _refusal_nudge,
+                        "_refusal_recovery_synthetic": True,
+                    })
+                    agent._session_messages = messages
+                    logger.info(
+                        "refusal recovery nudge issued (attempt %d, category=%s)",
+                        agent._refusal_recovery_nudges,
+                        _refusal_cat,
+                    )
+                    agent._emit_status(
+                        f"⚠️ Refusal detected ({_refusal_cat}) — nudging recovery ({agent._refusal_recovery_nudges}/2)"
+                    )
                     _pending_verification_response = final_response
                     _pending_verification_response_previewed = (
                         agent._interim_content_was_streamed(final_response or "")
