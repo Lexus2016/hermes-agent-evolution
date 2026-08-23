@@ -124,23 +124,24 @@ class TelegramFallbackTransport(httpx.AsyncBaseTransport):
             logger.debug("[Telegram] Error closing fallback transport %s: %s", ip, exc)
 
     def _attempt_order(self) -> list[Optional[str]]:
-        """IPv4 literals first; dual-stack hostname last.
+        """Dual-stack hostname first; IPv4 literals as fallback.
 
-        A blackholed IPv6 path to ``api.telegram.org`` never errors — Happy
-        Eyeballs waits on AAAA until the OS TCP timeout, which can pin the
-        event loop so ``_await_with_thread_deadline`` never fires (#87015).
-        Known A-record IPs connect over IPv4 immediately. The hostname is
-        kept as a last resort for IPv6-only networks.
+        In networks where direct IPv4 literals to Telegram's CDN are rate-
+        limited or return 502 Bad Gateway (common after the bot API path is
+        heavily retried), the normal hostname path via api.telegram.org is
+        the reliable route.  Known A-record IPs are kept as fallbacks so a
+        blackholed IPv6 AAAA cannot pin initialize() (#87015), but they are
+        tried only after the hostname fails.
         """
         order: list[Optional[str]] = []
         if self._sticky_ip is not _UNSET:
             sticky = self._sticky_ip
             order.append(sticky if sticky is None else str(sticky))
+        if None not in order:
+            order.append(None)
         for ip in self._fallback_ips:
             if ip not in order:
                 order.append(ip)
-        if None not in order:
-            order.append(None)
         return order
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
