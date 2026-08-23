@@ -686,7 +686,7 @@ def _state_db(tmp_path, rows):
                 r.get("tool_call_id"),
                 json.dumps(r["tool_calls"]) if r.get("tool_calls") else None,
                 r.get("tool_name"),
-                time.time(),
+                r.get("timestamp", time.time()),
             )
             if "id" in r:
                 conn.execute(
@@ -721,8 +721,9 @@ def _db_tool(cid, content):
 
 
 class TestStateDB:
-    """#399 — scripts/introspection_extract.py must scan the SQLite SessionDB
-    (state.db messages table) in addition to JSONL and request_dump files."""
+    """#399 / #3145 — scripts/introspection_extract.py must scan the SQLite SessionDB
+    (state.db messages table) in addition to JSONL and request_dump files, respecting
+    the --days cutoff."""
 
     def test_state_db_counts_sessions_and_signals(self, tmp_path):
         _state_db(
@@ -743,6 +744,43 @@ class TestStateDB:
         d = build_digest(tmp_path, window_days=7)
         assert d["sessions_scanned"] == 2
         assert d["signals"]["tool_failures"] == {"terminal": 1, "read_file": 1}
+
+    def test_state_db_respects_cutoff_window(self, tmp_path):
+        """Issue #3145: SessionDB messages older than cutoff must not be aggregated."""
+        now = time.time()
+        old_ts = now - 30 * 86400  # 30 days ago
+        fresh_ts = now - 2 * 86400  # 2 days ago
+
+        _state_db(
+            tmp_path,
+            [
+                # Old session (30 days ago) — should be excluded from 7-day digest
+                {
+                    "session_id": "old-sess",
+                    "timestamp": old_ts,
+                    **_db_asst("terminal", "c1"),
+                },
+                {
+                    "session_id": "old-sess",
+                    "timestamp": old_ts,
+                    **_db_tool("c1", _term("bash: old: not found", exit_code=127)),
+                },
+                # Fresh session (2 days ago) — should be included
+                {
+                    "session_id": "fresh-sess",
+                    "timestamp": fresh_ts,
+                    **_db_asst("read_file", "c2"),
+                },
+                {
+                    "session_id": "fresh-sess",
+                    "timestamp": fresh_ts,
+                    **_db_tool("c2", _fail("no such file")),
+                },
+            ],
+        )
+        d = build_digest(tmp_path, window_days=7, now=now)
+        assert d["sessions_scanned"] == 1
+        assert d["signals"]["tool_failures"] == {"read_file": 1}
 
     def test_state_db_at_hermes_home_root(self, tmp_path, monkeypatch):
         """#623 — state.db can live at HERMES_HOME root, not under sessions_dir."""

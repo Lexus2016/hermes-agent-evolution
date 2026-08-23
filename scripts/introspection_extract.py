@@ -370,8 +370,8 @@ _MESSAGE_ROW_ID_KEY = "_db_id"
 
 def _message_row_to_dict(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
     """Convert a SessionDB messages row into the role-tagged dict scan_messages
-    consumes (#399).  Drops DB-only columns (session_id, timestamp) but keeps
-    the original id for ordering."""
+    consumes (#399). Drops DB-only columns (session_id) but keeps
+    the original id for ordering and timestamp for cutoff filtering (#3145)."""
     obj: Dict[str, Any] = {_MESSAGE_ROW_ID_KEY: row["id"]}
     if "role" in row.keys():
         obj["role"] = row["role"]
@@ -388,6 +388,11 @@ def _message_row_to_dict(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
             pass
     if "tool_name" in row.keys():
         obj["tool_name"] = row["tool_name"]
+    if "timestamp" in row.keys() and row["timestamp"] is not None:
+        try:
+            obj["timestamp"] = float(row["timestamp"])
+        except (ValueError, TypeError):
+            pass
     return obj if obj.get("role") else None
 
 
@@ -405,12 +410,20 @@ def _iter_state_db(db_path: Path) -> Iterable[tuple[str, List[Dict[str, Any]]]]:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         # Probe schema; the expected columns are id, session_id, role, content,
-        # tool_call_id, tool_calls, tool_name, timestamp.  Any subset is fine.
+        # tool_call_id, tool_calls, tool_name, timestamp. Any subset is fine.
         try:
             cur.execute(
                 "SELECT session_id, id, role, content, tool_call_id, tool_calls, "
-                "tool_name FROM messages ORDER BY session_id, id"
+                "tool_name, timestamp FROM messages ORDER BY session_id, id"
             )
+        except sqlite3.OperationalError:
+            try:
+                cur.execute(
+                    "SELECT session_id, id, role, content, tool_call_id, tool_calls, "
+                    "tool_name FROM messages ORDER BY session_id, id"
+                )
+            except sqlite3.Error:
+                return
         except sqlite3.Error:
             return
         current_session: Optional[str] = None
@@ -437,11 +450,12 @@ def _state_db_session_signals(msgs: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     The caller gives us messages already grouped by session_id and ordered by
     id, but we also carry the original id on each dict so we can re-sort here
-    as a defense-in-depth step.  The id key is stripped before scanning so it
-    never leaks into the digest."""
+    as a defense-in-depth step. The id and timestamp keys are stripped before
+    scanning so they never leak into the digest."""
     ordered = sorted(msgs, key=lambda m: m.get(_MESSAGE_ROW_ID_KEY, 0))
     for m in ordered:
         m.pop(_MESSAGE_ROW_ID_KEY, None)
+        m.pop("timestamp", None)
     return scan_messages(ordered)
 
 
@@ -667,6 +681,16 @@ def build_digest(
             if db_path.is_file():
                 for _sid, msgs in _iter_state_db(db_path):
                     if not msgs:
+                        continue
+                    # Issue #3145: Filter by --days cutoff so 7-day digest
+                    # doesn't aggregate all historical SessionDB sessions.
+                    # A session is fresh if any message timestamp >= cutoff,
+                    # or if no messages carry timestamps, fall back to file mtime.
+                    has_ts = any("timestamp" in m for m in msgs)
+                    if has_ts:
+                        if not any(m.get("timestamp", 0) >= cutoff for m in msgs):
+                            continue
+                    elif not _fresh(db_path, cutoff):
                         continue
                     scanned += 1
                     _aggregate(_state_db_session_signals(msgs))
