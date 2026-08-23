@@ -5693,7 +5693,7 @@ class TestRunConversation:
 
         fallback_called = {"called": False}
 
-        def _mock_fallback():
+        def _mock_fallback(*args, **kwargs):
             fallback_called["called"] = True
             # Simulate what _try_activate_fallback does: just advance the
             # index and set the flag (the client is already mocked).
@@ -5738,7 +5738,7 @@ class TestRunConversation:
             empty_resp,  # fallback exhausted
         ]
 
-        def _mock_fallback():
+        def _mock_fallback(*args, **kwargs):
             if agent._fallback_index >= len(agent._fallback_chain):
                 return False
             agent._fallback_index += 1
