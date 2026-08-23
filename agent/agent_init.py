@@ -101,6 +101,7 @@ def _ra():
     patches reach this code path.
     """
     import run_agent
+
     return run_agent
 
 
@@ -168,9 +169,7 @@ def _provider_default_routes(provider: str) -> set[str]:
         from providers import get_provider_profile
 
         profile = get_provider_profile(provider)
-        route = _normalize_route_base_url(
-            getattr(profile, "base_url", "")
-        )
+        route = _normalize_route_base_url(getattr(profile, "base_url", ""))
         if route:
             routes.add(route)
     except Exception:
@@ -179,7 +178,9 @@ def _provider_default_routes(provider: str) -> set[str]:
     try:
         from hermes_cli.auth import PROVIDER_REGISTRY
         from hermes_cli.models import normalize_provider as normalize_model_provider
-        from hermes_cli.providers import normalize_provider as normalize_registry_provider
+        from hermes_cli.providers import (
+            normalize_provider as normalize_registry_provider,
+        )
 
         for provider_id, config in PROVIDER_REGISTRY.items():
             canonical_id = normalize_registry_provider(
@@ -187,9 +188,7 @@ def _provider_default_routes(provider: str) -> set[str]:
             )
             if canonical_id != provider:
                 continue
-            route = _normalize_route_base_url(
-                getattr(config, "inference_base_url", "")
-            )
+            route = _normalize_route_base_url(getattr(config, "inference_base_url", ""))
             if route:
                 routes.add(route)
     except Exception:
@@ -207,10 +206,7 @@ def _provider_default_routes(provider: str) -> set[str]:
         pass
 
     if provider == "gemini":
-        routes.update(
-            f"{route.rstrip('/')}/openai"
-            for route in list(routes)
-        )
+        routes.update(f"{route.rstrip('/')}/openai" for route in list(routes))
     return routes
 
 
@@ -245,7 +241,9 @@ def _context_route_mismatch(
         configured_provider = configured_provider.lower()
         active_provider = active_provider.lower()
     try:
-        from hermes_cli.providers import normalize_provider as normalize_registry_provider
+        from hermes_cli.providers import (
+            normalize_provider as normalize_registry_provider,
+        )
 
         configured_provider = normalize_registry_provider(configured_provider)
         active_provider = normalize_registry_provider(active_provider)
@@ -300,7 +298,9 @@ def _build_codex_gpt5_autoraise_notice(
     ``status_callback`` for gateway users, so it must be self-contained and
     include the exact opt-back-out command.
     """
-    model = str(autoraise.get("model") or "gpt-5.4/5.5").strip().lower().rsplit("/", 1)[-1]
+    model = (
+        str(autoraise.get("model") or "gpt-5.4/5.5").strip().lower().rsplit("/", 1)[-1]
+    )
     if isinstance(context_length, int) and context_length > 0:
         cap = f"{round(context_length / 1000)}K"
     else:
@@ -385,9 +385,10 @@ def _codex_gpt55_autoraise_notice_seen(autoraise: Dict[str, Any]) -> bool:
     """
     try:
         current = _codex_gpt55_autoraise_notice_state(autoraise)
-        return _codex_gpt55_autoraise_notice_marker().read_text(
-            encoding="utf-8"
-        ).strip() == current
+        return (
+            _codex_gpt55_autoraise_notice_marker().read_text(encoding="utf-8").strip()
+            == current
+        )
     except (OSError, KeyError, TypeError, ValueError):
         return False
 
@@ -482,7 +483,9 @@ def _custom_provider_extra_body_for_agent(
     return fallback
 
 
-def _merge_custom_provider_extra_body(agent, custom_providers: List[Dict[str, Any]]) -> None:
+def _merge_custom_provider_extra_body(
+    agent, custom_providers: List[Dict[str, Any]]
+) -> None:
     extra_body = _custom_provider_extra_body_for_agent(
         provider=agent.provider,
         model=agent.model,
@@ -652,14 +655,20 @@ def init_agent(
     agent._chat_name = chat_name
     agent._chat_type = chat_type
     agent._thread_id = thread_id
-    agent._gateway_session_key = gateway_session_key  # Stable per-chat key (e.g. agent:main:telegram:dm:123)
+    agent._gateway_session_key = (
+        gateway_session_key  # Stable per-chat key (e.g. agent:main:telegram:dm:123)
+    )
     # Pluggable print function — CLI replaces this with _cprint so that
     # raw ANSI status lines are routed through prompt_toolkit's renderer
     # instead of going directly to stdout where patch_stdout's StdoutProxy
     # would mangle the escape sequences.  None = use builtins.print.
     agent._print_fn = None
-    agent.background_review_callback = None  # Optional sync callback for gateway delivery
-    agent.memory_notifications = "on"  # Memory update notifications: "off", "on", "verbose"
+    agent.background_review_callback = (
+        None  # Optional sync callback for gateway delivery
+    )
+    agent.memory_notifications = (
+        "on"  # Memory update notifications: "off", "on", "verbose"
+    )
     agent.skip_context_files = skip_context_files
     agent.load_soul_identity = load_soul_identity
     # Background review (memory/skill) opt-out switch. When True, skips the
@@ -674,7 +683,11 @@ def init_agent(
     agent.log_prefix = f"{log_prefix} " if log_prefix else ""
     # Store effective base URL for feature detection (prompt caching, reasoning, etc.)
     agent.base_url = base_url or ""
-    provider_name = provider.strip().lower() if isinstance(provider, str) and provider.strip() else None
+    provider_name = (
+        provider.strip().lower()
+        if isinstance(provider, str) and provider.strip()
+        else None
+    )
     agent.provider = provider_name or ""
     agent.requested_provider = (
         requested_provider.strip().lower()
@@ -684,7 +697,13 @@ def init_agent(
     agent._credential_pool = credential_pool
     agent.acp_command = acp_command or command
     agent.acp_args = list(acp_args or args or [])
-    if api_mode in {"chat_completions", "codex_responses", "anthropic_messages", "bedrock_converse", "codex_app_server"}:
+    if api_mode in {
+        "chat_completions",
+        "codex_responses",
+        "anthropic_messages",
+        "bedrock_converse",
+        "codex_app_server",
+    }:
         agent.api_mode = api_mode
     elif agent.provider == "openai-codex":
         agent.api_mode = "codex_responses"
@@ -699,7 +718,9 @@ def init_agent(
     elif (provider_name is None) and agent._base_url_hostname == "api.x.ai":
         agent.api_mode = "codex_responses"
         agent.provider = "xai"
-    elif agent.provider == "anthropic" or (provider_name is None and agent._base_url_hostname == "api.anthropic.com"):
+    elif agent.provider == "anthropic" or (
+        provider_name is None and agent._base_url_hostname == "api.anthropic.com"
+    ):
         agent.api_mode = "anthropic_messages"
         agent.provider = "anthropic"
     elif agent._base_url_lower.rstrip("/").endswith("/anthropic"):
@@ -733,7 +754,9 @@ def init_agent(
         # forcing `codex_responses` on the provider name alone would break custom endpoints
         # named "meta" that do not host the Responses API.
         try:
-            from hermes_cli.providers import host_mandated_api_mode as _host_mandated_api_mode
+            from hermes_cli.providers import (
+                host_mandated_api_mode as _host_mandated_api_mode,
+            )
 
             _mandated = _host_mandated_api_mode(base_url or "")
         except Exception:
@@ -819,8 +842,9 @@ def init_agent(
     # AIAgent is created for every gateway request, so without the guard
     # each message leaks one OS thread and the process eventually exhausts
     # the system thread limit (RuntimeError: can't start new thread).
-    if (agent.provider == "openrouter" or agent._is_openrouter_url()) and \
-            not _ra()._openrouter_prewarm_done.is_set():
+    if (
+        agent.provider == "openrouter" or agent._is_openrouter_url()
+    ) and not _ra()._openrouter_prewarm_done.is_set():
         _ra()._openrouter_prewarm_done.set()
         threading.Thread(
             target=fetch_model_metadata,
@@ -849,7 +873,6 @@ def init_agent(
     agent.reaction_callback = reaction_callback
     agent.tool_gen_callback = tool_gen_callback
 
-    
     # Tool execution state — allows _vprint during tool execution
     # even when stream consumers are registered (no tokens streaming then)
     agent._executing_tools = False
@@ -894,10 +917,10 @@ def init_agent(
     # their tids explicitly.
     agent._tool_worker_threads: set[int] = set()
     agent._tool_worker_threads_lock = threading.Lock()
-    
+
     # Subagent delegation state
-    agent._delegate_depth = 0        # 0 = top-level agent, incremented for children
-    agent._active_children = []      # Running child AIAgents (for interrupt propagation)
+    agent._delegate_depth = 0  # 0 = top-level agent, incremented for children
+    agent._active_children = []  # Running child AIAgents (for interrupt propagation)
     agent._active_children_lock = threading.Lock()
 
     # Background memory/skill review state (agent/background_review.py). Holds
@@ -922,15 +945,17 @@ def init_agent(
     # Store toolset filtering options
     agent.enabled_toolsets = enabled_toolsets
     agent.disabled_toolsets = disabled_toolsets
-    
+
     # Model response configuration
     agent.max_tokens = max_tokens  # None = use model default
-    agent.reasoning_config = reasoning_config  # None = use default (medium for OpenRouter)
+    agent.reasoning_config = (
+        reasoning_config  # None = use default (medium for OpenRouter)
+    )
     agent.service_tier = service_tier
     agent.request_overrides = dict(request_overrides or {})
     agent.prefill_messages = prefill_messages or []  # Prefilled conversation turns
     agent._force_ascii_payload = False
-    
+
     # Anthropic prompt caching: auto-enabled for Claude models on native
     # Anthropic, OpenRouter, and third-party gateways that speak the
     # Anthropic protocol (``api_mode == 'anthropic_messages'``). Reduces
@@ -1025,11 +1050,14 @@ def init_agent(
     # both live under ~/.hermes/logs/.  Idempotent, so gateway mode
     # (which creates a new AIAgent per message) won't duplicate handlers.
     from hermes_logging import setup_logging, setup_verbose_logging
+
     setup_logging(hermes_home=_ra()._hermes_home)
 
     if agent.verbose_logging:
         setup_verbose_logging()
-        _ra().logger.info("Verbose logging enabled (third-party library logs suppressed)")
+        _ra().logger.info(
+            "Verbose logging enabled (third-party library logs suppressed)"
+        )
     elif agent.quiet_mode:
         # In quiet mode (CLI default), keep console output clean —
         # but DO NOT raise per-logger levels. Doing so prevents the
@@ -1042,7 +1070,7 @@ def init_agent(
         # console. Any future noise reduction belongs at the
         # handler level inside hermes_logging.py, not here.
         pass
-    
+
     # Internal stream callback (set during streaming TTS).
     # Initialized here so _vprint can reference it before run_conversation.
     agent._stream_callback = None
@@ -1112,13 +1140,20 @@ def init_agent(
     _provider_timeout = get_provider_request_timeout(agent.provider, agent.model)
 
     if agent.api_mode == "anthropic_messages":
-        from agent.anthropic_adapter import build_anthropic_client, resolve_anthropic_token
+        from agent.anthropic_adapter import (
+            build_anthropic_client,
+            resolve_anthropic_token,
+        )
+
         # Bedrock + Claude → use AnthropicBedrock SDK for full feature parity
         # (prompt caching, thinking budgets, adaptive thinking).
         _is_bedrock_anthropic = agent.provider == "bedrock"
         if _is_bedrock_anthropic:
             from agent.anthropic_adapter import build_anthropic_bedrock_client
-            _region_match = re.search(r"bedrock-runtime\.([a-z0-9-]+)\.", base_url or "")
+
+            _region_match = re.search(
+                r"bedrock-runtime\.([a-z0-9-]+)\.", base_url or ""
+            )
             _br_region = _region_match.group(1) if _region_match else "us-east-1"
             agent._bedrock_region = _br_region
             agent._anthropic_client = build_anthropic_bedrock_client(_br_region)
@@ -1129,13 +1164,19 @@ def init_agent(
             agent.client = None
             agent._client_kwargs = {}
             if not agent.quiet_mode:
-                print(f"🤖 AI Agent initialized with model: {agent.model} (AWS Bedrock + AnthropicBedrock SDK, {_br_region})")
+                print(
+                    f"🤖 AI Agent initialized with model: {agent.model} (AWS Bedrock + AnthropicBedrock SDK, {_br_region})"
+                )
         else:
             # Only fall back to ANTHROPIC_TOKEN when the provider is actually Anthropic.
             # Other anthropic_messages providers (MiniMax, Alibaba, etc.) must use their own API key.
             # Falling back would send Anthropic credentials to third-party endpoints (Fixes #1739, #minimax-401).
             _is_native_anthropic = agent.provider == "anthropic"
-            effective_key = (api_key or resolve_anthropic_token() or "") if _is_native_anthropic else (api_key or "")
+            effective_key = (
+                (api_key or resolve_anthropic_token() or "")
+                if _is_native_anthropic
+                else (api_key or "")
+            )
 
             # MiniMax OAuth issues short-lived (~15-min) access tokens. The
             # Anthropic SDK caches ``api_key`` as a static string at client
@@ -1149,12 +1190,18 @@ def init_agent(
             # The cached refresh path is a no-op when the token still has
             # ``MINIMAX_OAUTH_REFRESH_SKEW_SECONDS`` of life left, so steady-
             # state cost is one file read + one timestamp compare per request.
-            if agent.provider == "minimax-oauth" and isinstance(effective_key, str) and effective_key:
+            if (
+                agent.provider == "minimax-oauth"
+                and isinstance(effective_key, str)
+                and effective_key
+            ):
                 try:
                     from hermes_cli.auth import build_minimax_oauth_token_provider
+
                     effective_key = build_minimax_oauth_token_provider()
                 except Exception as _mm_exc:  # noqa: BLE001 — never block startup on this
                     import logging as _logging
+
                     _logging.getLogger(__name__).warning(
                         "MiniMax OAuth: failed to install per-request token provider "
                         "(%s); falling back to static bearer that will expire ~15min in.",
@@ -1172,13 +1219,22 @@ def init_agent(
             # that cause 401/403 on their endpoints.  Guards #1739 and
             # the third-party identity-injection bug.
             from agent.anthropic_adapter import _is_oauth_token as _is_oat
-            agent._is_anthropic_oauth = _is_oat(effective_key) if (_is_native_anthropic and isinstance(effective_key, str)) else False
-            agent._anthropic_client = build_anthropic_client(effective_key, base_url, timeout=_provider_timeout)
+
+            agent._is_anthropic_oauth = (
+                _is_oat(effective_key)
+                if (_is_native_anthropic and isinstance(effective_key, str))
+                else False
+            )
+            agent._anthropic_client = build_anthropic_client(
+                effective_key, base_url, timeout=_provider_timeout
+            )
             # No OpenAI client needed for Anthropic mode
             agent.client = None
             agent._client_kwargs = {}
             if not agent.quiet_mode:
-                print(f"🤖 AI Agent initialized with model: {agent.model} (Anthropic native)")
+                print(
+                    f"🤖 AI Agent initialized with model: {agent.model} (Anthropic native)"
+                )
                 # ``effective_key`` may be a callable Entra ID bearer
                 # provider for Azure Foundry anthropic_messages mode.
                 # The Anthropic adapter installs an httpx event hook
@@ -1192,6 +1248,7 @@ def init_agent(
                     print(f"🔑 Using token: {effective_key[:8]}...{effective_key[-4:]}")
     elif agent.provider == "moa":
         from agent.moa_loop import build_moa_facade
+
         agent.api_mode = "chat_completions"
 
         # build_moa_facade wires the reference relay that routes
@@ -1219,6 +1276,7 @@ def init_agent(
         agent._bedrock_guardrail_config = None
         try:
             from hermes_cli.config import load_config_readonly as _load_br_cfg
+
             _gr = _load_br_cfg().get("bedrock", {}).get("guardrail", {})
             if _gr.get("guardrail_identifier") and _gr.get("guardrail_version"):
                 agent._bedrock_guardrail_config = {
@@ -1226,7 +1284,9 @@ def init_agent(
                     "guardrailVersion": _gr["guardrail_version"],
                 }
                 if _gr.get("stream_processing_mode"):
-                    agent._bedrock_guardrail_config["streamProcessingMode"] = _gr["stream_processing_mode"]
+                    agent._bedrock_guardrail_config["streamProcessingMode"] = _gr[
+                        "stream_processing_mode"
+                    ]
                 if _gr.get("trace"):
                     agent._bedrock_guardrail_config["trace"] = _gr["trace"]
         except Exception:
@@ -1235,7 +1295,9 @@ def init_agent(
         agent._client_kwargs = {}
         if not agent.quiet_mode:
             _gr_label = " + Guardrails" if agent._bedrock_guardrail_config else ""
-            print(f"🤖 AI Agent initialized with model: {agent.model} (AWS Bedrock, {agent._bedrock_region}{_gr_label})")
+            print(
+                f"🤖 AI Agent initialized with model: {agent.model} (AWS Bedrock, {agent._bedrock_region}{_gr_label})"
+            )
     else:
         if api_key and base_url:
             # Explicit credentials from CLI/gateway — construct directly.
@@ -1264,10 +1326,14 @@ def init_agent(
             effective_base = base_url
             if base_url_host_matches(effective_base, "openrouter.ai"):
                 from agent.auxiliary_client import build_or_headers
+
                 client_kwargs["default_headers"] = build_or_headers()
             elif base_url_host_matches(effective_base, "integrate.api.nvidia.com"):
                 from agent.auxiliary_client import build_nvidia_nim_headers
-                client_kwargs["default_headers"] = build_nvidia_nim_headers(effective_base)
+
+                client_kwargs["default_headers"] = build_nvidia_nim_headers(
+                    effective_base
+                )
             elif base_url_host_matches(effective_base, "api.routermint.com"):
                 client_kwargs["default_headers"] = _ra()._routermint_headers()
             elif base_url_host_matches(effective_base, "githubcopilot.com"):
@@ -1282,6 +1348,7 @@ def init_agent(
                 client_kwargs["default_headers"] = _ra()._qwen_portal_headers()
             elif base_url_host_matches(effective_base, "chatgpt.com"):
                 from agent.auxiliary_client import _codex_cloudflare_headers
+
                 client_kwargs["default_headers"] = _codex_cloudflare_headers(api_key)
             elif base_url_host_matches(effective_base, "x.ai"):
                 from tools.xai_http import hermes_xai_default_headers
@@ -1293,6 +1360,7 @@ def init_agent(
                 # Kimi User-Agent on non-kimi.com endpoints).
                 try:
                     from providers import get_provider_profile as _gpf
+
                     _ph = _gpf(agent.provider)
                     if _ph and _ph.default_headers:
                         client_kwargs["default_headers"] = dict(_ph.default_headers)
@@ -1301,8 +1369,10 @@ def init_agent(
         else:
             # No explicit creds — use the centralized provider router
             from agent.auxiliary_client import resolve_provider_client
+
             _routed_client, _ = resolve_provider_client(
-                agent.provider or "auto", model=agent.model, raw_codex=True)
+                agent.provider or "auto", model=agent.model, raw_codex=True
+            )
             if _routed_client is not None:
                 client_kwargs = {
                     "api_key": _routed_client.api_key,
@@ -1333,6 +1403,7 @@ def init_agent(
                     _env_hint = f"{_explicit.upper()}_API_KEY"
                     try:
                         from hermes_cli.auth import PROVIDER_REGISTRY
+
                         _pcfg = PROVIDER_REGISTRY.get(_explicit)
                         if _pcfg and _pcfg.api_key_env_vars:
                             _env_hint = _pcfg.api_key_env_vars[0]
@@ -1342,25 +1413,36 @@ def init_agent(
                     _fb_entries = []
                     if isinstance(fallback_model, list):
                         _fb_entries = [
-                            f for f in fallback_model
-                            if isinstance(f, dict) and f.get("provider") and f.get("model")
+                            f
+                            for f in fallback_model
+                            if isinstance(f, dict)
+                            and f.get("provider")
+                            and f.get("model")
                         ]
-                    elif isinstance(fallback_model, dict) and fallback_model.get("provider") and fallback_model.get("model"):
+                    elif (
+                        isinstance(fallback_model, dict)
+                        and fallback_model.get("provider")
+                        and fallback_model.get("model")
+                    ):
                         _fb_entries = [fallback_model]
                     _fb_resolved = False
                     for _fb in _fb_entries:
                         try:
                             from hermes_cli.fallback_config import resolve_entry_api_key
+
                             _fb_explicit_key = resolve_entry_api_key(_fb)
                             _fb_client, _fb_model = resolve_provider_client(
-                                _fb["provider"], model=_fb["model"], raw_codex=True,
+                                _fb["provider"],
+                                model=_fb["model"],
+                                raw_codex=True,
                                 explicit_base_url=_fb.get("base_url"),
                                 explicit_api_key=_fb_explicit_key,
                             )
                         except Exception as _fb_exc:
                             logger.debug(
                                 "Init-time fallback entry %s failed: %s",
-                                _fb.get("provider"), _fb_exc,
+                                _fb.get("provider"),
+                                _fb_exc,
                             )
                             continue
                         if _fb_client is not None:
@@ -1375,9 +1457,13 @@ def init_agent(
                                 client_kwargs["timeout"] = _provider_timeout
                             _fb_headers = getattr(_fb_client, "_custom_headers", None)
                             if not _fb_headers:
-                                _fb_headers = getattr(_fb_client, "default_headers", None)
+                                _fb_headers = getattr(
+                                    _fb_client, "default_headers", None
+                                )
                             if not _fb_headers:
-                                _fb_headers = getattr(_fb_client, "_default_headers", None)
+                                _fb_headers = getattr(
+                                    _fb_client, "_default_headers", None
+                                )
                             if _fb_headers:
                                 client_kwargs["default_headers"] = dict(_fb_headers)
                             _fb_resolved = True
@@ -1395,7 +1481,7 @@ def init_agent(
                         "select a provider, or run `hermes setup` for first-time "
                         "configuration."
                     )
-        
+
         agent._client_kwargs = client_kwargs  # stored for rebuilding after interrupt
 
         # Enable fine-grained tool streaming for Claude on OpenRouter.
@@ -1405,7 +1491,10 @@ def init_agent(
         # stream tool call arguments token-by-token, keeping the
         # connection alive.
         _effective_base = str(client_kwargs.get("base_url", "")).lower()
-        if base_url_host_matches(_effective_base, "openrouter.ai") and "claude" in (agent.model or "").lower():
+        if (
+            base_url_host_matches(_effective_base, "openrouter.ai")
+            and "claude" in (agent.model or "").lower()
+        ):
             headers = client_kwargs.get("default_headers") or {}
             existing_beta = headers.get("x-anthropic-beta", "")
             _FINE_GRAINED = "fine-grained-tool-streaming-2025-05-14"
@@ -1458,7 +1547,9 @@ def init_agent(
             from agent.ssl_guard import verify_ca_bundle_with_fallback
 
             verify_ca_bundle_with_fallback()
-            agent.client = agent._create_openai_client(client_kwargs, reason="agent_init", shared=True)
+            agent.client = agent._create_openai_client(
+                client_kwargs, reason="agent_init", shared=True
+            )
             if not agent.quiet_mode:
                 print(f"🤖 AI Agent initialized with model: {agent.model}")
                 if base_url:
@@ -1472,7 +1563,12 @@ def init_agent(
                 key_used = client_kwargs.get("api_key", "none")
                 if is_token_provider(key_used):
                     print("🔑 Using credentials: Microsoft Entra ID")
-                elif isinstance(key_used, str) and key_used and key_used != "dummy-key" and len(key_used) > 12:
+                elif (
+                    isinstance(key_used, str)
+                    and key_used
+                    and key_used != "dummy-key"
+                    and len(key_used) > 12
+                ):
                     print(f"🔑 Using API key: {key_used[:8]}...{key_used[-4:]}")
                 else:
                     print("⚠️  Warning: API key appears invalid or missing")
@@ -1484,18 +1580,24 @@ def init_agent(
     # recovered, so the mutable API-key value alone cannot reliably attribute
     # the failure to its source entry.
     from agent.agent_runtime_helpers import sync_credential_pool_entry_id
+
     sync_credential_pool_entry_id(agent)
-    
+
     # Provider fallback chain — ordered list of backup providers tried
     # when the primary is exhausted (rate-limit, overload, connection
     # failure).  Supports both legacy single-dict ``fallback_model`` and
     # new list ``fallback_providers`` format.
     if isinstance(fallback_model, list):
         agent._fallback_chain = [
-            f for f in fallback_model
+            f
+            for f in fallback_model
             if isinstance(f, dict) and f.get("provider") and f.get("model")
         ]
-    elif isinstance(fallback_model, dict) and fallback_model.get("provider") and fallback_model.get("model"):
+    elif (
+        isinstance(fallback_model, dict)
+        and fallback_model.get("provider")
+        and fallback_model.get("model")
+    ):
         agent._fallback_chain = [fallback_model]
     else:
         try:
@@ -1514,8 +1616,12 @@ def init_agent(
             fb = agent._fallback_chain[0]
             print(f"🔄 Fallback model: {fb['model']} ({fb['provider']})")
         else:
-            print(f"🔄 Fallback chain ({len(agent._fallback_chain)} providers): " +
-                  " → ".join(f"{f['model']} ({f['provider']})" for f in agent._fallback_chain))
+            print(
+                f"🔄 Fallback chain ({len(agent._fallback_chain)} providers): "
+                + " → ".join(
+                    f"{f['model']} ({f['provider']})" for f in agent._fallback_chain
+                )
+            )
 
     # A multiplexed gateway may enter a different HERMES_HOME after
     # ``model_tools`` was first imported. Ensure that profile's keyed plugin
@@ -1532,6 +1638,7 @@ def init_agent(
     # whether it holds a newer or staler view (see refresh_agent_mcp_tools).
     try:
         from tools.registry import registry as _snapshot_registry
+
         agent._tool_snapshot_generation = _snapshot_registry._generation
     except Exception:
         agent._tool_snapshot_generation = 0
@@ -1540,7 +1647,7 @@ def init_agent(
         disabled_toolsets=disabled_toolsets,
         quiet_mode=agent.quiet_mode,
     )
-    
+
     # Show tool configuration and store valid tool names for validation
     agent.valid_tool_names = set()
     if agent.tools:
@@ -1563,6 +1670,7 @@ def init_agent(
     # membership test + reference on every system-prompt rebuild
     # (init + each context compression).
     from agent.prompt_builder import KANBAN_GUIDANCE
+
     agent._kanban_worker_guidance = (
         KANBAN_GUIDANCE if "kanban_show" in agent.valid_tool_names else ""
     )
@@ -1570,19 +1678,29 @@ def init_agent(
     # Check tool requirements
     if agent.tools and not agent.quiet_mode:
         requirements = _ra().check_toolset_requirements()
-        missing_reqs = [name for name, available in requirements.items() if not available]
+        missing_reqs = [
+            name for name, available in requirements.items() if not available
+        ]
         if missing_reqs:
-            print(f"⚠️  Some tools may not work due to missing requirements: {missing_reqs}")
-    
+            print(
+                f"⚠️  Some tools may not work due to missing requirements: {missing_reqs}"
+            )
+
     # Show trajectory saving status
     if agent.save_trajectories and not agent.quiet_mode:
         print("📝 Trajectory saving enabled")
-    
+
     # Show ephemeral system prompt status
     if agent.ephemeral_system_prompt and not agent.quiet_mode:
-        prompt_preview = agent.ephemeral_system_prompt[:60] + "..." if len(agent.ephemeral_system_prompt) > 60 else agent.ephemeral_system_prompt
-        print(f"🔒 Ephemeral system prompt: '{prompt_preview}' (not saved to trajectories)")
-    
+        prompt_preview = (
+            agent.ephemeral_system_prompt[:60] + "..."
+            if len(agent.ephemeral_system_prompt) > 60
+            else agent.ephemeral_system_prompt
+        )
+        print(
+            f"🔒 Ephemeral system prompt: '{prompt_preview}' (not saved to trajectories)"
+        )
+
     # Show prompt caching status
     if agent._use_prompt_caching and not agent.quiet_mode:
         if agent._use_native_cache_layout and agent.provider == "anthropic":
@@ -1592,7 +1710,7 @@ def init_agent(
         else:
             source = "Claude via OpenRouter"
         print(f"💾 Prompt caching: ENABLED ({source}, {agent._cache_ttl} TTL)")
-    
+
     # Session logging setup - auto-save conversation trajectories for debugging
     agent.session_start = datetime.now()
     if session_id:
@@ -1642,13 +1760,14 @@ def init_agent(
     agent._session_json_enabled = False
     try:
         from hermes_cli.config import load_config_readonly as _load_sess_cfg
-        _sess_cfg = (_load_sess_cfg().get("sessions") or {})
+
+        _sess_cfg = _load_sess_cfg().get("sessions") or {}
         agent._session_json_enabled = bool(_sess_cfg.get("write_json_snapshots", False))
     except Exception:
         pass
     # logs_dir is retained unconditionally for request_dump_*.json (debug
     # breadcrumb path written by agent_runtime_helpers.dump_api_request_debug).
-    
+
     # Track conversation messages for session logging
     agent._session_messages: List[Dict[str, Any]] = []
     # Responses encrypted reasoning replay state.  Some OpenAI-compatible
@@ -1660,22 +1779,23 @@ def init_agent(
     agent._codex_reasoning_replay_enabled = True
     agent._memory_write_origin = "assistant_tool"
     agent._memory_write_context = "foreground"
-    
+
     # Cached system prompt -- built once per session, only rebuilt on compression
     agent._cached_system_prompt: Optional[str] = None
     # Cross-session-stable prefix of the cached prompt. It remains separate
     # from the persisted string and is used only to place an early cache marker.
     agent._cached_system_prompt_static: Optional[str] = None
-    
+
     # Filesystem checkpoint manager (transparent — not a tool)
     from tools.checkpoint_manager import CheckpointManager
+
     agent._checkpoint_mgr = CheckpointManager(
         enabled=checkpoints_enabled,
         max_snapshots=checkpoint_max_snapshots,
         max_total_size_mb=checkpoint_max_total_size_mb,
         max_file_size_mb=checkpoint_max_file_size_mb,
     )
-    
+
     # SQLite session store (optional -- provided by CLI or gateway)
     agent._session_db = session_db
     # Whether close() must also close that handle. Default False: a
@@ -1697,7 +1817,9 @@ def init_agent(
     # the race before the agent's normal early turn flush.
     agent._pending_cli_user_message = None
     agent._last_flushed_db_idx = 0  # tracks DB-write cursor to prevent duplicate writes
-    agent._history_repaired_count = 0  # messages repair_message_sequence removed this turn
+    agent._history_repaired_count = (
+        0  # messages repair_message_sequence removed this turn
+    )
     agent._session_db_created = False  # DB row deferred to run_conversation()
     # Most agents own their session row and should finalize it on close().
     # Some temporary helper agents (manual compression / session-hygiene /
@@ -1722,18 +1844,21 @@ def init_agent(
     # SessionDB.set_session_yolo at toggle time.
     try:
         from tools.approval import _YOLO_MODE_FROZEN
+
         if _YOLO_MODE_FROZEN:
             agent._session_init_model_config["yolo_mode"] = True
     except Exception:
         pass
-    
+
     # In-memory todo list for task planning (one per agent/session)
     from tools.todo_tool import TodoStore
+
     agent._todo_store = TodoStore()
-    
+
     # Load config once for memory, skills, and compression sections
     try:
         from hermes_cli.config import load_config_readonly as _load_agent_config
+
         _agent_cfg = _load_agent_config()
     except Exception:
         _agent_cfg = {}
@@ -1760,7 +1885,11 @@ def init_agent(
     try:
         _model_section = _agent_cfg.get("model", {})
         if isinstance(_model_section, dict):
-            _load_mode = str(_model_section.get("lmstudio_load_mode", "explicit") or "explicit").strip().lower()
+            _load_mode = (
+                str(_model_section.get("lmstudio_load_mode", "explicit") or "explicit")
+                .strip()
+                .lower()
+            )
             if _load_mode in {"explicit", "jit"}:
                 agent.lmstudio_load_mode = _load_mode
             else:
@@ -1773,6 +1902,7 @@ def init_agent(
 
     try:
         from agent.policy_interceptors import build_registry_from_config
+
         _policy_registry = build_registry_from_config(
             _agent_cfg.get("policy_interceptors", {})
         )
@@ -1780,6 +1910,7 @@ def init_agent(
         # guardrail so before_call can suppress a single redundant read-only
         # recheck when ``recheck_suppression.enabled`` is set.
         from agent.recheck_suppression import RecheckController
+
         _recheck_controller = RecheckController.from_mapping(
             _agent_cfg.get("recheck_suppression", {})
         )
@@ -1869,12 +2000,14 @@ def init_agent(
             agent._memory_nudge_interval = int(mem_config.get("nudge_interval", 10))
             if agent._memory_enabled or agent._user_profile_enabled:
                 from tools.memory_tool import MemoryStore
+
                 # Memory-poisoning guard (issue #315): None unless memory.guard
                 # is explicitly enabled in config, so the default path keeps the
                 # pre-#315 binary-block write behaviour exactly.
                 _mem_guard = None
                 try:
                     from agent.memory_guard import build_memory_guard_from_config
+
                     _mem_guard = build_memory_guard_from_config(mem_config.get("guard"))
                 except Exception:
                     _mem_guard = None
@@ -1888,8 +2021,6 @@ def init_agent(
                 agent._memory_store.load_from_disk()
         except Exception:
             pass  # Memory is optional -- don't break agent init
-    
-
 
     # Memory provider plugin (external — one at a time, alongside built-in)
     # Reads memory.provider from config to select which plugin to activate.
@@ -1901,6 +2032,7 @@ def init_agent(
             if _mem_provider_name and _mem_provider_name.strip():
                 from agent.memory_manager import MemoryManager as _MemoryManager
                 from plugins.memory import load_memory_provider as _load_mem
+
                 agent._memory_manager = _MemoryManager()
                 _mp = _load_mem(_mem_provider_name)
                 if _mp and _mp.is_available():
@@ -1916,7 +2048,9 @@ def init_agent(
                             _unavailable_reason = _mp.unavailable_reason()
                         except Exception:
                             _unavailable_reason = ""
-                        _warn_memory_provider_unavailable(_mem_provider_name, _unavailable_reason)
+                        _warn_memory_provider_unavailable(
+                            _mem_provider_name, _unavailable_reason
+                        )
                 if agent._memory_manager.providers:
                     _init_kwargs = {
                         "session_id": agent.session_id,
@@ -1957,6 +2091,7 @@ def init_agent(
                     # Profile identity for per-profile provider scoping
                     try:
                         from hermes_cli.profiles import get_active_profile_name
+
                         _profile = get_active_profile_name()
                         _init_kwargs["agent_identity"] = _profile
                         _init_kwargs["agent_workspace"] = "hermes"
@@ -1967,22 +2102,32 @@ def init_agent(
                     # delivered on a different path (see the platform=="cli"
                     # block), and the indicator no-ops when it's absent.
                     agent._memory_manager.initialize_all(**_init_kwargs)
-                    _ra().logger.info("Memory provider '%s' activated", _mem_provider_name)
+                    _ra().logger.info(
+                        "Memory provider '%s' activated", _mem_provider_name
+                    )
                 else:
-                    _ra().logger.debug("Memory provider '%s' not found or not available", _mem_provider_name)
+                    _ra().logger.debug(
+                        "Memory provider '%s' not found or not available",
+                        _mem_provider_name,
+                    )
                     agent._memory_manager = None
         except Exception as _mpe:
             _ra().logger.warning("Memory provider plugin init failed: %s", _mpe)
             agent._memory_manager = None
 
-    from agent.memory_manager import inject_memory_provider_tools as _inject_memory_provider_tools
+    from agent.memory_manager import (
+        inject_memory_provider_tools as _inject_memory_provider_tools,
+    )
+
     _inject_memory_provider_tools(agent)
 
     # Skills config: nudge interval for skill creation reminders
     agent._skill_nudge_interval = 10
     try:
         skills_config = _agent_cfg.get("skills", {})
-        agent._skill_nudge_interval = int(skills_config.get("creation_nudge_interval", 10))
+        agent._skill_nudge_interval = int(
+            skills_config.get("creation_nudge_interval", 10)
+        )
     except Exception:
         pass
 
@@ -2013,6 +2158,7 @@ def init_agent(
     # a malformed section falls back to the schema defaults (guard on,
     # $0.25 threshold), matching the guard's overall fail-open posture.
     from agent.empty_response_guard import resolve_guard_settings
+
     (
         agent._empty_guard_enabled,
         agent._empty_guard_cost_threshold_usd,
@@ -2022,25 +2168,33 @@ def init_agent(
     # the historical gate), true (all api_modes), false (never), or a list of
     # model-name substrings.  Resolved against the active api_mode/model in the
     # conversation loop's intent-ack block.
-    agent._intent_ack_continuation = _agent_section.get("intent_ack_continuation", "auto")
+    agent._intent_ack_continuation = _agent_section.get(
+        "intent_ack_continuation", "auto"
+    )
 
     # Universal task-completion guidance toggle.  Default True.  Surfaced
     # as a separate flag from tool_use_enforcement because the guidance
     # applies to ALL models, not just the model families enforcement
     # targets.
-    agent._task_completion_guidance = bool(_agent_section.get("task_completion_guidance", True))
+    agent._task_completion_guidance = bool(
+        _agent_section.get("task_completion_guidance", True)
+    )
 
     # Universal parallel-tool-call guidance toggle.  Default True.  Separate
     # flag from task_completion_guidance because a user may want one but not
     # the other.  Steers the model to batch independent tool calls into a
     # single turn; the runtime already executes such batches concurrently.
-    agent._parallel_tool_call_guidance = bool(_agent_section.get("parallel_tool_call_guidance", True))
+    agent._parallel_tool_call_guidance = bool(
+        _agent_section.get("parallel_tool_call_guidance", True)
+    )
 
     # Experimental experience-bank injection toggle.  Default False.  When
     # True, distilled execution patterns from the evolution experience bank
     # are injected into the context tier at session start (once per session —
     # prompt-cache safe).  Zero token cost when the bank is empty.
-    agent._experience_injection = bool(_agent_section.get("experience_injection", False))
+    agent._experience_injection = bool(
+        _agent_section.get("experience_injection", False)
+    )
 
     # ERL heuristic injection toggle (#1361). Default False. When True, the
     # top-ranked heuristics distilled from the agent's own recorded
@@ -2048,7 +2202,9 @@ def init_agent(
     # start — cached per session, so prompt-cache safe. Separate flag from
     # experience_injection: the two distil different inputs and either can run
     # without the other.
-    agent._erl_prompt_injection = bool(_agent_section.get("erl_prompt_injection", False))
+    agent._erl_prompt_injection = bool(
+        _agent_section.get("erl_prompt_injection", False)
+    )
     # Session-scoped cache stored on the agent. Empty string is resolved;
     # None means the bank has not been read for this session yet.
     # Сесійний кеш на агенті: порожній рядок уже обчислено, None — ще ні.
@@ -2069,6 +2225,7 @@ def init_agent(
     if agent._environment_probe:
         try:
             from tools.env_probe import warm_environment_probe_async
+
             warm_environment_probe_async()
         except Exception:
             pass
@@ -2077,7 +2234,9 @@ def init_agent(
     # When True, injects a prompt fragment asking the model to write an
     # explicit problem model before planning non-trivial tasks.  Stable
     # prefix — no prompt-cache break.
-    agent._model_first_reasoning = bool(_agent_section.get("model_first_reasoning", False))
+    agent._model_first_reasoning = bool(
+        _agent_section.get("model_first_reasoning", False)
+    )
 
     # Bot Mode teammate protocol section (tools/bot_mode_probe.py) — pure
     # filesystem reads, no warm needed. Silent on non-Bot-Mode installs.
@@ -2124,6 +2283,26 @@ def init_agent(
         _cron_retries = 15
     agent._cron_api_max_retries = _cron_retries
 
+    # Issue #3113: per-turn wall-clock cap on provider retry/backoff so
+    # stream drops / APIConnectionError loops cannot stall a turn indefinitely.
+    # Defaults keep enough headroom for the Z.AI Coding overload long-backoff
+    # schedule (30/60/90/120s) while still bounding the worst case.
+    try:
+        _raw_wall = _agent_section.get("api_retry_wall_clock_seconds", 300)
+        _wall_seconds = float(_raw_wall)
+        _wall_seconds = max(_wall_seconds, 30.0)
+    except (TypeError, ValueError):
+        _wall_seconds = 300.0
+    agent._api_retry_wall_clock_seconds = _wall_seconds
+
+    try:
+        _raw_cron_wall = _agent_section.get("cron_api_retry_wall_clock_seconds", 600)
+        _cron_wall_seconds = float(_raw_cron_wall)
+        _cron_wall_seconds = max(_cron_wall_seconds, 30.0)
+    except (TypeError, ValueError):
+        _cron_wall_seconds = 600.0
+    agent._cron_api_retry_wall_clock_seconds = _cron_wall_seconds
+
     # Initialize context compressor for automatic context management
     # Compresses conversation when approaching model's context limit
     # Configuration via config.yaml (compression section)
@@ -2152,6 +2331,7 @@ def init_agent(
             _is_codex_gpt54_or_gpt55 as _is_codex_gpt54_or_gpt55_fn,
             _is_codex_spark as _is_codex_spark_fn,
         )
+
         _model_cthresh = _cthresh_fn(
             agent.model,
             agent.provider,
@@ -2175,14 +2355,20 @@ def init_agent(
         )
     except Exception:
         pass
-    compression_enabled = str(_compression_cfg.get("enabled", True)).lower() in {"true", "1", "yes"}
+    compression_enabled = str(_compression_cfg.get("enabled", True)).lower() in {
+        "true",
+        "1",
+        "yes",
+    }
     compression_target_ratio = float(_compression_cfg.get("target_ratio", 0.20))
     compression_protect_last = int(_compression_cfg.get("protect_last_n", 20))
     # Tail retention mode (compression.tail_mode). "legacy" (default) keeps
     # the 0.20*window verbatim tail; "lean" switches to the clamped
     # 2.5%/10K-25K tail with recovery-pointer machinery (#87326). Unknown
     # values fall back to legacy inside the compressor.
-    compression_tail_mode = str(_compression_cfg.get("tail_mode", "legacy")).strip().lower()
+    compression_tail_mode = (
+        str(_compression_cfg.get("tail_mode", "legacy")).strip().lower()
+    )
     # Minimum REAL (actionable) user messages guaranteed to survive in the
     # uncompressed tail (compression.min_tail_user_messages).  Default 1
     # preserves current behavior exactly — the existing single-user tail
@@ -2272,9 +2458,7 @@ def init_agent(
     # 0 means "preserve only the system prompt + summary + tail", which
     # is a legitimate (and common) configuration for long-running
     # rolling-compaction sessions.
-    compression_protect_first = max(
-        0, int(_compression_cfg.get("protect_first_n", 3))
-    )
+    compression_protect_first = max(0, int(_compression_cfg.get("protect_first_n", 3)))
     compression_abort_on_summary_failure = str(
         _compression_cfg.get("abort_on_summary_failure", False)
     ).lower() in {"true", "1", "yes"}
@@ -2284,7 +2468,8 @@ def init_agent(
     _raw_model_thresholds = _compression_cfg.get("model_thresholds", {})
     if isinstance(_raw_model_thresholds, dict):
         compression_model_thresholds = {
-            str(k): float(v) for k, v in _raw_model_thresholds.items()
+            str(k): float(v)
+            for k, v in _raw_model_thresholds.items()
             if isinstance(v, (int, float)) and not isinstance(v, bool)
         }
     else:
@@ -2454,6 +2639,7 @@ def init_agent(
     # than repeating it under ``model``.
     try:
         from hermes_cli.config import get_compatible_custom_providers
+
         _custom_providers = get_compatible_custom_providers(_agent_cfg)
     except Exception:
         _custom_providers = _agent_cfg.get("custom_providers")
@@ -2471,6 +2657,7 @@ def init_agent(
         _default = _model_cfg.get("default")
         if isinstance(_default, dict):
             from hermes_cli.config import split_model_config_default
+
             _default, _ = split_model_config_default(_default)
         _configured_default_model = str(_default or "").strip()
         _configured_default_runtime_model = _configured_default_model
@@ -2488,9 +2675,7 @@ def init_agent(
             except Exception:
                 pass
         _configured_provider = str(_model_cfg.get("provider") or "").strip()
-        _configured_base_url = _normalize_route_base_url(
-            _model_cfg.get("base_url")
-        )
+        _configured_base_url = _normalize_route_base_url(_model_cfg.get("base_url"))
         _configured_provider_norm = _normalize_custom_provider_name(
             _configured_provider
         )
@@ -2535,9 +2720,7 @@ def init_agent(
                 for _provider_key, _provider_entry in _user_providers.items():
                     if not isinstance(_provider_entry, dict):
                         continue
-                    _entry_name = str(
-                        _provider_entry.get("name") or ""
-                    ).strip()
+                    _entry_name = str(_provider_entry.get("name") or "").strip()
                     _entry_provider_ids = _custom_provider_runtime_ids(
                         _provider_key
                     ) | _custom_provider_runtime_ids(_entry_name)
@@ -2561,12 +2744,10 @@ def init_agent(
                 for _provider_entry in _custom_providers:
                     if not isinstance(_provider_entry, dict):
                         continue
-                    _entry_name = str(
-                        _provider_entry.get("name") or ""
-                    ).strip()
-                    _entry_provider_key = str(
-                        _provider_entry.get("provider_key") or ""
-                    ).strip().lower()
+                    _entry_name = str(_provider_entry.get("name") or "").strip()
+                    _entry_provider_key = (
+                        str(_provider_entry.get("provider_key") or "").strip().lower()
+                    )
                     _entry_provider_ids = _custom_provider_runtime_ids(
                         _entry_name
                     ) | _custom_provider_runtime_ids(_entry_provider_key)
@@ -2630,6 +2811,7 @@ def init_agent(
     if _config_context_length is None and _custom_providers:
         try:
             from hermes_cli.config import get_custom_provider_context_length
+
             _cp_ctx_resolved = get_custom_provider_context_length(
                 model=agent.model,
                 base_url=agent.base_url,
@@ -2665,7 +2847,8 @@ def init_agent(
                                         "custom_providers: %r — must be a positive "
                                         "integer (e.g. 256000, not '256K'). "
                                         "Falling back to auto-detection.",
-                                        agent.model, _cp_ctx,
+                                        agent.model,
+                                        _cp_ctx,
                                     )
                                     print(
                                         f"\n⚠ Invalid context_length for model {agent.model!r} in custom_providers: {_cp_ctx!r}\n"
@@ -2692,8 +2875,6 @@ def init_agent(
         _lmstudio_runtime_context_length,
     )
 
-
-
     # Select context engine: config-driven (like memory providers).
     # 1. Check config.yaml context.engine setting
     # 2. Check plugins/context_engine/<name>/ directory (repo-shipped)
@@ -2712,15 +2893,19 @@ def init_agent(
         # Try loading from plugins/context_engine/<name>/
         try:
             from plugins.context_engine import load_context_engine
+
             _selected_engine = load_context_engine(_engine_name)
         except Exception as _ce_load_err:
-            _ra().logger.debug("Context engine load from plugins/context_engine/: %s", _ce_load_err)
+            _ra().logger.debug(
+                "Context engine load from plugins/context_engine/: %s", _ce_load_err
+            )
 
         # Try general plugin system as fallback
         if _selected_engine is None:
             _candidate = None
             try:
                 from hermes_cli.plugins import get_plugin_context_engine
+
                 _candidate = get_plugin_context_engine()
             except Exception:
                 _candidate = None
@@ -2732,6 +2917,7 @@ def init_agent(
                 # compressor with an ACCURATE message rather than silently
                 # mislabelling it "not found".
                 import copy
+
                 try:
                     _selected_engine = copy.deepcopy(_candidate)
                 except Exception as _copy_err:
@@ -2742,7 +2928,8 @@ def init_agent(
                         "engines that hold uncopyable state (locks, DB connections) "
                         "should implement __deepcopy__ to copy only mutable budget "
                         "state.",
-                        _engine_name, _copy_err,
+                        _engine_name,
+                        _copy_err,
                     )
                     _selected_engine = None
 
@@ -2763,6 +2950,7 @@ def init_agent(
         agent._compression_threshold_autoraised = None
         # Resolve context_length for plugin engines — mirrors switch_model() path
         from agent.model_metadata import get_model_context_length
+
         _plugin_ctx_len = get_model_context_length(
             agent.model,
             base_url=agent.base_url,
@@ -2850,7 +3038,11 @@ def init_agent(
         and not isinstance(agent._config_context_length, bool)
         and agent._config_context_length > 0
     )
-    if _ctx and _ctx < MINIMUM_CONTEXT_LENGTH and not _allow_lmstudio_explicit_below_floor:
+    if (
+        _ctx
+        and _ctx < MINIMUM_CONTEXT_LENGTH
+        and not _allow_lmstudio_explicit_below_floor
+    ):
         raise ValueError(
             f"Model {agent.model} has a context window of {_ctx:,} tokens, "
             f"which is below the minimum {MINIMUM_CONTEXT_LENGTH:,} required "
@@ -2908,8 +3100,7 @@ def init_agent(
         and agent.context_compressor
         and agent.tools is not None
         and (
-            agent.enabled_toolsets is None
-            or "context_engine" in agent.enabled_toolsets
+            agent.enabled_toolsets is None or "context_engine" in agent.enabled_toolsets
         )
     ):
         _existing_tool_names = {
@@ -2918,6 +3109,7 @@ def init_agent(
             if isinstance(t, dict)
         }
         from agent.memory_manager import normalize_tool_schema as _normalize_tool_schema
+
         for _raw_schema in agent.context_compressor.get_tool_schemas():
             _schema = _normalize_tool_schema(_raw_schema)
             if _schema is None:
@@ -2973,7 +3165,7 @@ def init_agent(
     agent.session_estimated_cost_usd = 0.0
     agent.session_cost_status = "unknown"
     agent.session_cost_source = "none"
-    
+
     # ── Ollama num_ctx injection ──
     # Ollama defaults to 2048 context regardless of the model's capabilities.
     # When running against an Ollama server, detect the model's max context
@@ -2989,15 +3181,23 @@ def init_agent(
         try:
             agent._ollama_num_ctx = int(_ollama_num_ctx_override)
         except (TypeError, ValueError):
-            _ra().logger.debug("Invalid ollama_num_ctx config value: %r", _ollama_num_ctx_override)
-    if agent._ollama_num_ctx is None and agent.base_url and is_local_endpoint(agent.base_url):
+            _ra().logger.debug(
+                "Invalid ollama_num_ctx config value: %r", _ollama_num_ctx_override
+            )
+    if (
+        agent._ollama_num_ctx is None
+        and agent.base_url
+        and is_local_endpoint(agent.base_url)
+    ):
         try:
             # ``agent.api_key`` may be a callable (Entra token provider).
             # Ollama detection makes a manual HTTP request and expects a
             # string — Azure Foundry isn't a local endpoint so this branch
             # never fires for Entra, but guard defensively.
             _key_for_ollama = agent.api_key if isinstance(agent.api_key, str) else ""
-            _detected = query_ollama_num_ctx(agent.model, agent.base_url, api_key=_key_for_ollama or "")
+            _detected = query_ollama_num_ctx(
+                agent.model, agent.base_url, api_key=_key_for_ollama or ""
+            )
             if _detected and _detected > 0:
                 agent._ollama_num_ctx = _detected
         except Exception as exc:
@@ -3014,7 +3214,8 @@ def init_agent(
     ):
         _ra().logger.info(
             "Ollama num_ctx capped: %d -> %d (model.context_length override)",
-            agent._ollama_num_ctx, _config_context_length,
+            agent._ollama_num_ctx,
+            _config_context_length,
         )
         agent._ollama_num_ctx = _config_context_length
     if agent._ollama_num_ctx and not agent.quiet_mode:
@@ -3050,17 +3251,25 @@ def init_agent(
             _cap = getattr(agent.context_compressor, "threshold_tokens_cap", None)
             if _cap and _cap > 0:
                 _cap_note = f" (capped at {_cap:,} tokens)"
-            print(f"📊 Context limit: {agent.context_compressor.context_length:,} tokens (compress at {int(_active_threshold_pct*100)}% = {agent.context_compressor.threshold_tokens:,}{_cap_note})")
+            print(
+                f"📊 Context limit: {agent.context_compressor.context_length:,} tokens (compress at {int(_active_threshold_pct * 100)}% = {agent.context_compressor.threshold_tokens:,}{_cap_note})"
+            )
         else:
-            print(f"📊 Context limit: {agent.context_compressor.context_length:,} tokens (auto-compression disabled)")
+            print(
+                f"📊 Context limit: {agent.context_compressor.context_length:,} tokens (auto-compression disabled)"
+            )
         # Notice with the exact opt-back-out command. Printed inline at startup
         # for CLI users; gateway users get the same text replayed via
         # _compression_warning on turn 1 (set below).
         if _show_autoraise_notice:
-            print(_build_codex_gpt5_autoraise_notice(
-                _autoraise,
-                context_length=getattr(agent.context_compressor, "context_length", None),
-            ))
+            print(
+                _build_codex_gpt5_autoraise_notice(
+                    _autoraise,
+                    context_length=getattr(
+                        agent.context_compressor, "context_length", None
+                    ),
+                )
+            )
 
     # Check immediately so CLI users see the warning at startup.
     # Gateway status_callback is not yet wired, so any warning is stored
@@ -3119,7 +3328,6 @@ def init_agent(
             "anthropic_base_url": agent._anthropic_base_url,
             "is_anthropic_oauth": agent._is_anthropic_oauth,
         })
-
 
 
 __all__ = ["init_agent"]

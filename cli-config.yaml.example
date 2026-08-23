@@ -1107,6 +1107,14 @@ agent:
   # underneath this wrapper — this is the Hermes-level loop.
   # api_max_retries: 3
 
+  # Per-turn wall-clock cap on provider retry/backoff (seconds). Once this
+  # budget is spent, the turn fails fast with a clear message instead of
+  # silently stalling on stream drops or APIConnectionError loops. Defaults
+  # are 300s interactive / 600s cron, enough headroom for the Z.AI Coding
+  # overload long-backoff schedule while preventing indefinite hangs.
+  # api_retry_wall_clock_seconds: 300
+  # cron_api_retry_wall_clock_seconds: 600
+
   # After the agent edits code without fresh passing verification, nudge it to
   # verify before finishing. The default "auto" enables it on interactive
   # coding surfaces (CLI, TUI, desktop) and programmatic callers, and disables

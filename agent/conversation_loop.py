@@ -3103,6 +3103,17 @@ def _run_conversation_impl(
                 "%sCron-context extended retry active: max_retries=%d (default %d)",
                 agent.log_prefix, max_retries, agent._api_max_retries,
             )
+        # Issue #3113: hard wall-clock deadline for the whole retry/backoff
+        # sequence. Prevents stream drops / APIConnectionError loops from
+        # stalling a turn indefinitely, while still allowing the Z.AI Coding
+        # overload long-backoff schedule to run within the budget.
+        _wall_clock_limit = (
+            getattr(agent, "_cron_api_retry_wall_clock_seconds", 600.0)
+            if _is_cron_context
+            else getattr(agent, "_api_retry_wall_clock_seconds", 300.0)
+        )
+        _api_retry_deadline = time.time() + _wall_clock_limit
+        _retry_wall_clock_exceeded = False
         _retry = TurnRetryState()
 
         finish_reason = "stop"
@@ -3112,6 +3123,12 @@ def _run_conversation_impl(
         agent._current_api_request_id = api_request_id
 
         while retry_count < max_retries:
+            # Issue #3113: wall-clock deadline for the whole retry/backoff
+            # sequence. Skip the next attempt if the budget is already spent.
+            if time.time() > _api_retry_deadline:
+                _retry_wall_clock_exceeded = True
+                break
+
             # ── Nous Portal rate limit guard ──────────────────────
             # If another session already recorded that Nous is rate-
             # limited, skip the API call entirely.  Each attempt
@@ -3717,11 +3734,17 @@ def _run_conversation_impl(
                         retry_count, base_delay=5.0, max_delay=120.0,
                         jitter_ratio=_backoff_jitter,
                     )
-                    agent._buffer_vprint(f"⏳ Retrying in {wait_time:.1f}s ({_failure_hint})...")
-                    logger.warning("Invalid API response (retry %d/%d): %s | Provider: %s", retry_count, max_retries, ', '.join(error_details), provider_name)
-                    
-                    # Sleep in small increments to stay responsive to interrupts
+                    # Issue #3113: cap this backoff so we don't oversleep the
+                    # wall-clock budget; the post-loop handler surfaces failure.
                     sleep_end = time.time() + wait_time
+                    if sleep_end > _api_retry_deadline:
+                        sleep_end = _api_retry_deadline
+                        _retry_wall_clock_exceeded = True
+                    remaining = max(sleep_end - time.time(), 0.0)
+                    agent._buffer_vprint(f"⏳ Retrying in {remaining:.1f}s ({_failure_hint})...")
+                    logger.warning("Invalid API response (retry %d/%d): %s | Provider: %s", retry_count, max_retries, ', '.join(error_details), provider_name)
+
+                    # Sleep in small increments to stay responsive to interrupts
                     _backoff_touch_counter = 0
                     while time.time() < sleep_end:
                         if agent._interrupt_requested:
@@ -3757,8 +3780,8 @@ def _run_conversation_impl(
                                 f"retry backoff ({retry_count}/{max_retries}), "
                                 f"{int(sleep_end - time.time())}s remaining"
                             )
-                    if _retry.restart_with_redirected_messages:
-                        break  # rebuild this iteration from the correction
+                    if _retry.restart_with_redirected_messages or _retry_wall_clock_exceeded:
+                        break  # rebuild from correction, or fail via post-loop handler
                     continue  # Retry the API call
 
                 agent._turn_received_provider_response = True
@@ -6903,6 +6926,10 @@ def _run_conversation_impl(
                 # Sleep in small increments so we can respond to interrupts quickly
                 # instead of blocking the entire wait_time in one sleep() call
                 sleep_end = time.time() + wait_time
+                # Issue #3113: cap this backoff against the wall-clock budget.
+                if sleep_end > _api_retry_deadline:
+                    sleep_end = _api_retry_deadline
+                    _retry_wall_clock_exceeded = True
                 _backoff_touch_counter = 0
                 while time.time() < sleep_end:
                     if agent._interrupt_requested:
@@ -6938,6 +6965,8 @@ def _run_conversation_impl(
                     # iteration from the correction instead of re-firing the
                     # stale request.
                     break
+                if _retry_wall_clock_exceeded:
+                    break
         
         if _retry.restart_with_redirected_messages:
             # The cancelled request produced no valid assistant item. Reuse the
@@ -6947,6 +6976,31 @@ def _run_conversation_impl(
             agent.iteration_budget.refund()
             _retry.restart_with_redirected_messages = False
             continue
+
+        # Issue #3113: if retry/backoff burned the whole wall-clock budget,
+        # surface a clear partial-failure message instead of silently stalling.
+        if _retry_wall_clock_exceeded:
+            agent._flush_status_buffer()
+            _wall_elapsed = time.time() - api_start_time
+            _wall_summary = (
+                f"⏱️ Retry wall-clock budget exhausted after {_wall_elapsed:.0f}s "
+                f"(limit {_wall_clock_limit:.0f}s). The provider kept failing or "
+                "backed off beyond the per-turn cap. Configure a fallback provider "
+                "or raise agent.api_retry_wall_clock_seconds / "
+                "agent.cron_api_retry_wall_clock_seconds if your workload needs "
+                "longer recovery windows."
+            )
+            agent._buffer_status(_wall_summary)
+            agent._persist_session(messages, conversation_history)
+            return {
+                "final_response": _wall_summary,
+                "messages": messages,
+                "api_calls": api_call_count,
+                "completed": False,
+                "failed": True,
+                "error": _wall_summary,
+                "failure_reason": "retry_wall_clock_exceeded",
+            }
 
         # If the API call was interrupted, skip response processing
         if interrupted:
