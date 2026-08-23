@@ -252,14 +252,23 @@ def deterministic_empty(agent: Any) -> bool:
 
 
 def empty_retry_budget(agent: Any, response: Any) -> int:
-    """Empty-retry budget for the current streak (3, or 1 when a single
-    attempt is estimated to cost more than the configured threshold)."""
+    """Empty-retry budget for the current streak.
+
+    Returns 1 (REDUCED_EMPTY_RETRY_BUDGET) when:
+    - Running in a cron / subagent autonomous execution context (#3144), or
+    - A single attempt is estimated to cost more than the configured threshold (NS-503).
+    Otherwise returns 3 (DEFAULT_EMPTY_RETRY_BUDGET).
+    """
     if not guard_enabled(agent):
         return DEFAULT_EMPTY_RETRY_BUDGET
+    if (
+        getattr(agent, "platform", None) == "cron"
+        or getattr(agent, "_is_cron_subagent", False)
+        or getattr(agent, "_is_cron_context", False)
+    ):
+        return REDUCED_EMPTY_RETRY_BUDGET
     cost = _estimate_attempt_cost(agent, response)
-    if cost is None:
-        return DEFAULT_EMPTY_RETRY_BUDGET
-    if cost >= _cost_threshold_usd(agent):
+    if cost is not None and cost >= _cost_threshold_usd(agent):
         return REDUCED_EMPTY_RETRY_BUDGET
     return DEFAULT_EMPTY_RETRY_BUDGET
 

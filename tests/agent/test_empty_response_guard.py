@@ -232,6 +232,22 @@ class TestEmptyRetryBudget:
             == guard.DEFAULT_EMPTY_RETRY_BUDGET
         )
 
+    def test_cron_platform_uses_reduced_retry_budget(self):
+        """Issue #3144: cron jobs should only retry once before failover."""
+        agent = _agent(platform="cron")
+        assert (
+            guard.empty_retry_budget(agent, _response())
+            == guard.REDUCED_EMPTY_RETRY_BUDGET
+        )
+
+    def test_cron_subagent_uses_reduced_retry_budget(self):
+        """Issue #3144: cron subagents should only retry once before failover."""
+        agent = _agent(_is_cron_subagent=True)
+        assert (
+            guard.empty_retry_budget(agent, _response())
+            == guard.REDUCED_EMPTY_RETRY_BUDGET
+        )
+
 
 class TestStreakCost:
     def test_streak_cost_accumulates(self, monkeypatch):

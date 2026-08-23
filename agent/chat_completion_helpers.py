@@ -2499,6 +2499,7 @@ def try_activate_fallback(
         FailoverReason.rate_limit,
         FailoverReason.billing,
         FailoverReason.upstream_rate_limit,
+        FailoverReason.server_error,
     }:
         # Only start cooldown when leaving the primary provider.  If we're
         # already on a fallback and chain-switching, the primary wasn't the
@@ -2533,6 +2534,8 @@ def try_activate_fallback(
             # stays blocked and subsequent calls go to the fallback chain.
             if reason == FailoverReason.billing:
                 _cooldown = 3600.0
+            elif reason == FailoverReason.server_error:
+                _cooldown = 300.0
             if _retry_after_raw:
                 _parsed = extract_retry_after_seconds(_retry_after_raw)
                 if _parsed is not None:
