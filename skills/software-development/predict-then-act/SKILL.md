@@ -1,7 +1,6 @@
 ---
 name: predict-then-act
-description: "Falsifiable prediction before every consequential action, graded
-  against outcome; one-page notes that survive compaction."
+description: "Predict outcomes before actions; grade against results."
 version: 1.1.0
 author: Hermes Agent (adapted from pbshgthm/arc-skill)
 license: MIT
