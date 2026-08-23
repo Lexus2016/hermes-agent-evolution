@@ -1243,7 +1243,12 @@ def direct_api_call(agent, api_kwargs: dict):
         # Do not put the API call itself on another worker thread — that is
         # the nested-pool deadlock this path exists to avoid (#60203). This
         # ticker only refreshes the activity clock.
+        # Issue #3112: bound the heartbeat to the stale timeout budget so hung
+        # API calls don't heartbeat indefinitely and mask stalls from outer
+        # inactivity watchdogs.
         while not activity_hb_stop.wait(_DIRECT_API_ACTIVITY_HEARTBEAT_SECONDS):
+            if math.isfinite(stale_timeout) and (time.time() - call_start) >= stale_timeout:
+                break
             try:
                 agent._touch_activity("waiting for non-streaming API response")
             except Exception:
@@ -1271,6 +1276,8 @@ def direct_api_call(agent, api_kwargs: dict):
     activity_hb.start()
 
     def _on_stale() -> None:
+        # Issue #3112: stop the activity heartbeat immediately on stale timeout.
+        activity_hb_stop.set()
         # Runs on the timer thread. It only aborts the in-flight sockets —
         # it never issues a request — so the inline / no-worker property that
         # fixes #62151 and #60203 is preserved. The abort helper owns the

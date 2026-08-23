@@ -466,3 +466,67 @@ def test_infinite_budget_does_not_inject_a_hard_timeout():
 
     assert direct_api_call(agent, {"model": "m", "messages": []}).id == "ok"
     assert "timeout" not in captured or captured["timeout"] is None
+
+
+def test_activity_heartbeat_stops_after_stale_timeout_reached():
+    """Issue #3112: activity heartbeat must not run forever on a hung call."""
+    import agent.chat_completion_helpers as _cch
+
+    agent = _make_agent(stale_timeout=0.1)
+    fake_client = MagicMock()
+    stalled_event = threading.Event()
+
+    def _stalled_request(**_kwargs):
+        # Provider never returns; stays blocked until released
+        stalled_event.wait(timeout=0.5)
+        raise ConnectionError("connection closed")
+
+    fake_client.chat.completions.create.side_effect = _stalled_request
+    agent._create_request_openai_client.return_value = fake_client
+
+    # Monkeypatch heartbeat interval to 0.02s for fast testing
+    orig_hb = _cch._DIRECT_API_ACTIVITY_HEARTBEAT_SECONDS
+    try:
+        _cch._DIRECT_API_ACTIVITY_HEARTBEAT_SECONDS = 0.02
+        with pytest.raises((TimeoutError, ConnectionError)):
+            direct_api_call(agent, {"model": "m", "messages": []})
+    finally:
+        _cch._DIRECT_API_ACTIVITY_HEARTBEAT_SECONDS = orig_hb
+        stalled_event.set()
+
+    # The heartbeat should have stopped touching activity once stale_timeout (0.1s) passed
+    touch_count = agent._touch_activity.call_count
+    # Initial touch + at most a few heartbeat touches during the 0.1s window
+    assert touch_count < 15, f"Heartbeat did not stop; touched {touch_count} times"
+
+
+def test_on_stale_stops_activity_heartbeat_immediately():
+    """Issue #3112: on_stale watchdog kill must stop the activity heartbeat immediately."""
+    import agent.chat_completion_helpers as _cch
+
+    agent = _make_agent(stale_timeout=0.05)
+    fake_client = MagicMock()
+    abort_event = threading.Event()
+
+    def _abort(client, reason):
+        abort_event.set()
+
+    agent._abort_request_openai_client.side_effect = _abort
+
+    def _stalled_request(**_kwargs):
+        abort_event.wait(timeout=1.0)
+        raise ConnectionError("aborted")
+
+    fake_client.chat.completions.create.side_effect = _stalled_request
+    agent._create_request_openai_client.return_value = fake_client
+
+    orig_hb = _cch._DIRECT_API_ACTIVITY_HEARTBEAT_SECONDS
+    try:
+        _cch._DIRECT_API_ACTIVITY_HEARTBEAT_SECONDS = 0.01
+        with pytest.raises(TimeoutError):
+            direct_api_call(agent, {"model": "m", "messages": []})
+    finally:
+        _cch._DIRECT_API_ACTIVITY_HEARTBEAT_SECONDS = orig_hb
+
+    # Verify stale kill was reported and heartbeat stopped
+    assert agent._abort_request_openai_client.called
