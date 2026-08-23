@@ -1,19 +1,15 @@
 ---
 name: predict-then-act
-description: "Use when an agent takes consequential actions in an unfamiliar or
-  partially-known environment (trading, infra changes, game APIs, external
-  systems): write a falsifiable prediction of the expected outcome BEFORE each
-  action, have the harness grade it, and keep a one-page notes file that
-  survives context compaction. Proven at 100% RHAE on ARC-AGI-3 (25/25 games,
-  7,645 actions vs human median 17,135) by the arc-skill project
-  (https://github.com/pbshgthm/arc-skill)."
-version: 1.0.0
-author: Hermes Agent (adapted from pbshgthm/arc-skill, MIT)
+description: "Falsifiable prediction before every consequential action, graded
+  against outcome; one-page notes that survive compaction."
+version: 1.1.0
+author: Hermes Agent (adapted from pbshgthm/arc-skill)
 license: MIT
 platforms: [linux, macos, windows]
 metadata:
   hermes:
-    tags: [agent-methodology, reliability, decision-making]
+    tags: [agent-methodology, reliability, decision-making, experimentation]
+    related_skills: [plan, spike, test-driven-development, subagent-driven-development, systematic-debugging]
 ---
 
 # Predict, Then Act
@@ -62,7 +58,13 @@ Never batch exploration.
 
 ## One-page notes (`NOTES.md`)
 
-Context compaction will erase your reasoning. Keep ONE page per task/system:
+Context compaction will erase your reasoning. Keep ONE page per task/system,
+stored next to the task's artifacts:
+
+- paired with a plan: same directory as the plan file (`.hermes/plans/`), named
+  `NOTES-<plan-slug>.md`
+- standalone task: `NOTES.md` in the working directory of that task
+- subagent work: the orchestrator's NOTES.md section for that child
 
 ```markdown
 ## Verified (cite event/log ids)
@@ -77,6 +79,17 @@ Context compaction will erase your reasoning. Keep ONE page per task/system:
 
 The page cannot grow forever, so observations must compress into rules.
 Median length ~60 lines works.
+
+## Pairing with existing skills
+
+- **plan** — the plan states intent; NOTES.md records what reality confirmed
+  or refuted while executing it.
+- **spike** — a spike IS a batched experiment: write predictions for its
+  success criteria up front, grade them in the conclusion.
+- **test-driven-development** — TDD is predict-then-act for code: RED is the
+  prediction, GREEN is the grading.
+- **systematic-debugging** — each hypothesis test is one graded claim; the
+  REFUTED section is the hypothesis log.
 
 ## Tight rules, free thinking
 
