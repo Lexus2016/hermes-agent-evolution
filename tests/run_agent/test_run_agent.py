@@ -7860,6 +7860,12 @@ class TestRetryExhaustion:
         agent.tool_delay = 0
         agent.compression_enabled = False
         agent.save_trajectories = False
+        # Give tests a very large wall-clock budget so the fast time mock
+        # (500s jumps) does not trip the #3113 wall-clock guard before
+        # retry exhaustion.  These tests verify retry-count exhaustion,
+        # not wall-clock exhaustion.
+        agent._api_retry_wall_clock_seconds = 1e9
+        agent._cron_api_retry_wall_clock_seconds = 1e9
 
     @staticmethod
     def _make_fast_time_mock():
