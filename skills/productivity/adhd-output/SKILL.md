@@ -1,6 +1,6 @@
 ---
 name: adhd-output
-description: "Response style for all sessions: lead with the next action, number steps, restate state, no preamble/recap/closers, visible wins. Always-on."
+description: "Action-first output: numbered steps and zero fluff."
 version: 1.0.0
 author: Hermes Agent (adapted from ayghri/i-have-adhd)
 license: MIT
