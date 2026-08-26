@@ -34,6 +34,50 @@ except Exception:  # pragma: no cover - keep import path explicit on failure
 
 DEFAULT_MIN_COUNT = 5  # a cluster must recur this often to become a weakness
 
+# Per-kind diagnosis skeleton for the AutoSaddler-style harness optimization slice
+# (#3209 increment 1).  Each weakness is mapped to a component scope and a likely
+# root cause so the downstream proposer can generate typed, scoped edits rather
+# than broad prose rewrites.  This layer is deterministic and uses only the
+# anonymized fields already emitted by the miner.
+DIAGNOSIS_TEMPLATES: Dict[str, Dict[str, str]] = {
+    "tool_failure": {
+        "component_scope": "tool_wrapper",
+        "likely_root_cause": "argument validation or result-shape mismatch",
+        "failure_mode": "tool results look like failures across multiple sessions",
+        "recommended_harness_surface": "tool_guard",
+    },
+    "provider_error": {
+        "component_scope": "retry_policy",
+        "likely_root_cause": "retry/fallback policy not tuned for this error class",
+        "failure_mode": "provider-layer error recurs before recovery succeeds",
+        "recommended_harness_surface": "retry_policy_change",
+    },
+    "retry_spiral": {
+        "component_scope": "retry_policy",
+        "likely_root_cause": "uncapped consecutive retries on a failing tool",
+        "failure_mode": "same tool invoked many times in a row without recovery",
+        "recommended_harness_surface": "retry_policy_change",
+    },
+}
+
+
+def diagnose_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach a deterministic, component-scoped diagnosis skeleton to a weakness
+    record.  The diagnosis never uses raw trace content; it only reflects the
+    anonymized kind + counts already present.  Returns a fresh dict so the input
+    record is not mutated in place."""
+    out = dict(record)
+    tmpl = DIAGNOSIS_TEMPLATES.get(out.get("kind"), {})
+    if tmpl:
+        out["diagnosis"] = {
+            "component_scope": tmpl["component_scope"],
+            "likely_root_cause": tmpl["likely_root_cause"],
+            "failure_mode": tmpl["failure_mode"],
+            "recommended_harness_surface": tmpl["recommended_harness_surface"],
+            "severity": out.get("severity", 0),
+        }
+    return out
+
 
 def mine_weaknesses(digest: Dict[str, Any], min_count: int = DEFAULT_MIN_COUNT) -> List[Dict[str, Any]]:
     """Turn an introspection digest's aggregated signals into structured weakness
@@ -84,9 +128,8 @@ def mine_weaknesses(digest: Dict[str, Any], min_count: int = DEFAULT_MIN_COUNT) 
                          f"diagnostic or a fallback path.",
             })
 
-    # Highest-severity first so the issues stage triages the worst clusters early.
     records.sort(key=lambda r: -int(r.get("severity") or 0))
-    return records
+    return [diagnose_record(r) for r in records]
 
 
 def format_weaknesses(records: List[Dict[str, Any]], window_days: int = 0) -> str:

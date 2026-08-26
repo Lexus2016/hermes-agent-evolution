@@ -103,8 +103,27 @@ class TestBuildProposal:
         assert p["llm_authored"] is False
         assert p["delta"] == ""  # no model -> no authored delta
         assert p["title"].startswith("[HARNESS]")
-        # rationale falls back to the miner's label (no model).
-        assert "harden" in p["rationale"]
+        # Fixture has no diagnosis -> component scope falls back to "agent"
+        # (backward-compat with records the miner emitted before #3209).
+        assert p["component_scope"] == "agent"
+
+    def test_component_scope_propagates_from_diagnosis(self):
+        # A weakness that carries the new diagnosis skeleton propagates its
+        # component scope into the proposal (the realistic post-#3209 path).
+        w = dict(_tool_failure())
+        w["diagnosis"] = {
+            "component_scope": "tool_wrapper",
+            "likely_root_cause": "argument validation or result-shape mismatch",
+            "failure_mode": "tool results look like failures across sessions",
+            "recommended_harness_surface": "tool_guard",
+            "severity": 9,
+        }
+        p = build_proposal(w)
+        assert p is not None
+        assert p["component_scope"] == "tool_wrapper"
+        assert "tool_wrapper" in p["title"]
+        # offline rationale cites the deterministic diagnosis skeleton.
+        assert "Diagnosed root cause" in p["rationale"]
 
     def test_llm_seam_authors_fields_and_is_called(self):
         calls = []

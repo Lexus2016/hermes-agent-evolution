@@ -64,7 +64,8 @@ class TestMineWeaknesses:
         assert len(recs) == 1 and recs[0]["tool"] == "browser"
 
     def test_no_raw_content_only_counts_and_labels(self):
-        # mined records carry only tool names, counts, and our labels.
+        # mined records carry only tool names, counts, our labels, and the
+        # deterministic diagnosis skeleton — never raw trace content.
         d = _digest(tool_failures={"terminal": 9}, provider_errors={"429:rate_limit": 9})
         blob = json.dumps(mine_weaknesses(d, min_count=5))
         assert "rate_limit" in blob  # the class label is fine
@@ -72,8 +73,22 @@ class TestMineWeaknesses:
         for r in mine_weaknesses(d, min_count=5):
             assert set(r).issubset(
                 {"kind", "tool", "occurrences", "severity", "label", "signature",
-                 "max_consecutive", "sessions"}
+                 "max_consecutive", "sessions", "diagnosis"}
             )
+
+    def test_diagnosis_skeleton_attached_per_kind(self):
+        # Each weakness carries a typed, component-scoped diagnosis skeleton.
+        d = _digest(
+            tool_failures={"terminal": 9},
+            provider_errors={"429:rate_limit": 9},
+            repeated={"browser_navigate": {"max_consecutive": 9, "sessions": 1}},
+        )
+        by_kind = {r["kind"]: r["diagnosis"] for r in mine_weaknesses(d, min_count=5)}
+        assert by_kind["tool_failure"]["component_scope"] == "tool_wrapper"
+        assert by_kind["provider_error"]["component_scope"] == "retry_policy"
+        assert by_kind["retry_spiral"]["component_scope"] == "retry_policy"
+        assert by_kind["retry_spiral"]["recommended_harness_surface"] == "retry_policy_change"
+        assert by_kind["tool_failure"]["severity"] == 9
 
 
 class TestFormat:
