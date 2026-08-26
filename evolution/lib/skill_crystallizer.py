@@ -18,6 +18,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
+try:
+    from evolution.lib import trigger_matcher as _tm
+except ImportError:  # pragma: no cover - direct-path import fallback
+    import trigger_matcher as _tm  # type: ignore[no-redef]
+
 __all__ = [
     "CrystallizedSkillCandidate",
     "SkillCrystallizer",
@@ -159,6 +164,18 @@ class SkillCrystallizer:
         canonical_name = cls._sanitize_name(skill_name or task_goal[:30])
         description = f"Automated workflow for {task_goal.strip()[:80]}."
 
+        # Trigger metadata (#3210 step 2): every crystallized skill carries
+        # explicit, validated trigger conditions in its frontmatter so a
+        # runtime monitor can decide when to retrieve it.
+        triggers = _tm.extract_trigger_metadata(trace_data)
+        trig_ok, trig_reason = _tm.validate_trigger_metadata(triggers)
+        if not trig_ok:
+            logger.warning(
+                "trigger metadata rejected (%s); not crystallizing", trig_reason
+            )
+            return None
+        trigger_block = _tm.render_trigger_frontmatter(triggers)
+
         # Format markdown body
         frontmatter = f"""---
 name: {canonical_name}
@@ -167,6 +184,7 @@ version: "1.0.0"
 tags:
   - crystallized
   - auto-generated
+{trigger_block}
 ---
 """
         body = f"""# {canonical_name.replace("-", " ").title()}
@@ -235,6 +253,12 @@ tags:
 
         if "name:" not in md or "description:" not in md:
             return False, "Missing name or description in YAML frontmatter"
+
+        # Trigger frontmatter (#3210): when a triggers block is present it
+        # must parse and validate; hand-made candidates without one stay valid.
+        parsed = _tm.parse_trigger_frontmatter(md)
+        if "triggers:" in md and parsed is None:
+            return False, "Malformed or invalid triggers block in frontmatter"
 
         return True, "Valid"
 
