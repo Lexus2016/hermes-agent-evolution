@@ -102,11 +102,12 @@ def _evidence_of(weakness: Dict[str, Any]) -> Dict[str, Any]:
     """Carry the trace evidence forward VERBATIM from the weakness record.
 
     Only the anonymized fields the miner already emits (counts / classes /
-    labels / tool names) — never raw trace content, because the miner never had
-    any. Subset is whitelisted so nothing unexpected leaks into a filed issue."""
+    labels / tool names) plus the deterministic diagnosis skeleton — never raw
+    trace content, because the miner never had any. Subset is whitelisted so
+    nothing unexpected leaks into a filed issue."""
     allowed = (
         "kind", "tool", "signature", "occurrences", "severity", "label",
-        "max_consecutive", "sessions",
+        "max_consecutive", "sessions", "diagnosis",
     )
     return {k: weakness[k] for k in allowed if k in weakness}
 
@@ -114,15 +115,36 @@ def _evidence_of(weakness: Dict[str, Any]) -> Dict[str, Any]:
 def _default_title(weakness: Dict[str, Any], ptype: str) -> str:
     """Deterministic fallback title used when no LLM seam authors one.
 
-    Concrete and de-dup-friendly (names the subject + the proposal type) so the
-    issues stage's exact-title idempotency guard behaves predictably."""
+    Concrete and de-dup-friendly (names the subject + the proposal type +
+    component scope) so the issues stage's exact-title idempotency guard behaves
+    predictably."""
     subject = weakness.get("tool") or weakness.get("signature") or "agent harness"
+    diag = weakness.get("diagnosis") or {}
+    scope = diag.get("component_scope") or "agent"
     label = {
         "system_prompt_delta": "system-prompt guard",
         "retry_policy_change": "retry-policy change",
         "tool_guard": "tool guard",
     }[ptype]
-    return f"[HARNESS] {label} for `{subject}`"
+    return f"[HARNESS] {label} ({scope}) for `{subject}`"
+
+
+def _default_rationale(weakness: Dict[str, Any], ptype: str) -> str:
+    """Offline rationale that cites the diagnosis skeleton when available.
+
+    Falls back to the miner's free-form label when no deterministic diagnosis
+    exists, preserving the previous behavior."""
+    diag = weakness.get("diagnosis") or {}
+    if diag:
+        root = diag.get("likely_root_cause", "recurring failure")
+        mode = diag.get("failure_mode", "")
+        surface = diag.get("recommended_harness_surface", ptype)
+        return (
+            f"Diagnosed root cause: {root}. "
+            f"Failure mode: {mode}. "
+            f"Recommended harness surface: {surface}."
+        )
+    return _coerce_str(weakness.get("label"))
 
 
 def _coerce_str(value: Any) -> str:
@@ -162,10 +184,12 @@ def build_proposal(
         return None
 
     evidence = _evidence_of(weakness)
+    diag = weakness.get("diagnosis") or {}
     proposal: Dict[str, Any] = {
         "type": ptype,
         "source": "self-harness",  # distinguishes from research-generated proposals
         "evidence": evidence,
+        "component_scope": diag.get("component_scope") or "agent",
         # --- HARD human-gating invariant: inert, never auto-applied. ---
         "status": "proposed",
         "requires_human_review": True,
@@ -188,12 +212,12 @@ def build_proposal(
         title = _coerce_str(authored.get("title")) or _default_title(weakness, ptype)
         proposal["title"] = title
         proposal["delta"] = _coerce_str(authored.get("delta"))
-        proposal["rationale"] = _coerce_str(authored.get("rationale"))
+        proposal["rationale"] = _coerce_str(authored.get("rationale")) or _default_rationale(weakness, ptype)
         proposal["llm_authored"] = bool(authored)
     else:
         proposal["title"] = _default_title(weakness, ptype)
         proposal["delta"] = ""
-        proposal["rationale"] = _coerce_str(weakness.get("label"))
+        proposal["rationale"] = _default_rationale(weakness, ptype)
         proposal["llm_authored"] = False
 
     # Attach a structured code diff for the retry-policy surface (#2613).
