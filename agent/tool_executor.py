@@ -413,6 +413,39 @@ def _harm_gate_block_reason(function_name: str, function_args: Any) -> Optional[
         return None
 
 
+def _read_only_block_reason(agent: Any, function_name: str, function_args: Any) -> Optional[str]:
+    """Read-only tier (evo-2026-08-26-01): deny non-observational calls.
+
+    Active only when the agent runs under the read-only tier
+    (``HERMES_SUBAGENT_READ_ONLY=1`` or ``agent.read_only_mode``); inert for
+    normal sessions.
+    """
+    try:
+        from agent.read_only_tier import block_reason, read_only_mode_enabled
+
+        if not read_only_mode_enabled(agent):
+            return None
+        return block_reason(function_name, function_args)
+    except Exception:
+        # Enforcement must never break normal execution; fail open here and
+        # let the harm gate / approval layer apply its own rules.
+        return None
+
+
+def _read_only_blocked_tool_result(reason: str) -> str:
+    try:
+        from agent.read_only_tier import blocked_tool_result
+
+        return blocked_tool_result(reason)
+    except Exception:
+        import json
+
+        return json.dumps(
+            {"error": f"Tool execution blocked by read-only tier: {reason}", "status": "blocked"},
+            ensure_ascii=False,
+        )
+
+
 def _harm_blocked_tool_result(reason: str) -> str:
     return json.dumps(
         {
@@ -1440,6 +1473,17 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
             try:
                 def _execute(next_args: dict[str, Any]) -> Any:
                     _emit_execute_tool_event(agent, function_name)
+                    # Read-only tier (evo-2026-08-26-01): exploratory subagents
+                    # running under HERMES_SUBAGENT_READ_ONLY / agent
+                    # .read_only_mode may only invoke observational tools.
+                    ro_block = _read_only_block_reason(agent, function_name, next_args)
+                    if ro_block is not None:
+                        logger.warning(
+                            "tool %s blocked by read-only tier: %s",
+                            function_name,
+                            ro_block,
+                        )
+                        return _read_only_blocked_tool_result(ro_block)
                     # AgentProcessBench harm gate (#2662): reject high-impact
                     # calls (delete/overwrite/credential access) pre-execution.
                     block_reason = _harm_gate_block_reason(function_name, next_args)
