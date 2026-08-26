@@ -152,10 +152,32 @@ def sanitize_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return cleaned
 
 
+def current_attribution() -> Optional[str]:
+    """Return the subagent attribution marker for this process, if any.
+
+    evo-2026-08-26-03: propagate the ``HERMES-SUBAGENT-ATTRIBUTION`` marker
+    beyond produced artifacts into individual tool-call audit records, so
+    every external action is attributable to the run that caused it.
+    """
+    return os.environ.get("HERMES-SUBAGENT-ATTRIBUTION") or None
+
+
 def append(record: dict, *, path: Path | None = None) -> Optional[dict]:
     """Append a record to the chained log under flock and return with hash fields."""
     if not is_audit_enabled():
         return None
+
+    # evo-2026-08-26-03: stamp per-call attribution when running under an
+    # attributed subagent. Existing explicit markers are preserved.
+    attribution = current_attribution()
+    if attribution:
+        record = dict(record)
+        meta = record.get("metadata")
+        record["metadata"] = {
+            **(meta if isinstance(meta, dict) else {}),
+            "attribution": attribution,
+        }
+        record.setdefault("attribution", attribution)
 
     path = path or _audit_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -209,15 +231,23 @@ def extract_artifact_refs(
             "filename",
         ):
             val = args.get(key)
-            if val and isinstance(val, str) and not val.startswith(("http://", "https://")):
+            if (
+                val
+                and isinstance(val, str)
+                and not val.startswith(("http://", "https://"))
+            ):
                 refs.add(f"file://{val.strip()}")
 
     # Git operations in terminal or git tools
     cmd = str(args.get("command") or args.get("cmd") or "").strip()
-    if (name in ("terminal", "bash", "execute_command", "run_command") and "git commit" in cmd) or name == "git_commit":
+    if (
+        name in ("terminal", "bash", "execute_command", "run_command")
+        and "git commit" in cmd
+    ) or name == "git_commit":
         if isinstance(result, str):
             commit_match = re.search(
-                r"\[[\w.\-/]+\s+([0-9a-f]{7,40})\]|\bcommit\s+([0-9a-f]{7,40})\b", result
+                r"\[[\w.\-/]+\s+([0-9a-f]{7,40})\]|\bcommit\s+([0-9a-f]{7,40})\b",
+                result,
             )
             if commit_match:
                 commit_sha = commit_match.group(1) or commit_match.group(2)
@@ -247,7 +277,15 @@ def extract_validation_refs(
         # Linter detection
         if any(
             linter in cmd
-            for linter in ("ruff", "flake8", "mypy", "eslint", "golangci-lint", "black --check", "isort --check")
+            for linter in (
+                "ruff",
+                "flake8",
+                "mypy",
+                "eslint",
+                "golangci-lint",
+                "black --check",
+                "isort --check",
+            )
         ):
             failed = "error:" in result_text.lower() or "failed" in result_text.lower()
             status = "failed" if failed else "passed"
@@ -255,13 +293,27 @@ def extract_validation_refs(
         # Test runner detection
         elif any(
             runner in cmd
-            for runner in ("pytest", "python -m unittest", "cargo test", "npm test", "go test", "ctest", "mvn test")
+            for runner in (
+                "pytest",
+                "python -m unittest",
+                "cargo test",
+                "npm test",
+                "go test",
+                "ctest",
+                "mvn test",
+            )
         ):
             # Accurate check: match 'N failed' where N > 0, or FAIL keyword
             failed_match = re.search(r"\b([1-9]\d*)\s+failed\b", result_text)
             passed_match = re.search(r"\b([1-9]\d*)\s+passed\b", result_text)
-            has_fail = bool(failed_match) or ("FAIL" in result_text and "FAILED" in result_text)
-            has_pass = bool(passed_match) or "SUCCESS" in result_text or "passed" in result_text
+            has_fail = bool(failed_match) or (
+                "FAIL" in result_text and "FAILED" in result_text
+            )
+            has_pass = (
+                bool(passed_match)
+                or "SUCCESS" in result_text
+                or "passed" in result_text
+            )
             status = "failed" if has_fail else ("passed" if has_pass else "completed")
             refs.add(f"test://{cmd[:60].strip()}:{status}")
 
@@ -346,7 +398,9 @@ def query_trail(
         try:
             entry = json.loads(line)
             payload_raw = entry.get("payload", "{}")
-            payload = json.loads(payload_raw) if isinstance(payload_raw, str) else payload_raw
+            payload = (
+                json.loads(payload_raw) if isinstance(payload_raw, str) else payload_raw
+            )
             if not isinstance(payload, dict):
                 continue
             if session_id and payload.get("session_id") != session_id:
@@ -366,7 +420,9 @@ def query_trail(
 def reconstruct_run(session_id: str, *, path: Optional[Path] = None) -> Dict[str, Any]:
     """Reconstruct action -> artifact -> validation DAG and summary for a session."""
     # Query all events for this session in chronological order without truncation
-    events = query_trail(session_id=session_id, limit=None, newest_first=False, path=path)
+    events = query_trail(
+        session_id=session_id, limit=None, newest_first=False, path=path
+    )
     chain_valid, _ = verify(path)
 
     actions: List[Dict[str, Any]] = []
@@ -459,7 +515,10 @@ def verify(path: Path | None = None) -> tuple[bool, int]:
 
 
 def prune(
-    *, days: Optional[int] = None, now: Optional[float] = None, path: Optional[Path] = None
+    *,
+    days: Optional[int] = None,
+    now: Optional[float] = None,
+    path: Optional[Path] = None,
 ) -> int:
     """Drop entries older than the retention window; re-anchor the chain atomically."""
     path = path or _audit_path()
@@ -506,4 +565,3 @@ def prune(
             return removed
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
-
