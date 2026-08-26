@@ -287,6 +287,13 @@ final_priority = base_priority + community*0.1 + age*0.15 + compatibility*0.2 + 
      in step 5a — **3.0** by default, **1.5** when throttled; never a middle value.
      Stop adding issues once their summed `effort_score` reaches this budget; under
      the throttled 1.5 budget, fill it with the highest-land-confidence issues first.
+   - **Harness-over-backbone tie-break:** when two candidates score within 0.1 of
+     each other, prefer the harness/pipeline/tooling improvement over the
+     model-upgrade proposal. Rationale: task-specific harness refinement beats
+     backbone upgrades at comparable or better gains and up to ~60% lower cost
+     (arXiv:2608.08466), and this pipeline runs under sustained provider
+     cost/rate-limit pressure. Record the tie-break in the entry's
+     `selected_reason` as `"harness-first"` so the preference stays measurable.
 
 6a. **Anti-starvation slot — guarantee no valid issue rots for days.** Scoring
     alone lets a sound-but-modest issue lose every single night. To prevent that,
