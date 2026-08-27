@@ -532,7 +532,7 @@ def _preflight_check(
          are left to the shell.
     """
     if timeout is not None and timeout < 1:
-        return f"Preflight: timeout must be at least 1 second (got {timeout})."
+        return f"Preflight: timeout must be a positive integer in seconds (must be at least 1 second, got {timeout})."
     if env_type != "local" or is_mock_env:
         return None
     if workdir and not os.path.isdir(workdir):
