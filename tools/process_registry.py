@@ -3064,7 +3064,7 @@ PROCESS_SCHEMA = {
         "Manage background processes started with terminal(background=true). "
         "Actions: 'list' (show all), 'poll' (check status + new output), "
         "'log' (full output with pagination), 'wait' (block until done or timeout), "
-        "'kill' (terminate), 'write' (send raw stdin data without newline), "
+        "'kill' (terminate), 'stop' (alias for kill), 'write' (send raw stdin data without newline), "
         "'submit' (send data + Enter, for answering prompts), 'close' (close stdin/send EOF)."
     ),
     "parameters": {
@@ -3072,7 +3072,7 @@ PROCESS_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["list", "poll", "log", "wait", "kill", "write", "submit", "close"],
+                "enum": ["list", "poll", "log", "wait", "kill", "stop", "write", "submit", "close"],
                 "description": "Action to perform on background processes"
             },
             "session_id": {
@@ -3134,7 +3134,7 @@ def _handle_process(args, **kw):
     # Coerce to string — some models send session_id as an integer
     session_id = str(args.get("session_id", "")) if args.get("session_id") is not None else ""
 
-    valid_actions = {"list", "poll", "log", "wait", "kill", "write", "submit", "close"}
+    valid_actions = {"list", "poll", "log", "wait", "kill", "stop", "write", "submit", "close"}
 
     if action == "list":
         # Surface session-scoped background processes (e.g. a forgotten
@@ -3214,7 +3214,7 @@ def _handle_process(args, **kw):
                 session_id, offset=args.get("offset"), limit=args.get("limit", 200))), ensure_ascii=False)
         elif action == "wait":
             return json.dumps(_redact_process_result(process_registry.wait(session_id, timeout=args.get("timeout"))), ensure_ascii=False)
-        elif action == "kill":
+        elif action in ("kill", "stop"):
             return json.dumps(
                 _redact_process_result(process_registry.kill_process(session_id)),
                 ensure_ascii=False,

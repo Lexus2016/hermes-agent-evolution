@@ -21,7 +21,6 @@ class TestSuggestProcessAction:
         ("run", "list"),
         ("status", "poll"),
         ("check", "poll"),
-        ("stop", "kill"),
         ("tail", "log"),
         ("read", "log"),
         ("send", "submit"),
@@ -40,7 +39,7 @@ class TestSuggestProcessAction:
 
     def test_valid_action_returns_none(self):
         """Valid actions don't need a suggestion."""
-        for action in ["list", "poll", "log", "wait", "kill", "write", "submit", "close"]:
+        for action in ["list", "poll", "log", "wait", "kill", "stop", "write", "submit", "close"]:
             # Valid actions may or may not return a suggestion — the
             # handler only calls _suggest_process_action for INVALID actions
             pass  # no assertion needed, just verify no crash
@@ -75,11 +74,26 @@ class TestHandleProcessInvalidAction:
 
     def test_invalid_action_synonym_mapped(self):
         """An invalid action synonym gets the right suggestion."""
-        result = _handle_process({"action": "stop"}, task_id="test")
+        result = _handle_process({"action": "delete"}, task_id="test")
         data = json.loads(result)
         assert "error" in data
         assert "kill" in data["error"]
         assert "Did you mean" in data["error"]
+
+    def test_stop_action_maps_to_kill(self):
+        """'stop' is now a valid alias for 'kill' (issue #3221)."""
+        with patch("tools.process_registry.process_registry") as mock_reg:
+            mock_reg.get.return_value = MagicMock(id="proc_abc")
+            mock_reg.kill_process.return_value = {"status": "ok", "session_id": "proc_abc"}
+            result = _handle_process(
+                {"action": "stop", "session_id": "proc_abc"},
+                task_id="test",
+            )
+            data = json.loads(result)
+            # Should dispatch to kill_process, not return an error
+            mock_reg.kill_process.assert_called_once_with("proc_abc")
+            assert "error" not in data
+            assert data.get("status") == "ok"
 
     def test_completely_unknown_action_lists_valid(self):
         """A completely unknown action still lists valid actions."""
