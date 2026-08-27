@@ -79,7 +79,11 @@ UPSTREAM_ISSUE_PREFIX = "[UPSTREAM]"
 UPSTREAM_ISSUE_ENABLED = os.environ.get("WATCHDOG_FILE_UPSTREAM_ISSUE", "1") != "0"
 
 # Jobs that are weekly, not daily (looser staleness threshold).
-WEEKLY_JOBS = {"evolution-upstream-sync"}
+WEEKLY_JOBS = {
+    "evolution-upstream-sync",
+    "evolution-harness-gate",
+    "evolution-proceed-hold-calibration",
+}
 # The watchdog itself must not alert about its own first run.
 SELF_NAMES = {"evolution-watchdog"}
 
