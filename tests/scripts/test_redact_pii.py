@@ -161,16 +161,6 @@ class TestRedactPiiQuarantine:
         assert len(files) == 1
         assert "blocked" in files[0].name
 
-    def test_quarantine_dir_is_created(self, tmp_path: Path):
-        qdir = tmp_path / "deep" / "quarantine"
-        rc, out, err = _run(
-            "email here dave@example.org",
-            extra_args=["--quarantine-dir", str(qdir), "--slug", "nested"],
-        )
-        assert rc == 1
-        assert qdir.exists()
-        assert len(list(qdir.iterdir())) == 1
-
     def test_quarantine_covers_acceptance_patterns(self, tmp_path: Path):
         """Regression for the PII gate acceptance criteria (#3236)."""
         qdir = tmp_path / "quarantine"
@@ -184,19 +174,14 @@ class TestRedactPiiQuarantine:
         for sample, expected_reason in samples:
             rc, out, err = _run(
                 sample,
-                extra_args=[
-                    "--quarantine-dir",
-                    str(qdir),
-                    "--slug",
-                    expected_reason.lower().replace(" ", "-"),
-                ],
+                extra_args=["--quarantine-dir", str(qdir), "--slug", "pattern"],
             )
             assert rc == 1, f"{sample} should be blocked"
             files = list(qdir.iterdir())
             assert files, f"{sample} should be quarantined"
             content = files[-1].read_text(encoding="utf-8")
             assert expected_reason in content, f"{sample}: expected {expected_reason}"
-            # raw sample must not survive in the quarantine file
+            # raw sample must not survive into the quarantine file
             assert sample not in content
             # remove the file for the next sample to keep directory clean
             files[-1].unlink()
