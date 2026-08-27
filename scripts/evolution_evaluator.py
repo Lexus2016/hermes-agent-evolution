@@ -275,6 +275,41 @@ def _exit_code(verdict: str) -> int:
     }.get(verdict, EXIT_BAD_INPUT)
 
 
+def update_rubric_weights_from_outcome(
+    dimension_scores: Dict[str, float],
+    outcome_success: bool,
+    *,
+    current_weights: Optional[Dict[str, float]] = None,
+    learning_rate: float = 0.05,
+    skip_gap_advantage: Optional[float] = None,
+    min_weight: float = 0.2,
+    max_weight: float = 3.0,
+) -> Dict[str, float]:
+    """Co-evolve rubric weights based on post-merge outcome feedback (#3244, CAFE pattern).
+
+    Dimensions where high scores aligned with success (or low scores with failure)
+    receive positive advantage reinforcement. Mispredicted dimensions are adjusted
+    proportionally with advantage shaping. All weights are bounded in [min_weight, max_weight].
+    """
+    weights = dict(current_weights or DEFAULT_RUBRIC)
+    multiplier = 1.0
+    if skip_gap_advantage is not None:
+        multiplier = max(0.1, min(3.0, 1.0 + float(skip_gap_advantage)))
+
+    target_delta_sign = 1.0 if outcome_success else -1.0
+
+    for dim, score in dimension_scores.items():
+        if dim not in weights:
+            continue
+        sc = _clamp01(score)
+        advantage = (sc - 0.5) * 2.0
+        delta = learning_rate * multiplier * target_delta_sign * advantage
+        new_w = max(min_weight, min(max_weight, weights[dim] + delta))
+        weights[dim] = round(new_w, 4)
+
+    return weights
+
+
 def _parse_args(argv: List[str]) -> Tuple[Dict[str, Any], Optional[str]]:
     """Tiny hand-rolled arg parse (matches the other evolution_* CLIs' style).
 

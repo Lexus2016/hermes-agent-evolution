@@ -20,6 +20,7 @@ from evolution_evaluator import (  # noqa: E402
     evaluate_candidates,
     main,
     score_candidate,
+    update_rubric_weights_from_outcome,
 )
 
 
@@ -300,3 +301,38 @@ class TestCli:
     def test_bad_numeric_flag_exit_2(self, capsys):
         rc = main(["evolution_evaluator.py", "--threshold", "high"])
         assert rc == EXIT_BAD_INPUT
+
+
+class TestCoEvolveCriticFeedback:
+    def test_success_outcome_increases_high_scoring_dimensions(self):
+        initial = {"relevance": 1.0, "correctness": 1.2}
+        updated = update_rubric_weights_from_outcome(
+            {"relevance": 0.9, "correctness": 0.3},
+            outcome_success=True,
+            current_weights=initial,
+            learning_rate=0.1,
+        )
+        assert updated["relevance"] > 1.0
+        assert updated["correctness"] < 1.2
+
+    def test_failure_outcome_penalizes_high_scoring_dimensions(self):
+        initial = {"relevance": 1.0, "correctness": 1.2}
+        updated = update_rubric_weights_from_outcome(
+            {"relevance": 0.9, "correctness": 0.3},
+            outcome_success=False,
+            current_weights=initial,
+            learning_rate=0.1,
+        )
+        assert updated["relevance"] < 1.0
+        assert updated["correctness"] > 1.2
+
+    def test_weights_stay_bounded(self):
+        initial = {"relevance": 2.95}
+        updated = update_rubric_weights_from_outcome(
+            {"relevance": 1.0},
+            outcome_success=True,
+            current_weights=initial,
+            learning_rate=0.5,
+            max_weight=3.0,
+        )
+        assert updated["relevance"] <= 3.0
