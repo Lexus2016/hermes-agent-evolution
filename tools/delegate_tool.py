@@ -5486,17 +5486,31 @@ def delegate_task(
     # return the error results immediately — _execute_and_aggregate would
     # IndexError on an empty children list.
     if not children:
-        # Record the skipped batch as all-failed for per-session stats (#3225).
+        # Record the skipped batch as all-failed for per-session stats (#3225)
+        # and loop guard evaluation (#3224).
+        _empty_sid = str(
+            getattr(parent_agent, "session_id", "") or _origin_ui_session_id or ""
+        )
+        res_dict: Dict[str, Any] = {"results": results}
         try:
             from tools.delegate_session_stats import DELEGATE_SESSION_STATS
 
-            _empty_sid = str(
-                getattr(parent_agent, "session_id", "") or _origin_ui_session_id or ""
-            )
             DELEGATE_SESSION_STATS.record(_empty_sid, results)
         except Exception:
             logger.debug("delegate session stats recording failed", exc_info=True)
-        return json.dumps({"results": results})
+        try:
+            from tools.delegate_loop_guard import DELEGATE_LOOP_GUARD
+
+            _tripped, _cnt, _diag = DELEGATE_LOOP_GUARD.record_and_evaluate(
+                _empty_sid, tasks, results
+            )
+            if _tripped:
+                res_dict["delegate_loop_guard_tripped"] = True
+                res_dict["consecutive_delegate_failures"] = _cnt
+                res_dict["strategy_recommendation"] = _diag
+        except Exception:
+            logger.debug("delegate loop guard recording failed", exc_info=True)
+        return json.dumps(res_dict)
     def _execute_and_aggregate(*, honor_parent_interrupt: bool = True) -> dict:
         """Run all built children (1 or N), join on them, aggregate results,
         fire subagent_stop hooks + cost rollup, and return the combined result
@@ -5745,6 +5759,24 @@ def delegate_task(
                 combined["session_delegate_stats"] = _stats
         except Exception:
             logger.debug("delegate session stats recording failed", exc_info=True)
+
+        # Consecutive-failure loop-guard (#3224): evaluate identical-goal failure spirals
+        try:
+            from tools.delegate_loop_guard import DELEGATE_LOOP_GUARD
+
+            _guard_sid = str(
+                getattr(parent_agent, "session_id", "") or _origin_ui_session_id or ""
+            )
+            _tripped, _cnt, _diag = DELEGATE_LOOP_GUARD.record_and_evaluate(
+                _guard_sid, tasks, results
+            )
+            if _tripped:
+                combined["delegate_loop_guard_tripped"] = True
+                combined["consecutive_delegate_failures"] = _cnt
+                combined["strategy_recommendation"] = _diag
+        except Exception:
+            logger.debug("delegate loop guard recording failed", exc_info=True)
+
         return combined
 
     # ----- Background dispatch: run the WHOLE batch as one async unit -----
