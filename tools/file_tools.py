@@ -1669,7 +1669,22 @@ def _patch_preflight_blocked_structured(
     The payload is a non-retryable correction request that tells the model to
     re-read the target file and try again with a more precise old_string.
     """
-    count = _record_patch_preflight_blocked(task_id)
+    count = _record_empty_old_string(task_id, path)
+    preflight_count = _record_patch_preflight_blocked(task_id)
+    msg = (
+        "replace mode requires a non-empty old_string. The old_string is the "
+        "exact text to find and replace in the file; an empty string cannot be "
+        "matched. Either supply the text to replace, or use mode=patch (V4A "
+        "format) for insertions."
+    )
+    if count >= 2:
+        suffix = {2: "nd", 3: "rd"}.get(count % 10, "th")
+        msg += (
+            f" STOP: this is the {count}{suffix} consecutive replace-mode call with an "
+            f"empty old_string on {path!r}. Do not retry this shape — re-read the "
+            f"file to see the exact text, then supply a real old_string, or use "
+            f"mode=patch / write_file instead."
+        )
     message = (
         f"Patch blocked by preflight: {reason}. "
         f"Re-read {path!r} with read_file, copy the exact text you want to replace, "
@@ -1679,12 +1694,13 @@ def _patch_preflight_blocked_structured(
         message += " " + extra_message
     return json.dumps(
         {
+            "error": msg,
             "action": "re_read_file",
             "path": path,
             "reason": reason,
             "message": message,
-            "patch_preflight_blocked": count,
-            "argument_shape_spiral": count >= 3,
+            "patch_preflight_blocked": preflight_count,
+            "argument_shape_spiral": preflight_count >= 3,
         },
         ensure_ascii=False,
     )
