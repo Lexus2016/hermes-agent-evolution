@@ -43,7 +43,7 @@ def test_foreground_command_uses_registered_task_cwd_for_existing_environment(mo
     assert calls == [("pwd", {"timeout": 60, "cwd": "/workspace/acp", "bounded_capture": True})]
 
 
-def test_explicit_workdir_still_wins_over_registered_task_cwd(monkeypatch):
+def test_explicit_workdir_still_wins_over_registered_task_cwd(monkeypatch, tmp_path):
     calls = []
 
     class FakeEnv:
@@ -64,19 +64,22 @@ def test_explicit_workdir_still_wins_over_registered_task_cwd(monkeypatch):
         lambda command, env_type, **kwargs: {"approved": True},
     )
 
+    explicit_path = tmp_path / "explicit"
+    explicit_path.mkdir()
+    explicit = str(explicit_path)
     result = json.loads(
         terminal_tool.terminal_tool(
             command="pwd",
             task_id=task_id,
-            workdir="/explicit/workdir",
+            workdir=explicit,
         )
     )
 
     assert result["exit_code"] == 0
-    assert calls == [{"timeout": 60, "cwd": "/explicit/workdir", "bounded_capture": True}]
+    assert calls == [{"timeout": 60, "cwd": explicit, "bounded_capture": True}]
 
 
-def test_explicit_workdir_does_not_persist_into_session_cwd(monkeypatch):
+def test_explicit_workdir_does_not_persist_into_session_cwd(monkeypatch, tmp_path):
     """A per-command ``workdir`` must not hijack the durable session cwd.
 
     Regression: the post-command dual-write recorded ``env.cwd`` (stamped to
@@ -110,10 +113,11 @@ def test_explicit_workdir_does_not_persist_into_session_cwd(monkeypatch):
         lambda session_key, cwd: recorded.append((session_key, cwd)),
     )
 
-    terminal_tool.terminal_tool(command="pwd", task_id=task_id, workdir="/one/off/dir")
+    one_off = str(tmp_path / "one-off")
+    terminal_tool.terminal_tool(command="pwd", task_id=task_id, workdir=one_off)
 
     # The transient workdir must NOT have been recorded as the session cwd.
-    assert all(cwd != "/one/off/dir" for _, cwd in recorded), recorded
+    assert all(cwd != one_off for _, cwd in recorded), recorded
 
 
 def test_background_command_prefers_recorded_session_cwd_over_init_time_cwd(monkeypatch):
