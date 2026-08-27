@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any, List, Sequence, Tuple
 
-TYPES = ("goal_contains", "tool_used")
+TYPES = ("goal_contains", "tool_used", "error_class", "task_kind", "intent")
 DEFAULT_WEIGHT = 1.0
 _STOP = frozenset({
     "the",
@@ -146,6 +146,7 @@ def render_triggers(triggers: Sequence[dict[str, Any]]) -> str:
 
 
 def score_trigger(state: dict[str, Any], trigger: dict[str, Any]) -> float:
+    """Score a single trigger condition against current execution state."""
     if not isinstance(state, dict) or not isinstance(trigger, dict):
         return 0.0
     tt, vals = trigger.get("type"), trigger.get("values")
@@ -155,35 +156,74 @@ def score_trigger(state: dict[str, Any], trigger: dict[str, Any]) -> float:
         w = float(trigger.get("weight", DEFAULT_WEIGHT))
     except (TypeError, ValueError):
         w = DEFAULT_WEIGHT
-    if tt == "goal_contains":
-        g = state.get("goal")
-        if not isinstance(g, str):
+
+    if tt in ("goal_contains", "intent"):
+        g = str(state.get("goal") or state.get("intent") or "").lower()
+        if not g:
             return 0.0
-        g = g.lower()
         return w if any(isinstance(v, str) and v.lower() in g for v in vals) else 0.0
-    tools = state.get("tools_used")
-    if not isinstance(tools, list):
+
+    if tt == "tool_used":
+        tools = state.get("tools_used") or state.get("tool_constellation")
+        if not isinstance(tools, (list, tuple, set)):
+            return 0.0
+        tset = {str(t).lower() for t in tools}
+        return w if any(isinstance(v, str) and v.lower() in tset for v in vals) else 0.0
+
+    if tt == "error_class":
+        err = str(state.get("error_class") or state.get("last_error") or "").lower()
+        if not err:
+            return 0.0
+        return w if any(isinstance(v, str) and v.lower() in err for v in vals) else 0.0
+
+    if tt == "task_kind":
+        kind = str(state.get("task_kind") or state.get("kind") or "").lower()
+        if not kind:
+            return 0.0
+        return w if any(isinstance(v, str) and v.lower() in kind for v in vals) else 0.0
+
+    return 0.0
+
+
+def score_state_against_skill(state: dict[str, Any], skill: dict[str, Any]) -> float:
+    """Score execution state against a skill's triggers, returning relevance 0.0..1.0."""
+    if not isinstance(state, dict) or not isinstance(skill, dict):
         return 0.0
-    tset = {str(t).lower() for t in tools}
-    return w if any(isinstance(v, str) and v.lower() in tset for v in vals) else 0.0
+    triggers = skill.get("triggers")
+    if not isinstance(triggers, list):
+        md = skill.get("skill_markdown")
+        triggers = parse_triggers(md) if isinstance(md, str) else []
+    if not triggers:
+        return 0.0
+    scores = [score_trigger(state, t) for t in triggers]
+    return max(scores, default=0.0)
+
+
+def get_matching_skills(
+    state: dict[str, Any],
+    skills: Sequence[dict[str, Any]],
+    threshold: float = 0.7,
+    top_k: int = 3,
+) -> list[tuple[dict[str, Any], float]]:
+    """Retrieve top matching skills whose trigger scores meet or exceed threshold."""
+    scored: list[tuple[dict[str, Any], float]] = []
+    for skill in skills:
+        if not isinstance(skill, dict):
+            continue
+        score = score_state_against_skill(state, skill)
+        if score >= threshold:
+            scored.append((skill, score))
+    scored.sort(key=lambda item: (-item[1], str(item[0].get("name", ""))))
+    return scored[:top_k]
 
 
 def best_matches(
     state: dict[str, Any], skills: Sequence[dict[str, Any]], threshold: float = 0.7
 ) -> list[tuple[str, float]]:
+    """Legacy helper returning name, score tuples."""
     ranked: list[tuple[str, float]] = []
-    for skill in skills:
-        if not isinstance(skill, dict):
-            continue
-        name = skill.get("name")
-        if not isinstance(name, str) or not name:
-            continue
-        triggers = skill.get("triggers")
-        if not isinstance(triggers, list):
-            md = skill.get("skill_markdown")
-            triggers = parse_triggers(md) if isinstance(md, str) else []
-        best = max((score_trigger(state, t) for t in triggers), default=0.0)
-        if best >= threshold:
-            ranked.append((name, best))
-    ranked.sort(key=lambda p: (-p[1], p[0]))
+    for skill, score in get_matching_skills(state, skills, threshold=threshold, top_k=100):
+        name = str(skill.get("name", ""))
+        if name:
+            ranked.append((name, score))
     return ranked

@@ -5,8 +5,10 @@ import pytest
 from evolution.lib.trigger_matcher import (
     best_matches,
     extract_triggers,
+    get_matching_skills,
     parse_triggers,
     render_triggers,
+    score_state_against_skill,
     score_trigger,
 )
 
@@ -105,6 +107,69 @@ class TestScoreTrigger:
             == 0.0
         )
 
+    def test_error_class_matching(self):
+        assert (
+            score_trigger(
+                {"error_class": "database_connection_timeout"},
+                _trig("error_class", ["database_connection", "timeout"]),
+            )
+            == 1.0
+        )
+        assert (
+            score_trigger(
+                {"last_error": "ConnectionRefusedError: port 5432"},
+                _trig("error_class", ["ConnectionRefusedError"]),
+            )
+            == 1.0
+        )
+
+    def test_task_kind_matching(self):
+        assert (
+            score_trigger(
+                {"task_kind": "database_migration"},
+                _trig("task_kind", ["database_migration"]),
+            )
+            == 1.0
+        )
+
+    def test_intent_matching(self):
+        assert (
+            score_trigger(
+                {"intent": "fix broken tests in CI"},
+                _trig("intent", ["tests", "ci"]),
+            )
+            == 1.0
+        )
+
+    def test_tool_constellation_matching(self):
+        assert (
+            score_trigger(
+                {"tool_constellation": ["terminal", "browser_navigate", "read_file"]},
+                _trig("tool_used", ["browser_navigate"]),
+            )
+            == 1.0
+        )
+
+
+class TestStateAndMatchingSkills:
+    def test_score_state_against_skill(self):
+        skill = _skill("db-ops", [_trig("goal_contains", ["database"])])
+        state = {"goal": "Optimize the database query"}
+        assert score_state_against_skill(state, skill) == 1.0
+        assert score_state_against_skill({}, skill) == 0.0
+
+    def test_get_matching_skills_top_k(self):
+        skills = [
+            _skill("db-1", [_trig("goal_contains", ["db"], 0.8)]),
+            _skill("db-2", [_trig("goal_contains", ["db"], 0.95)]),
+            _skill("db-3", [_trig("goal_contains", ["db"], 0.9)]),
+            _skill("other", [_trig("goal_contains", ["other"], 0.9)]),
+        ]
+        matches = get_matching_skills({"goal": "fix db index"}, skills, threshold=0.7, top_k=2)
+        assert len(matches) == 2
+        assert matches[0][0]["name"] == "db-2"
+        assert matches[1][0]["name"] == "db-3"
+
 
 class TestBestMatches:
     def test_ranks_by_best_trigger(self):
@@ -135,3 +200,4 @@ class TestBestMatches:
             "apple",
             "zebra",
         ]
+
