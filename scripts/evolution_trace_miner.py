@@ -28,6 +28,7 @@ from typing import Any, Dict, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
+    from evolution_trace_holdout import evaluate_holdout
     from introspection_extract import _sessions_dir, build_digest
 except Exception:  # pragma: no cover - keep import path explicit on failure
     raise
@@ -166,6 +167,7 @@ def main(argv: List[str]) -> int:
         "min_count": min_count,
         "sessions_scanned": digest.get("sessions_scanned", 0),
         "weaknesses": records,
+        "holdout": evaluate_holdout(records, digest.get("sessions_scanned", 0)),
     }
     print(json.dumps(payload, indent=2, sort_keys=True))
 
