@@ -449,6 +449,108 @@ def _validate_workdir(workdir: str) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Preflight guard (#3243): catch the most common terminal failure classes
+# BEFORE the shell runs, so the model gets a clear, actionable error instead
+# of a runtime failure. Deliberately conservative — only flags unambiguous
+# cases and never blocks shell builtins, pipelines, or compound commands.
+# Dangerous-command patterns are intentionally NOT duplicated here: they are
+# already enforced by tools/approval.py's check_all_command_guards.
+# ---------------------------------------------------------------------------
+_SHELL_BUILTINS = frozenset({
+    "cd",
+    "pwd",
+    "echo",
+    "printf",
+    "export",
+    "unset",
+    "source",
+    ".",
+    "test",
+    "[",
+    "[[",
+    "true",
+    "false",
+    "exec",
+    "exit",
+    "command",
+    "builtin",
+    "type",
+    "alias",
+    "unalias",
+})
+
+
+def _first_command_token(command: str) -> str | None:
+    """Return the first executable token of a simple command, or None.
+
+    Returns None for compound commands (pipes, ``&&``/``||``, ``;``,
+    redirection, background ``&``, command substitution) and for commands
+    that begin with env-var assignments — those are left to the shell.
+    """
+    if not command or not command.strip():
+        return None
+    stripped = command.strip()
+    if any(ch in stripped for ch in "|&;<>`"):
+        return None
+    if "$(" in stripped:
+        return None
+    try:
+        parts = shlex.split(stripped)
+    except ValueError:
+        return None
+    if not parts:
+        return None
+    first = parts[0]
+    # Skip leading env-var assignments (FOO=bar cmd ...).
+    if "=" in first and not first.startswith("/"):
+        return None
+    return first
+
+
+def _is_shell_builtin(token: str) -> bool:
+    return token in _SHELL_BUILTINS
+
+
+def _preflight_check(
+    command: str,
+    workdir: Optional[str],
+    timeout: Optional[int],
+) -> str | None:
+    """Return an error string if the command fails a preflight check, else None.
+
+    Checks, in order:
+      1. An explicitly provided ``workdir`` exists and is a directory.
+      2. The first command token resolves to an executable in PATH (or is an
+         absolute path that exists and is executable). Only checked for
+         simple single commands; compound commands are left to the shell.
+      3. Timeout realism: reject a sub-second timeout (non-positive values
+         are already rejected by the caller).
+    """
+    if workdir and not os.path.isdir(workdir):
+        return (
+            f"Preflight: workdir {workdir!r} does not exist or is not a "
+            "directory. Create it first or pass an existing directory."
+        )
+    if timeout is not None and timeout < 1:
+        return f"Preflight: timeout must be at least 1 second (got {timeout})."
+    first = _first_command_token(command)
+    if first is None or _is_shell_builtin(first):
+        return None
+    if os.path.sep in first:
+        if not os.path.exists(first) or not os.access(first, os.X_OK):
+            return (
+                f"Preflight: {first!r} does not exist or is not executable. "
+                "Check the path or install the tool."
+            )
+    elif shutil.which(first) is None:
+        return (
+            f"Preflight: {first!r} was not found in PATH. Install it or use "
+            "an absolute path."
+        )
+    return None
+
+
 def _handle_sudo_failure(output: str, env_type: str) -> str:
     """
     Check for sudo failure and add helpful message for messaging contexts.
@@ -3021,6 +3123,20 @@ def terminal_tool(
                     "output": "",
                     "exit_code": -1,
                     "error": f"Invalid command: expected string, got {type(command).__name__}",
+                    "status": "error",
+                },
+                ensure_ascii=False,
+            )
+
+        # Lightweight preflight guard: fail fast on common, deterministic mistakes
+        # before paying for environment setup / shell execution (#3243).
+        preflight_error = _preflight_check(command, workdir, timeout)
+        if preflight_error:
+            return json.dumps(
+                {
+                    "output": "",
+                    "exit_code": -1,
+                    "error": preflight_error,
                     "status": "error",
                 },
                 ensure_ascii=False,
