@@ -11,12 +11,23 @@ Usage::
     # exit 0  → clean, safe to publish
     # exit 1  → blocked; stderr shows the redaction reason(s)
 
+With quarantine (evolution pipeline mode)::
+
+    $ printf '%s' "$BODY" | python scripts/redact_pii.py \
+    $     --quarantine-dir ~/.hermes/evolution/quarantine \
+    $     --slug "issue-123-proposal"
+    # exit 0 → clean, stdout = redacted body (unchanged if clean)
+    # exit 1 → blocked, stdout = redacted body, quarantine file written,
+    #          stderr = JSON with path and reasons
+
 Exit codes
 ----------
 0  Clean — no sensitive patterns found.
 1  Blocked — one or more sensitive patterns were detected. The filtered text
    is written to stdout and the reasons to stderr, so a wrapper can abort the
-   ``gh issue create`` call.
+   ``gh issue create`` call. When ``--quarantine-dir`` is given, a blocked
+   input is also written to a quarantine file for human review.
+2  Usage / IO error (e.g. cannot read file or write quarantine).
 
 Patterns
 --------
@@ -35,8 +46,13 @@ Author: Hermes Evolution
 
 from __future__ import annotations
 
+import argparse
+import json
 import re
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
 
 # Redacted replacement token — deterministic, so diffs remain stable.
 _REDACTED = "[REDACTED]"
@@ -122,15 +138,80 @@ def redact(text: str) -> tuple[str, list[str]]:
     return out, reasons
 
 
+def _safe_slug(raw: str) -> str:
+    """Collapse a title into a filesystem-safe slug."""
+    out = re.sub(r"[^\w._-]+", "-", raw)
+    out = re.sub(r"-+", "-", out).strip("-.")
+    if not out:
+        out = "blocked"
+    # Keep length bounded; quarantine filenames are human-readable, not DB keys.
+    return out[:80]
+
+
+def _write_quarantine(
+    quarantine_dir: Path,
+    slug: str,
+    cleaned: str,
+    reasons: list[str],
+) -> Optional[Path]:
+    """Write a blocked body to quarantine and return the path, or None on failure.
+
+    The file contains the redacted body plus a YAML-ish metadata header so a
+    human reviewer can see what triggered the gate without re-running the
+    detector. Returns ``None`` if the directory cannot be created or written.
+    """
+    try:
+        quarantine_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+        path = quarantine_dir / f"{timestamp}_{slug}.md"
+        header_lines = [
+            "# Quarantined evolution issue body",
+            "",
+            f"**slug:** {slug}",
+            f"**timestamp:** {timestamp}Z",
+            f"**matched_patterns:** {len(reasons)}",
+            "**redaction_reasons:**",
+        ]
+        for reason in reasons:
+            header_lines.append(f"  - {reason}")
+        header_lines.extend(["", "---", ""])
+        path.write_text("\n".join(header_lines) + cleaned, encoding="utf-8")
+        return path
+    except OSError:
+        return None
+
+
 def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        description="Mechanical PII/secret redaction gate.",
+        usage=(
+            "%(prog)s [--quarantine-dir DIR --slug SLUG] [FILE]\n"
+            "       %(prog)s < input.txt"
+        ),
+    )
+    parser.add_argument(
+        "path",
+        nargs="?",
+        help="Optional file to read; otherwise stdin is read.",
+    )
+    parser.add_argument(
+        "--quarantine-dir",
+        dest="quarantine_dir",
+        help="Directory where blocked inputs are written for human review.",
+    )
+    parser.add_argument(
+        "--slug",
+        help="Human-readable slug for the quarantine filename (default: blocked).",
+    )
+    args = parser.parse_args(argv[1:])
+
     src = sys.stdin.read()
-    if argv[1:]:
-        path = argv[1]
+    if args.path:
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(args.path, "r", encoding="utf-8") as fh:
                 src = fh.read()
         except OSError as exc:
-            print(f"[redact-pii] error reading {path}: {exc}", file=sys.stderr)
+            print(f"[redact-pii] error reading {args.path}: {exc}", file=sys.stderr)
             return 2
 
     cleaned, reasons = redact(src)
@@ -143,6 +224,22 @@ def main(argv: list[str]) -> int:
         )
         for r in reasons:
             print(f"  • {r}", file=sys.stderr)
+
+        qpath: Optional[Path] = None
+        if args.quarantine_dir:
+            qdir = Path(args.quarantine_dir).expanduser()
+            slug = _safe_slug(args.slug or "blocked")
+            qpath = _write_quarantine(qdir, slug, cleaned, reasons)
+            if qpath is None:
+                print(
+                    "[redact-pii] ERROR: could not write quarantine file",
+                    file=sys.stderr,
+                )
+                return 2
+            print(
+                json.dumps({"quarantine_path": str(qpath), "reasons": reasons}),
+                file=sys.stderr,
+            )
         return 1
     return 0
 

@@ -13,15 +13,18 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "redact_pii.py"
 # The concatenated results still match redact_pii's detection regexes.
 FAKE_SK_TOKEN = "sk-" + "abcdefghijklmnopqrstuvwxyz"
 FAKE_AWS_KEY = "AKIA" + "IOSFODNN7EXAMPLE"  # AWS docs example key id
-FAKE_HEX_BLOB = "aabbccdd112233445566778899" + "aabbccddeeff00112233445566778899aabbccdd"
+FAKE_HEX_BLOB = (
+    "aabbccdd112233445566778899" + "aabbccddeeff00112233445566778899aabbccdd"
+)
 FAKE_GHP_TOKEN = "ghp_" + "x" * 36
 FAKE_HEX_SHORT = "deadbeef" + "0123456789abcdef" * 2
 
 
-def _run(text: str) -> tuple[int, str, str]:
+def _run(text: str, extra_args: list[str] | None = None) -> tuple[int, str, str]:
     assert SCRIPT.exists()
+    cmd = [sys.executable, str(SCRIPT), *(extra_args or [])]
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT)],
+        cmd,
         input=text,
         capture_output=True,
         text=True,
@@ -99,3 +102,101 @@ class TestRedactPiiViaStdin:
         assert lines[0] == "line1"
         assert "[REDACTED]" in lines[1]
         assert lines[2] == "line3"
+
+
+class TestRedactPiiQuarantine:
+    def test_blocked_body_is_quarantined(self, tmp_path: Path):
+        qdir = tmp_path / "quarantine"
+        slug = "proposal-test-feature"
+        body = (
+            "Contact me at alice@example.com, my token is sk-"
+            + "x" * 32
+            + ", and my home is /home/bob/projects."
+        )
+        rc, out, err = _run(
+            body, extra_args=["--quarantine-dir", str(qdir), "--slug", slug]
+        )
+        assert rc == 1
+        # stdout is the redacted body
+        assert "alice@example.com" not in out
+        assert "[REDACTED]" in out
+        # quarantine file was created
+        files = list(qdir.iterdir())
+        assert len(files) == 1
+        qfile = files[0]
+        assert qfile.suffix == ".md"
+        assert slug in qfile.name
+        content = qfile.read_text(encoding="utf-8")
+        assert "# Quarantined evolution issue body" in content
+        # Reasons are recorded in the file (non-empty).
+        assert "redaction_reasons:" in content
+        # Raw secrets and home path do not leak into the quarantine file either.
+        assert "alice@example.com" not in content
+        assert "/home/bob/projects" not in content
+        assert "sk-" + "x" * 32 not in content
+        # stderr carries structured metadata for logging.
+        assert "quarantine_path" in err
+        assert qfile.name in err
+
+    def test_clean_body_does_not_create_quarantine(self, tmp_path: Path):
+        qdir = tmp_path / "quarantine"
+        rc, out, err = _run(
+            "A plain description of a memory handling bug.",
+            extra_args=["--quarantine-dir", str(qdir), "--slug", "clean"],
+        )
+        assert rc == 0
+        # Clean bodies never create the quarantine dir — assert non-existence,
+        # not "dir exists but is empty" (iterdir() would raise FileNotFoundError).
+        assert not qdir.exists()
+        assert "quarantine_path" not in err
+
+    def test_missing_slug_uses_default(self, tmp_path: Path):
+        qdir = tmp_path / "quarantine"
+        rc, out, err = _run(
+            "Internal IP 192.168.1.1",
+            extra_args=["--quarantine-dir", str(qdir)],
+        )
+        assert rc == 1
+        files = list(qdir.iterdir())
+        assert len(files) == 1
+        assert "blocked" in files[0].name
+
+    def test_quarantine_dir_is_created(self, tmp_path: Path):
+        qdir = tmp_path / "deep" / "quarantine"
+        rc, out, err = _run(
+            "email here dave@example.org",
+            extra_args=["--quarantine-dir", str(qdir), "--slug", "nested"],
+        )
+        assert rc == 1
+        assert qdir.exists()
+        assert len(list(qdir.iterdir())) == 1
+
+    def test_quarantine_covers_acceptance_patterns(self, tmp_path: Path):
+        """Regression for the PII gate acceptance criteria (#3236)."""
+        qdir = tmp_path / "quarantine"
+        samples = [
+            ("email@example.com", "Email"),
+            ("/home/alice/config.yaml", "Absolute home path"),
+            ("server at 10.0.0.1", "Private IPv4"),
+            ("github token gho_" + "1" * 36, "GitHub token"),
+            ("secretKey=" + "a" * 48, "Generic secret"),
+        ]
+        for sample, expected_reason in samples:
+            rc, out, err = _run(
+                sample,
+                extra_args=[
+                    "--quarantine-dir",
+                    str(qdir),
+                    "--slug",
+                    expected_reason.lower().replace(" ", "-"),
+                ],
+            )
+            assert rc == 1, f"{sample} should be blocked"
+            files = list(qdir.iterdir())
+            assert files, f"{sample} should be quarantined"
+            content = files[-1].read_text(encoding="utf-8")
+            assert expected_reason in content, f"{sample}: expected {expected_reason}"
+            # raw sample must not survive in the quarantine file
+            assert sample not in content
+            # remove the file for the next sample to keep directory clean
+            files[-1].unlink()

@@ -170,10 +170,17 @@ if [ -z "$RPII" ]; then
   exit 1
 fi
 
+# Ensure a quarantine directory exists so blocked issues are preserved for review.
+QUARANTINE_DIR="${HERMES_HOME:-$HOME/.hermes}/evolution/quarantine"
+mkdir -p "$QUARANTINE_DIR"
+
 BODY="<issue body markdown>"
-CLEANED=$(printf '%s' "$BODY" | python3 "$RPII")
-if [ $? -ne 0 ]; then
-  echo "BLOCKED by PII gate — issue body contained sensitive data"
+SLUG="$(printf '%s' "$TITLE" | tr -cs '[:alnum:]._' '-')"
+CLEANED=$(printf '%s' "$BODY" | python3 "$RPII" --quarantine-dir "$QUARANTINE_DIR" --slug "$SLUG")
+RPII_RC=$?
+if [ $RPII_RC -ne 0 ]; then
+  echo "BLOCKED by PII gate — issue body contained sensitive data (quarantine: $QUARANTINE_DIR)"
+  # Do NOT file the issue. The quarantine file is written; a human can review it.
   continue
 fi
 BODY="$CLEANED"
