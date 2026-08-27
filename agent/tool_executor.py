@@ -139,7 +139,7 @@ class _BatchAbandoned(BaseException):
     """
 
 def _parse_tool_arguments(
-    raw_arguments: Any, function_name: str = ""
+    raw_arguments: Any, function_name: str = "", agent: Any = None
 ) -> tuple[dict, Optional[str]]:
     """Parse model-emitted arguments without repairing or coercing them.
 
@@ -151,6 +151,10 @@ def _parse_tool_arguments(
     (a common model failure mode — emitting ``ls -la`` instead of
     ``{"command": "ls -la"}``), we extract it as the ``command`` argument
     so the command executes instead of producing a parse error.
+
+    For search_files, if the required ``pattern`` argument is missing, we
+    return a structured correction hint instead of letting the tool fail
+    with an opaque parameter error (issue #3237 — repeated cron noise).
     """
     if raw_arguments is None:
         return {}, json.dumps(
@@ -210,6 +214,35 @@ def _parse_tool_arguments(
         )
 
     if isinstance(arguments, dict):
+        # search_files preflight: a missing `pattern` argument is a frequent
+        # model failure mode. Return a correction hint immediately so the agent
+        # fixes the call on the same turn instead of blind-retrying.
+        if function_name == "search_files" and "pattern" not in arguments:
+            count = 0
+            if agent is not None:
+                count = getattr(agent, "_search_files_missing_pattern_count", 0) + 1
+                agent._search_files_missing_pattern_count = count
+            return {}, json.dumps(
+                {
+                    "error": "Missing required argument: pattern",
+                    "tool": "search_files",
+                    "missing": ["pattern"],
+                    "correction": {
+                        "pattern": "function_name_or_regex",
+                        "target": "content",
+                        "path": ".",
+                    },
+                    "message": (
+                        "`search_files` requires a `pattern` argument. "
+                        "Provide a regex/glob pattern and optionally "
+                        "`target='files'` for filename searches. "
+                        "Example: `search_files(pattern='*.py', target='files', path='.')`."
+                    ),
+                    "search_files_missing_pattern_count": count,
+                    "argument_shape_spiral": count >= 3,
+                },
+                ensure_ascii=False,
+            )
         return arguments, None
 
     # Parsed successfully but not a dict (e.g. a JSON list or scalar).
@@ -1224,7 +1257,7 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
         function_name = tool_call.function.name
 
         function_args, malformed_args_result = _parse_tool_arguments(
-            tool_call.function.arguments, function_name=function_name
+            tool_call.function.arguments, function_name=function_name, agent=agent
         )
 
         if malformed_args_result is not None:
@@ -2082,7 +2115,7 @@ def execute_tool_calls_sequential(agent, assistant_message, messages: list, effe
         function_name = tool_call.function.name
 
         function_args, malformed_args_result = _parse_tool_arguments(
-            tool_call.function.arguments, function_name=function_name
+            tool_call.function.arguments, function_name=function_name, agent=agent
         )
         if malformed_args_result is not None:
             _emit_terminal_post_tool_call(
