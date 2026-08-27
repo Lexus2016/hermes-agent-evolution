@@ -24,8 +24,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from evolution_harness_proposer import generate_proposals, load_weaknesses
-from evolution_invariant_filter import check_proposal
 from evolution_harness_sandbox import INVALID, VALIDATED, validate_code_diff
+from evolution_harness_validator import (
+    DEFAULT_MIN_SESSIONS,
+    score_candidate,
+)
+from evolution_invariant_filter import check_proposal
 
 EXIT_VALIDATED = 0
 EXIT_REJECTED = 1
@@ -36,13 +40,19 @@ EXIT_APPLY_REFUSED = 3
 GATE_SIDECAR = "harness-gate-latest.json"
 
 
-def run_gate(proposal: Dict[str, Any], *, gate_runner=None) -> Dict[str, Any]:
+def run_gate(
+    proposal: Dict[str, Any],
+    *,
+    gate_runner=None,
+    holdout_batch: Optional[List[Dict[str, Any]]] = None,
+    min_sessions: int = DEFAULT_MIN_SESSIONS,
+) -> Dict[str, Any]:
     """Sandboxed apply + regression gate for a proposal; never auto-applies.
 
-    Slice 2 wiring (#68): screen the proposal against the immutable invariant
-    rules FIRST. A violating proposal is short-circuited (``zero_fitness``)
-    before the sandbox/regression gate ever runs — a candidate that breaks the
-    "cannot violate" floor never reaches the judge."""
+    1. Screen against immutable invariant rules first (#68).
+    2. Screen against held-out trace validation (#3228) to prevent overfitting.
+    3. Run sandbox/regression validation (#2615).
+    """
     invariant = check_proposal(proposal)
     if not invariant["ok"]:
         return {
@@ -55,6 +65,24 @@ def run_gate(proposal: Dict[str, Any], *, gate_runner=None) -> Dict[str, Any]:
             "requires_human_review": True,
             "auto_apply": False,
         }
+
+    # Harness validator screen (#3228): ensure candidate generalizes across holdout batch
+    candidate_info = proposal.get("candidate") or proposal.get("evidence") or proposal.get("weakness")
+    batch = holdout_batch if holdout_batch is not None else proposal.get("holdout_batch")
+    if candidate_info and batch is not None:
+        val = score_candidate(candidate_info, batch, min_sessions=min_sessions)
+        if val.get("verdict") == "reject":
+            return {
+                "status": INVALID,
+                "applied": None,
+                "gate": {"passed": False, "exit_code": None, "output": ""},
+                "reason": f"harness validation rejected (overfitting risk): {val.get('key')}",
+                "validator": val,
+                "zero_fitness": True,
+                "requires_human_review": False,
+                "auto_apply": False,
+            }
+
     return validate_code_diff(proposal, gate_runner=gate_runner)
 
 
@@ -75,12 +103,15 @@ def run_cron_pass(
     *,
     gate_runner=None,
     surface: Optional[Dict[str, Any]] = None,
+    holdout_batch: Optional[List[Dict[str, Any]]] = None,
+    min_sessions: int = DEFAULT_MIN_SESSIONS,
 ) -> Dict[str, Any]:
     """Cron pass: weaknesses -> proposals -> gated verdicts (report-only)."""
     proposals = generate_proposals(load_weaknesses(weaknesses_payload), surface=surface)
     verdicts: List[Dict[str, Any]] = []
     skipped = 0
     invariant_rejected = 0
+    validator_rejected = 0
     for p in proposals:
         # Slice 2 wiring (#68): screen the FULL proposal (title/delta/auto_apply)
         # against the immutable invariant rules before it reaches the gate.
@@ -99,19 +130,45 @@ def run_cron_pass(
                 "auto_apply": False,
             })
             continue
+
+        # Hold-out validation (#3228): ensure candidate generalizes
+        cand = p.get("candidate") or p.get("evidence") or p.get("weakness")
+        if cand and holdout_batch is not None:
+            val = score_candidate(cand, holdout_batch, min_sessions=min_sessions)
+            if val.get("verdict") == "reject":
+                validator_rejected += 1
+                verdicts.append({
+                    "status": INVALID,
+                    "applied": None,
+                    "gate": {"passed": False, "exit_code": None, "output": ""},
+                    "reason": f"harness validation rejected (overfitting risk): {val.get('key')}",
+                    "validator": val,
+                    "zero_fitness": True,
+                    "proposal_title": p.get("title", ""),
+                    "requires_human_review": False,
+                    "auto_apply": False,
+                })
+                continue
+
         diff = p.get("code_diff")
         if not isinstance(diff, dict):
             skipped += 1  # gate only judges diffs it can sandbox-apply
             continue
-        verdict = run_gate(diff, gate_runner=gate_runner)
+        verdict = run_gate(
+            diff,
+            gate_runner=gate_runner,
+            holdout_batch=holdout_batch,
+            min_sessions=min_sessions,
+        )
         verdict["proposal_title"] = p.get("title", "")
         verdicts.append(verdict)
     return {
         "mode": "cron-report-only",
         "auto_apply": False,
         "proposals": len(proposals),
-        "gated": len(verdicts) - invariant_rejected,
+        "gated": len(verdicts) - invariant_rejected - validator_rejected,
         "invariant_rejected": invariant_rejected,
+        "validator_rejected": validator_rejected,
         "skipped_no_code_diff": skipped,
         "validated": sum(1 for v in verdicts if v.get("status") == VALIDATED),
         "verdicts": verdicts,

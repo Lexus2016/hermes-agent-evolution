@@ -144,3 +144,63 @@ def test_cron_yaml_registers_the_gate():
     assert spec["no_agent"] is True
     assert spec["script"] == "evolution_harness_gate.py"
     assert (repo / "scripts" / spec["script"]).is_file()
+
+
+def test_run_gate_holdout_validator_accepts_generalizing():
+    candidate_prop = dict(PROPOSAL)
+    candidate_prop["candidate"] = {
+        "kind": "retry_spiral",
+        "tool": "terminal",
+        "occurrences": 10,
+        "sessions": 5,
+    }
+    holdout_batch = [
+        {"kind": "retry_spiral", "tool": "terminal", "sessions": 4},
+    ]
+    res = run_gate(candidate_prop, gate_runner=_green, holdout_batch=holdout_batch, min_sessions=3)
+    assert res["status"] == "validated"
+
+
+def test_run_gate_holdout_validator_rejects_overfitting():
+    candidate_prop = dict(PROPOSAL)
+    candidate_prop["candidate"] = {
+        "kind": "retry_spiral",
+        "tool": "terminal",
+        "occurrences": 1,
+        "sessions": 1,
+    }
+    holdout_batch = [
+        {"kind": "retry_spiral", "tool": "terminal", "sessions": 1},
+    ]
+    res = run_gate(candidate_prop, gate_runner=_green, holdout_batch=holdout_batch, min_sessions=3)
+    assert res["status"] == "invalid"
+    assert "harness validation rejected" in res["reason"]
+    assert res["zero_fitness"] is True
+
+
+def test_cron_pass_with_holdout_filters_rejected_proposals():
+    holdout_batch = [
+        {"kind": "retry_spiral", "tool": "terminal", "sessions": 1},
+    ]
+    # Weakness with low occurrences/sessions fails holdout threshold
+    weaknesses = {
+        "weaknesses": [
+            {
+                "kind": "retry_spiral",
+                "tool": "terminal",
+                "occurrences": 1,
+                "sessions": 1,
+                "candidate": {"kind": "retry_spiral", "tool": "terminal", "occurrences": 1, "sessions": 1},
+            }
+        ]
+    }
+    report = run_cron_pass(
+        weaknesses,
+        gate_runner=_green,
+        surface=SURFACE,
+        holdout_batch=holdout_batch,
+        min_sessions=3,
+    )
+    assert report["validator_rejected"] == 1
+    assert report["validated"] == 0
+
