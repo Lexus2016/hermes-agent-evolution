@@ -1644,6 +1644,50 @@ def _empty_old_string_error(path: str, task_id: str) -> str:
 # is never referenced again (only the most recent reads matter for dedup,
 # loop detection, and external-edit warnings).  Hard caps bound the
 # accretion to a few hundred KB regardless of session length.
+
+# #3238 — patch preflight counter: every replace-mode call blocked for an
+# empty/short/ambiguous old_string increments this per-task counter.  It is
+# surfaced in the structured error so the spiral guard can act on it.
+_patch_preflight_blocked_lock = threading.Lock()
+_patch_preflight_blocked_counter: dict[str, int] = {}
+
+
+def _record_patch_preflight_blocked(task_id: str) -> int:
+    """Increment and return the per-task patch-preflight block count."""
+    with _patch_preflight_blocked_lock:
+        _patch_preflight_blocked_counter[task_id] = (
+            _patch_preflight_blocked_counter.get(task_id, 0) + 1
+        )
+        return _patch_preflight_blocked_counter[task_id]
+
+
+def _patch_preflight_blocked_structured(
+    path: str, reason: str, task_id: str, extra_message: str = ""
+) -> str:
+    """Return a structured re_read_file instruction for a blocked patch.
+
+    The payload is a non-retryable correction request that tells the model to
+    re-read the target file and try again with a more precise old_string.
+    """
+    count = _record_patch_preflight_blocked(task_id)
+    message = (
+        f"Patch blocked by preflight: {reason}. "
+        f"Re-read {path!r} with read_file, copy the exact text you want to replace, "
+        f"and retry with a longer, unambiguous old_string."
+    )
+    if extra_message:
+        message += " " + extra_message
+    return json.dumps(
+        {
+            "action": "re_read_file",
+            "path": path,
+            "reason": reason,
+            "message": message,
+            "patch_preflight_blocked": count,
+            "argument_shape_spiral": count >= 3,
+        },
+        ensure_ascii=False,
+    )
 _READ_HISTORY_CAP = 500  # set; used only by get_read_files_summary
 _DEDUP_CAP = 1000  # dict; skip-identical-reread guard
 _READ_TIMESTAMPS_CAP = 1000  # dict; external-edit detection for write/patch
@@ -3025,14 +3069,14 @@ def patch_tool(
             if mode == "replace":
                 if not path:
                     return tool_error("path required")
-                # #1703 — a replace-mode call with an EMPTY (falsy) old_string is
-                # a usage error, not a match failure. Return a targeted,
-                # non-retryable diagnostic at the boundary instead of letting
-                # the generic error below feed a 5-8 call retry spiral. A
-                # non-empty old_string clears any prior empty-string counter for
-                # this path (the model moved past the bad shape).
-                if not old_string:
-                    return _empty_old_string_error(path, task_id)
+                # #1703/#3238 — Preflight: reject empty old_string before
+                # attempting the patch. Return a structured re_read_file
+                # instruction so the model fixes the shape instead of blind-retrying.
+                _old = (old_string or "").strip()
+                if not _old:
+                    return _patch_preflight_blocked_structured(
+                        path, "empty old_string", task_id
+                    )
                 _reset_empty_old_string(task_id, path)
                 if new_string is None:
                     return tool_error("old_string and new_string required")
