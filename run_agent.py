@@ -9386,7 +9386,7 @@ class AIAgent:
         #     gateway session the async result would route back to.
         # The schema-level `background` param is intentionally ignored here.
         _is_subagent = getattr(self, "_delegate_depth", 0) > 0
-        return _delegate_task(
+        result = _delegate_task(
             goal=function_args.get("goal"),
             context=function_args.get("context"),
             tasks=function_args.get("tasks"),
@@ -9399,6 +9399,24 @@ class AIAgent:
             message=function_args.get("message"),
             parent_agent=self,
         )
+        # #3223 slice 1 — attach a typed failure_class to failed dispatches so
+        # the parent sees a deterministic category (capability-blocked |
+        # provider-error | timeout) instead of only free-text error summaries.
+        # Background handles carry no result to classify here; their per-child
+        # results are surfaced on the completion path (follow-up #3225).
+        try:
+            from tools.delegate_failure_classifier import (
+                inject_delegate_failure_class,
+            )
+
+            payload = json.loads(result)
+            if isinstance(payload, dict) and inject_delegate_failure_class(payload):
+                result = json.dumps(payload, ensure_ascii=False)
+        except Exception:
+            # Never break dispatch on a classification failure — the raw result
+            # is still valid and the parent can act on it.
+            pass
+        return result
 
     def _invoke_tool(
         self,
