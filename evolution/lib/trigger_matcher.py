@@ -206,9 +206,18 @@ def get_matching_skills(
     top_k: int = 3,
 ) -> list[tuple[dict[str, Any], float]]:
     """Retrieve top matching skills whose trigger scores meet or exceed threshold."""
+    try:
+        from evolution.lib.skill_outcome_logger import is_skill_demoted
+    except ImportError:
+        def is_skill_demoted(name: str) -> bool:
+            return False
+
     scored: list[tuple[dict[str, Any], float]] = []
     for skill in skills:
         if not isinstance(skill, dict):
+            continue
+        name = str(skill.get("name", ""))
+        if skill.get("demoted") or (name and is_skill_demoted(name)):
             continue
         score = score_state_against_skill(state, skill)
         if score >= threshold:
