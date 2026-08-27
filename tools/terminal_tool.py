@@ -516,24 +516,30 @@ def _preflight_check(
     command: str,
     workdir: Optional[str],
     timeout: Optional[int],
+    env_type: str = "local",
+    is_mock_env: bool = False,
 ) -> str | None:
     """Return an error string if the command fails a preflight check, else None.
 
     Checks, in order:
-      1. An explicitly provided ``workdir`` exists and is a directory.
-      2. The first command token resolves to an executable in PATH (or is an
-         absolute path that exists and is executable). Only checked for
-         simple single commands; compound commands are left to the shell.
-      3. Timeout realism: reject a sub-second timeout (non-positive values
+      1. Timeout realism: reject a sub-second timeout (non-positive values
          are already rejected by the caller).
+      2. For local, non-mocked environments: an explicitly provided ``workdir``
+         exists and is a directory on the local host.
+      3. For local, non-mocked environments: the first command token resolves
+         to an executable in PATH (or is an absolute path that exists and is
+         executable). Only checked for simple single commands; compound commands
+         are left to the shell.
     """
+    if timeout is not None and timeout < 1:
+        return f"Preflight: timeout must be at least 1 second (got {timeout})."
+    if env_type != "local" or is_mock_env:
+        return None
     if workdir and not os.path.isdir(workdir):
         return (
             f"Preflight: workdir {workdir!r} does not exist or is not a "
             "directory. Create it first or pass an existing directory."
         )
-    if timeout is not None and timeout < 1:
-        return f"Preflight: timeout must be at least 1 second (got {timeout})."
     first = _first_command_token(command)
     if first is None or _is_shell_builtin(first):
         return None
@@ -3128,20 +3134,6 @@ def terminal_tool(
                 ensure_ascii=False,
             )
 
-        # Lightweight preflight guard: fail fast on common, deterministic mistakes
-        # before paying for environment setup / shell execution (#3243).
-        preflight_error = _preflight_check(command, workdir, timeout)
-        if preflight_error:
-            return json.dumps(
-                {
-                    "output": "",
-                    "exit_code": -1,
-                    "error": preflight_error,
-                    "status": "error",
-                },
-                ensure_ascii=False,
-            )
-
         # Check active verification scope (issue #2458 / #2436)
         from agent.file_safety import get_active_verification_scope
 
@@ -3171,6 +3163,26 @@ def terminal_tool(
         # every delegate_task child share one container; only task_ids with
         # a registered env override (RL benchmarks) get isolated sandboxes.
         effective_task_id = _resolve_container_task_id(task_id)
+
+        from tools.environments.local import LocalEnvironment
+        active_env = _active_environments.get(effective_task_id) or _active_environments.get("default")
+        is_mock_env = active_env is not None and not isinstance(active_env, LocalEnvironment)
+
+        # Lightweight preflight guard: fail fast on common, deterministic mistakes
+        # before paying for environment setup / shell execution (#3243).
+        preflight_error = _preflight_check(
+            command, workdir, timeout, env_type=env_type, is_mock_env=is_mock_env
+        )
+        if preflight_error:
+            return json.dumps(
+                {
+                    "output": "",
+                    "exit_code": -1,
+                    "error": preflight_error,
+                    "status": "error",
+                },
+                ensure_ascii=False,
+            )
 
         # Check per-task overrides (set by environments like TerminalBench2Env)
         # before falling back to global env var config. ``resolve_task_overrides``
