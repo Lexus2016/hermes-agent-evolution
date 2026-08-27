@@ -5486,6 +5486,16 @@ def delegate_task(
     # return the error results immediately — _execute_and_aggregate would
     # IndexError on an empty children list.
     if not children:
+        # Record the skipped batch as all-failed for per-session stats (#3225).
+        try:
+            from tools.delegate_session_stats import DELEGATE_SESSION_STATS
+
+            _empty_sid = str(
+                getattr(parent_agent, "session_id", "") or _origin_ui_session_id or ""
+            )
+            DELEGATE_SESSION_STATS.record(_empty_sid, results)
+        except Exception:
+            logger.debug("delegate session stats recording failed", exc_info=True)
         return json.dumps({"results": results})
     def _execute_and_aggregate(*, honor_parent_interrupt: bool = True) -> dict:
         """Run all built children (1 or N), join on them, aggregate results,
@@ -5719,6 +5729,22 @@ def delegate_task(
         }
         if live_paths:
             combined["live_transcripts"] = list(live_paths)
+        # Per-session success-rate tracking (#3225): record this batch's
+        # completed/failed counts keyed by the parent's durable session id and
+        # attach a snapshot to the result so callers can observe the running
+        # rate without a separate lookup. Best-effort — never break the
+        # delegate path on a stats failure.
+        try:
+            from tools.delegate_session_stats import DELEGATE_SESSION_STATS
+
+            _stats_sid = str(
+                getattr(parent_agent, "session_id", "") or _origin_ui_session_id or ""
+            )
+            _stats = DELEGATE_SESSION_STATS.record(_stats_sid, results)
+            if _stats is not None:
+                combined["session_delegate_stats"] = _stats
+        except Exception:
+            logger.debug("delegate session stats recording failed", exc_info=True)
         return combined
 
     # ----- Background dispatch: run the WHOLE batch as one async unit -----
