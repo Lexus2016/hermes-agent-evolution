@@ -202,3 +202,28 @@ jobs:
 
       - name: LLM-judge prompt safety scan (#1808)
         run: python scripts/evolution_judge_safety_scan.py || true  # advisory until templates are fixed
+
+  skills-spec:
+    # Agent Skills spec conformance (#125): every skills/**/SKILL.md must
+    # satisfy the open agentskills.io contract (name + description frontmatter,
+    # folder-name match) so malformed skill manifests fail fast in CI instead
+    # of breaking portability/discovery downstream. Non-spec top-level fields
+    # are advisory warnings (the spec tolerates extra fields) — see
+    # scripts/check_skills_spec.py. Pure static scan, no network.
+    name: Agent Skills spec check (blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pyyaml
+        run: pip install pyyaml==6.0.3
+
+      - name: Run skills spec check
+        run: python scripts/check_skills_spec.py skills
