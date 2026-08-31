@@ -58,6 +58,71 @@ def _num(x: Any) -> Optional[float]:
     return None
 
 
+# Keys under which a nested ``effort_budget`` dict may carry its scalar value.
+# Observed shapes (analysis reports): ``{"limit": 3.0, ...}`` (2026-08-29),
+# ``{"max": 3.0, "used": 2.7, ...}`` (2026-08-28). The audit must read the
+# scalar explicitly from whichever key the producer chose (#168).
+_EFFORT_BUDGET_KEYS: Tuple[str, ...] = ("limit", "max", "selected_total", "used")
+
+
+def _scalar_effort_budget(report: Dict[str, Any], default: float = 3.0) -> float:
+    """Extract a scalar effort budget from scalar OR nested report shapes.
+
+    The analysis report's ``effort_budget`` was historically a scalar float;
+    some producers now emit a nested dict (``{"limit": ...}`` /
+    ``{"max": ..., "used": ...}``). ``float(dict)`` raises TypeError, which
+    crashed the meta-skill trace step of the watchdog audit (#168). Read the
+    scalar explicitly, falling back to the default when no scalar is present.
+    """
+    eb = report.get("effort_budget")
+    if isinstance(eb, bool):
+        return default
+    if isinstance(eb, (int, float)):
+        return float(eb)
+    if isinstance(eb, dict):
+        for key in _EFFORT_BUDGET_KEYS:
+            val = eb.get(key)
+            if isinstance(val, bool):
+                continue
+            if isinstance(val, (int, float)):
+                return float(val)
+    return default
+
+
+def check_effort_budget_shape(report: Dict[str, Any]) -> List[str]:
+    """Schema check on the report's ``effort_budget`` field (loud, no crash).
+
+    Returns violation strings (empty == shape is readable). A future shape
+    change surfaces here as a flagged violation at write/audit time instead of
+    a TypeError crash in the consumer (#168). The audit tolerates both the
+    scalar and the known nested dict shapes; anything else is flagged so the
+    producer is told loudly rather than the watchdog dying silently.
+    """
+    if not isinstance(report, dict):
+        return []
+    eb = report.get("effort_budget")
+    if eb is None:
+        return []
+    if isinstance(eb, (int, float)) and not isinstance(eb, bool):
+        return []
+    if isinstance(eb, dict):
+        if any(
+            isinstance(eb.get(k), (int, float)) and not isinstance(eb.get(k), bool)
+            for k in _EFFORT_BUDGET_KEYS
+        ):
+            return []
+        return [
+            "EFFORT_BUDGET_SHAPE: report.effort_budget is a dict without a "
+            f"scalar under any of {list(_EFFORT_BUDGET_KEYS)} (got {sorted(eb)}) "
+            "— consumer cannot read a budget; update the producer or the "
+            "_EFFORT_BUDGET_KEYS contract"
+        ]
+    return [
+        "EFFORT_BUDGET_SHAPE: report.effort_budget is neither a number nor a "
+        f"dict (got {type(eb).__name__}) — expected scalar or nested shape"
+    ]
+
+
 def _selection_constraints(report: Dict[str, Any]) -> Dict[str, Any]:
     """``max_total_effort`` lives under ``scoring_model.selection_constraints``
     (observed shape), but tolerate a top-level ``selection_constraints`` too so a
@@ -82,6 +147,12 @@ def audit_analysis(
     if not isinstance(report, dict):
         return []
     out: List[str] = []
+
+    # Schema check (#168): effort_budget may be scalar or a known nested dict.
+    # Flag (not crash) when the producer shipped a shape the consumer can't
+    # read, so a future report-schema change fails loudly at audit time
+    # instead of the watchdog dying with a TypeError.
+    out.extend(check_effort_budget_shape(report))
 
     sc = _selection_constraints(report)
     budget = _num(sc.get("max_total_effort"))
@@ -365,7 +436,7 @@ def _record_meta_skill_trace(report: Dict[str, Any], evolution_dir: Path) -> Non
         merged=0,  # filled post-merge by the implementation stage
         selected_issue_ids=selected_issue_ids,
         merged_issue_ids=merged_issue_ids,
-        effort_budget=float(report.get("effort_budget", 3.0)),
+        effort_budget=_scalar_effort_budget(report),
     )
     try:
         append_trace(trace, evolution_dir=evolution_dir)

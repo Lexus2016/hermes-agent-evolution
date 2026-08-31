@@ -283,6 +283,46 @@ def run_local_triage(evolution_dir: Path, repo_root: Optional[Path] = None) -> d
     return output
 
 
+def _load_check_effort_budget_shape():
+    """Resolve the producer-side shape check without import fragility.
+
+    The gate copies this script (sometimes alone, sometimes with the audit
+    module) into an isolated working dir — see
+    test_missing_access_gate_fails_closed. ``scripts.evolution_analysis_audit``
+    is unresolvable there, so fall back to a bare import, then to loading the
+    module by path next to this file. Returns None when the module is
+    genuinely unavailable; the caller must degrade to a stderr warning and
+    still write the report (#168) — a missing check must never abort triage.
+    """
+    try:
+        from scripts.evolution_analysis_audit import check_effort_budget_shape
+
+        return check_effort_budget_shape
+    except ImportError:
+        pass
+    try:
+        from evolution_analysis_audit import check_effort_budget_shape
+
+        return check_effort_budget_shape
+    except ImportError:
+        pass
+    try:
+        import importlib.util
+
+        audit_path = Path(__file__).resolve().parent / "evolution_analysis_audit.py"
+        if audit_path.is_file():
+            spec = importlib.util.spec_from_file_location(
+                "evolution_analysis_audit", audit_path
+            )
+            if spec is not None and spec.loader is not None:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                return module.check_effort_budget_shape
+    except Exception:  # pragma: no cover - degraded install; any failure is fine
+        pass
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
@@ -325,6 +365,34 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 0
+
+    # Producer-side schema check (#168): fail loudly AT WRITE TIME if the
+    # report shape would crash a consumer later (the watchdog's meta-skill
+    # trace died with TypeError: float() got 'dict' because a producer shipped
+    # a nested effort_budget the consumer couldn't read). The audit module is
+    # the single source of truth for the shape contract. A missing module
+    # (isolated/degraded install — the gate copies this script alone) must
+    # degrade to a warning, never abort the write: Phase 0 output is the
+    # gate's core guarantee.
+    check_shape = _load_check_effort_budget_shape()
+    shape_violations = []
+    if check_shape is None:
+        print(
+            "Warning: evolution_analysis_audit unavailable — skipping producer "
+            "shape check; report still written (#168).",
+            file=sys.stderr,
+        )
+    else:
+        shape_violations = check_shape(output)
+    if shape_violations:
+        for v in shape_violations:
+            print(f"REPORT_SHAPE_VIOLATION: {v}", file=sys.stderr)
+        print(
+            "Refusing to write an analysis report whose shape would crash "
+            "consumers — fix the producer before it lands.",
+            file=sys.stderr,
+        )
+        return 1
 
     output_path.write_text(
         json.dumps(output, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
