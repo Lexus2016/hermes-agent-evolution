@@ -5843,6 +5843,8 @@ def run_job(
             kwargs["extra_prompt"] = extra_prompt
         if cancel_event is not None:
             kwargs["cancel_event"] = cancel_event
+        if execution_id is not None:
+            kwargs["execution_id"] = execution_id
         result = impl(job, **kwargs)
         hermes_telemetry.set_attributes(
             success=bool(result[0]),
@@ -5857,6 +5859,7 @@ def _run_job_impl(
     defer_agent_teardown: Optional[list] = None,
     extra_prompt: Optional[str] = None,
     cancel_event: Optional[_CancelEventLike] = None,
+    execution_id: Optional[str] = None,
 ) -> tuple[bool, str, str, Optional[str]]:
     """
     Execute a single cron job.
@@ -6333,11 +6336,8 @@ def _run_job_impl(
         # concurrent cron jobs on the parallel pool.  contextvars.copy_context()
         # at the run_conversation hop carries this into the agent thread.
         _non_dispatcher_token = enter_non_dispatcher_owned_context()
-        _workdir_file_redirect = None
         if _job_workdir:
-            os.environ["TERMINAL_CWD"] = _job_workdir
             logger.info("Job '%s': using task-scoped workdir %s", job_id, _job_workdir)
-            _workdir_file_redirect = _seed_workdir_file_tools(_job_workdir)
 
         # Re-read .env and config.yaml fresh every run so provider/key
         # changes take effect without a gateway restart. Route through
@@ -7033,14 +7033,12 @@ def _run_job_impl(
         # Tag this fire and time the run_conversation call for the usage_audit.jsonl entry.
         _audit_fire_id = uuid.uuid4().hex
         _audit_t_start = time.monotonic()
-        def _cron_run_reassert_workdir():
-            if _job_workdir:
-                os.environ["TERMINAL_CWD"] = _job_workdir
-            return agent.run_conversation(prompt, task_id=_cron_task_id)
-
         try:
             _cron_future = _cron_pool.submit(
-                _cron_context.run, _cron_run_reassert_workdir
+                _cron_context.run,
+                agent.run_conversation,
+                prompt,
+                task_id=_cron_task_id,
             )
         except RuntimeError as submit_exc:
             # Interpreter shutdown race: the Python runtime began tearing down
@@ -7335,24 +7333,6 @@ def _run_job_impl(
 
     finally:
         _clear_tool_session_cwd(_cron_task_id)
-        # Restore TERMINAL_CWD to whatever it was before this job ran.  We
-        # only ever mutate it when the job has a workdir AND actually held
-        # the write lock — a fail-closed timeout raised before the env-set,
-        # so restoring there would replay a pre-wait snapshot over the
-        # ACTIVE holder's live override.
-        if _job_workdir and _cwd_lock_acquired:
-            if _prior_terminal_cwd == "_UNSET_":
-                os.environ.pop("TERMINAL_CWD", None)
-            else:
-                os.environ["TERMINAL_CWD"] = _prior_terminal_cwd
-            _restore_workdir_file_tools(_workdir_file_redirect)
-        # Release the cwd lock now that the env is restored, so a waiting
-        # workdir job (or queued reader) can proceed without seeing the override.
-        if _cwd_lock_acquired:
-            if _holds_cwd_write:
-                _terminal_cwd_lock.release_write()
-            else:
-                _terminal_cwd_lock.release_read()
         # Clean up ContextVar session/delivery state for this job.
         # clear_session_vars also clears _SESSION_CWD internally, so no
         # separate clear_session_cwd() call is needed.
