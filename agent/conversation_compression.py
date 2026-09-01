@@ -101,7 +101,8 @@ _SPLIT_FAILURE_COOLDOWN_SECONDS = 60
 # status as ``kind="compacting"`` (tui_gateway/server.py::_status_update), so
 # drivers like the desktop app can show an explicit "Summarizing…" indicator
 # instead of the transcript appearing to silently reset. Keep the marker phrase
-# intact if you reword COMPACTION_STATUS.
+# intact if you reword COMPACTION_STATUS. Idle/preflight/retry lines do not
+# contain this marker — ``is_compaction_progress_status`` covers those too.
 COMPACTION_STATUS_MARKER = "Compacting context"
 COMPACTION_STATUS = f"🗜️ {COMPACTION_STATUS_MARKER} — summarizing earlier conversation so I can continue..."
 
@@ -229,6 +230,40 @@ ROUTINE_COMPRESSION_STATUS_SAMPLES = (
 )
 
 
+def is_compaction_progress_status(text: str | None) -> bool:
+    """True for in-progress auto-compaction lifecycle lines (not the done edge).
+
+    ``tui_gateway.server._status_update`` re-tags matching ``lifecycle``
+    statuses as ``kind="compacting"`` so TUI and desktop can show a summarizing
+    indicator for the whole pause. Matching only ``COMPACTION_STATUS_MARKER``
+    left idle/preflight/retry lines looking like a hung turn (#97239).
+
+    The terminal ``COMPACTION_DONE_STATUS`` is emitted as ``kind="compacted"``
+    and must not match here.
+    """
+    if not isinstance(text, str):
+        return False
+    body = text.strip()
+    if not body:
+        return False
+    if COMPACTION_STATUS_MARKER in body:
+        return True
+    if body == COMPACTION_DONE_STATUS:
+        return False
+    lowered = body.lower()
+    if "compaction complete" in lowered:
+        return False
+    # Failure-class overflow warning mentions compression but is a blocked
+    # notice, not progress — keep it lifecycle so chat gateways stay loud.
+    if "compression is currently blocked" in lowered:
+        return False
+    return (
+        "compact" in lowered
+        or "compress" in lowered
+        or "context reduced to" in lowered
+    )
+
+
 def _builtin_memory_prompt_snapshot(agent: Any) -> Optional[Tuple[str, str]]:
     """Return the built-in memory text that can affect a system prompt.
 
@@ -343,6 +378,7 @@ _COMPRESSOR_ATTEMPT_STATE_FIELDS = (
     "_last_summary_auth_failure",
     "_last_summary_network_failure",
     "_last_summary_empty_content_failure",
+    "_last_summary_truncated_failure",
     "_last_aux_model_failure_error",
     "_last_aux_model_failure_model",
     "_summary_model_fallen_back",
@@ -1870,6 +1906,76 @@ def compression_skipped_due_to_lock(agent: Any) -> bool:
     """
     _sig = getattr(agent, "_compression_skipped_due_to_lock", None)
     return _sig is True or isinstance(_sig, str)
+
+
+def _get_context_compression_timeout_state(
+    agent: Any,
+    *,
+    create: bool,
+) -> Optional[Tuple[Any, Optional[threading.local]]]:
+    """Return the stable lock and thread-local timeout state for an agent."""
+    try:
+        attributes = vars(agent)
+    except TypeError:
+        return None
+
+    lock = attributes.setdefault(
+        "_context_compression_timeout_state_lock",
+        threading.Lock(),
+    )
+    with lock:
+        state = attributes.get("_context_compression_timeout_state")
+        if create and not isinstance(state, threading.local):
+            state = threading.local()
+            attributes["_context_compression_timeout_state"] = state
+        return lock, state if isinstance(state, threading.local) else None
+
+
+def reset_context_compression_timeout_outcome(agent: Any) -> None:
+    """Clear the current thread's owned-compression timeout outcome.
+
+    The compatibility mirror ``agent._last_compression_timed_out`` is the
+    simple per-attempt flag landed by #98424 (turn-start preflight fail-closed
+    boundary); it stays authoritative for minimal/older agent doubles that do
+    not support ``vars()``.
+    """
+    locked_state = _get_context_compression_timeout_state(agent, create=True)
+    if locked_state is None or locked_state[1] is None:
+        agent._last_compression_timed_out = False
+        return
+    lock, state = locked_state
+    with lock:
+        state.timed_out = False
+        agent._last_compression_timed_out = False
+
+
+def mark_context_compression_timed_out(agent: Any) -> None:
+    """Mark the current owned compression as host-timed-out."""
+    locked_state = _get_context_compression_timeout_state(agent, create=True)
+    if locked_state is None or locked_state[1] is None:
+        agent._last_compression_timed_out = True
+        return
+    lock, state = locked_state
+    with lock:
+        state.timed_out = True
+        agent._last_compression_timed_out = True
+
+
+def context_compression_timed_out(agent: Any) -> bool:
+    """Return whether this thread's owned compression hit its host timeout.
+
+    A single agent may receive overlapping automatic/manual entrypoints. The
+    thread-local outcome prevents one entrypoint's reset from hiding another's
+    timeout. The attribute fallback supports older/minimal agent doubles.
+    Every read is type-pinned to avoid MagicMock auto-attributes.
+    """
+    locked_state = _get_context_compression_timeout_state(agent, create=False)
+    if locked_state is not None:
+        lock, state = locked_state
+        with lock:
+            if isinstance(state, threading.local):
+                return getattr(state, "timed_out", None) is True
+    return getattr(agent, "_last_compression_timed_out", None) is True
 
 
 def compression_blocked_transiently(agent: Any) -> bool:
@@ -3935,8 +4041,27 @@ def compress_context(
             )
         # Incoming-message interrupts and active-turn redirects must not tear an
         # atomic summary in half (#23975). Explicit stop surfaces set a separate
-        # Event atomically; never infer cause from the racy message fields.
+        # Event atomically; never infer cause from the racy message fields. A
+        # host timeout also cancels the attempt's commit fence. Feed BOTH into
+        # the protected auxiliary-call seam so the compression owner unwinds
+        # promptly while an isolated provider stream finishes or closes in its
+        # daemon worker. Otherwise four timed-out streams retain all four shared
+        # compression-pool slots until the auxiliary stream's longer absolute
+        # ceiling expires.
         _hard_cancel_event = getattr(agent, "_hard_interrupt_requested", None)
+
+        def _compression_cancel_requested() -> bool:
+            return bool(
+                (
+                    _hard_cancel_event is not None
+                    and _hard_cancel_event.is_set()
+                )
+                or (
+                    commit_fence is not None
+                    and commit_fence.is_cancelled
+                )
+            )
+
         try:
             # F6: never start expensive summary work for an already-cancelled
             # fence (a stale queued job admitted after host departure).
@@ -3950,7 +4075,9 @@ def compress_context(
             else:
                 with (
                     aux_progress_hook(_progress_hook),
-                    aux_interrupt_protection(cancel_event=_hard_cancel_event),
+                    aux_interrupt_protection(
+                        cancel_check=_compression_cancel_requested
+                    ),
                 ):
                     compressed = compress_fn(messages, **compress_kwargs)
                     # Freeze a hard stop that arrived after the final provider
@@ -4470,6 +4597,21 @@ def compress_context(
                 # away regardless of whether the id rotates).
                 agent.commit_memory_session(messages)
 
+                # Pop the #86366 carried-forward-tail tags BEFORE the size
+                # estimate and BEFORE any non-in-place path can see them:
+                # the private `_compaction_tail` key must not inflate the
+                # anti-growth token estimate (it tipped break-even
+                # transcripts into a false "would grow" refusal) and must
+                # not ride rotation handoffs into the provider payload.
+                # Remember the tagged dicts by identity — the salvage pass
+                # below may swap `compressed` for a subset, and tail_count
+                # must describe the FINAL committed list.
+                _tail_tagged_ids = {
+                    id(m)
+                    for m in compressed
+                    if isinstance(m, dict) and m.pop("_compaction_tail", None)
+                }
+
                 # Anti-growth guard at the COMMIT SITE: never persist a
                 # compression that makes the transcript larger (observed:
                 # 379K -> 687K when the generated summary plus retained
@@ -4602,6 +4744,15 @@ def compress_context(
                         PROACTIVE_PRUNE_REARM_MODEL_CONFIG_KEY,
                     )
 
+                    # Tail rows carried the _compaction_tail tag from
+                    # compress() (#86366; popped above, before the size
+                    # estimate): their originals must be archived as
+                    # superseded duplicates (rewind-style), not compacted=1.
+                    # Count against the FINAL list — salvage may have
+                    # dropped rows.
+                    _tail_count = sum(
+                        1 for m in compressed if id(m) in _tail_tagged_ids
+                    )
                     agent._session_db.archive_and_compact(
                         agent.session_id,
                         compressed,
@@ -4610,6 +4761,7 @@ def compress_context(
                         },
                         watermark=_commit_watermark,
                         lock_holder=_lock_holder,
+                        tail_count=_tail_count,
                     )
                     split_status = "in_place_committed"
                     # Post-commit contract (#98450, mirrors
@@ -4690,13 +4842,27 @@ def compress_context(
                     # before. Deliberately NOT extended to the compression lease:
                     # a lease is re-acquirable, so a transient miss here would
                     # abort a rotation that would otherwise have committed.
+                    #
+                    # AUTOMATIC stamps (tui_shutdown, ws_disconnect, orphan
+                    # reap, idle/LRU evict — is_automatic_end_reason) do NOT
+                    # trip this guard: publish_compression_child treats them
+                    # as stale-by-construction and clears them in its own
+                    # transaction (#88197 Bug 1), so aborting here would keep
+                    # rotation wedged on exactly the stamp the publish can
+                    # heal. Only deliberate boundaries (compression,
+                    # session_reset, explicit close) abort before the flush.
                     _parent_row_reader = getattr(agent._session_db, "get_session", None)
                     _parent_already_ended = False
                     if callable(_parent_row_reader):
                         try:
+                            from hermes_state_common import is_automatic_end_reason
+
                             _parent_row = _parent_row_reader(old_session_id) or {}
                             _parent_already_ended = (
                                 _parent_row.get("ended_at") is not None
+                                and not is_automatic_end_reason(
+                                    _parent_row.get("end_reason")
+                                )
                             )
                         except Exception:
                             # Fail OPEN: an unreadable row must not turn a cheap
@@ -5031,6 +5197,51 @@ def compress_context(
                     # durable copy was never cleared — that clear only rides
                     # the atomic archive_and_compact / child-row publication
                     # that just failed.)
+                    if "_proactive_prune_rearm_tokens" in _compressor_attempt_snapshot:
+                        agent.context_compressor._proactive_prune_rearm_tokens = (
+                            _compressor_attempt_snapshot[
+                                "_proactive_prune_rearm_tokens"
+                            ]
+                        )
+                elif (
+                    in_place
+                    and split_status != "in_place_committed"
+                    and messages_before_compression is not None
+                ):
+                    # In-place sibling of the rotation rollback above (#99477).
+                    # archive_and_compact() is atomic, so a raise before it
+                    # returned means EVERY pre-compaction row is still
+                    # ``active = 1`` in state.db — nothing was archived and the
+                    # compacted set was never inserted. But ``compressed`` is
+                    # the marker-swept output of compress()
+                    # (_strip_persistence_markers, #57491) and the post-commit
+                    # ``stamp_db_persisted_markers`` never ran, so handing it
+                    # back makes the next append-only flush treat the whole
+                    # compacted transcript as new and INSERT it ON TOP of the
+                    # rows it was supposed to replace. The active set then holds
+                    # the summary AND the turns it summarized; the next resume
+                    # reloads both, the token count goes UP, preflight fires
+                    # again, and each failed attempt appends another copy of the
+                    # protected head + tail (#99477: ~15 real turns stored as
+                    # 3,814 rows, the first user message repeated 893 times).
+                    #
+                    # Gate on ``split_status`` rather than ``compacted_in_place``:
+                    # it is assigned on the statement immediately after the
+                    # atomic commit returns, so a committed compaction can never
+                    # be rolled back into a live/durable mismatch of the
+                    # opposite sign.
+                    #
+                    # The deepcopy carries each row's _DB_PERSISTED_MARKER from
+                    # the pre-compression snapshot, so the restored transcript is
+                    # correctly skipped by the flush, and replacing every dict
+                    # breaks _db_flush_scan_prefix identity (same reasoning as
+                    # the rotation branch — no explicit clear needed).
+                    messages[:] = copy.deepcopy(messages_before_compression)
+                    compressed = messages
+                    _compression_made_progress = False
+                    # Runway rolls back with the transcript, exactly as above:
+                    # compress() zeroed it in memory, and the durable clear only
+                    # rides the archive_and_compact that just failed.
                     if "_proactive_prune_rearm_tokens" in _compressor_attempt_snapshot:
                         agent.context_compressor._proactive_prune_rearm_tokens = (
                             _compressor_attempt_snapshot[
@@ -5796,6 +6007,7 @@ __all__ = [
     "COMPACTION_STATUS",
     "COMPACTION_DONE_STATUS",
     "COMPACTION_STATUS_MARKER",
+    "is_compaction_progress_status",
     "check_compression_model_feasibility",
     "replay_compression_warning",
     "compress_context",

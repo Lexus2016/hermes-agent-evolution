@@ -205,6 +205,40 @@ def _resolve_ws_orphan_reap_grace() -> float:
 
 
 _WS_ORPHAN_REAP_GRACE_S = _resolve_ws_orphan_reap_grace()
+
+
+def _resolve_ws_orphan_activity_stale() -> float:
+    """Resolve the detached-turn activity staleness threshold (seconds).
+
+    A detached RUNNING turn is only interrupted by the WS-orphan reaper once
+    its activity clock has been idle at least this long (#98028/#100325);
+    while the turn keeps producing (API waits, stream tokens, tool
+    heartbeats all stamp the clock) it runs to completion detached.
+    Config-driven via ``dashboard.ws_orphan_activity_stale_s``; the
+    ``HERMES_TUI_WS_ORPHAN_ACTIVITY_STALE_S`` env var is an internal
+    override. Defaults to 600s, matching the turn-liveness watchdog's idle
+    bound (``agent.turn_liveness.timeout_s``) so "wedged" means the same
+    thing on both paths. ``0`` disables the gate (pre-#98028 behavior:
+    interrupt at grace regardless of activity).
+    """
+    raw = os.environ.get("HERMES_TUI_WS_ORPHAN_ACTIVITY_STALE_S")
+    if raw is None or not str(raw).strip():
+        try:
+            from hermes_cli.config import load_config
+
+            raw = (load_config().get("dashboard") or {}).get(
+                "ws_orphan_activity_stale_s"
+            )
+        except Exception:
+            raw = None
+    try:
+        stale = float(raw) if raw is not None else 600.0
+    except (ValueError, TypeError):
+        stale = 600.0
+    return max(0.0, stale)
+
+
+_WS_ORPHAN_ACTIVITY_STALE_S = _resolve_ws_orphan_activity_stale()
 _WS_ORPHAN_INTERRUPT_REAP_POLL_S = 1.0
 # Total budget for the interrupt-then-reap poll chain. If an interrupted turn
 # never settles (agent thread hung in a syscall, supervisor lost), each 1s poll
@@ -665,11 +699,12 @@ def _claim_active_session_slot(
         )
     except Exception as exc:
         logger.warning("Failed to claim active session slot: %s", exc)
-        return (
-            (None, _SESSION_OWNERSHIP_UNAVAILABLE)
-            if track_liveness
-            else (None, None)
-        )
+        # Fail CLOSED regardless of surface: per-session exclusivity is a
+        # correctness guarantee (see PER_SESSION_EXCLUSIVE_SUBMIT), and a
+        # claim that errors out has NOT proven the session is unowned.
+        # Proceeding without a lease here is the silent double-writer hole
+        # flagged in the #94595 review (blocker 2).
+        return (None, _SESSION_OWNERSHIP_UNAVAILABLE)
 
 
 def _ensure_active_session_slot(sid: str, session: dict) -> str | None:
@@ -1245,7 +1280,16 @@ def _interrupt_session_turn(
     run_thread_alive = False
 
     if use_compute_host:
-        if should_interrupt:
+        # The host owns the live turn. Parent `running` is only a mirror and
+        # can lag behind a blocked interactive tool (a clarify parked on its
+        # Event keeps the host turn alive after the parent flag went stale),
+        # so let the host decide whether there is work to interrupt.
+        # Gate on `_compute_host_active` too: `_session_uses_compute_host`
+        # is also true for lazy sessions that never ran a hosted turn, and
+        # `HostSupervisor.interrupt()` calls `start()` — forwarding
+        # unconditionally would spawn a compute-host child just to deliver
+        # an interrupt no session ever submitted work to.
+        if should_interrupt or session.get("_compute_host_active"):
             _get_compute_host_supervisor().interrupt(sid, request_id=request_id)
     else:
         run_thread = session.get("_run_thread")
@@ -1383,6 +1427,34 @@ def _cancel_ws_orphan_reap(sid: str) -> None:
             pass
 
 
+def _ws_orphan_turn_activity_is_fresh(session: dict) -> bool:
+    """Whether a detached RUNNING turn's activity clock is still fresh.
+
+    Reuses the agent's existing activity summary (``_touch_activity`` is
+    stamped by API waits, stream tokens, and tool heartbeats — the same
+    clock the turn-liveness watchdog samples; see agent/turn_liveness.py).
+    Fresh means the WS-orphan reaper must NOT interrupt the turn yet
+    (#98028/#100325): deliberate client absence (closed laptop, backgrounded
+    mobile app, desktop update/relaunch) keeps healthy work running detached.
+
+    Conservative fallbacks preserve the wedged-turn safety net: a disabled
+    threshold (<= 0), a missing/opaque agent, an unreadable summary, or a
+    never-stamped clock all report NOT fresh, i.e. eligible for the
+    interrupt-at-grace path exactly as before.
+    """
+    if _WS_ORPHAN_ACTIVITY_STALE_S <= 0:
+        return False
+    agent = session.get("agent")
+    summary_fn = getattr(agent, "get_activity_summary", None)
+    if not callable(summary_fn):
+        return False
+    try:
+        elapsed = summary_fn().get("seconds_since_activity")
+        return elapsed is not None and float(elapsed) < _WS_ORPHAN_ACTIVITY_STALE_S
+    except Exception:
+        return False
+
+
 def _schedule_ws_orphan_reap(sid: str, *, delay_s: float | None = None) -> None:
     """After a grace window, reap session ``sid`` iff it's still orphaned.
 
@@ -1419,30 +1491,47 @@ def _schedule_ws_orphan_reap(sid: str, *, delay_s: float | None = None) -> None:
             if _session_has_active_delegations(sid, current):
                 reschedule_delay = _WS_ORPHAN_REAP_GRACE_S
             elif current.get("running"):
-                # Mid-turn detached sessions must never drop the single
-                # Timer (#85578): after the reconnect grace the turn is
-                # interrupted once, then the reap keeps polling until the
-                # normal turn-finalization path settles.
-                polls = int(current.get("_client_gone_interrupt_polls") or 0) + 1
-                current["_client_gone_interrupt_polls"] = polls
-                if polls > _WS_ORPHAN_INTERRUPT_REAP_MAX_POLLS:
-                    # The interrupted turn never settled inside the budget —
-                    # force-reap rather than parking the session + a timer
-                    # chain forever. Loud by design: this only fires when a
-                    # turn is genuinely stuck past interrupt.
-                    logger.error(
-                        "client_gone sid=%s: turn did not settle after %d "
-                        "interrupt polls (%.0fs) — force-reaping detached "
-                        "session",
-                        sid, polls - 1,
-                        (polls - 1) * _WS_ORPHAN_INTERRUPT_REAP_POLL_S,
+                if not current.get(
+                    "_client_gone_interrupt_requested"
+                ) and _ws_orphan_turn_activity_is_fresh(current):
+                    # Client-absent but actively producing (#98028/#100325):
+                    # the turn keeps running detached (the sentinel transport
+                    # already buffers emits) and the reaper re-checks each
+                    # grace interval. Only a turn whose activity clock has
+                    # gone stale — genuinely wedged, the case the interrupt
+                    # was added for — falls through to the interrupt below.
+                    logger.debug(
+                        "client_gone sid=%s action=defer (turn activity "
+                        "fresh; stale threshold %.0fs)",
+                        sid,
+                        _WS_ORPHAN_ACTIVITY_STALE_S,
                     )
-                    session = _pop_session_by_id(sid)
+                    reschedule_delay = _WS_ORPHAN_REAP_GRACE_S
                 else:
-                    if not current.get("_client_gone_interrupt_requested"):
-                        current["_client_gone_interrupt_requested"] = True
-                        interrupt_session = current
-                    reschedule_delay = _WS_ORPHAN_INTERRUPT_REAP_POLL_S
+                    # Mid-turn detached sessions must never drop the single
+                    # Timer (#85578): after the reconnect grace the turn is
+                    # interrupted once, then the reap keeps polling until the
+                    # normal turn-finalization path settles.
+                    polls = int(current.get("_client_gone_interrupt_polls") or 0) + 1
+                    current["_client_gone_interrupt_polls"] = polls
+                    if polls > _WS_ORPHAN_INTERRUPT_REAP_MAX_POLLS:
+                        # The interrupted turn never settled inside the budget
+                        # — force-reap rather than parking the session + a
+                        # timer chain forever. Loud by design: this only fires
+                        # when a turn is genuinely stuck past interrupt.
+                        logger.error(
+                            "client_gone sid=%s: turn did not settle after %d "
+                            "interrupt polls (%.0fs) — force-reaping detached "
+                            "session",
+                            sid, polls - 1,
+                            (polls - 1) * _WS_ORPHAN_INTERRUPT_REAP_POLL_S,
+                        )
+                        session = _pop_session_by_id(sid)
+                    else:
+                        if not current.get("_client_gone_interrupt_requested"):
+                            current["_client_gone_interrupt_requested"] = True
+                            interrupt_session = current
+                        reschedule_delay = _WS_ORPHAN_INTERRUPT_REAP_POLL_S
             else:
                 session = _pop_session_by_id(sid)
 
@@ -2206,10 +2295,10 @@ _start_idle_reaper()
 def _get_db():
     global _db, _db_error
     if _db is None:
-        from hermes_state import SessionDB
+        from hermes_state import get_shared_session_db
 
         try:
-            _db = SessionDB()
+            _db = get_shared_session_db()
             _db_error = None
         except Exception as exc:
             _db_error = str(exc)
@@ -2235,9 +2324,9 @@ def _db_for_profile(profile: str | None = None):
     if profile_home is None:
         return _get_db(), False
     try:
-        from hermes_state import SessionDB
+        from hermes_state import get_shared_session_db
 
-        return SessionDB(db_path=Path(profile_home) / "state.db"), True
+        return get_shared_session_db(Path(profile_home) / "state.db"), True
     except Exception as exc:
         logger.warning(
             "TUI profile session store unavailable for %s: %s",
@@ -2299,11 +2388,11 @@ def _open_profile_session_db(profile_home):
     the build's ``agent_error`` path) instead of swallowing it back onto the
     launch handle.
     """
-    from hermes_state import SessionDB
+    from hermes_state import get_shared_session_db
 
     db_path = Path(profile_home) / "state.db"
     try:
-        return SessionDB(db_path=db_path)
+        return get_shared_session_db(db_path)
     except Exception as exc:
         raise RuntimeError(
             f"profile session store unavailable: {db_path}: {exc}"
@@ -2599,7 +2688,7 @@ def _get_compute_host_supervisor(cfg: dict | None = None):
             from tui_gateway.host_supervisor import HostSupervisor
 
             _compute_host_supervisor = HostSupervisor(
-                rpc_sink=write_json,
+                rpc_sink=_relay_compute_host_rpc,
                 heartbeat_secs=int(isolation_cfg.get("compute_host_heartbeat_secs") or 15),
                 respawn_max=int(isolation_cfg.get("compute_host_respawn_max") or 3),
             )
@@ -2634,6 +2723,7 @@ def _compute_host_turn_frame(
         "history_version": history_version,
         "cols": int(session.get("cols", 80) or 80),
         "cwd": _session_cwd(session),
+        "context_cwd_is_launch_artifact": _context_cwd_is_launch_artifact(session),
         "profile_home": session.get("profile_home") or "",
         "model_override": session.get("model_override"),
         "reasoning_config_override": session.get("create_reasoning_override"),
@@ -2647,6 +2737,87 @@ def _compute_host_turn_frame(
 def _metadata_mirror(session: dict | None) -> dict:
     mirror = (session or {}).get("_metadata_mirror")
     return mirror if isinstance(mirror, dict) else {}
+
+
+def _relay_compute_host_rpc(message: dict) -> bool:
+    """Relay host events while retaining the clarify snapshot needed on resume."""
+    params = message.get("params") if isinstance(message, dict) else None
+    if isinstance(params, dict) and params.get("type") == "clarify.request":
+        sid = str(params.get("session_id") or "")
+        payload = params.get("payload")
+        session = _sessions.get(sid)
+        if session is not None and isinstance(payload, dict) and payload.get("request_id"):
+            with session.get("history_lock", threading.Lock()):
+                session["_compute_host_pending_clarify"] = dict(payload)
+    elif isinstance(params, dict) and params.get("type") == "clarify.expire":
+        sid = str(params.get("session_id") or "")
+        payload = params.get("payload")
+        session = _sessions.get(sid)
+        request_id = payload.get("request_id") if isinstance(payload, dict) else None
+        if session is not None and request_id:
+            with session.get("history_lock", threading.Lock()):
+                pending = session.get("_compute_host_pending_clarify")
+                if isinstance(pending, dict) and pending.get("request_id") == request_id:
+                    session.pop("_compute_host_pending_clarify", None)
+    return write_json(message)
+
+
+def _compute_host_clarify_session(request_id: str) -> tuple[str, dict] | None:
+    """Find the parent mirror for one host-owned clarify request."""
+    if not request_id:
+        return None
+    for sid, session in list(_sessions.items()):
+        with session.get("history_lock", threading.Lock()):
+            pending = session.get("_compute_host_pending_clarify")
+            if isinstance(pending, dict) and pending.get("request_id") == request_id:
+                return sid, session
+    return None
+
+
+def _update_compute_host_clarify_snapshot(sid: str, session: dict, params: dict, result: dict) -> None:
+    """Keep reconnect snapshots accurate while a batch clarify is answered."""
+    request_id = str(params.get("request_id") or "")
+    with session.get("history_lock", threading.Lock()):
+        pending = session.get("_compute_host_pending_clarify")
+        if not isinstance(pending, dict) or pending.get("request_id") != request_id:
+            return
+        if result.get("status") == "expired" or not result.get("remaining") and not params.get("question_id"):
+            session.pop("_compute_host_pending_clarify", None)
+            return
+        question_id = str(params.get("question_id") or "")
+        if question_id and isinstance(result.get("remaining"), list):
+            answers = dict(pending.get("answers") or {})
+            answers[question_id] = str(params.get("answer") or "")
+            pending["answers"] = answers
+            if not result["remaining"]:
+                session.pop("_compute_host_pending_clarify", None)
+
+
+def _respond_compute_host_clarify(rid: str, params: dict) -> dict | None:
+    """Proxy a clarify answer into the process that owns its pending Event."""
+    located = _compute_host_clarify_session(str(params.get("request_id") or ""))
+    if located is None:
+        return None
+    sid, session = located
+    if not _session_uses_compute_host(session):
+        return None
+    try:
+        ack = _get_compute_host_supervisor().respond(sid, params)
+    except Exception as exc:
+        return _err(rid, 5019, f"compute-host clarify response failed: {exc}")
+    if ack.get("type") == "respond.error":
+        return _err(rid, 5019, str(ack.get("message") or "compute-host clarify response failed"))
+    response = ack.get("response")
+    if not isinstance(response, dict):
+        return _err(rid, 5019, "compute-host clarify response returned an invalid response")
+    if "error" in response:
+        error = response["error"] if isinstance(response["error"], dict) else {}
+        return _err(rid, int(error.get("code") or 5000), str(error.get("message") or "clarify response failed"))
+    result = response.get("result")
+    if not isinstance(result, dict):
+        return _err(rid, 5019, "compute-host clarify response returned an invalid result")
+    _update_compute_host_clarify_snapshot(sid, session, params, result)
+    return _ok(rid, result)
 
 
 def _apply_compute_host_metadata_mirror(session: dict, frame: dict | None) -> None:
@@ -2698,6 +2869,7 @@ def _on_compute_host_turn_done(rid: str, sid: str, session: dict, frame: dict) -
         session["running"] = False
         session["last_active"] = time.time()
         _clear_inflight_turn(session)
+        session.pop("_compute_host_pending_clarify", None)
     if is_error:
         message = str(frame.get("message") or "compute host turn failed")
         _emit("message.complete", sid, {"text": f"Error: {message}", "status": "error"})
@@ -2817,6 +2989,12 @@ def _pending_clarify_request_payload(sid: str) -> dict | None:
                 if batch is not None and batch["answers"]:
                     snapshot["answers"] = dict(batch["answers"])
                 return snapshot
+    session = _sessions.get(sid)
+    if session is not None:
+        with session.get("history_lock", threading.Lock()):
+            pending = session.get("_compute_host_pending_clarify")
+            if isinstance(pending, dict):
+                return dict(pending)
     return None
 
 
@@ -2849,12 +3027,12 @@ def _status_update(sid: str, kind: str, text: str | None = None):
         return
     out_kind = kind if text is not None else "status"
     # Auto-compaction reaches us as a generic "lifecycle" status. Re-tag it so
-    # drivers (desktop app) can show an explicit "Summarizing…" indicator —
-    # otherwise a mid-turn compaction looks like the transcript reset itself.
+    # drivers (TUI / desktop) can show an explicit summarizing indicator —
+    # otherwise idle/preflight compaction looks like a hung turn (#97239).
     if out_kind == "lifecycle":
-        from agent.conversation_compression import COMPACTION_STATUS_MARKER
+        from agent.conversation_compression import is_compaction_progress_status
 
-        if COMPACTION_STATUS_MARKER in body:
+        if is_compaction_progress_status(body):
             out_kind = "compacting"
     _emit("status.update", sid, {"kind": out_kind, "text": body})
 
@@ -3220,7 +3398,12 @@ def _start_agent_build(sid: str, session: dict) -> None:
                 # Lazy-resumed (watch) sessions carry the stored conversation
                 # id — pass it through so the upgrade continues that session
                 # instead of starting a fresh one under the same key.
-                kw = {"session_db": session_db}
+                kw = {
+                    "session_db": session_db,
+                    "context_cwd_is_launch_artifact": (
+                        _context_cwd_is_launch_artifact(current)
+                    ),
+                }
                 if resume_sid := current.get("resume_session_id"):
                     kw["session_id"] = resume_sid
                 kw["platform_override"] = _session_source(current)
@@ -3568,6 +3751,15 @@ def _session_cwd(session: dict | None) -> str:
 _LAUNCH_CWD_NOT_A_WORKSPACE = {"desktop"}
 
 
+def _context_cwd_is_launch_artifact(session: dict | None) -> bool:
+    """Whether the session cwd came from app launch rather than user intent."""
+    return bool(
+        session
+        and not session.get("explicit_cwd")
+        and _session_source(session) in _LAUNCH_CWD_NOT_A_WORKSPACE
+    )
+
+
 def _persisted_session_cwd(session: dict) -> str | None:
     """The cwd to stamp on the session's DB row, or None to leave it unset.
 
@@ -3788,13 +3980,17 @@ def _register_session_cwd(session: dict | None) -> None:
         pass
 
 
-def _ensure_session_db_row(session: dict) -> None:
+def _ensure_session_db_row(session: dict) -> bool:
     """Idempotently persist the session's DB row on first real activity.
 
     Called from prompt.submit so a row only exists once the user actually sends
     a message — abandoned drafts never leave an empty "Untitled" session behind.
     Uses INSERT OR IGNORE under the hood, so re-calls (and the AIAgent's own
     lazy create) are no-ops.
+    Returns False only when the store is unavailable (no openable state.db);
+    prompt.submit turns that into an RPC error so a send fails loudly with a
+    toast instead of streaming into a store that will never save it (#98924).
+    Every other outcome — no key, best-effort attempt, success — is True.
 
     A cwd the user *chose* is always persisted. When they made no explicit
     choice the launch directory stands in, and whether that is meaningful
@@ -3821,16 +4017,22 @@ def _ensure_session_db_row(session: dict) -> None:
         from hermes_state import SessionDB
 
         try:
-            db = SessionDB(db_path=Path(profile_home) / "state.db")
+            from hermes_state import get_shared_session_db
+            db = get_shared_session_db(Path(profile_home) / "state.db")
         except Exception:
             logger.debug("failed to open profile db for session row", exc_info=True)
-            return
+            return False
         close_db = True
     else:
         db = _get_db()
         close_db = False
     if db is None:
-        return
+        # Fail loud ONLY when the store actually failed to open (#98924):
+        # _db_error records the SessionDB open exception. A None db with no
+        # recorded error means "no store in this context" (degraded harness,
+        # store deliberately absent) — that keeps the pinned best-effort
+        # contract and stays True.
+        return _db_error is None
     # The session's own model/effort/fast pick — the composer override shipped on
     # session.create, or a restored /model switch — must own the row's model +
     # model_config. The agent isn't built yet at first prompt.submit, so derive
@@ -3946,9 +4148,11 @@ def _ensure_session_db_row(session: dict) -> None:
     finally:
         if close_db:
             try:
-                db.close()
+                from hermes_state import release_or_close
+                release_or_close(db)
             except Exception:
                 pass
+    return True
 
 
 def _persist_branch_seed(session: dict) -> None:
@@ -4029,7 +4233,8 @@ def _session_db(session: dict):
         from hermes_state import SessionDB
 
         try:
-            db, close_db = SessionDB(db_path=Path(profile_home) / "state.db"), True
+            from hermes_state import get_shared_session_db
+            db, close_db = get_shared_session_db(Path(profile_home) / "state.db"), True
         except Exception:
             logger.debug("failed to open profile db for session", exc_info=True)
     else:
@@ -4039,7 +4244,8 @@ def _session_db(session: dict):
     finally:
         if close_db and db is not None:
             with contextlib.suppress(Exception):
-                db.close()
+                from hermes_state import release_or_close
+                release_or_close(db)
 
 
 def _rewind_active_session_history(
@@ -5714,6 +5920,34 @@ def _write_config_key(key_path: str, value):
 
 _STATUSBAR_MODES = frozenset({"off", "top", "bottom"})
 _APPROVAL_MODES = frozenset({"manual", "smart", "off"})
+
+# Appearance switches the desktop renderer owns but the AGENT has to see: each
+# one gates a tool's `check_fn`, so the toggle has to reach the config of
+# whichever gateway the app is actually talking to — local, SSH, URL, or cloud.
+#
+# `config.set` matches an explicit key list and answers 4002 for anything else,
+# so a renderer mirroring a key that is not listed here writes nothing at all.
+# That is not hypothetical: the reactions toggle shipped mirroring
+# `display.message_reactions`, every write was rejected into a swallowed
+# `.catch()`, and `react_to_message` therefore stayed dark no matter what the
+# user picked. Adding a mirrored switch to the renderer means adding it here.
+_DISPLAY_TOGGLE_KEYS = frozenset(
+    {
+        "display.message_reactions",
+        "display.in_app_tips",
+        "display.in_app_tours",
+    }
+)
+_BOOL_WORDS = {
+    "1": True,
+    "on": True,
+    "true": True,
+    "yes": True,
+    "0": False,
+    "off": False,
+    "false": False,
+    "no": False,
+}
 
 
 def _load_approval_mode() -> str:
@@ -8652,6 +8886,9 @@ def _reset_session_agent(sid: str, session: dict) -> dict:
             session["session_key"],
             session_id=session["session_key"],
             platform_override=_session_source(session),
+            context_cwd_is_launch_artifact=(
+                _context_cwd_is_launch_artifact(session)
+            ),
         )
     finally:
         _clear_session_context(tokens)
@@ -8822,6 +9059,7 @@ def _make_agent(
     reasoning_config_override: dict | None = None,
     service_tier_override: str | None = None,
     platform_override: str | None = None,
+    context_cwd_is_launch_artifact: bool | None = None,
 ):
     # AC-4 test seam: dead unless explicitly armed by the isolated certify
     # harness. Both inline and compute-host paths construct through _make_agent,
@@ -8951,7 +9189,7 @@ def _make_agent(
                 raise RuntimeError("Auth fallback resolved without a model")
             model = resolution.selected_model
     _pr = _load_provider_routing()
-    return AIAgent(
+    agent = AIAgent(
         model=model,
         max_iterations=_cfg_max_turns(cfg, 500),
         provider=runtime.get("provider"),
@@ -8998,6 +9236,16 @@ def _make_agent(
         fallback_model=_load_fallback_model(),
         **_agent_cbs(sid),
     )
+    if context_cwd_is_launch_artifact is None:
+        with _sessions_lock:
+            context_session = _sessions.get(sid)
+        context_cwd_is_launch_artifact = _context_cwd_is_launch_artifact(
+            context_session
+        )
+    agent._context_cwd_is_launch_artifact = bool(
+        context_cwd_is_launch_artifact
+    )
+    return agent
 
 
 def _init_session(
@@ -9010,6 +9258,7 @@ def _init_session(
     session_db=None,
     source: str | None = None,
     profile_home: str | None = None,
+    explicit_cwd: bool = False,
 ):
     now = time.time()
     with _sessions_lock:
@@ -9026,6 +9275,7 @@ def _init_session(
             "attached_images": [],
             "image_counter": 0,
             "cwd": cwd or _completion_cwd(),
+            "explicit_cwd": bool(explicit_cwd),
             "cols": cols,
             "slash_worker": None,
             "show_reasoning": _load_show_reasoning(),
@@ -9852,6 +10102,23 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> 
                 return
             session["running"] = True
             session["last_active"] = time.time()
+        # Ownership admission BEFORE message.start: the interrupted-turn
+        # marker this continuation is recovering may have been written by a
+        # sibling backend that is still alive and mid-turn (#94778 — two
+        # backends share one HERMES_HOME; B resumes S while A runs it and
+        # sees A's fresh marker). Running the continuation anyway would be
+        # the double-writer this fence exists to prevent. Leave the marker:
+        # once the owner finishes or dies, a later resume retries.
+        if _ensure_active_session_slot(sid, session) is not None:
+            logger.info(
+                "auto-continue for %s refused: session has another live owner",
+                session_key,
+            )
+            with session["history_lock"]:
+                session["running"] = False
+                session["_auto_continue_scheduled"] = False
+            return
+        with session["history_lock"]:
             # Hand this turn its own marker inputs (read back by
             # _run_prompt_submit): count the attempt so a crash during the
             # continuation trips the breaker, and re-record the ORIGINAL
@@ -10431,6 +10698,7 @@ def _deferred_session_record(
     model_override=None,
     resume_runtime_overrides: dict | None = None,
     todo_state: dict | None = None,
+    explicit_cwd: bool = False,
 ) -> dict:
     """A live-session record whose AIAgent is built later (lazy watch / cold
     resume) — _init_session's shape minus the agent."""
@@ -10447,7 +10715,7 @@ def _deferred_session_record(
         "cwd": cwd,
         "display_history_prefix": display_history_prefix or [],
         "edit_snapshots": {},
-        "explicit_cwd": False,
+        "explicit_cwd": bool(explicit_cwd),
         "history": history,
         "history_lock": threading.Lock(),
         "history_version": 0,
@@ -12601,6 +12869,22 @@ def _run_prompt_submit(
     queued_prompt_generation: int | None = None,
     terminal_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> bool:
+    # Ownership admission at the ONE chokepoint every fresh turn source must
+    # cross. prompt.submit already claims the slot in its RPC handler (so this
+    # is a no-op re-check there), but crash auto-continue, wake-ups and other
+    # synthesized turns call _run_prompt_submit directly — the exact bypass
+    # that let a second backend run a duplicate turn in #94778. When the
+    # session already holds its lease this is a cheap dict check.
+    if (ownership_refusal := _ensure_active_session_slot(sid, session)) is not None:
+        logger.info(
+            "Refusing turn for session %s at _run_prompt_submit: %s",
+            session.get("session_key") or sid,
+            getattr(ownership_refusal, "reason", None) or "refused",
+        )
+        with session["history_lock"]:
+            session["running"] = False
+        _emit("error", sid, {"message": str(ownership_refusal)})
+        return False
     with session["history_lock"]:
         if session.get("_closing"):
             session["running"] = False
@@ -12684,7 +12968,17 @@ def _run_prompt_submit(
         marker_attempt = int(session.pop("_auto_continue_attempt", 0) or 0)
         marker_text = session.pop("_auto_continue_prompt", None) or text
         if isinstance(marker_text, str) and marker_text.strip():
+            # Publish the original key before the disk write so an interrupt
+            # racing startup can retire it even if compression rotates the
+            # session key later. The post-write cancel check closes the inverse
+            # race where Stop lands first and therefore clears no file yet.
+            with session["history_lock"]:
+                session["_active_turn_marker_key"] = marker_key
             record_turn_start(marker_home, marker_key, marker_text, attempts=marker_attempt)
+            with session["history_lock"]:
+                marker_cancelled = bool(session.get("_turn_cancel_requested"))
+            if marker_cancelled:
+                clear_turn_marker(marker_home, marker_key)
         try:
             from tools.approval import (
                 reset_current_session_key,
@@ -13539,6 +13833,8 @@ def _run_prompt_submit(
             if terminal_receipt_committed:
                 _retire_turn_marker(session, marker_key)
                 with session["history_lock"]:
+                    if session.get("_active_turn_marker_key") == marker_key:
+                        session.pop("_active_turn_marker_key", None)
                     session.pop("_hosted_room_task", None)
             session.pop("_auto_continue_scheduled", None)
             _emit_settled_session_info(sid, session, agent)
@@ -14730,6 +15026,13 @@ def _(rid, params: dict) -> dict:
             return _ok(rid, resp)
         except Exception as e:
             return _err(rid, 5001, str(e))
+
+    if key in _DISPLAY_TOGGLE_KEYS:
+        on = _BOOL_WORDS.get(str(value).strip().lower())
+        if on is None:
+            return _err(rid, 4002, f"{key} takes true or false")
+        _write_config_key(key, on)
+        return _ok(rid, {"key": key, "value": on})
 
     return _err(rid, 4002, f"unknown config key: {key}")
 
@@ -16867,6 +17170,25 @@ def _persist_wake_enabled(enabled: bool) -> bool:
     except Exception as e:
         logger.warning("wake: failed to persist wake_word.enabled=%s: %s", enabled, e)
         return False
+
+
+@method("gateway.capabilities")
+def _(rid, params: dict) -> dict:
+    """What guarantees THIS BUILD enforces, for a client that must not assume.
+
+    An automated client cannot tell a gateway that fences concurrent writers to
+    one session from one that silently allows them -- both accept the same calls
+    and both answer prompt.submit the same way. It only finds out by corrupting a
+    conversation. So the guarantee is advertised, and a client that does not see
+    it advertised is expected to withhold rather than hope.
+
+    Sourced from the module that performs the enforcement, never from config: a
+    capability an operator can switch on without also having the mechanism is
+    worse than no capability at all, because it is believed.
+    """
+    from hermes_cli.active_sessions import PER_SESSION_EXCLUSIVE_SUBMIT
+
+    return _ok(rid, {"per_session_exclusive_submit": bool(PER_SESSION_EXCLUSIVE_SUBMIT)})
 
 
 @method("ping")

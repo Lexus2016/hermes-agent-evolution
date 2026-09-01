@@ -836,6 +836,43 @@ def should_require_dashboard_auth(
     )
 
 
+def _desktop_loopback_auth_exempt(
+    host: str,
+    ssh_session_token: Optional[str] = None,
+    ssh_owner_nonce: Optional[str] = None,
+) -> bool:
+    """True for a Desktop-owned loopback backend (#96490).
+
+    A non-loopback ``dashboard.public_url`` engages the ticket-only auth gate
+    for EVERY ``hermes serve`` on the machine — including the private loopback
+    backends the Desktop app spawns for itself. Those backends authenticate
+    with the per-spawn session token (injected via
+    ``HERMES_DASHBOARD_SESSION_TOKEN`` for local spawns, ``--ssh-session-token
+    -file``/``--ssh-owner-nonce`` for Desktop SSH), which the gate's WS path
+    refuses outright — Desktop could not boot with a ``public_url`` configured.
+
+    The public_url describes a DIFFERENT deployment: the actual public
+    dashboard is a separate process on a non-loopback bind, whose own startup
+    computes ``should_require_dashboard_auth`` from its host and stays gated.
+    Exempting this process therefore never opens the public surface.
+
+    Exemption requires ALL of: loopback bind, ``HERMES_DESKTOP=1`` (set by
+    every Desktop spawn path — local and SSH), and an operator-minted
+    credential (env token, SSH session token, or owner nonce). A plain
+    ``hermes serve`` with ``HERMES_DESKTOP=1`` exported but no credential is
+    NOT exempt.
+    """
+    if host not in _LOOPBACK_HOST_VALUES:
+        return False
+    if os.environ.get("HERMES_DESKTOP") != "1":
+        return False
+    return bool(
+        os.environ.get("HERMES_DASHBOARD_SESSION_TOKEN")
+        or ssh_session_token
+        or ssh_owner_nonce
+    )
+
+
 def _host_header_hostname(host_header: str) -> str:
     """Return a normalized hostname from a valid HTTP Host authority.
 
@@ -7379,17 +7416,18 @@ _AUX_TASK_SLOTS: Tuple[str, ...] = (
 
 
 def _dashboard_code_skew_guard() -> Optional[str]:
-    """Return a clear \"restart required\" message when the dashboard runs stale code.
+    """Return a clear \"restart required\" message when this process runs stale code.
 
-    The dashboard is a long-lived process; its ``sys.modules`` is frozen at
-    boot.  When ``hermes update`` (or a manual ``git pull``) replaces the
-    checkout underneath it, a first-time lazy import on a new code path can
-    resolve a freshly-pulled consumer module against a stale cached dependency
-    -> ImportError — e.g. ``/api/model/options`` 500 after the update added
-    ``agent.model_metadata.is_grok_46_family`` while the running process kept
-    serving the pre-update module (#86207).  Mirror the gateway's
-    ``_model_switch_skew_guard``: refuse the risky call with an actionable
-    message instead of crashing with a cryptic import error.
+    The dashboard and Desktop-owned ``hermes serve`` are long-lived; their
+    ``sys.modules`` is frozen at boot.  When ``hermes update`` (or a manual
+    ``git pull``) replaces the checkout underneath them, a first-time lazy
+    import on a new code path can resolve a freshly-pulled consumer module
+    against a stale cached dependency -> ImportError — e.g. ``/api/model/options``
+    500 after the update added ``agent.model_metadata.is_grok_46_family`` while
+    the running process kept serving the pre-update module (#86207).  Mirror
+    the gateway's ``_model_switch_skew_guard``: refuse the risky call with an
+    actionable, deployment-aware message instead of crashing with a cryptic
+    import error (#97046).
 
     Returns None when no drift is detectable (fresh process, or a non-git
     install where the boot fingerprint could not be read — never a false
@@ -7402,10 +7440,28 @@ def _dashboard_code_skew_guard() -> Optional[str]:
         return None
     boot_rev, disk_rev = skew
     return (
-        f"This dashboard is running code from {boot_rev} but the checkout on "
+        f"This process is running code from {boot_rev} but the checkout on "
         f"disk is now {disk_rev}. The model picker would risk a stale-module "
-        f"crash — restart the dashboard to load the new code "
-        f"(systemctl --user restart hermes-dashboard, or hermes dashboard --port <port>)"
+        f"crash — {_dashboard_skew_restart_hint()}"
+    )
+
+
+def _dashboard_skew_restart_hint() -> str:
+    """Restart advice that matches how this process is actually owned.
+
+    The same FastAPI app backs the browser dashboard *and* Desktop-owned
+    ``hermes serve --isolated`` (local or SSH). Hardcoding a systemd unit
+    misleads macOS/launchd hosts and Desktop SSH backends, which have no
+    ``hermes-dashboard`` unit (#97046).
+    """
+    if os.environ.get("HERMES_SERVE_HEADLESS") == "1":
+        return (
+            "restart the Desktop-owned backend to load the new code "
+            "(use Restart backend in Hermes Desktop, or quit and reopen the app)"
+        )
+    return (
+        "restart this Hermes process to load the new code "
+        "(hermes dashboard --port <port>, or the equivalent service restart for this install)"
     )
 
 
@@ -8026,15 +8082,22 @@ def _denormalize_config_from_web(config: Dict[str, Any]) -> Dict[str, Any]:
     string; the rest is preserved transparently.
 
     Also handles ``model_context_length`` — writes it back into the model dict
-    as ``context_length``.  A value of 0 or absent means "auto-detect" (omitted
-    from the dict so get_model_context_length() uses its normal resolution).
+    as ``context_length``.  A value of 0 means "auto-detect" (omitted from the
+    dict so get_model_context_length() uses its normal resolution). ``config``
+    may be a partial update (e.g. the Settings autosave diff) that omits
+    ``model_context_length`` entirely when the user didn't touch it — that
+    must leave the on-disk override untouched, not get treated the same as an
+    explicit 0 and cleared.
     """
     config = dict(config)
     # Remove any _model_meta that might have leaked in (shouldn't happen
     # with the stripped GET response, but be defensive)
     config.pop("_model_meta", None)
 
-    # Extract and remove model_context_length before processing model
+    # Extract and remove model_context_length before processing model, but
+    # remember whether it was actually present: a partial update omitting the
+    # key means "unchanged", which is different from an explicit 0.
+    ctx_sent = "model_context_length" in config
     ctx_override = config.pop("model_context_length", 0)
     if not isinstance(ctx_override, int):
         try:
@@ -8043,50 +8106,59 @@ def _denormalize_config_from_web(config: Dict[str, Any]) -> Dict[str, Any]:
             ctx_override = 0
 
     model_val = config.get("model")
-    if isinstance(model_val, str) and model_val:
+    if (isinstance(model_val, str) and model_val) or ctx_sent:
         # Read the current disk config to recover model subkeys
         try:
             disk_config = load_config()
             disk_model = disk_config.get("model")
             if isinstance(disk_model, dict):
-                prev_default = str(disk_model.get("default") or "").strip()
-                prev_provider = str(disk_model.get("provider") or "").strip()
-                # When the model name actually changed, re-detect which
-                # provider serves it. The Config-page Model field is a flat
-                # string with no provider info, so without this a user who
-                # picks an OpenRouter model while their default provider is
-                # ollama-local keeps the stale provider and 404s. Only fires
-                # on a real model change so saving unrelated config fields
-                # never overwrites an explicit provider.
-                if model_val != prev_default and prev_provider:
-                    new_provider, resolved_model = _infer_provider_on_model_change(
-                        model_val, prev_provider
-                    )
-                    if new_provider and new_provider.strip().lower() != prev_provider.lower():
-                        # Route through the canonical assignment chokepoints so
-                        # the model is normalized for the new provider and stale
-                        # base_url/api_mode/api_key are cleared on the switch
-                        # (and preserved on a same-provider re-pick).
-                        norm_provider, norm_model = _normalize_main_model_assignment(
-                            new_provider, resolved_model
+                if isinstance(model_val, str) and model_val:
+                    prev_default = str(disk_model.get("default") or "").strip()
+                    prev_provider = str(disk_model.get("provider") or "").strip()
+                    # When the model name actually changed, re-detect which
+                    # provider serves it. The Config-page Model field is a flat
+                    # string with no provider info, so without this a user who
+                    # picks an OpenRouter model while their default provider is
+                    # ollama-local keeps the stale provider and 404s. Only fires
+                    # on a real model change so saving unrelated config fields
+                    # never overwrites an explicit provider.
+                    if model_val != prev_default and prev_provider:
+                        new_provider, resolved_model = _infer_provider_on_model_change(
+                            model_val, prev_provider
                         )
-                        disk_model = _apply_main_model_assignment(
-                            disk_model, norm_provider, norm_model
-                        )
-                        model_val = norm_model
-                # Preserve all subkeys, update default with the new value
-                disk_model["default"] = model_val
-                # Write context_length into the model dict (0 = remove/auto)
-                if ctx_override > 0:
-                    disk_model["context_length"] = ctx_override
-                else:
-                    disk_model.pop("context_length", None)
+                        if new_provider and new_provider.strip().lower() != prev_provider.lower():
+                            # Route through the canonical assignment chokepoints so
+                            # the model is normalized for the new provider and stale
+                            # base_url/api_mode/api_key are cleared on the switch
+                            # (and preserved on a same-provider re-pick).
+                            norm_provider, norm_model = _normalize_main_model_assignment(
+                                new_provider, resolved_model
+                            )
+                            disk_model = _apply_main_model_assignment(
+                                disk_model, norm_provider, norm_model
+                            )
+                            model_val = norm_model
+                    # Preserve all subkeys, update default with the new value
+                    disk_model["default"] = model_val
+                # Write context_length into the model dict (0 = remove/auto),
+                # but only when the payload actually carried the key.
+                if ctx_sent:
+                    if ctx_override > 0:
+                        disk_model["context_length"] = ctx_override
+                    else:
+                        disk_model.pop("context_length", None)
                 config["model"] = disk_model
-            # Model was previously a bare string — upgrade to dict if
-            # user is setting a context_length override
-            elif ctx_override > 0:
+            # Model was previously a bare string (or absent) — upgrade to a
+            # dict if the user is setting a context_length override.
+            elif ctx_sent and ctx_override > 0:
+                if isinstance(model_val, str) and model_val:
+                    default = model_val
+                elif isinstance(disk_model, str) and disk_model:
+                    default = disk_model
+                else:
+                    default = ""
                 config["model"] = {
-                    "default": model_val,
+                    "default": default,
                     "context_length": ctx_override,
                 }
         except Exception:
@@ -12420,15 +12492,21 @@ def _open_session_db_at_path(db_path: Path, *, read_only: bool):
 
     try:
         return _open_probed()
-    except sqlite3.DatabaseError as exc:
+    except (sqlite3.DatabaseError, UnicodeDecodeError) as exc:
         message = str(exc).lower()
         stale_schema = "no such table" in message or "no such column" in message
-        if not stale_schema and not is_malformed_schema_error(exc):
+        if not stale_schema and not (
+            # UnicodeDecodeError = pysqlite could not decode SQLite's own
+            # error message because corrupt file bytes were embedded in it
+            # (#98924). The one-writable-open heal is the only repair path,
+            # so route it through the same dispatch as malformed schema.
+            is_malformed_schema_error(exc) or isinstance(exc, UnicodeDecodeError)
+        ):
             raise
         SessionDB(db_path=db_path, read_only=False).close()
         try:
             return _open_probed()
-        except sqlite3.DatabaseError as still_stale:
+        except (sqlite3.DatabaseError, UnicodeDecodeError) as still_stale:
             message = str(still_stale).lower()
             if "no such table" not in message and "no such column" not in message:
                 raise
@@ -19635,9 +19713,22 @@ def start_server(
     # Stash the auth-gate flag on app.state so middleware / SPA-token injection /
     # WS-auth paths can branch on it consistently. It also decides whether to
     # refuse startup, log the gate-on banner, and enable uvicorn proxy_headers.
-    app.state.auth_required = should_require_dashboard_auth(
-        host, app.state.trusted_public_hosts
-    )
+    if _desktop_loopback_auth_exempt(host, ssh_session_token, ssh_owner_nonce):
+        # A configured dashboard.public_url describes the operator's PUBLIC
+        # deployment, not this private Desktop-owned loopback backend (#96490).
+        # Desktop authenticates with the per-spawn session token; forcing the
+        # ticket-only gate here broke every Desktop boot while the actual
+        # public dashboard — a separate non-loopback process — stayed gated.
+        app.state.auth_required = should_require_auth(host)
+        _log.info(
+            "Desktop-owned loopback backend: dashboard.public_url does not "
+            "engage the ticket gate for this process; the public deployment "
+            "keeps its own gate.",
+        )
+    else:
+        app.state.auth_required = should_require_dashboard_auth(
+            host, app.state.trusted_public_hosts
+        )
 
     # ``--insecure`` no longer disables the auth gate (June 2026 hardening:
     # the hermes-0day MCP-persistence campaign abused unauthenticated public

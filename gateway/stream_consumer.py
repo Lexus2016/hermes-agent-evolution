@@ -332,6 +332,12 @@ class GatewayStreamConsumer:
         # (#78541) — that combination was swallowing complete Telegram group
         # replies after an early/partial multi-message delivery.
         self._turn_split_delivery = False
+        # True when a full-final send timed out in a way that MAY have reached
+        # the platform (``_send_empty_fallback_final`` → "ambiguous").  The
+        # only case where a payload-less delivery flag keeps legacy trust in
+        # ``delivered_final_matches`` (#95382 tightening) — re-sending there
+        # risks a duplicate rather than recovering a loss.
+        self._delivery_ambiguous = False
         self._delivered_commentary_texts: list[str] = []
         # Retains the finalized visible text of each streaming segment so
         # ``has_delivered_text`` can still match after ``_reset_segment_state``
@@ -655,7 +661,26 @@ class GatewayStreamConsumer:
             if self._turn_split_delivery:
                 # #78541: refuse legacy trust for payload-less split delivery.
                 return False
-            return None
+            # #95382 / #98552 class fix: a delivery flag with NO recorded
+            # payload must still be judged against the FINAL content, not
+            # trusted blindly. Every internal flag-setting site records a
+            # payload; a record-less consumer whose visible/streamed text
+            # does not contain the completed response has demonstrably NOT
+            # delivered it (first-edit prefix, mid-stream truncation) — the
+            # flag alone must not suppress the corrective send.
+            # ``_already_sent`` gates the visible-text match: draft frames
+            # set ``_last_sent_text`` for dedupe but are ephemeral (they
+            # deliberately do not set ``_already_sent``), so draft-only
+            # visibility must not count as durable delivery.
+            if self._already_sent and self.has_delivered_text(final_text):
+                return True
+            # The one legitimately ambiguous case keeps legacy trust: a
+            # timed-out full-final send may have reached the platform
+            # (``_send_empty_fallback_final`` → "ambiguous"), so re-sending
+            # risks a duplicate. That site marks itself explicitly.
+            if self._delivery_ambiguous:
+                return None
+            return False
         if self._delivered_final_text.strip() == target:
             return True
         # A segment break / commentary may have delivered the final text
@@ -864,6 +889,7 @@ class GatewayStreamConsumer:
         self._final_response_sent = False
         self._final_content_delivered = False
         self._delivered_final_text = None
+        self._delivery_ambiguous = False
         self._turn_split_delivery = False
         # Native draft streaming: bump the draft_id so the next text segment
         # animates as a fresh preview below the tool-progress bubbles, not
@@ -2196,6 +2222,7 @@ class GatewayStreamConsumer:
                     # client never received the response. Preserve duplicate
                     # suppression for that one uncertain outcome.
                     self._final_content_delivered = True
+                    self._delivery_ambiguous = True
                 else:
                     # A confirmed failure leaves the gateway free to perform
                     # its normal final send.
@@ -2714,10 +2741,16 @@ class GatewayStreamConsumer:
             # duplicate (live finding, 2026-08-16 canary).
             _md = self._metadata_for_send(final=False) or {}
             _md["_interim_send"] = True
+            # Only pass reply_to for platforms that use reply-anchoring for
+            # threading. Discord/Telegram use native thread_id in metadata;
+            # passing reply_to on every commentary creates reply spam.
+            _plat = getattr(getattr(self.adapter, "platform", None), "value", None)
+            _platform_name = str(_plat or getattr(self.adapter, "name", "")).lower()
+            _needs_reply_anchor = _platform_name in ("buzz", "slack", "mattermost", "feishu")
             result = await self.adapter.send(
                 chat_id=self.chat_id,
                 content=text,
-                reply_to=self._initial_reply_to_id,
+                reply_to=self._initial_reply_to_id if _needs_reply_anchor else None,
                 metadata=_md,
             )
             # Note: do NOT set _already_sent = True here.
@@ -2928,6 +2961,10 @@ class GatewayStreamConsumer:
         self._last_sent_text = text
         if is_turn_final:
             self._final_response_sent = True
+            # Fresh send carried exactly ``text`` — record it so the gateway
+            # can reconcile the flag against the completed response
+            # (#71643/#95382 content-vs-flag contract).
+            self._record_turn_final_payload(text)
         return True
 
     async def _suppress_silence_marker(self) -> None:
@@ -2993,6 +3030,7 @@ class GatewayStreamConsumer:
         self._final_response_sent = False
         self._final_content_delivered = False
         self._delivered_final_text = None
+        self._delivery_ambiguous = False
         self._turn_split_delivery = False
         logger.info(
             "Suppressed streamed intentional-silence marker (chat=%s)",
@@ -3157,6 +3195,11 @@ class GatewayStreamConsumer:
             if _optimistic_finalize:
                 self._final_response_sent = True
                 self._final_content_delivered = True
+                # Record what this finalize frame carries so the gateway's
+                # content reconciliation (#71643/#95382) can judge the flag:
+                # a frame holding only a stale/partial snapshot must not
+                # suppress the corrective send of the complete response.
+                self._record_turn_final_payload(text)
 
             ok = False
             try:
@@ -3187,6 +3230,8 @@ class GatewayStreamConsumer:
             if _optimistic_finalize:
                 self._final_response_sent = False
                 self._final_content_delivered = False
+                # Roll back the recorded payload too — nothing was delivered.
+                self._delivered_final_text = None
 
             # Native streaming refused / failed — switch off so this and
             # subsequent frames take the edit/send fallback path below.

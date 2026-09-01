@@ -18,6 +18,7 @@ from typing import Dict, Optional, Sequence
 
 
 from hermes_constants import get_hermes_home
+from hermes_startup_watchdog import report_startup_progress
 from hermes_state_common import (
     DEFERRED_INDEX_SQL,
     FTS_CJK_STALE_KEY,
@@ -388,18 +389,38 @@ class SessionSchemaMixin:
         try:
             cursor.execute(f"SELECT * FROM {table_name} LIMIT 0")
             return True
-        except sqlite3.OperationalError as exc:
-            if self._is_fts5_unavailable_error(exc):
-                # Only disable FTS entirely when the whole module is missing.
-                # A missing trigram tokenizer only affects trigram searches.
-                if self._is_trigram_unavailable_error(exc):
-                    self._warn_trigram_unavailable(exc)
-                else:
-                    self._warn_fts5_unavailable(exc)
-                return None
-            if "no such table" in str(exc).lower():
-                return False
-            raise
+        except (sqlite3.OperationalError, UnicodeDecodeError) as exc:
+            # UnicodeDecodeError can occur when FTS shadow tables or content
+            # columns hold invalid UTF-8 bytes. On some Python/SQLite builds
+            # it surfaces as a bare UnicodeDecodeError (ValueError subclass,
+            # not sqlite3.Error); on others as OperationalError("Could not
+            # decode to UTF-8 column ..."). Catch both so the probe never
+            # kills the connection or raises to writable-init/recovery flows.
+            if isinstance(exc, sqlite3.OperationalError):
+                if self._is_fts5_unavailable_error(exc):
+                    # Only disable FTS entirely when the whole module is missing.
+                    # A missing trigram tokenizer only affects trigram searches.
+                    if self._is_trigram_unavailable_error(exc):
+                        self._warn_trigram_unavailable(exc)
+                    else:
+                        self._warn_fts5_unavailable(exc)
+                    return None
+                if "no such table" in str(exc).lower():
+                    return False
+                # Re-raise any other OperationalError (e.g. malformed schema,
+                # corrupt vtable that isn't a decode error).
+                if "decode to utf-8" not in str(exc).lower():
+                    raise
+            # Swallow: decode error means the index is degraded but the
+            # store remains accessible. Writable init / recovery will
+            # schedule a rebuild or degrade to LIKE.
+            logger.warning(
+                "%s probe encountered invalid UTF-8 in FTS content; "
+                "search may return incomplete results until FTS is rebuilt: %s",
+                table_name,
+                exc,
+            )
+            return None
 
     def _recover_stale_fts(self, cursor: sqlite3.Cursor, *, legacy: bool) -> bool:
         """Atomically rebuild stale base/trigram indexes and resume syncing."""
@@ -497,7 +518,7 @@ class SessionSchemaMixin:
         """Body of :meth:`_recover_stale_fts`; caller holds rebuild authority."""
         try:
             trigram_status = self._fts_table_probe(cursor, "messages_fts_trigram")
-        except sqlite3.DatabaseError:
+        except (sqlite3.DatabaseError, UnicodeDecodeError):
             # A corrupt vtable may fail even a LIMIT 0 probe. It still needs
             # to be included in the drop-and-recreate recovery below.
             trigram_status = True
@@ -951,6 +972,19 @@ class SessionSchemaMixin:
         The schema_version table is retained for future data migrations
         (transforming existing rows) which cannot be handled declaratively.
         """
+        # Declare a startup-watchdog progress lease before potentially long
+        # synchronous work: on multi-GB state.db files the reconciliation +
+        # version-gated data migrations below are legitimately slow and can
+        # be I/O-bound (near-zero CPU), which the watchdog's CPU fallback
+        # would misread as a parked deadlock (OOF-298 / PR #89750).
+        # Single lease is deliberate: this is the one pre-loop phase that can
+        # legitimately exceed the 300s default deadline (multi-GB DBs), and
+        # the lease is clamped to _MAX_LEASE_S=900. Honest worst case: a
+        # genuinely wedged DB init delays supervisor respawn by up to the
+        # lease duration. Per-chunk renewal would shrink that, but adds
+        # complexity to the migration loops for a rare failure mode.
+        report_startup_progress(600.0, phase="state_db_init_schema")
+
         cursor = self._conn.cursor()
 
         cursor.executescript(SCHEMA_SQL)
@@ -1048,6 +1082,12 @@ class SessionSchemaMixin:
 
         else:
             current_version = row["version"] if isinstance(row, sqlite3.Row) else row[0]
+            # Renew the progress lease: the version-gated chain below can
+            # rewrite whole tables (PK rebuilds, backfills) on large DBs.
+            # Same deliberate single-lease trade-off as _init_schema: honest
+            # worst case is up to the lease duration of zombie time on a
+            # wedged migration, accepted over per-chunk renewal complexity.
+            report_startup_progress(600.0, phase="state_db_data_migrations")
             # Data migrations that can't be expressed declaratively (row
             # backfills, index changes tied to a specific version step) stay
             # in a version-gated chain. Column additions are handled by
