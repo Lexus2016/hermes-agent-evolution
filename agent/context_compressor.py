@@ -223,6 +223,20 @@ _TRUNCATED_SUMMARY_MARKER = "finish_reason=length"
 def _is_summary_access_or_quota_error(exc: Exception) -> bool:
     """Return True for non-retryable summary auth, permission, or quota errors."""
 
+    # A credential read that failed closed because no profile secret scope
+    # was active (multiplexed gateway, worker thread without the caller's
+    # ContextVars) is a missing-credential failure of our own making: the
+    # summary model cannot be reached until the spawn site is fixed, and a
+    # placeholder summary would only destroy the middle window for nothing.
+    # Classify it with the credential class so compress() preserves the
+    # session unchanged (#100849 bundle: every hygiene pass truncated).
+    try:
+        from agent.secret_scope import UnscopedSecretError
+    except Exception:  # pragma: no cover - import guard
+        UnscopedSecretError = ()  # type: ignore[assignment]
+    if UnscopedSecretError and isinstance(exc, UnscopedSecretError):
+        return True
+
     classified = classify_api_error(exc)
     if classified.reason is FailoverReason.rate_limit:
         return False
@@ -2380,7 +2394,7 @@ def _summarize_tool_result_unguarded(
         target = args.get("target", "?")
         return f"[memory] {action} on {target}"
 
-    if tool_name == "todo":
+    if tool_name == "todo_list":
         return "[todo] updated task list"
 
     if tool_name == "clarify":
@@ -2430,11 +2444,11 @@ def _summarize_tool_result_unguarded(
     if tool_name == "text_to_speech":
         return f"[text_to_speech] generated audio ({content_len:,} chars)"
 
-    if tool_name == "cronjob":
+    if tool_name == "cronjob_manage":
         action = args.get("action", "?")
         return f"[cronjob] {action}"
 
-    if tool_name == "process":
+    if tool_name == "process_manage":
         action = args.get("action", "?")
         sid = args.get("session_id", "?")
         return f"[process] {action} session={sid}"

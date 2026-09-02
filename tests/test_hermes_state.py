@@ -281,6 +281,83 @@ class TestConnectionLifecycle:
         healed.close()
         assert list(tmp_path.glob("*malformed-backup*"))
 
+    def test_read_only_open_retries_transient_wal_ioerr(self, tmp_path, monkeypatch):
+        """A transient SQLITE_IOERR on a read-only open must retry, not raise.
+
+        A ``mode=ro`` connection cannot perform WAL recovery (recovery would
+        need to write the -shm index, which read-only mode refuses), so a
+        concurrent checkpoint / WAL reset / frame-flush on the writer side can
+        surface "disk I/O error" to a reader on a perfectly healthy database
+        (#100436). The transition window is millisecond-scale; a bounded retry
+        must let the open succeed instead of 500-ing the /api/sessions poll
+        and every other read-only opener.
+        """
+        import sqlite3
+
+        from hermes_cli.sqlite_safe_read import has_live_connection
+
+        db_path = tmp_path / "state.db"
+        writable = SessionDB(db_path=db_path)
+        writable.create_session("wal-race", source="cli")
+        writable.close()
+
+        real_connect = hermes_state._connect_tracked_db
+        attempts = []
+
+        def flaky_connect(*args, **kwargs):
+            attempts.append(kwargs.get("uri"))
+            if len(attempts) == 1:
+                # First open lands inside the writer's WAL transition window.
+                raise sqlite3.OperationalError("disk I/O error")
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr(hermes_state, "_connect_tracked_db", flaky_connect)
+        # Keep the test fast: one backoff tick is enough; the retry budget
+        # itself is exercised by the attempt count below.
+        monkeypatch.setattr(hermes_state, "_READ_ONLY_IOERR_RETRY_BACKOFF_S", 0.0)
+
+        read_only = SessionDB(db_path=db_path, read_only=True)
+        try:
+            assert read_only._fts_enabled is True
+            matches = read_only.search_messages("wal-race")
+        finally:
+            read_only.close()
+
+        assert len(attempts) >= 2, "the transient IOERR must be retried"
+        assert has_live_connection(db_path) is False  # no leaked connections
+
+    def test_read_only_open_exhausts_retry_budget_for_persistent_ioerr(
+        self, tmp_path, monkeypatch
+    ):
+        """A persistent SQLITE_IOERR must exhaust the budget and raise.
+
+        The retry exists to ride out a millisecond WAL transition — a
+        storage layer that keeps failing after the full budget is genuinely
+        broken and must surface the error (and not loop forever).
+        """
+        import sqlite3
+
+        db_path = tmp_path / "state.db"
+        writable = SessionDB(db_path=db_path)
+        writable.create_session("broken-disk", source="cli")
+        writable.close()
+
+        attempts = []
+
+        def bad_connect(*args, **kwargs):
+            attempts.append(1)
+            raise sqlite3.OperationalError("disk I/O error")
+
+        monkeypatch.setattr(hermes_state, "_connect_tracked_db", bad_connect)
+        monkeypatch.setattr(hermes_state, "_READ_ONLY_IOERR_RETRY_BACKOFF_S", 0.0)
+        budget = hermes_state._READ_ONLY_IOERR_RETRY_ATTEMPTS
+
+        with pytest.raises(sqlite3.OperationalError, match="disk I/O error"):
+            SessionDB(db_path=db_path, read_only=True)
+
+        # budget + 1 = the initial attempt plus `budget` retries.
+        assert len(attempts) == budget + 1
+
 
 # =========================================================================
 # Session lifecycle
@@ -8063,6 +8140,66 @@ class TestGetMessagesPagination:
             db.assert_resume_safe("tip", max_messages=4)
         assert exc_info.value.message_count == 5
         assert exc_info.value.limit == 4
+
+    def test_resume_safety_tip_only_counts_the_tip_segment(self, db):
+        """A deep compression lineage behind a small tip resumes tip-only.
+
+        The Desktop Bot Chat shape: many compaction segments (~29k rows of
+        lineage) and a small live tip. Callers that never materialize the
+        ancestors (deferred / omit_messages / lazy resume, tip-only model
+        restore) must be bounded by the tip alone, and the message must name
+        the scope it counted.
+        """
+        prev = None
+        for i in range(6):
+            sid = f"seg-{i}"
+            kwargs = {"parent_session_id": prev} if prev else {}
+            db.create_session(session_id=sid, source="tui", **kwargs)
+            db.append_messages_batch(
+                sid,
+                [{"role": "user", "content": f"{sid}-{j}"} for j in range(4)],
+            )
+            if i < 5:
+                db.end_session(sid, "compression")
+            prev = sid
+
+        assert db.get_resume_message_count("seg-5") == 24
+        assert db.get_resume_message_count("seg-5", tip_only=True) == 4
+        with pytest.raises(hermes_state.SessionResumeTooLargeError) as full:
+            db.assert_resume_safe("seg-5", max_messages=10)
+        assert "across its lineage" in str(full.value)
+        assert db.assert_resume_safe("seg-5", max_messages=10, tip_only=True) == 4
+        with pytest.raises(hermes_state.SessionResumeTooLargeError) as tip:
+            db.assert_resume_safe("seg-5", max_messages=3, tip_only=True)
+        assert tip.value.message_count == 4
+        assert "in its tip segment" in str(tip.value)
+
+    def test_resume_guard_counts_exactly_what_a_branch_resume_loads(self, db):
+        """An explicit /branch copy owns its transcript: the guard and the
+        resume readers must agree that its lineage is itself alone."""
+        db.create_session(session_id="parent", source="tui")
+        db.append_messages_batch(
+            "parent",
+            [{"role": "user", "content": f"parent-{i}"} for i in range(6)],
+        )
+        db.create_session(
+            session_id="branch",
+            source="tui",
+            parent_session_id="parent",
+            model_config={"_branched_from": "parent"},
+        )
+        db.append_messages_batch(
+            "branch",
+            [{"role": "user", "content": f"branch-{i}"} for i in range(2)],
+        )
+
+        _, display = db.get_resume_conversations("branch")
+        assert len(display) == 2
+        assert db.get_ancestor_display_prefix("branch") == []
+        # Before: the guard walked parent_session_id and counted 8, so a branch
+        # could be refused for rows a resume would never load.
+        assert db.get_resume_message_count("branch") == 2
+        assert db.assert_resume_safe("branch", max_messages=5) == 2
 
     def test_export_safety_is_bounded_to_the_requested_active_segment(self, db):
         db.create_session(session_id="root", source="cli")

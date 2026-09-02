@@ -664,6 +664,13 @@ _MAX_BACKOFF_SECONDS = 60
 # can ever reach the circuit-breaker half-open probe or _signal_reconnect.
 _PARKED_RETRY_INTERVAL = 300  # seconds between parked self-probes
 _RECYCLED_RECONNECT_TIMEOUT = 15.0
+# How long a tool call waits for a respawned stdio child after its subprocess
+# was found dead — a gateway restart kills every MCP stdio child,
+# and the next call from a still-live session would otherwise fail for no real
+# reason). Bounded: when the wait elapses the call reports the dead transport
+# instead of looping, so a genuinely broken server still parks via the
+# rapid-drop budget in run() rather than hot-cycling respawns.
+_STDIO_RESPAWN_WAIT_SEC = 15.0
 # Jitter applied to reconnect backoff sleeps. Without it, every server that
 # lost the same backend retries in lockstep (thundering herd) and log lines
 # from N servers land in synchronized bursts.
@@ -3355,21 +3362,44 @@ class MCPServerTask:
                 await asyncio.wait_for(self.session.send_ping(), timeout=30.0)
                 return
             except Exception as exc:
-                # Only a "method not found" means ping is unsupported. Any
-                # other error (timeout, closed transport, session expired) is
-                # a real liveness failure — propagate so we reconnect.
-                if not _is_method_not_found_error(exc):
+                if _is_method_not_found_error(exc):
+                    # Structural -32601 or "Unknown method" — ping is
+                    # definitively unsupported.
+                    if not self._advertises_tools():
+                        raise
+                    self._ping_unsupported = True
+                    logger.info(
+                        "MCP server '%s': does not implement the optional "
+                        "'ping' utility (-32601); using 'list_tools' for "
+                        "keepalive on this connection.",
+                        self.name,
+                    )
+                elif isinstance(exc, (TimeoutError, asyncio.TimeoutError)) and self._advertises_tools():
+                    # A server that silently drops ping (no response at all)
+                    # produces a TimeoutError indistinguishable from a dead
+                    # transport. Before declaring it dead, try list_tools as
+                    # a confirmation probe (#97245). If the transport is
+                    # genuinely broken, list_tools will also fail and we
+                    # propagate that failure.
+                    try:
+                        await asyncio.wait_for(self.session.list_tools(), timeout=30.0)
+                    except Exception:
+                        # Both probes failed — genuine liveness failure.
+                        raise exc from None
+                    # Transport alive, ping just isn't answered. Latch the
+                    # fallback so subsequent keepalives skip the 30s wait.
+                    self._ping_unsupported = True
+                    logger.info(
+                        "MCP server '%s': ping timed out but list_tools "
+                        "succeeded — server silently drops ping; using "
+                        "'list_tools' for keepalive on this connection.",
+                        self.name,
+                    )
+                    return
+                else:
+                    # Any other error (closed transport, session expired,
+                    # etc.) is a real liveness failure — propagate.
                     raise
-                if not self._advertises_tools():
-                    # No ping, no tools → no cheaper probe to fall back to.
-                    raise
-                self._ping_unsupported = True
-                logger.info(
-                    "MCP server '%s': does not implement the optional 'ping' "
-                    "utility (-32601); using 'list_tools' for keepalive on "
-                    "this connection.",
-                    self.name,
-                )
 
         # Fallback probe for servers without ping support.
         await asyncio.wait_for(self.session.list_tools(), timeout=30.0)
@@ -5731,6 +5761,123 @@ def _handle_session_expired_and_retry(
     return None
 
 
+class _StdioChildExited(RuntimeError):
+    """A server's stdio subprocess was gone when (or while) a call ran.
+
+    Deliberately NOT a TimeoutError: nothing timed out — the child was
+    already dead, usually because a gateway restart killed every MCP stdio
+    subprocess out from under a still-live agent session. The old wording
+    ("failing the call fast instead of waiting 300s") sent an investigation
+    into the remote server for an afternoon; the server was healthy.
+
+    Handled by :func:`_handle_stdio_child_exited_and_retry`, which respawns
+    and retries the call once before any error reaches the model.
+    """
+
+
+def _handle_stdio_child_exited_and_retry(
+    server_name: str,
+    exc: Exception,
+    retry_call,
+    op_description: str,
+):
+    """Respawn a dead stdio child and retry the call once.
+
+    A gateway restart kills every MCP stdio subprocess. An agent session that
+    outlives the restart still holds the dead child, so its next tool call
+    used to fail in 0.00s — before anything reached the network — while the
+    subprocess was respawned seconds later. Cron runs spanning a restart lost
+    tool calls this way, silently.
+
+    Why retrying here cannot hot-cycle respawns: this function never spawns
+    anything. It sets ``_reconnect_event`` (one signal, same as before) and
+    waits for the server task to publish a fresh session. Spawn frequency
+    stays governed entirely by ``run()``'s rapid-drop budget, which parks a
+    transport that keeps dropping without proving healthy (#62212). The retry
+    is single-shot: a child that dies again immediately reports and stops,
+    so a genuinely broken server converges on the park instead of looping.
+
+    Returns:
+        A JSON string when this was a dead-stdio failure (retry result, or a
+        clean error), or ``None`` when ``exc`` is something else and the
+        caller should use its generic error path.
+    """
+    if not isinstance(exc, _StdioChildExited):
+        return None
+
+    with _lock:
+        srv = _servers.get(server_name)
+
+    reconnected = False
+    if srv is not None and hasattr(srv, "_reconnect_event"):
+        logger.info(
+            "MCP server '%s': %s found the stdio subprocess dead (%s); "
+            "respawning and retrying once.",
+            server_name, op_description, exc,
+        )
+        loop = _mcp_loop
+        if loop is not None and loop.is_running():
+            reconnected = _signal_reconnect_and_wait(
+                server_name,
+                srv,
+                op_description=op_description,
+                timeout=_STDIO_RESPAWN_WAIT_SEC,
+            )
+        else:
+            # No MCP loop to wait on (non-async adapters, tests) — still ask
+            # for the respawn so the next call lands on a live transport.
+            _signal_reconnect(srv)
+
+    if reconnected:
+        try:
+            result = retry_call()
+        except _StdioChildExited as retry_exc:
+            # Respawned and died again straight away: this is a broken
+            # server, not a restart artifact. Stop here — run()'s budget
+            # takes it to the park.
+            logger.warning(
+                "MCP server '%s': %s stdio subprocess exited again right "
+                "after respawn (%s); not retrying further.",
+                server_name, op_description, retry_exc,
+            )
+            _bump_server_error(server_name)
+            return tool_error(
+                f"MCP server '{server_name}' respawned its stdio subprocess "
+                f"and it exited again immediately. The server is not "
+                f"starting cleanly — do NOT retry this tool; ask the user to "
+                f"check the server's command and its stderr log."
+            )
+        except Exception as retry_exc:
+            logger.warning(
+                "MCP %s/%s retry after stdio respawn failed: %s",
+                server_name, op_description, retry_exc,
+            )
+            _bump_server_error(server_name)
+            return tool_error(_sanitize_error(
+                f"MCP call failed after respawning the stdio subprocess for "
+                f"'{server_name}': {type(retry_exc).__name__}: "
+                f"{_exc_str(retry_exc)}"
+            ))
+        try:
+            parsed = json.loads(result)
+            if "error" not in parsed:
+                _reset_server_error(server_name)
+            else:
+                _bump_server_error(server_name)
+        except (json.JSONDecodeError, TypeError):
+            _reset_server_error(server_name)
+        return result
+
+    _bump_server_error(server_name)
+    return tool_error(
+        f"MCP server '{server_name}' stdio subprocess had exited (this is "
+        f"not a timeout — the call never reached the server). A respawn was "
+        f"requested but no fresh session came back within "
+        f"{_STDIO_RESPAWN_WAIT_SEC:.0f}s. Wait a few seconds before retrying; "
+        f"if it keeps failing the server is not starting and needs the user."
+    )
+
+
 # Exact raw server names whose ``supports_parallel_tool_calls`` config is True.
 # Raw identity matters: distinct names such as ``foo-bar`` and ``foo_bar`` both
 # sanitize to ``foo_bar`` but must not share policy.
@@ -6092,11 +6239,26 @@ def _snapshot_child_pids() -> set:
     """
     my_pid = os.getpid()
 
-    # Linux: read from /proc
+    # Linux: read from /proc. ``/proc/<pid>/task/<tid>/children`` is
+    # per-THREAD — a child forked from thread T is listed only under T's
+    # task dir. stdio_client() spawns from the background MCP loop thread,
+    # so reading only the main thread's file (``task/<pid>/children``)
+    # returned an empty set on every Linux install and left
+    # ``_stdio_child_pids`` / ``_stdio_pids`` empty: the #81995 dead-child
+    # fast-fail, the #96452 respawn signal, and the killpg shutdown sweep
+    # never saw the subprocess. Union the children of every task instead.
     try:
-        children_path = f"/proc/{my_pid}/task/{my_pid}/children"
-        with open(children_path, encoding="utf-8") as f:
-            return {int(p) for p in f.read().split() if p.strip()}
+        task_dir = f"/proc/{my_pid}/task"
+        tids = os.listdir(task_dir)
+        found: set = set()
+        for tid in tids:
+            try:
+                with open(f"{task_dir}/{tid}/children", encoding="utf-8") as f:
+                    found.update(int(p) for p in f.read().split() if p.strip())
+            except (FileNotFoundError, OSError, ValueError):
+                # Thread exited between listdir and open — skip it.
+                continue
+        return found
     except (FileNotFoundError, OSError, ValueError):
         pass
 
@@ -6967,21 +7129,13 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                         and _stdio_dead_result
                     ):
                         # Dead children but stale server.session, so the
-                        # transport-down path above never fired — signal the
-                        # server task to respawn and return a clean
-                        # reconnecting error. No explicit _bump_server_error:
-                        # the error return flows through the handler's JSON
-                        # parse, which already bumps once.
-                        if _signal_reconnect(server):
-                            return tool_error(
-                                f"MCP server '{server_name}' stdio subprocess is "
-                                f"dead and reconnect was requested. Do NOT retry "
-                                f"immediately — give it a few seconds to respawn."
-                            )
-                        raise TimeoutError(
-                            f"MCP stdio subprocess for '{server_name}' has "
-                            f"exited; failing the call fast instead of "
-                            f"waiting {float(tool_timeout):.0f}s"
+                        # transport-down path above never fired. Hand this to
+                        # the handler's respawn-and-retry path —
+                        # it is not a timeout, and a gateway restart that
+                        # killed the child must not cost the caller a call.
+                        raise _StdioChildExited(
+                            f"MCP stdio subprocess for '{server_name}' had "
+                            f"already exited when the call was dispatched"
                         )
 
                     # In stateless mode, carry the request routing context
@@ -7047,16 +7201,13 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                                 # Same stale-session problem as the pre-call
                                 # gate above: the subprocess died mid-call but
                                 # nothing clears server.session, so without a
-                                # reconnect signal the server would stay dead
-                                # until the idle keepalive probe notices.
-                                _signal_reconnect(server)
-                                raise TimeoutError(
-                                    f"MCP stdio subprocess for '{server_name}' "
-                                    f"exited mid-call; failing the call fast "
-                                    f"instead of waiting "
-                                    f"{float(tool_timeout):.0f}s; reconnect "
-                                    f"requested — give it a few seconds to "
-                                    f"respawn before retrying"
+                                # reconnect the server would stay dead until
+                                # the idle keepalive probe notices. The
+                                # handler's respawn-and-retry path owns the
+                                # reconnect signal.
+                                raise _StdioChildExited(
+                                    f"MCP stdio subprocess for "
+                                    f"'{server_name}' exited mid-call"
                                 )
                             result = await rpc_task
                         finally:
@@ -7290,6 +7441,16 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
         except InterruptedError:
             return _interrupted_call_result()
         except Exception as exc:
+            # Dead stdio child: respawn and retry once before any
+            # error reaches the model — a gateway restart kills every MCP
+            # subprocess, and the call it lands on is not really a failure.
+            recovered = _handle_stdio_child_exited_and_retry(
+                server_name, exc, _call_once,
+                f"tools/call {tool_name}",
+            )
+            if recovered is not None:
+                return recovered
+
             # Quota-exhaustion detection (#2193): HTTP 402 / billing errors
             # get a longer cooldown than the generic circuit breaker.
             if _is_quota_error(exc):

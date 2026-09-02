@@ -82,6 +82,17 @@ model:
   # api_key: "your-key-here"  # Uncomment to set here instead of .env
   base_url: "https://openrouter.ai/api/v1"
 
+  # Stream API responses from the provider (default: true). The agent core
+  # prefers streaming for every turn — subagents included — for liveness
+  # health-checking. Set false to force non-streaming requests for the whole
+  # session (persists across mid-session model switches). Escape hatch for
+  # self-hosted OpenAI-compatible servers whose streaming tool-call path is
+  # broken (e.g. vLLM with --tool-call-parser qwen3_xml + a reasoning parser
+  # can leak tool calls into plain text instead of returning tool_calls —
+  # #72901). Orthogonal to display.streaming, which controls token rendering
+  # only.
+  # streaming: true
+
   # Azure Foundry keyless auth example:
   # provider: "azure-foundry"
   # base_url: "https://<resource>.openai.azure.com/openai/v1"
@@ -522,12 +533,14 @@ browser:
 # Tool Loop Guardrails
 # =============================================================================
 # Soft warnings are enabled by default. They append guidance to repeated failed
-# or non-progressing tool results but still let the tool execute. Hard stops are
-# opt-in circuit breakers for autonomous/cron sessions where stopping a loop is
-# preferable to spending the full iteration budget.
+# or non-progressing tool results but still let the tool execute. Hard stops stay
+# opt-in for interactive CLI/TUI/Desktop/ACP sessions, but default on for unattended
+# gateway/cron sessions where nobody is present to interrupt a model that
+# ignores loop warnings.
 tool_loop_guardrails:
   warnings_enabled: true
   hard_stop_enabled: false
+  non_interactive_hard_stop_enabled: true
   warn_after:
     exact_failure: 2
     same_tool_failure: 3
@@ -784,6 +797,19 @@ compression:
   # post-compression target = threshold × target_ratio), so it never wastes a
   # summarization on a short idle thread. Example: 1800 = compact after 30 min idle.
   idle_compact_after_seconds: 0
+
+  # Gateway session-hygiene turn-hold budget (default: 10). Max seconds an
+  # arriving user turn is held while a still-streaming hygiene summary
+  # finishes. Distinct from hygiene_timeout_seconds (compressor inactivity
+  # budget): this bounds user-visible latency so chat transports (Telegram
+  # ~30s) do not drop a silent connection. On expiry the turn proceeds
+  # uncompressed; the detached worker keeps its commit admission (when the
+  # commit is watermark-fenced) and the summary is adopted at the next safe
+  # boundary. Thinking-model summarizers often need longer than 10s to emit
+  # the first content token — raise to 300 (or >= your summarizer's real
+  # time-to-first-content) only if you want THIS turn to wait for the
+  # compression instead of adopting it one turn late.
+  hygiene_max_turn_hold_seconds: 10
 
   # Proactive tool-result prune (default: 0 = disabled). Opt-in token trigger
   # for a deterministic, no-LLM prune of OLD tool-result payloads, run
@@ -1984,15 +2010,31 @@ display:
 # =============================================================================
 # Shared metrics are disabled by default. When enabled, Hermes writes only
 # allowlisted aggregate counters and immutable JSON
-# packages under $HERMES_HOME/telemetry/shared_metrics; it does not upload them.
+# packages under $HERMES_HOME/telemetry/shared_metrics.
 # Packages include a random profile-scoped ID that stays stable until this
 # directory is deleted. It is not derived from hardware, account, or host data.
 # Successfully exported local history is retained for 30 days; pending deltas
 # are retained until they can be exported.
 # This profile-owned choice is not overridden by managed-scope configuration.
+#
+# Nothing is uploaded unless you also set `send: true`. That is a separate
+# opt-in and requires `enabled`; it never turns collection on by itself.
+# When sending is on:
+#   * only packages whose entire collection period falls within one
+#     continuous recorded consent window are ever sent. Consent windows open
+#     when you enable sending and close when you disable it, so data
+#     collected before you opted in — or during any gap between opt-ins —
+#     stays on this machine;
+#   * each package carries the profile-scoped ID as-is. It is a random UUID
+#     with no hardware, account, or host-derived content, and deleting the
+#     shared-metrics directory resets it.
+# See docs/observability/relay-shared-metrics.md (Appendix A) for the full
+# consent, identity, retention, and deletion decisions.
 telemetry:
   shared_metrics:
     enabled: false
+    send: false
+    # endpoint: https://telemetry.nousresearch.com/v1/telemetry
 
 
 # =============================================================================

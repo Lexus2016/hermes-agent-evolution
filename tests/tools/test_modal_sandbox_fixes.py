@@ -35,21 +35,24 @@ class TestToolResolution:
     """Verify get_tool_definitions returns all expected tools for eval."""
 
     def test_terminal_and_file_toolsets_resolve_all_tools(self):
-        """enabled_toolsets=['terminal', 'file'] should produce 7 tools."""
+        """enabled_toolsets=['terminal', 'file'] should produce 6 tools."""
+        from unittest.mock import patch as _patch
+
         from model_tools import get_tool_definitions
-        tools = get_tool_definitions(
-            enabled_toolsets=["terminal", "file"],
-            quiet_mode=True,
-        )
+        from tools.tool_search import ToolSearchConfig
+
+        # Pin the RESOLUTION contract independent of deferral policy —
+        # #97979 defers process_manage by default (legacy defer: [] override).
+        _legacy = ToolSearchConfig.from_raw({"enabled": "on", "defer": []})
+        with _patch("tools.tool_search.load_config", return_value=_legacy), \
+             _patch("tools.tool_search.load_config_readonly", return_value=_legacy):
+            tools = get_tool_definitions(
+                enabled_toolsets=["terminal", "file"],
+                quiet_mode=True,
+            )
         names = {t["function"]["name"] for t in tools}
-        expected = {"terminal", "process", "read_file", "write_file", "search_files", "patch", "repo_map"}
-        missing = expected - names
-        assert not missing, f"missing {missing}, got {names}"
-        # tool_search / tool_describe / tool_call are assembled by default
-        # when tool-search is not "off"; they are not part of the static
-        # terminal+file bundle but they are an intentional always-on bridge.
-        extras = names - expected - {"tool_search", "tool_call", "tool_describe"}
-        assert not extras, f"unexpected extras {extras}"
+        expected = {"terminal", "process_manage", "read_file", "write_file", "search_files", "patch", "repo_map"}
+        assert expected == names, f"Expected {expected}, got {names}"
 
     def test_terminal_tool_present(self):
         """The terminal tool must be present (not silently dropped)."""
