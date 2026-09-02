@@ -20,44 +20,52 @@ if TYPE_CHECKING:  # avoid a circular import; policy_interceptors imports this m
     from agent.policy_interceptors import PolicyInterceptorRegistry
     from agent.recheck_suppression import RecheckController
 
+IDEMPOTENT_TOOL_NAMES = frozenset(
+    {
+        "read_file",
+        "search_files",
+        "web_search",
+        "web_extract",
+        "session_search",
+        "skill_view",
+        "skills_list",
+        "browser_snapshot",
+        "browser_console",
+        "browser_get_images",
+        "mcp_filesystem_read_file",
+        "mcp_filesystem_read_text_file",
+        "mcp_filesystem_read_multiple_files",
+        "mcp_filesystem_list_directory",
+        "mcp_filesystem_list_directory_with_sizes",
+        "mcp_filesystem_directory_tree",
+        "mcp_filesystem_get_file_info",
+        "mcp_filesystem_search_files",
+    }
+)
 
-IDEMPOTENT_TOOL_NAMES = frozenset({
-    "read_file",
-    "search_files",
-    "web_search",
-    "web_extract",
-    "session_search",
-    "browser_snapshot",
-    "browser_console",
-    "browser_get_images",
-    "mcp_filesystem_read_file",
-    "mcp_filesystem_read_text_file",
-    "mcp_filesystem_read_multiple_files",
-    "mcp_filesystem_list_directory",
-    "mcp_filesystem_list_directory_with_sizes",
-    "mcp_filesystem_directory_tree",
-    "mcp_filesystem_get_file_info",
-    "mcp_filesystem_search_files",
-})
-
-MUTATING_TOOL_NAMES = frozenset({
-    "terminal",
-    "execute_code",
-    "write_file",
-    "patch",
-    "todo",
-    "memory",
-    "skill_manage",
-    "browser_click",
-    "browser_type",
-    "browser_press",
-    "browser_scroll",
-    "browser_navigate",
-    "send_message",
-    "cronjob",
-    "delegate_task",
-    "process",
-})
+MUTATING_TOOL_NAMES = frozenset(
+    {
+        "terminal",
+        "execute_code",
+        "write_file",
+        "patch",
+        "todo",
+        "todo_list",
+        "memory",
+        "skill_manage",
+        "browser_click",
+        "browser_type",
+        "browser_press",
+        "browser_scroll",
+        "browser_navigate",
+        "send_message",
+        "cronjob",
+        "cronjob_manage",
+        "delegate_task",
+        "process",
+        "process_manage",
+    }
+)
 
 # #974/#969/#970 — tools whose retry spirals are the system's largest failure
 # sources. Trace-miner evidence: terminal (1237 failures / 410 sessions),
@@ -84,25 +92,12 @@ _SPIRAL_PRONE_TOOLS = frozenset({
     "execute_code",
     "read_file",
     "process",
+    "process_manage",
     "search_files",
     "tool_call",
     "tool_describe",
     "memory",
-    # #1258 — patch tool failures: 255 failures in 7d. Patch failures are
-    # deterministic (no-match, ambiguous, identical-edit) — the model
-    # retries the same stale old_string without re-reading the file. The
-    # fallback directive ("use read_file to verify the exact text before
-    # patching, or use write_file") is already defined at line 751.
-    # Adding patch here activates the always-on spiral_failure_cap (default
-    # 5) that halts the turn regardless of hard_stop_enabled, bounding the
-    # retry spiral and forcing a strategy switch.
     "patch",
-    # #1840 — write_file parse-errors: 48 failures in 7d with 15-deep
-    # spirals. The fail-closed syntax gate returns a validation error
-    # (JSON/YAML/TOML parse failure) that is deterministic — the same
-    # malformed content will fail identically on retry. Adding write_file
-    # here activates the always-on spiral_failure_cap (default 5) so the
-    # agent is forced to fix the content instead of blind-retrying.
     "write_file",
 })
 
@@ -134,7 +129,7 @@ def _successes_needed_to_decay(tool_name: str) -> int:
 # unannotated.
 STALL_GUARD_REPEATABLE_TOOLS = frozenset(
     {
-        "process",
+        "process_manage",
     }
 )
 
@@ -165,6 +160,49 @@ IDENTICAL_RESULT_STUB_MIN_CHARS = 512
 _RESULT_STUB_ARGS_PREVIEW_CHARS = 120
 
 
+# Tools whose "failure" is a normal, informative outcome of legitimate work:
+# a red test run, a grep with no matches, a failing build during a fix loop, a
+# page that times out. Hard stops never fire on these from failure counts of
+# DIFFERENT commands (same_tool_failure) — only an exact-args replay with NO
+# intervening change, or an identical-result streak, can halt them.
+FAILURE_TOLERANT_TOOL_NAMES = frozenset(
+    {
+        "terminal",
+        "execute_code",
+        "process_manage",
+        "process",
+        "browser_navigate",
+        "web_extract",
+    }
+)
+
+# A landed mutation between two attempts means the retry is a NEW experiment
+# (edit -> re-run) rather than a replay. A successful call to one of these
+# marks progress for every failing signature still being counted this turn.
+PROGRESS_RESET_TOOL_NAMES = frozenset(
+    {
+        "write_file",
+        "patch",
+        "terminal",
+        "execute_code",
+        "browser_click",
+        "browser_type",
+        "browser_press",
+        "browser_navigate",
+        "process_manage",
+        "process",
+        "delegate_task",
+        "send_message",
+        "cronjob",
+        "cronjob_manage",
+        "todo",
+        "todo_list",
+        "memory",
+        "skill_manage",
+    }
+)
+
+
 def is_stall_guard_repeatable(tool_name: str) -> bool:
     """Whether a tool is exempt from the identical-call loop notice."""
     if tool_name in STALL_GUARD_REPEATABLE_TOOLS:
@@ -177,12 +215,14 @@ class ToolCallGuardrailConfig:
     """Thresholds for per-turn tool-call loop detection.
 
     Warnings are enabled by default and never prevent tool execution. Hard stops
-    are explicit opt-in so interactive CLI/TUI sessions get a gentle nudge unless
-    the user enables circuit-breaker behavior in config.yaml.
+    stay opt-in for interactive CLI/TUI/Desktop/ACP sessions, but default on for
+    non-interactive gateway/cron platforms where nobody is present to interrupt
+    a model that ignores loop warnings.
     """
 
     warnings_enabled: bool = True
     hard_stop_enabled: bool = False
+    non_interactive_hard_stop_enabled: bool = True
     exact_failure_warn_after: int = 2
     exact_failure_block_after: int = 5
     same_tool_failure_warn_after: int = 3
@@ -229,10 +269,15 @@ class ToolCallGuardrailConfig:
     loop_caps: "LoopCapConfig" = field(default_factory=lambda: LoopCapConfig())
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "ToolCallGuardrailConfig":
+    def from_mapping(
+        cls,
+        data: Mapping[str, Any] | None,
+        *,
+        platform: str | None = None,
+    ) -> "ToolCallGuardrailConfig":
         """Build config from the `tool_loop_guardrails` config.yaml section."""
         if not isinstance(data, Mapping):
-            return cls()
+            data = {}
 
         warn_after = data.get("warn_after")
         if not isinstance(warn_after, Mapping):
@@ -242,13 +287,18 @@ class ToolCallGuardrailConfig:
             hard_stop_after = {}
 
         defaults = cls()
+        hard_stop_enabled = _as_bool(data.get("hard_stop_enabled"), defaults.hard_stop_enabled)
+        non_interactive_hard_stop_enabled = _as_bool(
+            data.get("non_interactive_hard_stop_enabled"),
+            defaults.non_interactive_hard_stop_enabled,
+        )
+        if _is_non_interactive_platform(platform) and non_interactive_hard_stop_enabled:
+            hard_stop_enabled = True
+
         return cls(
-            warnings_enabled=_as_bool(
-                data.get("warnings_enabled"), defaults.warnings_enabled
-            ),
-            hard_stop_enabled=_as_bool(
-                data.get("hard_stop_enabled"), defaults.hard_stop_enabled
-            ),
+            warnings_enabled=_as_bool(data.get("warnings_enabled"), defaults.warnings_enabled),
+            hard_stop_enabled=hard_stop_enabled,
+            non_interactive_hard_stop_enabled=non_interactive_hard_stop_enabled,
             exact_failure_warn_after=_positive_int(
                 warn_after.get("exact_failure", data.get("exact_failure_warn_after")),
                 defaults.exact_failure_warn_after,
@@ -343,6 +393,25 @@ class LoopCapConfig:
                 data.get("max_subagents"), defaults.max_subagents
             ),
         )
+
+
+_INTERACTIVE_PLATFORMS = frozenset({"cli", "tui", "desktop", "acp"})
+
+# Platforms that are not chat gateways but whose work is a bounded, supervised
+# task loop: a subagent inherits its parent's budget and is stopped by the
+# parent; api_server runs have a live client holding the request. Both do
+# real edit -> re-run work, so they keep the interactive (warn-only) default.
+_SUPERVISED_TASK_PLATFORMS = frozenset({"subagent", "api_server"})
+
+
+def _is_non_interactive_platform(platform: str | None) -> bool:
+    """Return true for gateway/cron sessions where tool loops are unattended."""
+    if not isinstance(platform, str) or not platform.strip():
+        return False
+    key = platform.strip().lower()
+    if key in _INTERACTIVE_PLATFORMS or key in _SUPERVISED_TASK_PLATFORMS:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -544,6 +613,8 @@ class ToolCallGuardrailController:
     def reset_for_turn(self) -> None:
         self._exact_failure_counts: dict[ToolCallSignature, int] = {}
         self._same_tool_failure_counts: dict[str, int] = {}
+        # signature -> a mutating call succeeded since its last failure
+        self._progress_since_failure: dict[ToolCallSignature, bool] = {}
         self._no_progress: dict[ToolCallSignature, tuple[str, int]] = {}
         self._halt_decision: ToolGuardrailDecision | None = None
         # #1041 — last executed call, for immediate-recheck detection.
@@ -593,6 +664,25 @@ class ToolCallGuardrailController:
                 return policy_decision
 
         signature = ToolCallSignature.from_call(tool_name, _coerce_args(args))
+
+        exact_count = self._exact_failure_counts.get(signature, 0)
+        if self._progress_since_failure.get(signature):
+            exact_count = 0
+        if self.config.hard_stop_enabled and exact_count >= self.config.exact_failure_block_after:
+            decision = ToolGuardrailDecision(
+                action="block",
+                code="repeated_exact_failure_block",
+                message=(
+                    f"Blocked {tool_name}: the same tool call failed {exact_count} "
+                    "times with identical arguments. Stop retrying it unchanged; "
+                    "change strategy or explain the blocker."
+                ),
+                tool_name=tool_name,
+                count=exact_count,
+                signature=signature,
+            )
+            self._halt_decision = decision
+            return decision
 
         # #1826 — session-level permanent hard-stop. Once a tool has been
         # session-hard-stopped, ALL subsequent calls are blocked unconditionally
@@ -725,6 +815,10 @@ class ToolCallGuardrailController:
             return ToolGuardrailDecision(tool_name=tool_name, signature=signature)
 
         exact_count = self._exact_failure_counts.get(signature, 0)
+        if self._progress_since_failure.get(signature):
+            # Something landed since this call last failed — let it run; the
+            # streak restarts in after_call if it fails again.
+            exact_count = 0
         if exact_count >= self.config.exact_failure_block_after:
             decision = ToolGuardrailDecision(
                 action="block",
@@ -787,6 +881,12 @@ class ToolCallGuardrailController:
             self.policy_registry.record_observation(tool_name, args, failed=failed)
 
         if failed:
+            # An identical failing call is only a REPLAY if nothing landed in
+            # between. If any mutating call succeeded since the previous
+            # identical failure (edit -> re-run pytest, click -> re-snapshot),
+            # the retry is a new experiment: restart the exact-args streak.
+            if self._progress_since_failure.pop(signature, False):
+                self._exact_failure_counts.pop(signature, None)
             exact_count = self._exact_failure_counts.get(signature, 0) + 1
             self._exact_failure_counts[signature] = exact_count
             self._no_progress.pop(signature, None)
@@ -857,33 +957,35 @@ class ToolCallGuardrailController:
                 and tool_name in self.config.spiral_prone_tools
                 and effective_streak >= self._effective_cap_for(tool_name)
             ):
-                # #1826 — permanently session-hard-stop this tool so subsequent
-                # turns cannot retry it. The cross-turn streak alone was
-                # insufficient because interspersed diagnostic successes (pwd,
-                # ls) decaying the streak allowed the spiral to recur across
-                # turns. The session stop is irreversible for this session.
-                self._session_hard_stopped.add(tool_name)
                 _cap = self._effective_cap_for(tool_name)
-                directive = _fallback_directive_for(tool_name)
-                decision = ToolGuardrailDecision(
-                    action="halt",
-                    code="spiral_prone_tool_failure_cap",
-                    message=(
-                        f"Stopped {tool_name}: it failed {effective_streak} times, "
-                        f"reaching the retry cap ({_cap}). "
-                        "This failure pattern is deterministic — retrying the same way "
-                        "will not fix it. Use the fallback directive below."
-                    ),
-                    tool_name=tool_name,
-                    count=effective_streak,
-                    signature=signature,
-                    fallback_directive=directive,
-                )
-                self._halt_decision = decision
-                return decision
+                # When hard_stop_enabled is True on unattended platforms, distinct commands
+                # of failure-tolerant tools warn instead of halting (Teknium Sep 2026).
+                if self.config.hard_stop_enabled and tool_name in FAILURE_TOLERANT_TOOL_NAMES and exact_count < self.config.exact_failure_block_after:
+                    pass
+                else:
+                    self._session_hard_stopped.add(tool_name)
+                    directive = _fallback_directive_for(tool_name)
+                    decision = ToolGuardrailDecision(
+                        action="halt",
+                        code="spiral_prone_tool_failure_cap",
+                        message=(
+                            f"Stopped {tool_name}: it failed {effective_streak} times, "
+                            f"reaching the retry cap ({_cap}). "
+                            "This failure pattern is deterministic — retrying the same way "
+                            "will not fix it. Use the fallback directive below."
+                        ),
+                        tool_name=tool_name,
+                        count=effective_streak,
+                        signature=signature,
+                        fallback_directive=directive,
+                    )
+                    self._halt_decision = decision
+                    return decision
 
+            same_tool_halt_eligible = tool_name not in FAILURE_TOLERANT_TOOL_NAMES
             if (
                 self.config.hard_stop_enabled
+                and same_tool_halt_eligible
                 and effective_streak >= self.config.same_tool_failure_halt_after
             ):
                 decision = ToolGuardrailDecision(
@@ -984,6 +1086,27 @@ class ToolCallGuardrailController:
                 self._cross_turn_tool_failure_counts.pop(tool_name, None)
             else:
                 self._cross_turn_tool_failure_counts[tool_name] = current - 1
+
+        # A successful mutation is progress for every failing signature still
+        # being counted this turn: the next identical retry runs against
+        # changed state, so it is a fresh attempt rather than a replay. Pure
+        # loops never mutate anything between attempts, so the replay detector
+        # keeps its teeth.
+        if tool_name in {"patch", "write_file"} or file_mutation_result_landed(tool_name, result):
+            for sig in list(self._exact_failure_counts):
+                self._progress_since_failure[sig] = True
+            self._same_tool_failure_counts.clear()
+            self._cross_turn_tool_failure_counts.pop("terminal", None)
+            self._cross_turn_tool_failure_counts.pop("execute_code", None)
+        elif _is_browser_tool(tool_name) and tool_name != "browser_navigate":
+            for sig in list(self._exact_failure_counts):
+                self._progress_since_failure[sig] = True
+            self._same_tool_failure_counts.clear()
+            self._cross_turn_tool_failure_counts.pop("browser_navigate", None)
+        elif tool_name in PROGRESS_RESET_TOOL_NAMES:
+            for sig in list(self._exact_failure_counts):
+                self._progress_since_failure[sig] = True
+            self._same_tool_failure_counts.clear()
 
         if not self._is_idempotent(tool_name):
             self._no_progress.pop(signature, None)
@@ -1114,6 +1237,31 @@ class ToolCallGuardrailController:
                 "Do not repeat it — change arguments, use a different tool, or "
                 "proceed with what you have.]"
             )
+            # Hard-stop widening (#89069 / #100849 bundle): the per-turn
+            # no-progress BLOCK above only covers tools in idempotent_tools, so
+            # a model replaying the same successful `terminal`/`skill_view`
+            # call with a byte-identical result ran until the iteration budget.
+            # The consecutive-identical streak is tool-agnostic; when hard
+            # stops are enabled, halt at the same idempotent_no_progress
+            # threshold. Pollers stay exempt (an unchanged poll is progress).
+            if (
+                self.config.hard_stop_enabled
+                and count >= self.config.no_progress_block_after
+                and self._halt_decision is None
+            ):
+                self._halt_decision = ToolGuardrailDecision(
+                    action="halt",
+                    code="identical_call_streak_halt",
+                    message=(
+                        f"Stopped {tool_name}: the same call with identical arguments "
+                        f"returned the same result {count} times in a row. Stop "
+                        "repeating it unchanged; use the result already provided or "
+                        "change strategy."
+                    ),
+                    tool_name=tool_name,
+                    count=count,
+                    signature=signature,
+                )
 
         stub = None
         if (

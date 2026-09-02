@@ -395,8 +395,12 @@ async def run_codex_hygiene_compaction(
     count_before = getattr(compressor, "compression_count", 0)
     try:
         await asyncio.wait_for(
+            # copy_context().run: keep the caller's profile secret scope /
+            # HERMES_HOME override in the worker (multiplex_profiles) — same
+            # class as the detached-agent hygiene path below.
             loop.run_in_executor(
                 None,
+                copy_context().run,
                 lambda: agent._compress_context(
                     history,
                     "",
@@ -2623,7 +2627,7 @@ def _platform_has_bot_credential(platform: "Platform", platform_config: "Platfor
     Platforms that do not use ``PlatformConfig.token`` always return True so we
     never skip them here (Signal session paths, port-binding HTTP adapters, etc.).
     """
-    from gateway.config import PLATFORM_TOKEN_ENV_NAMES
+    from gateway.config import PLATFORM_TOKEN_ENV_NAMES, Platform
 
     if platform not in PLATFORM_TOKEN_ENV_NAMES:
         return True
@@ -2634,6 +2638,26 @@ def _platform_has_bot_credential(platform: "Platform", platform_config: "Platfor
     api_key = getattr(platform_config, "api_key", None) or ""
     if isinstance(api_key, str) and api_key.strip():
         return True
+    # Matrix also authenticates by password login (MATRIX_USER_ID +
+    # MATRIX_PASSWORD, no MATRIX_ACCESS_TOKEN). Those credentials land in
+    # ``extra`` rather than ``.token``, so a token-only check reads a
+    # perfectly reconnectable password-auth config as credential-less and
+    # evicts it from the retry queue on the first transient failure — after
+    # which it stays down until the gateway is restarted by hand. Mirror the
+    # adapter's own gate: homeserver + user_id + password.
+    #
+    # Read ONLY from extra, never os.getenv: build_config() already copies all
+    # three env vars onto extra, and importing this module loads ~/.hermes/.env,
+    # so an env fallback would report "has credential" for every Matrix config
+    # on the box — including the empty-primary multiplex case (#64674) this
+    # check exists to evict.
+    if platform is Platform.MATRIX:
+        extra = getattr(platform_config, "extra", None) or {}
+        if all(
+            str(extra.get(key) or "").strip()
+            for key in ("homeserver", "user_id", "password")
+        ):
+            return True
     return False
 
 
@@ -2985,6 +3009,7 @@ from gateway.session import (
     SessionStore,
     SessionSource,
     SessionContext,
+    TranscriptReadError,
     build_session_context,
     build_session_context_prompt,
     build_channel_continuity_note,
@@ -3042,6 +3067,7 @@ from gateway.restart import (
     DEFAULT_GATEWAY_SIGNAL_INTERRUPT_GRACE_TIMEOUT,
     GATEWAY_FATAL_CONFIG_EXIT_CODE,
     GATEWAY_SERVICE_RESTART_EXIT_CODE,
+    is_global_startup_conflict,
     parse_cron_drain_timeout,
     parse_restart_after_turn_timeout,
     parse_restart_drain_timeout,
@@ -9490,9 +9516,26 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         except Exception:  # noqa: BLE001 - unreadable source => assume busy
             logger.debug("scale-to-zero: api work count unreadable — staying awake", exc_info=True)
             api_count = 1
+        # An attached dashboard/desktop/TUI client is inbound activity too. It
+        # lives in the DASHBOARD process, so it reaches us as a file mtime that
+        # process refreshes on every WS frame (gateway/scale_to_zero.py). Fold
+        # it into the inbound clock rather than adding a conjunct: the client
+        # then gets the same idle_timeout grace after it disconnects as a chat
+        # message does, and a lingering marker cannot pin the box (an old mtime
+        # is outside idle_timeout just like an old _last_inbound_at).
+        last_inbound = self._last_inbound_at
+        try:
+            from gateway.scale_to_zero import dashboard_client_last_seen
+
+            seen = dashboard_client_last_seen()
+        except Exception:  # noqa: BLE001 - unreadable source => assume busy
+            logger.debug("scale-to-zero: dashboard heartbeat unreadable — staying awake", exc_info=True)
+            seen = time.time()
+        if seen is not None and seen > last_inbound:
+            last_inbound = seen
         return is_idle(
             active_work_count=self._running_agent_count() + cron_count + api_count,
-            seconds_since_last_inbound=time.time() - self._last_inbound_at,
+            seconds_since_last_inbound=time.time() - last_inbound,
             idle_timeout_seconds=self._scale_to_zero_idle_timeout_seconds(),
             has_live_background_work=self._scale_to_zero_has_live_background_work(),
         )
@@ -9728,6 +9771,72 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         if adapter is not None and session_key in getattr(adapter, "_pending_messages", {}):
             depth += 1
         return depth
+
+    def _rescue_orphaned_overflow(
+        self, session_key: str, adapter: Any
+    ) -> Optional["MessageEvent"]:
+        """Pop the oldest orphaned FIFO overflow event for an idle session (#99882).
+
+        The FIFO overflow (``queued_events``) drains only at the post-turn
+        promotion site (``_promote_queued_event`` inside the ``_run_agent``
+        drain).  When a busy window ends without that drain running — the
+        #99882 shape: a follow-up queued during compression-in-flight lands
+        in overflow, compression finishes, the slot event's turn runs, but
+        the drain recursion exits before promoting (or the busy window ends
+        through an exception / interrupt / generation-bump exit that never
+        reaches the promotion site) — the overflow entries are silently
+        orphaned: never dispatched, never persisted, never logged.
+
+        This rescue runs at the point where a NEW event arrives for a
+        session that is NOT busy (the idle entry in
+        ``_process_message_priority``).  If the session went idle with a
+        populated overflow, the oldest orphan is returned so the caller runs
+        it as THIS turn, and the next orphan (if any) is staged into the
+        slot so the post-turn drain continues the chain in arrival order
+        (#28503).  The caller then enqueues the incoming event behind the
+        chain via ``_enqueue_fifo``.
+
+        The returned event is REMOVED from both stores: leaving it in the
+        slot while it also runs as the current turn would make the post-turn
+        ``_dequeue_pending_event`` run it a second time.
+
+        Returns the orphaned event to run now, or ``None`` when there is
+        nothing to rescue (no overflow, slot occupied, or no slot storage).
+        """
+        try:
+            _q_state = self._peek_session_state(session_key)
+            overflow = _q_state.conversation.queued_events if _q_state else None
+            if not overflow:
+                return None
+            pending_slot = getattr(adapter, "_pending_messages", None)
+            if not isinstance(pending_slot, dict) or pending_slot.get(session_key):
+                # Slot occupied (busy) or no slot storage — promotion owns
+                # this; do not fight it from the idle path.
+                return None
+            head = overflow.pop(0)
+            # Keep the slot occupied for the rest of the chain so the drain
+            # promotes in order and any mid-chain arrival routes to overflow
+            # instead of jumping the queue (same invariant as the drain's
+            # own _promote_queued_event).  Only ONE event fits the slot.
+            if overflow:
+                pending_slot[session_key] = overflow.pop(0)
+            logger.warning(
+                "Rescued orphaned FIFO overflow event for idle session "
+                "%s — it was queued during a busy window but the post-turn "
+                "drain never promoted it (#99882)",
+                session_key,
+            )
+            if overflow:
+                logger.warning(
+                    "%d overflow event(s) still queued for session %s after "
+                    "rescue staging (will drain via normal promotion)",
+                    len(overflow),
+                    session_key,
+                )
+            return head
+        except Exception:
+            logger.debug("FIFO overflow rescue failed for %s", session_key, exc_info=True)
+            return None
 
     @staticmethod
     def _is_goal_continuation_event(event_or_text: Any) -> bool:
@@ -14065,20 +14174,30 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 # Python logs "Unclosed client session" at process exit.
                 await self._safe_adapter_disconnect(adapter, platform)
                 if adapter.has_fatal_error:
+                    # A live foreign holder of this bot token / identity is
+                    # a single-writer ownership conflict, not a transient
+                    # blip — even though ``_acquire_platform_lock`` emits it
+                    # retryable so a MID-RUN reconnect can recover (#54167).
+                    # At startup route it as non-retryable: with nothing
+                    # connected the gateway exits 78 instead of sitting alive
+                    # and deaf in the retry queue forever (#83183).
+                    _retryable = adapter.fatal_error_retryable and not (
+                        is_global_startup_conflict(adapter.fatal_error_code)
+                    )
                     self._update_platform_runtime_status(
                         platform.value,
-                        platform_state="retrying" if adapter.fatal_error_retryable else "fatal",
+                        platform_state="retrying" if _retryable else "fatal",
                         error_code=adapter.fatal_error_code,
                         error_message=adapter.fatal_error_message,
                     )
                     target = (
                         startup_retryable_errors
-                        if adapter.fatal_error_retryable
+                        if _retryable
                         else startup_nonretryable_errors
                     )
                     target.append(f"{platform.value}: {adapter.fatal_error_message}")
                     # Queue for reconnection if the error is retryable
-                    if adapter.fatal_error_retryable:
+                    if _retryable:
                         self._failed_platforms[platform] = {
                             "config": platform_config,
                             "attempts": 1,
@@ -16411,6 +16530,21 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 flush_pending_to_file(dict(self._pending_messages), reason="shutdown")
             except Exception:
                 pass
+            # The FIFO tail lives in SessionState.conversation.queued_events,
+            # not in the slot dict above — flush it too or every follow-up
+            # parked in overflow at restart time is lost (#99882).
+            try:
+                from gateway.shutdown_flush import flush_overflow_to_file
+                flush_overflow_to_file(
+                    {
+                        _k: list(_v)
+                        for _k, _v in dict(getattr(self, "_queued_events", None) or {}).items()
+                        if _v
+                    },
+                    reason="shutdown",
+                )
+            except Exception:
+                pass
             # On the real runner these are live SessionState views whose
             # clear() resets one field per session — never a wholesale dict
             # swap, so a concurrent writer on another session can't lose its
@@ -17022,6 +17156,26 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         scheduler would.
         """
         if not getattr(adapter, "fatal_error_retryable", True):
+            return
+        if is_global_startup_conflict(getattr(adapter, "fatal_error_code", None)):
+            # Same startup contract as the primary path: a live foreign holder
+            # of this profile's token/identity is an ownership conflict, not
+            # a transient blip. Park it fatal (like ``duplicate_credential``)
+            # instead of retry-storming the token every backoff (#83183).
+            logger.error(
+                "[MULTIPLEX] Profile '%s': %s credential is held by another "
+                "gateway (%s) — parked, not retried. %s",
+                profile_name,
+                platform.value,
+                adapter.fatal_error_code,
+                adapter.fatal_error_message or "",
+            )
+            self._update_platform_runtime_status(
+                f"{profile_name}:{platform.value}",
+                platform_state="fatal",
+                error_code=adapter.fatal_error_code,
+                error_message=adapter.fatal_error_message,
+            )
             return
 
         async def _await_running_then_schedule() -> None:
@@ -19661,6 +19815,50 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 _quick_key,
             )
             return _limit_message
+
+        # ── FIFO orphan rescue (#99882) ────────────────────────────────
+        # If this session went idle with a populated overflow (queued
+        # during a busy window whose post-turn drain never promoted —
+        # e.g. a compression-demoted follow-up after the compression
+        # window ended through an exit that skipped the promotion site),
+        # those events were silently orphaned.  We are starting the next
+        # turn for this session NOW: re-stage the orphans in FIFO order
+        # and enqueue the incoming event behind them, so arrival order
+        # (#28503) holds: oldest orphan runs as this turn, the rest drain
+        # in order, the new message last.  Skipped for control commands
+        # (/stop etc. own their own semantics) and internal events.
+        try:
+            _orphan_adapter = self._adapter_for_source(source)
+            if (
+                _orphan_adapter is not None
+                and not bool(getattr(event, "internal", False))
+                and not event.get_command()
+            ):
+                _rescued = self._rescue_orphaned_overflow(
+                    _quick_key, _orphan_adapter
+                )
+                if _rescued is not None:
+                    # The oldest orphan runs as THIS turn.  Park the
+                    # incoming event behind the rest of the chain: into the
+                    # slot when the chain was a single orphan (so the
+                    # post-turn drain picks it up), otherwise into overflow
+                    # behind the already-staged next orphan (FIFO).
+                    self._enqueue_fifo(_quick_key, event, _orphan_adapter)
+                    event = _rescued
+                    # Same session key by construction; carry the orphan's
+                    # own source so reply anchors / thread metadata point
+                    # at the message that is actually being answered.
+                    _rescued_source = getattr(_rescued, "source", None)
+                    if _rescued_source is not None:
+                        source = _rescued_source
+                    is_internal = bool(getattr(_rescued, "internal", False))
+        except Exception:
+            logger.debug(
+                "FIFO orphan rescue pre-claim failed for %s",
+                _quick_key,
+                exc_info=True,
+            )
+
         _claim_state = self._session_state(_quick_key)
         if _active_session_lease is not None:
             _claim_state.turn.lease = _active_session_lease
@@ -21084,8 +21282,23 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # began processing if the gateway died while it was still waiting.
         await self._mark_durable_active_turn(event, session_entry.session_key)
 
-        # Load conversation history from transcript
-        history = await self.async_session_store.load_transcript(session_entry.session_id)
+        # Load conversation history from transcript. An unreadable canonical
+        # store is not an empty conversation: stop before the agent can invent
+        # continuity from a plausible-looking []. This return happens before
+        # the broad cleanup finally below, so restore task-local context here;
+        # the outer dispatch still clears the durable marker and turn lease.
+        try:
+            history = await self.async_session_store.load_transcript(
+                session_entry.session_id
+            )
+        except TranscriptReadError:
+            self._clear_session_env(_session_env_tokens)
+            return (
+                "⚠️ This session's history is temporarily unavailable, so "
+                "this message was not processed. Ask the operator to inspect "
+                "state.db, then resend after it is healthy. Use /reset only "
+                "if you intentionally want to start a new conversation."
+            )
         
         # -----------------------------------------------------------------
         # Session hygiene: auto-compress pathologically large transcripts
@@ -21526,8 +21739,22 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                                     _hyg_commit_fence = CompressionCommitFence(
                                         total_ceiling_seconds=_hyg_total_ceiling_seconds
                                     )
+                                    # Default executor (NOT self._get_executor):
+                                    # a fence-cancelled hung summary must never
+                                    # occupy one of the gateway's agent-work
+                                    # slots. But it MUST run inside the caller's
+                                    # contextvars: under multiplex_profiles the
+                                    # profile secret scope / HERMES_HOME override
+                                    # live in ContextVars, and a bare
+                                    # run_in_executor worker starts with an empty
+                                    # Context — the summary model's
+                                    # get_secret(<PROVIDER>_API_KEY) then fails
+                                    # closed (UnscopedSecretError) and every
+                                    # hygiene compaction silently degrades to a
+                                    # lossy truncation (#100849 bundle).
                                     _hyg_future = loop.run_in_executor(
                                         None,
+                                        copy_context().run,
                                         lambda: _hyg_agent._compress_context(
                                             _hyg_msgs, "",
                                             approx_tokens=_approx_tokens,
@@ -21675,6 +21902,175 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                                         # uncompressed) but with distinct provenance,
                                         # user message, and NO failure-cooldown
                                         # increment.
+                                        #
+                                        # #97963: decouple the TURN from the
+                                        # COMPRESSION. When the worker's commit is
+                                        # watermark-fenced (it captured the session's
+                                        # active-row watermark at compression start,
+                                        # so rows appended after that point — this
+                                        # released turn included — survive its late
+                                        # commit verbatim as cloned concurrent tail),
+                                        # the already-running attempt KEEPS its commit
+                                        # admission: the user's turn proceeds on the
+                                        # uncompressed transcript NOW, and the summary
+                                        # is adopted when the detached worker reaches
+                                        # its own watermark-fenced commit transaction
+                                        # (archive_and_compact / the rotation publish
+                                        # path — the next safe boundary). Before this,
+                                        # the fence was ALWAYS cancelled here, burning
+                                        # the full summary attempt — for a thinking
+                                        # summary model whose reasoning prefix alone
+                                        # exceeds the 10s hold, that made hygiene
+                                        # auto-compression fail 100% of the time while
+                                        # paying the summary model per turn. The turn
+                                        # itself is still released at the same budget:
+                                        # only the fate of the detached worker's
+                                        # RESULT changes. If the commit is NOT
+                                        # watermark-fenced (no session_db, watermark
+                                        # capture failed, legacy lock API), a late
+                                        # commit could clobber newer turns, so cancel
+                                        # exactly as before — never worse than the
+                                        # status quo.
+                                        _hyg_keep_admission = bool(
+                                            getattr(
+                                                _hyg_commit_fence,
+                                                "commit_watermark_fenced",
+                                                False,
+                                            )
+                                        ) and not _hyg_commit_fence.is_cancelled
+                                        if _hyg_keep_admission:
+                                            self._defer_agent_cleanup_until_future_done(
+                                                _hyg_future,
+                                                _hyg_agent,
+                                                context="session hygiene turn-hold",
+                                            )
+                                            _hyg_cleanup_deferred = True
+                                            # NO retry-after here (#97963 (b)): the
+                                            # attempt is still running toward a real
+                                            # commit, and arming the flat 60s
+                                            # retry-after would ALSO block the
+                                            # agent-side preflight compressor from a
+                                            # fresh chance ("Skipping preflight
+                                            # compression: same-session cooldown
+                                            # active"). Re-attempt spacing is covered
+                                            # by the durable compression lock instead:
+                                            # the next turn's hygiene pre-check skips
+                                            # while this worker's lease is held
+                                            # (_session_has_compression_in_flight).
+                                            # The flat retry-after is recorded by the
+                                            # done-callback below ONLY if the worker
+                                            # ends without committing anything.
+                                            _hyg_deferred_sid = session_entry.session_id
+                                            _hyg_deferred_key = session_key
+                                            _hyg_deferred_agent = _hyg_agent
+
+                                            def _hyg_adopt_or_space_retry(
+                                                _fut,
+                                                _gw=self,
+                                                _sid=_hyg_deferred_sid,
+                                                _skey=_hyg_deferred_key,
+                                                _agent=_hyg_deferred_agent,
+                                            ):
+                                                try:
+                                                    _exc = _fut.exception()
+                                                except (
+                                                    asyncio.CancelledError,
+                                                    Exception,
+                                                ):
+                                                    _exc = None
+                                                    _committed = False
+                                                else:
+                                                    _committed = _exc is None and (
+                                                        bool(
+                                                            getattr(
+                                                                _agent,
+                                                                "_last_compaction_in_place",
+                                                                False,
+                                                            )
+                                                        )
+                                                        or getattr(
+                                                            _agent, "session_id", _sid
+                                                        )
+                                                        != _sid
+                                                    )
+                                                if _committed:
+                                                    logger.info(
+                                                        "Session hygiene compression for "
+                                                        "session %s finished after the "
+                                                        "turn-hold was released — summary "
+                                                        "adopted at the watermark-fenced "
+                                                        "commit boundary (#97963)",
+                                                        _sid,
+                                                    )
+                                                    try:
+                                                        _reset_hygiene_failure_streak(
+                                                            _gw, _skey
+                                                        )
+                                                    except Exception as _rs_err:
+                                                        logger.debug(
+                                                            "hygiene streak reset after "
+                                                            "deferred adoption failed: %s",
+                                                            _rs_err,
+                                                        )
+                                                else:
+                                                    # Nothing to adopt (summary failed,
+                                                    # fence refused the commit, or the
+                                                    # attempt was superseded). Restore
+                                                    # the pre-#97963 spacing so
+                                                    # sustained traffic does not spawn
+                                                    # and abandon a fresh compressor
+                                                    # every turn. Flat and
+                                                    # non-escalating: the streak must
+                                                    # not advance for a deferral.
+                                                    _record_hygiene_cooldown(
+                                                        _gw, _sid,
+                                                        _HYGIENE_TURNHOLD_RETRY_SECONDS,
+                                                        "hygiene compression deferred: "
+                                                        "turn-hold budget expired and the "
+                                                        "detached attempt did not commit",
+                                                    )
+
+                                            _hyg_future.add_done_callback(
+                                                _hyg_adopt_or_space_retry
+                                            )
+                                            from agent.session_activity import (
+                                                ActivityProvenance,
+                                            )
+                                            _stamp_hygiene_compression_provenance(
+                                                _hyg_agent,
+                                                "session hygiene compression turn-hold",
+                                                ActivityProvenance.AGENT_COMPRESSION_TURNHOLD,
+                                                "hygiene compression turn-hold "
+                                                "activity stamp failed",
+                                            )
+                                            logger.info(
+                                                "Session hygiene compression for session %s "
+                                                "exceeded turn-hold budget (%.1fs); "
+                                                "proceeding without compression this turn — "
+                                                "the watermark-fenced worker keeps its "
+                                                "commit admission and the summary will be "
+                                                "adopted when it finishes",
+                                                session_entry.session_id,
+                                                time.monotonic() - _hyg_wait_started,
+                                            )
+                                            _turnhold_msg = t(
+                                                "gateway.compress.turnhold_deferred"
+                                            )
+                                            try:
+                                                _adapter = self._adapter_for_source(source)
+                                                if _adapter and source.chat_id:
+                                                    await _adapter.send(
+                                                        source.chat_id,
+                                                        _turnhold_msg,
+                                                        metadata=_hyg_meta,
+                                                    )
+                                            except Exception as _werr:
+                                                logger.warning(
+                                                    "Failed to deliver compression-turnhold "
+                                                    "notice to user: %s",
+                                                    _werr,
+                                                )
+                                            raise
                                         _cancelled = None
                                         while _cancelled is None:
                                             if _hyg_commit_fence.commit_in_flight:
@@ -22241,6 +22637,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                                             _hyg_agent, context="session hygiene"
                                         )
 
+                    except HygieneTurnHoldExceeded:
+                        # Availability boundary, not a failure — already logged
+                        # at INFO by the turn-hold handler. Must not hit the
+                        # generic "auto-compress failed" warning below: that
+                        # log is how thinking-model deployments read as
+                        # permanently broken (#97963; surfaced by @686f6c61
+                        # in PR #99657).
+                        pass
                     except Exception as e:
                         logger.warning(
                             "Session hygiene auto-compress failed: %s", e

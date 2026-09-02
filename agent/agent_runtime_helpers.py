@@ -110,6 +110,7 @@ def _ra():
 AGENT_RUNTIME_POST_HOOK_TOOL_NAMES = frozenset(
     {
         "todo",
+        "todo_list",
         "session_search",
         "memory",
         "clarify",
@@ -121,6 +122,7 @@ AGENT_RUNTIME_POST_HOOK_TOOL_NAMES = frozenset(
         "read_window_below",
         "setup_mcp",
         "tour",
+        "gui_tour",
         "delegate_task",
         "compact_context",
     }
@@ -3666,7 +3668,7 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
             pass
         return result
 
-    if function_name == "todo":
+    if function_name == "todo_list":
         def _execute(next_args: dict) -> Any:
             from tools.todo_tool import todo_tool as _todo_tool
             return _finish_agent_tool(
@@ -3808,7 +3810,7 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
                 ),
                 next_args,
             )
-    elif function_name == "tour":
+    elif function_name == "gui_tour":
         def _execute(next_args: dict) -> Any:
             from tools.tour_tool import tour_tool as _tour_tool
             return _finish_agent_tool(

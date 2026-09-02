@@ -629,6 +629,85 @@ export function mergeSessionPage(
   return interleaved
 }
 
+function sidebarProfileKey(session: Pick<SessionInfo, 'profile'>): string {
+  return (session.profile ?? '').trim() || 'default'
+}
+
+function sessionListIdentity(session: Pick<SessionInfo, 'id' | 'profile'>): string {
+  return `${sidebarProfileKey(session)}::${session.id}`
+}
+
+/**
+ * Re-attach previous rows for profiles whose sidebar slice failed this refresh.
+ *
+ * The batched sidebar endpoint reports a disk I/O / lock failure as HTTP 200
+ * with `recents: []` and `errors: [{ profile }]`. `mergeSessionPage` only keeps
+ * working / pinned / selected ids, so idle Yesterday / This-week rows would
+ * otherwise vanish until a later successful scan (#73847, #88528).
+ *
+ * Successful profiles are left alone: their incoming page is still authoritative.
+ */
+export function carryForwardFailedProfileSessions(
+  previous: SessionInfo[],
+  incoming: SessionInfo[],
+  errors: Array<{ profile?: string; error?: string }> | undefined | null
+): SessionInfo[] {
+  if (!errors?.length || previous.length === 0) {
+    return incoming
+  }
+
+  const failed = new Set(errors.map(error => (error.profile ?? '').trim() || 'default'))
+  const incomingIds = new Set(incoming.map(sessionListIdentity))
+  const carried: SessionInfo[] = []
+
+  for (const session of previous) {
+    if (!failed.has(sidebarProfileKey(session)) || incomingIds.has(sessionListIdentity(session))) {
+      continue
+    }
+
+    carried.push(session)
+  }
+
+  if (carried.length === 0) {
+    return incoming
+  }
+
+  // Incoming-first concat parks the failed profile at the tail of an
+  // all-profiles list. Re-rank by the same recency key the backend uses.
+  const recency = (session: SessionInfo): number => Math.max(session.last_active || 0, session.started_at || 0)
+
+  return [...incoming, ...carried].sort((a, b) => recency(b) - recency(a))
+}
+
+/** Keep previous per-profile sidebar meta for profiles whose slice failed.
+ *
+ *  A failed scan returns `{}` / falsey truncated flags. Applying those
+ *  would zero usage and hide Load more under a list we just carried forward.
+ */
+export function keepFailedProfileMeta<T>(
+  previous: Record<string, T>,
+  incoming: Record<string, T>,
+  errors: Array<{ profile?: string; error?: string }> | undefined | null
+): Record<string, T> {
+  if (!errors?.length) {
+    return incoming
+  }
+
+  const next = { ...incoming }
+
+  for (const error of errors) {
+    const key = (error.profile ?? '').trim() || 'default'
+
+    if (Object.prototype.hasOwnProperty.call(previous, key)) {
+      next[key] = previous[key]
+    } else {
+      delete next[key]
+    }
+  }
+
+  return next
+}
+
 /** Raise a session in recents on user send (before stream / turn resolve). */
 export function touchSessionActivity(
   sessionId: string | null | undefined,
@@ -1349,16 +1428,19 @@ export const setNewChatWorkspaceTarget = (next: NewChatWorkspaceTarget): number 
 }
 
 export const workspaceCwdForNewSession = (): string => {
-  if ($connection.get()?.mode === 'remote') {
-    return getRememberedWorkspaceCwd()
-  }
-
   // A bare new chat starts DETACHED — no inherited cwd, so the composer's coding
   // rail (which keys off $currentCwd) shows no branch and the first message runs
   // in the gateway's default rather than silently in the last repo you touched.
   // Only an explicit default-project-dir setting pre-attaches. Entering a
   // project/worktree attaches its cwd directly (startSessionInWorkspace), so the
   // "remember where I was when I'm in a project" case is unaffected.
+  //
+  // This must behave identically in local and remote mode: the remembered CWD
+  // under the remote-keyed workspaceCwdKey() can be from a *different* project
+  // than the one the user is currently scoped into, and bare-new-session in
+  // the wrong workspace was the #57911 symptom. Resume/restore still reads
+  // the remembered cwd via ensureDefaultWorkspaceCwd (where it remains
+  // remote-keyed and intentionally sticky).
   return getConfiguredDefaultProjectDir()
 }
 

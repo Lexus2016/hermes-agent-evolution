@@ -826,6 +826,10 @@ DEFAULT_CONFIG = {
     "tool_loop_guardrails": {
         "warnings_enabled": True,
         "hard_stop_enabled": False,
+        # Unattended gateway/cron platforms get hard stops by default (nobody
+        # is present to /stop a model that ignores loop warnings); interactive
+        # cli/tui/desktop/acp stay warning-only unless hard_stop_enabled.
+        "non_interactive_hard_stop_enabled": True,
         "warn_after": {
             "exact_failure": 2,
             "same_tool_failure": 3,
@@ -962,6 +966,10 @@ DEFAULT_CONFIG = {
                                       # waiting. Kept well under chat-transport idle timeouts
                                       # (Telegram ~30s). On expiry the turn proceeds
                                       # uncompressed — an availability boundary, not a failure.
+                                      # The detached worker keeps its commit admission when its
+                                      # commit is watermark-fenced, so the finished summary is
+                                      # adopted at the next safe boundary instead of being
+                                      # discarded (#97963 — thinking summary models).
         "context_timeout_seconds": 120,  # inactivity budget for in-agent compress_context
                                       # (conversation loop, /compress, preflight, etc.).
                                       # Same progress-aware semantics as hygiene_timeout_seconds:
@@ -2825,6 +2833,15 @@ DEFAULT_CONFIG = {
         # Wrap delivered cron responses with a header (task name) and footer
         # ("The agent cannot see this message").  Set to false for clean output.
         "wrap_response": True,
+        # Delivery behaviour for cron output sent through a live gateway adapter.
+        "delivery": {
+            # Mark cron deliveries as FINAL notifications so the platform pushes
+            # them (Telegram's "important" notification mode otherwise sends
+            # every non-notify message with disable_notification=True, and users
+            # report the silent brief as "never delivered"). Set to false to
+            # restore silent (no-push) cron deliveries.
+            "notify": True,
+        },
         # Make cron deliveries CONTINUABLE: a user can reply to a cron brief
         # and the agent has it in context (no "what is Task #2?" amnesia).
         # Default False preserves the historical isolation guarantee (cron
@@ -3595,11 +3612,28 @@ DEFAULT_CONFIG = {
         "profile_build": "ask",
     },
 
-    # Privacy-safe aggregate metrics written only to this profile's local
-    # telemetry directory. Collection is opt-in and no remote sink exists.
+    # Privacy-safe aggregate metrics written to this profile's local telemetry
+    # directory. Collection is opt-in (``enabled``). Transmission to the Nous
+    # telemetry service is a SEPARATE opt-in (``send``) and is off by default;
+    # see docs/observability/relay-shared-metrics.md, Appendix A, for the
+    # consent, identity, rotation, retention, and deletion decisions.
     "telemetry": {
         "shared_metrics": {
             "enabled": False,
+            # Transmit exported packages to the Nous telemetry service.
+            # Requires ``enabled``: it never switches collection on by itself,
+            # and ``send`` without ``enabled`` is logged as an error rather
+            # than silently doing nothing. A package is only sent when its
+            # whole period falls inside a recorded consent window, so data
+            # collected before consent — or while it was withdrawn — stays
+            # local.
+            "send": False,
+            # Ingest endpoint. Production by default; override for staging or
+            # a local test server. Deliberately NOT overridable by an
+            # environment variable: that would let an inherited value silently
+            # redirect telemetry a user consented to send to Nous. Non-HTTPS
+            # is refused unless the host is localhost.
+            "endpoint": "https://telemetry.nousresearch.com/v1/telemetry",
         },
     },
 
@@ -4073,6 +4107,29 @@ DEFAULT_CONFIG = {
     "patch": {
         "self_correction_retries": 3,
         "lint_after_patch": True,
+    },
+
+    # Managed llama.cpp local runtime (see docs: user-guide/local-models).
+    # Hermes downloads official llama.cpp release binaries, then spawns and
+    # supervises one llama-server in router mode. Context sizing is policy,
+    # not preference: there are deliberately no context/VRAM knobs here.
+    "local_runtime": {
+        # Master switch for the managed runtime. Off = detection-only
+        # (Hermes still finds an external llama-server you run yourself).
+        "enabled": False,
+        # Pinned llama.cpp release tag (rolling bNNNN). Bumped by Hermes
+        # releases after the validation suite re-runs, not tracked live.
+        "tag": "b10679",
+        # Inference backend: auto = CUDA on NVIDIA, Metal on macOS, Vulkan on
+        # other GPUs, else CPU. Explicit values: cuda|metal|vulkan|hip|cpu.
+        "backend": "auto",
+        # Router process: how many models may be resident at once.
+        "models_max": 4,
+        # Port for the managed server. 0 = pick a free port at spawn.
+        "port": 0,
+        # Extra ports detection probes for an external llama-server, in
+        # addition to the default 8080.
+        "detect_ports": [],
     },
 
     # Config schema version - bump this when adding new required fields

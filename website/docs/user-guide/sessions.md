@@ -888,6 +888,47 @@ Active sessions are never auto-pruned, regardless of age. Ended sessions are
 aged from their latest message, so a long-lived conversation used recently is
 not deleted merely because it began before the retention window.
 
+**Stale open sessions from automation.** Some producers — cron jobs, kanban
+workers, subagents, one-shot CLI runs — can die without ever marking their
+session ended, and pruning only deletes *ended* rows. To keep those from
+accumulating forever, each auto-prune pass also *closes* open sessions from
+those state-owned sources (`cli`, `cron`, `kanban`, `acp`, `api_server`,
+`subagent`, `tool`) whose last activity is older than `retention_days`
+(`end_reason: startup_orphan_reap`). Closing is non-destructive — the
+session stays resumable — and the row is aged from its close, so it is only
+deleted by a *later* pass after a further full retention window. Messaging
+platform sessions (Telegram, Discord, …), TUI/desktop sessions, pinned
+sessions, and sessions with a live turn or compression in progress are
+never closed by this sweep.
+
+### Oversized-Transcript Guards
+
+Two limits stop a runaway transcript from being loaded into memory all at once
+(both default to `20000` active messages; `0` disables the guard):
+
+```yaml
+sessions:
+  max_resume_messages: 20000   # interactive resume (CLI / TUI / Desktop)
+  max_export_messages: 20000   # one-shot in-memory export of a single session
+```
+
+`max_resume_messages` bounds **what the resume actually loads**, not the whole
+history of the conversation:
+
+- A plain interactive resume (CLI `--resume`, the TUI) materializes the full
+  compression lineage — every compacted segment plus the live tip — so it is
+  bounded across the lineage.
+- Desktop's cold resume pages the transcript over REST and only holds the live
+  tip segment in memory, so it is bounded by the tip alone. A long-lived chat
+  that has been compacted many times (dozens of segments, tens of thousands of
+  archived rows behind a small tip) is exactly what compression is meant to
+  produce and opens normally; its footer message count reflects the stored
+  lineage, not the live prompt.
+
+When a resume is refused the client receives error code `4130` with the count
+and the scope it was measured against (`across its lineage` or
+`in its tip segment`). `hermes sessions export` still works for such sessions.
+
 ### Manual Cleanup
 
 ```bash

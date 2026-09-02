@@ -1058,6 +1058,7 @@ def _format_job(job: Dict[str, Any]) -> Dict[str, Any]:
         "last_run_at": job.get("last_run_at"),
         "last_status": job.get("last_status"),
         "last_delivery_error": job.get("last_delivery_error"),
+        "last_delivery_unverified": job.get("last_delivery_unverified"),
         "last_fire_error": job.get("last_fire_error"),
         "enabled": job.get("enabled", True),
         # Derive from enabled so half-paused records never render as paused.
@@ -1206,6 +1207,30 @@ def _forward_relay_fronted_run(
         },
         indent=2,
     )
+
+
+def _manual_run_delivery_note(deliver: str, refreshed: Dict[str, Any]) -> str:
+    """Parenthetical delivery note for a manual run's completion summary.
+
+    Follows the refreshed job record (#83993): ``run_one_job`` writes
+    ``last_delivery_error`` via ``mark_job_run`` when the post-run delivery
+    (telegram/discord/…) failed, and the summary must not claim success over
+    that record — the calling agent relays this line to the user. Local jobs
+    never deliver; an empty/missing error keeps the legacy wording
+    byte-for-byte.
+    """
+    # Falsy deliver ("", stored JSON null) means no delivery target — the
+    # fire-time path normalizes it to "local" (no delivery, output persisted
+    # in last_output, no delivery error), so it must read as saved-locally,
+    # not as a delivered remote target. Whitespace-only values are NOT folded
+    # in here: they keep falling through to the error check, where the
+    # fire-time "no delivery target resolved" error gets surfaced.
+    if not deliver or deliver == "local":
+        return " (output saved locally only)"
+    err = str(refreshed.get("last_delivery_error") or "").strip()
+    if not err:
+        return " (output was delivered there by the job itself)"
+    return f" (⚠ delivery FAILED: {err[:200]})"
 
 
 def _execute_job_now(
@@ -1388,11 +1413,21 @@ def _run_claimed_job(
             _registered = False
             release_running_job(job_id)
         refreshed = get_job(job_id) or {}
-        ok = refreshed.get("last_status") == "ok"
+        last_status = refreshed.get("last_status")
+        # "delivery_failed" (#83993): the agent run itself succeeded but the
+        # output never reached the user. That is NOT a success for the caller
+        # — the calling agent relays this result — so report it as failed
+        # and surface the delivery error, which lives in last_delivery_error
+        # (last_error is None for these runs, and a bare success=False with
+        # error=None reads as an unexplained failure).
+        ok = last_status == "ok"
+        run_error = refreshed.get("last_error")
+        if last_status == "delivery_failed" and not run_error:
+            run_error = refreshed.get("last_delivery_error")
         return {
             "claimed": True,
             "success": bool(processed and ok),
-            "error": refreshed.get("last_error"),
+            "error": run_error,
         }
 
     except Exception as e:
@@ -1622,7 +1657,14 @@ def _try_dispatch_background_run(
         max_async = 3
 
     started_at = time.time()
-    deliver = job.get("deliver", "local")
+    # Canonicalize with the scheduler's own normalizer so the summary states
+    # the same target fire time will use: falsy ("", stored JSON null) reads
+    # "local", legacy list-form deliver flattens to its comma string. Read
+    # from the claimed snapshot — the owner-bearing record the run actually
+    # executes — not the pre-claim `job` the tool loaded.
+    from cron.scheduler import _normalize_deliver_value
+
+    deliver = _normalize_deliver_value(claimed_job.get("deliver", "local"))
 
     def _runner() -> Dict[str, Any]:
         res = _run_claimed_job(claimed_job, extra_prompt=extra_prompt)
@@ -1633,11 +1675,7 @@ def _try_dispatch_background_run(
             f"Result: {'ok' if res.get('success') else 'FAILED'}"
             + (f" — {res.get('error')}" if res.get("error") else ""),
             f"Delivery target: {deliver}"
-            + (
-                " (output was delivered there by the job itself)"
-                if deliver != "local"
-                else " (output saved locally only)"
-            ),
+            + _manual_run_delivery_note(deliver, refreshed),
         ]
         if refreshed.get("next_run_at"):
             lines.append(f"Next scheduled run: {refreshed['next_run_at']}")
@@ -2267,7 +2305,7 @@ def cronjob(
 
 
 CRONJOB_SCHEMA = {
-    "name": "cronjob",
+    "name": "cronjob_manage",
     "description": """Manage scheduled cron jobs: action='create' schedules a job from a prompt and/or skills; 'list' inspects jobs; 'update'/'pause'/'resume'/'remove' manage one by job_id (always list first — never guess job IDs); 'run' fires a job immediately in the BACKGROUND (returns a handle at once, outcome re-enters the conversation when done — do not wait or poll; optional 'prompt' adds transient context for that fire only).
 
 Jobs run in a fresh session with no current-chat context, so prompts must be self-contained, and the agent's FINAL RESPONSE is what gets delivered — cron runs are autonomous and cannot ask questions. Prefer updating an existing job over creating near-duplicates.""",
@@ -2424,7 +2462,7 @@ def _cronjob_handler(args, **kw):
 
 
 registry.register(
-    name="cronjob",
+    name="cronjob_manage",
     toolset="cronjob",
     schema=CRONJOB_SCHEMA,
     handler=_cronjob_handler,

@@ -2049,6 +2049,34 @@ def init_agent(
     except Exception:
         agent.lmstudio_load_mode = "explicit"
 
+    # API-transport streaming (``model.streaming``, default true).  The
+    # conversation loop prefers ``stream=True`` for every turn — including
+    # subagent turns — to get fine-grained liveness health-checking (#3120),
+    # but self-hosted OpenAI-compatible backends with broken streaming
+    # tool-call paths (e.g. vLLM ``--tool-call-parser qwen3_xml`` + a
+    # reasoning parser can leak tool-call markup into plain text and return
+    # zero ``tool_calls``, #72901) silently no-op instead of executing.
+    # ``model.streaming: false`` seeds ``_disable_streaming`` so the session
+    # uses the non-streaming path, which the loop already falls back to at
+    # runtime when a provider rejects streaming.  The setting is
+    # session-scoped: it persists across mid-session model switches, mirroring
+    # the runtime fallback's semantics.  Orthogonal to ``display.streaming``
+    # (token rendering) — display-only settings are untouched.
+    agent._disable_streaming = False
+    try:
+        _model_section = _agent_cfg.get("model", {})
+        if isinstance(_model_section, dict):
+            _streaming = str(_model_section.get("streaming", "true")).strip().lower()
+            if _streaming in {"false", "0", "no", "off"}:
+                agent._disable_streaming = True
+            elif _streaming not in {"true", "1", "yes", "on"}:
+                logger.warning(
+                    "Invalid model.streaming=%r; expected a boolean. Using streaming (default).",
+                    _model_section.get("streaming"),
+                )
+    except Exception:
+        agent._disable_streaming = False
+
     try:
         from agent.policy_interceptors import (
             RegisteredPolicy,
@@ -2086,7 +2114,8 @@ def init_agent(
         )
         agent._tool_guardrails = ToolCallGuardrailController(
             ToolCallGuardrailConfig.from_mapping(
-                _agent_cfg.get("tool_loop_guardrails", {})
+                _agent_cfg.get("tool_loop_guardrails", {}),
+                platform=platform,
             ),
             policy_registry=_policy_registry,
             recheck_controller=_recheck_controller,
@@ -3425,6 +3454,7 @@ def init_agent(
     # until the first response with usage; invalidated on compaction and
     # session switches so stale anchors can never suppress compression.
     agent._usage_anchor = None
+    agent._turn_base_usage_anchor = None
 
     # Cumulative token usage for the session
     agent.session_prompt_tokens = 0
