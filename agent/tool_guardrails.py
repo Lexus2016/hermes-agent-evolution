@@ -519,7 +519,7 @@ def classify_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str
     # with exit_code but no "error" key when the background process exits
     # non-zero — without this check those results are misclassified as
     # successes and the spiral cap never fires (#1839).
-    if tool_name in ("terminal", "process"):
+    if tool_name in ("terminal", "process", "process_manage"):
         data = safe_json_loads(result)
         if isinstance(data, dict):
             exit_code = data.get("exit_code")
@@ -533,7 +533,7 @@ def classify_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str
             # Without these checks the early ``return False`` above swallows
             # them, the streak counter never accumulates, and the spiral cap
             # never fires — regressing to 18-deep (#2241).
-            if tool_name == "process":
+            if tool_name in ("process", "process_manage"):
                 status = data.get("status")
                 if status in ("not_found", "error", "already_exited"):
                     return True, f" [{status}]"
@@ -730,6 +730,7 @@ class ToolCallGuardrailController:
             (
                 effective_spiral_cap >= 1
                 and tool_name in self.config.spiral_prone_tools
+                and tool_name not in FAILURE_TOLERANT_TOOL_NAMES
                 and cross_turn_count >= effective_spiral_cap
             )
             or (
@@ -813,27 +814,6 @@ class ToolCallGuardrailController:
 
         if not self.config.hard_stop_enabled:
             return ToolGuardrailDecision(tool_name=tool_name, signature=signature)
-
-        exact_count = self._exact_failure_counts.get(signature, 0)
-        if self._progress_since_failure.get(signature):
-            # Something landed since this call last failed — let it run; the
-            # streak restarts in after_call if it fails again.
-            exact_count = 0
-        if exact_count >= self.config.exact_failure_block_after:
-            decision = ToolGuardrailDecision(
-                action="block",
-                code="repeated_exact_failure_block",
-                message=(
-                    f"Blocked {tool_name}: the same tool call failed {exact_count} "
-                    "times with identical arguments. Stop retrying it unchanged; "
-                    "change strategy or explain the blocker."
-                ),
-                tool_name=tool_name,
-                count=exact_count,
-                signature=signature,
-            )
-            self._halt_decision = decision
-            return decision
 
         if self._is_idempotent(tool_name):
             record = self._no_progress.get(signature)
@@ -1450,6 +1430,15 @@ _TOOL_FALLBACK_DIRECTIVE: dict[str, str] = {
     "patch": "use read_file to verify the exact text before patching, or use write_file",
     "write_file": "verify the directory exists with terminal, or use patch for targeted edits; for parse-errors, fix the syntax in the content argument — the same malformed content will fail identically on retry",
     "process": "use process action=list to find the correct session_id before retrying",
+    "process_manage": "use process_manage action=list to find the correct session_id before retrying",
+    "todo": "use todo action=list to check current items before retrying",
+    "todo_list": "use todo_list action=list to check current items before retrying",
+    "cronjob": "use cronjob action=list to inspect scheduled jobs before retrying",
+    "cronjob_manage": "use cronjob_manage action=list to inspect scheduled jobs before retrying",
+    "tour": "use tour action=list to inspect available tour steps",
+    "gui_tour": "use gui_tour action=list to inspect available tour steps",
+    "tip": "verify tip identifier or category before retrying",
+    "show_tip": "verify tip identifier or category before retrying",
     # #739 — media tools: a failed visual call is usually a bad path/format or an
     # unavailable provider, not something a blind retry fixes. Route to a check
     # or a text fallback instead of spiraling on the same call.

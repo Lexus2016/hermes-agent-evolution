@@ -145,6 +145,7 @@ _NON_RETRYABLE_BY_TOOL: dict[str, frozenset[str]] = {
     # timeout — status="timeout", the process still running — is already caught by
     # the global _NON_RETRYABLE set, so it is not duplicated here.)
     "process": frozenset({"session_not_found", "invalid_action", "process_exited"}),
+    "process_manage": frozenset({"session_not_found", "invalid_action", "process_exited"}),
 }
 
 
@@ -256,6 +257,13 @@ _DIVERSION_HINT = {
         "of writing/submitting to it. If an action name was rejected, use a valid "
         "one: list / poll / log / wait / kill / write / submit / close."
     ),
+    "process_manage": (
+        " If the session is gone (session_not_found), use action='list' to find "
+        "the live session id or re-spawn the process with terminal(background=true). "
+        "If the process already finished, read its output with action='log' instead "
+        "of writing/submitting to it. If an action name was rejected, use a valid "
+        "one: list / poll / log / wait / kill / write / submit / close."
+    ),
     "browser_navigate": (
         " Stop navigating: extract what you need from the CURRENT page "
         "(`browser_snapshot` for structure, `web_extract` for content — "
@@ -335,6 +343,7 @@ _MUTATING_TOOLS = frozenset({
     "write_file",
     "patch",
     "todo",
+    "todo_list",
     "memory",
     "skill_manage",
     "browser_click",
@@ -344,8 +353,10 @@ _MUTATING_TOOLS = frozenset({
     "browser_navigate",
     "send_message",
     "cronjob",
+    "cronjob_manage",
     "delegate_task",
     "process",
+    "process_manage",
 })
 # Default thresholds: lower for mutating tools, higher for idempotent (#432).
 # Mutating:  repeat at 4, fail at 2, escalate at 8
@@ -375,7 +386,7 @@ _TOOL_FAIL_THRESHOLD_OVERRIDE: dict[str, int] = {
 # evolution-integration job — which polls a background process while it waits
 # for a PR's CI to settle — was hard-stopped and marked failed on essentially
 # every run (see run_warrants_cron_hard_stop).
-_POLLING_TOOLS = frozenset({"process"})
+_POLLING_TOOLS = frozenset({"process", "process_manage"})
 
 # ── Semantic test-iteration loop detection (#1328) ────────────────────
 # The generic same-tool guard catches terminal called N times in a row, but a

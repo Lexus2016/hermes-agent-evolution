@@ -47,7 +47,7 @@ def compute_safety_risk(tool_name: str, tool_args: Dict[str, Any]) -> float:
     if not isinstance(tool_args, dict):
         return 0.0
 
-    if t in ("terminal", "process"):
+    if t in ("terminal", "process", "process_manage"):
         cmd = str(tool_args.get("command") or "").strip()
         for p in _HIGH_RISK_PATTERNS:
             if p.search(cmd):
@@ -82,7 +82,7 @@ def compute_utility_cost(tool_name: str, tool_args: Dict[str, Any]) -> float:
     # File writes and standard commands in workspace have moderate-to-high utility
     if t in ("write_file", "patch"):
         return 0.8
-    if t in ("terminal", "process"):
+    if t in ("terminal", "process", "process_manage"):
         cmd = str(tool_args.get("command") or "").strip()
         if cmd.startswith(("git ", "pytest ", "python ", "cargo ", "npm ", "ruff ", "ls ", "cat ", "echo ", "mkdir ", "touch ")):
             return 0.85

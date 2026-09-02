@@ -515,7 +515,7 @@ def build_system_prompt_parts(agent: Any, system_message: Optional[str] = None) 
     if getattr(agent, "_task_completion_guidance", True) and agent.valid_tool_names:
         _has_execution_or_write = any(
             t in agent.valid_tool_names
-            for t in ("terminal", "process", "write_file", "patch", "execute_code")
+            for t in ("terminal", "process", "process_manage", "write_file", "patch", "execute_code")
         )
         if _has_execution_or_write:
             stable_parts.append(TASK_COMPLETION_GUIDANCE)

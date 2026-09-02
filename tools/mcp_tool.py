@@ -7163,18 +7163,12 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                         )
 
                     _watch_children = getattr(server, "_watch_stdio_children", None)
-                    _watch_coro = (
-                        _watch_children()
-                        if callable(_watch_children) and asyncio.iscoroutine(_call_coro)
-                        else None
-                    )
                     _watch_ok = (
-                        _watch_coro is not None
-                        and inspect.isawaitable(_watch_coro)
+                        callable(_watch_children)
+                        and inspect.iscoroutinefunction(_watch_children)
+                        and asyncio.iscoroutine(_call_coro)
                     )
                     if not _watch_ok:
-                        if _watch_coro is not None and inspect.isawaitable(_watch_coro):
-                            _watch_coro.close()
                         # Stubbed sessions (MagicMock in tests) return a
                         # non-awaitable, or there is no child-watcher to race
                         # against: plain await is exactly the pre-#81995
@@ -7189,6 +7183,7 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
                         # stdio-children watcher so a dead subprocess fails
                         # the call immediately instead of riding out the full
                         # tool timeout.
+                        _watch_coro = _watch_children()
                         rpc_task = asyncio.ensure_future(_call_coro)
                         watch_task = asyncio.ensure_future(_watch_coro)
                         try:

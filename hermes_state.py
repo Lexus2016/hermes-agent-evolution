@@ -4407,7 +4407,7 @@ def _pread_db_header(db_path: Path, length: int) -> "Optional[bytes]":
     key = str(db_path)
     try:
         st = db_path.stat() if hasattr(db_path, "stat") else os.stat(db_path)
-    except (OSError, TypeError, Exception):
+    except (OSError, TypeError, ValueError):
         return None
     with _HEADER_PROBE_LOCK:
         cached = _HEADER_PROBE_FDS.get(key)
@@ -4419,7 +4419,7 @@ def _pread_db_header(db_path: Path, length: int) -> "Optional[bytes]":
         if cached is None:
             try:
                 fd = os.open(db_path, os.O_RDONLY)
-            except (OSError, TypeError, Exception):
+            except (OSError, TypeError, ValueError):
                 return None
             try:
                 fst = os.fstat(fd)
@@ -4460,7 +4460,7 @@ def _stat_db_file_identity(path: Path) -> "Optional[tuple]":
     """Return ``(st_dev, st_ino)`` for *path*, or None when identity is unavailable."""
     try:
         st = path.stat() if hasattr(path, "stat") else os.stat(path)
-    except (OSError, TypeError, Exception):
+    except (OSError, TypeError, ValueError):
         return None
     # Windows volumes (and some network FS) report st_ino=0; a (0, 0)
     # identity would false-positive every check. Skip the inode half of
@@ -5150,7 +5150,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             logger.debug("Could not close a SessionDB connection", exc_info=True)
 
     def __init__(self, db_path: Path = None, read_only: bool = False):
-        self.db_path = db_path or _default_db_path()
+        self.db_path = Path(db_path) if db_path else _default_db_path()
         # Fail hard (before any connection/pragma/mkdir) if a pytest-context
         # process resolved the developer's production state.db — see the
         # live-DB test-isolation guard block near _default_db_path().
