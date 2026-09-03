@@ -44,6 +44,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from hermes_cli._subprocess_compat import harden_git_argv, noninteractive_git_env
+
 logger = logging.getLogger(__name__)
 
 _GIT_TIMEOUT = 30
@@ -52,11 +54,17 @@ _BRANCH_NAMESPACE = "hermes-subagent"
 
 
 def _run_git(args, cwd: str, timeout: int = _GIT_TIMEOUT):
-    """Run a git command, capturing output. Never raises on non-zero exit."""
-    from hermes_cli._subprocess_compat import noninteractive_git_env
+    """Run a git command, capturing output. Never raises on non-zero exit.
 
+    Runs under :func:`noninteractive_git_env` (GHSA-7x36-8jrh-v4pw): worktree
+    isolation runs automatically for delegated subagents against whatever repo
+    the parent sits in, and ``worktree add`` runs checkout hooks. Disabling the
+    fsmonitor/hooks/pager/credential config sinks keeps a malicious ``.git/config``
+    from executing on the host.
+    """
+    from hermes_cli._subprocess_compat import noninteractive_git_env
     return subprocess.run(
-        ["git", *args],
+        ["git", *harden_git_argv(args)],
         cwd=cwd,
         capture_output=True,
         text=True,

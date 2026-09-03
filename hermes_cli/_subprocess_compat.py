@@ -47,8 +47,63 @@ __all__ = [
     "bounded_git_probe",
     "bounded_probe_run",
     "noninteractive_git_env",
+    "NO_DRIVER_DIFF_FLAGS",
     "pid_is_hermes",
 ]
+
+# Flags that neutralize *attribute-scoped* diff drivers on any diff-rendering
+# git command (``diff``, ``log -p``, ``show``, ``blame``). A malicious repo can
+# name a driver in ``.gitattributes`` (``* diff=evil``) and point it at an
+# arbitrary program via ``[diff "evil"] command=/textconv=`` in ``.git/config``.
+# Because the attacker chooses the driver name, ``GIT_CONFIG_KEY`` overrides in
+# ``noninteractive_git_env`` cannot enumerate and disable it — only these
+# command-line flags do. ``--no-ext-diff`` kills ``command=``; ``--no-textconv``
+# kills ``textconv=``. Both are required (verified empirically: each alone
+# leaves the other live). Smudge/clean filters are neutralized by the env
+# layer's ``core.hooksPath`` + running against the index without checkout.
+NO_DRIVER_DIFF_FLAGS = ("--no-ext-diff", "--no-textconv")
+
+# Subcommands that render diffs and therefore invoke ``.gitattributes``-scoped
+# diff/textconv drivers. Only these accept ``NO_DRIVER_DIFF_FLAGS`` — ``status``
+# and friends reject the flags (``unknown option``), so the helper must gate on
+# this set rather than blanket-prepending.
+_DIFF_RENDERING_SUBCOMMANDS = frozenset({"diff", "show", "log", "blame"})
+
+
+def harden_git_argv(args: Sequence[str]) -> list[str]:
+    """Return a copy of subcommand-first git *args* with diff-driver flags
+    inserted for diff-rendering subcommands.
+
+    *args* is the argument list WITHOUT the leading ``"git"`` (e.g.
+    ``["diff", "HEAD"]`` or ``["-c", "core.quotePath=false", "diff", ...]``).
+    The first non-option token is treated as the subcommand; if it is one of
+    :data:`_DIFF_RENDERING_SUBCOMMANDS`, :data:`NO_DRIVER_DIFF_FLAGS` is
+    inserted immediately after it. Non-diff subcommands are returned unchanged.
+
+    Pair with :func:`noninteractive_git_env`: the env layer disables
+    fsmonitor/hooks/pager/editor/credential sinks, this closes the one class
+    (attacker-named attribute drivers) env overrides cannot reach.
+    """
+    out = list(args)
+    # Options that consume the FOLLOWING token as their value, so that value is
+    # never mistaken for the subcommand (``-C diff`` is a path; ``-c diff=x`` is
+    # a config pair — neither is the diff subcommand).
+    _value_opts = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
+    i = 0
+    while i < len(out):
+        tok = out[i]
+        if tok in _value_opts:
+            i += 2
+            continue
+        if tok.startswith("-"):
+            i += 1
+            continue
+        if tok in _DIFF_RENDERING_SUBCOMMANDS:
+            return out[: i + 1] + list(NO_DRIVER_DIFF_FLAGS) + out[i + 1 :]
+        # First non-option token is the subcommand; if it isn't a diff renderer
+        # there is nothing to harden.
+        return out
+    return out
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -365,10 +420,10 @@ def noninteractive_git_env(
       instead of prompting for credentials.
     * ``GCM_INTERACTIVE=Never`` — Git Credential Manager (the default
       credential helper on Windows installs) never pops its own dialog.
-    * ``GIT_CONFIG_PARAMETERS`` — injects ``core.fsmonitor=false`` and
-      ``core.hooksPath=/dev/null`` to neutralize repository-level configuration
-      injection attacks (e.g. GitSpawn / CVE-2026-71963) where untrusted repos
-      execute arbitrary commands on background status/diff probes.
+    * isolated git config — inherited ``GIT_CONFIG_*`` overrides, global/system
+      config, pagers, editors, fsmonitor, external diff, and hooks are disabled
+      for the child process. A user's repo/global config should not be able to
+      hang or mutate Hermes's internal plumbing calls (e.g. GitSpawn / CVE-2026-71963).
 
     ``GIT_ASKPASS`` / ``SSH_ASKPASS`` are deliberately left alone: when the
     user has a *working* askpass helper or ssh-agent configured, auth should
@@ -386,13 +441,41 @@ def noninteractive_git_env(
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GCM_INTERACTIVE"] = "Never"
 
-    safe_git_configs = "'core.fsmonitor=false' 'core.hooksPath=/dev/null'"
-    existing_params = env.get("GIT_CONFIG_PARAMETERS", "").strip()
-    env["GIT_CONFIG_PARAMETERS"] = (
-        f"{existing_params} {safe_git_configs}".strip()
-        if existing_params
-        else safe_git_configs
-    )
+    # Do not inherit caller-supplied config injection. We rebuild the
+    # GIT_CONFIG_COUNT block below so ambient -c values cannot re-enable
+    # pagers, hooks, fsmonitor, editors, or credential prompts.
+    for key in list(env):
+        if (
+            key == "GIT_CONFIG_PARAMETERS"
+            or key.startswith("GIT_CONFIG_KEY_")
+            or key.startswith("GIT_CONFIG_VALUE_")
+        ):
+            env.pop(key, None)
+    env.pop("GIT_CONFIG_COUNT", None)
+
+    devnull = os.devnull
+    env["GIT_CONFIG_GLOBAL"] = devnull
+    env["GIT_CONFIG_SYSTEM"] = devnull
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_PAGER"] = "cat"
+    env["PAGER"] = "cat"
+    env["GIT_EDITOR"] = "true"
+
+    config_overrides = {
+        "credential.helper": "",
+        "core.askPass": "",
+        "core.fsmonitor": "false",
+        "core.untrackedCache": "false",
+        "core.hooksPath": devnull,
+        "core.pager": "cat",
+        "core.editor": "true",
+        "sequence.editor": "true",
+        "diff.external": "",
+    }
+    env["GIT_CONFIG_COUNT"] = str(len(config_overrides))
+    for idx, (key, value) in enumerate(config_overrides.items()):
+        env[f"GIT_CONFIG_KEY_{idx}"] = key
+        env[f"GIT_CONFIG_VALUE_{idx}"] = value
 
     return env
 
@@ -582,7 +665,7 @@ def bounded_probe_run(
     *,
     timeout: float,
     errors: str = "replace",
-    env: Mapping[str, str] | None = None,
+    env: "Mapping[str, str] | None" = None,
 ) -> "subprocess.CompletedProcess[str] | None":
     """Deadlock-safe ``subprocess.run(argv, capture_output=True, timeout=...)``
     for fail-open probe call sites. Returns a ``CompletedProcess`` when the
@@ -622,6 +705,7 @@ def bounded_probe_run(
             text=True,
             encoding="utf-8",
             errors=errors,
+            env=dict(env) if env is not None else None,
             **_popen_kwargs,
         )
     except Exception:
@@ -653,6 +737,20 @@ def bounded_git_probe(
     This is the shared, deadlock-safe replacement for
     ``subprocess.run(["git", ...], timeout=...)`` at fail-open probe call sites
     (``tui_gateway.git_probe.run_git``, ``agent.coding_context._git``).
+
+    **Security (GHSA-7x36-8jrh-v4pw):** these probes run automatically against
+    whatever directory the session sits in — the coding-workspace snapshot and
+    the gateway project-tree build fire ``git status`` / ``git branch`` before
+    any tool call, approval, or trust prompt. An index refresh executes the
+    repository-configured ``core.fsmonitor`` program, and other config keys
+    (hooks, pager, editor, credential helper) are execution sinks too. A repo
+    delivered as files with its ``.git`` directory intact (a shared zip, sync
+    folder, or USB stick — ``git clone`` never transfers ``.git/config``) would
+    otherwise get host code execution as the user. Every probe now runs under
+    :func:`noninteractive_git_env`, which pins those keys to inert values via
+    ``GIT_CONFIG_*`` and ignores global/system config. Diff-rendering callers
+    additionally pass :data:`NO_DRIVER_DIFF_FLAGS` (attribute-scoped drivers
+    can't be disabled through env overrides).
 
     Why not ``subprocess.run``: on Windows, ``run()``'s post-timeout cleanup
     calls an *unbounded* ``communicate()`` after killing git. Killing the

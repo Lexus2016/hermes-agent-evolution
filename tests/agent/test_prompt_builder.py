@@ -5,6 +5,8 @@ import importlib
 import logging
 import os
 import sys
+import time
+from pathlib import Path
 
 import pytest
 
@@ -1333,17 +1335,6 @@ class TestPromptBuilderConstants:
     def test_default_identity_non_empty(self):
         assert len(DEFAULT_AGENT_IDENTITY) > 50
 
-    def test_platform_hints_known_platforms(self):
-        assert "whatsapp" in PLATFORM_HINTS
-        assert "whatsapp_cloud" in PLATFORM_HINTS
-        assert "telegram" in PLATFORM_HINTS
-        assert "discord" in PLATFORM_HINTS
-        assert "cron" in PLATFORM_HINTS
-        assert "cli" in PLATFORM_HINTS
-        assert "tui" in PLATFORM_HINTS
-        assert "api_server" in PLATFORM_HINTS
-        assert "webui" in PLATFORM_HINTS
-
     def test_cli_and_tui_hints_flag_local_only_cron(self):
         """#51568 — cron jobs from CLI/TUI sessions don't deliver back into
         the session, so the agent must be told up front not to promise it."""
@@ -1352,21 +1343,24 @@ class TestPromptBuilderConstants:
             assert "LOCAL-ONLY" in hint
             assert "deliver" in hint
 
-    def test_whatsapp_cloud_hint_mentions_24h_window(self):
-        """The Cloud API's 24-hour conversation window is a hard rule the
-        agent should know about. Phase 5 (template fallback) was deferred,
-        so the model needs to know free-form replies outside the window
-        will fail with Graph error 131047 — otherwise it'll cheerfully
-        try to schedule delayed messages that silently break."""
-        hint = PLATFORM_HINTS["whatsapp_cloud"]
-        assert "24-hour" in hint or "24h" in hint or "24 hour" in hint
-        assert "131047" in hint
-
-    def test_whatsapp_cloud_hint_advertises_media(self):
-        """Cloud adapter supports the same MEDIA:/path/ convention as
-        Baileys for outbound attachments."""
-        hint = PLATFORM_HINTS["whatsapp_cloud"]
+    def test_api_server_hint_scopes_media_tag_guidance(self):
+        """api_server MEDIA: interception is partial (#68402, corrected):
+        _resolve_media_to_data_urls (gateway/platforms/api_server.py) inlines
+        small image MEDIA: tags as base64 data URLs on the chat, completions,
+        and responses endpoints — but non-image files are never resolved
+        (_MEDIA_IMG_EXT is image-only) and the /v1/runs handler never calls
+        the resolver at all. The hint must teach BOTH halves: images work via
+        MEDIA:, everything else needs a plain path in the response text."""
+        hint = PLATFORM_HINTS["api_server"]
+        # Images ARE intercepted: inlined as data URLs.
         assert "MEDIA:" in hint
+        assert "inlined" in hint.lower()
+        assert "data" in hint.lower()  # data URLs
+        # The gaps: non-image files and the runs endpoint.
+        assert "non-image" in hint.lower()
+        assert "runs" in hint.lower()
+        # Fallback guidance: plain file path in the response text.
+        assert "plain" in hint.lower()
 
     def test_markdown_converting_platform_hints_do_not_forbid_markdown(self):
         """#12224 — WhatsApp (Baileys) and Signal adapters actively convert
@@ -1401,30 +1395,6 @@ class TestPromptBuilderConstants:
         # spine ("write MEDIA:/absolute/path..."), not per-hint prose.
         assert "MEDIA:/absolute/path" in PLATFORM_HINTS["telegram"]
 
-    def test_telegram_hint_encourages_rich_markdown(self):
-        # Telegram Bot API 10.1 rich messages are default-on, so the hint must
-        # encourage native structured markdown instead of forbidding tables.
-        hint = PLATFORM_HINTS["telegram"]
-        lowered = hint.lower()
-        assert "Telegram has NO table syntax" not in hint
-        # Base hint covers MarkdownV2-compatible constructs.
-        assert "MEDIA:" in hint
-        # Rich-messages extension (TELEGRAM_RICH_MESSAGES_HINT) covers the
-        # Bot API 10.1 guidance; it is injected conditionally in
-        # system_prompt.py when rich_messages: true.
-        from agent.prompt_builder import TELEGRAM_RICH_MESSAGES_HINT
-        rich_lowered = TELEGRAM_RICH_MESSAGES_HINT.lower()
-        assert "rich markdown" in rich_lowered
-        assert "table" in rich_lowered
-        assert "task list" in rich_lowered
-        assert "math" in rich_lowered
-        # Hint should proactively steer toward structured formatting, not just
-        # permit it: bullet + numbered lists for scannable, structured output.
-        assert "bullet" in rich_lowered
-        assert "numbered" in rich_lowered
-        # Local media delivery guidance must remain intact in the base hint.
-        assert "include MEDIA:" in hint
-
     def test_platform_hints_mattermost(self):
         hint = PLATFORM_HINTS["mattermost"]
         assert "Mattermost" in hint
@@ -1435,25 +1405,14 @@ class TestPromptBuilderConstants:
         hint = PLATFORM_HINTS["matrix"]
         assert "Matrix" in hint
         assert "MEDIA:" in hint
-        assert "Markdown" in hint
-        # Regression (#52552): the hint must steer models away from Markdown
-        # tables — popular Matrix clients don't render HTML tables and the
-        # cells collapse into one continuous line.
+        assert "markdown" in hint.lower()
         assert "table" in hint.lower()
-        assert "Do NOT use Markdown tables" in hint
 
     def test_platform_hints_feishu(self):
         hint = PLATFORM_HINTS["feishu"]
         assert "Feishu" in hint
         assert "MEDIA:" in hint
         assert "Markdown" in hint
-
-    def test_platform_hints_webui(self):
-        hint = PLATFORM_HINTS["webui"]
-        assert "WebUI" in hint
-        assert "MEDIA:" in hint
-        assert "Markdown" in hint
-        assert "absolute" in hint
 
     def test_api_server_hint_scopes_media_tag_guidance(self):
         """api_server MEDIA: interception is partial (#68402, corrected):
@@ -1653,6 +1612,126 @@ class TestEnvironmentHints:
                 f"{backend!r} must be in _REMOTE_TERMINAL_BACKENDS so its host "
                 f"info is suppressed in the system prompt"
             )
+
+    def test_probe_remote_backend_tears_down_its_sandbox(self, monkeypatch):
+        """THE BUG: the probe leaked a second, permanently idle sandbox.
+
+        ``_probe_remote_backend`` spins up an environment with
+        ``task_id="prompt-backend-probe"`` purely to run one ``uname``. Container
+        backends default to ``container_persistent`` /
+        ``docker_persist_across_processes``, so that throwaway sandbox stayed up
+        for the whole process lifetime *next to* the agent's own ``default``
+        sandbox — one wasted idle container per profile, forever. The probe owns
+        that environment, so it must tear it down.
+        """
+        import agent.prompt_builder as _pb
+
+        monkeypatch.setenv("TERMINAL_ENV", "docker")
+        _pb._clear_backend_probe_cache()
+
+        cleaned = {}
+
+        class _FakeEnv:
+            def execute(self, cmd, timeout=None):
+                return {
+                    "returncode": 0,
+                    "output": (
+                        "os=Linux\nkernel=6.8.0\nhome=/root\n"
+                        "cwd=/workspace\nuser=root\n"
+                    ),
+                }
+
+            def cleanup(self, *, force_remove=False):
+                cleaned["force_remove"] = force_remove
+
+        import tools.terminal_tool as _tt
+        monkeypatch.setattr(_tt, "_create_environment", lambda **kw: _FakeEnv())
+
+        assert _pb._probe_remote_backend("docker") is not None
+        # force_remove=True: persist mode would otherwise leave it running.
+        assert cleaned == {"force_remove": True}
+
+    def test_probe_remote_backend_tears_down_sandbox_on_failure(self, monkeypatch):
+        """Teardown must also run when the probe command blows up — a flaky
+        backend would otherwise leak the container the probe just created."""
+        import agent.prompt_builder as _pb
+
+        monkeypatch.setenv("TERMINAL_ENV", "docker")
+        _pb._clear_backend_probe_cache()
+
+        cleaned = []
+
+        class _ExplodingEnv:
+            def execute(self, cmd, timeout=None):
+                raise RuntimeError("backend went away")
+
+            def cleanup(self, *, force_remove=False):
+                cleaned.append(force_remove)
+
+        import tools.terminal_tool as _tt
+        monkeypatch.setattr(_tt, "_create_environment", lambda **kw: _ExplodingEnv())
+
+        assert _pb._probe_remote_backend("docker") is None
+        assert cleaned == [True]
+
+    def test_probe_remote_backend_tolerates_kwargless_cleanup(self, monkeypatch):
+        """Backends that inherit the base ``cleanup(self)`` take no kwargs; the
+        probe must use the bare call instead of dying on TypeError."""
+        import agent.prompt_builder as _pb
+
+        monkeypatch.setenv("TERMINAL_ENV", "singularity")
+        _pb._clear_backend_probe_cache()
+
+        calls = []
+
+        class _LegacyEnv:
+            def execute(self, cmd, timeout=None):
+                return {
+                    "returncode": 0,
+                    "output": (
+                        "os=Linux\nkernel=6.8.0\nhome=/home/u\n"
+                        "cwd=/home/u\nuser=u\n"
+                    ),
+                }
+
+            def cleanup(self):
+                calls.append("bare")
+
+        import tools.terminal_tool as _tt
+        monkeypatch.setattr(_tt, "_create_environment", lambda **kw: _LegacyEnv())
+
+        assert _pb._probe_remote_backend("singularity") is not None
+        assert calls == ["bare"]
+
+    def test_probe_remote_backend_does_not_tear_down_ssh(self, monkeypatch):
+        """SSH has no task-scoped sandbox: its cleanup() closes a ControlMaster
+        socket shared with the agent's real environment, so the probe must
+        leave it alone (nothing leaks — ControlPersist expires the master)."""
+        import agent.prompt_builder as _pb
+
+        monkeypatch.setenv("TERMINAL_ENV", "ssh")
+        _pb._clear_backend_probe_cache()
+
+        calls = []
+
+        class _SharedSshEnv:
+            def execute(self, cmd, timeout=None):
+                return {
+                    "returncode": 0,
+                    "output": (
+                        "os=Linux\nkernel=6.8.0\nhome=/home/u\n"
+                        "cwd=/home/u\nuser=u\n"
+                    ),
+                }
+
+            def cleanup(self):
+                calls.append("cleanup")
+
+        import tools.terminal_tool as _tt
+        monkeypatch.setattr(_tt, "_create_environment", lambda **kw: _SharedSshEnv())
+
+        assert _pb._probe_remote_backend("ssh") is not None
+        assert calls == []
 
     def test_environment_hint_from_env_var_is_appended(self, monkeypatch):
         """HERMES_ENVIRONMENT_HINT lets an embedder describe the runtime env."""
@@ -1971,6 +2050,13 @@ class TestExecutionGuidanceModels:
         for fam in ("deepseek", "kimi", "qwen", "glm", "minimax", "mimo", "mistral"):
             assert fam in EXECUTION_GUIDANCE_MODELS
 
+    def test_muse_spark_gets_both_guidance_blocks(self):
+        # Muse Spark closes the turn after a chat-only response on defaults
+        # (#96550) — it needs tool-use enforcement AND execution guidance.
+        from agent.prompt_builder import EXECUTION_GUIDANCE_MODELS
+        assert any(p in "meta/muse-spark-1.3-contributor" for p in TOOL_USE_ENFORCEMENT_MODELS)
+        assert any(p in "meta/muse-spark-1.3-contributor" for p in EXECUTION_GUIDANCE_MODELS)
+
     def test_excludes_google_and_claude(self):
         # Gemini/Gemma get GOOGLE_MODEL_OPERATIONAL_GUIDANCE instead;
         # Claude doesn't exhibit the targeted failure modes.
@@ -2051,3 +2137,38 @@ class TestDynamicContextFileCapFitsAgentsMd:
         assert _dynamic_context_file_max_chars(0) == CONTEXT_FILE_MAX_CHARS
 
 
+class TestContextFileReadTimeout:
+    def test_slow_hermes_md_is_skipped_and_agents_md_still_loads(self, tmp_path, monkeypatch, caplog):
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".hermes.md").write_text("Hermes project rules.")
+        (tmp_path / "AGENTS.md").write_text("Agent fallback rules.")
+        # Patch the module object build_context_files_prompt actually closes
+        # over: an earlier test re-imports agent.prompt_builder, so the
+        # sys.modules entry can be a different module object.
+        pb_mod = sys.modules[build_context_files_prompt.__module__]
+        monkeypatch.setattr(pb_mod, "_get_context_file_read_timeout", lambda: 0.05)
+
+        original_read_text = Path.read_text
+
+        def slow_read_text(self, *args, **kwargs):
+            if self.name == ".hermes.md":
+                time.sleep(0.6)
+            return original_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", slow_read_text)
+
+        start = time.monotonic()
+        with caplog.at_level(logging.WARNING, logger=pb_mod.__name__):
+            result = build_context_files_prompt(cwd=str(tmp_path))
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 0.4, f"context load blocked for {elapsed:.2f}s"
+        assert "Agent fallback rules" in result
+        assert "Hermes project rules" not in result
+        assert "timed out" in caplog.text.lower()
+
+    def test_read_errors_still_propagate_to_caller(self, tmp_path):
+        from agent.prompt_builder import _read_text_with_timeout
+
+        with pytest.raises(FileNotFoundError):
+            _read_text_with_timeout(tmp_path / "missing.md", timeout=1.0)

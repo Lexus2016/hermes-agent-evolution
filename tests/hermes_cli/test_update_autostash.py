@@ -62,6 +62,7 @@ def _patch_gateway_discovery():
          patch("hermes_cli.gateway.find_profile_gateway_processes", return_value=[]), \
          patch("hermes_cli.update_inventory.collect_runtime_inventory", return_value=None), \
          patch("hermes_cli.update_inventory.report_unaccounted_runtimes", return_value=False), \
+         patch("hermes_cli.update_cmd._restart_macos_launchd_gateways", lambda *a, **kw: None), \
          patch.object(hermes_main, "_fleet_probe_expected_runtimes", lambda *a, **kw: False), \
          patch.object(hermes_main, "_purge_stale_hermes_modules", lambda *a, **kw: None), \
          patch("hermes_cli.update_receipt.collect_fleet_versions", return_value=[]):
@@ -91,7 +92,7 @@ def _setup_update_mocks(monkeypatch, tmp_path):
     monkeypatch.setattr(hermes_main, "_restore_stashed_changes", lambda *a, **kw: True)
     monkeypatch.setattr(hermes_config, "get_missing_env_vars", lambda required_only=True: [])
     monkeypatch.setattr(hermes_config, "get_missing_config_fields", lambda: [])
-    monkeypatch.setattr(hermes_config, "check_config_version", lambda: (5, 5))
+    monkeypatch.setattr(hermes_config, "check_config_version", lambda **_kwargs: (5, 5))
     monkeypatch.setattr(hermes_config, "migrate_config", lambda **kw: {"env_added": [], "config_added": []})
     monkeypatch.setattr(hermes_main, "_upgrade_pip_before_lazy_refresh", lambda *a, **kw: None)
     monkeypatch.setattr(hermes_main, "_refresh_active_lazy_features", lambda *a, **kw: True)

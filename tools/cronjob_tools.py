@@ -1413,6 +1413,12 @@ def _run_claimed_job(
             _registered = False
             release_running_job(job_id)
         refreshed = get_job(job_id) or {}
+        execution = None
+        execution_id = job.get("execution_id")
+        if execution_id:
+            from cron.executions import get_execution
+
+            execution = get_execution(str(execution_id))
         last_status = refreshed.get("last_status")
         # "delivery_failed" (#83993): the agent run itself succeeded but the
         # output never reached the user. That is NOT a success for the caller
@@ -1424,6 +1430,12 @@ def _run_claimed_job(
         run_error = refreshed.get("last_error")
         if last_status == "delivery_failed" and not run_error:
             run_error = refreshed.get("last_delivery_error")
+        if execution is not None and execution.get("status") != "completed":
+            ok = False
+            run_error = (
+                execution.get("error")
+                or f"execution ended in {execution.get('status') or 'unknown'} state"
+            )
         return {
             "claimed": True,
             "success": bool(processed and ok),
@@ -1811,6 +1823,7 @@ def cronjob(
     monitor_url: Optional[str] = None,
     pin_inference: Optional[bool] = None,
     reasoning_effort: Optional[str] = None,
+    failure_deliver: Optional[Union[str, List[str]]] = None,
     task_id: str = None,
     session_id: Optional[str] = None,
 ) -> str:
@@ -1885,6 +1898,12 @@ def cronjob(
             bot_chat_error = _validate_bot_chat_deliver(_normalize_deliver_param(deliver))
             if bot_chat_error:
                 return tool_error(bot_chat_error, success=False)
+            # failure_deliver shares deliver's grammar and validators (NS-788).
+            bot_chat_error = _validate_bot_chat_deliver(
+                _normalize_deliver_param(failure_deliver)
+            )
+            if bot_chat_error:
+                return tool_error(bot_chat_error, success=False)
 
             # Validate context_from references existing jobs
             if context_from:
@@ -1944,6 +1963,9 @@ def cronjob(
                     # dispatch below: models do not make model-config
                     # decisions (standing policy).
                     reasoning_effort=reasoning_effort,
+                    failure_deliver=_resolve_cron_context_deliver(
+                        _normalize_deliver_param(failure_deliver)
+                    ),
                 )
             except CronSchedulerRegistrationError as exc:
                 _partial = exc.to_dict()
@@ -2147,6 +2169,19 @@ def cronjob(
                 updates["deliver"] = _resolve_cron_context_deliver(
                     _normalize_deliver_param(deliver)
                 )
+            if failure_deliver is not None:
+                # '' clears the override (job falls back to deliver on
+                # failures); non-empty values share deliver's validation
+                # AND its cron-context origin resolution (a job created
+                # from inside a cron run must never store literal
+                # 'origin' — same rule as deliver).
+                _norm_fd = _normalize_deliver_param(failure_deliver)
+                if _norm_fd:
+                    bot_chat_error = _validate_bot_chat_deliver(_norm_fd)
+                    if bot_chat_error:
+                        return tool_error(bot_chat_error, success=False)
+                    _norm_fd = _resolve_cron_context_deliver(_norm_fd)
+                updates["failure_deliver"] = _norm_fd
             if skills is not None or skill is not None:
                 canonical_skills = _canonical_skills(skill, skills)
                 updates["skills"] = canonical_skills
@@ -2341,6 +2376,10 @@ Jobs run in a fresh session with no current-chat context, so prompts must be sel
                 "type": "string",
                 "description": "Where the job's output is POSTED as a one-way message (the job itself always runs in a fresh session with no chat context). Omit to address the chat/topic this job was created from. Otherwise: 'local' (save only, no delivery), 'all' (every connected home channel, resolved at fire time), 'bot-chat' or 'bot-chat:<profile>' (inject into a Bot Chat as a real message), or platform:chat_id:thread_id (e.g. 'telegram:-1001234567890:17585'). Comma-combine like 'origin,all'."
             },
+            "failure_deliver": {
+                "type": "string",
+                "description": "Optional override target for FAILURE notices only (same grammar as deliver). When set, engine failure/interruption notices go here instead of the deliver target; 'local' suppresses them entirely (state still recorded in cron list/run history). Use for jobs delivering into shared channels where failure noise is unwanted. Omit = failures follow deliver (default). On update, '' clears."
+            },
             "skills": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -2436,6 +2475,7 @@ def _cronjob_handler(args, **kw):
         name=args.get("name"),
         repeat=args.get("repeat"),
         deliver=args.get("deliver"),
+        failure_deliver=args.get("failure_deliver"),
         include_disabled=args.get("include_disabled", True),
         skill=args.get("skill"),
         skills=args.get("skills"),
