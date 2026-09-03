@@ -388,10 +388,10 @@ def _extract_pinned_constraints(messages: List[Dict[str, Any]]) -> list[str]:
         if not isinstance(msg, dict):
             continue
         # Only the human and the runtime may pin. Tool results and model turns
-        # are untrusted here: a tagged span inside a fetched page or a command
-        # output would otherwise install a permanent "governance rule" that
-        # survives every compaction — indirect prompt injection with a
-        # persistence primitive attached.
+        # are untrusted here: before this filter existed, a `[PINNED_CONSTRAINT]`
+        # span inside a fetched page or a command result was extracted like any
+        # other and re-injected as a system rule on every compaction — indirect
+        # prompt injection with a persistence primitive attached.
         if msg.get("role") not in _PINNABLE_ROLES:
             continue
         content = msg.get("content")
@@ -454,76 +454,6 @@ def _pinned_constraint_survives(
     return (matched / len(words)) >= 0.8
 
 
-def _is_synthetic_user_turn(msg: Dict[str, Any]) -> bool:
-    """True when this ``role="user"`` row was written by the runtime, not a human.
-
-    Delegates to :meth:`ContextCompressor._is_synthetic_compression_user_turn`,
-    the canonical classifier in this module — it already recognizes background
-    process output, todo injections, compaction summaries and every
-    continuation nudge, and it keys off stable *content* markers because
-    SessionDB strips underscore metadata.  Background ``Output:`` rows in
-    particular carry CI logs whose wording ("approved", "LGTM") must never be
-    read as user authority.
-    """
-    if msg.get("_todo_snapshot_synthetic"):
-        return True
-    try:
-        return bool(ContextCompressor._is_synthetic_compression_user_turn(msg))
-    except Exception:  # noqa: BLE001 - classification must never break compaction
-        # Fail CLOSED: an unclassifiable row is skipped rather than scanned.
-        # Reading a background CI log as user authority is the costly mistake;
-        # missing one human turn only forgoes a pin this pass.
-        logger.debug("Synthetic-turn classification failed; skipping row", exc_info=True)
-        return True
-
-
-def _detected_user_constraints(messages: List[Dict[str, Any]]) -> List[str]:
-    """Clause texts of binding user constraints nothing explicitly pinned.
-
-    Slice A only sees a constraint that something already marked, and in
-    production nothing ever did: ``_pinned_constraint`` was assigned only in
-    tests, so this defense protected an empty set while the summarizer was
-    free to drop "don't push until I review it".
-    ``evolution/lib/pinned_constraint_detector.py`` is the missing producer —
-    it reads user turns and returns prohibitions, deferrals and scope
-    exclusions over irreversible actions, with later approvals superseding the
-    gates they release.
-
-    Fails open to today's behaviour: a missing module or a detector error
-    leaves compaction exactly as it was.
-    """
-    try:
-        from evolution.lib.pinned_constraint_detector import (
-            ConstraintRegistry,
-            detect_constraints,
-        )
-
-        registry = ConstraintRegistry()
-        for msg in messages:
-            if not isinstance(msg, dict) or msg.get("role") != "user":
-                continue
-            if _is_synthetic_user_turn(msg):
-                continue
-            content = msg.get("content")
-            if isinstance(content, str):
-                # Revocations are NOT applied here. Three review rounds showed
-                # that every rule for inferring release from text produced some
-                # input that deleted a live constraint ("not approved to ship"
-                # read as approval, a PR "LGTM" clearing an unrelated database
-                # gate, an approval reviving after a rotation). Preserving a
-                # constraint the user already lifted costs one re-injected
-                # line; dropping one they still mean is unbounded. Release is
-                # the user's to state, and the model still sees the later
-                # approval in the transcript.
-                registry.ingest(
-                    detect_constraints(content), apply_revocations=False
-                )
-        return registry.pin_texts()
-    except Exception:  # noqa: BLE001 - detection must never break a compaction
-        logger.debug("Pinned-constraint detection failed; skipping", exc_info=True)
-        return []
-
-
 def _normalize_pinned_constraint_texts(text: str) -> List[str]:
     """Split re-injection scaffolding back into the individual clauses.
 
@@ -559,9 +489,6 @@ def _reinject_dropped_pinned_constraints(
     as a tagged system message.
     """
     pinned = _extract_pinned_constraints(pre_compression_messages)
-    for clause in _detected_user_constraints(pre_compression_messages):
-        if clause not in pinned:
-            pinned.append(clause)
     if not pinned:
         return compressed_messages
 
