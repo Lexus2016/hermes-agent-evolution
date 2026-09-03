@@ -931,3 +931,83 @@ class TestAttributionBypasses:
     def test_real_orders_still_bind(self):
         assert detect_constraints("do not deploy to production")
         assert detect_constraints("never force-push to main")
+
+
+class TestRealCompressPath:
+    """End-to-end through the actual ``ContextCompressor.compress()`` call.
+
+    Every other test here drives ``_reinject_dropped_pinned_constraints``
+    directly. That proves the seam, not the wiring — and a producer the real
+    flow never reaches would be exactly the dead machinery this module exists
+    to wake up. These two tests close that gap.
+    """
+
+    @staticmethod
+    def _compressor():
+        cc = pytest.importorskip("agent.context_compressor")
+        from unittest.mock import patch
+
+        with patch(
+            "agent.context_compressor.get_model_context_length", return_value=100_000
+        ):
+            instance = cc.ContextCompressor(
+                model="test/model",
+                threshold_percent=0.50,
+                protect_first_n=0,
+                protect_last_n=2,
+                quiet_mode=True,
+            )
+        instance.tail_token_budget = 80
+        return cc, instance
+
+    @staticmethod
+    def _filler(n):
+        return [
+            {"role": "assistant", "content": f"step {i} done. " + ("x" * 500)}
+            for i in range(n)
+        ]
+
+    def test_constraint_survives_a_real_compression(self):
+        from unittest.mock import patch
+
+        cc, compressor = self._compressor()
+        messages = (
+            [{"role": "user", "content": "don't push to main until I review it"}]
+            + self._filler(40)
+            + [{"role": "user", "content": "keep going"}]
+        )
+        # A summary that lost the constraint entirely — the Governance Decay case.
+        summary = f"{cc.SUMMARY_PREFIX}\nThe user asked for scheduled steps."
+        with patch.object(compressor, "_generate_summary", return_value=summary):
+            out = compressor.compress(messages, current_tokens=90_000)
+
+        pinned = [m for m in out if m.get("_pinned_constraint")]
+        assert pinned, "compress() produced no re-injected constraint"
+        assert "push to main" in " ".join(m.get("content", "") for m in pinned)
+
+        # And it is genuinely a re-injection: the original turn is gone.
+        survivors = [
+            m
+            for m in out
+            if m.get("role") == "user"
+            and not m.get("_pinned_constraint")
+            and "until I review it" in str(m.get("content"))
+        ]
+        assert not survivors, "test would pass for the wrong reason"
+
+    def test_ordinary_transcript_gains_no_pin(self):
+        from unittest.mock import patch
+
+        cc, compressor = self._compressor()
+        messages = (
+            [{"role": "user", "content": "please add a test for the parser"}]
+            + self._filler(40)
+            + [{"role": "user", "content": "go on"}]
+        )
+        summary = f"{cc.SUMMARY_PREFIX}\nUser asked for a test; work proceeded."
+        with patch.object(compressor, "_generate_summary", return_value=summary):
+            out = compressor.compress(messages, current_tokens=90_000)
+        blob = "\n".join(
+            m.get("content", "") for m in out if isinstance(m.get("content"), str)
+        )
+        assert "PINNED_CONSTRAINT" not in blob
