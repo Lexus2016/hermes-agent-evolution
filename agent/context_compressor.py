@@ -343,6 +343,10 @@ PROACTIVE_PRUNE_REARM_MODEL_CONFIG_KEY = "_proactive_prune_rearm_tokens"
 # ---------------------------------------------------------------------------
 PINNED_CONSTRAINT_METADATA_KEY = "_pinned_constraint"
 PINNED_CONSTRAINT_MARKER = "[PINNED_CONSTRAINT]"
+# Roles whose content may create a pin. Deliberately excludes "tool" and
+# "assistant": constraint text arriving from a tool result or a model turn is
+# attacker-reachable content, not user authority.
+_PINNABLE_ROLES = frozenset({"user", "system"})
 _PINNED_CONSTRAINT_RE = re.compile(
     re.escape(PINNED_CONSTRAINT_MARKER)
     + r"\s*(.*?)"  # capture the constraint text
@@ -383,6 +387,13 @@ def _extract_pinned_constraints(messages: List[Dict[str, Any]]) -> list[str]:
     for msg in messages:
         if not isinstance(msg, dict):
             continue
+        # Only the human and the runtime may pin. Tool results and model turns
+        # are untrusted here: a tagged span inside a fetched page or a command
+        # output would otherwise install a permanent "governance rule" that
+        # survives every compaction — indirect prompt injection with a
+        # persistence primitive attached.
+        if msg.get("role") not in _PINNABLE_ROLES:
+            continue
         content = msg.get("content")
         # Metadata-flagged messages contribute their full content.
         if msg.get(PINNED_CONSTRAINT_METADATA_KEY):
@@ -405,10 +416,13 @@ def _extract_pinned_constraints(messages: List[Dict[str, Any]]) -> list[str]:
 # :func:`_reinject_dropped_pinned_constraints` re-injects any that vanished
 # as a synthetic ``role="system"`` message carrying the pin metadata.
 # ---------------------------------------------------------------------------
+# Deliberately NOT wrapped in [PINNED_CONSTRAINT] tags: each constraint below
+# carries its own pair, and tagging the header too made the boilerplate parse
+# back as a constraint once SessionDB stripped the metadata flag.
 _PINNED_CONSTRAINT_REINJECT_HEADER = (
-    "[PINNED_CONSTRAINT] The following safety / governance constraint(s) "
+    "The following safety / governance constraint(s) "
     "were pinned but were dropped during context compression. "
-    "They MUST be respected for the remainder of this conversation. [/PINNED_CONSTRAINT]"
+    "They MUST be respected for the remainder of this conversation."
 )
 
 
@@ -440,6 +454,102 @@ def _pinned_constraint_survives(
     return (matched / len(words)) >= 0.8
 
 
+def _is_synthetic_user_turn(msg: Dict[str, Any]) -> bool:
+    """True when this ``role="user"`` row was written by the runtime, not a human.
+
+    Delegates to :meth:`ContextCompressor._is_synthetic_compression_user_turn`,
+    the canonical classifier in this module — it already recognizes background
+    process output, todo injections, compaction summaries and every
+    continuation nudge, and it keys off stable *content* markers because
+    SessionDB strips underscore metadata.  Background ``Output:`` rows in
+    particular carry CI logs whose wording ("approved", "LGTM") must never be
+    read as user authority.
+    """
+    if msg.get("_todo_snapshot_synthetic"):
+        return True
+    try:
+        return bool(ContextCompressor._is_synthetic_compression_user_turn(msg))
+    except Exception:  # noqa: BLE001 - classification must never break compaction
+        # Fail CLOSED: an unclassifiable row is skipped rather than scanned.
+        # Reading a background CI log as user authority is the costly mistake;
+        # missing one human turn only forgoes a pin this pass.
+        logger.debug("Synthetic-turn classification failed; skipping row", exc_info=True)
+        return True
+
+
+def _detected_user_constraints(messages: List[Dict[str, Any]]) -> List[str]:
+    """Clause texts of binding user constraints nothing explicitly pinned.
+
+    Slice A only sees a constraint that something already marked, and in
+    production nothing ever did: ``_pinned_constraint`` was assigned only in
+    tests, so this defense protected an empty set while the summarizer was
+    free to drop "don't push until I review it".
+    ``evolution/lib/pinned_constraint_detector.py`` is the missing producer —
+    it reads user turns and returns prohibitions, deferrals and scope
+    exclusions over irreversible actions, with later approvals superseding the
+    gates they release.
+
+    Fails open to today's behaviour: a missing module or a detector error
+    leaves compaction exactly as it was.
+    """
+    try:
+        from evolution.lib.pinned_constraint_detector import (
+            ConstraintRegistry,
+            detect_constraints,
+        )
+
+        registry = ConstraintRegistry()
+        for msg in messages:
+            if not isinstance(msg, dict) or msg.get("role") != "user":
+                continue
+            if _is_synthetic_user_turn(msg):
+                continue
+            content = msg.get("content")
+            if isinstance(content, str):
+                # Revocations are NOT applied here. Three review rounds showed
+                # that every rule for inferring release from text produced some
+                # input that deleted a live constraint ("not approved to ship"
+                # read as approval, a PR "LGTM" clearing an unrelated database
+                # gate, an approval reviving after a rotation). Preserving a
+                # constraint the user already lifted costs one re-injected
+                # line; dropping one they still mean is unbounded. Release is
+                # the user's to state, and the model still sees the later
+                # approval in the transcript.
+                registry.ingest(
+                    detect_constraints(content), apply_revocations=False
+                )
+        return registry.pin_texts()
+    except Exception:  # noqa: BLE001 - detection must never break a compaction
+        logger.debug("Pinned-constraint detection failed; skipping", exc_info=True)
+        return []
+
+
+def _normalize_pinned_constraint_texts(text: str) -> List[str]:
+    """Split re-injection scaffolding back into the individual clauses.
+
+    A re-injected message carries the metadata flag, so
+    :func:`_extract_pinned_constraints` hands back its entire body — header,
+    every bullet and the tags. Re-wrapping that verbatim nests the tags and
+    grows the protected region on each rotation, and joining the bullets into
+    one string invents a constraint the user never stated. Each bullet is
+    returned separately so the set stays exactly what was pinned.
+    """
+    if not isinstance(text, str):
+        return []
+    cleaned = text.replace(PINNED_CONSTRAINT_MARKER, " ").replace(
+        "[/PINNED_CONSTRAINT]", " "
+    )
+    out: List[str] = []
+    for line in cleaned.splitlines():
+        line = line.strip().lstrip("-").strip()
+        if not line or line.startswith("The following safety / governance constraint"):
+            continue
+        collapsed = " ".join(line.split())
+        if collapsed:
+            out.append(collapsed)
+    return out
+
+
 def _reinject_dropped_pinned_constraints(
     pre_compression_messages: List[Dict[str, Any]],
     compressed_messages: List[Dict[str, Any]],
@@ -449,6 +559,9 @@ def _reinject_dropped_pinned_constraints(
     as a tagged system message.
     """
     pinned = _extract_pinned_constraints(pre_compression_messages)
+    for clause in _detected_user_constraints(pre_compression_messages):
+        if clause not in pinned:
+            pinned.append(clause)
     if not pinned:
         return compressed_messages
 
@@ -464,7 +577,26 @@ def _reinject_dropped_pinned_constraints(
         len(dropped),
     )
 
-    body_lines = "\n".join(f"- {c}" for c in dropped)
+    # Each constraint carries its own inline marker. The metadata flag does not
+    # survive SessionDB's explicit column list, so on reload the inline parser
+    # is the only way back to the constraint text; a body outside the tags
+    # would leave the reader with the header alone.
+    #
+    # Normalise first: while the metadata flag is still present the extractor
+    # returns a previously re-injected message *whole*, so re-wrapping it
+    # verbatim nests the tags and the blob grows on every compaction.
+    seen: set = set()
+    bodies: List[str] = []
+    for raw in dropped:
+        for text in _normalize_pinned_constraint_texts(raw):
+            if text not in seen:
+                seen.add(text)
+                bodies.append(text)
+    if not bodies:
+        return compressed_messages
+    body_lines = "\n".join(
+        f"- {PINNED_CONSTRAINT_MARKER} {b} [/PINNED_CONSTRAINT]" for b in bodies
+    )
     reinject_msg: Dict[str, Any] = {
         "role": "system",
         "content": f"{_PINNED_CONSTRAINT_REINJECT_HEADER}\n{body_lines}",
