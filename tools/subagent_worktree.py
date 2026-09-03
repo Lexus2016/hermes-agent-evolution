@@ -53,6 +53,8 @@ _BRANCH_NAMESPACE = "hermes-subagent"
 
 def _run_git(args, cwd: str, timeout: int = _GIT_TIMEOUT):
     """Run a git command, capturing output. Never raises on non-zero exit."""
+    from hermes_cli._subprocess_compat import noninteractive_git_env
+
     return subprocess.run(
         ["git", *args],
         cwd=cwd,
@@ -61,6 +63,8 @@ def _run_git(args, cwd: str, timeout: int = _GIT_TIMEOUT):
         encoding="utf-8",
         errors="replace",
         timeout=timeout,
+        stdin=subprocess.DEVNULL,
+        env=noninteractive_git_env(),
     )
 
 

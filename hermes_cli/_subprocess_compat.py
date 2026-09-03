@@ -365,6 +365,10 @@ def noninteractive_git_env(
       instead of prompting for credentials.
     * ``GCM_INTERACTIVE=Never`` — Git Credential Manager (the default
       credential helper on Windows installs) never pops its own dialog.
+    * ``GIT_CONFIG_PARAMETERS`` — injects ``core.fsmonitor=false`` and
+      ``core.hooksPath=/dev/null`` to neutralize repository-level configuration
+      injection attacks (e.g. GitSpawn / CVE-2026-71963) where untrusted repos
+      execute arbitrary commands on background status/diff probes.
 
     ``GIT_ASKPASS`` / ``SSH_ASKPASS`` are deliberately left alone: when the
     user has a *working* askpass helper or ssh-agent configured, auth should
@@ -381,6 +385,15 @@ def noninteractive_git_env(
     env = dict(base if base is not None else os.environ)
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GCM_INTERACTIVE"] = "Never"
+
+    safe_git_configs = "'core.fsmonitor=false' 'core.hooksPath=/dev/null'"
+    existing_params = env.get("GIT_CONFIG_PARAMETERS", "").strip()
+    env["GIT_CONFIG_PARAMETERS"] = (
+        f"{existing_params} {safe_git_configs}".strip()
+        if existing_params
+        else safe_git_configs
+    )
+
     return env
 
 
@@ -569,6 +582,7 @@ def bounded_probe_run(
     *,
     timeout: float,
     errors: str = "replace",
+    env: Mapping[str, str] | None = None,
 ) -> "subprocess.CompletedProcess[str] | None":
     """Deadlock-safe ``subprocess.run(argv, capture_output=True, timeout=...)``
     for fail-open probe call sites. Returns a ``CompletedProcess`` when the
@@ -597,6 +611,8 @@ def bounded_probe_run(
     launcher instead of orphaning them.
     """
     _popen_kwargs: dict = {"creationflags": windows_hide_flags()} if IS_WINDOWS else {"process_group": 0}
+    if env is not None:
+        _popen_kwargs["env"] = dict(env)
     try:
         proc = subprocess.Popen(
             list(argv),
@@ -625,7 +641,12 @@ def bounded_probe_run(
     return subprocess.CompletedProcess(list(argv), proc.returncode, stdout, stderr)
 
 
-def bounded_git_probe(argv: Sequence[str], *, timeout: float) -> str:
+def bounded_git_probe(
+    argv: Sequence[str],
+    *,
+    timeout: float,
+    env: Mapping[str, str] | None = None,
+) -> str:
     """Run a short, throwaway ``git`` probe and return stripped stdout, or ``""``
     on ANY failure (nonzero exit, timeout, spawn error, decode error).
 
@@ -657,7 +678,9 @@ def bounded_git_probe(argv: Sequence[str], *, timeout: float) -> str:
     openai/codex#36793). ``process_group`` only changes which group the child
     belongs to; it does not detach the terminal or alter the fast path.
     """
-    result = bounded_probe_run(argv, timeout=timeout)
+    if env is None:
+        env = noninteractive_git_env()
+    result = bounded_probe_run(argv, timeout=timeout, env=env)
     if result is None or result.returncode != 0:
         return ""
     return (result.stdout or "").strip()
