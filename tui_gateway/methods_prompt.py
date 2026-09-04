@@ -1494,6 +1494,8 @@ def _(rid, params: dict) -> dict:
                 ).run_conversation(
                     user_message=text,
                     task_id=task_id,
+                    # A background agent's own prompt, not a person's turn.
+                    persist_user_origin="runtime",
                 )
             finally:
                 if home_token is not None:
@@ -1697,6 +1699,8 @@ def _(rid, params: dict) -> dict:
                     user_message=prompt,
                     task_id=task_id,
                     conversation_history=parent_history or None,
+                    # An ephemeral preview run, not a person's turn.
+                    persist_user_origin="runtime",
                 )
             finally:
                 if home_token is not None:

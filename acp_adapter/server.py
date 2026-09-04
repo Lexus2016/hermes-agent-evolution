@@ -2077,6 +2077,9 @@ class HermesACPAgent(acp.Agent):
                     conversation_history=state.history,
                     task_id=session_id,
                     persist_user_message=user_text or "[Image attachment]",
+                    # ACP carries a person's prompt from their editor, the same
+                    # kind of surface as the CLI and the desktop client.
+                    persist_user_origin="human",
                 )
                 return result
             except Exception as e:

@@ -2441,6 +2441,8 @@ class CLICommandsMixin:
                 result = bg_agent.run_conversation(
                     user_message=prompt,
                     task_id=task_id,
+                    # A background task the agent runs for itself.
+                    persist_user_origin="runtime",
                 )
 
                 response = result.get("final_response", "") if result else ""

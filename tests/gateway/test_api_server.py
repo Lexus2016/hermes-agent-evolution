@@ -390,6 +390,10 @@ class TestAgentExecution:
             user_message="hello",
             conversation_history=[],
             task_id="session-123",
+            # /v1 takes both the turn and its history from the request body,
+            # so neither is a person's channel — the turn carries its own
+            # provenance class rather than being left merely unclassified.
+            persist_user_origin="api",
         )
 
     @pytest.mark.asyncio

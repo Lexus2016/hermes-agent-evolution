@@ -2455,6 +2455,15 @@ from gateway.config import (
     platform_binds_port as _platform_binds_port,
 )
 
+# Channels whose inbound payload is service traffic rather than a person
+# typing: a webhook body, a Graph notification, an API request, a relay frame.
+# They reach the same adapter pipeline as chat platforms, so provenance has to
+# exclude them explicitly.
+_SERVICE_PLATFORMS = frozenset(
+    {"webhook", "msgraph_webhook", "api_server", "relay"}
+)
+
+
 
 class MultiplexConfigError(RuntimeError):
     """A profile multiplexer config is invalid.
@@ -7115,6 +7124,11 @@ class TurnRunner:
                 _conversation_kwargs["persist_user_display_kind"] = (
                     ctx.persist_user_display_kind
                 )
+            if getattr(ctx, "persist_user_origin", None):
+                # Provenance travels with the turn context the same way, but it
+                # is a trust decision rather than presentation: it is persisted
+                # as its own column and read fail-closed.
+                _conversation_kwargs["persist_user_origin"] = ctx.persist_user_origin
             if ctx.moa_config is not None:
                 _conversation_kwargs["moa_config"] = ctx.moa_config
             if _persist_user_timestamp_override is not None:
@@ -21668,6 +21682,40 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         persist_user_display_kind = (
             "internal_notification" if getattr(event, "internal", False) else None
         )
+        # Provenance. `internal` alone is NOT enough: it defaults to False and
+        # several runtime-generated events omit it (the watch heartbeat, goal
+        # continuations, the goal kickoff), so "not internal" would have
+        # classified them as human. It also cannot simply be set on those
+        # constructors, because `internal=True` additionally bypasses user
+        # authorization checks — a security change in the wrong direction.
+        #
+        # So three conditions must hold, and each rules out a real case:
+        #   * not internal            — excludes wake-ups and delegation replies
+        #   * raw_message is present  — a real turn was PARSED from a platform
+        #                               payload; every runtime-synthesised event
+        #                               omits it, and 30 adapter sites set it,
+        #                               so this needs no per-adapter opt-in
+        #   * a person-to-agent channel — webhook, msgraph_webhook, api_server
+        #                               and relay carry service traffic whose
+        #                               payload is attacker-reachable
+        # Anything unclassified stays untrusted, so a missed case is a false
+        # negative rather than forged trust.
+        _platform = getattr(getattr(event, "source", None), "platform", None)
+        _platform_value = getattr(_platform, "value", _platform)
+        # None rather than "runtime" for the negative case: this parameter
+        # exists to ASSERT trust, and absence is already the untrusted default
+        # that every reader fails closed on. Declaring the negative would also
+        # add a keyword to every gateway turn, which is a lot of noise for a
+        # value that changes nothing.
+        persist_user_origin = (
+            "human"
+            if (
+                not getattr(event, "internal", False)
+                and getattr(event, "raw_message", None) is not None
+                and _platform_value not in _SERVICE_PLATFORMS
+            )
+            else None
+        )
         try:
             _pcfg = _load_gateway_config()
             _redact_pii = bool((_pcfg.get("privacy") or {}).get("redact_pii", False))
@@ -23440,6 +23488,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 persist_user_message=persist_user_message,
                 persist_user_timestamp=persist_user_timestamp,
                 persist_user_display_kind=persist_user_display_kind,
+                persist_user_origin=persist_user_origin,
                 message_type=event.message_type,
             )
             _turn_seconds = time.monotonic() - _turn_started_monotonic
@@ -23881,6 +23930,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 }
                 if persist_user_display_kind:
                     _user_entry["display_kind"] = persist_user_display_kind
+                if persist_user_origin:
+                    _user_entry["origin"] = persist_user_origin
                 if event.message_id:
                     _user_entry["message_id"] = str(event.message_id)
                 # Dedupe: skip if this platform message_id is already in the
@@ -23925,6 +23976,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     }
                     if persist_user_display_kind:
                         _user_entry["display_kind"] = persist_user_display_kind
+                    if persist_user_origin:
+                        _user_entry["origin"] = persist_user_origin
                     if event.message_id:
                         _user_entry["message_id"] = str(event.message_id)
                     await self.async_session_store.append_to_transcript(
@@ -24124,6 +24177,8 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                         }
                         if 'persist_user_display_kind' in locals() and persist_user_display_kind:
                             _user_entry["display_kind"] = persist_user_display_kind
+                        if 'persist_user_origin' in locals() and persist_user_origin:
+                            _user_entry["origin"] = persist_user_origin
                         if getattr(event, "message_id", None):
                             _user_entry["message_id"] = str(event.message_id)
                         await self.async_session_store.append_to_transcript(
@@ -31422,6 +31477,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         persist_user_message: Optional[Any] = None,
         persist_user_timestamp: Optional[float] = None,
         persist_user_display_kind: Optional[str] = None,
+        persist_user_origin: Optional[str] = None,
         message_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Profile-scoping wrapper around the agent run.
@@ -31443,6 +31499,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 persist_user_message=persist_user_message,
                 persist_user_timestamp=persist_user_timestamp,
                 persist_user_display_kind=persist_user_display_kind,
+                persist_user_origin=persist_user_origin,
                 message_type=message_type,
             )
 
@@ -31457,6 +31514,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 persist_user_message=persist_user_message,
                 persist_user_timestamp=persist_user_timestamp,
                 persist_user_display_kind=persist_user_display_kind,
+                persist_user_origin=persist_user_origin,
                 message_type=message_type,
             )
 
@@ -31601,6 +31659,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         persist_user_message: Optional[Any] = None,
         persist_user_timestamp: Optional[float] = None,
         persist_user_display_kind: Optional[str] = None,
+        persist_user_origin: Optional[str] = None,
         message_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
@@ -31912,6 +31971,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             persist_user_message=persist_user_message,
             persist_user_timestamp=persist_user_timestamp,
             persist_user_display_kind=persist_user_display_kind,
+            persist_user_origin=persist_user_origin,
         )
         turn_runner = TurnRunner(self, turn_ctx)
         # Callback invoked by agent on tool lifecycle events — extracted to
