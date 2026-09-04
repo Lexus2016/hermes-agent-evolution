@@ -586,3 +586,62 @@ class TestSplicedSummaryDemotesProvenance:
 
         source = inspect.getsource(cc.ContextCompressor.compress)
         assert "_demote_origin_for_spliced_summary(" in source
+
+
+class TestPinningIsGatedOnProvenance:
+    """A person may pin again — and only a person.
+
+    The inline marker is text, so the trust boundary cannot be the role label
+    the runtime also applies to its own content. `origin == "human"` is
+    recorded at ingress by the four surfaces that carry a person's words, and
+    is unforgeable from content: the API builds message dicts with role and
+    content only, imports drop the field, and an unrecognised value normalises
+    to None on both read and write.
+    """
+
+    RULE = f"{PINNED_CONSTRAINT_MARKER} never force-push to main [/PINNED_CONSTRAINT]"
+
+    def test_a_human_turn_can_pin_again(self):
+        msg = {"role": "user", "content": self.RULE, "origin": "human"}
+        assert _extract_pinned_constraints([msg]) == ["never force-push to main"]
+
+    def test_the_same_text_without_provenance_cannot(self):
+        msg = {"role": "user", "content": self.RULE}
+        assert _extract_pinned_constraints([msg]) == []
+
+    @pytest.mark.parametrize("origin", ["runtime", "api", "HUMAN", "", None])
+    def test_only_exactly_human_counts(self, origin):
+        msg = {"role": "user", "content": self.RULE, "origin": origin}
+        assert _extract_pinned_constraints([msg]) == []
+
+    @pytest.mark.parametrize("role", ["tool", "assistant"])
+    def test_provenance_does_not_rescue_an_untrusted_role(self, role):
+        """A laundered row could carry both; the role gate still applies."""
+        msg = {"role": role, "content": self.RULE, "origin": "human"}
+        assert _extract_pinned_constraints([msg]) == []
+
+    def test_our_own_reinjection_still_works(self):
+        msg = {"role": "system", "content": self.RULE}
+        assert _extract_pinned_constraints([msg]) == ["never force-push to main"]
+
+    def test_a_human_pin_survives_a_full_rotation(self):
+        pre = [{"role": "user", "content": self.RULE, "origin": "human"}]
+        out = _reinject_dropped_pinned_constraints(
+            pre, [{"role": "system", "content": "Summary that lost it."}]
+        )
+        joined = " ".join(
+            m.get("content", "") for m in out if isinstance(m.get("content"), str)
+        )
+        assert "never force-push to main" in joined
+
+    def test_metadata_pin_prefers_provenance_over_the_old_heuristics(self):
+        """A human row carrying a synthetic-looking display_kind still pins:
+        provenance is the answer, the heuristics were the stand-in."""
+        msg = {
+            "role": "user",
+            "content": "never deploy on Friday",
+            "_pinned_constraint": True,
+            "origin": "human",
+            "display_kind": "hidden",
+        }
+        assert _extract_pinned_constraints([msg]) == ["never deploy on Friday"]
