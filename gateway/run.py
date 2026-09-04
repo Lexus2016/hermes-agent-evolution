@@ -21702,6 +21702,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # negative rather than forged trust.
         _platform = getattr(getattr(event, "source", None), "platform", None)
         _platform_value = getattr(_platform, "value", _platform)
+        # None rather than "runtime" for the negative case: this parameter
+        # exists to ASSERT trust, and absence is already the untrusted default
+        # that every reader fails closed on. Declaring the negative would also
+        # add a keyword to every gateway turn, which is a lot of noise for a
+        # value that changes nothing.
         persist_user_origin = (
             "human"
             if (
@@ -21709,7 +21714,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 and getattr(event, "raw_message", None) is not None
                 and _platform_value not in _SERVICE_PLATFORMS
             )
-            else "runtime"
+            else None
         )
         try:
             _pcfg = _load_gateway_config()

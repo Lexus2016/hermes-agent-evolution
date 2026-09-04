@@ -268,7 +268,7 @@ def _parked_agent(loop, started: asyncio.Event, release: threading.Event) -> Mag
     agent._last_compaction_in_place = False
     agent._hermes_api_runtime = {}
 
-    def _park(user_message=None, conversation_history=None, task_id=None):
+    def _park(user_message=None, conversation_history=None, task_id=None, **_kwargs):
         loop.call_soon_threadsafe(started.set)
         release.wait(_TURN_UNBLOCK_TIMEOUT)
         return {"final_response": "done", "messages": [], "api_calls": 0, "tools": []}
@@ -333,7 +333,7 @@ class TestRunAgentRegistersForShutdownInterrupt:
         agent._last_compaction_in_place = False
         observed = {}
 
-        def _record(user_message=None, conversation_history=None, task_id=None):
+        def _record(user_message=None, conversation_history=None, task_id=None, **_kwargs):
             observed["during"] = dict(adapter._shutdown_interruptible_agents)
             return {"final_response": "done", "messages": [], "api_calls": 0, "tools": []}
 

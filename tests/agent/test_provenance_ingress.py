@@ -90,25 +90,25 @@ class TestGatewayClassification:
                 and raw_message is not None
                 and platform not in TestGatewayClassification.SERVICE
             )
-            else "runtime"
+            else None
         )
 
     def test_a_real_inbound_chat_message_is_human(self):
         assert self._classify() == "human"
 
-    def test_a_wake_up_or_delegation_reply_is_runtime(self):
-        assert self._classify(internal=True) == "runtime"
+    def test_a_wake_up_or_delegation_reply_is_not_human(self):
+        assert self._classify(internal=True) is None
 
-    def test_a_runtime_synthesised_event_is_runtime(self):
+    def test_a_runtime_synthesised_event_is_not_human(self):
         """The heartbeat, goal continuations and kickoff omit raw_message."""
-        assert self._classify(raw_message=None) == "runtime"
+        assert self._classify(raw_message=None) is None
 
     @pytest.mark.parametrize(
         "platform", ["webhook", "msgraph_webhook", "api_server", "relay"]
     )
     def test_service_channels_are_never_human(self, platform):
         """Their payload is attacker-reachable even though it is parsed."""
-        assert self._classify(platform=platform) == "runtime"
+        assert self._classify(platform=platform) is None
 
     @pytest.mark.parametrize(
         "platform",
@@ -122,6 +122,15 @@ class TestGatewayClassification:
         assert 'not getattr(event, "internal", False)' in source
         assert 'getattr(event, "raw_message", None) is not None' in source
         assert "_platform_value not in _SERVICE_PLATFORMS" in source
+
+    def test_the_negative_case_asserts_nothing_rather_than_runtime(self):
+        """The parameter exists to ASSERT trust; absence is already the
+        untrusted default every reader fails closed on, and declaring the
+        negative would add a keyword to every gateway turn for no effect."""
+        source = (REPO / "gateway" / "run.py").read_text(encoding="utf-8")
+        marker = source.index("persist_user_origin = (")
+        block = source[marker : marker + 400]
+        assert "else None" in block
 
     def test_runtime_event_constructors_still_omit_raw_message(self):
         """The discriminator only holds while this stays true, so assert it."""
