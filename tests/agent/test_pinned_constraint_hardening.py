@@ -421,3 +421,117 @@ class TestDelimiterCollisionInConstraintText:
             )
             carried = out
         assert len(set(sizes)) == 1, f"growth restarted: {sizes}"
+
+
+class TestReinjectionBounds:
+    """Always re-injecting is only safe if the set is bounded.
+
+    Phase 3 replaced an 80%-word-overlap survival guess (which got negation
+    backwards and lost rules silently) with unconditional assertion. That trade
+    is only sound with de-duplication, a count cap, a byte cap, deterministic
+    eviction, and a log line whenever something is refused.
+    """
+
+    @staticmethod
+    def _pins(texts):
+        from agent.context_compressor import PINNED_CONSTRAINT_MARKER as M
+
+        return [
+            {
+                "role": "system",
+                "content": "\n".join(f"{M} {t} [/PINNED_CONSTRAINT]" for t in texts),
+            }
+        ]
+
+    def test_duplicates_collapse_case_and_whitespace_insensitively(self):
+        from agent.context_compressor import _bound_pinned_constraints
+
+        assert _bound_pinned_constraints(
+            ["Never  push to MAIN", "never push to main", "Never push to main"]
+        ) == ["Never  push to MAIN"]
+
+    def test_count_cap_is_enforced(self):
+        from agent.context_compressor import (
+            MAX_REINJECTED_CONSTRAINTS,
+            _bound_pinned_constraints,
+        )
+
+        out = _bound_pinned_constraints(
+            [f"rule {i}" for i in range(MAX_REINJECTED_CONSTRAINTS + 10)]
+        )
+        assert len(out) == MAX_REINJECTED_CONSTRAINTS
+
+    def test_byte_cap_is_enforced(self):
+        from agent.context_compressor import (
+            MAX_REINJECTED_CHARS,
+            _bound_pinned_constraints,
+        )
+
+        out = _bound_pinned_constraints([f"{i} " + "x" * 400 for i in range(20)])
+        assert sum(len(c) for c in out) <= MAX_REINJECTED_CHARS
+
+    def test_eviction_is_deterministic_and_oldest_first(self):
+        from agent.context_compressor import (
+            MAX_REINJECTED_CONSTRAINTS,
+            _bound_pinned_constraints,
+        )
+
+        texts = [f"rule {i}" for i in range(MAX_REINJECTED_CONSTRAINTS + 5)]
+        first = _bound_pinned_constraints(texts)
+        assert first == _bound_pinned_constraints(texts), "not deterministic"
+        assert first[0] == "rule 0", "first-seen order must be stable"
+
+    def test_refusal_is_logged(self, caplog):
+        from agent.context_compressor import (
+            MAX_REINJECTED_CONSTRAINTS,
+            _bound_pinned_constraints,
+        )
+
+        with caplog.at_level("WARNING"):
+            _bound_pinned_constraints(
+                [f"rule {i}" for i in range(MAX_REINJECTED_CONSTRAINTS + 3)]
+            )
+        assert any("budget reached" in r.message for r in caplog.records), (
+            "dropping a constraint must never be silent"
+        )
+
+    def test_blank_and_non_string_entries_are_ignored(self):
+        from agent.context_compressor import _bound_pinned_constraints
+
+        assert _bound_pinned_constraints(["", "   ", None, 42, "real"]) == ["real"]
+
+    def test_negation_flip_no_longer_loses_the_rule(self):
+        """The exact case the survival heuristic got backwards."""
+        rule = "never push directly to the main branch without review"
+        out = _reinject_dropped_pinned_constraints(
+            self._pins([rule]),
+            [{"role": "system", "content": "Pushes to the main branch continue without review."}],
+        )
+        joined = " ".join(
+            m.get("content", "") for m in out if isinstance(m.get("content"), str)
+        )
+        assert rule in joined
+
+    def test_short_word_rule_no_longer_loses_the_rule(self):
+        """Words all <= 3 chars produced an empty word list -> 'survived'."""
+        rule = "ask me"
+        out = _reinject_dropped_pinned_constraints(
+            self._pins([rule]), [{"role": "system", "content": "unrelated summary"}]
+        )
+        joined = " ".join(
+            m.get("content", "") for m in out if isinstance(m.get("content"), str)
+        )
+        assert rule in joined
+
+    def test_unconditional_reinjection_still_does_not_grow(self):
+        carried = self._pins(["never force-push to main", "ask before deploying"])
+        sizes = []
+        for _ in range(6):
+            out = _reinject_dropped_pinned_constraints(
+                carried, [{"role": "system", "content": "Summary."}]
+            )
+            sizes.append(
+                len("".join(m.get("content", "") for m in out if isinstance(m.get("content"), str)))
+            )
+            carried = out
+        assert len(set(sizes)) == 1, f"grew across rotations: {sizes}"

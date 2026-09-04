@@ -488,6 +488,10 @@ _PINNED_CONSTRAINT_REINJECT_HEADER = (
 )
 
 
+# NOTE: retained for API compatibility and its existing tests, but it no
+# longer gates re-injection — its 80% word-overlap test mis-handles negation
+# and short-word constraints, both of which lose a rule silently. See
+# _reinject_dropped_pinned_constraints.
 def _pinned_constraint_survives(
     constraint_text: str,
     compressed_messages: List[Dict[str, Any]],
@@ -574,6 +578,53 @@ def _normalize_pinned_constraint_texts(text: str) -> List[str]:
     return bodies
 
 
+# Bounds on the re-injected set. Re-injection is unconditional (see
+# _reinject_dropped_pinned_constraints), so these are what keep it from
+# trading a silent-loss bug for an unbounded-prompt one.
+MAX_REINJECTED_CONSTRAINTS = 8
+MAX_REINJECTED_CHARS = 2000
+
+
+def _pinned_constraint_dedupe_key(text: str) -> str:
+    """Identity for de-duplication: case- and whitespace-insensitive."""
+    return " ".join((text or "").split()).casefold()
+
+
+def _bound_pinned_constraints(constraints: List[str]) -> List[str]:
+    """De-duplicate and cap *constraints*, oldest-first, deterministically.
+
+    Order is first-seen and eviction happens at the tail, so the set a session
+    carries is stable across rotations rather than reshuffling each pass. What
+    is refused is logged: dropping a constraint must never be silent, which is
+    the failure this whole mechanism exists to prevent.
+    """
+    seen: set[str] = set()
+    out: List[str] = []
+    used = 0
+    for raw in constraints:
+        if not isinstance(raw, str):
+            continue
+        text = raw.strip()
+        if not text:
+            continue
+        key = _pinned_constraint_dedupe_key(text)
+        if key in seen:
+            continue
+        if len(out) >= MAX_REINJECTED_CONSTRAINTS or used + len(text) > MAX_REINJECTED_CHARS:
+            logger.warning(
+                "Context compressor: pinned-constraint budget reached "
+                "(%d items / %d chars); NOT re-injecting: %s",
+                MAX_REINJECTED_CONSTRAINTS,
+                MAX_REINJECTED_CHARS,
+                text[:80],
+            )
+            continue
+        seen.add(key)
+        out.append(text)
+        used += len(text)
+    return out
+
+
 def _reinject_dropped_pinned_constraints(
     pre_compression_messages: List[Dict[str, Any]],
     compressed_messages: List[Dict[str, Any]],
@@ -586,15 +637,26 @@ def _reinject_dropped_pinned_constraints(
     if not pinned:
         return compressed_messages
 
-    dropped = [
-        c for c in pinned if not _pinned_constraint_survives(c, compressed_messages)
-    ]
+    # Do not GUESS whether a constraint survived — assert it.
+    #
+    # The survival test is 80% word overlap, which gets negation backwards: a
+    # summary stating the opposite policy reuses nearly all of the same words,
+    # so "never push directly to main without review" is judged to have
+    # survived a summary that says the reverse, and is silently not re-injected.
+    # A constraint whose words are all short produces an empty word list and is
+    # judged survived unconditionally. Both are silent losses of exactly the
+    # rule this machinery exists to preserve.
+    #
+    # Re-injecting unconditionally costs a few duplicated lines when the
+    # summary did keep the rule, and that cost is bounded below. A missed
+    # re-injection is not bounded by anything.
+    dropped = _bound_pinned_constraints(pinned)
     if not dropped:
         return compressed_messages
 
     logger.warning(
-        "Context compressor: %d pinned constraint(s) dropped during "
-        "compaction — re-injecting to prevent Governance Decay",
+        "Context compressor: re-injecting %d pinned constraint(s) after "
+        "compaction to prevent Governance Decay",
         len(dropped),
     )
 
