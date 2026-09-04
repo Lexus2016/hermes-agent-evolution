@@ -2925,6 +2925,9 @@ def _run_conversation_impl(
             # event row enters the live history.
             api_msg.pop("display_kind", None)
             api_msg.pop("display_metadata", None)
+            # Provenance: which channel the row really came from. Persistence
+            # only — it must never reach a provider, for the same reason.
+            api_msg.pop("origin", None)
 
             # Durable row identity stamped by _rows_to_conversation so the
             # desktop can address a specific persisted message (reactions).

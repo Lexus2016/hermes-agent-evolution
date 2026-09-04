@@ -3446,6 +3446,8 @@ def handle_max_iterations(agent, messages: list, api_call_count: int) -> str:
                 "codex_message_items",
                 "timestamp",
                 "platform_message_id",
+                # provenance: persistence-only, same rejection class
+                "origin",
             ):
                 api_msg.pop(schema_foreign, None)
             # api_content (the persist-what-you-send sidecar) carries the

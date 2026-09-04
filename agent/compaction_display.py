@@ -44,4 +44,5 @@ def project_compaction_message_for_display(
     for key in _COMPACTION_INTERNAL_FIELDS:
         projected.pop(key, None)
     projected.pop("display_kind", None)
+    projected.pop("origin", None)
     return projected

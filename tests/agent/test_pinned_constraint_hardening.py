@@ -535,3 +535,54 @@ class TestReinjectionBounds:
             )
             carried = out
         assert len(set(sizes)) == 1, f"grew across rotations: {sizes}"
+
+
+class TestSplicedSummaryDemotesProvenance:
+    """A message the summary is spliced into stops being purely human.
+
+    Merging the summary rewrites the tail message's content: generated text,
+    itself derived from tool output, now shares the dict with whatever the
+    human wrote. Keeping origin="human" would launder runtime content into
+    trusted provenance — the same escalation-by-relabelling the provenance
+    column exists to close, one level up.
+
+    The merge branch needs the protected head and tail to collide on both
+    candidate summary roles, which no constructed fixture reached (all four
+    head/tail role combinations were tried), so the invariant is asserted on
+    the extracted helper rather than through a fixture that would prove nothing.
+    """
+
+    @staticmethod
+    def _demote():
+        from agent.context_compressor import _demote_origin_for_spliced_summary
+
+        return _demote_origin_for_spliced_summary
+
+    def test_human_is_demoted_to_runtime(self):
+        msg = {"role": "user", "content": "mine", "origin": "human"}
+        self._demote()(msg)
+        assert msg["origin"] == "runtime"
+
+    @pytest.mark.parametrize("origin", ["runtime", "api", None])
+    def test_other_provenance_is_left_alone(self, origin):
+        msg = {"role": "user", "content": "x", "origin": origin}
+        self._demote()(msg)
+        assert msg.get("origin") == origin
+
+    def test_absent_provenance_is_not_invented(self):
+        msg = {"role": "user", "content": "x"}
+        self._demote()(msg)
+        assert "origin" not in msg, "a missing origin must not become 'runtime'"
+
+    @pytest.mark.parametrize("bad", [None, "str", 42, []])
+    def test_non_dict_input_is_ignored(self, bad):
+        self._demote()(bad)  # must not raise
+
+    def test_it_is_called_at_the_merge_site(self):
+        """Guards the extraction: the helper is worthless if nothing calls it."""
+        import inspect
+
+        import agent.context_compressor as cc
+
+        source = inspect.getsource(cc.ContextCompressor.compress)
+        assert "_demote_origin_for_spliced_summary(" in source

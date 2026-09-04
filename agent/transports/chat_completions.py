@@ -398,6 +398,7 @@ class ChatCompletionsTransport(ProviderTransport):
                 or "timestamp" in msg  # #47868 — strict providers reject this
                 or "platform_message_id" in msg  # gateway dedup id (persistence-only)
                 or "api_content" in msg  # persist-what-you-send sidecar
+                or "origin" in msg  # provenance: persistence-only, never a wire field
                 or "anthropic_content_blocks" in msg
                 or "bedrock_content_blocks" in msg
             ):
@@ -472,6 +473,7 @@ class ChatCompletionsTransport(ProviderTransport):
                 or "timestamp" in msg  # #47868 — leak into strict providers
                 or "platform_message_id" in msg  # gateway dedup id (persistence-only)
                 or "api_content" in msg  # persist-what-you-send sidecar
+                or "origin" in msg  # provenance: persistence-only, never a wire field
                 or "anthropic_content_blocks" in msg
                 or "bedrock_content_blocks" in msg
             ):
@@ -483,6 +485,10 @@ class ChatCompletionsTransport(ProviderTransport):
                 out_msg.pop("timestamp", None)  # #47868 — leak into strict providers
                 out_msg.pop("platform_message_id", None)  # gateway dedup id
                 out_msg.pop("api_content", None)  # persist-what-you-send sidecar
+                # Provenance is persistence-only. It rides resumed history the
+                # way display_kind does, and a strict OpenAI-compatible backend
+                # rejects an unknown message key (same class as #47868).
+                out_msg.pop("origin", None)
                 out_msg.pop("anthropic_content_blocks", None)
                 out_msg.pop("bedrock_content_blocks", None)
 

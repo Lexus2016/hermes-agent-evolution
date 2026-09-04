@@ -249,26 +249,12 @@ def _compression_lock_holder_process_is_dead(holder: str) -> bool:
     return False
 
 
-MESSAGE_ORIGIN_HUMAN = "human"
-MESSAGE_ORIGIN_RUNTIME = "runtime"
-MESSAGE_ORIGIN_API = "api"
-_MESSAGE_ORIGINS = frozenset(
-    {MESSAGE_ORIGIN_HUMAN, MESSAGE_ORIGIN_RUNTIME, MESSAGE_ORIGIN_API}
+from agent.message_metadata import (  # noqa: E402 - canonical, leaf module
+    MESSAGE_ORIGIN_API,
+    MESSAGE_ORIGIN_HUMAN,
+    MESSAGE_ORIGIN_RUNTIME,
+    normalize_message_origin as _normalize_message_origin,
 )
-
-
-def _normalize_message_origin(value: Any) -> Optional[str]:
-    """Coerce a message ``origin`` to the known set, or to None.
-
-    Fail-closed by construction: anything unrecognised becomes None, and a
-    reader must treat None as untrusted. The value set is enforced here rather
-    than with a CHECK constraint, because SQLite applies a CHECK added through
-    ALTER TABLE to later writes as well, and legacy rows carry NULL.
-    """
-    if isinstance(value, str) and value in _MESSAGE_ORIGINS:
-        return value
-    return None
-
 
 def _scrub_surrogates(value: Any) -> Any:
     """Replace lone surrogates when *value* is text; pass anything else through.
