@@ -314,6 +314,26 @@ def drain_transcript_spool(session_id: str, replay) -> tuple[int, int]:
     return replayed, remaining
 
 
+def _downgrade_spooled_origin(value: Any) -> Optional[str]:
+    """Never let a spool file assert human provenance.
+
+    The spool is a plain file in a directory the agent itself can write to, so
+    treating its ``origin`` as authoritative would hand a prompt-injected turn
+    a way to mint trusted provenance. Known non-human values are carried
+    through; anything else, "human" included, becomes None.
+    """
+    from agent.message_metadata import (
+        MESSAGE_ORIGIN_API,
+        MESSAGE_ORIGIN_RUNTIME,
+        normalize_message_origin,
+    )
+
+    normalized = normalize_message_origin(value)
+    if normalized in (MESSAGE_ORIGIN_RUNTIME, MESSAGE_ORIGIN_API):
+        return normalized
+    return None
+
+
 def _serialise_value(value: Any) -> Optional[dict]:
     """Convert a pending message value to a JSON-serialisable dict."""
     # MessageEvent objects have a .text attribute and other fields
@@ -321,7 +341,12 @@ def _serialise_value(value: Any) -> Optional[dict]:
         result: Dict[str, Any] = {"text": getattr(value, "text", "")}
         # Preserve additional fields if present
         for attr in ("session_id", "platform", "sender_id", "sender_name",
-                      "reply_to", "media", "raw_event"):
+                      "reply_to", "media", "raw_event",
+                      # `internal` is the classification a spooled event needs
+                      # to be replayed with the right provenance after a
+                      # restart; dropping it here would make every recovered
+                      # turn indistinguishable from a runtime-authored one.
+                      "internal", "origin"):
             val = getattr(value, attr, None)
             if val is not None:
                 try:
@@ -457,6 +482,13 @@ def recover_pending_to_db(
                 session_id=session_id,
                 role="user",
                 content=text,
+                # A spool file is an ordinary file under HERMES_HOME, and the
+                # agent can write files — a prompt-injected turn could plant
+                # one. So the spool never CONFERS trust: a recovered turn is
+                # downgraded to runtime at best, never restored as human. The
+                # cost is that a genuine human turn interrupted by a shutdown
+                # comes back untrusted, which is the safe direction.
+                origin=_downgrade_spooled_origin(data.get("origin")),
                 timestamp=payload.get("ts", int(time.time())),
             )
             recovered += 1

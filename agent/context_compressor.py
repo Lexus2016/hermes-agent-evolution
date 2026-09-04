@@ -47,6 +47,10 @@ from agent.model_metadata import (
 )
 from agent.redact import redact_sensitive_text
 from agent.turn_context import drop_stale_api_content
+from agent.message_metadata import (
+    MESSAGE_ORIGIN_HUMAN,
+    MESSAGE_ORIGIN_RUNTIME,
+)
 from tools.todo_tool import TODO_INJECTION_HEADER
 
 try:
@@ -623,6 +627,30 @@ def _bound_pinned_constraints(constraints: List[str]) -> List[str]:
         out.append(text)
         used += len(text)
     return out
+
+
+def _demote_origin_for_spliced_summary(msg: Dict[str, Any]) -> None:
+    """Drop human provenance from a message the summary is spliced into.
+
+    Merging the summary into a tail message rewrites that message's content:
+    generated text — itself derived from tool output — now shares the dict with
+    whatever the human wrote. The row is no longer purely the human's words, so
+    keeping ``origin="human"`` would launder runtime content into trusted
+    provenance. That is the same escalation-by-relabelling as the laundering
+    paths the provenance column exists to close, one level up.
+
+    Demote rather than clear: the row is still runtime-authored history, not
+    unknown history, and a reader treats both as untrusted anyway.
+
+    Extracted from the merge site so the invariant can be asserted directly.
+    The merge branch itself needs the protected head and tail to collide on
+    both candidate roles, which no constructed fixture reached, so an
+    integration test over it would have asserted nothing.
+    """
+    if not isinstance(msg, dict):
+        return
+    if msg.get("origin") == MESSAGE_ORIGIN_HUMAN:
+        msg["origin"] = MESSAGE_ORIGIN_RUNTIME
 
 
 def _reinject_dropped_pinned_constraints(
@@ -9541,13 +9569,7 @@ This compaction should PRIORITISE preserving all information related to the focu
             if _merge_summary_into_tail and tail_idx == _merge_target_idx:
                 # Merge the summary into the tail message that collided.
                 #
-                # The row stops being purely the human's words at this point:
-                # generated summary text — itself derived from tool output — is
-                # spliced into the same dict. Keeping `origin="human"` here
-                # would launder that content into trusted provenance, so the
-                # composite is demoted to runtime.
-                if msg.get("origin") == "human":
-                    msg["origin"] = "runtime"
+                _demote_origin_for_spliced_summary(msg)
                 old_content = msg.get("content", "")
                 if _force_user_leading and summary_role == "user":
                     # The summary must be part of the first user-visible
@@ -9869,6 +9891,7 @@ def split_user_originated_turn(
         candidate.pop("_row_id", None)
     candidate.pop("display_kind", None)
     candidate.pop("display_metadata", None)
+    candidate.pop("origin", None)
     carrier_metadata = message.get("display_metadata")
     if isinstance(carrier_metadata, dict):
         durable_metadata = {
