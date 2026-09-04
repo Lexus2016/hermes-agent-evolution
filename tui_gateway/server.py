@@ -4300,6 +4300,9 @@ def _persist_branch_seed(session: dict) -> None:
                     {
                         "role": msg.get("role", "user"),
                         "content": msg.get("content"),
+                        # A copy of a human turn is still a human turn; this
+                        # dict is rebuilt field by field, so omitting it drops it.
+                        "origin": msg.get("origin"),
                         "reasoning": msg.get("reasoning"),
                         "reasoning_content": msg.get("reasoning_content"),
                         "reasoning_details": msg.get("reasoning_details"),

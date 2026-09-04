@@ -777,6 +777,11 @@ class SessionPortabilityMixin:
                         "codex_message_items",
                     ):
                         clean[key] = self._reasoning_json_value(clean.get(key))
+                    # Provenance is never imported. The payload is arbitrary
+                    # caller-supplied JSON (/api/sessions/import), so an
+                    # attacker could otherwise assert `origin: "human"` and
+                    # have it persisted as trusted. Foreign history is foreign.
+                    clean.pop("origin", None)
                     sanitized_messages.append(clean)
 
                 total_messages, total_tool_calls = self._insert_message_rows(

@@ -14183,8 +14183,12 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             # Provenance must round-trip: compress() and every other consumer
             # read the in-memory dict, never the row, so a column alone would
             # be invisible to them.
-            if row["origin"]:
-                msg["origin"] = row["origin"]
+            # Normalised on the way OUT as well as in: the column carries no
+            # CHECK constraint, so a value written by an import, another tool
+            # or direct SQL reaches this point unvalidated. Reads fail closed.
+            row_origin = _normalize_message_origin(row["origin"])
+            if row_origin:
+                msg["origin"] = row_origin
             if row["display_metadata"]:
                 decoded = self._decode_display_metadata(row["display_metadata"])
                 if decoded is not None:

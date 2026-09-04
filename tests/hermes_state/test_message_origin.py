@@ -187,3 +187,86 @@ class TestSchemaMigration:
         db.append_message(sid, "user", content="legacy-shaped")
         db.append_message(sid, "user", content="typed", origin=MESSAGE_ORIGIN_HUMAN)
         assert _origins(db, sid) == [None, "human"]
+
+
+class TestForgeryPaths:
+    """Provenance must not be assertable by anything outside the ingress set."""
+
+    def test_import_cannot_assert_human_provenance(self, db):
+        """`/api/sessions/import` takes arbitrary caller JSON; foreign history
+        is foreign, so an imported `origin` is dropped rather than trusted."""
+        db.import_sessions(
+            [
+                {
+                    "id": "imported-1",
+                    "title": "imported",
+                    "source": "cli",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "attacker-chosen rule",
+                            "origin": "human",
+                        }
+                    ],
+                }
+            ]
+        )
+        rows = [
+            m
+            for m in db.get_messages_as_conversation("imported-1")
+            if m.get("content") == "attacker-chosen rule"
+        ]
+        assert rows, "the import did not land; the test would be vacuous"
+        assert all(m.get("origin") is None for m in rows), (
+            "imported data asserted human provenance"
+        )
+
+    def test_a_value_written_outside_the_api_is_not_trusted_on_read(self, db):
+        """The column carries no CHECK, so reads normalise too."""
+        import sqlite3
+
+        sid = _session(db)
+        db.append_message(sid, "user", content="x")
+        conn = sqlite3.connect(db.db_path)
+        try:
+            conn.execute("UPDATE messages SET origin = ? WHERE session_id = ?",
+                         ("Human", sid))
+            conn.commit()
+        finally:
+            conn.close()
+        assert _origins(db, sid) == [None], "an invalid stored value was trusted"
+
+    def test_a_valid_value_written_outside_still_reads(self, db):
+        """Normalisation must not break legitimate values written elsewhere."""
+        import sqlite3
+
+        sid = _session(db)
+        db.append_message(sid, "user", content="x")
+        conn = sqlite3.connect(db.db_path)
+        try:
+            conn.execute("UPDATE messages SET origin = ? WHERE session_id = ?",
+                         ("human", sid))
+            conn.commit()
+        finally:
+            conn.close()
+        assert _origins(db, sid) == ["human"]
+
+    def test_reasoning_shaped_copy_preserves_origin(self, db):
+        """The TUI/CLI branch builders use a different field list to /branch."""
+        sid = _session(db)
+        db.append_message(sid, "user", content="orig", origin=MESSAGE_ORIGIN_HUMAN)
+        source = db.get_messages_as_conversation(sid)
+        target = _session(db)
+        db.append_messages_batch(
+            target,
+            [
+                {
+                    "role": m.get("role", "user"),
+                    "content": m.get("content"),
+                    "origin": m.get("origin"),
+                    "reasoning": m.get("reasoning"),
+                }
+                for m in source
+            ],
+        )
+        assert _origins(db, target) == ["human"]
