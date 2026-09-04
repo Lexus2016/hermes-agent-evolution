@@ -440,34 +440,41 @@ def _extract_pinned_constraints(messages: List[Dict[str, Any]]) -> list[str]:
         # it is honoured for both roles — a user row must still be a genuine
         # human turn rather than a runtime-authored one.
         if msg.get(PINNED_CONSTRAINT_METADATA_KEY):
-            if role == "user" and _is_runtime_authored_user_turn(msg):
+            # A user row must be a genuine human turn. Provenance answers that
+            # directly now; the display_kind and synthetic-classifier checks
+            # below are the crutches that stood in for it, kept as a second
+            # signal for rows written before the column existed.
+            if role == "user" and (
+                msg.get("origin") != MESSAGE_ORIGIN_HUMAN
+                and _is_runtime_authored_user_turn(msg)
+            ):
                 continue
             if isinstance(content, str) and content.strip():
                 _add(content)
             continue
         # The inline marker is TEXT, so anything that can put text into a row
-        # can forge it, and gating on the role LABEL is whack-a-mole: the
-        # runtime writes user rows out of tool output in at least four places
+        # can forge it. Gating on the role LABEL was whack-a-mole: the runtime
+        # writes user rows out of tool output in at least four places
         # (gateway/wake.py self-post and delegation persistence, a compaction
-        # summary emitted with role="user", and steer extraction from tool
-        # content in conversation_compression.py). Each patch surfaced another.
+        # summary emitted with role="user", steer extraction from tool content
+        # in conversation_compression.py), and each patch surfaced another.
         #
-        # role="system" is kept because the threat that matters is ESCALATION:
-        # content an attacker controls WITHOUT controlling the conversation —
-        # a fetched page, a command result, a file the agent read. Those all
-        # arrive as tool/assistant rows, or as user rows via the laundering
-        # paths above, and are refused. A caller who can submit a system
-        # message through /v1/responses (`role = item.get("role", "user")`)
-        # already directs the agent outright, so a pin buys them nothing.
+        # PROVENANCE settles it. `origin == "human"` is recorded at ingress by
+        # the four surfaces that can actually carry a person's words, through
+        # one stamping point, and is unforgeable from content: the API builds
+        # message dicts with role and content only, imports drop the field, and
+        # an unrecognised value normalises to None on both read and write. So a
+        # person may pin by typing the marker again — the capability removed
+        # when the role label turned out not to be a trust boundary.
         #
-        # KNOWN COST, accepted deliberately: a human typing the marker into
-        # Telegram or the CLI can no longer pin a rule, because the runtime
-        # cannot tell that turn apart from a laundered one. Restoring genuine
-        # human pinning needs PROVENANCE recorded at ingress — a persisted
-        # marker on rows that really came from a human channel — not a role
-        # label applied downstream. Until that exists, an exploitable
-        # capability is worse than a missing one.
-        if role == "system" and isinstance(content, str):
+        # role="system" stays for this module's own re-injection, which has to
+        # survive SessionDB dropping the metadata column. A caller who can post
+        # a system message through /v1/responses already directs the agent
+        # outright, so a pin buys them nothing.
+        if isinstance(content, str) and (
+            role == "system"
+            or (role == "user" and msg.get("origin") == MESSAGE_ORIGIN_HUMAN)
+        ):
             for m in _PINNED_CONSTRAINT_RE.finditer(content):
                 _add(m.group(1))
     return constraints
