@@ -68,9 +68,13 @@ class TestExtractPinnedConstraints:
         assert _extract_pinned_constraints(messages) == ["Rule A."]
 
     def test_mixed_metadata_and_inline(self):
+        # The inline marker is honoured on role="system" only: it is plain text,
+        # so any writer of a user row could forge it, and the runtime writes
+        # user rows out of tool output in several places. The role here is
+        # incidental to what this test asserts (both paths feed the result).
         messages = [
             {"role": "system", "content": "From metadata.", PINNED_CONSTRAINT_METADATA_KEY: True},
-            {"role": "user", "content": f"{PINNED_CONSTRAINT_MARKER} From inline [/PINNED_CONSTRAINT]"},
+            {"role": "system", "content": f"{PINNED_CONSTRAINT_MARKER} From inline [/PINNED_CONSTRAINT]"},
         ]
         assert _extract_pinned_constraints(messages) == ["From metadata.", "From inline"]
 

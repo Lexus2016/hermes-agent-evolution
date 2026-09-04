@@ -347,6 +347,34 @@ PINNED_CONSTRAINT_MARKER = "[PINNED_CONSTRAINT]"
 # "assistant": constraint text arriving from a tool result or a model turn is
 # attacker-reachable content, not user authority.
 _PINNABLE_ROLES = frozenset({"user", "system"})
+
+# ...but the role LABEL alone is not a trust boundary, because the runtime
+# relabels attacker-reachable content as role="user" before the compressor
+# ever sees it: background-process stdout and async-delegation summaries are
+# self-posted or persisted as user rows by gateway/wake.py, and a compaction
+# summary itself can be emitted with role="user". A `[PINNED_CONSTRAINT]` span
+# inside a fetched page would otherwise be laundered into a permanent system
+# rule after a single rotation. These display kinds mark runtime-authored
+# rows and, unlike underscore metadata, are real persisted columns.
+_SYNTHETIC_DISPLAY_KINDS = frozenset(
+    {"async_delegation_complete", "internal_notification", "hidden"}
+)
+
+
+def _is_runtime_authored_user_turn(msg: Dict[str, Any]) -> bool:
+    """True when a ``role="user"`` row was written by the runtime, not a human.
+
+    Fails CLOSED: an unclassifiable row is treated as runtime-authored and
+    cannot pin. Missing a genuine pin costs one constraint; accepting a
+    laundered one installs an attacker-chosen rule for the rest of the session.
+    """
+    if msg.get("display_kind") in _SYNTHETIC_DISPLAY_KINDS:
+        return True
+    try:
+        return bool(ContextCompressor._is_synthetic_compression_user_turn(msg))
+    except Exception:  # noqa: BLE001 - classification must never break compaction
+        logger.debug("Synthetic-turn classification failed; refusing pin", exc_info=True)
+        return True
 _PINNED_CONSTRAINT_RE = re.compile(
     re.escape(PINNED_CONSTRAINT_MARKER)
     + r"\s*(.*?)"  # capture the constraint text
@@ -356,15 +384,23 @@ _PINNED_CONSTRAINT_RE = re.compile(
 
 
 def _is_pinned_constraint_message(msg: Dict[str, Any]) -> bool:
-    """Return True when *msg* carries the pinned-constraint signal."""
+    """Return True when *msg* carries the pinned-constraint signal.
+
+    Applies the same role gate as :func:`_extract_pinned_constraints`. It has
+    no production caller today, but leaving it ungated would hand the next
+    caller the tool/assistant bypass the gate exists to close.
+    """
     if not isinstance(msg, dict):
+        return False
+    role = msg.get("role")
+    if role not in _PINNABLE_ROLES:
+        return False
+    if role == "user" and _is_runtime_authored_user_turn(msg):
         return False
     if msg.get(PINNED_CONSTRAINT_METADATA_KEY):
         return True
     content = msg.get("content")
-    if isinstance(content, str) and PINNED_CONSTRAINT_MARKER in content:
-        return True
-    return False
+    return role == "system" and isinstance(content, str) and PINNED_CONSTRAINT_MARKER in content
 
 
 def _extract_pinned_constraints(messages: List[Dict[str, Any]]) -> list[str]:
@@ -392,16 +428,42 @@ def _extract_pinned_constraints(messages: List[Dict[str, Any]]) -> list[str]:
         # span inside a fetched page or a command result was extracted like any
         # other and re-injected as a system rule on every compaction — indirect
         # prompt injection with a persistence primitive attached.
-        if msg.get("role") not in _PINNABLE_ROLES:
+        role = msg.get("role")
+        if role not in _PINNABLE_ROLES:
             continue
         content = msg.get("content")
-        # Metadata-flagged messages contribute their full content.
+        # The metadata flag is set by code and cannot be forged by content, so
+        # it is honoured for both roles — a user row must still be a genuine
+        # human turn rather than a runtime-authored one.
         if msg.get(PINNED_CONSTRAINT_METADATA_KEY):
+            if role == "user" and _is_runtime_authored_user_turn(msg):
+                continue
             if isinstance(content, str) and content.strip():
                 _add(content)
             continue
-        # Inline text markers contribute only the tagged spans.
-        if isinstance(content, str):
+        # The inline marker is TEXT, so anything that can put text into a row
+        # can forge it, and gating on the role LABEL is whack-a-mole: the
+        # runtime writes user rows out of tool output in at least four places
+        # (gateway/wake.py self-post and delegation persistence, a compaction
+        # summary emitted with role="user", and steer extraction from tool
+        # content in conversation_compression.py). Each patch surfaced another.
+        #
+        # role="system" is kept because the threat that matters is ESCALATION:
+        # content an attacker controls WITHOUT controlling the conversation —
+        # a fetched page, a command result, a file the agent read. Those all
+        # arrive as tool/assistant rows, or as user rows via the laundering
+        # paths above, and are refused. A caller who can submit a system
+        # message through /v1/responses (`role = item.get("role", "user")`)
+        # already directs the agent outright, so a pin buys them nothing.
+        #
+        # KNOWN COST, accepted deliberately: a human typing the marker into
+        # Telegram or the CLI can no longer pin a rule, because the runtime
+        # cannot tell that turn apart from a laundered one. Restoring genuine
+        # human pinning needs PROVENANCE recorded at ingress — a persisted
+        # marker on rows that really came from a human channel — not a role
+        # label applied downstream. Until that exists, an exploitable
+        # capability is worse than a missing one.
+        if role == "system" and isinstance(content, str):
             for m in _PINNED_CONSTRAINT_RE.finditer(content):
                 _add(m.group(1))
     return constraints
@@ -454,30 +516,62 @@ def _pinned_constraint_survives(
     return (matched / len(words)) >= 0.8
 
 
-def _normalize_pinned_constraint_texts(text: str) -> List[str]:
-    """Split re-injection scaffolding back into the individual clauses.
+_PINNED_CONSTRAINT_CLOSE = "[/PINNED_CONSTRAINT]"
 
-    A re-injected message carries the metadata flag, so
-    :func:`_extract_pinned_constraints` hands back its entire body — header,
-    every bullet and the tags. Re-wrapping that verbatim nests the tags and
-    grows the protected region on each rotation, and joining the bullets into
-    one string invents a constraint the user never stated. Each bullet is
-    returned separately so the set stays exactly what was pinned.
+
+def _neutralize_pinned_constraint_delimiters(text: str) -> str:
+    """Defuse marker tokens inside a constraint before it is wrapped.
+
+    The body is embedded between delimiters, so a constraint that legitimately
+    talks ABOUT the mechanism ("never allow the literal [/PINNED_CONSTRAINT]
+    token in policy files") would close its own tag early: the inline parser
+    is non-greedy, so after SessionDB drops the metadata flag only the prefix
+    survives, and the mangled remainder can restart envelope growth. Swapping
+    the brackets for parentheses keeps the sentence readable and its meaning
+    intact while removing the delimiter.
     """
-    if not isinstance(text, str):
-        return []
-    cleaned = text.replace(PINNED_CONSTRAINT_MARKER, " ").replace(
-        "[/PINNED_CONSTRAINT]", " "
+    return text.replace(_PINNED_CONSTRAINT_CLOSE, "(/PINNED_CONSTRAINT)").replace(
+        PINNED_CONSTRAINT_MARKER, "(PINNED_CONSTRAINT)"
     )
-    out: List[str] = []
-    for line in cleaned.splitlines():
-        line = line.strip().lstrip("-").strip()
-        if not line or line.startswith("The following safety / governance constraint"):
-            continue
-        collapsed = " ".join(line.split())
-        if collapsed:
-            out.append(collapsed)
-    return out
+
+
+def _normalize_pinned_constraint_texts(text: str) -> List[str]:
+    """Split OUR OWN re-injection envelope back into its constraints.
+
+    Only the envelope is unpacked; anything else is returned unchanged as a
+    single item. This used to line-split every dropped constraint, which
+    shredded multi-line pins, ate the leading hyphens of a rule about
+    ``--no-verify``, and deleted any constraint whose wording began like the
+    header. Parsing is done over the WHOLE remainder rather than line by line:
+    a constraint body may itself span lines, and a per-line scan never found
+    its closing tag, fell through, and let the envelope nest and grow on every
+    rotation (measured 267 -> 478 -> 689 -> 900 characters).
+
+    KNOWN, accepted: recognition is by SHAPE, not provenance. A pin whose text
+    happens to open with this exact header AND continues with a correctly
+    tagged bullet is unpacked as though it were an envelope, costing its header
+    line. That requires reproducing the boilerplate verbatim, and bodies that
+    passed through re-injection cannot do it because their delimiters are
+    neutralised on the way in. Telling the two apart properly needs provenance
+    the message row does not carry.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return []
+    stripped = text.strip()
+    header, sep, remainder = stripped.partition("\n")
+    if header.strip() != _PINNED_CONSTRAINT_REINJECT_HEADER or not sep:
+        return [text]
+    bodies = [m.group(1).strip() for m in _PINNED_CONSTRAINT_RE.finditer(remainder)]
+    bodies = [b for b in bodies if b]
+    if not bodies:
+        return [text]
+    # Everything outside the tags must be bullet scaffolding, or this is a
+    # constraint that merely opens with the header wording and unpacking it
+    # would silently drop the untagged remainder.
+    leftover = _PINNED_CONSTRAINT_RE.sub(" ", remainder)
+    if leftover.replace("-", " ").strip():
+        return [text]
+    return bodies
 
 
 def _reinject_dropped_pinned_constraints(
@@ -522,7 +616,9 @@ def _reinject_dropped_pinned_constraints(
     if not bodies:
         return compressed_messages
     body_lines = "\n".join(
-        f"- {PINNED_CONSTRAINT_MARKER} {b} [/PINNED_CONSTRAINT]" for b in bodies
+        f"- {PINNED_CONSTRAINT_MARKER} {_neutralize_pinned_constraint_delimiters(b)}"
+        f" {_PINNED_CONSTRAINT_CLOSE}"
+        for b in bodies
     )
     reinject_msg: Dict[str, Any] = {
         "role": "system",

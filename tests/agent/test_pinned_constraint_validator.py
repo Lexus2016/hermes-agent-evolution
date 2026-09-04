@@ -150,9 +150,11 @@ class TestReinjectDroppedPinnedConstraints:
     def test_reinject_after_system_prompt_no_system(self):
         """If compressed[0] is not a system message, reinject goes to front."""
         constraint = "Edge case rule"
+        # role="system": the inline marker is only honoured there. This test is
+        # about WHERE the re-injection is inserted, not about which role pins.
         original = [
             {
-                "role": "user",
+                "role": "system",
                 "content": f"{PINNED_CONSTRAINT_MARKER} {constraint} [/PINNED_CONSTRAINT]",
             },
         ]
