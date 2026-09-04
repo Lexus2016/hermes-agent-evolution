@@ -270,3 +270,34 @@ class TestForgeryPaths:
             ],
         )
         assert _origins(db, target) == ["human"]
+
+
+class TestImportTrustBoundary:
+    """External imports reset provenance; an in-process move carries it."""
+
+    _PAYLOAD = [
+        {
+            "id": "imported-trust",
+            "title": "t",
+            "source": "cli",
+            "messages": [{"role": "user", "content": "x", "origin": "human"}],
+        }
+    ]
+
+    def test_default_import_resets_origin(self, db):
+        db.import_sessions([dict(s) for s in self._PAYLOAD])
+        assert _origins(db, "imported-trust") == [None]
+
+    def test_trusted_move_carries_origin(self, db):
+        """Profile adoption moves our own rows; resetting them would
+        silently downgrade a real human turn."""
+        db.import_sessions([dict(s) for s in self._PAYLOAD], trust_origin=True)
+        assert _origins(db, "imported-trust") == ["human"]
+
+    def test_trust_is_keyword_only_and_defaults_to_false(self):
+        import inspect
+
+        sig = inspect.signature(SessionDB.import_sessions)
+        param = sig.parameters["trust_origin"]
+        assert param.kind is inspect.Parameter.KEYWORD_ONLY
+        assert param.default is False
