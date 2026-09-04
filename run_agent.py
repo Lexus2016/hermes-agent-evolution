@@ -2908,6 +2908,10 @@ class AIAgent:
                     "_compressed_summary": bool(msg.get(COMPRESSED_SUMMARY_METADATA_KEY)),
                     "timestamp": _row_timestamp,
                     "api_content": _row_api_content,
+                    # Provenance rides the flush or it never reaches the row:
+                    # this builder forwards a fixed key list, so an unlisted
+                    # key is dropped silently.
+                    "origin": msg.get("origin"),
                     # Standalone reference handoffs are always hidden, even
                     # when the summarized transcript contained a user turn —
                     # otherwise they occupy the active user slot in

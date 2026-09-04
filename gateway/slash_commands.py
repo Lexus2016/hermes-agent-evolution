@@ -5591,6 +5591,10 @@ class GatewaySlashCommandsMixin:
                     {
                         "role": msg.get("role", "user"),
                         "content": msg.get("content"),
+                        # Provenance is copied, never re-derived: a branch of a
+                        # human turn is still a human turn, and this dict is
+                        # rebuilt field by field, so omitting it drops it.
+                        "origin": msg.get("origin"),
                         "tool_name": msg.get("tool_name") or msg.get("name"),
                         "tool_calls": msg.get("tool_calls"),
                         "tool_call_id": msg.get("tool_call_id"),

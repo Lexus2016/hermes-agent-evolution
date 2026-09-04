@@ -249,6 +249,27 @@ def _compression_lock_holder_process_is_dead(holder: str) -> bool:
     return False
 
 
+MESSAGE_ORIGIN_HUMAN = "human"
+MESSAGE_ORIGIN_RUNTIME = "runtime"
+MESSAGE_ORIGIN_API = "api"
+_MESSAGE_ORIGINS = frozenset(
+    {MESSAGE_ORIGIN_HUMAN, MESSAGE_ORIGIN_RUNTIME, MESSAGE_ORIGIN_API}
+)
+
+
+def _normalize_message_origin(value: Any) -> Optional[str]:
+    """Coerce a message ``origin`` to the known set, or to None.
+
+    Fail-closed by construction: anything unrecognised becomes None, and a
+    reader must treat None as untrusted. The value set is enforced here rather
+    than with a CHECK constraint, because SQLite applies a CHECK added through
+    ALTER TABLE to later writes as well, and legacy rows carry NULL.
+    """
+    if isinstance(value, str) and value in _MESSAGE_ORIGINS:
+        return value
+    return None
+
+
 def _scrub_surrogates(value: Any) -> Any:
     """Replace lone surrogates when *value* is text; pass anything else through.
 
@@ -12716,6 +12737,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         api_content: Optional[str] = None,
         display_kind: Optional[str] = None,
         display_metadata: Optional[Dict[str, Any]] = None,
+        origin: Optional[str] = None,
         compression_lock_holder: Optional[str] = None,
         turn_lease_holder: Optional[str] = None,
         turn_lease_ttl_seconds: float = 300.0,
@@ -12787,8 +12809,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 """INSERT INTO messages (session_id, role, content, tool_call_id,
                    tool_calls, tool_name, effect_disposition, timestamp, token_count, finish_reason,
                    reasoning, reasoning_content, reasoning_details, codex_reasoning_items,
-                   codex_message_items, platform_message_id, observed, _compressed_summary, active, api_content, display_kind, display_metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   codex_message_items, platform_message_id, observed, _compressed_summary, active, api_content, display_kind, display_metadata, origin)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     role,
@@ -12812,6 +12834,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     _scrub_surrogates(api_content) if isinstance(api_content, str) else None,
                     _scrub_surrogates(display_kind) if isinstance(display_kind, str) else None,
                     display_metadata_json,
+                    _normalize_message_origin(origin),
                 ),
             )
             msg_id = cursor.lastrowid
@@ -13232,8 +13255,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 """INSERT INTO messages (session_id, role, content, tool_call_id,
                    tool_calls, tool_name, effect_disposition, timestamp, token_count, finish_reason,
                    reasoning, reasoning_content, reasoning_details, codex_reasoning_items,
-                   codex_message_items, platform_message_id, observed, _compressed_summary, active, api_content, display_kind, display_metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   codex_message_items, platform_message_id, observed, _compressed_summary, active, api_content, display_kind, display_metadata, origin)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     session_id,
                     role,
@@ -13257,6 +13280,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     _scrub_surrogates(api_content) if isinstance(api_content, str) else None,
                     _scrub_surrogates(msg.get("display_kind")) if isinstance(msg.get("display_kind"), str) else None,
                     self._encode_display_metadata(msg.get("display_metadata")),
+                    _normalize_message_origin(msg.get("origin")),
                 ),
             )
             if isinstance(msg, dict) and cur.lastrowid is not None:
@@ -14095,7 +14119,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         "finish_reason, reasoning, reasoning_content, reasoning_details, "
         "codex_reasoning_items, codex_message_items, platform_message_id, observed, "
         "_compressed_summary, timestamp, active, "
-        "api_content, display_kind, display_metadata"
+        "api_content, display_kind, display_metadata, origin"
     )
 
     def _rows_to_conversation(
@@ -14156,6 +14180,11 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 msg["api_content"] = row["api_content"]
             if row["display_kind"]:
                 msg["display_kind"] = row["display_kind"]
+            # Provenance must round-trip: compress() and every other consumer
+            # read the in-memory dict, never the row, so a column alone would
+            # be invisible to them.
+            if row["origin"]:
+                msg["origin"] = row["origin"]
             if row["display_metadata"]:
                 decoded = self._decode_display_metadata(row["display_metadata"])
                 if decoded is not None:
