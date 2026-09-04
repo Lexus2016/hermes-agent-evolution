@@ -374,7 +374,11 @@ class SessionPortabilityMixin:
                     seg_id, donor_count, local_count,
                 )
 
-        result = self.import_sessions([dict(seg) for seg in segments])
+        # Adoption moves OUR OWN rows between local profile databases, so the
+        # provenance already recorded on them is carried rather than reset.
+        result = self.import_sessions(
+            [dict(seg) for seg in segments], trust_origin=True
+        )
         imported = int(result.get("imported") or 0)
         skipped = int(result.get("skipped") or 0)
         adopted = result.get("ok", False) and (imported + skipped) == len(segments)
@@ -504,7 +508,12 @@ class SessionPortabilityMixin:
             item["session_id"] = session_id
         return item
 
-    def import_sessions(self, sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def import_sessions(
+        self,
+        sessions: List[Dict[str, Any]],
+        *,
+        trust_origin: bool = False,
+    ) -> Dict[str, Any]:
         """Import sessions exported by :meth:`export_session` or ``export_all``.
 
         Existing session IDs are skipped. Imported child sessions keep their
@@ -777,6 +786,15 @@ class SessionPortabilityMixin:
                         "codex_message_items",
                     ):
                         clean[key] = self._reasoning_json_value(clean.get(key))
+                    # Provenance is not imported unless the CALLER vouches
+                    # for it. The default payload is arbitrary caller-supplied
+                    # JSON (/api/sessions/import), where an attacker could
+                    # otherwise assert `origin: "human"` and have it persisted
+                    # as trusted. ``trust_origin=True`` is for an in-process
+                    # move of our own rows — profile adoption — where dropping
+                    # it would silently downgrade a real human turn.
+                    if not trust_origin:
+                        clean.pop("origin", None)
                     sanitized_messages.append(clean)
 
                 total_messages, total_tool_calls = self._insert_message_rows(

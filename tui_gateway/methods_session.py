@@ -164,7 +164,12 @@ def _(rid, params: dict) -> dict:
                         db.append_messages_batch(
                             key,
                             [
-                                {"role": m.get("role", "user"), "content": m.get("content")}
+                                {
+                                    "role": m.get("role", "user"),
+                                    "content": m.get("content"),
+                                    # provenance rides every copy
+                                    "origin": m.get("origin"),
+                                }
                                 for m in history
                             ],
                             chunk_rows=500,
@@ -3378,6 +3383,9 @@ def _(rid, params: dict) -> dict:
                     {
                         "role": msg.get("role", "user"),
                         "content": msg.get("content"),
+                        # A copy of a human turn is still a human turn; this
+                        # dict is rebuilt field by field, so omitting it drops it.
+                        "origin": msg.get("origin"),
                         "reasoning": msg.get("reasoning"),
                         "reasoning_content": msg.get("reasoning_content"),
                         "reasoning_details": msg.get("reasoning_details"),

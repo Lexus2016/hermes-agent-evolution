@@ -9540,6 +9540,14 @@ This compaction should PRIORITISE preserving all information related to the focu
                 msg[_COMPACTION_TAIL_MARKER] = True
             if _merge_summary_into_tail and tail_idx == _merge_target_idx:
                 # Merge the summary into the tail message that collided.
+                #
+                # The row stops being purely the human's words at this point:
+                # generated summary text — itself derived from tool output — is
+                # spliced into the same dict. Keeping `origin="human"` here
+                # would launder that content into trusted provenance, so the
+                # composite is demoted to runtime.
+                if msg.get("origin") == "human":
+                    msg["origin"] = "runtime"
                 old_content = msg.get("content", "")
                 if _force_user_leading and summary_role == "user":
                     # The summary must be part of the first user-visible

@@ -412,6 +412,9 @@ def recover_pending_to_db(
                     session_id=spooled_sid,
                     role=message.get("role", "unknown"),
                     content=message.get("content") or "",
+                    # A spooled turn is replayed as-is after a restart; without
+                    # this the human turn it recovers comes back untrusted.
+                    origin=message.get("origin"),
                     timestamp=message.get("timestamp") or payload.get("ts"),
                 )
                 recovered += 1

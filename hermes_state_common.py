@@ -503,7 +503,25 @@ CREATE TABLE IF NOT EXISTS messages (
     compacted INTEGER NOT NULL DEFAULT 0,
     api_content TEXT,
     display_kind TEXT,
-    display_metadata TEXT
+    display_metadata TEXT,
+    -- Provenance of the row, NOT its presentation. "human" means the content
+    -- entered through a genuine human channel (a platform adapter carrying a
+    -- non-internal MessageEvent, the CLI, or the TUI prompt). Everything the
+    -- runtime authors itself -- wake-ups, background-process notifications,
+    -- delegation summaries, nudges, compaction placeholders -- is not human,
+    -- and neither is anything a caller supplies through the public API.
+    -- Deliberately unconstrained: enforcing the value set in Python keeps a
+    -- CHECK added by ALTER TABLE from rejecting writes for legacy NULL rows.
+    -- Read fail-closed: absent or unrecognised is untrusted.
+    --
+    -- Out of scope by design: restoring a full backup replaces state.db
+    -- wholesale, so a crafted archive can set any value here. Whoever can do
+    -- that already owns every message, role and setting in the database --
+    -- total control, not an escalation. The same line is drawn for
+    -- /v1/responses, which takes its role straight from the caller. The threat
+    -- this column addresses is content an attacker controls WITHOUT
+    -- controlling the conversation: a fetched page, a command result, a file.
+    origin TEXT
 );
 
 CREATE TABLE IF NOT EXISTS session_model_usage (

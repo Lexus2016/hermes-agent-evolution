@@ -4216,6 +4216,9 @@ class SessionStore:
             session_id=session_id,
             role=message.get("role", "unknown"),
             content=message.get("content"),
+            # Queued, retried and shutdown-spooled writes bypass the agent
+            # flush, so provenance has to ride this path too.
+            origin=message.get("origin"),
             tool_name=message.get("tool_name"),
             tool_calls=message.get("tool_calls"),
             tool_call_id=message.get("tool_call_id"),
