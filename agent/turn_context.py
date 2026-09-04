@@ -42,7 +42,11 @@ from agent.context_engine import automatic_compaction_status_message
 from agent.iteration_budget import IterationBudget
 from agent.memory_manager import build_memory_context_block
 from agent.memory_provider import is_trivial_prompt
-from agent.message_metadata import append_message, stamp_message_timestamp
+from agent.message_metadata import (
+    append_message,
+    normalize_message_origin,
+    stamp_message_timestamp,
+)
 from agent.model_metadata import (
     anchored_context_tokens,
     estimate_messages_tokens_rough,
@@ -581,6 +585,7 @@ def build_turn_context(
     persist_user_platform_id: Optional[str] = None,
     *,
     persist_user_display_kind: Optional[str] = None,
+    persist_user_origin: Optional[str] = None,
     persist_user_display_metadata: Optional[Dict[str, Any]] = None,
     restore_or_build_system_prompt,
     install_safe_stdio,
@@ -834,8 +839,16 @@ def build_turn_context(
     # build strips both fields from every outgoing copy.
     if persist_user_display_kind:
         user_msg["display_kind"] = persist_user_display_kind
-        if persist_user_display_metadata:
-            user_msg["display_metadata"] = persist_user_display_metadata
+    # The single stamping point. Every surface — gateway adapters, the CLI, the
+    # TUI, the public API — converges here before the message reaches the live
+    # list, so provenance is applied once instead of in twenty adapters, any
+    # one of which could ship "human" by copy-paste. Unknown values normalise
+    # to None, so an unclassified turn is untrusted rather than assumed human.
+    if persist_user_display_metadata:
+        user_msg["display_metadata"] = persist_user_display_metadata
+    stamped_origin = normalize_message_origin(persist_user_origin)
+    if stamped_origin:
+        user_msg["origin"] = stamped_origin
 
     # Stamp the platform-side message id (e.g. the Discord/Telegram message id)
     # as metadata on the user turn so it survives the early crash-resilience

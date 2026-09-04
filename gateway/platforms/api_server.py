@@ -6397,7 +6397,11 @@ class APIServerAdapter(BasePlatformAdapter):
                         content = _normalize_multimodal_content(item.get("content", ""))
                     except ValueError as exc:
                         return _multimodal_validation_error(exc, param=f"input[{idx}].content")
-                    input_messages.append({"role": role, "content": content})
+                    # The caller chose this role, so it is not provenance:
+                    # /v1/responses takes `role` straight from the request.
+                    input_messages.append(
+                        {"role": role, "content": content, "origin": "api"}
+                    )
         else:
             return web.json_response(_openai_error("'input' must be a string or array"), status=400)
 
@@ -6423,7 +6427,13 @@ class APIServerAdapter(BasePlatformAdapter):
                     entry_content = _normalize_multimodal_content(entry["content"])
                 except ValueError as exc:
                     return _multimodal_validation_error(exc, param=f"conversation_history[{i}].content")
-                conversation_history.append({"role": str(entry["role"]), "content": entry_content})
+                conversation_history.append(
+                    {
+                        "role": str(entry["role"]),
+                        "content": entry_content,
+                        "origin": "api",
+                    }
+                )
             if previous_response_id:
                 logger.debug("Both conversation_history and previous_response_id provided; using conversation_history")
 
@@ -7498,6 +7508,10 @@ class APIServerAdapter(BasePlatformAdapter):
                         user_message=user_message,
                         conversation_history=conversation_history,
                         task_id=effective_task_id,
+                        # The turn itself is caller-supplied, exactly like the
+                        # history entries above: /v1/responses takes both from
+                        # the request body, so neither is a person's channel.
+                        persist_user_origin="api",
                     )
                     usage = {
                         "input_tokens": getattr(agent, "session_prompt_tokens", 0) or 0,
