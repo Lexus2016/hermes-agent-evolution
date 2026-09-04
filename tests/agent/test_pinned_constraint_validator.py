@@ -70,19 +70,24 @@ class TestReinjectDroppedPinnedConstraints:
         result = _reinject_dropped_pinned_constraints(original, compressed)
         assert result is compressed  # same list, not modified
 
-    def test_all_survive_returns_unchanged(self):
-        constraint = "Important rule: always confirm"
+    def test_all_survive_still_reinjects(self):
+        """Formerly: if everything survived, the transcript was left alone.
+
+        The survival test cannot be trusted to make that call, so the pins are
+        asserted every pass. Bounded by _bound_pinned_constraints.
+        """
+        constraint = "Never merge without tests"
         original = [
             {
                 "role": "system",
                 "content": f"{PINNED_CONSTRAINT_MARKER} {constraint} [/PINNED_CONSTRAINT]",
             },
         ]
-        compressed = [
-            {"role": "system", "content": f"Summary: {constraint}"},
-        ]
+        compressed = [{"role": "system", "content": f"Summary: {constraint}"}]
         result = _reinject_dropped_pinned_constraints(original, compressed)
-        assert result is compressed
+        assert len(result) == 2
+        assert constraint in result[1]["content"]
+
 
     def test_single_dropped_reinjected(self):
         constraint = "Never deploy on Fridays"
@@ -164,8 +169,16 @@ class TestReinjectDroppedPinnedConstraints:
         assert result[0]["role"] == "system"
         assert result[0][PINNED_CONSTRAINT_METADATA_KEY] is True
 
-    def test_partial_survival_only_dropped_reinjected(self):
-        """If one of two constraints survives, only the other is re-injected."""
+    def test_every_constraint_is_reinjected_regardless_of_survival(self):
+        """Re-injection no longer depends on the survival heuristic.
+
+        That heuristic is 80% word overlap, and it gets negation backwards: a
+        summary stating the OPPOSITE policy reuses nearly the same words, so a
+        rule was judged "survived" and silently not re-injected. Asserting the
+        rule unconditionally costs a duplicated line when the summary did keep
+        it; missing one is unbounded. The set is de-duplicated and capped
+        instead (see _bound_pinned_constraints).
+        """
         c_survives = "Survives"
         c_dropped = "Dropped"
         original = [
@@ -182,10 +195,11 @@ class TestReinjectDroppedPinnedConstraints:
         ]
         result = _reinject_dropped_pinned_constraints(original, compressed)
         assert len(result) == 2  # summary + reinject
-        # The reinject message should contain the dropped constraint...
         assert c_dropped in result[1]["content"]
-        # ...but NOT the one that survived (already in the summary).
-        assert c_survives not in result[1]["content"]
+        assert c_survives in result[1]["content"], (
+            "a constraint the summary appears to keep is still asserted, "
+            "because 'appears to' is a word-overlap guess"
+        )
 
 
 # ---------------------------------------------------------------------------
