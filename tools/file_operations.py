@@ -550,6 +550,7 @@ class PatchResult:
     # model explaining why no diff is included.
     no_change: bool = False
     note: Optional[str] = None
+    structured_error: Optional[str] = None
 
     def to_dict(self) -> dict:
         result: Dict[str, Any] = {"success": self.success}
@@ -573,10 +574,12 @@ class PatchResult:
             result["lsp_diagnostics"] = self.lsp_diagnostics
         if self.error:
             result["error"] = self.error
-            classified = classify_file_error(self.error, similar_files=self.similar_files)
+            classified = classify_file_error(self.error, similar_files=self.similar_files, structured_error=self.structured_error)
             if classified:
                 result["error_class"] = classified[0]
                 result["recovery"] = classified[1]
+        if self.structured_error:
+            result["_diagnostic"] = self.structured_error
         return result
 
 
@@ -2524,30 +2527,30 @@ class ShellFileOperations(FileOperations):
                     if not f:
                         continue
                     all_entries.append(f)
-                lf = f.lower()
-                score = 0
+                    lf = f.lower()
+                    score = 0
 
-                if lf == lower_name:
-                    score = 100
-                elif os.path.splitext(f)[0].lower() == basename_no_ext.lower():
-                    score = 90
-                elif lf.startswith(lower_name) or lower_name.startswith(lf):
-                    score = 70
-                elif lower_name in lf:
-                    score = 60
-                elif lf in lower_name and len(lf) > 2:
-                    score = 40
-                elif ext and os.path.splitext(f)[1].lower() == ext:
-                    common = set(lower_name) & set(lf)
-                    if len(common) >= max(len(lower_name), len(lf)) * 0.4:
-                        score = 30
-                if score == 0 and difflib.SequenceMatcher(
-                    None, lower_name, lf
-                ).ratio() >= 0.6:
-                    score = 50
+                    if lf == lower_name:
+                        score = 100
+                    elif os.path.splitext(f)[0].lower() == basename_no_ext.lower():
+                        score = 90
+                    elif lf.startswith(lower_name) or lower_name.startswith(lf):
+                        score = 70
+                    elif lower_name in lf:
+                        score = 60
+                    elif lf in lower_name and len(lf) > 2:
+                        score = 40
+                    elif ext and os.path.splitext(f)[1].lower() == ext:
+                        common = set(lower_name) & set(lf)
+                        if len(common) >= max(len(lower_name), len(lf)) * 0.4:
+                            score = 30
+                    if score == 0 and difflib.SequenceMatcher(
+                        None, lower_name, lf
+                    ).ratio() >= 0.6:
+                        score = 50
 
-                if score > 0:
-                    scored.append((score, os.path.join(dir_path, f)))
+                    if score > 0:
+                        scored.append((score, os.path.join(dir_path, f)))
 
         scored.sort(key=lambda x: -x[0])
         similar = [fp for _, fp in scored[:5]]
@@ -3196,12 +3199,31 @@ class ShellFileOperations(FileOperations):
                     note=note,
                 )
             err_msg = error or f"Could not find match for old_string in {path}"
+            structured_err = ""
             try:
-                from tools.fuzzy_match import format_no_match_hint
-                err_msg += format_no_match_hint(err_msg, match_count, old_string, content)
+                from tools.fuzzy_match import format_structured_error
+
+                structured_err = format_structured_error(
+                    error,
+                    match_count,
+                    old_string,
+                    new_string,
+                    content,
+                    file_path=path,
+                    strategy=_strategy,
+                )
             except Exception:
                 pass
-            return PatchResult(error=err_msg)
+            if not structured_err:
+                try:
+                    from tools.fuzzy_match import format_no_match_hint
+
+                    err_msg += format_no_match_hint(
+                        err_msg, match_count, old_string, content
+                    )
+                except Exception:
+                    pass
+            return PatchResult(error=err_msg, structured_error=structured_err or None)
 
         # ── Line-ending preservation ──────────────────────────────────
         # Models nearly always send old_string/new_string with bare LF

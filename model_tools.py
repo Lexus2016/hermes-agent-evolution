@@ -1650,6 +1650,10 @@ def handle_function_call(
             _probe_err = _ts_mod.validate_deferred_call_args(underlying_name, underlying_args)
             if _probe_err is not None:
                 return _return_bridge_result(_probe_err)
+            try:
+                underlying_args = coerce_tool_args(underlying_name, underlying_args)
+            except Exception:
+                pass
             from tools.registry import registry as _schema_registry
             _ok, _type_err = _ts_mod.validate_tool_args(
                 underlying_name,

@@ -61,8 +61,10 @@ class TestHandleFunctionCall:
         assert "error" in result
         assert "totally_fake_tool_xyz" in result["error"]
 
-    def test_exception_returns_json_error(self):
-        # Even if something goes wrong, should return valid JSON
+    def test_exception_returns_json_error(self, monkeypatch):
+        # Even if something goes wrong, should return valid JSON.
+        # Re-enable contract checking for this test so invalid/missing args are rejected.
+        monkeypatch.setenv("HERMES_TOOL_ARG_CONTRACT", "1")
         result = handle_function_call("web_search", None)  # None args may cause issues
         parsed = json.loads(result)
         assert isinstance(parsed, dict)

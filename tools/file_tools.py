@@ -79,6 +79,39 @@ def _find_unicode_equivalent_path(requested: Path) -> Path | None:
     return None
 
 
+# ── Self-correction retry threshold (issue #996) ─────────────────────────
+# Controls how many consecutive patch failures on the same file are allowed
+# before the error is classified as "permanent" and the model is told to
+# stop retrying.  Read from ``patch.self_correction_retries`` in config.yaml
+# on first call, cached for the process lifetime.  Default 3, max 5.
+_DEFAULT_SELF_CORRECTION_RETRIES = 3
+_MAX_SELF_CORRECTION_RETRIES = 5
+_self_correction_retries_cached: int | None = None
+
+
+def _get_self_correction_retries() -> int:
+    """Return the configured self-correction retry threshold for patches."""
+    global _self_correction_retries_cached
+    if _self_correction_retries_cached is not None:
+        return _self_correction_retries_cached
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config()
+        patch_cfg = cfg.get("patch", {})
+        val = patch_cfg.get("self_correction_retries")
+        if (
+            isinstance(val, (int, float))
+            and 1 <= int(val) <= _MAX_SELF_CORRECTION_RETRIES
+        ):
+            _self_correction_retries_cached = int(val)
+            return _self_correction_retries_cached
+    except Exception:
+        pass
+    _self_correction_retries_cached = _DEFAULT_SELF_CORRECTION_RETRIES
+    return _self_correction_retries_cached
+
+
 def _find_auto_repaired_path(
     requested: Path,
     raw_path: str,
@@ -3092,8 +3125,11 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                 resolved = _path_to_resolved.get(path) or path
                 failure_count = _record_patch_failure(task_id, resolved)
 
-            if failure_count > 3:
-                # 4th failure onwards: Hard stop / PATCH REFUSED (#1037)
+            has_diagnostic = bool(result_dict.get("_diagnostic"))
+            retry_threshold = _get_self_correction_retries()
+
+            if failure_count > retry_threshold:
+                # Beyond retry threshold: Hard stop / PATCH REFUSED (#1037)
                 from tools.fuzzy_match import suggest_closest_match
                 content = ""
                 try:
@@ -3103,16 +3139,16 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                 except Exception:
                     pass
                 closest = suggest_closest_match(old_string, content) if (content and old_string) else ""
-                refusal_msg = f"PATCH REFUSED: 3 consecutive patch attempts failed on {path}."
+                refusal_msg = f"PATCH REFUSED: {retry_threshold} consecutive patch attempts failed on {path}."
                 if closest:
                     refusal_msg += f" Closest matching content in file:\n{closest}"
                 refusal_msg += " Use read_file to view the current file content, or write_file to overwrite."
                 result_dict["error"] = refusal_msg
                 result_dict["_hint"] = "PATCH REFUSED. Stop retrying; switch to write_file or re-read the file."
-            elif failure_count == 3:
-                # 3rd consecutive failure: PERMANENT FAILURE escalation (#507)
+            elif failure_count == retry_threshold:
+                # At retry threshold: PERMANENT FAILURE escalation (#507)
                 result_dict["_hint"] = (
-                    f"This is failure #3 (PERMANENT FAILURE) patching {path!r}. "
+                    f"This is failure #{failure_count} (PERMANENT FAILURE) patching {path!r}. "
                     "Stop retrying with variations of the same old_string. "
                     "Either: (1) re-read the file fresh to verify current content, "
                     "(2) use a longer / more unique old_string with surrounding context lines, "
@@ -3124,7 +3160,11 @@ def patch_tool(mode: str = "replace", path: str = None, old_string: str = None,
                     f"This is failure #2 patching {path!r}. "
                     "Consider switching to write_file if the exact snippet cannot be located."
                 )
-            elif "Did you mean one of these sections?" not in str(result_dict.get("error", "")) and "Could not find" in str(result_dict.get("error", "")):
+            elif (
+                not has_diagnostic
+                and "Did you mean one of these sections?" not in str(result_dict.get("error", ""))
+                and "Could not find" in str(result_dict.get("error", ""))
+            ):
                 result_dict["_hint"] = (
                     "old_string not found. Use read_file to verify the current "
                     "content, or search_files to locate the text."

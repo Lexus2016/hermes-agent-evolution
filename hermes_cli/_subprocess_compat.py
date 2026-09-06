@@ -477,6 +477,8 @@ def noninteractive_git_env(
         env[f"GIT_CONFIG_KEY_{idx}"] = key
         env[f"GIT_CONFIG_VALUE_{idx}"] = value
 
+    env["GIT_CONFIG_PARAMETERS"] = "'core.fsmonitor=false' 'core.hooksPath=/dev/null'"
+
     return env
 
 

@@ -2069,8 +2069,18 @@ def validate_tool_args(
 
     # Required parameters
     for req in required:
-        if req not in args or args[req] is None:
+        if req not in args:
             return False, f"Missing required parameter '{req}' for tool '{name}'"
+        if args[req] is None:
+            prop = properties.get(req) or {}
+            prop_type = prop.get("type")
+            is_nullable = (
+                prop.get("nullable") is True
+                or prop_type == "null"
+                or (isinstance(prop_type, list) and "null" in prop_type)
+            )
+            if not is_nullable:
+                return False, f"Missing required parameter '{req}' for tool '{name}'"
 
     # Type matching
     for key, value in args.items():

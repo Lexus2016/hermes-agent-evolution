@@ -36,6 +36,7 @@ class TestDynamicInferenceRouting:
         monkeypatch.setattr(mod, "_ensure_evolution_labels", lambda *a, **k: [])
         monkeypatch.setattr(mod, "_install_access_gate", lambda *a, **k: None)
         monkeypatch.setattr(mod, "_install_evolution_helpers", lambda *a, **k: [])
+        monkeypatch.setattr(mod, "_classify_write_access", lambda: "write")
 
         import cron.jobs as jobs_mod
 
@@ -76,6 +77,7 @@ class TestDynamicInferenceRouting:
         monkeypatch.setattr(mod, "_ensure_evolution_labels", lambda *a, **k: [])
         monkeypatch.setattr(mod, "_install_access_gate", lambda *a, **k: None)
         monkeypatch.setattr(mod, "_install_evolution_helpers", lambda *a, **k: [])
+        monkeypatch.setattr(mod, "_classify_write_access", lambda: "write")
 
         import cron.jobs as jobs_mod
 
@@ -116,6 +118,7 @@ class TestDynamicInferenceRouting:
         monkeypatch.setattr(mod, "_ensure_evolution_labels", lambda *a, **k: [])
         monkeypatch.setattr(mod, "_install_access_gate", lambda *a, **k: None)
         monkeypatch.setattr(mod, "_install_evolution_helpers", lambda *a, **k: [])
+        monkeypatch.setattr(mod, "_classify_write_access", lambda: "write")
 
         import cron.jobs as jobs_mod
 
