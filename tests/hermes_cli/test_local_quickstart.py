@@ -17,6 +17,22 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture(autouse=True)
+def _reset_quickstart_lock():
+    from hermes_cli.web_routers import local_models
+    if local_models._QUICKSTART_LOCK.locked():
+        try:
+            local_models._QUICKSTART_LOCK.release()
+        except RuntimeError:
+            pass
+    yield
+    if local_models._QUICKSTART_LOCK.locked():
+        try:
+            local_models._QUICKSTART_LOCK.release()
+        except RuntimeError:
+            pass
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))

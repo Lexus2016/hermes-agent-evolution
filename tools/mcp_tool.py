@@ -9590,7 +9590,6 @@ def discover_mcp_tools(allowed_mcp_names: Optional[List[str]] = None) -> List[st
     if not _MCP_AVAILABLE:
         logger.debug("MCP SDK not available -- skipping MCP tool discovery")
         return []
-    _ensure_mcp_sdk()
 
     servers = _load_mcp_config()
     if not servers:

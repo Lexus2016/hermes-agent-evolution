@@ -97,7 +97,7 @@ class TestDescribeDirectTool:
         defs = [_td("mcp_search_web")]
         with patch(
             "tools.tool_search.is_deferrable_tool_name",
-            side_effect=lambda name, config=None: name == "mcp_search_web",
+            side_effect=lambda name, *a, **kw: name == "mcp_search_web",
         ):
             result = json.loads(
                 dispatch_tool_describe(

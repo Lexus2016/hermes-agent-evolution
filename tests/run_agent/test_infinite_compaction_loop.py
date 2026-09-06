@@ -305,7 +305,12 @@ class TestPressureRealFloor:
         import inspect
         from agent import conversation_loop
 
-        src = inspect.getsource(conversation_loop.run_conversation)
+        target = getattr(
+            conversation_loop,
+            "_run_conversation_impl",
+            conversation_loop.run_conversation,
+        )
+        src = inspect.getsource(target)
         i = src.index("if _anchored_pressure is not None:")
         window = src[i : i + 400]
         assert "request_pressure_tokens = _anchored_pressure" in window

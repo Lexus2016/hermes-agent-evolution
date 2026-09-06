@@ -1144,7 +1144,7 @@ class TestStructuredErrorReasons:
     @pytest.mark.asyncio
     async def test_insufficient_credits_reason(self, tmp_path):
         img = tmp_path / "test.png"
-        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+        img.write_bytes(VALID_PNG + b"\x00" * 8)
         with (
             patch(
                 "tools.vision_tools._image_to_base64_data_url",
@@ -1164,7 +1164,7 @@ class TestStructuredErrorReasons:
     @pytest.mark.asyncio
     async def test_vision_not_supported_reason(self, tmp_path):
         img = tmp_path / "test.png"
-        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+        img.write_bytes(VALID_PNG + b"\x00" * 8)
         with (
             patch(
                 "tools.vision_tools._image_to_base64_data_url",
@@ -1184,7 +1184,7 @@ class TestStructuredErrorReasons:
     @pytest.mark.asyncio
     async def test_invalid_image_reason(self, tmp_path):
         img = tmp_path / "test.png"
-        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+        img.write_bytes(VALID_PNG + b"\x00" * 8)
         with (
             patch(
                 "tools.vision_tools._image_to_base64_data_url",
@@ -1204,7 +1204,7 @@ class TestStructuredErrorReasons:
     @pytest.mark.asyncio
     async def test_other_reason_fallback(self, tmp_path):
         img = tmp_path / "test.png"
-        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+        img.write_bytes(VALID_PNG + b"\x00" * 8)
         with (
             patch(
                 "tools.vision_tools._image_to_base64_data_url",
@@ -1225,7 +1225,7 @@ class TestStructuredErrorReasons:
     async def test_success_has_no_reason(self, tmp_path):
         """A successful analysis must NOT carry error-only fields."""
         img = tmp_path / "test.png"
-        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+        img.write_bytes(VALID_PNG + b"\x00" * 8)
         mock_response = MagicMock()
         mock_choice = MagicMock()
         mock_choice.message.content = "A test image"

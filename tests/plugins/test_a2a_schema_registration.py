@@ -36,7 +36,7 @@ def test_a2a_call_schema_round_trips_through_tool_describe(monkeypatch):
         tool_search,
         "is_deferrable_tool_name",
         # #97979 added the defer_tools positional (curated-set override).
-        lambda name, defer_tools=None: name == "a2a_call",
+        lambda name, *a, **kw: name == "a2a_call",
     )
 
     described = json.loads(

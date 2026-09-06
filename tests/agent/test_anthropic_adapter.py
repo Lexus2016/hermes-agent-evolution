@@ -1808,7 +1808,7 @@ class TestServerSideCompaction:
         )
 
         kwargs = build_anthropic_kwargs(
-            model="claude-opus-4-6",
+            model="claude-opus-4-8",
             messages=[{"role": "user", "content": "hi"}],
             tools=None,
             max_tokens=4096,

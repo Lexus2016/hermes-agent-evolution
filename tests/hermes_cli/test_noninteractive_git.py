@@ -69,7 +69,8 @@ class TestNoninteractiveGitEnv:
         )
 
         assert env["GIT_CONFIG_COUNT"] != "2"
-        assert "GIT_CONFIG_PARAMETERS" not in env
+        assert "core.pager=less" not in env.get("GIT_CONFIG_PARAMETERS", "")
+        assert "core.fsmonitor=false" in env.get("GIT_CONFIG_PARAMETERS", "")
         values = {
             env[f"GIT_CONFIG_KEY_{idx}"]: env[f"GIT_CONFIG_VALUE_{idx}"]
             for idx in range(int(env["GIT_CONFIG_COUNT"]))

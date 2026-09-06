@@ -8,7 +8,7 @@ platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [agent-methodology, reliability, decision-making, experimentation]
-    related_skills: [plan, spike, test-driven-development, subagent-driven-development, systematic-debugging]
+    related_skills: [spike, test-driven-development, subagent-driven-development, systematic-debugging]
 ---
 
 # Predict, Then Act

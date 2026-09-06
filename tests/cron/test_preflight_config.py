@@ -455,7 +455,7 @@ class TestBalanceLowBlock:
         job = _job()
         deliveries = []
 
-        def fake_deliver(job, content, adapters=None, loop=None):
+        def fake_deliver(job, content, adapters=None, loop=None, **kwargs):
             deliveries.append(content)
             return None
 

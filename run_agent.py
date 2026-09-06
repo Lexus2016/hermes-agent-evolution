@@ -8878,7 +8878,7 @@ class AIAgent:
             "vertex",
         }:
             return True
-        base = self._base_url_lower
+        base = getattr(self, "_base_url_lower", None) or (getattr(self, "base_url", "") or "").lower()
         host = base_url_hostname(base)
         return (
             "dashscope" in host
