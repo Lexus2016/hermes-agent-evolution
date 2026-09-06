@@ -33,6 +33,20 @@ def _reset_quickstart_lock():
             pass
 
 
+@pytest.fixture(autouse=True)
+def _mock_hardware_budget(monkeypatch):
+    from hermes_cli.local_runtime.estimator import HardwareBudget
+
+    budget = HardwareBudget(
+        usable_vram_bytes=64 << 30,
+        total_device_bytes=64 << 30,
+        ram_available_bytes=64 << 30,
+    )
+    monkeypatch.setattr(
+        "hermes_cli.local_runtime.hardware.probe_budget", lambda **kw: budget
+    )
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
