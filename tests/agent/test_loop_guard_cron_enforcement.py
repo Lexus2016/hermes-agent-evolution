@@ -101,7 +101,13 @@ def _repeated_terminal_run(n: int, command: str = "echo hi"):
 
 
 def test_cron_platform_hard_stops_after_repeated_advisory_nudges():
+    import dataclasses
+
     agent = _make_agent("terminal", max_iterations=20, platform="cron")
+    if hasattr(agent, "_tool_guardrails") and agent._tool_guardrails:
+        agent._tool_guardrails.config = dataclasses.replace(
+            agent._tool_guardrails.config, hard_stop_enabled=False
+        )
     agent.client.chat.completions.create.side_effect = _repeated_terminal_run(15)
 
     with (

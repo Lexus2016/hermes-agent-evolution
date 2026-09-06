@@ -98,7 +98,7 @@ class TestDispatchToolDescribeFuzzy:
         defs = [_make_tool_def("mcp_search_web")]
         with patch(
             "tools.tool_search.is_deferrable_tool_name",
-            side_effect=lambda name, config=None: name == "mcp_search_web",
+            side_effect=lambda name, *args, **kwargs: name == "mcp_search_web",
         ):
             result = json.loads(
                 dispatch_tool_describe(
@@ -158,7 +158,7 @@ class TestDispatchToolDescribeStructuredReasons:
         defs = [_make_tool_def("mcp_search_web")]
         with patch(
             "tools.tool_search.is_deferrable_tool_name",
-            side_effect=lambda name, config=None: name == "mcp_search_web",
+            side_effect=lambda name, *args, **kwargs: name == "mcp_search_web",
         ):
             result = json.loads(
                 dispatch_tool_describe(

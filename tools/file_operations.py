@@ -354,16 +354,30 @@ def classify_file_error(
             "old_string must be non-empty. Provide the exact text to replace.",
         )
 
-    # 8. Ambiguous match / replace all intent
-    if "found" in error_lower and "matches for old_string" in error_lower:
+    # 8. Ambiguous match / replace all intent (#2354)
+    if "found" in error_lower and "matches" in error_lower and "old_string" in error_lower:
         if "replace_all" in error_lower:
             return (
                 "replace_all_intent",
-                "Multiple matches found. If you intended to replace all occurrences, set replace_all=True. Do NOT repeat ambiguous single replacements.",
+                "Multiple matches found and the resolution suggests replace_all. "
+                "If you intend to replace ALL occurrences, re-send the patch with "
+                "replace_all=True. Do NOT repeat ambiguous single replacements.",
+            )
+        if "more context" in error_lower or "surrounding context" in error_lower or "longer" in error_lower:
+            return (
+                "ambiguous_insufficient_context",
+                "old_string is too short to be unique — multiple regions match. "
+                "Re-read the file with read_file, then include more surrounding "
+                "context lines (function signature, class name, unique nearby lines) "
+                "so only one location matches. Do NOT retry the same old_string — "
+                "it is inherently ambiguous.",
             )
         return (
-            "ambiguous_match",
-            "Multiple matches found for old_string. Provide more surrounding context to disambiguate.",
+            "ambiguous_not_unique",
+            "Multiple matches found for old_string — it is not unique. Do NOT "
+            "retry the same old_string (it will match the same locations again). "
+            "Either add more surrounding context to make it unique, or use "
+            "replace_all=True if you intend to replace all occurrences.",
         )
 
     # 9. Patch parse failure
@@ -382,6 +396,48 @@ def classify_file_error(
         return (
             "fuzzy_match",
             "Re-read the file to get the EXACT lines including whitespace and line breaks before retrying.",
+        )
+
+    # 11. Decompose remaining "other" failures (#2244)
+    if (
+        "unicode" in error_lower
+        or "codec can't decode" in error_lower
+        or "invalid byte" in error_lower
+        or "invalid continuation byte" in error_lower
+        or "can't decode" in error_lower
+    ):
+        return (
+            "encoding_error",
+            "The file has a byte sequence that can't be decoded as UTF-8. "
+            "It may be a non-UTF-8 encoding or contain invalid bytes. "
+            "Use write_file to replace the content, or handle the encoding "
+            "explicitly via execute_code.",
+        )
+    if "line ending" in error_lower or "crlf" in error_lower or "line-ending" in error_lower:
+        return (
+            "line_ending_conflict",
+            "The file uses different line endings (CRLF vs LF) than "
+            "old_string. Re-read the file and copy the EXACT line endings, "
+            "or use write_file to replace the whole file.",
+        )
+    if "bom" in error_lower or "ufeff" in error_lower or "u+feff" in error_lower or "byte order mark" in error_lower:
+        return (
+            "bom_conflict",
+            "The file has a UTF-8 BOM (byte order mark) prefix that "
+            "interferes with the match. Re-read the file from line 1 and "
+            "include the BOM in old_string, or use write_file.",
+        )
+    if (
+        ("concurrent" in error_lower)
+        or ("modified" in error_lower and "since" in error_lower)
+        or ("changed" in error_lower and "since" in error_lower)
+        or ("stale" in error_lower and "handle" in error_lower)
+    ):
+        return (
+            "concurrent_modification",
+            "The file was modified between the read and the write. "
+            "Re-read the current content and retry the patch against the "
+            "latest version.",
         )
 
     # Fallback to generic error

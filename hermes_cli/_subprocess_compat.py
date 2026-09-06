@@ -694,8 +694,6 @@ def bounded_probe_run(
     launcher instead of orphaning them.
     """
     _popen_kwargs: dict = {"creationflags": windows_hide_flags()} if IS_WINDOWS else {"process_group": 0}
-    if env is not None:
-        _popen_kwargs["env"] = dict(env)
     try:
         proc = subprocess.Popen(
             list(argv),
