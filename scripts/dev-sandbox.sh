@@ -232,7 +232,10 @@ if [ -n "$INSTALL_REF" ]; then
   # Peel to ^{commit} in both cases: an annotated tag fetches as a tag OBJECT,
   # and using it directly fails later with "trying to write non-commit object
   # ... to branch 'refs/heads/main'".
-  if git -C "$UPSTREAM_REPO" fetch -q "$UPSTREAM_URL" "$INSTALL_REF" 2>/dev/null; then
+  if git -C "$GIT_ROOT" rev-parse --verify -q "$INSTALL_REF^{commit}" >/dev/null 2>&1 \
+    && git -C "$UPSTREAM_REPO" fetch -q "$GIT_ROOT" "$INSTALL_REF" 2>/dev/null; then
+    UPSTREAM_COMMIT="$(git -C "$UPSTREAM_REPO" rev-parse "FETCH_HEAD^{commit}")"
+  elif git -C "$UPSTREAM_REPO" fetch -q "$UPSTREAM_URL" "$INSTALL_REF" 2>/dev/null; then
     UPSTREAM_COMMIT="$(git -C "$UPSTREAM_REPO" rev-parse "FETCH_HEAD^{commit}")"
   elif git -C "$UPSTREAM_REPO" fetch -q "$UPSTREAM_URL" refs/heads/main \
     && UPSTREAM_COMMIT="$(git -C "$UPSTREAM_REPO" rev-parse --verify -q "$INSTALL_REF^{commit}")"; then

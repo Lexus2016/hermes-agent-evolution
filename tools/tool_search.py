@@ -564,7 +564,7 @@ def _describe_classification(
         entry = registry.get_entry(name)
     except Exception:
         return "not_found"
-    if entry is None and name not in _hermes_core_tools():
+    if entry is None:
         return "not_found"
     if is_deferrable_tool_name(name, defer_tools=defer_tools, config=config):
         return "available"
@@ -2035,16 +2035,86 @@ def _validation_path(error: Any) -> str:
     return path
 
 
+# Map JSON Schema type strings to Python types for validation. ``number``
+# accepts both int and float (JSON ints are a subset of floats).
+_SCHEMA_PY_TYPES: Dict[str, Tuple[type, ...]] = {
+    "string": (str,),
+    "integer": (int,),
+    "number": (int, float),
+    "boolean": (bool,),
+    "array": (list, tuple),
+    "object": (dict,),
+}
+
+
 def validate_tool_args(
     name: str,
     args: Dict[str, Any],
     schema: Optional[dict] = None,
 ) -> Tuple[bool, Optional[str]]:
-    """Validate *args* against schema (forwarder to validate_deferred_call_args)."""
-    err = validate_deferred_call_args(name, args)
-    if err:
-        return False, err
+    """Validate *args* against a tool's OpenAI-format parameter *schema*.
+
+    Returns ``(True, None)`` when valid, ``(False, error_message)`` otherwise.
+    Checks required-parameter presence and basic type matching for the
+    common JSON Schema types. Only top-level parameters are validated.
+    """
+    if not schema:
+        return True, None
+    params = schema.get("parameters") or {}
+    properties = params.get("properties") or {}
+    required = params.get("required") or []
+
+    if not isinstance(args, dict):
+        return False, f"Arguments for '{name}' must be an object"
+
+    # Required parameters
+    for req in required:
+        if req not in args:
+            return False, f"Missing required parameter '{req}' for tool '{name}'"
+        if args[req] is None:
+            prop = properties.get(req) or {}
+            prop_type = prop.get("type")
+            is_nullable = (
+                prop.get("nullable") is True
+                or prop_type == "null"
+                or (isinstance(prop_type, list) and "null" in prop_type)
+            )
+            if not is_nullable:
+                return False, f"Missing required parameter '{req}' for tool '{name}'"
+
+    # Type matching
+    for key, value in args.items():
+        if value is None:
+            continue  # null is acceptable for optional params
+        prop = properties.get(key)
+        if not prop:
+            continue  # unknown params are not our concern here
+        expected_types = prop.get("type")
+        if not expected_types:
+            continue
+        if isinstance(expected_types, str):
+            expected_types = [expected_types]
+        if not any(_check_type(value, t) for t in expected_types):
+            got = type(value).__name__
+            want = " or ".join(expected_types)
+            return False, (
+                f"Parameter '{key}' for tool '{name}' has wrong type: "
+                f"expected {want}, got {got}"
+            )
     return True, None
+
+
+def _check_type(value: Any, type_str: str) -> bool:
+    """Check whether *value* matches the JSON Schema *type_str*."""
+    if type_str == "integer":
+        # bool is a subclass of int in Python; reject it for integer params.
+        return isinstance(value, int) and not isinstance(value, bool)
+    py_types = _SCHEMA_PY_TYPES.get(type_str)
+    if py_types is None:
+        return True  # unknown type — don't block dispatch
+    return isinstance(value, py_types)
+
+
 def validate_deferred_call_args(name: str, args: Dict[str, Any]) -> Optional[str]:
     """Validate ``tool_call`` arguments against the deferred tool's schema.
 

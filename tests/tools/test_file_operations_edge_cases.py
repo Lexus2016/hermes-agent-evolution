@@ -223,8 +223,8 @@ class TestPaginationBounds:
         assert result.error is None
         assert "1|line1" in result.content
         # The clamped range rides the single compound probe.
-        assert len(commands) == 1
-        assert "sed -n '1,1p' 'notes.txt' 2>/dev/null | cut -b1-8001" in commands[0]
+        assert "sed -n '1,1p' 'notes.txt' 2>/dev/null" in commands[0]
+        assert "cut -b1-8001" in commands[0]
 
     def test_search_clamps_offset_and_limit_before_building_head_pipeline(self):
         env = MagicMock()

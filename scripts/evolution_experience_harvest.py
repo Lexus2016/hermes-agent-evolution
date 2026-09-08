@@ -69,8 +69,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 # from HERMES_HOME/scripts (outside the repo). The repo is the editable
 # install source; its root must be on sys.path for `agent` imports.
 _REPO_ROOT = "/root/hermes-agent-evolution"
-if _REPO_ROOT not in sys.path and Path(_REPO_ROOT).is_dir():
-    sys.path.insert(0, _REPO_ROOT)
+try:
+    if _REPO_ROOT not in sys.path and Path(_REPO_ROOT).is_dir():
+        sys.path.insert(0, _REPO_ROOT)
+except OSError:
+    pass
 
 try:
     from agent.display import _detect_tool_failure  # noqa: E402

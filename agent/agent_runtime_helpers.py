@@ -109,19 +109,16 @@ def _ra():
 
 AGENT_RUNTIME_POST_HOOK_TOOL_NAMES = frozenset(
     {
-        "todo",
         "todo_list",
         "session_search",
         "memory",
         "clarify",
         "read_terminal",
-        "read_preview",
         "desktop_preview",
         "drive_preview",
         "annotate_preview",
         "read_window_below",
         "setup_mcp",
-        "tour",
         "gui_tour",
         "delegate_task",
         "compact_context",
@@ -132,6 +129,9 @@ AGENT_RUNTIME_POST_HOOK_TOOL_NAMES = frozenset(
 def agent_runtime_owns_post_tool_hook(agent: Any, function_name: str) -> bool:
     """Return True when an agent-level tool path emits its own post hook."""
     if function_name in AGENT_RUNTIME_POST_HOOK_TOOL_NAMES:
+        return True
+    from model_tools import _LEGACY_TOOL_ALIASES as _lta
+    if _lta.get(function_name, function_name) in AGENT_RUNTIME_POST_HOOK_TOOL_NAMES:
         return True
     if getattr(agent, "_context_engine_tool_names", None) and function_name in agent._context_engine_tool_names:
         return True
@@ -3746,7 +3746,7 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
             pass
         return result
 
-    if function_name == "todo_list":
+    if function_name in ("todo_list", "todo"):
         def _execute(next_args: dict) -> Any:
             from tools.todo_tool import todo_tool as _todo_tool
             return _finish_agent_tool(
@@ -3832,11 +3832,11 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
                 ),
                 next_args,
             )
-    elif function_name == "desktop_preview":
+    elif function_name in ("desktop_preview", "read_preview"):
         def _execute(next_args: dict) -> Any:
             # action=read needs the GUI callback (agent-level); open/close go
             # through the registry handler like any other tool.
-            if (next_args.get("action") or "").strip() == "read":
+            if function_name == "read_preview" or (next_args.get("action") or "").strip() == "read":
                 from tools.read_preview_tool import read_preview_tool as _read_preview_tool
                 return _finish_agent_tool(
                     _read_preview_tool(
@@ -3888,7 +3888,7 @@ def invoke_tool(agent, function_name: str, function_args: dict, effective_task_i
                 ),
                 next_args,
             )
-    elif function_name == "gui_tour":
+    elif function_name in ("gui_tour", "tour"):
         def _execute(next_args: dict) -> Any:
             from tools.tour_tool import tour_tool as _tour_tool
             return _finish_agent_tool(

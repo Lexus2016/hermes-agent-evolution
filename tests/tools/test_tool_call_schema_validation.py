@@ -79,4 +79,4 @@ class TestModelToolsDispatch:
         )
         parsed = json.loads(result)
         assert "error" in parsed
-        assert "Parameter 'n'" in parsed["error"]
+        assert "arguments.n" in parsed["error"] or "Parameter 'n'" in parsed["error"]

@@ -13582,6 +13582,14 @@ def _run_prompt_submit(
             if display_kind and "persist_user_display_kind" in _run_params:
                 run_kwargs["persist_user_display_kind"] = display_kind
                 run_kwargs["persist_user_display_metadata"] = display_metadata
+            if _run_params and "persist_user_origin" not in _run_params and not any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in _run_params.values()
+            ):
+                run_kwargs.pop("persist_user_origin", None)
+            if _run_params and "persist_user_message" not in _run_params and not any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in _run_params.values()
+            ):
+                run_kwargs.pop("persist_user_message", None)
             # Auto-titling now fires inside the turn prologue (shared by every
             # surface). Hand the agent this session's live-rename hook so the
             # sidebar repaints the moment a title lands, rather than waiting

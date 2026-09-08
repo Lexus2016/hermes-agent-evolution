@@ -290,7 +290,7 @@ def test_delegate_task_signature_accepts_handoff_mode():
 def test_schema_exposes_handoff_mode_enum():
     props = dt.DELEGATE_TASK_SCHEMA["parameters"]["properties"]
     assert "handoff_mode" in props
-    assert props["handoff_mode"]["enum"] == ["collapsed_summary"]
+    assert "collapsed_summary" in props["handoff_mode"]["enum"]
 
 
 def test_apply_handoff_collapse_called_in_delegate_task(monkeypatch):

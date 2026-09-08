@@ -1886,6 +1886,10 @@ class TestSystemdCgroupIsolation:
     ENTIRE gateway cgroup, taking down the messaging control plane.
     """
 
+    @pytest.fixture(autouse=True)
+    def _mock_linux_for_systemd(self, monkeypatch):
+        monkeypatch.setattr("tools.process_registry._IS_LINUX", True)
+
     @pytest.fixture()
     def _gateway_identity(self, monkeypatch):
         """Opt-in: mark this test as running AS the live gateway process."""
@@ -2061,7 +2065,7 @@ class TestSystemdCgroupIsolation:
             ):
                 session = registry.spawn_local("codex", cwd="/tmp", use_pty=True)
             assert pty_spawn.call_args.args[0] == [
-                "/bin/bash", "-lic", "set +m; codex",
+                "/bin/bash", "-lc", "set +m; codex",
             ]
         else:
             fake_popen, captured = self._fake_popen_capture()
@@ -2112,7 +2116,7 @@ class TestSystemdCgroupIsolation:
             ):
                 session = registry.spawn_local("codex", cwd="/tmp", use_pty=True)
             assert pty_spawn.call_args.args[0] == [
-                "/bin/bash", "-lic", "set +m; codex",
+                "/bin/bash", "-lc", "set +m; codex",
             ]
         else:
             fake_popen, captured = self._fake_popen_capture()
@@ -2191,7 +2195,7 @@ class TestSystemdCgroupIsolation:
         assert "--scope" in argv
         assert "--unit" in argv
         assert "--" in argv
-        assert argv[-3:] == ["/bin/bash", "-lic", "set +m; codex"]
+        assert argv[-3:] == ["/bin/bash", "-lc", "set +m; codex"]
         assert session.systemd_unit == f"hermes-worker-{session.id}.scope"
 
     def test_pty_spawn_failure_reaps_scope_before_distinct_pipe_fallback(

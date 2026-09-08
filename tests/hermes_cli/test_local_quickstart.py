@@ -17,6 +17,36 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture(autouse=True)
+def _reset_quickstart_lock():
+    from hermes_cli.web_routers import local_models
+    if local_models._QUICKSTART_LOCK.locked():
+        try:
+            local_models._QUICKSTART_LOCK.release()
+        except RuntimeError:
+            pass
+    yield
+    if local_models._QUICKSTART_LOCK.locked():
+        try:
+            local_models._QUICKSTART_LOCK.release()
+        except RuntimeError:
+            pass
+
+
+@pytest.fixture(autouse=True)
+def _mock_hardware_budget(monkeypatch):
+    from hermes_cli.local_runtime.estimator import HardwareBudget
+
+    budget = HardwareBudget(
+        usable_vram_bytes=64 << 30,
+        total_device_bytes=64 << 30,
+        ram_available_bytes=64 << 30,
+    )
+    monkeypatch.setattr(
+        "hermes_cli.local_runtime.hardware.probe_budget", lambda **kw: budget
+    )
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))

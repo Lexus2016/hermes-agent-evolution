@@ -223,5 +223,5 @@ def test_blank_slate_prompt_size_counts_only_minimal_tools(isolated_home):
 
     data = compute_prompt_breakdown("cli")
 
-    # Blank Slate is file + terminal (5 file + 2 terminal = 7 schemas).
-    assert data["tools"]["count"] == 7
+    # Blank Slate minimal toolsets (file, terminal, skills, and bridge tools = 12).
+    assert data["tools"]["count"] == 12

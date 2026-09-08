@@ -31,7 +31,7 @@ class TestProcessSchemaDiet(unittest.TestCase):
         props = PROCESS_SCHEMA["parameters"]["properties"]
         self.assertEqual(
             props["action"]["enum"],
-            ["list", "poll", "log", "wait", "kill", "write", "submit", "close"],
+            ["list", "poll", "log", "wait", "kill", "stop", "write", "submit", "close"],
         )
         # No redundant description on the enum param.
         self.assertNotIn("description", props["action"])

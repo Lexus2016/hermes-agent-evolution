@@ -3535,8 +3535,7 @@ PROCESS_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["list", "poll", "log", "wait", "kill", "stop", "write", "submit", "close"],
-                "description": "Action to perform on background processes"
+                "enum": ["list", "poll", "log", "wait", "kill", "stop", "write", "submit", "close"]
             },
             "session_id": {
                 "type": "string",

@@ -2254,6 +2254,8 @@ class AIAgent:
             messages_snapshot=messages_snapshot,
             review_memory=review_memory,
             review_skills=review_skills,
+            correction_hint=correction_hint,
+            block_durable_writes=block_durable_writes,
             focus=focus,
             task_cfg=task_cfg,
         )
@@ -2275,6 +2277,8 @@ class AIAgent:
         messages_snapshot: List[Dict],
         review_memory: bool = False,
         review_skills: bool = False,
+        correction_hint: Optional[Dict[str, Any]] = None,
+        block_durable_writes: bool = False,
         focus: Optional[str] = None,
         task_cfg: Optional[Dict[str, Any]] = None,
         _requeue_attempts: int = 0,
@@ -2338,6 +2342,8 @@ class AIAgent:
                         messages_snapshot=messages_snapshot,
                         review_memory=review_memory,
                         review_skills=review_skills,
+                        correction_hint=correction_hint,
+                        block_durable_writes=block_durable_writes,
                         focus=focus,
                         task_cfg=task_cfg,
                         _requeue_attempts=_requeue_attempts + 1,
@@ -8872,7 +8878,7 @@ class AIAgent:
             "vertex",
         }:
             return True
-        base = self._base_url_lower
+        base = getattr(self, "_base_url_lower", None) or (getattr(self, "base_url", "") or "").lower()
         host = base_url_hostname(base)
         return (
             "dashscope" in host

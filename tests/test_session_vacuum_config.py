@@ -44,6 +44,7 @@ def test_fresh_config_runs_auto_prune_at_startup(monkeypatch, tmp_path: Path):
         min_vacuum_interval_days=30,
         vacuum=True,
         sessions_dir=tmp_path / "sessions",
+        db_size_vacuum_threshold=768 * 1024 * 1024,
     )
 
 

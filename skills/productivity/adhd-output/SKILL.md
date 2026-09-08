@@ -8,7 +8,7 @@ platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [output-style, productivity, communication]
-    related_skills: [predict-then-act, plan]
+    related_skills: [predict-then-act]
 ---
 
 # ADHD-Friendly Output (always-on style)

@@ -1849,7 +1849,7 @@ def _setup_worktree(repo_root: str = None, sync_base: bool = True,
     import subprocess
 
     from hermes_cli._subprocess_compat import (
-        noninteractive_git_env as _noninteractive_git_env,
+        noninteractive_git_env,
     )
 
     repo_root = repo_root or _git_repo_root()
@@ -2841,6 +2841,8 @@ def _prune_stale_worktrees(repo_root: str, max_age_hours: int = 24) -> None:
     import re
     import subprocess
     import time
+
+    from hermes_cli._subprocess_compat import noninteractive_git_env
 
     worktrees_dir = Path(repo_root) / ".worktrees"
     if not worktrees_dir.exists():
