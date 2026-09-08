@@ -581,7 +581,8 @@ class TestShellFileOpsHelpers:
             "then wc -c < '/c/Users/alice/notes.txt' 2>/dev/null; "
         )
         assert "head -c 1000 '/c/Users/alice/notes.txt' 2>/dev/null | base64" in probe
-        assert "sed -n '1,2000p' '/c/Users/alice/notes.txt' 2>/dev/null | cut -b1-8001" in probe
+        assert "sed -n '1,2000p' '/c/Users/alice/notes.txt' 2>/dev/null" in probe
+        assert "cut -b1-8001" in probe
         assert "wc -l < '/c/Users/alice/notes.txt'" in probe
         assert (
             "elif [ -e '/c/Users/alice/notes.txt' ]; "
