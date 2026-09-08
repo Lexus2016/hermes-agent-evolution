@@ -28,6 +28,14 @@ import time
 import traceback
 import uuid
 from datetime import datetime, timezone
+from typing import Dict, Optional
+
+# Tool-call counts per job id for the CURRENT run, written by _run_job_impl
+# and consumed (popped) by run_one_job's mark_job_run call. Defined EARLY in
+# the module (not at the bottom) so that partial/deferred module loads can
+# never hit ``NameError: _LAST_RUN_TOOL_CALLS is not defined`` from run
+# paths that execute before the bottom of the module is evaluated (#cron-fix).
+_LAST_RUN_TOOL_CALLS: Dict[str, Optional[int]] = {}
 
 # fcntl is Unix-only; on Windows use msvcrt for file locking
 try:
@@ -9715,14 +9723,9 @@ def _maybe_cron_refusal_recovery(
     return _refusal_result
 
 
-# Tool-call counts per job id for the CURRENT run, written by _run_job_impl
-# and consumed (popped) by run_one_job's mark_job_run call. A side channel —
-# NOT part of run_job's (success, output, final_response, error) tuple — so
-# every existing caller and test stub of that 4-tuple contract keeps working;
-# a missing entry simply reads as None (= unknown, e.g. stubbed run_job or
-# no_agent scripts). Keys are per-job and a job cannot run concurrently with
-# itself (fire claims), so parallel ticks don't collide (#701).
-_LAST_RUN_TOOL_CALLS: Dict[str, Optional[int]] = {}
+# Tool-call counts per job id: defined at the TOP of this module (see the
+# comment near the imports) so partial module loads can never hit NameError;
+# per-job keys, popped by run_one_job's mark_job_run (#701).
 
 
 
