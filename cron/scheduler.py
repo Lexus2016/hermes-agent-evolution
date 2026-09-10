@@ -39,9 +39,92 @@ _LAST_RUN_TOOL_CALLS: Dict[str, Optional[int]] = {}
 
 # fcntl is Unix-only; on Windows use msvcrt for file locking
 
-# Defined EARLY (moved from near the bottom of the module) so partial/deferred
-# module loads can never hit NameError on the call site in _run_job_impl
-# (same defect class as _LAST_RUN_TOOL_CALLS, #cron-fix).
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+    try:
+        import msvcrt
+    except ImportError:
+        msvcrt = None
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Protocol, Set, Tuple, Union
+
+# Add parent directory to path for imports BEFORE repo-level imports.
+# Without this, standalone invocations (e.g. after `hermes update` reloads
+# the module) fail with ModuleNotFoundError for hermes_time et al.
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from hermes_constants import get_hermes_home
+from hermes_cli._subprocess_compat import windows_hide_flags
+from hermes_cli.config import (
+    _expand_env_vars,
+    cron_model_drift_axes,
+    cron_model_drift_guard_enabled,
+    load_config,
+    resolve_cron_model_drift_defaults,
+)
+from hermes_cli.fallback_config import get_fallback_chain
+from hermes_time import now as _hermes_now
+from agent.interrupt_compat import request_hard_interrupt
+from agent.delegation_context import (
+    enter_non_dispatcher_owned_context,
+    exit_non_dispatcher_owned_context,
+)
+
+logger = logging.getLogger(__name__)
+
+# Delivery/refusal tail helpers (moved up from the bottom of the module).
+# Partial/interrupted module loads — a gateway importing cron.scheduler
+# while `hermes update` replaces the file on disk — used to truncate the
+# module before these definitions, so run/delivery paths died with
+# NameError: _maybe_cron_refusal_recovery / _resolve_delivery_verbosity /
+# etc (#cron-fix part 2; same class as _LAST_RUN_TOOL_CALLS above).
+# `_count_tool_calls` must sit above `_maybe_cron_refusal_recovery` because
+# the recovery path calls it; leaving it at EOF re-creates the NameError
+# on a prefix load that reaches `_run_job_impl`.
+
+
+def strip_reasoning_for_delivery(text: str) -> str:
+    """Remove model reasoning/thinking blocks from a cron-delivered message.
+
+    Cron output must be the RESULT only — never the model's reasoning. The
+    delivery hint asks the agent for clean output, but instructions are not a
+    guarantee, so we also strip `<think>`/`<thinking>`/`<reasoning>` blocks
+    mechanically here, at the delivery boundary (CRON-ONLY — interactive sessions
+    may legitimately surface reasoning).
+
+    Only LEADING / own-line blocks are stripped — Hermes prepends native
+    reasoning as ``<think>\\n...\\n</think>\\n`` (see agent_runtime_helpers), so a
+    reasoning block always starts a line. An INLINE ``<think>...</think>``
+    mid-sentence is left intact, because a report may legitimately quote/discuss
+    the tag (e.g. an agent-research report about reasoning models) and silently
+    deleting that content would be worse than the leak. Inline untagged narration
+    is handled by the delivery-hint instruction, not here."""
+    if not text:
+        return text
+    import re
+
+    return re.sub(
+        r"^[ \t]*<(think|thinking|reasoning|reasoning_scratchpad)\b[^>]*>.*?</\1>[ \t]*\n?",
+        "",
+        text,
+        flags=re.IGNORECASE | re.DOTALL | re.MULTILINE,
+    ).strip()
+
+
+def _count_tool_calls(messages) -> int:
+    """Number of tool invocations in a run_conversation message list.
+
+    Counts ``role == "tool"`` entries — exactly one per executed tool call.
+    Tolerates junk (None, non-list, non-dict entries) because the messages
+    come back from an agent run that may have failed mid-flight (#701).
+    """
+    if not isinstance(messages, list):
+        return 0
+    return sum(1 for m in messages if isinstance(m, dict) and m.get("role") == "tool")
+
+
 def _maybe_cron_refusal_recovery(
     result: Dict[str, Any],
     agent: Optional[Any],
@@ -140,40 +223,221 @@ def _maybe_cron_refusal_recovery(
     )
     return _refusal_result
 
-try:
-    import fcntl
-except ImportError:
-    fcntl = None
+
+def _failure_digest_enabled(cfg: dict) -> bool:
+    """Return whether ``cron.failure_digest`` is enabled in config.yaml.
+
+    The digest surfaces recent cron failures to the user on the next
+    interaction. Default disabled (False); opt-in via config.yaml.
+    """
     try:
-        import msvcrt
-    except ImportError:
-        msvcrt = None
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Protocol, Set, Tuple, Union
+        cron_cfg = cfg.get("cron", {}) if isinstance(cfg, dict) else {}
+        return bool(cron_cfg.get("failure_digest", False))
+    except Exception:
+        return False
 
-# Add parent directory to path for imports BEFORE repo-level imports.
-# Without this, standalone invocations (e.g. after `hermes update` reloads
-# the module) fail with ModuleNotFoundError for hermes_time et al.
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from hermes_constants import get_hermes_home
-from hermes_cli._subprocess_compat import windows_hide_flags
-from hermes_cli.config import (
-    _expand_env_vars,
-    cron_model_drift_axes,
-    cron_model_drift_guard_enabled,
-    load_config,
-    resolve_cron_model_drift_defaults,
-)
-from hermes_cli.fallback_config import get_fallback_chain
-from hermes_time import now as _hermes_now
-from agent.interrupt_compat import request_hard_interrupt
-from agent.delegation_context import (
-    enter_non_dispatcher_owned_context,
-    exit_non_dispatcher_owned_context,
-)
+def _load_cron_config() -> dict:
+    """Load config.yaml, returning an empty dict on any failure."""
+    try:
+        from hermes_cli.config import load_config
 
-logger = logging.getLogger(__name__)
+        return load_config() or {}
+    except Exception:
+        return {}
+
+
+def build_cron_failure_digest(adapters=None, loop=None) -> Optional[str]:
+    """Build a user-visible digest of recent cron failures.
+
+    Scans all jobs and emits a compact message for any job whose latest
+    failure record reports success=False and is newer than the job's last
+    acknowledged digest timestamp (stored in ``failure_digest_last_at``).
+    Updates that timestamp when a failure is included.
+
+    Returns the digest text, or None if there is nothing new to surface.
+    """
+    cfg = _load_cron_config()
+    if not _failure_digest_enabled(cfg):
+        return None
+
+    import datetime as _dt
+
+    now = _hermes_now()
+    cutoff = now - _dt.timedelta(hours=24)
+    lines: List[str] = []
+    jobs = load_jobs()
+    for job in jobs:
+        if not job.get("enabled", True):
+            continue
+        record = get_latest_failure(job["id"])
+        if not record:
+            continue
+        if record.get("success") is True:
+            continue
+        try:
+            ts = _dt.datetime.fromisoformat(str(record.get("timestamp") or ""))
+        except (TypeError, ValueError):
+            continue
+        if ts < cutoff:
+            continue
+
+        last_ack = job.get("failure_digest_last_at")
+        if last_ack:
+            try:
+                last_ack_dt = _dt.datetime.fromisoformat(str(last_ack))
+                if ts <= last_ack_dt:
+                    continue
+            except (TypeError, ValueError):
+                pass
+
+        job_name = record.get("job_name") or job.get("name") or job["id"]
+        err = (record.get("error") or "unknown error")[:120]
+        lines.append(f"• '{job_name}' failed at {ts.strftime('%Y-%m-%d %H:%M')}: {err}")
+
+    if not lines:
+        return None
+
+    digest = (
+        "⚠️ Cron failure digest (last 24h):\n"
+        + "\n".join(lines)
+        + "\n\nFull details: ~/.hermes/cron/failures/"
+    )
+
+    # Update ack timestamps so we don't repeat the same failures every turn.
+    try:
+        from cron.jobs import _jobs_lock
+        with _jobs_lock():
+            jobs = load_jobs()
+            now_iso = now.isoformat()
+            changed = False
+            for job in jobs:
+                record = get_latest_failure(job["id"])
+                if not record or record.get("success") is True:
+                    continue
+                try:
+                    ts = _dt.datetime.fromisoformat(str(record.get("timestamp") or ""))
+                except (TypeError, ValueError):
+                    continue
+                if ts < cutoff:
+                    continue
+                job["failure_digest_last_at"] = now_iso
+                changed = True
+            if changed:
+                save_jobs(jobs)
+    except Exception as e:
+        logger.warning("Failed to update failure_digest_last_at timestamps: %s", e)
+
+    return digest
+
+
+def _summarize_job_result(content: str, *, limit: int = 280) -> str:
+    """One-line-ish status + trimmed final response for delivery_verbosity=summary.
+
+    Strips any leading reasoning trace, then truncates to *limit* chars with an
+    ellipsis. The cron wrap header (``Cronjob Response: <name>``) already carries
+    the run identity, so this keeps the body to a short digestible tail.
+    """
+    text = strip_reasoning_for_delivery(content or "").strip()
+    if not text:
+        return text
+    if len(text) > limit:
+        text = text[:limit].rstrip() + "…"
+    return text
+
+
+def _resolve_delivery_verbosity(job: dict, target_chat_ids, user_cfg: dict) -> str:
+    """Resolve the effective cron delivery verbosity level.
+
+    Order (issue #924):
+      1. per-job ``delivery_verbosity``
+      2. per-chat override at the delivery target(s)
+         (``mode: quiet``/``quiet_chats`` ⇒ ``result_only``;
+          ``mode: silent`` ⇒ ``silent``; verbose/normal ⇒ ``full``)
+      3. default ``full`` (per-platform display tiers carry no delivery-content
+         equivalent, so the effective fallback is byte-identical to prior
+         behavior).
+
+    Multi-target jobs (``deliver: all`` / fan-out) share ONE delivered
+    ``content``, so the per-chat layer resolves to the MOST RESTRICTIVE shaping
+    across targets — the full trace is never delivered to a chat that asked to
+    be quiet/silent. ``silent`` (full suppression) is only chosen when EVERY
+    resolvable target is silent; a mix of silent + others degrades to
+    ``result_only`` (deliver the final answer everywhere, leak nothing) rather
+    than suppressing delivery to the non-silent targets.
+
+    Returns one of ``DELIVERY_VERBOSITY_LEVELS``.
+    """
+    raw = job.get("delivery_verbosity")
+    if raw:
+        norm = str(raw).strip().lower()
+        if norm in DELIVERY_VERBOSITY_LEVELS:
+            return norm
+
+    try:
+        from gateway.display_config import resolve_chat_mode
+    except Exception:
+        return "full"
+
+    modes = [
+        resolve_chat_mode(user_cfg, str(chat_id))
+        for chat_id in (target_chat_ids or [])
+        if chat_id is not None
+    ]
+    configured = [m for m in modes if m]
+    if not configured:
+        return "full"
+    # Every resolvable target wants silence → suppress. (Only when there are no
+    # unconfigured targets that would otherwise expect a delivery.)
+    if all(m == "silent" for m in modes):
+        return "silent"
+    # Any quiet/silent target present → never leak the full trace to it.
+    if any(m in ("silent", "quiet") for m in modes):
+        return "result_only"
+    return "full"
+
+
+def _apply_delivery_verbosity(
+    verbosity: str,
+    content: str,
+    *,
+    success: bool = True,
+    summary_limit: int = 280,
+) -> Optional[str]:
+    """Transform delivery content per verbosity level.
+
+    Returns the (possibly transformed) content, or ``None`` to SUPPRESS delivery
+    entirely. Error deliveries (``success=False``) are NEVER transformed or
+    suppressed — a failing job always delivers its full failure summary so
+    ``silent``/``result_only``/``summary`` can't swallow error alerts.
+    """
+    if not success:
+        return content
+    if verbosity == "silent":
+        return None
+    if verbosity == "result_only":
+        # Try to extract just the final response section from the full output
+        # document. The output is typically structured as:
+        #   # Cron Job: ...
+        #   ## Prompt
+        #   ...
+        #   ## Response
+        #   <actual answer>
+        # We want only the content under ## Response (or ## Final Response).
+        import re as _re
+
+        _resp_match = _re.search(
+            r"^##\s+(?:Final\s+)?Response\s*\n(.*)",
+            content,
+            _re.MULTILINE | _re.DOTALL,
+        )
+        if _resp_match:
+            return _resp_match.group(1).strip()
+        # Fallback: strip reasoning and return as-is
+        return strip_reasoning_for_delivery(content)
+    if verbosity == "summary":
+        return _summarize_job_result(content, limit=summary_limit)
+    return content  # "full" (default) — unchanged
 
 
 def _close_late_session_db_result(future: "concurrent.futures.Future") -> None:
@@ -9676,276 +9940,3 @@ if __name__ == "__main__":
             0 if _run_external_worker_payload(args.external_worker_file, args.ack_file) else 1
         )
     tick(verbose=True)
-
-
-def strip_reasoning_for_delivery(text: str) -> str:
-    """Remove model reasoning/thinking blocks from a cron-delivered message.
-
-    Cron output must be the RESULT only — never the model's reasoning. The
-    delivery hint asks the agent for clean output, but instructions are not a
-    guarantee, so we also strip `<think>`/`<thinking>`/`<reasoning>` blocks
-    mechanically here, at the delivery boundary (CRON-ONLY — interactive sessions
-    may legitimately surface reasoning).
-
-    Only LEADING / own-line blocks are stripped — Hermes prepends native
-    reasoning as ``<think>\\n...\\n</think>\\n`` (see agent_runtime_helpers), so a
-    reasoning block always starts a line. An INLINE ``<think>...</think>``
-    mid-sentence is left intact, because a report may legitimately quote/discuss
-    the tag (e.g. an agent-research report about reasoning models) and silently
-    deleting that content would be worse than the leak. Inline untagged narration
-    is handled by the delivery-hint instruction, not here."""
-    if not text:
-        return text
-    import re
-
-    return re.sub(
-        r"^[ \t]*<(think|thinking|reasoning|reasoning_scratchpad)\b[^>]*>.*?</\1>[ \t]*\n?",
-        "",
-        text,
-        flags=re.IGNORECASE | re.DOTALL | re.MULTILINE,
-    ).strip()
-
-
-# Tool-call task id that the top-level cron agent's file/terminal tools collapse
-# to (see tools/terminal_tool._resolve_container_task_id). The split-brain lives
-# on this shared env: its live cwd is file-tool priority #1 and shadows
-# $TERMINAL_CWD (#3) for a workdir job.
-_CRON_FILE_TOOL_TASK_ID = "default"
-
-
-
-def _count_tool_calls(messages) -> int:
-    """Number of tool invocations in a run_conversation message list.
-
-    Counts ``role == "tool"`` entries — exactly one per executed tool call.
-    Tolerates junk (None, non-list, non-dict entries) because the messages
-    come back from an agent run that may have failed mid-flight (#701).
-    """
-    if not isinstance(messages, list):
-        return 0
-    return sum(1 for m in messages if isinstance(m, dict) and m.get("role") == "tool")
-
-
-# Tool-call counts per job id: defined at the TOP of this module (see the
-# comment near the imports) so partial module loads can never hit NameError;
-# per-job keys, popped by run_one_job's mark_job_run (#701).
-
-
-
-def _failure_digest_enabled(cfg: dict) -> bool:
-    """Return whether ``cron.failure_digest`` is enabled in config.yaml.
-
-    The digest surfaces recent cron failures to the user on the next
-    interaction. Default disabled (False); opt-in via config.yaml.
-    """
-    try:
-        cron_cfg = cfg.get("cron", {}) if isinstance(cfg, dict) else {}
-        return bool(cron_cfg.get("failure_digest", False))
-    except Exception:
-        return False
-
-
-def _load_cron_config() -> dict:
-    """Load config.yaml, returning an empty dict on any failure."""
-    try:
-        from hermes_cli.config import load_config
-
-        return load_config() or {}
-    except Exception:
-        return {}
-
-
-def build_cron_failure_digest(adapters=None, loop=None) -> Optional[str]:
-    """Build a user-visible digest of recent cron failures.
-
-    Scans all jobs and emits a compact message for any job whose latest
-    failure record reports success=False and is newer than the job's last
-    acknowledged digest timestamp (stored in ``failure_digest_last_at``).
-    Updates that timestamp when a failure is included.
-
-    Returns the digest text, or None if there is nothing new to surface.
-    """
-    cfg = _load_cron_config()
-    if not _failure_digest_enabled(cfg):
-        return None
-
-    import datetime as _dt
-
-    now = _hermes_now()
-    cutoff = now - _dt.timedelta(hours=24)
-    lines: List[str] = []
-    jobs = load_jobs()
-    for job in jobs:
-        if not job.get("enabled", True):
-            continue
-        record = get_latest_failure(job["id"])
-        if not record:
-            continue
-        if record.get("success") is True:
-            continue
-        try:
-            ts = _dt.datetime.fromisoformat(str(record.get("timestamp") or ""))
-        except (TypeError, ValueError):
-            continue
-        if ts < cutoff:
-            continue
-
-        last_ack = job.get("failure_digest_last_at")
-        if last_ack:
-            try:
-                last_ack_dt = _dt.datetime.fromisoformat(str(last_ack))
-                if ts <= last_ack_dt:
-                    continue
-            except (TypeError, ValueError):
-                pass
-
-        job_name = record.get("job_name") or job.get("name") or job["id"]
-        err = (record.get("error") or "unknown error")[:120]
-        lines.append(f"• '{job_name}' failed at {ts.strftime('%Y-%m-%d %H:%M')}: {err}")
-
-    if not lines:
-        return None
-
-    digest = (
-        "⚠️ Cron failure digest (last 24h):\n"
-        + "\n".join(lines)
-        + "\n\nFull details: ~/.hermes/cron/failures/"
-    )
-
-    # Update ack timestamps so we don't repeat the same failures every turn.
-    try:
-        from cron.jobs import _jobs_lock
-        with _jobs_lock():
-            jobs = load_jobs()
-            now_iso = now.isoformat()
-            changed = False
-            for job in jobs:
-                record = get_latest_failure(job["id"])
-                if not record or record.get("success") is True:
-                    continue
-                try:
-                    ts = _dt.datetime.fromisoformat(str(record.get("timestamp") or ""))
-                except (TypeError, ValueError):
-                    continue
-                if ts < cutoff:
-                    continue
-                job["failure_digest_last_at"] = now_iso
-                changed = True
-            if changed:
-                save_jobs(jobs)
-    except Exception as e:
-        logger.warning("Failed to update failure_digest_last_at timestamps: %s", e)
-
-    return digest
-
-
-
-def _summarize_job_result(content: str, *, limit: int = 280) -> str:
-    """One-line-ish status + trimmed final response for delivery_verbosity=summary.
-
-    Strips any leading reasoning trace, then truncates to *limit* chars with an
-    ellipsis. The cron wrap header (``Cronjob Response: <name>``) already carries
-    the run identity, so this keeps the body to a short digestible tail.
-    """
-    text = strip_reasoning_for_delivery(content or "").strip()
-    if not text:
-        return text
-    if len(text) > limit:
-        text = text[:limit].rstrip() + "…"
-    return text
-
-
-def _resolve_delivery_verbosity(job: dict, target_chat_ids, user_cfg: dict) -> str:
-    """Resolve the effective cron delivery verbosity level.
-
-    Order (issue #924):
-      1. per-job ``delivery_verbosity``
-      2. per-chat override at the delivery target(s)
-         (``mode: quiet``/``quiet_chats`` ⇒ ``result_only``;
-          ``mode: silent`` ⇒ ``silent``; verbose/normal ⇒ ``full``)
-      3. default ``full`` (per-platform display tiers carry no delivery-content
-         equivalent, so the effective fallback is byte-identical to prior
-         behavior).
-
-    Multi-target jobs (``deliver: all`` / fan-out) share ONE delivered
-    ``content``, so the per-chat layer resolves to the MOST RESTRICTIVE shaping
-    across targets — the full trace is never delivered to a chat that asked to
-    be quiet/silent. ``silent`` (full suppression) is only chosen when EVERY
-    resolvable target is silent; a mix of silent + others degrades to
-    ``result_only`` (deliver the final answer everywhere, leak nothing) rather
-    than suppressing delivery to the non-silent targets.
-
-    Returns one of ``DELIVERY_VERBOSITY_LEVELS``.
-    """
-    raw = job.get("delivery_verbosity")
-    if raw:
-        norm = str(raw).strip().lower()
-        if norm in DELIVERY_VERBOSITY_LEVELS:
-            return norm
-
-    try:
-        from gateway.display_config import resolve_chat_mode
-    except Exception:
-        return "full"
-
-    modes = [
-        resolve_chat_mode(user_cfg, str(chat_id))
-        for chat_id in (target_chat_ids or [])
-        if chat_id is not None
-    ]
-    configured = [m for m in modes if m]
-    if not configured:
-        return "full"
-    # Every resolvable target wants silence → suppress. (Only when there are no
-    # unconfigured targets that would otherwise expect a delivery.)
-    if all(m == "silent" for m in modes):
-        return "silent"
-    # Any quiet/silent target present → never leak the full trace to it.
-    if any(m in ("silent", "quiet") for m in modes):
-        return "result_only"
-    return "full"
-
-
-
-def _apply_delivery_verbosity(
-    verbosity: str,
-    content: str,
-    *,
-    success: bool = True,
-    summary_limit: int = 280,
-) -> Optional[str]:
-    """Transform delivery content per verbosity level.
-
-    Returns the (possibly transformed) content, or ``None`` to SUPPRESS delivery
-    entirely. Error deliveries (``success=False``) are NEVER transformed or
-    suppressed — a failing job always delivers its full failure summary so
-    ``silent``/``result_only``/``summary`` can't swallow error alerts.
-    """
-    if not success:
-        return content
-    if verbosity == "silent":
-        return None
-    if verbosity == "result_only":
-        # Try to extract just the final response section from the full output
-        # document. The output is typically structured as:
-        #   # Cron Job: ...
-        #   ## Prompt
-        #   ...
-        #   ## Response
-        #   <actual answer>
-        # We want only the content under ## Response (or ## Final Response).
-        import re as _re
-
-        _resp_match = _re.search(
-            r"^##\s+(?:Final\s+)?Response\s*\n(.*)",
-            content,
-            _re.MULTILINE | _re.DOTALL,
-        )
-        if _resp_match:
-            return _resp_match.group(1).strip()
-        # Fallback: strip reasoning and return as-is
-        return strip_reasoning_for_delivery(content)
-    if verbosity == "summary":
-        return _summarize_job_result(content, limit=summary_limit)
-    return content  # "full" (default) — unchanged
-
