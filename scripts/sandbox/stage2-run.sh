@@ -17,6 +17,28 @@
 
 set -euo pipefail
 
+# Leaf certs the fake-internet proxy mints are signed by this CA. curl / Python
+# / git REPLACE their CA store with it (CURL_CA_BUNDLE, SSL_CERT_FILE,
+# GIT_SSL_CAINFO). Node is the odd one out: NODE_EXTRA_CA_CERTS is additive, so
+# this must still be the MITM CA — Node already ships the public roots that
+# live in real-ca.pem. Pointing NODE_EXTRA_CA_CERTS at real-ca.pem is a no-op
+# for public certs and leaves every proxy-minted leaf untrusted; npm then
+# exits in well under a second, and with --silent it writes nothing. That is
+# how the installer E2E died once a failed npm install became fatal (#85297).
+SANDBOX_MITM_CA=/work/certs/ca.pem
+
+# Test/debug hook: print the TLS env the payload gets, then exit. Asserted by
+# tests/test_sandbox_payload_tls_env.py so the Node CA contract is checked by
+# running this script, not by grepping it.
+if [ "${1:-}" = --dump-tls-env ]; then
+  printf 'CURL_CA_BUNDLE=%s\n' "$SANDBOX_MITM_CA"
+  printf 'SSL_CERT_FILE=%s\n' "$SANDBOX_MITM_CA"
+  printf 'GIT_SSL_CAINFO=%s\n' "$SANDBOX_MITM_CA"
+  printf 'NODE_EXTRA_CA_CERTS=%s\n' "$SANDBOX_MITM_CA"
+  printf 'npm_config_cafile=%s\n' "$SANDBOX_MITM_CA"
+  exit 0
+fi
+
 : "${DEV_SANDBOX_ROOT:?missing DEV_SANDBOX_ROOT}"
 : "${DEV_SANDBOX_BASH:?missing DEV_SANDBOX_BASH}"
 : "${DEV_SANDBOX_INTERACTIVE:?missing DEV_SANDBOX_INTERACTIVE}"
@@ -213,13 +235,16 @@ exec bwrap \
   --setenv HOME "$DEV_SANDBOX_HOME" \
   --setenv USER "$DEV_SANDBOX_USER" \
   --setenv LOGNAME "$DEV_SANDBOX_USER" \
-  --setenv CURL_CA_BUNDLE /work/certs/ca.pem \
-  --setenv SSL_CERT_FILE /work/certs/ca.pem \
-  --setenv GIT_SSL_CAINFO /work/certs/ca.pem \
-  --setenv NODE_EXTRA_CA_CERTS /work/certs/real-ca.pem \
+  --setenv CURL_CA_BUNDLE "$SANDBOX_MITM_CA" \
+  --setenv SSL_CERT_FILE "$SANDBOX_MITM_CA" \
+  --setenv GIT_SSL_CAINFO "$SANDBOX_MITM_CA" \
+  --setenv NODE_EXTRA_CA_CERTS "$SANDBOX_MITM_CA" \
+  --setenv npm_config_cafile "$SANDBOX_MITM_CA" \
   --setenv OPENSSL_CONF /work/certs/openssl.cnf \
   --setenv HTTP_PROXY http://127.0.0.1:8080 \
   --setenv HTTPS_PROXY http://127.0.0.1:8080 \
+  --setenv http_proxy http://127.0.0.1:8080 \
+  --setenv https_proxy http://127.0.0.1:8080 \
   --setenv ALL_PROXY http://127.0.0.1:8080 \
   --setenv NO_PROXY '' \
   --setenv DEV_SANDBOX_INTERACTIVE "$DEV_SANDBOX_INTERACTIVE" \

@@ -2661,6 +2661,19 @@ install_computer_use_driver() {
     rm -f "$cua_log"
 }
 
+# Print captured npm output on failure. --silent used to leave this empty
+# even for TLS trust errors (UNABLE_TO_GET_ISSUER_CERT_LOCALLY), so a
+# missing-CA proxy looked like a hang/timeout with no further signal.
+dump_npm_failure_log() {
+    local npm_log="$1"
+    if [ -s "$npm_log" ]; then
+        log_error "npm output:"
+        cat "$npm_log" >&2
+        return 0
+    fi
+    log_error "npm produced no output. If you are behind a TLS-intercepting proxy, set NODE_EXTRA_CA_CERTS to your proxy CA."
+}
+
 # Select the npm workspaces a CLI install actually needs, into the
 # NODE_DEPS_WORKSPACE_ARGS array.
 #
@@ -2713,18 +2726,19 @@ install_node_deps() {
         # installed", hiding the degradation from the user (#77003). Now it
         # fails the install outright instead of burying the warning (#85297).
         # Capture npm output so failures are diagnosable (#87340).
+        # Do not pass --silent: npm then writes nothing even on TLS trust
+        # failures, so the captured log is empty and the only signal is
+        # "failed or timed out".
         # Scoped to the workspaces a CLI install needs so apps/desktop's
         # node-pty is never built here — see node_deps_workspace_args().
         node_deps_workspace_args "$INSTALL_DIR"
         local npm_log
         npm_log="$(mktemp)"
-        if ! run_with_timeout "$NODE_DEPS_TIMEOUT" npm install "${NODE_DEPS_WORKSPACE_ARGS[@]}" --silent \
+        if ! run_with_timeout "$NODE_DEPS_TIMEOUT" npm install "${NODE_DEPS_WORKSPACE_ARGS[@]}" \
+                --no-audit --no-fund --progress=false \
                 >"$npm_log" 2>&1; then
             log_error "npm install failed or timed out; Node.js dependencies were not installed"
-            if [ -s "$npm_log" ]; then
-                log_error "npm output:"
-                cat "$npm_log" >&2
-            fi
+            dump_npm_failure_log "$npm_log"
             rm -f "$npm_log"
             restore_dirty_lockfiles "$INSTALL_DIR"
             return 1
@@ -2832,15 +2846,14 @@ install_node_deps() {
         # Report success only on actual success, same as node-deps above
         # (#77003) — and fail the install outright (#85297).
         # Capture npm output so failures are diagnosable (#87340).
+        # --silent hides TLS trust errors from that capture; see install_node_deps.
         local tui_npm_log
         tui_npm_log="$(mktemp)"
-        if ! run_with_timeout "$NODE_DEPS_TIMEOUT" npm install --silent \
+        if ! run_with_timeout "$NODE_DEPS_TIMEOUT" npm install \
+                --no-audit --no-fund --progress=false \
                 >"$tui_npm_log" 2>&1; then
             log_error "TUI npm install failed or timed out; TUI dependencies were not installed"
-            if [ -s "$tui_npm_log" ]; then
-                log_error "npm output:"
-                cat "$tui_npm_log" >&2
-            fi
+            dump_npm_failure_log "$tui_npm_log"
             rm -f "$tui_npm_log"
             restore_dirty_lockfiles "$INSTALL_DIR"
             return 1
@@ -3257,11 +3270,12 @@ ensure_browser() {
     log_file="$(mktemp)"
     # Time-boxed (#39219): a stalled npm registry fetch here would otherwise
     # hang the installer with no progress, same class as the desktop build.
-    if ! run_with_timeout "$NODE_DEPS_TIMEOUT" "$npm_bin" install -g --prefix "$HERMES_HOME/node" --silent --ignore-scripts \
+    if ! run_with_timeout "$NODE_DEPS_TIMEOUT" "$npm_bin" install -g --prefix "$HERMES_HOME/node" \
+        --no-audit --no-fund --progress=false --ignore-scripts \
         "@askjo/camofox-browser@^1.5.2" \
         >"$log_file" 2>&1; then
         log_error "npm install failed or timed out:"
-        cat "$log_file" >&2
+        dump_npm_failure_log "$log_file"
         rm -f "$log_file"
         return 1
     fi
