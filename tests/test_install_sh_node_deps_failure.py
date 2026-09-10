@@ -21,13 +21,15 @@ def _run_node_deps_stage(
     tmp_path: Path,
     *,
     fail_directory: str | None,
-) -> tuple[subprocess.CompletedProcess[str], Path, list[str]]:
+    fail_empty: str | None = None,
+) -> tuple[subprocess.CompletedProcess[str], Path, list[str], list[str]]:
     install_dir = tmp_path / "install"
     tui_dir = install_dir / "ui-tui"
     bin_dir = tmp_path / "bin"
     hermes_home = tmp_path / "home"
     managed_bin = hermes_home / "bin"
     npm_calls = tmp_path / "npm-calls"
+    npm_args = tmp_path / "npm-args"
 
     tui_dir.mkdir(parents=True)
     bin_dir.mkdir()
@@ -49,6 +51,10 @@ if [ "${1:-}" = "--version" ]; then
     exit 0
 fi
 printf '%s\\n' "$PWD" >> "$NPM_CALLS"
+printf '%s\\n' "$*" >> "$NPM_ARGS"
+if [ -n "${NPM_FAIL_EMPTY:-}" ] && [ "$PWD" = "$NPM_FAIL_EMPTY" ]; then
+    exit 37
+fi
 if [ -n "${NPM_FAIL_DIRECTORY:-}" ] && [ "$PWD" = "$NPM_FAIL_DIRECTORY" ]; then
     echo "simulated npm lifecycle failure" >&2
     exit 37
@@ -64,7 +70,9 @@ exit 0
             "HERMES_HOME": str(hermes_home),
             "HERMES_INSTALL_DIR": str(install_dir),
             "NPM_CALLS": str(npm_calls),
+            "NPM_ARGS": str(npm_args),
             "NPM_FAIL_DIRECTORY": fail_directory or "",
+            "NPM_FAIL_EMPTY": fail_empty or "",
             "PATH": f"{bin_dir}:{env['PATH']}",
         }
     )
@@ -84,8 +92,9 @@ exit 0
         text=True,
         check=False,
     )
-    calls = npm_calls.read_text(encoding="utf-8").splitlines()
-    return proc, install_dir, calls
+    calls = npm_calls.read_text(encoding="utf-8").splitlines() if npm_calls.exists() else []
+    args = npm_args.read_text(encoding="utf-8").splitlines() if npm_args.exists() else []
+    return proc, install_dir, calls, args
 
 
 def _stage_result(proc: subprocess.CompletedProcess[str]) -> dict[str, object]:
@@ -94,7 +103,7 @@ def _stage_result(proc: subprocess.CompletedProcess[str]) -> dict[str, object]:
 
 def test_root_node_dependency_failure_is_fatal(tmp_path: Path) -> None:
     install_dir = tmp_path / "install"
-    proc, actual_install_dir, calls = _run_node_deps_stage(
+    proc, actual_install_dir, calls, args = _run_node_deps_stage(
         tmp_path,
         fail_directory=str(install_dir),
     )
@@ -111,12 +120,14 @@ def test_root_node_dependency_failure_is_fatal(tmp_path: Path) -> None:
     assert "Node.js dependencies installed" not in proc.stdout
     assert "TUI dependencies installed" not in proc.stdout
     assert not (install_dir / "node_modules").exists()
+    assert "simulated npm lifecycle failure" in proc.stderr
+    assert args and "--silent" not in args[0]
 
 
 def test_tui_node_dependency_failure_is_fatal(tmp_path: Path) -> None:
     install_dir = tmp_path / "install"
     tui_dir = install_dir / "ui-tui"
-    proc, _, calls = _run_node_deps_stage(
+    proc, _, calls, args = _run_node_deps_stage(
         tmp_path,
         fail_directory=str(tui_dir),
     )
@@ -126,10 +137,12 @@ def test_tui_node_dependency_failure_is_fatal(tmp_path: Path) -> None:
     assert calls == [str(install_dir), str(tui_dir)]
     assert "Node.js dependencies installed" in proc.stdout
     assert "TUI dependencies installed" not in proc.stdout
+    assert "simulated npm lifecycle failure" in proc.stderr
+    assert all("--silent" not in line for line in args)
 
 
 def test_node_dependency_success_remains_successful(tmp_path: Path) -> None:
-    proc, install_dir, calls = _run_node_deps_stage(
+    proc, install_dir, calls, args = _run_node_deps_stage(
         tmp_path,
         fail_directory=None,
     )
@@ -143,3 +156,20 @@ def test_node_dependency_success_remains_successful(tmp_path: Path) -> None:
     assert calls == [str(install_dir), str(install_dir / "ui-tui")]
     assert "Node.js dependencies installed" in proc.stdout
     assert "TUI dependencies installed" in proc.stdout
+    assert all("--silent" not in line for line in args)
+
+
+def test_empty_npm_output_still_explains_the_failure(tmp_path: Path) -> None:
+    """A TLS-proxy miss often yields exit 1 and an empty log under --silent."""
+    install_dir = tmp_path / "install"
+    proc, _, calls, _args = _run_node_deps_stage(
+        tmp_path,
+        fail_directory=None,
+        fail_empty=str(install_dir),
+    )
+
+    assert proc.returncode != 0
+    assert calls == [str(install_dir)]
+    combined = proc.stdout + proc.stderr
+    assert "npm produced no output" in combined
+    assert "NODE_EXTRA_CA_CERTS" in combined
