@@ -79,12 +79,12 @@ class _TimeoutError(Exception):
 def _make_agent(max_iterations: int = 10) -> AIAgent:
     with (
         patch(
-            "run_agent.get_tool_definitions", return_value=_make_tool_defs("terminal")
+            "model_tools.get_tool_definitions", return_value=_make_tool_defs("terminal")
         ),
-        patch("run_agent.check_toolset_requirements", return_value={}),
+        patch("model_tools.check_toolset_requirements", return_value={}),
         patch("hermes_cli.config.load_config", return_value={}),
         patch("hermes_cli.config.load_config_readonly", return_value={}),
-        patch("run_agent.OpenAI"),
+        patch("openai.OpenAI"),
     ):
         agent = AIAgent(
             api_key="test-key-1234567890",

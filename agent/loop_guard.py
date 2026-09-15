@@ -1428,6 +1428,7 @@ def maybe_refusal_nudge(
     message — giving the model a chance to course-correct before the
     refusal is accepted as the final answer.
 
+    #1243 — Multi-shot refusal recovery with escalation replaces single-shot.
     Stage 1 (nudge_count=1, already_nudged=False): advisory category directive.
     Stage 2 (nudge_count>=2, already_nudged=True): escalated alternative/escalate directive.
     """

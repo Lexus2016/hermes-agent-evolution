@@ -209,8 +209,9 @@ class TestCrossTurnOverloadRecovery:
         """
         from pathlib import Path
         import agent.conversation_loop as cl
+        import agent.turn_response_check as trc
 
-        src = Path(cl.__file__).read_text(encoding="utf-8")
+        src = Path(cl.__file__).read_text(encoding="utf-8") + "\n" + Path(trc.__file__).read_text(encoding="utf-8")
         # Success-exit reset lives right after the has_retried_429 reset.
         assert "_retry.has_retried_429 = False  # Reset on success" in src
         # Both recovery sites set the cross-turn streak back to 0.

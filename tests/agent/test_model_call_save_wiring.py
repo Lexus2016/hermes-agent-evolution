@@ -93,7 +93,7 @@ class TestRunAgentSaveTrajectoryWiring:
         from run_agent import AIAgent
 
         captured = {}
-        monkeypatch.setattr("run_agent._save_trajectory_to_file",
+        monkeypatch.setattr("agent.session_persistence._save_trajectory_to_file",
                             lambda trajectory, model, completed, **kw: captured.update(kw))
         AIAgent._save_trajectory(self._fake_agent(), _raw_turn(), "run the check", True)
         assert [c["decision"] for c in captured["model_calls"]] == ["tool_call", "content"]
@@ -102,7 +102,7 @@ class TestRunAgentSaveTrajectoryWiring:
         from run_agent import AIAgent
 
         captured = {}
-        monkeypatch.setattr("run_agent._save_trajectory_to_file",
+        monkeypatch.setattr("agent.session_persistence._save_trajectory_to_file",
                             lambda trajectory, model, completed, **kw: captured.update(kw))
         msgs = [{"role": "user", "content": "delete the db"},
                 {"role": "assistant", "model": "hermes-small", "content": "I can't do that."}]
@@ -117,7 +117,7 @@ class TestRunAgentSaveTrajectoryWiring:
 
         monkeypatch.setattr("agent.tool_call_capture.extract_model_calls", _boom)
         captured = {}
-        monkeypatch.setattr("run_agent._save_trajectory_to_file",
+        monkeypatch.setattr("agent.session_persistence._save_trajectory_to_file",
                             lambda *a, **kw: captured.update(kw))
         AIAgent._save_trajectory(self._fake_agent(), _raw_turn(), "q", True)
         assert captured.get("model_calls") is None
@@ -127,7 +127,7 @@ class TestRunAgentSaveTrajectoryWiring:
 
         called = {"n": 0}
         monkeypatch.setattr(
-            "run_agent._save_trajectory_to_file",
+            "agent.session_persistence._save_trajectory_to_file",
             lambda *a, **kw: called.__setitem__("n", called["n"] + 1))
         agent = self._fake_agent()
         agent.save_trajectories = False

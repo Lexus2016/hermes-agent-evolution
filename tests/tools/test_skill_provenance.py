@@ -143,3 +143,23 @@ class TestRecordPromotionAttribution:
         record_promotion("myskill", reason="provenance_ok")
         assert "attribution" not in written
         assert "outcome_credit" not in written
+
+def test_attended_review_is_still_a_background_review():
+    """/refine keeps the background_review origin: every curator/skill-ledger/approval guard keyed on
+    is_background_review() must still apply; only the unattended-only memory delete gate stands down."""
+    from tools.skill_provenance import (
+        BACKGROUND_REVIEW, is_background_review, is_unattended_review, reset_current_write_origin,
+        reset_review_attended, set_current_write_origin, set_review_attended,
+    )
+
+    token = set_current_write_origin(BACKGROUND_REVIEW)
+    try:
+        assert is_background_review() and is_unattended_review()
+        att = set_review_attended(True)
+        try:
+            assert is_background_review() and not is_unattended_review()
+        finally:
+            reset_review_attended(att)
+    finally:
+        reset_current_write_origin(token)
+    assert not is_background_review() and not is_unattended_review()

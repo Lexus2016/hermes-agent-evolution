@@ -15,6 +15,9 @@ def _make_runner(running_agents=None):
     runner = MagicMock()
     # Empty dict = no interactive turn in flight (the default happy path).
     runner._running_agents = {} if running_agents is None else running_agents
+    runner._skew_restart_requested = False
+    runner.config = None
+    runner._profile_adapters = {}
     return runner
 
 

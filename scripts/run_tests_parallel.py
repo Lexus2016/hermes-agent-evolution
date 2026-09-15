@@ -57,6 +57,20 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 
+def _raise_nofile_limit(target: int = 10240) -> None:
+    try:
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft < target:
+            new_soft = min(target, hard) if hard != resource.RLIM_INFINITY else target
+            resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard))
+    except Exception:
+        pass
+
+
+_raise_nofile_limit()
+
+
 # Default test discovery roots.
 _DEFAULT_ROOTS = ["tests"]
 

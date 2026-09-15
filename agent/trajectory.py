@@ -1,9 +1,4 @@
-"""Trajectory saving utilities and static helpers.
-
-_convert_to_trajectory_format stays as an AIAgent method (batch_runner.py
-calls agent._convert_to_trajectory_format). Only the static helpers and
-the file-write logic live here.
-"""
+"""Trajectory saving + scratchpad helpers (``_convert_to_trajectory_format`` stays an AIAgent method — batch_runner.py calls it)."""
 
 import json
 import logging
@@ -21,10 +16,8 @@ def convert_scratchpad_to_think(content: str) -> str:
 
 
 def has_incomplete_scratchpad(content: str) -> bool:
-    """Check if content has an opening <REASONING_SCRATCHPAD> without a closing tag."""
-    if not content:
-        return False
-    return "<REASONING_SCRATCHPAD>" in content and "</REASONING_SCRATCHPAD>" not in content
+    """Whether content has an opening <REASONING_SCRATCHPAD> without a closing tag."""
+    return bool(content) and "<REASONING_SCRATCHPAD>" in content and "</REASONING_SCRATCHPAD>" not in content
 
 
 def save_trajectory(trajectory: List[Dict[str, Any]], model: str,

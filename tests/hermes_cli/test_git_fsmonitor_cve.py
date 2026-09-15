@@ -20,7 +20,7 @@ from hermes_cli._subprocess_compat import (
     noninteractive_git_env,
 )
 from tools.subagent_worktree import _run_git
-from cli import _worktree_is_dirty, _git_repo_root
+from hermes_cli.worktree_ops import _worktree_is_dirty, _git_repo_root
 
 
 def _setup_malicious_repo(tmp_path: Path, payload_marker: Path) -> Path:

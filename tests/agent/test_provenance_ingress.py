@@ -61,7 +61,7 @@ class TestStampingPoint:
         """A parameter that stops halfway is worse than none: the caller
         believes it classified the turn and nothing carries the answer."""
         for rel in (
-            "run_agent.py",
+            "agent/turn_facade.py",
             "agent/conversation_loop.py",
             "agent/turn_context.py",
         ):
@@ -118,7 +118,7 @@ class TestGatewayClassification:
         assert self._classify(platform=platform) == "human"
 
     def test_the_gateway_implements_all_three_conditions(self):
-        source = (REPO / "gateway" / "run.py").read_text(encoding="utf-8")
+        source = (REPO / "gateway" / "run_turn.py").read_text(encoding="utf-8")
         assert 'not getattr(event, "internal", False)' in source
         assert 'getattr(event, "raw_message", None) is not None' in source
         assert "_platform_value not in _SERVICE_PLATFORMS" in source
@@ -127,19 +127,18 @@ class TestGatewayClassification:
         """The parameter exists to ASSERT trust; absence is already the
         untrusted default every reader fails closed on, and declaring the
         negative would add a keyword to every gateway turn for no effect."""
-        source = (REPO / "gateway" / "run.py").read_text(encoding="utf-8")
+        source = (REPO / "gateway" / "run_turn.py").read_text(encoding="utf-8")
         marker = source.index("persist_user_origin = (")
         block = source[marker : marker + 400]
         assert "else None" in block
 
     def test_runtime_event_constructors_still_omit_raw_message(self):
         """The discriminator only holds while this stays true, so assert it."""
-        run = (REPO / "gateway" / "run.py").read_text(encoding="utf-8")
-        slash = (REPO / "gateway" / "slash_commands.py").read_text(encoding="utf-8")
+        run_goals = (REPO / "gateway" / "run_goals.py").read_text(encoding="utf-8")
+        slash_goals = (REPO / "gateway" / "slash_commands_goals.py").read_text(encoding="utf-8")
         for source, marker in (
-            (run, "hb_event = MessageEvent("),
-            (run, "cont_event = MessageEvent("),
-            (slash, "kickoff_event = MessageEvent("),
+            (run_goals, "return MessageEvent("),
+            (slash_goals, "turn = MessageEvent("),
         ):
             start = source.index(marker)
             block = source[start : source.index(")", source.index("\n", start))]
@@ -160,11 +159,11 @@ class TestHumanAllowlist:
     ALLOWED = {
         # Real inbound platform messages (Telegram, Discord, Slack, WhatsApp,
         # Signal, …) — every adapter funnels through this one classification.
-        "gateway/run.py",
+        "gateway/run_turn.py",
         # A person typing at the interactive CLI prompt.
-        "cli.py",
+        "hermes_cli/cli_chat_turn_mixin.py",
         # A person typing in the desktop client.
-        "tui_gateway/server.py",
+        "tui_gateway/prompt_turn.py",
         # A person prompting from their editor over ACP.
         "acp_adapter/server.py",
     }
@@ -290,10 +289,10 @@ class TestNonHumanSurfacesAreExplicit:
         source = (REPO / "gateway" / "platforms" / "api_server.py").read_text(
             encoding="utf-8"
         )
-        assert 'persist_user_origin="api"' in source
+        assert 'persist_user_origin: Optional[str] = "api"' in source or 'persist_user_origin="api"' in source
 
     def test_api_supplied_messages_are_marked_api(self):
-        source = (REPO / "gateway" / "platforms" / "api_server.py").read_text(
+        source = (REPO / "gateway" / "platforms" / "api_server_openai_routes.py").read_text(
             encoding="utf-8"
         )
         assert source.count('"origin": "api"') >= 2, (
