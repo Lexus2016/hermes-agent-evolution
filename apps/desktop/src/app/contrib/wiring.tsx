@@ -38,6 +38,7 @@ import { SendDiagnosticsHost } from '@/components/send-diagnostics-dialog'
 import { TipHost } from '@/components/tips'
 import { emitGatewayEvent } from '@/contrib/events'
 import { getLatestSessionMessages } from '@/hermes'
+import { translateNow } from '@/i18n'
 import { type ChatMessage, chatMessageText, preserveLocalAssistantErrors, toChatMessages } from '@/lib/chat-messages'
 import { isMessagingSource } from '@/lib/session-source'
 import { latestSessionTodos } from '@/lib/todos'
@@ -49,8 +50,10 @@ import { requestVoiceConversationStart } from '@/store/composer'
 import { $activeConnectionId } from '@/store/connections'
 import { $cronReviewRequest, setCronFocusJobId } from '@/store/cron'
 import { requestGatewayForProfile } from '@/store/gateway'
+import { reconnectGateway } from '@/store/gateway-reconnect'
 import { $pinnedSessionIds, pinSession, restoreWorktree, unpinSession } from '@/store/layout'
 import { notifyError } from '@/store/notifications'
+import { $poolLimitsSettingsRequest } from '@/store/pool-limits'
 import { $previewTarget } from '@/store/preview'
 import {
   $activeGatewayProfile,
@@ -63,6 +66,7 @@ import {
   refreshActiveProfile
 } from '@/store/profile'
 import { $newProjectSessionRequest, $startWorkSessionRequest, followActiveSessionCwd } from '@/store/projects'
+import { $backendRestartRequest, $routeRequest } from '@/store/recovery-requests'
 import {
   $activeSessionId,
   $connection,
@@ -85,6 +89,7 @@ import {
   setBusy,
   setMessages
 } from '@/store/session'
+import { $titlebarAppActionsSide, titlebarAppActionsClusterCounts } from '@/store/titlebar-app-actions'
 import { clearSessionTodos, setSessionTodos, todosForHydration } from '@/store/todos'
 import { armWakeWord, stopClientCapture } from '@/store/wake-word'
 import { isAuxiliaryWindow, isBrowserWindow, isHudWindow } from '@/store/windows'
@@ -147,6 +152,7 @@ import { UpdatesOverlay } from '../updates-overlay'
 
 import { ContribWiringContext } from './context'
 import {
+  profileScopeForTranscriptSession,
   reconcileActiveTranscript,
   resolveActiveTranscriptSession,
   useBackgroundSync
@@ -162,6 +168,7 @@ import { $restartPreviewServer, useTitlebarToolContributions } from './panes'
 import { type AmbientGatewayRequest, createSessionRpcDispatcher } from './session-rpc-dispatcher'
 import { ChatRoutesSurface, SidebarSurface, StatusbarSurface, TerminalSurface } from './surfaces'
 import type { WiringActions, WiringApi } from './types'
+import { POOL_LIMITS_SETTINGS_ROUTE } from './wiring-routing'
 
 // Overlay views the controller mounts over the shell — lazy, load on demand.
 // The workspace-route full-page views (skills/messaging/artifacts) are the
@@ -193,6 +200,9 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // context (the sticky toast). The shell owns `navigate`, so it consumes the
   // intent counter here; the ref skips the initial mount value.
   const billingSettingsSeenRef = useRef(0)
+  const poolLimitsSettingsSeenRef = useRef(0)
+  const routeRequestSeenRef = useRef(0)
+  const backendRestartSeenRef = useRef(0)
   const cronReviewSeenRef = useRef(0)
   const activeTranscriptSignatureRef = useRef(new Map<string, string>())
   const activeTranscriptRequestSequenceRef = useRef(0)
@@ -203,8 +213,48 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   const gatewayState = useStore($gatewayState)
   const activeSessionId = useStore($activeSessionId)
   const billingSettingsRequest = useStore($billingSettingsRequest)
+  const poolLimitsSettingsRequest = useStore($poolLimitsSettingsRequest)
+  const routeRequest = useStore($routeRequest)
+  const backendRestartRequest = useStore($backendRestartRequest)
   const cronReviewRequest = useStore($cronReviewRequest)
   const currentCwd = useStore($currentCwd)
+
+  // Generic in-app route intents raised by toast recovery buttons (Open Keys,
+  // Open Gateways, Maintenance …) fired from stores with no router context.
+  // eslint-disable-next-line no-restricted-syntax -- one-shot request-seen sentinel, not an atom mirror
+  useEffect(() => {
+    if (!routeRequest || routeRequest.seq === routeRequestSeenRef.current) {
+      return
+    }
+
+    routeRequestSeenRef.current = routeRequest.seq
+    navigate(routeRequest.path)
+  }, [navigate, routeRequest])
+
+  // "Restart Hermes" from a toast: recycle the local backend the user is
+  // looking at (same IPC the Models page uses), then let the boot hook re-dial.
+  // A remote/cloud connection has no local process to recycle — there the
+  // only meaningful "restart" is re-dialing the connection.
+  // eslint-disable-next-line no-restricted-syntax -- one-shot request-seen sentinel, not an atom mirror
+  useEffect(() => {
+    if (backendRestartRequest === backendRestartSeenRef.current) {
+      return
+    }
+
+    backendRestartSeenRef.current = backendRestartRequest
+
+    if (backendRestartRequest > 0) {
+      if ($connection.get()?.mode === 'remote') {
+        void reconnectGateway().catch(err => notifyError(err, translateNow('notifications.errors.restartHermesFailed')))
+
+        return
+      }
+
+      void window.hermesDesktop?.recycleBackend?.(normalizeProfileKey($activeGatewayProfile.get())).catch(err =>
+        notifyError(err, translateNow('notifications.errors.restartHermesFailed'))
+      )
+    }
+  }, [backendRestartRequest])
 
   // eslint-disable-next-line no-restricted-syntax -- one-shot request-seen sentinel, not an atom mirror
   useEffect(() => {
@@ -218,6 +268,22 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       navigate(`${SETTINGS_ROUTE}?tab=billing`)
     }
   }, [billingSettingsRequest, navigate])
+
+  // Pool-cap recovery is fired by the notification action, which has no router
+  // context. Keep navigation user-initiated: the counter changes only when the
+  // user clicks "Open Advanced Settings" on a pool-slot failure.
+  // eslint-disable-next-line no-restricted-syntax -- one-shot request-seen sentinel, not an atom mirror
+  useEffect(() => {
+    if (poolLimitsSettingsRequest === poolLimitsSettingsSeenRef.current) {
+      return
+    }
+
+    poolLimitsSettingsSeenRef.current = poolLimitsSettingsRequest
+
+    if (poolLimitsSettingsRequest > 0) {
+      navigate(POOL_LIMITS_SETTINGS_ROUTE)
+    }
+  }, [navigate, poolLimitsSettingsRequest])
 
   // eslint-disable-next-line no-restricted-syntax -- one-shot request-seen sentinel, not an atom mirror
   useEffect(() => {
@@ -419,7 +485,9 @@ export function ContribWiring({ children }: { children: ReactNode }) {
         return
       }
 
-      const storedProfile = $sessions.get().find(session => sessionMatchesStoredId(session, storedSessionId))?.profile
+      const storedProfile = profileScopeForTranscriptSession(
+        resolveActiveTranscriptSession(storedSessionId, runtimeSessionId)
+      )
 
       for (let index = 0; index < Math.max(1, attempts); index += 1) {
         try {
@@ -476,7 +544,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     [activeSessionIdRef, busyRef, selectedStoredSessionIdRef, updateSessionState]
   )
 
-  const { handleGatewayEvent } = useMessageStream({
+  const { handleGatewayEvent, handleServerRequest } = useMessageStream({
     activeGatewayProfile,
     activeSessionIdRef,
     hydrateFromStoredSession,
@@ -707,6 +775,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     reloadFromMessage,
     restoreToMessage,
     steerPrompt,
+    injectHiddenPrompt,
     submitText,
     transcribeVoiceAudio
   } = usePromptActions({
@@ -876,6 +945,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       closeAllTerminals()
     },
     handleGatewayEvent: handleGatewayEventWithPlugins,
+    handleServerRequest,
     onConnectionReady: c => {
       connectionRef.current = c
     },
@@ -1053,6 +1123,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     onAttachDroppedItems: composer.attachDroppedItems,
     onAttachImageBlob: composer.attachImageBlob,
     onAttachPrCommentUrl: composer.attachPrCommentUrl,
+    onAttachPastedText: composer.attachPastedText,
     onBranchInNewChat: messageId => void branchInNewChat(messageId),
     onBranchSession: sessionId => void branchStoredSession(sessionId),
     onCancel: cancelRun,
@@ -1115,6 +1186,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     },
     onRetryResume: sessionId => void resumeSession(sessionId, true),
     onSteer: steerPrompt,
+    onSteerHidden: injectHiddenPrompt,
     onSubmit: submitText,
     onThreadMessagesChange: handleThreadMessagesChange,
     onToggleSelectedPin: toggleSelectedPin,
@@ -1200,12 +1272,16 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   }
 
   const titlebarToolsRight = titlebarToolsRightCss(nativeOverlayWidth, titlebarChrome)
-  // App controls live on the left; flip and the right toggle share the right.
-  const titlebarToolsWidth = titlebarToolsWidthCss(2)
+  const appActionsSide = useStore($titlebarAppActionsSide)
+  const paneToolCount = rightTitlebarTools.filter(tool => !tool.hidden).length
+  const leftExtraCount = leftTitlebarTools.filter(tool => !tool.hidden).length
+  const clusters = titlebarAppActionsClusterCounts(appActionsSide, leftExtraCount, 0)
+  const systemToolsWidth = titlebarToolsWidthCss(clusters.right)
 
-  const leftToolsWidth = titlebarToolsWidthCss(
-    4 + [...leftTitlebarTools, ...rightTitlebarTools].filter(tool => !tool.hidden).length
-  )
+  const titlebarToolsWidth =
+    paneToolCount > 0 ? `calc(${systemToolsWidth} + ${titlebarToolsWidthCss(paneToolCount)})` : systemToolsWidth
+
+  const leftToolsWidth = titlebarToolsWidthCss(clusters.left)
 
   return (
     <ContribWiringContext.Provider value={api}>
@@ -1218,7 +1294,8 @@ export function ContribWiring({ children }: { children: ReactNode }) {
             '--titlebar-controls-width': leftToolsWidth,
             '--titlebar-controls-y-nudge': titlebarControlsYNudge(titlebarChrome),
             '--titlebar-tools-right': titlebarToolsRight,
-            '--titlebar-tools-width': titlebarToolsWidth
+            '--titlebar-tools-width': titlebarToolsWidth,
+            '--shell-preview-toolbar-gap': systemToolsWidth
           } as CSSProperties
         }
       >

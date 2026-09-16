@@ -117,6 +117,22 @@ jobs:
         # re-download, keeping the persisted cache small and fast to restore.
         run: uv cache prune --ci
 
+      - name: Restore per-file duration cache
+        # scripts/run_tests_parallel.py raises a file's timeout to
+        # 3x its last healthy duration (_effective_file_timeout) so a
+        # known-slow file dilated by load is not SIGKILL'd at the flat cap
+        # and laundered into a FLAKY retry. The scaler reads
+        # test_durations.json from the checkout; without this restore the
+        # file is absent on a fresh runner and the scaler is inert.
+        # Exact key never matches (run_id differs); restore-keys picks the
+        # most recent cache saved by a main push. PRs read, only main writes.
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: test_durations.json
+          key: test-durations-never-exact
+          restore-keys: |
+            test-durations-
+
       - name: Run tests (slice ${{ matrix.slice.index }}/${{ inputs.slice_count }})
         # Per-file isolation via scripts/run_tests.sh: each test file runs
         # in its own freshly-spawned `python -m pytest <file>` subprocess
@@ -150,7 +166,9 @@ jobs:
   # (including PRs) get balanced slicing.
   save-durations:
     needs: test
-    if: needs.test.result == 'success' && github.ref == 'refs/heads/main'
+    # Only green first-attempt durations are written by the runner, so
+    # a hang on main cannot ratchet its own bound upward.
+    if: needs.test.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -179,6 +197,7 @@ jobs:
           "
 
       - name: Save merged duration cache
+        if: hashFiles('test_durations.json') != ''
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: test_durations.json

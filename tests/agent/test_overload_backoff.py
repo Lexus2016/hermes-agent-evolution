@@ -10,6 +10,7 @@ from agent.retry_utils import (
 )
 
 
+@pytest.mark.real_retry_backoff
 class TestAdaptiveOverloadBackoff:
     """Verify the two-tier overload backoff schedule."""
 

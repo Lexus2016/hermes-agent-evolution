@@ -40,10 +40,7 @@ from hermes_cli.update_cmd import (
 )
 
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="launchd fleet restart is macOS-only; helpers use POSIX os.getuid",
-)
+pytestmark = pytest.mark.macos_only  # launchd fleet restart is macOS-only; helpers use POSIX os.getuid
 
 UID = 501
 
@@ -198,8 +195,10 @@ class TestProbeLaunchdDomainForLabel:
 
 class TestGetServicePidsScoping:
     def _wire(self, monkeypatch):
-        monkeypatch.setattr(gw, "is_macos", lambda: True)
         monkeypatch.setattr(gw, "supports_systemd_services", lambda: False)
+        # The all_profiles branch also runs a real ``launchctl list`` prefix scan; a developer
+        # box with a live ai.hermes.gateway* fleet would leak its PIDs into the assertion.
+        monkeypatch.setattr(gw.subprocess, "run", lambda *a, **k: _completed(0, ""))
         monkeypatch.setattr(gw, "get_launchd_label", lambda: "ai.hermes.gateway")
         monkeypatch.setattr(
             gw,
@@ -299,7 +298,7 @@ def _fleet(monkeypatch, tmp_path, *, current, labels, located,
     monkeypatch.setattr(
         gw,
         "_graceful_restart_via_sigusr1",
-        lambda pid, drain_timeout: (rec.drains.append(pid), (drain_results or {}).get(pid, False))[1],
+        lambda pid, drain_timeout, **_: (rec.drains.append(pid), (drain_results or {}).get(pid, False))[1],
     )
 
     def fake_kickstart(label, domain):
@@ -661,3 +660,16 @@ class TestIncompleteWarningMentionsLaunchctl:
         out = capsys.readouterr().out
         assert "systemctl" in out
         assert "launchctl" not in out
+
+
+class TestIncompleteWarningOnMacos:
+    """On the launchd host the hint is bootstrap/list, never the systemd or the
+    ``kickstart`` line — a label in this list is likely deregistered (#88848)."""
+
+    def test_launchd_labels_get_bootstrap_hint(self, capsys):
+        _warn_incomplete_gateway_fleet_restart(["ai.hermes.gateway-merit-ops"])
+        out = capsys.readouterr().out
+        assert "Update incomplete" in out
+        assert "launchctl bootstrap" in out
+        assert "systemctl" not in out
+

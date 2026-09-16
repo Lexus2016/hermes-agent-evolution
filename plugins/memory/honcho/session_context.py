@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, Callable
 
@@ -11,6 +12,36 @@ from plugins.memory.honcho.session_auth import HonchoAuthError
 logger = logging.getLogger("plugins.memory.honcho.session")
 
 _FAILED = object()  # sentinel: a guarded call raised (distinct from a legitimately empty/None result)
+
+# Reasoning-channel markers a summarizer model can leave inside a persisted session summary.
+_THINK_BLOCK_RE = re.compile(
+    r"<\s*(?:think|thinking|reasoning|thought|reasoning_scratchpad)\s*>.*?"
+    r"<\s*/\s*(?:think|thinking|reasoning|thought|reasoning_scratchpad)\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_THINK_CLOSE_RE = re.compile(r"</\s*think\s*>", re.IGNORECASE)
+_PLANNING_HEAD_RE = re.compile(
+    r"^(?:i need to create a thorough|the instruction says to focus on capturing key facts|first, let me review)",
+    re.IGNORECASE,
+)
+
+
+def usable_honcho_summary(text: object) -> str | None:
+    """A session summary safe to inject, or None to omit it. Honcho summarizers can persist the
+    model's planning text and a trailing ``</think>`` as the summary body; the text after that
+    close survives, planning-only or still-tagged text is dropped."""
+    raw = "" if text is None else str(text)
+    if not raw.strip():
+        return None
+    # The observed payload has no opening tag: planning prose, then ``</think>``, then the summary.
+    close = _THINK_CLOSE_RE.search(raw)
+    if close:
+        raw = raw[close.end():]
+    cleaned = _THINK_BLOCK_RE.sub("", raw).strip()
+    lowered = cleaned.lower()
+    if not cleaned or "<think" in lowered or "</think" in lowered or _PLANNING_HEAD_RE.search(cleaned):
+        return None
+    return cleaned
 
 
 class SessionContextMixin:
@@ -34,7 +65,7 @@ class SessionContextMixin:
         self, session_key: str, fn: Callable[[Any], Any], default: Any, level: int, msg: str, *args: Any,
     ) -> Any:
         """``_guarded`` over ``fn(session)`` for the cached session; ``default`` when no session is cached."""
-        session = self._cache.get(session_key)
+        session = self._cached_session(session_key)
         return self._guarded(lambda: fn(session), default, level, msg, *args) if session else default
 
     @staticmethod
@@ -96,7 +127,7 @@ class SessionContextMixin:
         """Pre-fetch user + AI peer context (representation, card) plus the session summary.
         ``user_message`` is passed as search_query so Honcho returns topic-relevant conclusions.
         Stops early (returning what it has) once auth is dead."""
-        session = self._cache.get(session_key)
+        session = self._cached_session(session_key)
         if not session:
             return {}
         result: dict[str, str] = {}
@@ -105,10 +136,11 @@ class SessionContextMixin:
             if session.honcho_session_id not in self._sessions_cache:
                 return
             ctx = self._authed_call(
-                "session summary fetch", lambda: self._sdk_session(session.honcho_session_id).context(summary=True),
+                "session summary fetch",
+                lambda: self._sdk_session(session.honcho_session_id).context(summary=True, tokens=self._context_tokens),
             )
-            if ctx.summary and getattr(ctx.summary, "content", None):
-                result["summary"] = ctx.summary.content
+            if ctx.summary and (summary := usable_honcho_summary(getattr(ctx.summary, "content", None))):
+                result["summary"] = summary
 
         def _user() -> None:
             observer_peer_id, target_peer_id = self._resolve_observer_target(session, "user")
@@ -149,7 +181,7 @@ class SessionContextMixin:
     def get_session_context(self, session_key: str, peer: str = "user") -> dict[str, Any]:
         """Fetch session-level context (summary, representation, card, recent messages).
         Raises HonchoAuthError so callers can tell rejected credentials from no context."""
-        session = self._cache.get(session_key)
+        session = self._cached_session(session_key)
         if not session:
             return {}
         if session.honcho_session_id not in self._sessions_cache:
@@ -162,12 +194,13 @@ class SessionContextMixin:
             ctx = self._authed_call(
                 "session context fetch",
                 lambda: self._sdk_session(session.honcho_session_id).context(
-                    summary=True, peer_target=target_peer_id or observer_peer_id, peer_perspective=observer_peer_id,
+                    summary=True, tokens=self._context_tokens,
+                    peer_target=target_peer_id or observer_peer_id, peer_perspective=observer_peer_id,
                 ),
             )
             result: dict[str, Any] = {}
-            if ctx.summary:
-                result["summary"] = ctx.summary.content
+            if ctx.summary and (summary := usable_honcho_summary(getattr(ctx.summary, "content", ctx.summary))):
+                result["summary"] = summary
             if ctx.peer_representation:
                 result["representation"] = ctx.peer_representation
             if ctx.peer_card:
@@ -193,7 +226,7 @@ class SessionContextMixin:
         """Hybrid search over raw messages visible from ``peer``'s perspective, all sessions. Snippets
         accumulate until ``max_tokens`` (~4 chars/token) is exhausted. Returns "" when nothing matches;
         raises HonchoAuthError on rejected credentials."""
-        session = self._cache.get(session_key)
+        session = self._cached_session(session_key)
         q = (query or "").strip()[:4000]  # Honcho caps query length for the embedding model.
         if not session or not q:
             return ""
@@ -237,7 +270,7 @@ class SessionContextMixin:
 
     def _conclusions_scope(self, session: Any, target_peer_id: str) -> Any:
         """ConclusionScope for observing target_peer_id; shared by create/delete/list."""
-        ai_observes = target_peer_id == session.assistant_peer_id or self._ai_observe_others
+        ai_observes = target_peer_id == session.assistant_peer_id or self._ai_observes_others(session)
         observer = self._get_or_create_peer(session.assistant_peer_id if ai_observes else target_peer_id)
         return observer.conclusions_of(target_peer_id)
 
@@ -245,7 +278,7 @@ class SessionContextMixin:
         """Write a conclusion (durable fact) about ``peer`` back to Honcho."""
         if not content or not content.strip():
             return False
-        session = self._cache.get(session_key)
+        session = self._cached_session(session_key)
         if not session:
             logger.warning("No session cached for '%s', skipping conclusion", session_key)
             return False
@@ -309,7 +342,7 @@ class SessionContextMixin:
         operations, auth failures are logged and swallowed here too."""
         if not content or not content.strip():
             return False
-        session = self._cache.get(session_key)
+        session = self._cached_session(session_key)
         if not session:
             logger.warning("No session cached for '%s', skipping AI seed", session_key)
             return False
@@ -361,7 +394,7 @@ class SessionContextMixin:
         if not self.dialectic_query_available():
             return ""
 
-        session = self._cache.get(session_key)
+        session = self._cached_session(session_key)
         target_peer_id = self._resolve_peer_id(session, peer) if session else None
         if target_peer_id is None:
             return ""
@@ -371,7 +404,7 @@ class SessionContextMixin:
 
         def _chat_once() -> str:
             # The AI peer observes others when allowed; otherwise each peer queries its own context.
-            if self._ai_observe_others and target_peer_id != session.assistant_peer_id:
+            if self._ai_observes_others(session) and target_peer_id != session.assistant_peer_id:
                 observer = self._get_or_create_peer(session.assistant_peer_id)
                 return observer.chat(query, target=target_peer_id, reasoning_level=level) or ""
             return self._get_or_create_peer(target_peer_id).chat(query, reasoning_level=level) or ""

@@ -150,6 +150,17 @@ class TestRunJobScript:
         assert "exited with code 1" in output
         assert "error info" in output
 
+    def test_missing_script_names_the_profile_folder(self, cron_env):
+        """Scripts resolve per profile (#4707); the runtime error must say so (#94821)."""
+        from cron.scheduler_script import _run_job_script
+
+        success, output = _run_job_script("copied-from-other-profile.py")
+        assert success is False
+        assert "Script not found" in output
+        assert str(cron_env / "scripts") in output and "profile" in output
+        assert "hermes cron edit" in output
+
+
     def test_script_subprocess_env_sanitized(self, cron_env, monkeypatch):
         """Cron scripts must not inherit Hermes provider env (SECURITY.md §2.3)."""
         from tools.environments.local_env_policy import _HERMES_PROVIDER_ENV_BLOCKLIST
@@ -599,6 +610,7 @@ class TestCronjobToolScript:
     def test_create_with_script(self, cron_env, monkeypatch):
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
         from tools.cronjob_tools import cronjob
+        (cron_env / "scripts" / "monitor.py").write_text("print('ok')\n")
 
         result = json.loads(cronjob(
             action="create",
@@ -620,6 +632,7 @@ class TestCronjobToolScript:
         ))
         job_id = create_result["job_id"]
 
+        (cron_env / "scripts" / "new_script.py").write_text("print('ok')\n")
         update_result = json.loads(cronjob(
             action="update",
             job_id=job_id,
@@ -632,6 +645,7 @@ class TestCronjobToolScript:
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
         from tools.cronjob_tools import cronjob
 
+        (cron_env / "scripts" / "some_script.py").write_text("print('hi')\n")
         create_result = json.loads(cronjob(
             action="create",
             schedule="every 1h",
@@ -652,6 +666,7 @@ class TestCronjobToolScript:
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
         from tools.cronjob_tools import cronjob
 
+        (cron_env / "scripts" / "data_collector.py").write_text("print('hi')\n")
         cronjob(
             action="create",
             schedule="every 1h",
@@ -818,6 +833,7 @@ class TestCronjobToolScriptValidation:
     def test_create_with_relative_script_allowed(self, cron_env, monkeypatch):
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
         from tools.cronjob_tools import cronjob
+        (cron_env / "scripts" / "monitor.py").write_text("print('ok')\n")
 
         result = json.loads(cronjob(
             action="create",
@@ -852,6 +868,7 @@ class TestCronjobToolScriptValidation:
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
         from tools.cronjob_tools import cronjob
 
+        (cron_env / "scripts" / "monitor.py").write_text("print('ok')\n")
         create_result = json.loads(cronjob(
             action="create",
             schedule="every 1h",

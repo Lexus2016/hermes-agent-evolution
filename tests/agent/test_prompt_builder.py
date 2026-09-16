@@ -537,6 +537,7 @@ class TestBuildSkillsSystemPrompt:
         assert "web-search" in result
         assert "imessage" not in result
 
+    @pytest.mark.macos_only
     def test_includes_matching_platform_skills(self, monkeypatch, tmp_path):
         """Skills with platforms: [macos] should appear on macOS."""
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -1492,6 +1493,7 @@ class TestEnvironmentHints:
         assert "bash" in result
         assert "PowerShell" in result
 
+    @pytest.mark.macos_only
     def test_build_environment_hints_on_macos_local(self, monkeypatch):
         import agent.prompt_builder as _pb
         import sys

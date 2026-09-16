@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +19,19 @@ def convert_scratchpad_to_think(content: str) -> str:
 def has_incomplete_scratchpad(content: str) -> bool:
     """Whether content has an opening <REASONING_SCRATCHPAD> without a closing tag."""
     return bool(content) and "<REASONING_SCRATCHPAD>" in content and "</REASONING_SCRATCHPAD>" not in content
+
+
+def _lock_append_handle(f, acquire: bool) -> None:
+    """Exclusive whole-file lock on an append handle: ``flock`` on POSIX, a 1-byte
+    ``msvcrt.locking`` range at offset 0 on Windows (append position is restored by the OS)."""
+    if os.name == "nt":
+        import msvcrt
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK if acquire else msvcrt.LK_UNLCK, 1)
+        f.seek(0, os.SEEK_END)
+    else:
+        import fcntl
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX if acquire else fcntl.LOCK_UN)
 
 
 def save_trajectory(trajectory: List[Dict[str, Any]], model: str,
@@ -49,8 +63,17 @@ def save_trajectory(trajectory: List[Dict[str, Any]], model: str,
         entry["model_calls"] = list(model_calls)
 
     try:
+        line = json.dumps(entry, ensure_ascii=False) + "\n"  # serialize before taking the lock
         with open(filename, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            # Gateway sessions and batch workers append to the SAME default file; without an
+            # exclusive lock around write+flush, entries larger than one write() interleave and the
+            # JSONL stops parsing (#12684).
+            _lock_append_handle(f, True)
+            try:
+                f.write(line)
+                f.flush()
+            finally:
+                _lock_append_handle(f, False)
         logger.info("Trajectory saved to %s", filename)
     except Exception as e:
         logger.warning("Failed to save trajectory: %s", e)
