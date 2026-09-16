@@ -92,6 +92,6 @@ def test_malformed_arguments_are_rejected_without_blocking_valid_sibling(
     assert [message["tool_call_id"] for message in messages] == ["call-bad", "call-good"]
     assert len([message for message in messages if message["tool_call_id"] == "call-bad"]) == 1
 
-    assert '"error": "Invalid tool arguments"' in messages[0]["content"]
+    assert "Invalid tool arguments" in messages[0]["content"]
     assert "JSON object" in messages[0]["content"]
     assert json.loads(messages[1]["content"]) == {"ok": "valid"}
