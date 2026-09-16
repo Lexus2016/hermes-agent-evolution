@@ -134,7 +134,7 @@ class TestAIAgentToolCoalescingIntegration:
 
         messages = []
         with patch(
-            "run_agent.handle_function_call",
+            "model_tools.handle_function_call",
             side_effect=lambda name, args, task_id: f"mock_{name}",
         ):
             res = agent._execute_tool_calls_coalesced(mock_msg, messages, "task-1")
@@ -159,7 +159,7 @@ class TestAIAgentToolCoalescingIntegration:
             {"name": "context_var", "arguments": {"action": "list"}, "id": "r2"},
         ]
         with patch(
-            "run_agent.handle_function_call",
+            "model_tools.handle_function_call",
             side_effect=lambda name, args, task_id: f"executed_{name}",
         ):
             res = agent.coalesce_and_execute_tool_calls(calls, task_id="task-direct")

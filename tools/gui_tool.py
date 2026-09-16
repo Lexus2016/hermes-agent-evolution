@@ -191,24 +191,24 @@ GUI_PLAN_SCHEMA = {
 registry.register(
     name="gui_screenshot",
     toolset="gui_automation",
-    schema=GUI_SCREENSHOT_SCHEMA,
+    schema=GUI_SCREENSHOT_SCHEMA["function"],
     handler=gui_screenshot,
 )
 registry.register(
     name="gui_elements",
     toolset="gui_automation",
-    schema=GUI_ELEMENTS_SCHEMA,
+    schema=GUI_ELEMENTS_SCHEMA["function"],
     handler=gui_elements,
 )
 registry.register(
     name="gui_act",
     toolset="gui_automation",
-    schema=GUI_ACT_SCHEMA,
+    schema=GUI_ACT_SCHEMA["function"],
     handler=gui_act,
 )
 registry.register(
     name="gui_plan",
     toolset="gui_automation",
-    schema=GUI_PLAN_SCHEMA,
+    schema=GUI_PLAN_SCHEMA["function"],
     handler=gui_plan,
 )

@@ -455,6 +455,25 @@ def _harm_blocked_tool_result(reason: str) -> str:
     )
 
 
+def _harm_gated_invoke(agent, ref, next_args, messages):
+    reason = _harm_gate_block_reason(ref.name, next_args)
+    if reason is not None:
+        logger.warning(
+            "tool %s blocked by AgentProcessBench harm gate: %s",
+            ref.name,
+            reason,
+        )
+        return _harm_blocked_tool_result(reason)
+    return agent._invoke_tool(
+        ref.name, next_args, ref.task_id, ref.call_id,
+        messages=messages,
+        pre_tool_block_checked=True,
+        skip_tool_request_middleware=True,
+        skip_tool_execution_middleware=True,
+        tool_request_middleware_trace=list(ref.trace),
+    )
+
+
 def _record_tool_circuit_breaker(agent, tool_name: str, result: Any, is_error: bool, effective_task_id: str) -> Any:
     # Retry-spiral circuit breaker check (#3391)
     try:
@@ -1373,13 +1392,8 @@ class _ConcurrentBatch:
             managed = _run_agent_tool_execution_middleware(
                 agent,
                 **ref.middleware_kwargs(),
-                execute=lambda next_args: agent._invoke_tool(
-                    ref.name, next_args, ref.task_id, ref.call_id,
-                    messages=self.messages,
-                    pre_tool_block_checked=True,
-                    skip_tool_request_middleware=True,
-                    skip_tool_execution_middleware=True,
-                    tool_request_middleware_trace=list(ref.trace),
+                execute=lambda next_args: _harm_gated_invoke(
+                    agent, ref, next_args, self.messages
                 ),
                 scope_block=scope_block,
                 display_index=index + 1,
@@ -1727,6 +1741,14 @@ def _resolve_sequential_dispatch(agent, ref: _ToolCallRef, messages: list) -> _S
     def _execute(next_args: dict) -> Any:
         import model_tools
 
+        block_reason = _harm_gate_block_reason(function_name, next_args)
+        if block_reason is not None:
+            logger.warning(
+                "tool %s blocked by AgentProcessBench harm gate: %s",
+                function_name,
+                block_reason,
+            )
+            return _harm_blocked_tool_result(block_reason)
         with model_tools.suppress_post_tool_call_hook():
             return model_tools.handle_function_call(
                 function_name,
