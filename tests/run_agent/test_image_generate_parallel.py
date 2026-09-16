@@ -23,6 +23,8 @@ def test_image_generate_batch_routes_to_concurrent_executor():
     agent._execute_tool_calls = run_agent.AIAgent._execute_tool_calls.__get__(agent)
     agent._execute_tool_calls_concurrent = MagicMock()
     agent._execute_tool_calls_sequential = MagicMock()
+    agent._emit_plan_before_tool_calls = lambda: None
+    agent._check_step_divergence_after_tool_calls = lambda *a, **k: None
     assistant_message = SimpleNamespace(
         tool_calls=[
             _tool_call("image_generate", {"prompt": "variation one"}, "img_1"),

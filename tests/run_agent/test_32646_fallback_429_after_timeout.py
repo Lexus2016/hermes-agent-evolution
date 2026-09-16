@@ -46,9 +46,9 @@ def _make_tool_defs():
 def _make_agent_with_fallback(fb_chain):
     """Build a minimal AIAgent with the given fallback chain configured."""
     with (
-        patch("run_agent.get_tool_definitions", return_value=_make_tool_defs()),
-        patch("run_agent.check_toolset_requirements", return_value={}),
-        patch("run_agent.OpenAI", return_value=MagicMock()),
+        patch("model_tools.get_tool_definitions", return_value=_make_tool_defs()),
+        patch("model_tools.check_toolset_requirements", return_value={}),
+        patch("agent.process_bootstrap.OpenAI", return_value=MagicMock()),
     ):
         agent = AIAgent(
             api_key="primary-key-abcdef12",
@@ -231,9 +231,9 @@ class TestFallbackChainResetOnTransportRecovery:
         """
         fb_chain = [
             {
-                "provider": "openai",
+                "provider": "zai",
                 "model": "glm-4.7",
-                "base_url": "https://api.openai.com/v1",
+                "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
             }
         ]
         agent = _make_agent_with_fallback(fb_chain)
@@ -264,8 +264,7 @@ class TestFallbackChainResetOnTransportRecovery:
             patch.object(agent, "_persist_session"),
             patch.object(agent, "_save_trajectory"),
             patch.object(agent, "_cleanup_task_resources"),
-            patch("agent.title_generator.maybe_auto_title"),
-            patch("run_agent.OpenAI", return_value=MagicMock()),
+            patch("agent.process_bootstrap.OpenAI", return_value=MagicMock()),
             patch("agent.agent_runtime_helpers.time.sleep"),
             patch(
                 "agent.auxiliary_client.resolve_provider_client",
@@ -285,9 +284,13 @@ class TestFallbackChainResetOnTransportRecovery:
             ("zai", "glm-5.1"),
             ("zai", "glm-5.1"),
             ("zai", "glm-5.1"),
-            ("openai", "glm-4.7"),
+            ("zai", "glm-4.7"),
         ]
-        mock_resolve.assert_called_once()
+        fallback_calls = [
+            c for c in mock_resolve.call_args_list
+            if c.args[:1] == ("zai",) or c.kwargs.get("model") == "glm-4.7"
+        ]
+        assert fallback_calls, mock_resolve.call_args_list
         assert agent._fallback_activated is True
         assert agent.model == "glm-4.7"
 

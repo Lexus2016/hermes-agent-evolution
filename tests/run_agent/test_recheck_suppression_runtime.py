@@ -76,7 +76,7 @@ def _two_identical_reads(agent):
         executed.append(kwargs.get("tool_call_id"))
         return json.dumps({"content": "file body"})
 
-    with patch("run_agent.handle_function_call", side_effect=fake_handle):
+    with patch("model_tools.handle_function_call", side_effect=fake_handle):
         agent._execute_tool_calls_sequential(msg, messages, "task-1")
     return messages, executed
 
@@ -122,7 +122,7 @@ def test_recheck_suppression_does_not_touch_mutating_tools():
         executed.append(kwargs.get("tool_call_id"))
         return json.dumps({"success": True})
 
-    with patch("run_agent.handle_function_call", side_effect=fake_handle):
+    with patch("model_tools.handle_function_call", side_effect=fake_handle):
         agent._execute_tool_calls_sequential(msg, messages, "task-1")
     # mutating tool: both execute, never suppressed
     assert executed == ["w-1", "w-2"]

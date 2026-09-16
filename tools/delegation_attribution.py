@@ -151,6 +151,7 @@ def attribution_prompt_block(stamp: str) -> str:
     ``stamp`` is a canonical marker line from :func:`build_attribution_stamp`.
     """
     return (
+        "ATTRIBUTION:\n"
         "You are an attributed subagent run.\n"
         f"Attribution line:\n{stamp}\n" + _STAMPING_INSTRUCTION
     )

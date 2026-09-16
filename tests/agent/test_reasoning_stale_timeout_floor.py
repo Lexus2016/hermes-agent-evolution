@@ -58,6 +58,10 @@ import pytest
     ("deepseek/deepseek-v4-flash", 180.0),
     ("deepseek/deepseek-v4-pro", 300.0),
     ("deepseek-v4-flash-free", 180.0),   # catalog -free variant inherits via separator anchor
+    # Version-less canonical Flash id from the 2026-09 Flash refresh —
+    # ``deepseek-v4-flash`` still aliases onto it server-side.
+    ("deepseek/deepseek-flash", 180.0),
+    ("deepseek-flash", 180.0),
     # Qwen QwQ + Qwen3 thinking variants (qwen3 family entry matches all).
     ("qwen/qwq-32b-preview", 300.0),
     ("qwen/qwen3-235b-a22b-thinking", 180.0),

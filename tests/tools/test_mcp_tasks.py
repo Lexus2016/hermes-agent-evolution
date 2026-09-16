@@ -250,10 +250,10 @@ def test_wired_mcp_tool_call_handler_with_tasks_extension() -> None:
     try:
         with (
             patch(
-                "tools.mcp_tool._get_connected_server_for_call",
+                "tools.mcp_tool_discovery._get_connected_server_for_call",
                 return_value=mock_server,
             ),
-            patch("tools.mcp_tool._run_on_mcp_loop", side_effect=fake_run_on_mcp_loop),
+            patch("tools.mcp_tool_loop._run_on_mcp_loop", side_effect=fake_run_on_mcp_loop),
         ):
             handler = _make_tool_handler(server_name, tool_name, tool_timeout=5.0)
             output_json = handler({"dataset": "large.csv"})

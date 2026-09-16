@@ -373,6 +373,35 @@ class TestShallowRetryBehaviour(unittest.TestCase):
             self.assertIn("Recovered on second retry.", entry["summary"])
             self.assertEqual(entry.get("shallow_retries"), 2)
 
+    def test_completion_token_goal_is_not_retried_or_flagged(self):
+        """A no-tool child whose goal did not ask for evidence is a valid result.
+
+        Finite-chat fan-out uses completion tokens; auto-retry would double the
+        child HTTP calls and the SHALLOW prefix would rewrite the summary.
+        """
+        parent = _make_mock_parent(depth=0)
+        with patch("run_agent.AIAgent") as MockAgent, patch(
+            "tools.delegate_tool._get_shallow_retry_budget", return_value=1
+        ):
+            mock_child = MagicMock()
+            mock_child.session_prompt_tokens = 0
+            mock_child.session_completion_tokens = 0
+            mock_child.run_conversation.return_value = _shallow_result("WORKER_ALPHA_COMPLETE")
+            MockAgent.return_value = mock_child
+
+            result = json.loads(
+                delegate_task(
+                    goal="Complete WORKER_ALPHA and return its completion token.",
+                    parent_agent=parent,
+                )
+            )
+            entry = result["results"][0]
+
+            self.assertEqual(mock_child.run_conversation.call_count, 1)
+            self.assertNotEqual(entry.get("shallow_result"), True)
+            self.assertNotIn("shallow_retries", entry)
+            self.assertEqual(entry["summary"], "WORKER_ALPHA_COMPLETE")
+
 
 if __name__ == "__main__":
     unittest.main()

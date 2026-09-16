@@ -159,7 +159,7 @@ def test_fresh_api_call_gets_a_fresh_counter():
     with (
         jb,
         arb,
-        patch("run_agent.handle_function_call", return_value="command completed"),
+        patch("model_tools.handle_function_call", return_value="command completed"),
         patch.object(agent, "_persist_session"),
         patch.object(agent, "_save_trajectory"),
         patch.object(agent, "_cleanup_task_resources"),

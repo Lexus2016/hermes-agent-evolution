@@ -70,9 +70,12 @@ class TestApiCloneStripsOrigin:
     def test_loop_clone_pops_origin(self):
         import inspect
 
-        from agent import conversation_loop
+        from agent import turn_context, conversation_loop
 
-        source = inspect.getsource(conversation_loop)
+        try:
+            source = inspect.getsource(turn_context)
+        except Exception:
+            source = inspect.getsource(conversation_loop)
         assert 'api_msg.pop("origin", None)' in source, (
             "the loop's provider clone must strip provenance the way it strips "
             "display_kind and api_content"
@@ -98,13 +101,6 @@ class TestSummaryPathStripsOrigin:
     """
 
     def test_origin_is_in_the_schema_foreign_list(self):
-        import inspect
-
         from agent import chat_completion_helpers
 
-        source = inspect.getsource(chat_completion_helpers)
-        marker = source.split("for schema_foreign in (")[1].split("):")[0]
-        assert '"origin"' in marker, (
-            "the summary path must strip origin alongside timestamp and "
-            "platform_message_id"
-        )
+        assert "origin" in getattr(chat_completion_helpers, "_SUMMARY_FOREIGN_MESSAGE_KEYS", ())

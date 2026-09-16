@@ -211,7 +211,7 @@ def test_skills_breakdown_attributes_demoted_category_shared_line(isolated_home)
 def test_blank_slate_prompt_size_counts_only_minimal_tools(isolated_home):
     """Blank Slate prompt-size should report file + terminal schemas only."""
     from hermes_cli.config import save_config
-    from hermes_cli.setup import (
+    from hermes_cli.setup_quick import (
         _blank_slate_minimal_toolsets,
         _blank_slate_minimize_config,
     )

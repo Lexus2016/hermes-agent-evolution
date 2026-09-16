@@ -9,14 +9,13 @@ from unittest.mock import MagicMock
 
 from tests.tools.file_ops_fakes import READ_SENTINEL_RE, compound_read_output
 from tools.environments.local import _find_bash, _msys_to_windows_path, LocalEnvironment
+from agent.file_safety import is_write_denied as _is_write_denied
+from tools.file_operations_common import LintResult, SearchMatch
 from tools.file_operations import (
-    _is_write_denied,
     ReadResult,
     WriteResult,
     PatchResult,
     SearchResult,
-    SearchMatch,
-    LintResult,
     ShellFileOperations,
     MAX_LINE_LENGTH,
     normalize_read_pagination,
@@ -576,10 +575,9 @@ class TestShellFileOpsHelpers:
         # cannot block the read; it still reports a plain byte count.
         assert len(commands) == 1
         probe = commands[0]
-        assert probe.startswith(
-            "if [ -f '/c/Users/alice/notes.txt' ]; "
-            "then wc -c < '/c/Users/alice/notes.txt' 2>/dev/null; "
-        )
+        assert probe.startswith("if [ -f '/c/Users/alice/notes.txt' ]; ")
+        assert "if [ ! -r '/c/Users/alice/notes.txt' ];" in probe
+        assert "wc -c < '/c/Users/alice/notes.txt' 2>/dev/null" in probe
         assert "head -c 1000 '/c/Users/alice/notes.txt' 2>/dev/null | base64" in probe
         assert "sed -n '1,2000p' '/c/Users/alice/notes.txt' 2>/dev/null" in probe
         assert "cut -b1-8001" in probe

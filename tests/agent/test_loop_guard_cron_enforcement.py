@@ -49,11 +49,11 @@ def _mock_response(content="Hello", finish_reason="stop", tool_calls=None):
 
 def _make_agent(*tool_names: str, max_iterations: int = 20, platform: str | None = None) -> AIAgent:
     with (
-        patch("run_agent.get_tool_definitions", return_value=_make_tool_defs(*tool_names)),
-        patch("run_agent.check_toolset_requirements", return_value={}),
+        patch("model_tools.get_tool_definitions", return_value=_make_tool_defs(*tool_names)),
+        patch("model_tools.check_toolset_requirements", return_value={}),
         patch("hermes_cli.config.load_config", return_value={}),
         patch("hermes_cli.config.load_config_readonly", return_value={}),
-        patch("run_agent.OpenAI"),
+        patch("openai.OpenAI"),
     ):
         agent = AIAgent(
             api_key="test-key-1234567890",
@@ -111,7 +111,7 @@ def test_cron_platform_hard_stops_after_repeated_advisory_nudges():
     agent.client.chat.completions.create.side_effect = _repeated_terminal_run(15)
 
     with (
-        patch("run_agent.handle_function_call", return_value="command completed"),
+        patch("model_tools.handle_function_call", return_value="command completed"),
         patch.object(agent, "_persist_session"),
         patch.object(agent, "_save_trajectory"),
         patch.object(agent, "_cleanup_task_resources"),
@@ -176,7 +176,7 @@ def test_resolved_spiral_state_does_not_leak_into_a_later_unrelated_tool_run():
     )
 
     with (
-        patch("run_agent.handle_function_call", return_value="command completed"),
+        patch("model_tools.handle_function_call", return_value="command completed"),
         patch.object(agent, "_persist_session"),
         patch.object(agent, "_save_trajectory"),
         patch.object(agent, "_cleanup_task_resources"),
@@ -203,7 +203,7 @@ def test_non_cron_platform_keeps_nudging_advisory_only():
     agent.client.chat.completions.create.side_effect = _repeated_terminal_run(9)
 
     with (
-        patch("run_agent.handle_function_call", return_value="command completed"),
+        patch("model_tools.handle_function_call", return_value="command completed"),
         patch.object(agent, "_persist_session"),
         patch.object(agent, "_save_trajectory"),
         patch.object(agent, "_cleanup_task_resources"),
@@ -261,7 +261,7 @@ def test_cron_does_not_hard_stop_distinct_successful_terminal_burst():
     agent.client.chat.completions.create.side_effect = _distinct_terminal_run(18)
 
     with (
-        patch("run_agent.handle_function_call", return_value="command completed"),
+        patch("model_tools.handle_function_call", return_value="command completed"),
         patch.object(agent, "_persist_session"),
         patch.object(agent, "_save_trajectory"),
         patch.object(agent, "_cleanup_task_resources"),
@@ -287,7 +287,7 @@ def test_cron_does_not_hard_stop_process_polling():
     agent.client.chat.completions.create.side_effect = _process_polling_run(18)
 
     with (
-        patch("run_agent.handle_function_call", return_value="still running"),
+        patch("model_tools.handle_function_call", return_value="still running"),
         patch.object(agent, "_persist_session"),
         patch.object(agent, "_save_trajectory"),
         patch.object(agent, "_cleanup_task_resources"),
