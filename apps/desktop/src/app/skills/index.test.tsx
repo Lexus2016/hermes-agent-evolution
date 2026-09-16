@@ -156,7 +156,9 @@ describe('SkillsView toolset management', { timeout: 60_000 }, () => {
     expect(screen.queryByRole('region', { name: other })).toBeNull()
     expect(navigateSpy).not.toHaveBeenCalledWith({ pathname: '/skills', search: '', hash: '' }, { replace: true })
     const otherTab = other.replace(' workspace', '')
-    fireEvent.click(screen.getByRole('button', { name: otherTab }))
+    // Collective is gated on a post-query useEffect (fail-closed entitlement).
+    // The plugins workspace can paint before that tick, so wait for the tab.
+    fireEvent.click(await screen.findByRole('button', { name: otherTab }))
     expect(navigateSpy).toHaveBeenCalledWith(
       { pathname: '/skills', search: `?tab=${otherTab.toLowerCase()}`, hash: '' },
       { replace: true }
