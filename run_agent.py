@@ -295,8 +295,8 @@ class AIAgent(
             return None
         if self._session_db is None:
             try:
-                from hermes_state import SessionDB
-                self._session_db = SessionDB()
+                from hermes_state_registry import acquire
+                self._session_db = acquire()
                 self._owns_session_db = True
             except Exception as e:
                 logger.warning("Session DB unavailable for %s: %s", reason, e)
@@ -410,8 +410,13 @@ class AIAgent(
 
     def _ensure_db_session(self) -> None:
         """Create the session DB row on first use; a transient failure leaves it to retry next turn."""
-        if getattr(self, "_persist_disabled", False) or self._session_db_created or not self._session_db:
+        if getattr(self, "_persist_disabled", False) or self._session_db_created:
             return
+        if not self._session_db:
+            db = self._get_session_db_for_recall(reason="subagent persistence")
+            if db is None:
+                return
+            self._session_db = db
         source = _session_source_for_agent(self.platform)
         try:
             # Persist the profile name explicitly, including "default": profile-keyed consumers treat NULL
