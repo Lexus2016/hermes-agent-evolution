@@ -1,10 +1,10 @@
-import calendar
 """Retry utilities — jittered backoff for decorrelated retries.
 
 Jittered delays (vs. fixed exponential) prevent thundering-herd retry spikes
 when many sessions hit the same rate-limited provider concurrently.
 """
 
+import calendar
 import random
 import re
 import threading

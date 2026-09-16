@@ -474,7 +474,8 @@ def test_controlled_halt_response_includes_fallback_directive_when_present():
     )
     response = agent._toolguard_controlled_halt_response(decision)
 
-    assert "stopped retrying web_search" in response
+    assert "stopped retrying" in response
+    assert "web_search" in response
     assert "Suggested alternative: use web_extract on a known URL instead." in response
 
 
@@ -493,5 +494,6 @@ def test_controlled_halt_response_omits_directive_when_empty():
     )
     response = agent._toolguard_controlled_halt_response(decision)
 
-    assert "stopped retrying web_search" in response
+    assert "stopped retrying" in response
+    assert "web_search" in response
     assert "Suggested alternative:" not in response

@@ -3519,11 +3519,9 @@ def _compose_run_delivery(
                 "the job retries automatically when balance returns."
             )
         else:
-            deliver_content = (
-                f"⛔ Cron '{job.get('name') or job['id']}' blocked by "
-                f"configuration validation (no LLM call was made): "
-                f"{_pf_text} "
-                "This alert is sent once; the job stays blocked until the configuration is fixed."
+            from cron.scheduler_failure_copy import blocked_config_notice
+            deliver_content = blocked_config_notice(
+                job.get("name") or job["id"], _pf_text
             )
     elif drift_skip and not success:
         _drift_text = re.sub(

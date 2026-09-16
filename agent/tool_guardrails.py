@@ -721,6 +721,18 @@ class ToolCallGuardrailController:
     def halt_decision(self) -> ToolGuardrailDecision | None:
         return self._halt_decision
 
+    def _decide(
+        self, action: str, code: str, tool_name: str, count: int, signature: ToolCallSignature,
+        *, message: str | None = None, **fmt: Any,
+    ) -> ToolGuardrailDecision:
+        """Build a warn/block/halt decision; block/halt is also recorded as the turn's halt decision."""
+        if message is None:
+            message = _DECISION_MESSAGES[code].format(tool_name=tool_name, count=count, **fmt)
+        decision = ToolGuardrailDecision(action, code, message, tool_name, count, signature)
+        if decision.should_halt:
+            self._halt_decision = decision
+        return decision
+
     def before_call(
         self, tool_name: str, args: Mapping[str, Any] | None
     ) -> ToolGuardrailDecision:

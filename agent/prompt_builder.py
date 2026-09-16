@@ -1874,20 +1874,34 @@ def _agents_md_directory_chain(cwd_path: Path) -> list[Path]:
 
 
 def _agents_md_candidates(cwd_path: Path) -> list[tuple[str, Path, str]]:
-    """AGENTS.md chain from git root down to cwd; per directory the first NON-EMPTY of ``AGENTS.override.md`` /
-    ``AGENTS.md`` / ``agents.md`` wins (empty or unreadable files are listed but fall through)."""
+    """AGENTS.md chain from git root down to cwd.
+
+    Per directory the fork loads both the base ``AGENTS.md``/``agents.md`` and
+    ``AGENTS.override.md`` (override last) so team rules stay visible next to a
+    personal override. Empty or unreadable files are listed but fall through.
+    """
     cwd_resolved = cwd_path.resolve()
     found: list[tuple[str, Path, str]] = []
     for directory in _agents_md_directory_chain(cwd_resolved):
-        for name in ("AGENTS.override.md", "AGENTS.md", "agents.md"):
+        # Fork: load both AGENTS.md and AGENTS.override.md (override last) so
+        # team rules stay visible next to a personal override.
+        base: tuple[str, Path, str] | None = None
+        override: tuple[str, Path, str] | None = None
+        for name in ("AGENTS.md", "agents.md", "AGENTS.override.md"):
             candidate = directory / name
             if not _exists_or_denied(candidate):
                 continue
             content = _read_context_file(candidate)
             label = name if directory == cwd_resolved else os.path.relpath(candidate, cwd_resolved)
-            found.append((label, candidate, content))
-            if content:
-                break  # first name match wins per directory
+            entry = (label, candidate, content)
+            if name == "AGENTS.override.md":
+                override = entry
+            elif base is None:
+                base = entry
+        if base:
+            found.append(base)
+        if override:
+            found.append(override)
     return found
 
 
@@ -1955,13 +1969,12 @@ def _load_hermes_md(cwd_path: Path, context_length: Optional[int] = None) -> str
 def _load_agents_md(cwd_path: Path, context_length: Optional[int] = None) -> str:
     """AGENTS.md — merged directory chain from git root down to cwd.
 
-    Each directory on the chain (see ``_agents_md_candidates``) contributes its ``AGENTS.override.md`` /
-    ``AGENTS.md`` / ``agents.md`` (first name wins per directory) as its own provenance-labelled section.
-    ``AGENTS.override.md`` wins over ``AGENTS.md`` so a developer can keep a personal, typically-gitignored
-    override next to the committed project instructions without editing the tracked file (same convention as
-    earendil-works/pi#7681). Identical content encountered again further down the chain (copied or symlinked
-    files) is deduplicated. With a single match — the common case, and always the case outside a git repo —
-    output is identical to the historical single-file behavior.
+    Each directory on the chain (see ``_agents_md_candidates``) contributes its
+    base ``AGENTS.md``/``agents.md`` and, when present, ``AGENTS.override.md``
+    as separate provenance-labelled sections (override last). Identical content
+    encountered again further down the chain is deduplicated. A cross-source
+    seam scan runs on the concatenated bodies so an injection split across
+    files cannot bypass the per-file scanner.
     """
     sections: list[str] = []
     seen_content: set = set()
@@ -1970,17 +1983,34 @@ def _load_agents_md(cwd_path: Path, context_length: Optional[int] = None) -> str
             seen_content.add(content)
             sections.append(_context_section(content, label, label, candidate, context_length))
             _record_context_load(str(candidate), KIND_AGENTS, chars=len(content), section=f"## {label}")
-    if len(sections) <= 1:
-        return sections[0] if sections else ""
+    if not sections:
+        return ""
+    seam_block = _scan_context_seams(
+        "\n".join(_section_body(s) for s in sections), "AGENTS.md"
+    )
+    if seam_block:
+        return seam_block
+    if len(sections) == 1:
+        return sections[0]
     return _truncate_content("\n\n".join(sections), "AGENTS.md (directory chain)", context_length=context_length,
                              read_path=str(cwd_path.resolve() / "AGENTS.md"))
 
 
 def _load_claude_md(cwd_path: Path, context_length: Optional[int] = None) -> str:
-    """CLAUDE.md / claude.md — cwd only."""
+    """CLAUDE.md / claude.md — cwd only, with ``@path`` imports resolved."""
     for name, path, content in _claude_md_candidates(cwd_path):
         if content:
-            result = _context_section(content, name, "CLAUDE.md", path, context_length)
+            content = _resolve_claude_imports(content, cwd_path)
+            content = _scan_context_content(content, name)
+            seam_block = _scan_context_seams(
+                _IMPORT_MARKER_RE.sub("", content), name
+            )
+            if seam_block:
+                return seam_block
+            result = _truncate_content(
+                f"## {name}\n\n{content}", "CLAUDE.md",
+                context_length=context_length, read_path=str(path),
+            )
             _record_context_load(str(path), KIND_CLAUDE, chars=len(content), section=f"## {name}")
             return result
     return ""

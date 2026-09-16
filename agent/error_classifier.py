@@ -455,8 +455,10 @@ _V_AUTH_FALLBACK = _v(_R.auth, **_ABORT_FALLBACK)
 _V_MODEL_NOT_FOUND = _v(_R.model_not_found, **_ABORT_FALLBACK)
 _V_CONTENT_BLOCKED = _v(_R.content_policy_blocked, **_ABORT_FALLBACK)
 _V_FORMAT_ERROR = _v(_R.format_error, **_ABORT_FALLBACK)
+# Account data-policy block: the model exists, fallback cannot help (same account
+# setting applies). Distinct from TLS, where another host's chain can.
+_V_POLICY_BLOCKED = _v(_R.provider_policy_blocked, retryable=False)
 # A different provider (direct instead of the aggregator; another host's TLS chain) can fix these.
-_V_POLICY_BLOCKED = _v(_R.provider_policy_blocked, **_ABORT_FALLBACK)
 _V_SSL_CERT = _v(_R.ssl_cert_verification, **_ABORT_FALLBACK)
 _V_CONTEXT_OVERFLOW = _v(_R.context_overflow, should_compress=True)
 _V_PAYLOAD_TOO_LARGE = _v(_R.payload_too_large, should_compress=True)
@@ -926,7 +928,9 @@ def _classify_400(c: _Ctx) -> Verdict:
         "encrypted content for item" in msg and "could not be verified" in msg
     ) or "could not decrypt the provided encrypted_content" in msg or (
         # Custom Responses endpoints wrap a replay rejection in a generic bad_request (#95834).
-        "encrypted content could not be decrypted or parsed" in msg
+        # Gate on the structured code so a bare "encrypted content could not be decrypted
+        # or parsed" stays format_error (generic parse), not replay-strip.
+        code == "bad_request" and "encrypted content could not be decrypted or parsed" in msg
     ) or (
         # OpenCode Zen wraps this OpenAI replay rejection in ``invalid_request_error`` (#111309).
         "encrypted_content" in msg and "was not issued to this caller" in msg
