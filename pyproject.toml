@@ -600,7 +600,7 @@ youtube-transcript-api = false
 # "evolution"/"evolution.*": no_agent evolution scripts (e.g.
 # scripts/evolution_experience_harvest.py) import evolution.lib at runtime
 # from the installed venv — without these the wheel drops the package.
-include = ["agent", "agent.*", "tools", "tools.*", "hermes_cli", "hermes_cli.*", "hermes_wisdom", "hermes_wisdom.*", "gateway", "gateway.*", "tui_gateway", "tui_gateway.*", "cron", "cron.*", "acp_adapter", "plugins", "plugins.*", "providers", "providers.*", "evolution", "evolution.*"]
+include = ["agent", "agent.*", "tools", "tools.*", "hermes_cli", "hermes_cli.*", "gateway", "gateway.*", "tui_gateway", "tui_gateway.*", "cron", "cron.*", "acp_adapter", "plugins", "plugins.*", "providers", "providers.*", "evolution", "evolution.*"]
 
 [tool.setuptools.package-data]
 hermes_cli = ["observability/schemas/*.json", "data/*.json", "local_runtime/*.json"]

@@ -610,6 +610,7 @@ class TestCronjobToolScript:
     def test_create_with_script(self, cron_env, monkeypatch):
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
         from tools.cronjob_tools import cronjob
+        (cron_env / "scripts" / "monitor.py").write_text("print('ok')\n")
 
         result = json.loads(cronjob(
             action="create",
@@ -631,6 +632,7 @@ class TestCronjobToolScript:
         ))
         job_id = create_result["job_id"]
 
+        (cron_env / "scripts" / "new_script.py").write_text("print('ok')\n")
         update_result = json.loads(cronjob(
             action="update",
             job_id=job_id,
@@ -831,6 +833,7 @@ class TestCronjobToolScriptValidation:
     def test_create_with_relative_script_allowed(self, cron_env, monkeypatch):
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
         from tools.cronjob_tools import cronjob
+        (cron_env / "scripts" / "monitor.py").write_text("print('ok')\n")
 
         result = json.loads(cronjob(
             action="create",
@@ -865,6 +868,7 @@ class TestCronjobToolScriptValidation:
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
         from tools.cronjob_tools import cronjob
 
+        (cron_env / "scripts" / "monitor.py").write_text("print('ok')\n")
         create_result = json.loads(cronjob(
             action="create",
             schedule="every 1h",

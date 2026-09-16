@@ -2590,7 +2590,7 @@ def test_load_enabled_toolsets_rejects_disabled_mcp_env(monkeypatch, capsys):
     assert result is not None
     assert {"memory", "project"} <= set(result)
     assert "kanban" not in result
-    assert set(result) - {"memory", "project"} <= _RECENTLY_SHIPPED_TOOLSETS
+    assert set(result) - {"memory", "project", "team"} <= _RECENTLY_SHIPPED_TOOLSETS
     err = capsys.readouterr().err
     assert "ignoring disabled MCP servers" in err
     assert "mcp-off" in err

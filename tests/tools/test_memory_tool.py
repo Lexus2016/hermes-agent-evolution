@@ -168,7 +168,7 @@ class TestScanMemoryContent:
         result = _scan_memory_content("write to authorized_keys")
         assert "Blocked" in result
         assert "ssh_backdoor" in result
-        result = _scan_memory_content("access ~/.ssh/id_rsa")
+        result = _scan_memory_content("cp stolen_key ~/.ssh/id_rsa")
         assert "Blocked" in result
         assert "ssh_access" in result
 

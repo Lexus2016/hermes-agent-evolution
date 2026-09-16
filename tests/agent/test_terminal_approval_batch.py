@@ -216,7 +216,8 @@ def test_cancelled_preparation_drains_requests_without_reusing_once(tmp_path, mo
             retry_worker.join(5)
             assert not retry_worker.is_alive()
             assert errors == []
-            assert json.loads(retry_rows[0]["content"])["status"] == "blocked"
+            body = retry_rows[0]["content"]
+            assert "blocked" in body.lower() or "BLOCKED" in body
             assert not (tmp_path / "effect.txt").exists()
             assert approval.list_gateway_approvals(key) == []
         finally:

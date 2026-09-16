@@ -1175,7 +1175,6 @@ export const ar = defineLocale({
     all: 'الكل',
     searchSkills: 'البحث في المهارات',
     searchToolsets: 'البحث في مجموعات الأدوات',
-    searchCollective: 'البحث في المعرفة الجماعية...',
     refresh: 'تحديث',
     refreshing: 'جار التحديث...',
     loading: 'جار التحميل...',

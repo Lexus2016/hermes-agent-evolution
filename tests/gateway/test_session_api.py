@@ -1049,8 +1049,8 @@ async def test_session_stream_records_reply_text_for_post_disconnect_recovery(
         def interrupt(self, _message=None):
             allow_finish.set()
 
-        def run_conversation(self, user_message, conversation_history, task_id):
-            del user_message, conversation_history, task_id
+        def run_conversation(self, user_message, conversation_history, task_id, **kwargs):
+            del user_message, conversation_history, task_id, kwargs
             run_started.set()
             self._stream_delta_callback("partial ")
             allow_finish.wait(timeout=5)

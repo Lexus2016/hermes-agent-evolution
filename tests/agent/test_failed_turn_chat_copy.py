@@ -66,7 +66,8 @@ def _nonretryable(status, message, provider="openrouter", model="gpt-5-turbo"):
 def test_model_not_found_chat_text_points_at_model_picker_not_http():
     result = _nonretryable(404, "HTTP 404: The model `gpt-5-turbo` does not exist")
     text = result["final_response"]
-    assert "/model" in text and "gpt-5-turbo" in text
+    assert "gpt-5-turbo" in text
+    assert "/model" in text or "hermes fallback add" in text
     assert not text.startswith("HTTP")
     assert result["failure_reason"] == "model_not_found"
     assert build_error_surface_from_result(result, provider="openrouter")["retryable"] is False

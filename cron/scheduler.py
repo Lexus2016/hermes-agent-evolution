@@ -1990,7 +1990,10 @@ def _load_cron_job_config(job: dict, job_id: str, job_name: str) -> _CronJobConf
                 else:
                     _, _global_model = resolve_cron_model_drift_defaults(
                         _cfg, environ={"HERMES_MODEL": cron_env_setting("HERMES_MODEL")})
-                    model = _snapshot_pin(job, "model", _global_model, job_id) or _global_model or model
+                    # Do not feed the creation snapshot in as the live model —
+                    # the later drift guard compares snapshot vs current and
+                    # fail-closes (#44585). Snapshot-as-current would hide drift.
+                    model = _global_model or model
     except Exception as e:
         logger.warning("Job '%s': failed to load config.yaml, using defaults: %s", job_id, e)
 
