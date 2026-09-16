@@ -980,20 +980,6 @@ def handle_function_call(
             result, error_type, error_message = blocked
             return _emit(result, status="blocked", error_type=error_type, error_message=error_message)
 
-        # ACP/Zed edit approval runs before any file mutation.  The requester
-        # is bound via ContextVar only for ACP sessions, so CLI/gateway paths
-        # are unaffected when it is unset.
-        try:
-            from acp_adapter.edit_approval import maybe_require_edit_approval
-
-            edit_block_message = maybe_require_edit_approval(function_name, function_args)
-            if edit_block_message is not None:
-                return _emit(edit_block_message, status="blocked", error_type="edit_approval_denied")
-        except Exception as _edit_approval_err:
-            logger.debug("ACP edit approval guard error: %s", _edit_approval_err)
-            if function_name in {"write_file", "patch"}:
-                return _emit(tool_error("Edit approval denied: approval guard failed"), status="blocked", error_type="edit_approval_error")
-
         # Circuit-breaker gate: if this tool has tripped its per-tool breaker
         # (N consecutive failures), refuse the call and return a diagnostic
         # that tells the model to stop retrying and use an alternative tool.

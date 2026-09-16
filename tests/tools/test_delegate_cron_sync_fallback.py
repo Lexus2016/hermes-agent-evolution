@@ -167,11 +167,9 @@ def test_cron_sync_fallback_returns_and_spawns_no_review_fork(monkeypatch):
         results = parsed["results"]
         assert len(results) == 1
         assert results[0]["status"] == "completed"
-        # Fork semantics (#102 shallow-delegation annotator): a zero-tool-call
-        # child gets the SHALLOW DELEGATION warning PREPENDED to its summary.
-        # The delivery contract under test is that the child's own output is
-        # returned verbatim in the summary body, not the raw summary shape.
-        assert results[0]["shallow_result"] is True
+        # Trivial narration is not shallow (#102 flags evidence-seeking goals
+        # only). The delivery contract is the child's own output in the summary.
+        assert results[0].get("shallow_result") is not True
         assert results[0]["summary"].endswith("child work done")
 
         # 2) The wedge site must not exist at all: a delegated child

@@ -8,14 +8,19 @@ from hermes_cli.plugins import get_plugin_manager
 from plugins.memory import load_memory_provider
 
 
-def _install(home, monkeypatch, *, label="first", enabled=True):
+def _install(home, monkeypatch, *, label="first", enabled=True, allow_project_hooks=False):
     home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("HERMES_HOME", str(home))
     monkeypatch.setenv("HERMES_BUNDLED_PLUGINS", str(home / "empty"))
     monkeypatch.delenv("HERMES_ENABLE_PROJECT_PLUGINS", raising=False)
     monkeypatch.chdir(home)
+    entries = (
+        '  entries:\n    "project:dual":\n      allow_hooks: true\n'
+        if allow_project_hooks else ""
+    )
     (home / "config.yaml").write_text(
-        f"plugins:\n  enabled: {'[dual]' if enabled else '[]'}\nmemory:\n  provider: dual\n"
+        f"plugins:\n  enabled: {'[dual]' if enabled else '[]'}\n{entries}"
+        "memory:\n  provider: dual\n"
     )
     plugin = home / "plugins" / "dual"
     plugin.mkdir(parents=True)
@@ -78,7 +83,7 @@ def test_same_name_different_sources_are_not_suppressed(tmp_path, monkeypatch):
     import shutil
 
     home = tmp_path / "home"
-    manager = _install(home, monkeypatch)
+    manager = _install(home, monkeypatch, allow_project_hooks=True)
     project = tmp_path / "project"
     source = project / ".hermes" / "plugins" / "dual"
     shutil.copytree(home / "plugins" / "dual", source)

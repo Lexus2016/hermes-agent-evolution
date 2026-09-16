@@ -958,19 +958,22 @@ def _run_single_child(
 
         # Bounded shallow auto-retry (#323). Empty ``messages`` is a synthetic
         # stub (output_schema / finite-batch harnesses), not a real narrative
-        # turn — don't retry those. Prefix when we saw a conversation OR the
-        # goal asked for evidence (the #102 empty-messages fixture).
+        # turn — don't retry those. Retry and the #102 prefix apply only when
+        # the goal asked for evidence a subagent cannot invent; a completion
+        # token / trivial narration is a valid no-tool result (finite chat).
         shallow_retries = 0
         _child_is_orchestrator = getattr(child, "_delegate_role", None) == "orchestrator"
         _had_conversation = bool((result or {}).get("messages") if isinstance(result, dict) else None)
         _schema_raw = getattr(child, "_delegate_output_schema", None)
         _schema_child = isinstance(_schema_raw, dict)
+        _expects_tools = _goal_expects_tools(goal)
         if (
             entry.get("status") == "completed"
             and not entry.get("tool_trace")
             and not _child_is_orchestrator
             and _had_conversation
             and not _schema_child
+            and _expects_tools
         ):
             retry_budget = _get_shallow_retry_budget()
             while shallow_retries < retry_budget and not entry.get("tool_trace"):
@@ -997,7 +1000,7 @@ def _run_single_child(
             entry.get("status") == "completed"
             and not entry.get("tool_trace")
             and not _schema_child
-            and (_had_conversation or _goal_expects_tools(goal))
+            and _expects_tools
         ):
             entry["shallow_result"] = True
             _retry_note = (

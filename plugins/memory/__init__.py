@@ -356,13 +356,43 @@ class _ProviderCollector:
 
     def _plugin_context(self):
         """A real ``PluginContext``, built once on demand: the common provider that only
-        calls ``register_memory_provider`` must not pay for importing the plugin manager."""
+        calls ``register_memory_provider`` must not pay for importing the plugin manager.
+
+        Stamp ``source`` and ``path`` from the provider file so the #1389 hook-trust
+        gate sees a user plugin under ``<HERMES_HOME>/plugins/`` the same way general
+        discovery does. A pathless manifest is ``source=""`` and fails closed.
+        """
         if self._context is None:
             from hermes_cli.plugins import PluginContext, PluginManifest, get_plugin_manager
 
-            manifest = PluginManifest(name=self.name, key=self.name)
+            source, path = _memory_plugin_source_and_path(
+                self._hook_source[1] if self._hook_source else None,
+            )
+            manifest = PluginManifest(name=self.name, key=self.name, source=source, path=path)
             self._context = PluginContext(manifest, get_plugin_manager())
         return self._context
+
+
+def _memory_plugin_source_and_path(source_file: Optional[str]) -> Tuple[str, Optional[str]]:
+    """Classify a memory-provider ``__file__`` the way ``scan_directory`` labels plugins."""
+    if not source_file:
+        return "", None
+    plugin_dir = Path(source_file).resolve().parent
+    path = str(plugin_dir)
+    try:
+        if _is_bundled(plugin_dir):
+            return "bundled", path
+        user_dir = _get_user_plugins_dir()
+        if user_dir:
+            user_root = Path(user_dir).resolve()
+            if plugin_dir == user_root or user_root in plugin_dir.parents:
+                return "user", path
+        project_root = (Path.cwd() / ".hermes" / "plugins").resolve()
+        if plugin_dir == project_root or project_root in plugin_dir.parents:
+            return "project", path
+    except OSError:
+        return "unknown", path
+    return "unknown", path
 
 
 def _get_active_memory_provider() -> Optional[str]:
