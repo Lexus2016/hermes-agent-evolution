@@ -114,6 +114,29 @@ class TestPendingApprovalCronConversion:
         assert parsed["status"] == "blocked"
         assert "Do NOT retry" in parsed.get("error", "")
 
+    def test_cron_tirith_deny_gets_blocked_directive(self, monkeypatch, _cron_env):
+        """#1590: tirith deny (approved=False, not pending_approval) must get
+        the same non-retryable blocked envelope as the ask-mode conversion."""
+        tirith_deny = {
+            "approved": False,
+            "status": "denied",
+            "message": "Command requires approval (tirith:pipe_to_interpreter) "
+            "but no interactive user or gateway is present.",
+            "description": "pipe to interpreter",
+            "pattern_key": "tirith:pipe_to_interpreter",
+            "smart_denied": True,
+            "allow_permanent": False,
+        }
+        with patch.object(terminal_tool, "_check_all_guards", return_value=tirith_deny):
+            result = terminal_tool.terminal_tool(
+                command="gh pr view 1 --json body | python3 -c 'import json,sys; print(json.load(sys.stdin))'",
+            )
+        parsed = json.loads(result)
+        assert parsed["status"] == "blocked"
+        assert "Do NOT retry" in parsed.get("error", "")
+        error = parsed.get("error", "").lower()
+        assert "file/search" in error or "read_file" in error
+
     def test_cron_block_message_mentions_alternative_tools(
         self, monkeypatch, _cron_env
     ):
