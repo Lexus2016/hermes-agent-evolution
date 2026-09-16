@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import logging
+import os
 import time
 from contextlib import contextmanager, suppress
 from pathlib import Path
@@ -439,6 +440,14 @@ class MemoryStore:
             "memory": self._render_block("memory", sanitized_memory),
             "user": self._render_block("user", sanitized_user),
         }
+        # External writers (MCP bridges, hand edits) can exceed the cap; the limit only fires on
+        # add/replace, so the oversized block would silently ride in the prompt while every later
+        # add is refused with no visible cause (#10877). Warn; never truncate a user's memories.
+        for target in ("memory", "user"):
+            if (count := self._char_count(target)) > (limit := self._char_limit(target)):
+                logger.warning("%s exceeds its char limit on load: %d/%d chars. Entries stay loaded; "
+                               "further additions are blocked until it is back under the limit.",
+                               self._path_for(target).name, count, limit)
 
     @staticmethod
     def _sanitize_entries_for_snapshot(
@@ -555,33 +564,44 @@ class MemoryStore:
         TimeoutError with a diagnostic message.
         """
         lock_path = path.with_suffix(path.suffix + ".lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        from tools import memory_tool as _mt  # fcntl/msvcrt live (and are patched) there
+        fcntl, msvcrt = _mt.fcntl, _mt.msvcrt
+        from hermes_constants import mkdir_under_hermes_home
 
+        mkdir_under_hermes_home(lock_path.parent)
         if fcntl is None and msvcrt is None:
             yield
             return
-
-        fd = open(lock_path, "a+", encoding="utf-8")
+        flags = os.O_RDWR | os.O_CREAT
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        raw_fd = os.open(lock_path, flags, 0o600)
         try:
-            if fcntl:
-                MemoryStore._acquire_fcntl_lock(fd)
-            else:
-                fd.seek(0)
-                msvcrt.locking(fd.fileno(), msvcrt.LK_LOCK, 1)
-            yield
-        finally:
-            if fcntl:
-                try:
-                    fcntl.flock(fd, fcntl.LOCK_UN)
-                except (OSError, IOError):
-                    pass
-            elif msvcrt:
-                try:
+            # The creation mode is filtered through the process umask and does
+            # not repair a lock left loose by an older Hermes process. Tighten
+            # the opened inode before acquiring the lock so both cases are
+            # owner-only. Operating on the fd avoids a path-swap window.
+            if hasattr(os, "fchmod"):
+                os.fchmod(raw_fd, 0o600)
+            fd = os.fdopen(raw_fd, "r+", encoding="utf-8")
+        except Exception:
+            os.close(raw_fd)
+            raise
+        with fd:
+            try:
+                if fcntl:
+                    MemoryStore._acquire_fcntl_lock(fd)
+                else:
                     fd.seek(0)
-                    msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
-                except (OSError, IOError):
-                    pass
-            fd.close()
+                    msvcrt.locking(fd.fileno(), msvcrt.LK_LOCK, 1)
+                yield
+            finally:
+                with suppress(OSError, IOError):
+                    if fcntl:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                    elif msvcrt:
+                        fd.seek(0)
+                        msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
 
     @staticmethod
     def _acquire_fcntl_lock(fd, timeout: Optional[float] = None) -> None:
@@ -591,6 +611,8 @@ class MemoryStore:
         exponential backoff (0.05s, 0.1s, 0.2s, ...). Raises TimeoutError
         if the lock isn't acquired within *timeout* seconds.
         """
+        from tools import memory_tool as _mt  # tests patch fcntl here
+        fcntl = _mt.fcntl
         timeout = timeout if timeout is not None else MemoryStore._LOCK_TIMEOUT_SECONDS
         deadline = time.monotonic() + timeout
         wait = 0.05
@@ -717,6 +739,32 @@ class MemoryStore:
             if len(working) <= self.auto_evict_keep_min:
                 return None
             evicted.append(parse_provenance(working.pop(0))[0])
+
+    def _mutate(self, target: str, mutate, *, skip_drift: bool = False) -> Dict[str, Any]:
+        """Lock, re-read from disk, run ``mutate(entries, limit)`` -> ``(new_entries, message)``
+        or an error dict, then persist and return the success response. The reload aborts
+        on an existing-but-unreadable file (even append-only ``add`` rewrites the whole
+        file) and, unless *skip_drift*, on external drift (flushing would discard
+        un-roundtrippable content). Drift check and parse use the SAME raw snapshot —
+        a failed second read used to count as "no drift"."""
+        path = self._path_for(target)
+        with self._file_lock(path):
+            raw, read_ok = self._read_raw_checked(path)
+            if not read_ok:
+                return _read_failed_error(path)
+            bak = None if skip_drift else self._detect_external_drift(target, raw)
+            self._set_entries(target, list(dict.fromkeys(self._parse_entries(raw))))
+            if bak:
+                return _drift_error(path, bak)
+            result = mutate(self._entries_for(target), self._char_limit(target))
+            if isinstance(result, dict):
+                return result
+            self._set_entries(target, result[0])
+            from hermes_constants import mkdir_under_hermes_home
+
+            mkdir_under_hermes_home(path.parent)
+            self._write_file(path, result[0])
+            return self._success_response(target, result[1])
 
     def _evict_replacement_to_fit(
         self,

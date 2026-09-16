@@ -2075,6 +2075,15 @@ LEGACY_AUTHOR_MAP = {
     "zhchl@hermes-agent.local": "8294",  # PR #50572 salvage (honor config context_length on banner)
     "evolution@hermes.ai": "Lexus2016",  # Evolution autonomous agent commits (self-merging PRs)
     "yansh2017@gmail.com": "ya-nsh",  # PR #26790 salvage (normalize local terminal relative cwd; #26783)
+    "declanbatesmith@outlook.com": "cat-thats-fat",  # PR #60489 (desktop: first-run remote connection option)
+    "drbs2004@me.com": "cat-thats-fat",  # PR #60489 (desktop: first-run remote connection option; historical merge email)
+    "huajiang@tubi.tv": "thirstycrow",  # PR #23630 salvage (config-aware memory status labels)
+    "koshaji@gmail.com": "koshaji",  # PR #49832 salvage (OpenViking runtime autostart shutdown drain)
+    "kshitij@kshitij.dev": "kshitijk4poor",
+    "kuangmi@deeparchi.com": "kuangmi-bit",
+    "shady2k@gmail.com": "shady2k",  # PR #60104 salvage of #66143 (MCP loop-owned shutdown drain)
+    "thor753@foxmail.com": "wgd753",  # PR #59454 salvage (OpenViking trusted-mode retry matching)
+    "wangzhe00zju@gmail.com": "flyingdoubleG",  # PR #18166 salvage (memory-provider tools honor disabled_toolsets in initial and MCP-refresh injection)
 }
 
 
@@ -2231,6 +2240,47 @@ def update_version_files(semver: str, calver_date: str):
         )
         desktop_pkg.write_text(pkg_text, encoding="utf-8")
 
+    # Keep the bootstrap installer (Hermes-Setup.dmg CFBundleShortVersionString)
+    # in lockstep with the Python package version. Tauri reads `version` from
+    # package.json + tauri.conf.json; a hardcoded 0.0.1 ships in the DMG.
+    installer_pkg = REPO_ROOT / "apps" / "bootstrap-installer" / "package.json"
+    if installer_pkg.exists():
+        pkg_text = installer_pkg.read_text(encoding="utf-8")
+        pkg_text = re.sub(
+            r'("version"\s*:\s*)"[^"]+"',
+            rf'\g<1>"{semver}"',
+            pkg_text,
+            count=1,
+        )
+        installer_pkg.write_text(pkg_text, encoding="utf-8")
+
+    installer_tauri = (
+        REPO_ROOT / "apps" / "bootstrap-installer" / "src-tauri" / "tauri.conf.json"
+    )
+    if installer_tauri.exists():
+        pkg_text = installer_tauri.read_text(encoding="utf-8")
+        pkg_text = re.sub(
+            r'("version"\s*:\s*)"[^"]+"',
+            rf'\g<1>"{semver}"',
+            pkg_text,
+            count=1,
+        )
+        installer_tauri.write_text(pkg_text, encoding="utf-8")
+
+    installer_cargo = (
+        REPO_ROOT / "apps" / "bootstrap-installer" / "src-tauri" / "Cargo.toml"
+    )
+    if installer_cargo.exists():
+        cargo_text = installer_cargo.read_text(encoding="utf-8")
+        cargo_text = re.sub(
+            r'^version\s*=\s*"[^"]+"',
+            f'version = "{semver}"',
+            cargo_text,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        installer_cargo.write_text(cargo_text, encoding="utf-8")
+
     # Update ACP Registry manifest + npm launcher (must stay version-locked
     # with pyproject — enforced by tests/acp/test_registry_manifest.py).
     _update_acp_registry_versions(semver)
@@ -2294,6 +2344,21 @@ def build_release_artifacts(semver: str) -> list[Path]:
         print("  ⚠ Built artifacts did not match the expected release version.")
         return []
     return matching
+
+
+def version_files_to_stage() -> list[str]:
+    """Return version-bearing files that exist and should be `git add`ed after a bump."""
+    candidates = [
+        VERSION_FILE,
+        PYPROJECT_FILE,
+        REPO_ROOT / "apps" / "desktop" / "package.json",
+        REPO_ROOT / "apps" / "bootstrap-installer" / "package.json",
+        REPO_ROOT / "apps" / "bootstrap-installer" / "src-tauri" / "tauri.conf.json",
+        REPO_ROOT / "apps" / "bootstrap-installer" / "src-tauri" / "Cargo.toml",
+        ACP_REGISTRY_MANIFEST,
+    ]
+    return [str(path) for path in candidates if path.exists()]
+
 
 
 def resolve_author(name: str, email: str) -> str:
@@ -2633,9 +2698,8 @@ def main():
             print(f"  ✓ Updated version files to v{new_version} ({calver_date})")
 
             # Commit version bump
-            add_files = [str(VERSION_FILE), str(PYPROJECT_FILE)]
-            if ACP_REGISTRY_MANIFEST.exists():
-                add_files.append(str(ACP_REGISTRY_MANIFEST))
+            add_files = version_files_to_stage()
+
             add_result = git_result("add", *add_files)
             if add_result.returncode != 0:
                 print(f"  ✗ Failed to stage version files: {add_result.stderr.strip()}")
