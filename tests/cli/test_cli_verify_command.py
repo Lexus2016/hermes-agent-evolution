@@ -82,9 +82,9 @@ class TestHandleVerifyCommand(unittest.TestCase):
         mock_call_llm.return_value = _make_response(_APPROVED_JSON)
         cli = self._make_cli(agent_model="anthropic/claude-opus-4.8")
 
-        with patch.dict(
-            "cli.CLI_CONFIG",
-            {
+        with patch(
+            "hermes_cli.config.load_config",
+            return_value={
                 "auxiliary": {
                     "adversarial_verification": {
                         "provider": "openrouter",
@@ -92,7 +92,6 @@ class TestHandleVerifyCommand(unittest.TestCase):
                     }
                 }
             },
-            clear=False,
         ):
             cli._handle_verify_command()
 

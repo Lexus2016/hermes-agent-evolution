@@ -356,7 +356,14 @@ class SessionPersistenceMixin:
         """
         # Persistence-isolated agents (background review fork) share the parent's session_id for cache warmth;
         # a write here would land the curator's turn in the user's real history.
-        if getattr(self, "_persist_disabled", False) or not self._session_db:
+        if getattr(self, "_persist_disabled", False):
+            return None
+        _guard = getattr(self, "_ensure_session_db_usable", None)
+        if _guard is not None:
+            if not _guard():
+                self._spool_unpersisted_messages_to_jsonl(messages)
+                return None
+        elif not self._session_db:
             return None
         batch_rows: List[Dict[str, Any]] = []
         try:
