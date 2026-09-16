@@ -117,7 +117,7 @@ The cache automatically invalidates stale data based on tool relationships:
 Based on ToolCacheAgent research:
 - **Latency speed-up**: Up to 1.69x faster for repetitive workflows
 - **Cache hit rate**: 50%+ for typical development workflows
-- **Memory overhead**: Configurable, typically <100MB
+- **Memory overhead**: Configurable, typically under 100MB
 
 ## Testing
 
