@@ -2200,7 +2200,7 @@ class TestSystemdCgroupIsolation:
         assert "--scope" in argv
         assert "--unit" in argv
         assert "--" in argv
-        assert argv[-3:] == ["/bin/bash", "-lc", "set +m; codex"]
+        assert argv[-3:] == ["/bin/bash", "-lic", "set +m; codex"]
         assert session.systemd_unit == f"hermes-worker-{session.id}.scope"
 
     @pytest.mark.linux_only

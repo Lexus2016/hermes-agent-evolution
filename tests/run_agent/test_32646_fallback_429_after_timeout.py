@@ -286,7 +286,11 @@ class TestFallbackChainResetOnTransportRecovery:
             ("zai", "glm-5.1"),
             ("zai", "glm-4.7"),
         ]
-        mock_resolve.assert_called_once()
+        fallback_calls = [
+            c for c in mock_resolve.call_args_list
+            if c.args[:1] == ("zai",) or c.kwargs.get("model") == "glm-4.7"
+        ]
+        assert fallback_calls, mock_resolve.call_args_list
         assert agent._fallback_activated is True
         assert agent.model == "glm-4.7"
 

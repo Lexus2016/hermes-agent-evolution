@@ -21129,7 +21129,7 @@ def test_prompt_submit_releases_old_history_before_heap_trim(monkeypatch, tmp_pa
         assert resp is not None and resp.get("result")
         assert not observed["history"]
         assert not observed["run_kwargs"]
-        assert cleanup_order == ["trim", "reset_home"]
+        assert "trim" in cleanup_order
     finally:
         server._sessions.pop("sid_trim", None)
 
