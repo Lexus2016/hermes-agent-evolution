@@ -1760,6 +1760,11 @@ def _should_skip_fallback_candidate(agent, fb: dict, fb_key: tuple, fb_provider:
             "Fallback skip: chain entry %s/%s resolves to the same backend as the current one (%s)",
             fb_provider, fb_model, current_ident.base_url or current_ident.provider)
         return True
+    cooled = getattr(agent, "_rate_limited_providers", None) or {}
+    until = cooled.get(fb_provider, 0)
+    if until and until > time.monotonic():
+        logger.debug("Fallback skip: %s still in rate-limit cooldown", fb_provider)
+        return True
     return False
 
 
@@ -1832,12 +1837,37 @@ def _buffer_fallback_notice(agent, notice: str) -> None:
         agent._pending_fallback_notice = [str(pending), notice] if pending else [notice]
 
 
-def try_activate_fallback(agent, reason: "FailoverReason | None" = None) -> bool:
+def try_activate_fallback(
+    agent,
+    reason: "FailoverReason | None" = None,
+    *,
+    api_error: Optional[Exception] = None,
+) -> bool:
     """Switch to the next fallback model/provider in the chain; False when exhausted. Swaps client,
     model slug and provider in place so the retry loop continues on the new backend; client
     construction goes through resolve_provider_client (no duplicated provider→key mappings)."""
     from agent.fallback_cooldown import _arm_rate_limit_cooldown
     cooldown_seconds = _arm_rate_limit_cooldown(agent, reason)
+    if cooldown_seconds is not None:
+        _until = getattr(agent, "_rate_limited_until", None)
+        headers = getattr(getattr(api_error, "response", None), "headers", None)
+        if headers and hasattr(headers, "get"):
+            raw = headers.get("retry-after") or headers.get("Retry-After")
+            if raw:
+                from agent.retry_utils import extract_retry_after_seconds
+                parsed = extract_retry_after_seconds(raw)
+                if parsed is not None:
+                    cooldown_seconds = max(float(cooldown_seconds), parsed)
+                    _until = time.monotonic() + cooldown_seconds
+                    agent._rate_limited_until = _until
+        if _until is not None:
+            provider = (getattr(agent, "provider", "") or "").strip().lower()
+            if provider:
+                cooled = getattr(agent, "_rate_limited_providers", None)
+                if cooled is None:
+                    cooled = {}
+                    agent._rate_limited_providers = cooled
+                cooled[provider] = _until
     # Structured diagnostic so cron introspection can classify
     # rate-limit/billing events without parsing free-text logs.
     # See issue #514.

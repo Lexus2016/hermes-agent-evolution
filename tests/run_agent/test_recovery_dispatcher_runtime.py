@@ -66,7 +66,7 @@ def _run_failing_call(agent: AIAgent, tool_name: str, result: str, call_id: str)
     tc = _mock_tool_call(tool_name, "{}", call_id)
     msg = SimpleNamespace(content="", tool_calls=[tc])
     messages: list = []
-    with patch("run_agent.handle_function_call", return_value=result):
+    with patch("model_tools.handle_function_call", return_value=result):
         agent._execute_tool_calls_sequential(msg, messages, "task-1")
     return messages
 
@@ -106,6 +106,6 @@ def test_recovery_gate_enabled_is_inert_on_successful_call():
     tc = _mock_tool_call("read_file", "{}", "c-ok")
     msg = SimpleNamespace(content="", tool_calls=[tc])
     messages: list = []
-    with patch("run_agent.handle_function_call", return_value=json.dumps({"content": "hello"})):
+    with patch("model_tools.handle_function_call", return_value=json.dumps({"content": "hello"})):
         agent._execute_tool_calls_sequential(msg, messages, "task-1")
     assert "Recovery strategy" not in messages[0]["content"]

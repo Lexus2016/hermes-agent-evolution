@@ -11405,8 +11405,8 @@
   {
    "facade": "tools.terminal_tool",
    "name": "get_active_env",
-   "kind": "moved-lazy",
-   "target": "tools.terminal_tool_lifecycle"
+   "kind": "restored-def",
+   "target": "(deleted; BASE body restored)"
   },
   {
    "facade": "tools.terminal_tool",

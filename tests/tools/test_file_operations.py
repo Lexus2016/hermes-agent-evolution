@@ -575,10 +575,9 @@ class TestShellFileOpsHelpers:
         # cannot block the read; it still reports a plain byte count.
         assert len(commands) == 1
         probe = commands[0]
-        assert probe.startswith(
-            "if [ -f '/c/Users/alice/notes.txt' ]; "
-            "then wc -c < '/c/Users/alice/notes.txt' 2>/dev/null; "
-        )
+        assert probe.startswith("if [ -f '/c/Users/alice/notes.txt' ]; ")
+        assert "if [ ! -r '/c/Users/alice/notes.txt' ];" in probe
+        assert "wc -c < '/c/Users/alice/notes.txt' 2>/dev/null" in probe
         assert "head -c 1000 '/c/Users/alice/notes.txt' 2>/dev/null | base64" in probe
         assert "sed -n '1,2000p' '/c/Users/alice/notes.txt' 2>/dev/null" in probe
         assert "cut -b1-8001" in probe

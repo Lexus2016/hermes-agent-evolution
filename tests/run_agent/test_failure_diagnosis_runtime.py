@@ -65,7 +65,7 @@ def _run_failing_call(agent, tool_name, result, call_id):
     tc = _mock_tool_call(tool_name, "{}", call_id)
     msg = SimpleNamespace(content="", tool_calls=[tc])
     messages: list = []
-    with patch("run_agent.handle_function_call", return_value=result):
+    with patch("model_tools.handle_function_call", return_value=result):
         agent._execute_tool_calls_sequential(msg, messages, "task-1")
     return messages
 
@@ -104,7 +104,7 @@ def test_diagnosis_inert_on_success():
     tc = _mock_tool_call("web_search", "{}", "c-ok")
     msg = SimpleNamespace(content="", tool_calls=[tc])
     messages: list = []
-    with patch("run_agent.handle_function_call", return_value=json.dumps({"results": ["ok"]})):
+    with patch("model_tools.handle_function_call", return_value=json.dumps({"results": ["ok"]})):
         agent._execute_tool_calls_sequential(msg, messages, "task-1")
     assert "Failure diagnosis" not in messages[0]["content"]
 

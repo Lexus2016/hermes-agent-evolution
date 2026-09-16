@@ -1659,6 +1659,49 @@ def _run_conversation_turn(
     except PreflightCompressionTimedOut as _preflight_timeout_exc:
         return _preflight_timeout_result(agent, _preflight_timeout_exc, conversation_history)
 
+    # #1138 — task-decoupled planning pre-flight. Config-gated (off by default)
+    # and scoped to long-horizon tasks by a trigger heuristic. Never raises.
+    agent._subgoal_dag = None
+    try:
+        from agent.task_decoupling import (
+            decompose_task,
+            load_task_decoupling_config,
+            should_decouple,
+        )
+
+        _td_cfg = load_task_decoupling_config()
+        _td_task = user_message if isinstance(user_message, str) else str(user_message)
+        if should_decouple(_td_task, _td_cfg):
+            agent._subgoal_dag = decompose_task(_td_task)
+    except Exception:
+        agent._subgoal_dag = None
+
+    # #1139 — architecture router pre-flight. Config-gated (off by default):
+    # records the recommended architecture to telemetry without changing how
+    # this turn executes. Never raises.
+    agent._architecture_route = None
+    try:
+        from agent.architecture_router import (
+            RouterTelemetry,
+            load_router_config,
+            maybe_route,
+        )
+
+        _ar_cfg = load_router_config()
+        if _ar_cfg.enabled:
+            if getattr(agent, "_architecture_router_telemetry", None) is None:
+                agent._architecture_router_telemetry = RouterTelemetry()
+            _ar_task = (
+                user_message if isinstance(user_message, str) else str(user_message)
+            )
+            agent._architecture_route = maybe_route(
+                _ar_task,
+                config=_ar_cfg,
+                telemetry=agent._architecture_router_telemetry,
+            )
+    except Exception:
+        agent._architecture_route = None
+
     # Per-turn agent state (the gateway caches agents across turns, so none of this may
     # leak into the next message): interim-commentary dedup spans the whole turn but not
     # the next; a SessionDB append failure (and its classified cause) halts only this turn;
@@ -1803,7 +1846,9 @@ def run_conversation(
                 failed=bool(result.get("failed")),
                 interrupted=bool(result.get("interrupted")),
             )
-        return result
+        from agent.turn_context import export_current_turn_boundary
+        return export_current_turn_boundary(agent, result, user_message)
+
 
 
 def _run_conversation_impl(

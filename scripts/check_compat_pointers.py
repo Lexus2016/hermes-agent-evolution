@@ -23,7 +23,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "compat_manifest.json"
-SKIP_DIRS = {".git", "node_modules", "website", "skills", "optional-skills", "apps", "evals", "build", "MagicMock", ".worktrees", "__pycache__"}
+SKIP_DIRS = {".git", "node_modules", "website", "skills", "optional-skills", "apps", "evals", "build", "MagicMock", ".worktrees", "__pycache__", ".claude"}
 
 
 def _py_files():
@@ -44,6 +44,10 @@ def main() -> int:
     entries = json.loads(MANIFEST.read_text(encoding="utf-8"))["entries"]
     compat: dict[str, set[str]] = {}
     for e in entries:
+        # restored-def names live on the facade itself (sibling deleted, body restored).
+        # Importing them from the facade is the defining-module import, not a pointer.
+        if e.get("kind") == "restored-def":
+            continue
         compat.setdefault(e["facade"], set()).add(e["name"])
     facades = set(compat)
     hits: list[str] = []

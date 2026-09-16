@@ -185,8 +185,9 @@ def unified_search(query: str, sources: List[SkillSource],
                    source_filter: str = "all", limit: int = 10) -> List[SkillMeta]:
     """Search all sources (in parallel) and merge results."""
     import tools.skills_hub as _hub
-    searcher = getattr(_hub, "parallel_search_sources", parallel_search_sources)
-    all_results, _, _ = searcher(sources, query=query, source_filter=source_filter, overall_timeout=30)
+    all_results, _, _ = parallel_search_sources(
+        sources, query=query, source_filter=source_filter, overall_timeout=30
+    )
     # Provider filters target ``extra.provider`` on the merged set, not a source id.
     if source_filter.strip().lower() in _PROVIDER_FILTER_VALUES:
         all_results = _filter_results_by_provider(all_results, source_filter)

@@ -489,6 +489,12 @@ class AIAgent(
         self.session_cost_status = "unknown"
         self.session_cost_source = "none"
 
+        # Session-scoped prompt caches must be re-read at a real session boundary.
+        if hasattr(self, "_experience_block"):
+            self._experience_block = None
+        if hasattr(self, "_erl_block"):
+            self._erl_block = None
+
         # Session boundary: the usage anchor describes the OLD transcript; fall back to full estimation.
         self._usage_anchor = None
         self._turn_base_usage_anchor = None
@@ -502,6 +508,13 @@ class AIAgent(
         self._turn_author = None
         # Copilot x-initiator: True for the first API call of a user turn, False for tool-loop follow-ups.
         self._is_user_initiated_turn = False
+
+        hist = getattr(self, "_api_latency_history", None)
+        if hist is not None:
+            hist.clear()
+        ohist = getattr(self, "_api_output_history", None)
+        if ohist is not None:
+            ohist.clear()
 
         self._transition_context_engine_session(
             old_session_id=old_session_id, new_session_id=getattr(self, "session_id", None),
@@ -1562,6 +1575,67 @@ class AIAgent(
             if streak_halt is not None and streak_halt.code == "identical_call_streak_halt":
                 function_result = append_toolguard_guidance(function_result, streak_halt)
                 self._set_tool_guardrail_halt(streak_halt)
+
+        # Always-on non-retryable diagnostic. Recovery dispatcher is config-gated
+        # OFF by default, so should_retry=False never reaches the model otherwise.
+        if failed and not decision.should_halt:
+            from tools.tool_failure_classifier import (
+                ToolFailureCategory,
+                classify_tool_failure,
+            )
+
+            _exit_code = None
+            if tool_name == "terminal":
+                try:
+                    _parsed = json.loads(function_result)
+                    if isinstance(_parsed, dict) and isinstance(_parsed.get("exit_code"), int):
+                        _exit_code = _parsed["exit_code"]
+                except (ValueError, TypeError):
+                    _exit_code = None
+            _nr = classify_tool_failure(
+                tool_name, function_result, exit_code=_exit_code
+            )
+            if _nr.category in {
+                ToolFailureCategory.persistent_error,
+                ToolFailureCategory.unknown,
+            }:
+                _dd = getattr(self, "_unhandled_drilldown", None)
+                if _dd is not None:
+                    try:
+                        _dd.record(tool_name, function_result or "")
+                    except Exception:
+                        pass
+            if not _nr.should_retry:
+                _nr_line = f"\n\n⚠️ Non-retryable: {_nr.category.value}. {_nr.hint}"
+                if "Non-retryable:" not in function_result:
+                    function_result = function_result + _nr_line
+
+        if failed and getattr(self, "_failure_recovery_enabled", False):
+            from tools.recovery_strategy_dispatcher import (
+                maybe_append_recovery_guidance,
+            )
+
+            function_result = maybe_append_recovery_guidance(
+                function_result,
+                tool_name,
+                failed=True,
+                enabled=True,
+                consecutive_count=decision.count,
+            )
+        if failed and getattr(self, "_failure_diagnosis_mode", "off") != "off":
+            from agent.failure_diagnosis import maybe_append_diagnosis
+
+            _sig = decision.signature
+            _key = _sig.args_hash if _sig is not None else tool_name
+            function_result = maybe_append_diagnosis(
+                function_result,
+                tool_name,
+                failed=True,
+                mode=self._failure_diagnosis_mode,
+                consecutive_count=decision.count,
+                history=getattr(self, "_hypothesis_history", None),
+                history_key=f"{tool_name}:{_key}",
+            )
         if stall_notice:
             function_result = (function_result or "") + "\n\n" + stall_notice
         return function_result
@@ -1755,6 +1829,13 @@ class AIAgent(
             plan = None
         if plan is None:
             return
+        if getattr(self, "_plan_feasibility_enabled", False):
+            try:
+                from agent.plan_feasibility import maybe_validate_plan
+
+                self._plan_feasibility_report = maybe_validate_plan(plan, enabled=True)
+            except Exception:
+                self._plan_feasibility_report = None
         self._active_plan = plan
         self._plan_emitted_for_turn = False
         self._plan_progress = None

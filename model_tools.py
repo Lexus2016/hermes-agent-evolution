@@ -1040,9 +1040,18 @@ def handle_function_call(
             )
 
             if tool_arg_contract_enabled():
-                _contract_err = check_tool_args_contract(function_name, function_args)
-                if _contract_err:
-                    return _emit(tool_error(_contract_err), duration_ms=0, status="error", error_type="ContractViolation", error_message=_contract_err)
+                _contract_outcome = check_tool_args_contract(
+                    function_name, function_args, registry.get_schema(function_name)
+                )
+                if not _contract_outcome.ok:
+                    _contract_error = _contract_outcome.error_message()
+                    result = json.dumps({"error": _contract_error}, ensure_ascii=False)
+                    return _emit(
+                        result,
+                        status="blocked",
+                        error_type="arg_contract_violation",
+                        error_message=_contract_error,
+                    )
         except Exception as _contract_exc:
             logger.debug("Tool-argument contract check error: %s", _contract_exc)
 

@@ -50,7 +50,7 @@ def _trust_gate_check(server_name: str, tool_name: str) -> Optional[str]:
         return None
     gate_label = "SENSITIVE server" if trust == getattr(_core, "_TRUST_SENSITIVE", "sensitive") else "UNTRUSTED server"
     try:
-        from tools.approval import request_elicitation_consent
+        from tools.approval_prompt import request_elicitation_consent
         answer = request_elicitation_consent(
             f"MCP tool '{tool_name}' on {gate_label} '{server_name}' wants to run.",
             f"Server '{server_name}' is configured 'trust: {trust}'. "

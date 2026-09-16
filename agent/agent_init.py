@@ -1037,7 +1037,17 @@ def _init_fallback_chain(agent, fallback_model):
     sync_credential_pool_entry_id(agent)
 
     # Ordered backups tried when the primary is exhausted (legacy single-dict or list).
-    agent._fallback_chain = _fallback_entries(fallback_model)
+    # Constructor arg wins; otherwise load fallback_providers / fallback_model from config.
+    entries = _fallback_entries(fallback_model)
+    if not entries:
+        try:
+            from hermes_cli.config import load_config_readonly
+            from hermes_cli.fallback_config import get_fallback_chain
+
+            entries = get_fallback_chain(load_config_readonly())
+        except Exception:
+            entries = []
+    agent._fallback_chain = entries
     agent._fallback_index = 0
     agent._fallback_activated = getattr(agent, "_fallback_activated", False)
     # Legacy attribute kept for backward compat (tests, external callers)
@@ -1534,15 +1544,15 @@ def _apply_agent_section(agent, _agent_cfg):
     agent._session_activity_last_persist_mono = 0.0
 
     try:
-        _cron_retries = max(int(_agent_section.get("cron_api_max_retries", 5)), 1)
+        _cron_retries = max(int(_agent_section.get("cron_api_max_retries", 15)), 1)
     except (TypeError, ValueError):
-        _cron_retries = 5
+        _cron_retries = 15
     agent._cron_api_max_retries = _cron_retries
 
     try:
         _wall_seconds = max(
             float(_agent_section.get("api_retry_wall_clock_seconds", 300)),
-            10.0,
+            30.0,
         )
     except (TypeError, ValueError):
         _wall_seconds = 300.0
@@ -1551,7 +1561,7 @@ def _apply_agent_section(agent, _agent_cfg):
     try:
         _cron_wall_seconds = max(
             float(_agent_section.get("cron_api_retry_wall_clock_seconds", 600)),
-            10.0,
+            30.0,
         )
     except (TypeError, ValueError):
         _cron_wall_seconds = 600.0

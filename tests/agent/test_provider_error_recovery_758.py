@@ -21,10 +21,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from agent.conversation_loop import (
-    FailoverReason,
     _USER_ACTIONABLE_ABORT_REASONS,
     _user_actionable_provider_guidance,
 )
+from agent.error_classifier import FailoverReason
 from run_agent import AIAgent
 
 

@@ -16,13 +16,13 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
+from tools.delegate_tool_config import MAX_DEPTH
 from tools.delegate_tool import (
     DELEGATE_BLOCKED_TOOLS,
     DELEGATE_TASK_SCHEMA,
     DelegateEvent,
     _get_max_concurrent_children,
     _LEGACY_EVENT_MAP,
-    MAX_DEPTH,
     check_delegate_requirements,
     delegate_task,
     _build_child_agent,
@@ -265,7 +265,8 @@ class TestStripBlockedTools(unittest.TestCase):
         new blocked tool can't silently leak through as a toolset name
         (regression for issue #43466's 'more robust variant' suggestion).
         """
-        from tools.delegate_tool import TOOLSETS, _strip_blocked_tools
+        from toolsets import TOOLSETS
+        from tools.delegate_tool import _strip_blocked_tools
         # Every toolset whose tools are ALL in the blocklist should be stripped
         for name, defn in TOOLSETS.items():
             tools = defn.get("tools", [])

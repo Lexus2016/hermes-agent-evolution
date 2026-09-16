@@ -1973,7 +1973,8 @@ class TestUrlSourceFetchMissingReferencedFile:
 
 def test_search_skills_deduped_sorting():
     """Verify unified_search dedupes entries and sorts by trust level before limit cut."""
-    from tools.skills_hub import SkillMeta, unified_search
+    from tools.skills_hub_models import SkillMeta
+    from tools.skills_hub_search import unified_search
 
     # s3 (community) arrives first, then s1 (community), then duplicate s1 (builtin upgrade), then s2 (trusted)
     results = [
@@ -1984,7 +1985,7 @@ def test_search_skills_deduped_sorting():
     ]
 
     with (
-        patch("tools.skills_hub.parallel_search_sources", return_value=(results, {}, [])),
+        patch("tools.skills_hub_search.parallel_search_sources", return_value=(results, {}, [])),
         patch("tools.skills_hub._record_retrieval") as mock_record,
     ):
         out = unified_search("test", sources=[], limit=2)

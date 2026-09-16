@@ -5,6 +5,7 @@ pieces. The OpenAI client and tool loading are mocked so no network calls
 are made.
 """
 
+import inspect
 import io
 import json
 import logging
@@ -126,9 +127,6 @@ def test_direct_session_db_flushes_share_marker_claim(agent):
             self.token_flushes = 0
             self._lock = threading.Lock()
 
-        def flush_token_counts(self):
-            self.token_flushes += 1
-
         def append_message(self, **kwargs):
             with self._lock:
                 self.calls += 1
@@ -151,6 +149,7 @@ def test_direct_session_db_flushes_share_marker_claim(agent):
 
         def flush_token_counts(self, timeout: float = 5.0) -> bool:
             """Barrier DB stub: token flush is a no-op for the test fixture."""
+            self.token_flushes += 1
             return True
 
     db = _BarrierDB()

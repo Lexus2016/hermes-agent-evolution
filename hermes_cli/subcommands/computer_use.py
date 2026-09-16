@@ -117,9 +117,9 @@ def _cu_browser_approve(args) -> None:
     import subprocess
     from tools.computer_use.cua_backend import (
         cua_driver_child_env,
-        cua_driver_install_hint,
         resolve_cua_driver_cmd,
     )
+    from tools.computer_use.cua_backend_driver import cua_driver_install_hint
     binary = resolve_cua_driver_cmd()
     if not binary:
         print(cua_driver_install_hint())

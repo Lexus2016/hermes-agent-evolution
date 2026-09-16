@@ -22,9 +22,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from agent.conversation_loop import (
-    FailoverReason,
     _user_actionable_provider_guidance,
 )
+from agent.error_classifier import FailoverReason
 from agent.model_preflight import PreflightMiss, check_model
 from run_agent import AIAgent
 
