@@ -187,7 +187,7 @@ class TestTrustGateAtCallTime:
         _set_read_only("srv", "list_repos", True)
         handler = mcp_tool._make_tool_handler("srv", "list_repos", 30.0)
         with patch(
-            "tools.approval.request_elicitation_consent",
+            "tools.approval_prompt.request_elicitation_consent",
             return_value="accept",
         ) as consent:
             raw = handler({})
@@ -200,7 +200,7 @@ class TestTrustGateAtCallTime:
         _set_read_only("srv", "list_repos", True)
         handler = mcp_tool._make_tool_handler("srv", "list_repos", 30.0)
         with patch(
-            "tools.approval.request_elicitation_consent",
+            "tools.approval_prompt.request_elicitation_consent",
             return_value="decline",
         ):
             raw = handler({})

@@ -1761,9 +1761,17 @@ def _should_skip_fallback_candidate(agent, fb: dict, fb_key: tuple, fb_provider:
             fb_provider, fb_model, current_ident.base_url or current_ident.provider)
         return True
     cooled = getattr(agent, "_rate_limited_providers", None) or {}
-    until = cooled.get(fb_provider, 0)
-    if until and until > time.monotonic():
-        logger.debug("Fallback skip: %s still in rate-limit cooldown", fb_provider)
+    now = time.monotonic()
+    has_model_keys = any(
+        isinstance(k, tuple) and k and k[0] == fb_provider for k in cooled
+    )
+    until = (
+        cooled.get((fb_provider, fb_model), 0)
+        if has_model_keys
+        else cooled.get(fb_provider, 0)
+    )
+    if until and until > now:
+        logger.debug("Fallback skip: %s/%s still in rate-limit cooldown", fb_provider, fb_model)
         return True
     return False
 
@@ -1862,12 +1870,16 @@ def try_activate_fallback(
                     agent._rate_limited_until = _until
         if _until is not None:
             provider = (getattr(agent, "provider", "") or "").strip().lower()
+            model = (getattr(agent, "model", "") or "").strip()
             if provider:
                 cooled = getattr(agent, "_rate_limited_providers", None)
                 if cooled is None:
                     cooled = {}
                     agent._rate_limited_providers = cooled
+                # Provider key: tests/legacy inspection. Tuple: skip is per-model
+                # so glm-5.1 429 does not skip glm-4.7 on the same provider.
                 cooled[provider] = _until
+                cooled[(provider, model)] = _until
     # Structured diagnostic so cron introspection can classify
     # rate-limit/billing events without parsing free-text logs.
     # See issue #514.
