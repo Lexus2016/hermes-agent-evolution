@@ -15,6 +15,7 @@ import pytest
 
 from gateway.config import PlatformConfig
 from gateway.delivery_ledger import flood_wait_seconds, is_flood_error
+from gateway.platforms.base import SendResult
 from plugins.platforms.telegram.adapter import _SEND_COOLDOWN_CAP_SECONDS, TelegramAdapter
 
 
@@ -90,3 +91,24 @@ def test_unparsable_wait_does_not_arm_the_gate(adapter):
     adapter._record_send_cooldown("-100999", "not-a-number")
 
     assert adapter._send_cooldown_remaining("-100999") == 0.0
+
+
+@pytest.mark.asyncio
+async def test_rich_flood_refusal_arms_the_gate_too(adapter, monkeypatch):
+    """The rich fast-path returns before the legacy chunk loop, so it must arm the gate itself.
+
+    Rich-eligible content (pipe tables, task lists) is ~6% of final replies in our deployment and
+    skews long — exactly the traffic that must not keep probing an active penalty.
+    """
+    monkeypatch.setattr(TelegramAdapter, "_should_attempt_rich", lambda *_a, **_k: True)
+
+    async def _refuse(*_args, **_kwargs):
+        return SendResult(success=False, error="Flood control exceeded", retry_after=41.0)
+
+    monkeypatch.setattr(TelegramAdapter, "_try_send_rich", _refuse)
+    adapter._bot.send_message = AsyncMock(side_effect=AssertionError("must not reach legacy send"))
+
+    first = await adapter.send("-100777", "| a | b |\n|---|---|\n| 1 | 2 |")
+
+    assert first.success is False
+    assert adapter._send_cooldown_remaining("-100777") > 0, "a rich refusal must arm the cooldown"

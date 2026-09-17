@@ -3606,6 +3606,11 @@ class TelegramAdapter(BasePlatformAdapter):
                 if rich_result is not None:
                     if rich_result.success:
                         await self._retrigger_typing(chat_id, metadata)
+                    elif rich_result.retry_after is not None:
+                        # Rich refusals must arm the gate too, else the hottest content type
+                        # (structured reports — 6% of final replies here, and the long ones) keeps
+                        # probing an active penalty, which is what the gate exists to stop.
+                        self._record_send_cooldown(chat_id, rich_result.retry_after)
                     return rich_result
             # Raw-text chunking (see _chunks_for_send): the boundaries stay content offsets so a
             # partially delivered split reports its undelivered tail. format_message escapes the
