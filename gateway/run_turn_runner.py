@@ -955,7 +955,9 @@ class TurnRunner:
                     stts.on_delta(text)
                     stts.on_delta(None)
             if stream_consumer is not None:
-                stream_consumer.on_segment_break() if already_streamed else stream_consumer.on_commentary(text)
+                # Hand the authoritative text to the break: "already streamed" is a prefix test,
+                # so the consumer may still be holding only part of this message.
+                stream_consumer.on_segment_break(text) if already_streamed else stream_consumer.on_commentary(text)
             elif not already_streamed and ctx._status_adapter and str(text or "").strip():
                 self._send_status_text(text, ctx._status_thread_metadata, "interim_assistant_callback scheduling error")
 

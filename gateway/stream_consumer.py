@@ -40,9 +40,17 @@ logger = logging.getLogger("gateway.stream_consumer")
 # Queue sentinels (see _drain_queue()).  Bare: _DONE, _NEW_SEGMENT (finalize, start a
 # fresh message), _REOPEN_SEED (EAGER native re-seed after a clarify answer — WeCom
 # typing is driven by the seed frame; lazy re-seed measured 48s of dead air).  Tuples:
-# (_COMMENTARY, text); (_TOOL_PROGRESS, line) native-bubble overlay; (_FINAL_TEXT, text)
+# (_NEW_SEGMENT, text) authoritative text of the segment being closed; (_COMMENTARY, text);
+# (_TOOL_PROGRESS, line) native-bubble overlay; (_FINAL_TEXT, text)
 # authoritative final_response incl. post-stream augmentation, queued just before _DONE;
 # (_FLUSH, threading.Event) barrier; (_APPROVAL_BOUNDARY, future, cancelled_flag).
+def _collapse_ws(text: str) -> str:
+    """Whitespace-collapsed form, matching the agent's ``_normalize_interim_visible_text``."""
+    # str.split() collapses every run of whitespace and strips — same result as the agent's
+    # re.sub(r"\s+", " ", …).strip(), without pulling ``re`` into this module.
+    return " ".join(text.split()) if isinstance(text, str) else ""
+
+
 _DONE = object()
 _NEW_SEGMENT = object()
 _COMMENTARY = object()
@@ -198,6 +206,9 @@ class GatewayStreamConsumer(StreamTransportMixin, StreamFallbackMixin, StreamThi
         self._last_sent_text = ""    # skip redundant edits
         self._fallback_final_send = False
         self._fallback_prefix = ""
+        # Authoritative text of a segment break deferred because its message was still streaming;
+        # the break fires once that text has fully landed (see ``_segment_still_streaming``).
+        self._pending_break_text = ""
         # Fallback sends only the missing tail after a partial overflow delivery.
         self._fallback_preserve_partial_messages = False
         self._segment_preview_message_ids: "set[str]" = set()
@@ -364,9 +375,17 @@ class GatewayStreamConsumer(StreamTransportMixin, StreamFallbackMixin, StreamThi
                 *self._delivered_segment_texts)
         return bool(target) and any(sent.strip() == target for sent in seen)
 
-    def on_segment_break(self) -> None:
-        """Finalize the current stream segment and start a fresh message."""
-        self._queue.put(_NEW_SEGMENT)
+    def on_segment_break(self, text: Optional[str] = None) -> None:
+        """Finalize the current stream segment and start a fresh message.
+
+        ``text`` is the authoritative text of the segment being closed, when the caller has it. The
+        caller decides a segment is over from the COMPLETED assistant message while that message's
+        deltas may still be in flight, and its "already streamed" test is a PREFIX match
+        (``agent/stream_delivery.py``), so it is true even when almost none of the text has arrived.
+        Without the text, the segment is sealed holding only that prefix and the rest lands in the
+        next message — which is how one sentence was published split mid-word.
+        """
+        self._queue.put((_NEW_SEGMENT, text) if isinstance(text, str) and text else _NEW_SEGMENT)
 
     def close_for_approval_prompt(
         self, placeholder: str | None = None, reason: str = "Approval", reopen: bool = False,
@@ -647,6 +666,12 @@ class GatewayStreamConsumer(StreamTransportMixin, StreamFallbackMixin, StreamThi
                 tick.got_reopen_seed = True
                 return tick
             kind = item[0] if isinstance(item, tuple) and item else None
+            if kind is _NEW_SEGMENT:
+                # The tuple form carries the authoritative text of the segment being closed.
+                if self._segment_still_streaming(item[1]):
+                    continue  # rest of this message is still in flight; keep draining
+                tick.got_segment_break = True
+                return tick
             if kind is _FINAL_TEXT:
                 self._adopt_final_text(item[1])
             elif kind is _TOOL_PROGRESS:  # keep draining to batch simultaneous lines
@@ -666,6 +691,53 @@ class GatewayStreamConsumer(StreamTransportMixin, StreamFallbackMixin, StreamThi
                 return tick
             else:
                 self._filter_and_accumulate(item)
+                if self._deferred_break_now_due():
+                    tick.got_segment_break = True
+                    return tick
+
+    def _deferred_break_now_due(self) -> bool:
+        """Whether a deferred segment break has become due: its message has fully landed.
+
+        Firing it here rather than waiting for the next boundary is what keeps the FOLLOWING round
+        clean: the break resets the segment, so the next round's text accumulates from empty and its
+        own break is judged against its own text instead of the previous round's.
+        """
+        pending = self._pending_break_text
+        if not pending or not _collapse_ws(self._accumulated).endswith(pending):
+            return False
+        self._pending_break_text = ""
+        return True
+
+    def _segment_still_streaming(self, authoritative: str) -> bool:
+        """Whether this break would seal a message whose own deltas are still arriving.
+
+        The caller decides a segment is over from the COMPLETED assistant message, while its deltas
+        may still be in flight, and its "already streamed" test is a PREFIX match
+        (``agent/stream_delivery.py``) — true even when only a few characters have landed. Sealing
+        then publishes a fragment as a finished message and pushes the remainder into the next one,
+        which is how one sentence appeared split mid-word.
+
+        So the break is DROPPED while what is held is a strict prefix of the authoritative text: the
+        remaining deltas land in the same message, and the next boundary (the following round's
+        break, or the turn's finalize) closes it. Nothing is rewritten here — adopting the text
+        instead would publish the full sentence and then the still-arriving tail a second time.
+
+        Whitespace is collapsed for the comparison so the paragraph break the agent prepends after a
+        tool iteration cannot defeat the match. A divergent segment is a DIFFERENT message, not an
+        incomplete one, so its break is honoured as before.
+        """
+        if not isinstance(authoritative, str) or not authoritative:
+            return False
+        held = _collapse_ws(self._accumulated)
+        if not held:
+            return False  # nothing on screen to keep open
+        norm_auth = _collapse_ws(authoritative)
+        if norm_auth == held or not norm_auth.startswith(held):
+            return False
+        logger.debug("Segment break deferred: holding %d of %d chars, rest still streaming",
+                     len(held), len(norm_auth))
+        self._pending_break_text = norm_auth
+        return True
 
     def _adopt_final_text(self, final_raw: str) -> None:
         """Adopt the authoritative final (see finish()) as the finalize content — only if this
