@@ -1,9 +1,11 @@
 """Delivery routing for cron job outputs and agent responses, by target: explicit ("telegram:123456789"),
 platform home channel ("telegram"), origin (back to where the job was created), or local (files)."""
 
+import contextlib
 import logging
 import os
 import re
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from dataclasses import dataclass
@@ -287,6 +289,72 @@ class DeliveryRouter:
         logger.info("Cron output truncated (%d chars) — full output: %s", len(content), saved_path)
         return content[:max(0, MAX_PLATFORM_OUTPUT - len(footer))] + footer
 
+    @staticmethod
+    def _long_reply_capable(adapter: Any) -> bool:
+        """Whether this adapter can offer the split-or-file choice at all (capability, not platform)."""
+        return callable(getattr(adapter, "send_document", None)) and callable(
+            getattr(adapter, "send_choice_picker", None))
+
+    async def _deliver_as_document(self, adapter: Any, chat_id: str, content: str,
+                                   metadata: Optional[Dict[str, Any]], job_id: str) -> Dict[str, Any]:
+        """Send an over-cap reply as one Markdown file instead of several messages."""
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        tmp_dir = tempfile.mkdtemp(prefix="hermes-report-")
+        # The basename is what the reader sees in their chat, so keep it meaningful.
+        path = Path(tmp_dir) / f"report-{stamp}.md"
+        try:
+            path.write_text(content, encoding="utf-8")
+            caption = f"📄 Report as a file ({len(content):,} characters)."
+            result = await adapter.send_document(
+                chat_id=str(chat_id), file_path=str(path), caption=caption, metadata=metadata)
+            if not getattr(result, "success", False):
+                # Fall back to the normal split delivery rather than losing the report.
+                logger.warning("Document delivery failed (job=%s): %s — falling back to split messages",
+                               job_id, getattr(result, "error", None))
+                return {}
+            return {"success": True, "delivered": True, "as_document": True,
+                    "message_id": getattr(result, "message_id", None)}
+        except Exception as exc:
+            logger.warning("Document delivery raised (job=%s): %s — falling back to split messages",
+                           job_id, exc)
+            return {}
+        finally:
+            with contextlib.suppress(OSError):
+                path.unlink(missing_ok=True)
+                os.rmdir(tmp_dir)
+
+    async def _offer_long_reply_choice(self, adapter: Any, platform: str, chat_id: str,
+                                       metadata: Optional[Dict[str, Any]]) -> None:
+        """Offer the one-time split-or-file choice, after the report itself has been delivered.
+
+        Order matters: the report goes out first, unchanged. Holding a scheduled report until a human
+        taps a button would trade a cosmetic question for a missed delivery, and an unattended chat
+        would never receive it at all.
+        """
+        from gateway import long_reply_pref
+
+        async def _on_choice(_chat_id: str, value: str) -> str:
+            if long_reply_pref.set_preference(platform, str(chat_id), value):
+                return ("📄 Long replies will arrive as a file from now on."
+                        if value == long_reply_pref.DOCUMENT
+                        else "✂️ Long replies will keep arriving as separate messages.")
+            return "Could not save that preference."
+
+        try:
+            long_reply_pref.mark_asked(platform, str(chat_id))
+            await adapter.send_choice_picker(
+                str(chat_id),
+                "That report did not fit one message. How would you like long replies delivered?",
+                [{"value": long_reply_pref.SPLIT, "label": "✂️ Separate messages", "is_current": True},
+                 {"value": long_reply_pref.DOCUMENT, "label": "📄 One file"}],
+                f"long-reply-pref:{platform}:{chat_id}",
+                _on_choice,
+                metadata=metadata,
+            )
+        except Exception as exc:
+            # A failed courtesy prompt must never affect the delivery that already succeeded.
+            logger.debug("Long-reply choice prompt failed (chat=%s): %s", chat_id, exc)
+
     async def _deliver_to_platform(self, target: DeliveryTarget, content: str,
                                    metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Deliver content to a messaging platform."""
@@ -296,6 +364,12 @@ class DeliveryRouter:
         if not target.chat_id:
             raise ValueError(f"No chat ID for {target.platform.value} delivery")
         adapter = transport.adapter
+        # Whether the reply fit ONE message is a property of what the agent produced, so it is read
+        # before _cap_oversized_output, which truncates for adapters that cannot split. The document
+        # path also needs the untruncated text — writing the capped version to a file would ship the
+        # very truncation the file exists to avoid.
+        full_content = content
+        oversized_reply = len(content) > MAX_PLATFORM_OUTPUT
         content = self._cap_oversized_output(adapter, content, (metadata or {}).get("job_id", "unknown"))
 
         # Substrate-level anti-loop guard: drop hallucinated "silence narration" (*(silent)*, 🔇, a bare ".")
@@ -338,6 +412,19 @@ class DeliveryRouter:
                 else:
                     send_metadata["telegram_dm_topic_reply_fallback"] = True
 
+        # Over-cap reply: honour this chat's recorded choice, and offer it once if never asked.
+        # The preference is the reader's, never ours (gateway/long_reply_pref.py).
+        _oversized = oversized_reply and self._long_reply_capable(adapter)
+        _platform_name = target.platform.value
+        if _oversized:
+            from gateway import long_reply_pref
+            if long_reply_pref.get_preference(_platform_name, target.chat_id) == long_reply_pref.DOCUMENT:
+                _doc = await self._deliver_as_document(
+                    adapter, target.chat_id, full_content, send_metadata or None,
+                    (metadata or {}).get("job_id", "unknown"))
+                if _doc:
+                    return _doc
+
         for retry in (False, True):
             result = await transport.send(target.platform, target.chat_id, content, metadata=send_metadata or None)
             error = _send_result_error(result)
@@ -366,4 +453,9 @@ class DeliveryRouter:
                 or f"{target.platform.value} delivery failed — "
                 f"content preserved at {fallback_path}",
             )
+        if _oversized:
+            from gateway import long_reply_pref
+            if not long_reply_pref.was_asked(_platform_name, target.chat_id):
+                await self._offer_long_reply_choice(
+                    adapter, _platform_name, target.chat_id, send_metadata or None)
         return result
