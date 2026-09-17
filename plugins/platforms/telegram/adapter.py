@@ -466,6 +466,8 @@ class TelegramAdapter(BasePlatformAdapter):
         self._rich_send_disabled = self._rich_draft_disabled = False  # latched after a capability failure
         # One in-flight send per chat, so a split message lands contiguously (see _chat_send_lock).
         self._chat_send_locks: Dict[str, asyncio.Lock] = {}
+        # Task holding each chat's gate, so a nested acquire in the same task passes through.
+        self._chat_send_gate_holders: Dict[str, Any] = {}
         # Flood-refused sends: remember the platform's wait per chat so the next send fails closed
         # locally instead of firing another doomed request into an active penalty (see
         # _record_send_cooldown).
@@ -1125,23 +1127,36 @@ class TelegramAdapter(BasePlatformAdapter):
 
     async def _send_with_dm_topic_reply_anchor_retry(
         self, send_fn: Any, send_kwargs: Dict[str, Any], metadata: Optional[Dict[str, Any]],
-        reply_to_message_id: Optional[int], media_label: str, reset_media: Optional[Any] = None) -> Any:
-        """Retry stale private-topic media replies once without the topic anchor."""
+        reply_to_message_id: Optional[int], media_label: str, reset_media: Optional[Any] = None,
+        chat_id: Any = None) -> Any:
+        """Retry stale private-topic media replies once without the topic anchor.
+
+        The single transport funnel for every native media send (documents, video, photos, voice,
+        audio, animations, albums), so it is where media joins the per-chat send gate: without it a
+        file upload could land between two chunks of a text reply, leaving that reply looking
+        unfinished. ``chat_id`` falls back to ``send_kwargs`` for any caller that omits it.
+        """
+        _gate_chat = chat_id if chat_id is not None else send_kwargs.get("chat_id")
+        _gate = await self._acquire_chat_send_gate(_gate_chat) if _gate_chat is not None else False
         try:
-            return await send_fn(**send_kwargs)
-        except Exception as send_err:
-            if not self._should_retry_without_dm_topic_reply_anchor(send_err, metadata, reply_to_message_id):
-                raise
-            logger.warning(
-                "[%s] Reply target deleted for Telegram %s, retrying without reply/topic anchor: %s",
-                self.name, media_label, _redact_telegram_error_text(send_err))
-            if reset_media is not None:
-                reset_media()
-            retry_kwargs = dict(send_kwargs)
-            retry_kwargs["reply_to_message_id"] = None
-            retry_kwargs.pop("message_thread_id", None)
-            retry_kwargs.pop("direct_messages_topic_id", None)
-            return await send_fn(**retry_kwargs)
+            try:
+                return await send_fn(**send_kwargs)
+            except Exception as send_err:
+                if not self._should_retry_without_dm_topic_reply_anchor(send_err, metadata, reply_to_message_id):
+                    raise
+                logger.warning(
+                    "[%s] Reply target deleted for Telegram %s, retrying without reply/topic anchor: %s",
+                    self.name, media_label, _redact_telegram_error_text(send_err))
+                if reset_media is not None:
+                    reset_media()
+                retry_kwargs = dict(send_kwargs)
+                retry_kwargs["reply_to_message_id"] = None
+                retry_kwargs.pop("message_thread_id", None)
+                retry_kwargs.pop("direct_messages_topic_id", None)
+                return await send_fn(**retry_kwargs)
+        finally:
+            if _gate_chat is not None:
+                self._release_chat_send_gate(_gate_chat, _gate)
 
     def _fallback_ips(self) -> list[str]:
         """Return validated fallback IPs from config (populated by _apply_env_overrides)."""
@@ -3564,9 +3579,9 @@ class TelegramAdapter(BasePlatformAdapter):
         if not content or not content.strip():
             return SendResult(success=True, message_id=None)
         error_types = self._telegram_error_types()
-        # Serialize per chat so this message's chunks are not split apart by another sender's.
-        _send_lock = self._chat_send_lock(chat_id)
-        await _send_lock.acquire()
+        # Serialize per chat so this message's chunks are not split apart by another sender's
+        # text OR media (the media funnel takes the same gate).
+        _send_gate = await self._acquire_chat_send_gate(chat_id)
         try:
             # Re-read the cooldown now that the queue has moved: a burst that all passed the gate
             # before queueing must not each fire a doomed request once the first one is refused.
@@ -3623,7 +3638,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 retryable=(self._looks_like_connect_timeout(e) or self._looks_like_pool_timeout(e) or not is_timeout),
                 error_kind=error_kind)
         finally:
-            _send_lock.release()
+            self._release_chat_send_gate(chat_id, _send_gate)
 
     async def send_or_update_status(
         self, chat_id: str, status_key: str, content: str, *, metadata: Optional[Dict[str, Any]] = None) -> SendResult:
@@ -4906,7 +4921,8 @@ class TelegramAdapter(BasePlatformAdapter):
         """Send one native media payload with thread routing + DM-topic anchor retry."""
         reply_to_id, kwargs = self._media_send_kwargs(chat_id, reply_to, metadata)
         return await self._send_with_dm_topic_reply_anchor_retry(
-            send_fn, {**kwargs, **media_kwargs}, metadata, reply_to_id, media_label, reset_media=reset_media)
+            send_fn, {**kwargs, **media_kwargs}, metadata, reply_to_id, media_label,
+            reset_media=reset_media, chat_id=chat_id)
 
     @staticmethod
     def _caption_1024(caption: Optional[str]) -> Optional[str]:
@@ -5052,7 +5068,7 @@ class TelegramAdapter(BasePlatformAdapter):
 
                 await self._send_with_dm_topic_reply_anchor_retry(
                     self._bot.send_media_group, {**send_kwargs, "media": media}, metadata, reply_to_id,
-                    "media group", reset_media=_reset_opened_files)
+                    "media group", reset_media=_reset_opened_files, chat_id=chat_id)
                 delivered = True
             except Exception as e:
                 logger.warning(
@@ -5215,6 +5231,50 @@ class TelegramAdapter(BasePlatformAdapter):
             return True
         return isinstance(exc, (OSError, TimeoutError, ConnectionError, asyncio.TimeoutError))
 
+    @staticmethod
+    def _chat_key(chat_id: Any) -> str:
+        """Canonical per-chat key for the send lock and the flood cooldown.
+
+        Normalized so the text path (raw ``chat_id``) and the media funnel (whose ``send_kwargs``
+        carry the Bot-API-normalized id) resolve to the SAME lock — otherwise the two gates would be
+        different locks and media could still split a reply.
+        """
+        return str(normalize_telegram_chat_id(chat_id))
+
+    async def _acquire_chat_send_gate(self, chat_id: Any) -> bool:
+        """Take this chat's send gate; ``False`` when this task already holds it (nothing to release).
+
+        Reentrant per task because the media paths nest: ``send_voice`` → ``send_document``,
+        ``send_animation`` → ``send_image``, and every ``super().send_*`` fallback can reach
+        ``send()``. ``asyncio.Lock`` is not reentrant, so a second acquire inside one task would
+        deadlock that chat's sends forever — a far worse failure than the interleaving this fixes.
+
+        Scoped to the CURRENT task: a nested send wrapped in ``create_task``/``wait_for`` runs in a
+        different task and would still queue behind the holder. Nothing does that today (the nested
+        paths are plain awaits), and a gated region that spawns a send to its own chat and awaits it
+        would deadlock — don't.
+        """
+        key = self._chat_key(chat_id)
+        if not hasattr(self, "_chat_send_gate_holders"):
+            self._chat_send_gate_holders = {}
+        task = asyncio.current_task()
+        if task is not None and self._chat_send_gate_holders.get(key) is task:
+            return False
+        await self._chat_send_lock(chat_id).acquire()
+        self._chat_send_gate_holders[key] = task
+        return True
+
+    def _release_chat_send_gate(self, chat_id: Any, acquired: bool) -> None:
+        """Release a gate taken by ``_acquire_chat_send_gate``; a no-op for a reentrant pass-through."""
+        if not acquired:
+            return
+        key = self._chat_key(chat_id)
+        if hasattr(self, "_chat_send_gate_holders"):
+            self._chat_send_gate_holders.pop(key, None)
+        lock = self._chat_send_lock(chat_id)
+        if lock.locked():
+            lock.release()
+
     def _chat_send_lock(self, chat_id: str) -> asyncio.Lock:
         """The send lock for one chat: one message at a time, so its chunks land contiguously.
 
@@ -5230,7 +5290,7 @@ class TelegramAdapter(BasePlatformAdapter):
         """
         if not hasattr(self, "_chat_send_locks"):
             self._chat_send_locks = {}
-        key = str(chat_id)
+        key = self._chat_key(chat_id)
         lock = self._chat_send_locks.get(key)
         if lock is None:
             # Prune idle chats first: one entry per chat ever messaged would otherwise accumulate
@@ -5259,7 +5319,7 @@ class TelegramAdapter(BasePlatformAdapter):
             return
         # Capped like the typing cooldown: a bogus or huge wait must not park a chat for hours —
         # the ledger row's own deadline, not this gate, decides when redelivery may run.
-        self._telegram_send_cooldown_until[str(chat_id)] = time.monotonic() + max(
+        self._telegram_send_cooldown_until[self._chat_key(chat_id)] = time.monotonic() + max(
             0.0, min(delay, _SEND_COOLDOWN_CAP_SECONDS) - _SEND_COOLDOWN_SETTLE_SECONDS)
 
     def _send_cooldown_remaining(self, chat_id: str) -> float:
@@ -5267,19 +5327,19 @@ class TelegramAdapter(BasePlatformAdapter):
         if not hasattr(self, "_telegram_send_cooldown_until"):
             self._telegram_send_cooldown_until = {}
             return 0.0
-        until = self._telegram_send_cooldown_until.get(str(chat_id))
+        until = self._telegram_send_cooldown_until.get(self._chat_key(chat_id))
         if until is None:
             return 0.0
         remaining = until - time.monotonic()
         if remaining <= 0:
-            self._telegram_send_cooldown_until.pop(str(chat_id), None)
+            self._telegram_send_cooldown_until.pop(self._chat_key(chat_id), None)
             return 0.0
         return remaining
 
     def _clear_send_cooldown(self, chat_id: str) -> None:
         """Drop this chat's cooldown after a send lands — the penalty is demonstrably over."""
         if hasattr(self, "_telegram_send_cooldown_until"):
-            self._telegram_send_cooldown_until.pop(str(chat_id), None)
+            self._telegram_send_cooldown_until.pop(self._chat_key(chat_id), None)
 
     def _record_typing_cooldown(self, chat_id: str, exc: Exception) -> None:
         """Suppress Telegram typing refreshes for this chat after transient failures."""

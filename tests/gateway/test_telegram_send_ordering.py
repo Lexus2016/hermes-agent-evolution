@@ -121,3 +121,101 @@ async def test_idle_locks_are_pruned():
         adapter._chat_send_lock(f"chat-{i}")
 
     assert len(adapter._chat_send_locks) <= _CHAT_SEND_LOCK_PRUNE_AT
+
+
+# ── media joins the same gate ───────────────────────────────────────────────────
+# Media bypassed the text lock entirely: documents, video, photos, voice and albums all reach
+# Telegram through _send_with_dm_topic_reply_anchor_retry, which took no gate, so a file upload
+# could land between two chunks of a text reply and leave it looking unfinished.
+
+
+class _MixedBot(_OrderRecordingBot):
+    """Records text and document sends in delivery order."""
+
+    async def send_document(self, **_kwargs):
+        self.calls += 1
+        await asyncio.sleep(0)
+        self.order.append("DOC")
+        return SimpleNamespace(message_id=2000 + self.calls)
+
+
+@pytest.fixture
+def temp_file(tmp_path):
+    path = tmp_path / "report.pdf"
+    path.write_bytes(b"x" * 64)
+    return str(path)
+
+
+@pytest.mark.asyncio
+async def test_media_does_not_land_between_text_chunks(temp_file):
+    """A document must not split the reply it accompanies."""
+    adapter = _adapter()
+    adapter._bot = _MixedBot()
+
+    await asyncio.gather(
+        adapter.send("-100777", _REPORT),
+        adapter.send_document("-100777", temp_file, caption="report"))
+
+    order = adapter._bot.order
+    assert order.count("DOC") == 1
+    assert len(order) > 2
+    # One boundary only: the whole text, then the file (or the reverse) — never interleaved.
+    assert _source_switches(order) == 1, f"media split the reply: {order}"
+
+
+@pytest.mark.asyncio
+async def test_media_to_another_chat_is_not_blocked(temp_file):
+    """The gate stays per chat for media too."""
+    adapter = _adapter()
+    adapter._bot = _MixedBot()
+
+    results = await asyncio.gather(
+        adapter.send("-100777", _REPORT),
+        adapter.send_document("-100888", temp_file))
+
+    assert results[1].success is True
+
+
+@pytest.mark.asyncio
+async def test_gate_is_reentrant_within_one_task():
+    """Nested media paths (send_voice -> send_document, super().send_* -> send) must not deadlock.
+
+    asyncio.timeout does not wrap the body in a new task, so this exercises the real same-task
+    nesting the reentrancy is scoped to.
+    """
+    adapter = _adapter()
+
+    async with asyncio.timeout(3):
+        outer = await adapter._acquire_chat_send_gate("-100777")
+        inner = await adapter._acquire_chat_send_gate("-100777")
+
+    assert outer is True
+    assert inner is False, "a nested acquire must pass through, not queue behind itself"
+
+    adapter._release_chat_send_gate("-100777", inner)
+    assert adapter._chat_send_lock("-100777").locked(), "pass-through must not release the gate"
+    adapter._release_chat_send_gate("-100777", outer)
+    assert not adapter._chat_send_lock("-100777").locked()
+
+
+@pytest.mark.asyncio
+async def test_media_funnel_releases_the_gate_when_the_upload_raises():
+    """A failed upload must not wedge the chat."""
+    adapter = _adapter()
+
+    async def _boom(**_kwargs):
+        raise RuntimeError("upload exploded")
+
+    with pytest.raises(RuntimeError):
+        await adapter._send_with_dm_topic_reply_anchor_retry(
+            _boom, {"chat_id": -100777}, None, None, "document", chat_id="-100777")
+
+    assert not adapter._chat_send_lock("-100777").locked()
+
+
+def test_chat_key_is_canonical_across_id_spellings():
+    """The text path passes the raw id, the media funnel the Bot-API-normalized one: same gate."""
+    adapter = _adapter()
+
+    assert adapter._chat_send_lock("-100777") is adapter._chat_send_lock(-100777)
+    assert adapter._chat_key(" -100777 ") == adapter._chat_key(-100777)
