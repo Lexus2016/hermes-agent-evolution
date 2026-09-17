@@ -48,3 +48,99 @@ async def test_edit_overflow_split_reports_later_partial_failure_after_some_cont
     assert result.continuation_message_ids == ("202",)
 
 
+
+
+# ── send() partial split delivery ───────────────────────────────────────────────
+# A payload over MAX_MESSAGE_LENGTH goes out as several messages, so send() is not atomic:
+# a refusal on a later chunk (in production, a flood-control fail-closed) leaves the earlier
+# chunks on screen. Reported as a bare failure, the caller either drops the tail — the reader
+# gets a reply that stops mid-sentence — or re-sends the whole payload and duplicates the
+# visible head. send() must report the partial the same way _edit_overflow_split does.
+
+_SPLIT_BODY = "\n".join(f"line {i} with a few more words here" for i in range(1, 41))
+
+
+def _flood_on_call(n: int, wait: float = 6.0):
+    """send_message side effect: every call succeeds except the ``n``-th, which raises an
+    over-the-inline-cap Telegram flood refusal."""
+    state = {"calls": 0}
+
+    def _side_effect(*_args, **kwargs):
+        state["calls"] += 1
+        if state["calls"] == n:
+            err = RuntimeError("Flood control exceeded. Retry in 6 seconds")
+            err.retry_after = wait
+            raise err
+        return _message(1000 + state["calls"])
+
+    return _side_effect, state
+
+
+@pytest.mark.asyncio
+async def test_send_reports_partial_when_a_later_chunk_is_refused(telegram_adapter):
+    """The head chunks are on screen: say so, and name the undelivered tail."""
+    telegram_adapter._bot.send_message = AsyncMock(side_effect=_flood_on_call(2)[0])
+
+    result = await telegram_adapter.send("12345", _SPLIT_BODY)
+
+    assert result.success is False
+    raw = result.raw_response
+    assert raw["partial_overflow"] is True
+    assert raw["delivered_chunks"] == 1
+    assert raw["total_chunks"] > 1
+    assert raw["last_message_id"] == "1001"
+    assert result.message_id == "1001"  # not None: something IS on screen
+    # The reported halves account for the whole payload, so a resume loses nothing.
+    assert raw["delivered_prefix"] + raw["undelivered_tail"] == _SPLIT_BODY
+    assert result.retry_after == 6.0
+
+
+@pytest.mark.asyncio
+async def test_send_without_a_refusal_reports_no_partial(telegram_adapter):
+    """A fully delivered split stays an ordinary success."""
+    telegram_adapter._bot.send_message = AsyncMock(side_effect=_flood_on_call(0)[0])
+
+    result = await telegram_adapter.send("12345", _SPLIT_BODY)
+
+    assert result.success is True
+    assert "partial_overflow" not in (result.raw_response or {})
+
+
+@pytest.mark.asyncio
+async def test_send_retry_resends_only_the_undelivered_tail(telegram_adapter, monkeypatch):
+    """_send_with_retry must not re-send a head the platform already accepted."""
+    import gateway.platforms.base as base
+
+    monkeypatch.setattr(base.asyncio, "sleep", AsyncMock())
+    side_effect, state = _flood_on_call(2)
+    sent: list[str] = []
+
+    def _record(*_args, **kwargs):
+        result = side_effect(*_args, **kwargs)
+        sent.append(kwargs.get("text", ""))
+        return result
+
+    telegram_adapter._bot.send_message = AsyncMock(side_effect=_record)
+
+    result = await telegram_adapter._send_with_retry(chat_id="12345", content=_SPLIT_BODY)
+
+    assert result.success is True
+    # Every source line lands exactly once — no gap, and no duplicated head.
+    delivered = " ".join(sent)
+    for line in _SPLIT_BODY.splitlines():
+        assert delivered.count(line) == 1, f"{line!r} delivered {delivered.count(line)}x"
+
+
+def test_undelivered_tail_after_partial_ignores_a_whole_message_failure():
+    """Only a reported partial changes what gets resent."""
+    from gateway.platforms.base import undelivered_tail_after_partial
+
+    assert undelivered_tail_after_partial(
+        SendResult(success=False, error="boom"), "abc") is None
+    assert undelivered_tail_after_partial(
+        SendResult(success=False, error="flood", raw_response={"partial_overflow": True,
+                                                              "undelivered_tail": "c"}), "abc") == "c"
+    # No explicit tail: derive it from the delivered prefix.
+    assert undelivered_tail_after_partial(
+        SendResult(success=False, error="flood", raw_response={"partial_overflow": True,
+                                                              "delivered_prefix": "ab"}), "abc") == "c"

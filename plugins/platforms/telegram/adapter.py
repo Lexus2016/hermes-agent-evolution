@@ -157,6 +157,9 @@ _TELEGRAM_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 # machinery (delivery ledger, streaming fallback) owns the wait instead of the coroutine pinning its worker
 # — a 97-minute penalty on the boot path froze inbound on every platform (#91969).
 _FLOOD_INLINE_WAIT_CAP_SECS = 5.0
+# MarkdownV2 escaping of the " (12/34)" chunk indicator adds "\\" before each parenthesis, which
+# truncate_message's own 10-unit reserve does not account for.
+_INDICATOR_ESCAPE_COST = 4
 
 
 def _flood_cap_result(wait: float) -> "SendResult":
@@ -3288,6 +3291,90 @@ class TelegramAdapter(BasePlatformAdapter):
                 return await self._bot.send_message(text=_strip_mdv2(chunk), parse_mode=None, **send_kwargs)
             raise
 
+    def _chunks_for_send(self, content: str) -> "tuple[List[str], List[str]]":
+        """``(raw_chunks, wire_chunks)`` for a ``send()`` payload.
+
+        Chunking the RAW text (the split ``_edit_overflow_split`` already uses) keeps every chunk
+        boundary a *content* offset, so a send that dies after some chunks landed can name its
+        undelivered tail instead of forcing the caller to re-send from chunk 1 — the head chunks are
+        already on screen. ``raw_chunks`` comes back empty when MarkdownV2 escaping inflated a raw
+        chunk past the cap: delivery falls back to chunking the formatted text and only the resume
+        hint is lost.
+        """
+        formatted = self.format_message(content)
+        wire = self.truncate_message(formatted, self.MAX_MESSAGE_LENGTH, len_fn=utf16_len)
+        if len(wire) <= 1:
+            return [content], wire
+        # Split payload: redo the split on the RAW text, discounting the cap by the escaping
+        # inflation measured on this payload so the raw chunks still fit once formatted
+        # (truncate_message already reserves room for the "(1/3)" indicator).
+        raw_len = utf16_len(content) or 1
+        inflation = max(1.0, utf16_len(formatted) / raw_len)
+        # _INDICATOR_ESCAPE_COST: truncate_message reserves 10 units for " (12/34)", but MarkdownV2
+        # escaping turns its parentheses into "\(" / "\)" — 2 units the reserve does not cover.
+        headroom = max(32, self.MAX_MESSAGE_LENGTH - _INDICATOR_ESCAPE_COST)
+        budget = max(32, min(headroom, int(headroom / inflation)))
+        raw_chunks = self.truncate_message(content, budget, len_fn=utf16_len)
+        raw_wire = [_separate_chunk_indicator_from_fence(self.format_message(c)) for c in raw_chunks]
+        if len(raw_chunks) > 1 and all(utf16_len(w) <= self.MAX_MESSAGE_LENGTH for w in raw_wire):
+            return raw_chunks, raw_wire
+        # Escaping is locally denser than the payload average: keep the formatted split, which is
+        # measured against the real cap, and give up the resume hint for this message.
+        return [], [
+            _separate_chunk_indicator_from_fence(re.sub(r" \((\d+)/(\d+)\)$", r" \\(\1/\2\\)", chunk))
+            for chunk in wire
+        ]
+
+    @staticmethod
+    def _split_at_chunk_boundary(
+        content: str, raw_chunks: "List[str]", delivered: int) -> "tuple[str, str]":
+        """``(delivered_prefix, undelivered_tail)`` as exact slices of ``content``.
+
+        Walks the delivered chunk bodies through ``content`` to find the real boundary offset, so
+        the tail keeps the original whitespace (``truncate_message`` drops the leading newline of
+        each chunk, and a fence split injects code-fence markers that are not in ``content``).
+        Falls back to joining the chunk bodies when a chunk cannot be located — a reopened code
+        fence — which costs a newline per seam but never loses text.
+        """
+        bodies = [re.sub(r" \(\d+/\d+\)$", "", chunk) for chunk in raw_chunks]
+        offset = 0
+        for body in bodies[:delivered]:
+            found = content.find(body, offset)
+            if found < 0:
+                return "".join(bodies[:delivered]), "".join(bodies[delivered:])
+            offset = found + len(body)
+        return content[:offset], content[offset:]
+
+    def _partial_send_result(
+        self, failure: SendResult, content: str, raw_chunks: "List[str]", delivered_ids: "List[str]") -> SendResult:
+        """Re-stamp a mid-loop chunk failure with what already landed.
+
+        ``send()`` is not atomic for a split payload: when chunk N is refused (overwhelmingly a
+        flood-control fail-closed) chunks 1..N-1 are already in the chat. Reported as a bare failure
+        the caller either drops the tail — the user reads a reply that stops mid-sentence — or
+        re-sends the whole payload and duplicates the visible head. Same ``partial_overflow``
+        contract ``_edit_overflow_split`` uses, plus ``undelivered_tail`` so the caller can resume.
+        """
+        if not delivered_ids or not raw_chunks or len(delivered_ids) >= len(raw_chunks):
+            return failure
+        delivered = len(delivered_ids)
+        prefix, tail = self._split_at_chunk_boundary(content, raw_chunks, delivered)
+        raw = dict(failure.raw_response) if isinstance(failure.raw_response, dict) else {}
+        raw.update({
+            "partial_overflow": True, "delivered_chunks": delivered, "total_chunks": len(raw_chunks),
+            "last_message_id": delivered_ids[-1], "delivered_prefix": prefix, "undelivered_tail": tail,
+            "continuation_message_ids": tuple(delivered_ids[1:]),
+        })
+        logger.warning(
+            "[%s] Split send stopped at %d/%d chunks; reporting the undelivered tail so the caller "
+            "resumes instead of re-sending the whole reply: %s",
+            self.name, delivered, len(raw_chunks), failure.error)
+        return SendResult(
+            success=False, message_id=delivered_ids[-1], error=failure.error,
+            retryable=failure.retryable, retry_after=failure.retry_after,
+            error_kind=failure.error_kind, raw_response=raw,
+            continuation_message_ids=tuple(delivered_ids[1:]))
+
     async def _send_chunk_with_retries(
         self, chat_id: str, chunk: str, index: int, reply_to: Optional[str], metadata: Optional[Dict[str, Any]],
         thread_id: Optional[str], used_thread_fallback: bool, error_types: tuple):
@@ -3461,14 +3548,11 @@ class TelegramAdapter(BasePlatformAdapter):
                     if rich_result.success:
                         await self._retrigger_typing(chat_id, metadata)
                     return rich_result
-            chunks = self.truncate_message(self.format_message(content), self.MAX_MESSAGE_LENGTH, len_fn=utf16_len)
-            if len(chunks) > 1:
-                # truncate_message appends a raw " (1/2)" suffix; escape the MarkdownV2-special parentheses.
-                chunks = [
-                    _separate_chunk_indicator_from_fence(re.sub(r" \((\d+)/(\d+)\)$", r" \\(\1/\2\\)", chunk))
-                    for chunk in chunks
-               ]
-            message_ids = []
+            # Raw-text chunking (see _chunks_for_send): the boundaries stay content offsets so a
+            # partially delivered split reports its undelivered tail. format_message escapes the
+            # "(1/2)" indicator along with the chunk body.
+            raw_chunks, chunks = self._chunks_for_send(content)
+            message_ids: List[str] = []
             thread_id = self._metadata_thread_id(metadata)
             requested_thread_id = self._message_thread_id_for_send(thread_id)
             used_thread_fallback = False
@@ -3476,7 +3560,8 @@ class TelegramAdapter(BasePlatformAdapter):
                 outcome = await self._send_chunk_with_retries(
                     chat_id, chunk, i, reply_to, metadata, thread_id, used_thread_fallback, error_types)
                 if isinstance(outcome, SendResult):
-                    return outcome
+                    # Head chunks already landed: hand the caller what is left, not a bare failure.
+                    return self._partial_send_result(outcome, content, raw_chunks, message_ids)
                 msg, used_thread_fallback = outcome
                 message_ids.append(str(msg.message_id))
             await self._retrigger_typing(chat_id, metadata)

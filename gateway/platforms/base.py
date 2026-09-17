@@ -1614,6 +1614,27 @@ class SendResult:
     error_kind: Optional[str] = None
 
 
+def undelivered_tail_after_partial(result: "SendResult", sent: str) -> Optional[str]:
+    """The not-yet-delivered remainder of ``sent`` when an adapter reported a PARTIAL split send
+    (``raw_response["partial_overflow"]``), else ``None``.
+
+    A payload over the platform's cap goes out as several messages, so a refusal on a later chunk
+    (typically a flood-control fail-closed) leaves the earlier chunks on screen. Re-sending the
+    whole payload duplicates that visible head; dropping it leaves the reader with a reply that
+    stops mid-sentence. Both are wrong — resend only what this returns.
+    """
+    raw = getattr(result, "raw_response", None)
+    if not (isinstance(raw, dict) and raw.get("partial_overflow")):
+        return None
+    tail = raw.get("undelivered_tail")
+    if isinstance(tail, str) and tail.strip() and tail != sent:
+        return tail
+    prefix = raw.get("delivered_prefix")
+    if isinstance(prefix, str) and prefix and sent.startswith(prefix) and len(prefix) < len(sent):
+        return sent[len(prefix):].lstrip() or None
+    return None
+
+
 # Longest server ``retry_after`` ``_send_with_retry`` will sleep inline. Longer penalties return the
 # typed failure so the delivery ledger owns the wait (#91969: a 97-minute FloodWait slept verbatim
 # pinned the send coroutine and froze inbound on every platform).
@@ -3344,7 +3365,10 @@ class BasePlatformAdapter(ABC):
         failures fall back to a plain-text send, exhausted retries notify the user."""
         async def _send(text: str) -> "SendResult":
             return await self.send(chat_id=chat_id, content=text, reply_to=reply_to, metadata=metadata)
-        result = await _send(content)
+        # A split payload is not delivered atomically: track what is still owed so a retry after a
+        # partial send resends only the tail (see ``undelivered_tail_after_partial``).
+        pending = content
+        result = await _send(pending)
         if result.success or self._send_retry_is_final(result):
             return result
         error_str = result.error or ""
@@ -3386,9 +3410,11 @@ class BasePlatformAdapter(ABC):
                 logger.warning("[%s] Send failed (attempt %d/%d, retrying in %.1fs): %s", self.name,
                                attempt, max_retries, delay, error_str)
                 await asyncio.sleep(delay)
-                result = await _send(content)
+                pending = undelivered_tail_after_partial(result, pending) or pending
+                result = await _send(pending)
                 if result.success:
-                    logger.info("[%s] Send succeeded on retry %d", self.name, attempt)
+                    logger.info("[%s] Send succeeded on retry %d%s", self.name, attempt,
+                                " (undelivered tail only)" if pending != content else "")
                     return result
                 error_str = result.error or ""
                 if self._send_retry_is_final(result):
@@ -3436,7 +3462,8 @@ class BasePlatformAdapter(ABC):
         # rate-limited error never reaches here: it classifies as network above and the
         # loop only breaks on a non-transient, non-rate-limited error.
         logger.warning("[%s] Send failed: %s — trying plain-text fallback", self.name, error_str)
-        fallback_result = await self._send_plain_fallback(chat_id, content, reply_to=reply_to, metadata=metadata)
+        pending = undelivered_tail_after_partial(result, pending) or pending
+        fallback_result = await self._send_plain_fallback(chat_id, pending, reply_to=reply_to, metadata=metadata)
         if not fallback_result.success:
             logger.error("[%s] Fallback send also failed: %s", self.name, fallback_result.error)
         return fallback_result
