@@ -3387,6 +3387,15 @@ class TelegramAdapter(BasePlatformAdapter):
         """
         if not delivered_ids or not raw_chunks or len(delivered_ids) >= len(raw_chunks):
             return failure
+        # Only DEFINITE non-delivery may be reported as resumable. Today every mid-loop
+        # ``SendResult`` is one (flood fail-closed, or a Bot API rejection); an ambiguous timeout
+        # raises instead and never reaches here. Asserted rather than assumed: if a timeout is ever
+        # converted into a returned result, resuming its tail would duplicate a chunk the platform
+        # actually accepted.
+        if self._is_timeout_error(str(failure.error or "")):
+            logger.debug("[%s] Split send failed ambiguously (%s); not reporting a resumable tail",
+                         self.name, failure.error)
+            return failure
         delivered = len(delivered_ids)
         prefix, tail = self._split_at_chunk_boundary(content, raw_chunks, delivered)
         raw = dict(failure.raw_response) if isinstance(failure.raw_response, dict) else {}

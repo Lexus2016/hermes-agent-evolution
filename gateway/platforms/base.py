@@ -1626,6 +1626,12 @@ def undelivered_tail_after_partial(result: "SendResult", sent: str) -> Optional[
     raw = getattr(result, "raw_response", None)
     if not (isinstance(raw, dict) and raw.get("partial_overflow")):
         return None
+    # Resuming is only sound when non-delivery is CERTAIN. A read/write timeout may have been
+    # accepted by the platform after the client gave up (see ``_is_timeout_error``), so treating
+    # its "tail" as owed would duplicate content — the very thing this helper exists to avoid.
+    # Flood refusals and explicit rejections are definite; these are not.
+    if BasePlatformAdapter._is_timeout_error(str(getattr(result, "error", "") or "")):
+        return None
     tail = raw.get("undelivered_tail")
     if isinstance(tail, str) and tail.strip() and tail != sent:
         return tail

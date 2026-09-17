@@ -172,3 +172,43 @@ def test_undelivered_tail_after_partial_ignores_a_whole_message_failure():
     assert undelivered_tail_after_partial(
         SendResult(success=False, error="flood", raw_response={"partial_overflow": True,
                                                               "delivered_prefix": "ab"}), "abc") == "c"
+
+
+def test_ambiguous_failure_is_never_resumed():
+    """A read/write timeout may have been ACCEPTED after the client gave up, so its "tail" is not
+    owed — resuming it would duplicate a chunk the platform actually took.
+
+    Raised by an independent design review of the resume-vs-drop fork: resume is only sound for
+    definite non-delivery (flood refusals, explicit rejections).
+    """
+    from gateway.platforms.base import undelivered_tail_after_partial
+
+    definite = SendResult(
+        success=False, error="flood_control:41.0",
+        raw_response={"partial_overflow": True, "undelivered_tail": "tail"})
+    ambiguous = SendResult(
+        success=False, error="Timed out",
+        raw_response={"partial_overflow": True, "undelivered_tail": "tail"})
+
+    assert undelivered_tail_after_partial(definite, "head tail") == "tail"
+    assert undelivered_tail_after_partial(ambiguous, "head tail") is None
+
+
+@pytest.mark.asyncio
+async def test_send_does_not_report_a_resumable_tail_for_a_timeout(telegram_adapter):
+    """The producer side of the same invariant: no resumable partial for a maybe-landed failure."""
+    state = {"calls": 0}
+
+    def _side_effect(*_args, **kwargs):
+        state["calls"] += 1
+        if state["calls"] == 2:
+            raise TimeoutError("Timed out")
+        return _message(1000 + state["calls"])
+
+    telegram_adapter._bot.send_message = AsyncMock(side_effect=_side_effect)
+
+    result = await telegram_adapter.send("12345", _SPLIT_BODY)
+
+    assert result.success is False
+    raw = result.raw_response or {}
+    assert not raw.get("partial_overflow"), "an ambiguous failure must not advertise a tail"
