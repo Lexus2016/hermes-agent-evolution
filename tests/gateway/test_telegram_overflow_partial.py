@@ -60,6 +60,23 @@ async def test_edit_overflow_split_reports_later_partial_failure_after_some_cont
 _SPLIT_BODY = "\n".join(f"line {i} with a few more words here" for i in range(1, 41))
 
 
+class _FakeClock:
+    """Real ``time`` module, except ``monotonic()`` only moves when a faked sleep says so."""
+
+    def __init__(self, start: float = 1_000.0) -> None:
+        self._now = start
+
+    def advance(self, seconds: float) -> None:
+        self._now += float(seconds)
+
+    def monotonic(self) -> float:
+        return self._now
+
+    def __getattr__(self, name):  # every other time.* stays real
+        import time as _real_time
+        return getattr(_real_time, name)
+
+
 def _flood_on_call(n: int, wait: float = 6.0):
     """send_message side effect: every call succeeds except the ``n``-th, which raises an
     over-the-inline-cap Telegram flood refusal."""
@@ -110,8 +127,19 @@ async def test_send_without_a_refusal_reports_no_partial(telegram_adapter):
 async def test_send_retry_resends_only_the_undelivered_tail(telegram_adapter, monkeypatch):
     """_send_with_retry must not re-send a head the platform already accepted."""
     import gateway.platforms.base as base
+    import plugins.platforms.telegram.adapter as tg
 
-    monkeypatch.setattr(base.asyncio, "sleep", AsyncMock())
+    # Faking the retry sleep means faking the clock with it: the refusal arms a per-chat flood
+    # cooldown for exactly ``wait`` seconds, and _send_with_retry sleeps ``wait`` + jitter, so in
+    # production the retry lands after the cooldown. A mocked sleep that leaves time frozen would
+    # have the retry gated by the penalty it just waited out.
+    clock = _FakeClock()
+    monkeypatch.setattr(tg, "time", clock)
+
+    async def _sleep(seconds, *_args, **_kwargs):
+        clock.advance(seconds)
+
+    monkeypatch.setattr(base.asyncio, "sleep", _sleep)
     side_effect, state = _flood_on_call(2)
     sent: list[str] = []
 

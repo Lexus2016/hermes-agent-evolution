@@ -160,6 +160,15 @@ _FLOOD_INLINE_WAIT_CAP_SECS = 5.0
 # MarkdownV2 escaping of the " (12/34)" chunk indicator adds "\\" before each parenthesis, which
 # truncate_message's own 10-unit reserve does not account for.
 _INDICATOR_ESCAPE_COST = 4
+# Longest flood cooldown the send gate will hold for one chat. Beyond this the gate reopens and lets
+# a send probe the platform again; the delivery ledger's own deadline governs the real wait.
+_SEND_COOLDOWN_CAP_SECONDS = 300.0
+# Idle per-chat send locks are pruned once the map reaches this many entries.
+_CHAT_SEND_LOCK_PRUNE_AT = 512
+# Shaved off a recorded cooldown so a caller that DELIBERATELY waited the penalty out
+# (_send_with_retry sleeps retry_after + jitter) is never gated by scheduling jitter on the way
+# back in. Irrelevant to the gate's purpose: the penalties it absorbs are 9-269s.
+_SEND_COOLDOWN_SETTLE_SECONDS = 0.25
 
 
 def _flood_cap_result(wait: float) -> "SendResult":
@@ -455,6 +464,12 @@ class TelegramAdapter(BasePlatformAdapter):
         self._allow_cjk_rich_messages: bool = self._coerce_bool_extra("allow_cjk_rich_messages", False)
         self._rich_drafts_enabled: bool = self._coerce_bool_extra("rich_drafts", False)
         self._rich_send_disabled = self._rich_draft_disabled = False  # latched after a capability failure
+        # One in-flight send per chat, so a split message lands contiguously (see _chat_send_lock).
+        self._chat_send_locks: Dict[str, asyncio.Lock] = {}
+        # Flood-refused sends: remember the platform's wait per chat so the next send fails closed
+        # locally instead of firing another doomed request into an active penalty (see
+        # _record_send_cooldown).
+        self._telegram_send_cooldown_until: Dict[str, float] = {}
         # Transient sendChatAction failures recur on every keep-typing tick; back off per chat.
         self._telegram_typing_cooldown_until: Dict[str, float] = {}
         self._telegram_typing_cooldown_seconds: float = self._coerce_float_extra(
@@ -3461,6 +3476,7 @@ class TelegramAdapter(BasePlatformAdapter):
                         logger.warning(
                             "[%s] Telegram flood control on send (retry_after=%.1fs > %.0fs); failing closed instead of sleeping: %s",
                             self.name, wait, _FLOOD_INLINE_WAIT_CAP_SECS, safe_send_error)
+                        self._record_send_cooldown(chat_id, wait)
                         return _flood_cap_result(wait)
                     if _send_attempt < 2:
                         logger.warning(
@@ -3476,6 +3492,7 @@ class TelegramAdapter(BasePlatformAdapter):
                         "[%s] Telegram flood control on send persisted across %d attempts; failing "
                         "closed so the delivery ledger owns the wait: %s",
                         self.name, _send_attempt + 1, safe_send_error)
+                    self._record_send_cooldown(chat_id, wait)
                     return _flood_cap_result(wait)
                 raise
 
@@ -3535,11 +3552,29 @@ class TelegramAdapter(BasePlatformAdapter):
         # getattr() — tests build adapters via object.__new__() (no __init__).
         if getattr(self, "_send_path_degraded", False):
             return SendResult(success=False, error="send_path_degraded", retryable=True)
+        # Inside a known flood penalty: refuse locally. The request would be rejected anyway, and
+        # each rejection extends the penalty.
+        _cooldown = self._send_cooldown_remaining(chat_id)
+        if _cooldown > 0:
+            logger.debug("[%s] Send skipped: chat %s still inside a %.1fs flood cooldown",
+                         self.name, chat_id, _cooldown)
+            # Rounded: the wait is echoed into the ledger's ``flood_control:<seconds>`` error text.
+            return _flood_cap_result(round(_cooldown, 1))
         # Skip whitespace-only text to prevent Telegram 400 empty-text errors.
         if not content or not content.strip():
             return SendResult(success=True, message_id=None)
         error_types = self._telegram_error_types()
+        # Serialize per chat so this message's chunks are not split apart by another sender's.
+        _send_lock = self._chat_send_lock(chat_id)
+        await _send_lock.acquire()
         try:
+            # Re-read the cooldown now that the queue has moved: a burst that all passed the gate
+            # before queueing must not each fire a doomed request once the first one is refused.
+            _queued_cooldown = self._send_cooldown_remaining(chat_id)
+            if _queued_cooldown > 0:
+                logger.debug("[%s] Send skipped after queueing: chat %s inside a %.1fs flood cooldown",
+                             self.name, chat_id, _queued_cooldown)
+                return _flood_cap_result(round(_queued_cooldown, 1))
             # Bot API 10.1 rich fast-path; falls through to legacy MarkdownV2 on permanent/capability
             # errors or DM-topic skips; returns directly on success or transient failure (no legacy resend).
             if self._should_attempt_rich(content, metadata=metadata):
@@ -3564,6 +3599,7 @@ class TelegramAdapter(BasePlatformAdapter):
                     return self._partial_send_result(outcome, content, raw_chunks, message_ids)
                 msg, used_thread_fallback = outcome
                 message_ids.append(str(msg.message_id))
+            self._clear_send_cooldown(chat_id)
             await self._retrigger_typing(chat_id, metadata)
             return SendResult(
                 success=True, message_id=message_ids[0] if message_ids else None,
@@ -3586,6 +3622,8 @@ class TelegramAdapter(BasePlatformAdapter):
                 success=False, error=safe_error,
                 retryable=(self._looks_like_connect_timeout(e) or self._looks_like_pool_timeout(e) or not is_timeout),
                 error_kind=error_kind)
+        finally:
+            _send_lock.release()
 
     async def send_or_update_status(
         self, chat_id: str, status_key: str, content: str, *, metadata: Optional[Dict[str, Any]] = None) -> SendResult:
@@ -3708,9 +3746,12 @@ class TelegramAdapter(BasePlatformAdapter):
             retry_after = getattr(e, "retry_after", None)
             if retry_after is not None or "retry after" in err_str:
                 wait = retry_after if retry_after else 1.0
-                logger.warning("[%s] Telegram flood control, waiting %.1fs", self.name, wait)
                 if wait > _FLOOD_INLINE_WAIT_CAP_SECS:
+                    logger.warning(
+                        "[%s] Telegram flood control on edit (retry_after=%.1fs > %.0fs); failing "
+                        "closed instead of sleeping", self.name, wait, _FLOOD_INLINE_WAIT_CAP_SECS)
                     return _flood_cap_result(wait)
+                logger.warning("[%s] Telegram flood control on edit, waiting %.1fs", self.name, wait)
                 await asyncio.sleep(wait)
                 try:
                     await self._edit_text(chat_id, message_id, content)
@@ -5173,6 +5214,72 @@ class TelegramAdapter(BasePlatformAdapter):
         if any(marker in text for marker in ("too many requests", "rate limit", "timed out", "timeout", "temporar")):
             return True
         return isinstance(exc, (OSError, TimeoutError, ConnectionError, asyncio.TimeoutError))
+
+    def _chat_send_lock(self, chat_id: str) -> asyncio.Lock:
+        """The send lock for one chat: one message at a time, so its chunks land contiguously.
+
+        Nothing above the adapter serializes by CHAT — ``gateway/turn_lease.py`` serializes per
+        SESSION — so two sources aimed at the same chat (a cron report and a DM reply, a
+        notification landing mid-turn) interleaved their chunks: two concurrent 3-chunk sends
+        measured as a perfect A-B-A-B-A-B alternation. The reader then sees part 1, an unrelated
+        message, then part 2 — a reply that visibly stops mid-sentence. ``asyncio.Lock`` wakes
+        waiters FIFO, so arrival order survives and no separate queue machinery is needed.
+
+        Held only around the chunk loop: never across ``_wait_for_reconnection``, so a dead
+        transport cannot park every other chat's sends behind it.
+        """
+        if not hasattr(self, "_chat_send_locks"):
+            self._chat_send_locks = {}
+        key = str(chat_id)
+        lock = self._chat_send_locks.get(key)
+        if lock is None:
+            # Prune idle chats first: one entry per chat ever messaged would otherwise accumulate
+            # for the process's lifetime.
+            if len(self._chat_send_locks) >= _CHAT_SEND_LOCK_PRUNE_AT:
+                for idle in [k for k, v in self._chat_send_locks.items() if not v.locked()]:
+                    del self._chat_send_locks[idle]
+            lock = self._chat_send_locks[key] = asyncio.Lock()
+        return lock
+
+    def _record_send_cooldown(self, chat_id: str, wait: float) -> None:
+        """Remember a flood refusal so the next send to this chat fails closed WITHOUT an API call.
+
+        Telegram lengthens a penalty while a bot keeps hammering it, and production does exactly
+        that: of 1,253 flood refusals over four days, most arrive in bursts of 7-14 per second
+        inside ONE penalty window (every wait 9-269s — never the 1-3s a marginal per-second overrun
+        would give). Each of those is a wasted round-trip that also feeds the ban. Same shape as
+        ``_record_typing_cooldown``; the returned result stays ``_flood_cap_result``, so the
+        delivery ledger still owns redelivery once the wait has passed.
+        """
+        if not hasattr(self, "_telegram_send_cooldown_until"):
+            self._telegram_send_cooldown_until = {}
+        try:
+            delay = float(wait)
+        except (TypeError, ValueError):
+            return
+        # Capped like the typing cooldown: a bogus or huge wait must not park a chat for hours —
+        # the ledger row's own deadline, not this gate, decides when redelivery may run.
+        self._telegram_send_cooldown_until[str(chat_id)] = time.monotonic() + max(
+            0.0, min(delay, _SEND_COOLDOWN_CAP_SECONDS) - _SEND_COOLDOWN_SETTLE_SECONDS)
+
+    def _send_cooldown_remaining(self, chat_id: str) -> float:
+        """Seconds left on this chat's flood cooldown (``0.0`` when clear); expired entries drop."""
+        if not hasattr(self, "_telegram_send_cooldown_until"):
+            self._telegram_send_cooldown_until = {}
+            return 0.0
+        until = self._telegram_send_cooldown_until.get(str(chat_id))
+        if until is None:
+            return 0.0
+        remaining = until - time.monotonic()
+        if remaining <= 0:
+            self._telegram_send_cooldown_until.pop(str(chat_id), None)
+            return 0.0
+        return remaining
+
+    def _clear_send_cooldown(self, chat_id: str) -> None:
+        """Drop this chat's cooldown after a send lands — the penalty is demonstrably over."""
+        if hasattr(self, "_telegram_send_cooldown_until"):
+            self._telegram_send_cooldown_until.pop(str(chat_id), None)
 
     def _record_typing_cooldown(self, chat_id: str, exc: Exception) -> None:
         """Suppress Telegram typing refreshes for this chat after transient failures."""
