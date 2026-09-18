@@ -459,10 +459,6 @@ class GatewayStreamConsumer(StreamTransportMixin, StreamFallbackMixin, StreamThi
             with contextlib.suppress(Exception):
                 flush_event.set()
 
-    def _log_segment_close(self, where: str) -> None:
-        logger.info("[segdiag] segment CLOSED via %s: last_sent=%r acc=%r",
-                    where, (self._last_sent_text or "")[-30:], (self._accumulated or "")[-30:])
-
     def _reset_segment_state(self, *, preserve_no_edit: bool = False) -> None:
         if preserve_no_edit and self._message_id == "__no_edit__":
             return
