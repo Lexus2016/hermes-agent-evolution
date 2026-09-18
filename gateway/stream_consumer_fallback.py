@@ -47,16 +47,30 @@ class StreamFallbackMixin:
             prefix = prefix[:-len(self.cfg.cursor)]
         return self._clean_for_display(prefix)
 
+    @staticmethod
+    def _word_safe_cut(final_text: str, cut: int) -> int:
+        """Move ``cut`` back to a word boundary so a continuation cannot start mid-word.
+
+        The continuation is cut at whatever the last successful EDIT put on screen, and edits fire
+        on a throttle tick rather than at a word boundary. When edits then stop working (flood
+        control), the remainder goes out as a fresh message cut at that arbitrary offset, and one
+        word ends up split across two messages — observed in production as 'рядкам' + 'и (мій…'.
+
+        Backing up to the last space or newline re-sends the few characters of the broken word. That
+        overlap reads as a normal continuation; a severed word does not. With no boundary to back up
+        to (one very long token), the original cut stands rather than re-sending the whole message.
+        """
+        if cut <= 0 or cut >= len(final_text) or final_text[cut].isspace():
+            return cut
+        boundary = max(final_text.rfind(" ", 0, cut), final_text.rfind("\n", 0, cut))
+        return boundary + 1 if boundary > 0 else cut
+
     def _continuation_text(self, final_text: str) -> str:
         """Return only the part of final_text the user has not already seen."""
         prefix = self._fallback_prefix or self._visible_prefix()
         if prefix and final_text.startswith(prefix):
-            tail = final_text[len(prefix):].lstrip()
-            # The cut is wherever the last successful EDIT landed — a throttle tick, not a word
-            # boundary — so this is where a sentence can be published split mid-word.
-            logger.info("[segdiag] CONTINUATION cut at %d/%d: prefix_end=%r tail_start=%r",
-                        len(prefix), len(final_text), prefix[-25:], tail[:25])
-            return tail
+            cut = self._word_safe_cut(final_text, len(prefix))
+            return final_text[cut:].lstrip()
         logger.info("[segdiag] continuation: no prefix match (prefix=%d final=%d)",
                     len(prefix or ""), len(final_text))
         return final_text
