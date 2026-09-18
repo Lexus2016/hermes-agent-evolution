@@ -385,6 +385,9 @@ class GatewayStreamConsumer(StreamTransportMixin, StreamFallbackMixin, StreamThi
         Without the text, the segment is sealed holding only that prefix and the rest lands in the
         next message — which is how one sentence was published split mid-word.
         """
+        logger.info("[segdiag] break queued: text=%s held=%d tail=%r",
+                    len(text) if isinstance(text, str) else None,
+                    len(self._accumulated), self._accumulated[-30:])
         self._queue.put((_NEW_SEGMENT, text) if isinstance(text, str) and text else _NEW_SEGMENT)
 
     def close_for_approval_prompt(
@@ -455,6 +458,10 @@ class GatewayStreamConsumer(StreamTransportMixin, StreamFallbackMixin, StreamThi
         if flush_event is not None:
             with contextlib.suppress(Exception):
                 flush_event.set()
+
+    def _log_segment_close(self, where: str) -> None:
+        logger.info("[segdiag] segment CLOSED via %s: last_sent=%r acc=%r",
+                    where, (self._last_sent_text or "")[-30:], (self._accumulated or "")[-30:])
 
     def _reset_segment_state(self, *, preserve_no_edit: bool = False) -> None:
         if preserve_no_edit and self._message_id == "__no_edit__":
@@ -737,6 +744,7 @@ class GatewayStreamConsumer(StreamTransportMixin, StreamFallbackMixin, StreamThi
         logger.debug("Segment break deferred: holding %d of %d chars, rest still streaming",
                      len(held), len(norm_auth))
         self._pending_break_text = norm_auth
+        logger.info("[segdiag] break DEFERRED: held=%d of %d", len(held), len(norm_auth))
         return True
 
     def _adopt_final_text(self, final_raw: str) -> None:

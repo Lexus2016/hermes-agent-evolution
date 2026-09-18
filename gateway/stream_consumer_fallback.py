@@ -297,6 +297,8 @@ class StreamFallbackMixin:
         tail = self._clean_for_display(tail)
         if not tail.strip():
             return
+        logger.info("[segdiag] TAIL SENT as a new message: visible=%r tail=%r",
+                    (visible or "")[-30:], tail[:30])
         try:
             # Interim: must never seal a native stream (see _send_commentary).
             _md = dict(self.metadata) if self.metadata else {}
