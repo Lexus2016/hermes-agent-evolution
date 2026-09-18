@@ -1,0 +1,83 @@
+"""Outbound pacing: stop earning Telegram flood penalties instead of recovering from them.
+
+Three delivery defects in this adapter had the same origin — sending faster than Telegram allows,
+collecting a 9-269 second penalty, and then reconstructing what the reader missed. Reconstruction is
+where replies lost their tail, interleaved, or arrived split mid-word.
+"""
+
+import asyncio
+import time
+
+import pytest
+
+from plugins.platforms.telegram.send_pacer import TelegramSendPacer
+
+
+@pytest.mark.asyncio
+async def test_consecutive_sends_to_one_chat_are_spaced():
+    pacer = TelegramSendPacer(per_chat_interval=0.2, global_rate=1000.0)
+
+    started = time.monotonic()
+    for _ in range(4):
+        await pacer.wait_turn("chat")
+    elapsed = time.monotonic() - started
+
+    # Three gaps between four sends; the first goes immediately.
+    assert elapsed == pytest.approx(0.6, abs=0.15)
+
+
+@pytest.mark.asyncio
+async def test_other_chats_are_not_delayed():
+    """The per-chat limit is per chat: an unrelated conversation must not queue behind one."""
+    pacer = TelegramSendPacer(per_chat_interval=5.0, global_rate=1000.0)
+
+    started = time.monotonic()
+    await asyncio.gather(*(pacer.wait_turn(f"chat-{i}") for i in range(5)))
+
+    assert time.monotonic() - started < 0.2
+
+
+@pytest.mark.asyncio
+async def test_concurrent_sends_to_one_chat_queue_rather_than_burst():
+    """Waiters must not all wake on the same deadline — that would re-create the burst."""
+    pacer = TelegramSendPacer(per_chat_interval=0.2, global_rate=1000.0)
+
+    started = time.monotonic()
+    await asyncio.gather(*(pacer.wait_turn("chat") for _ in range(4)))
+
+    assert time.monotonic() - started == pytest.approx(0.6, abs=0.15)
+
+
+@pytest.mark.asyncio
+async def test_the_global_budget_bursts_then_paces():
+    """Across chats a short burst is allowed, then the rate holds."""
+    pacer = TelegramSendPacer(per_chat_interval=0.0, global_rate=10.0, global_burst=3)
+
+    started = time.monotonic()
+    await asyncio.gather(*(pacer.wait_turn(f"chat-{i}") for i in range(8)))
+    elapsed = time.monotonic() - started
+
+    # Three go at once; the remaining five arrive at ten per second.
+    assert elapsed == pytest.approx(0.5, abs=0.2)
+
+
+@pytest.mark.asyncio
+async def test_pacing_can_be_switched_off():
+    pacer = TelegramSendPacer(per_chat_interval=0.0, global_rate=30.0, global_burst=30)
+
+    assert await pacer.wait_turn("chat") == 0.0
+    assert await pacer.wait_turn("chat") == 0.0
+
+
+@pytest.mark.asyncio
+async def test_idle_chats_are_pruned():
+    """One entry per chat ever messaged must not accumulate for the process's lifetime."""
+    from plugins.platforms.telegram.send_pacer import _PRUNE_AT, _STALE_AFTER_SECONDS
+
+    pacer = TelegramSendPacer(per_chat_interval=0.0, global_rate=1000.0)
+    stale = time.monotonic() - _STALE_AFTER_SECONDS - 1
+    pacer._next_allowed = {f"old-{i}": stale for i in range(_PRUNE_AT)}
+
+    await pacer.wait_turn("fresh")
+
+    assert len(pacer._next_allowed) < _PRUNE_AT

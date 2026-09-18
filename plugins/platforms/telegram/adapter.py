@@ -145,6 +145,7 @@ _UNAUTHORIZED = unauthorized_action_notice(Platform.TELEGRAM)
 
 from gateway.platforms.event import MessageEvent, MessageType, ProcessingOutcome
 from plugins.platforms.telegram.telegram_entities import expand_link_entities
+from plugins.platforms.telegram.send_pacer import TelegramSendPacer
 from plugins.platforms.telegram.telegram_ids import normalize_telegram_chat_id
 from plugins.platforms.telegram.telegram_network import (
     SEED_FALLBACK_IPS, TelegramFallbackTransport, discover_fallback_ips, parse_fallback_ip_env, tcp_keepalive_socket_options)
@@ -464,6 +465,13 @@ class TelegramAdapter(BasePlatformAdapter):
         self._allow_cjk_rich_messages: bool = self._coerce_bool_extra("allow_cjk_rich_messages", False)
         self._rich_drafts_enabled: bool = self._coerce_bool_extra("rich_drafts", False)
         self._rich_send_disabled = self._rich_draft_disabled = False  # latched after a capability failure
+        # Pace outbound sends so we stop EARNING flood penalties: every delivery defect fixed in this
+        # adapter (lost tail, interleaved chunks, mid-word split) began with one. 0 disables pacing.
+        self._send_pacer = TelegramSendPacer(
+            per_chat_interval=self._coerce_float_extra(
+                "send_interval_seconds", 1.05, min_value=0.0, max_value=30.0),
+            global_rate=self._coerce_float_extra(
+                "send_global_rate", 25.0, min_value=0.1, max_value=30.0))
         # One in-flight send per chat, so a split message lands contiguously (see _chat_send_lock).
         self._chat_send_locks: Dict[str, asyncio.Lock] = {}
         # Task holding each chat's gate, so a nested acquire in the same task passes through.
@@ -1139,6 +1147,8 @@ class TelegramAdapter(BasePlatformAdapter):
         _gate_chat = chat_id if chat_id is not None else send_kwargs.get("chat_id")
         _gate = await self._acquire_chat_send_gate(_gate_chat) if _gate_chat is not None else False
         try:
+            if _gate_chat is not None:
+                await self._pace_send(_gate_chat)
             try:
                 return await send_fn(**send_kwargs)
             except Exception as send_err:
@@ -3602,6 +3612,7 @@ class TelegramAdapter(BasePlatformAdapter):
             # Bot API 10.1 rich fast-path; falls through to legacy MarkdownV2 on permanent/capability
             # errors or DM-topic skips; returns directly on success or transient failure (no legacy resend).
             if self._should_attempt_rich(content, metadata=metadata):
+                await self._pace_send(chat_id)
                 rich_result = await self._try_send_rich(chat_id, content, reply_to, metadata)
                 if rich_result is not None:
                     if rich_result.success:
@@ -3621,6 +3632,7 @@ class TelegramAdapter(BasePlatformAdapter):
             requested_thread_id = self._message_thread_id_for_send(thread_id)
             used_thread_fallback = False
             for i, chunk in enumerate(chunks):
+                await self._pace_send(chat_id)
                 outcome = await self._send_chunk_with_retries(
                     chat_id, chunk, i, reply_to, metadata, thread_id, used_thread_fallback, error_types)
                 if isinstance(outcome, SendResult):
@@ -5254,6 +5266,13 @@ class TelegramAdapter(BasePlatformAdapter):
         different locks and media could still split a reply.
         """
         return str(normalize_telegram_chat_id(chat_id))
+
+    async def _pace_send(self, chat_id: Any) -> None:
+        """Hold this send until it fits Telegram's rate budget. Every chunk is its own message, so
+        this is per chunk, not per payload. A no-op on adapters built without ``__init__``."""
+        pacer = getattr(self, "_send_pacer", None)
+        if pacer is not None:
+            await pacer.wait_turn(self._chat_key(chat_id))
 
     async def _acquire_chat_send_gate(self, chat_id: Any) -> bool:
         """Take this chat's send gate; ``False`` when this task already holds it (nothing to release).

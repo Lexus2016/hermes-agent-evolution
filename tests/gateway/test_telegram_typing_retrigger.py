@@ -21,6 +21,12 @@ def _make_adapter():
     adapter._bot = AsyncMock()
     adapter._bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=1))
     adapter._bot.send_chat_action = AsyncMock(return_value=None)
+    # These tests exercise the typing re-arm in isolation, so they need sends to arrive as a BURST.
+    # Outbound pacing (send_pacer.py) deliberately spaces sends about a second apart per chat, which
+    # would stretch a "burst" of twenty into twenty seconds and test nothing about the re-arm. The
+    # pacer has its own tests; the dedup window here is time-based, so its production rate (at most
+    # one action per chat per typing_retrigger_min_interval_seconds) is unaffected by pacing.
+    adapter._send_pacer = None
     return adapter
 
 
