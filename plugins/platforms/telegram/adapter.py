@@ -3611,8 +3611,10 @@ class TelegramAdapter(BasePlatformAdapter):
                 return _flood_cap_result(round(_queued_cooldown, 1))
             # Bot API 10.1 rich fast-path; falls through to legacy MarkdownV2 on permanent/capability
             # errors or DM-topic skips; returns directly on success or transient failure (no legacy resend).
+            _paced_slot = False
             if self._should_attempt_rich(content, metadata=metadata):
                 await self._pace_send(chat_id)
+                _paced_slot = True
                 rich_result = await self._try_send_rich(chat_id, content, reply_to, metadata)
                 if rich_result is not None:
                     if rich_result.success:
@@ -3632,7 +3634,11 @@ class TelegramAdapter(BasePlatformAdapter):
             requested_thread_id = self._message_thread_id_for_send(thread_id)
             used_thread_fallback = False
             for i, chunk in enumerate(chunks):
-                await self._pace_send(chat_id)
+                # A rich attempt that fell through to legacy already reserved this slot; pacing it
+                # again would charge one message twice — a second of latency and a global token
+                # spent on a send that never happened.
+                if i or not _paced_slot:
+                    await self._pace_send(chat_id)
                 outcome = await self._send_chunk_with_retries(
                     chat_id, chunk, i, reply_to, metadata, thread_id, used_thread_fallback, error_types)
                 if isinstance(outcome, SendResult):

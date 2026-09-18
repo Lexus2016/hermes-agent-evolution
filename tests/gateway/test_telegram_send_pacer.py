@@ -81,3 +81,48 @@ async def test_idle_chats_are_pruned():
     await pacer.wait_turn("fresh")
 
     assert len(pacer._next_allowed) < _PRUNE_AT
+
+
+# ── the adapter charges one slot per message that actually goes out ─────────────
+
+@pytest.mark.asyncio
+async def test_a_rich_attempt_that_falls_back_is_paced_once():
+    """A rich send that degrades to legacy is still ONE message, so it costs one slot.
+
+    Pacing sits before the rich fast-path and before each legacy chunk; without a guard, a rich
+    attempt that returns None (capability error, DM-topic skip) charged the message twice — a
+    second of latency and a global token spent on a send that never happened.
+    """
+    import time
+    from types import SimpleNamespace
+
+    from gateway.config import PlatformConfig
+    from plugins.platforms.telegram.adapter import TelegramAdapter
+
+    class _Bot:
+        def __init__(self):
+            self.sent = 0
+
+        async def send_message(self, text=None, **_kwargs):
+            self.sent += 1
+            return SimpleNamespace(message_id=self.sent)
+
+        async def do_api_request(self, *_a, **_k):
+            raise Exception("Method not found: sendRichMessage")
+
+    adapter = TelegramAdapter(
+        PlatformConfig(enabled=True, token="t", extra={"rich_messages": True}))
+    adapter._bot = _Bot()
+    rich_eligible = "| a | b |\n|---|---|\n| 1 | 2 |"
+
+    started = time.monotonic()
+    assert (await adapter.send("-100777", rich_eligible)).success
+    first = time.monotonic() - started
+
+    started = time.monotonic()
+    assert (await adapter.send("-100777", rich_eligible)).success
+    second = time.monotonic() - started
+
+    assert first < 0.3, "the first message must not wait — nothing preceded it"
+    # The second is held by the per-chat interval, proving exactly one slot was charged for the first.
+    assert second == pytest.approx(adapter._send_pacer.per_chat_interval, abs=0.25)
