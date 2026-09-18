@@ -663,6 +663,8 @@ class GatewayStreamConsumer(StreamTransportMixin, StreamFallbackMixin, StreamThi
                 tick.got_done = True
                 return tick
             if item is _NEW_SEGMENT:
+                logger.info("[segdiag] bare break drained: held=%d tail=%r",
+                            len(self._accumulated), self._accumulated[-30:])
                 tick.got_segment_break = True
                 return tick
             if item is _REOPEN_SEED:
@@ -671,7 +673,14 @@ class GatewayStreamConsumer(StreamTransportMixin, StreamFallbackMixin, StreamThi
             kind = item[0] if isinstance(item, tuple) and item else None
             if kind is _NEW_SEGMENT:
                 # The tuple form carries the authoritative text of the segment being closed.
-                if self._segment_still_streaming(item[1]):
+                _deferred = self._segment_still_streaming(item[1])
+                # Measured HERE, not where the break was queued: the producer runs on the agent's
+                # thread and the consumer may have caught up in between, so only this moment says
+                # what is actually sealed.
+                logger.info("[segdiag] break drained: text=%s held=%d deferred=%s tail=%r",
+                            len(item[1]) if isinstance(item[1], str) else None,
+                            len(self._accumulated), _deferred, self._accumulated[-30:])
+                if _deferred:
                     continue  # rest of this message is still in flight; keep draining
                 tick.got_segment_break = True
                 return tick
