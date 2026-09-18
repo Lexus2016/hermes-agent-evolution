@@ -500,6 +500,11 @@ class StreamTransportMixin:
 
     def _enter_fallback_mode(self, prefix: str) -> None:
         """Edits are over for this stream: send only the missing tail at got_done."""
+        # Entering this mode is what makes _continuation_text the delivery path, so record WHY and
+        # what the reader is left holding.
+        logger.info("[segdiag] FALLBACK MODE entered: prefix=%d strikes=%s edit_supported=%s end=%r",
+                    len(prefix or ""), getattr(self, "_flood_strikes", None),
+                    getattr(self, "_edit_supported", None), (prefix or "")[-25:])
         self._fallback_prefix = prefix
         self._fallback_final_send = True
         self._edit_supported = False

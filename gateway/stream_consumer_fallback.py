@@ -51,7 +51,14 @@ class StreamFallbackMixin:
         """Return only the part of final_text the user has not already seen."""
         prefix = self._fallback_prefix or self._visible_prefix()
         if prefix and final_text.startswith(prefix):
-            return final_text[len(prefix):].lstrip()
+            tail = final_text[len(prefix):].lstrip()
+            # The cut is wherever the last successful EDIT landed — a throttle tick, not a word
+            # boundary — so this is where a sentence can be published split mid-word.
+            logger.info("[segdiag] CONTINUATION cut at %d/%d: prefix_end=%r tail_start=%r",
+                        len(prefix), len(final_text), prefix[-25:], tail[:25])
+            return tail
+        logger.info("[segdiag] continuation: no prefix match (prefix=%d final=%d)",
+                    len(prefix or ""), len(final_text))
         return final_text
 
     @staticmethod
