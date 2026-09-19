@@ -792,8 +792,17 @@ class GatewayStreamConsumer(StreamTransportMixin, StreamFallbackMixin, StreamThi
                                or len(self._accumulated) >= self.cfg.buffer_threshold)
         # Defer mid-stream edits while the buffer could still resolve to a silence
         # marker ("NO"→"NO_REPLY"); got_done always resolves the buffer.
-        return should_edit and not _is_partial_silence_marker(
-            self._clean_for_display(self._accumulated))
+        if not (should_edit and not _is_partial_silence_marker(
+                self._clean_for_display(self._accumulated))):
+            return False
+        # Interim previews also spend the platform's rate budget, so ask before spending it. A
+        # refusal SKIPS this preview — the next tick shows the same text plus whatever arrived — and
+        # the final edit never reaches here (non-interim ticks returned True above).
+        try:
+            return bool(self.adapter.reserve_stream_edit_slot(self.chat_id))
+        except Exception:
+            logger.debug("reserve_stream_edit_slot failed; allowing the edit", exc_info=True)
+            return True
 
     async def _split_first_send(self, tick: "_Tick") -> bool:
         """No message to edit yet and the buffer overflows: seal only the head chunks; the

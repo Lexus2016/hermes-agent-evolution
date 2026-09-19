@@ -91,6 +91,26 @@ class TelegramSendPacer:
         await asyncio.sleep(wait)
         return wait
 
+    def try_slot(self, chat_key: str) -> bool:
+        """Take a slot if one is free right now; never waits. ``False`` means "skip this one".
+
+        Streaming EDITS use this rather than ``wait_turn``: an edit is a preview of text the next
+        tick will show anyway, so delaying it buys nothing and skipping it costs nothing. Sends must
+        wait instead — skipping one would drop a message.
+
+        Telegram counts edits and sends against the SAME per-chat allowance, so both go through this
+        one budget. Two independent throttles (0.8s for edits, ~1s for sends) added up to more than
+        two messages a second to one chat, which is what kept earning the penalties.
+        """
+        now = time.monotonic()
+        self._prune_locked(now)
+        self._refill_locked(now)
+        if self._next_allowed.get(chat_key, 0.0) > now or self._tokens < 1.0:
+            return False
+        self._tokens -= 1.0
+        self._next_allowed[chat_key] = now + self.per_chat_interval
+        return True
+
     def state(self) -> dict:
         """Read-only snapshot for diagnostics."""
         return {"per_chat_interval": self.per_chat_interval, "global_rate": self.global_rate,

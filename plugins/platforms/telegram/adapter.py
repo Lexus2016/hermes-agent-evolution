@@ -1378,6 +1378,11 @@ class TelegramAdapter(BasePlatformAdapter):
         return bool(
             getattr(self, "_rich_messages_enabled", True) and not getattr(self, "_rich_send_disabled", False) and self._bot_supports_rich())
 
+    def reserve_stream_edit_slot(self, chat_id: str) -> bool:
+        """Edits share the per-chat budget with sends — Telegram counts them together."""
+        pacer = getattr(self, "_send_pacer", None)
+        return True if pacer is None else pacer.try_slot(self._chat_key(chat_id))
+
     def streaming_overflow_limit(self) -> Optional[int]:
         """Let the stream consumer accumulate up to the rich cap so a reply that fits one sendRichMessage
         isn't fragmented at 4,096. None (→ legacy limit) if rich is unavailable."""

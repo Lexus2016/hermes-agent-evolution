@@ -1995,6 +1995,12 @@ class BasePlatformAdapter(ABC):
         deleting the preview) instead of final-editing it (Telegram: keeps rich rendering)."""
         return False
 
+    def reserve_stream_edit_slot(self, chat_id: str) -> bool:
+        """Whether a streaming preview edit may go out now, under whatever rate budget this
+        platform keeps. ``True`` (no budget) unless an adapter overrides it. Interim previews only —
+        the final edit is never gated, because skipping it would withhold the answer."""
+        return True
+
     def streaming_overflow_limit(self) -> Optional[int]:
         """Max single-message length (``message_len_fn`` units) the stream consumer may
         accumulate before splitting, for rich send/draft paths exceeding the legacy cap

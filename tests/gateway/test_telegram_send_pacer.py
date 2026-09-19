@@ -126,3 +126,44 @@ async def test_a_rich_attempt_that_falls_back_is_paced_once():
     assert first < 0.3, "the first message must not wait — nothing preceded it"
     # The second is held by the per-chat interval, proving exactly one slot was charged for the first.
     assert second == pytest.approx(adapter._send_pacer.per_chat_interval, abs=0.25)
+
+
+# ── edits share the budget with sends ───────────────────────────────────────────
+# Telegram counts an edit against the same per-chat allowance as a send. Keeping two independent
+# throttles (0.8s for streaming edits, ~1s for sends) let one chat receive more than two messages a
+# second, which is what kept earning the penalties that broke replies apart.
+
+def test_an_edit_over_budget_is_skipped_not_delayed():
+    """A preview edit shows text the next tick shows anyway: skipping costs nothing, waiting does."""
+    pacer = TelegramSendPacer(per_chat_interval=1.0, global_rate=1000.0)
+
+    allowed = [pacer.try_slot("chat") for _ in range(5)]
+
+    assert allowed.count(True) == 1
+    assert allowed.count(False) == 4
+
+
+@pytest.mark.asyncio
+async def test_a_send_and_an_edit_draw_on_one_budget():
+    pacer = TelegramSendPacer(per_chat_interval=1.0, global_rate=1000.0)
+
+    await pacer.wait_turn("chat")
+
+    assert pacer.try_slot("chat") is False, "an edit must not slip past a send's slot"
+    assert pacer.try_slot("other") is True, "the budget is per chat"
+
+
+def test_the_slot_frees_after_the_interval():
+    pacer = TelegramSendPacer(per_chat_interval=0.05, global_rate=1000.0)
+
+    assert pacer.try_slot("chat") is True
+    assert pacer.try_slot("chat") is False
+    time.sleep(0.06)
+    assert pacer.try_slot("chat") is True
+
+
+def test_adapters_without_a_budget_never_gate_edits():
+    """The consumer asks every adapter; the base answer must not throttle anyone."""
+    from gateway.platforms.base import BasePlatformAdapter
+
+    assert BasePlatformAdapter.reserve_stream_edit_slot(object(), "chat") is True
