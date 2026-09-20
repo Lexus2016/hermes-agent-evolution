@@ -407,8 +407,9 @@ class SubagentLifecycleService:
             raise SubagentLifecycleError("metadata exceeds 8192 bytes.")
         if not request.allowed_toolsets:
             return
-        from toolsets import TOOLSETS
-        unknown = set(request.allowed_toolsets) - set(TOOLSETS)
+        from toolsets import TOOLSETS, _get_plugin_toolset_names
+
+        unknown = set(request.allowed_toolsets) - set(TOOLSETS) - _get_plugin_toolset_names()
         if unknown:
             raise SubagentLifecycleError(f"Unknown toolsets: {', '.join(sorted(unknown))}.")
         enabled = getattr(parent, "enabled_toolsets", None)

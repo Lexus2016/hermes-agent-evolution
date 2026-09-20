@@ -149,6 +149,21 @@ class TestValidateToolset:
     def test_invalid(self):
         assert validate_toolset("nonexistent") is False
 
+    def test_plugin_toolset_valid(self, monkeypatch):
+        """A toolset registered only by a plugin validates once discovery has run."""
+        reg = ToolRegistry()
+        reg.register(
+            name="plug__ping",
+            toolset="plug",
+            schema=_make_schema("plug__ping", "Ping"),
+            handler=_dummy_handler,
+        )
+        monkeypatch.setattr("tools.registry.registry", reg)
+
+        assert "plug" not in TOOLSETS
+        assert validate_toolset("plug") is True
+        assert "plug" in toolsets_mod.get_toolset_names()
+
     def test_mcp_alias_uses_live_registry(self, monkeypatch):
         reg = ToolRegistry()
         reg.register(
