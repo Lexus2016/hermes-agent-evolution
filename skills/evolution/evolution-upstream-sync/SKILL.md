@@ -1,7 +1,7 @@
 ---
 name: evolution-upstream-sync
 description: Merge upstream Hermes release tags into the fork.
-version: 3.0.0
+version: 3.1.0
 author: Hermes Evolution
 license: MIT
 platforms: [linux, macos, windows]
@@ -102,9 +102,14 @@ git merge-base --is-ancestor "$C" upstream/main \
 ```
 
 Resolution rules:
+
+**Owner rule (2026-09-28):** when our change and upstream's change disagree and
+ours is the better fix, keep ours. Do not replace a better fork fix with
+upstream's text just because upstream edited the same lines.
+
 - **Upstream-domain files we don't customize** (`apps/desktop/**`, `ui-tui/**`,
   `web/**`, platforms we don't run): take upstream — `git checkout --theirs <f>`.
-  These must always be current.
+  These must always be current. We have no better local fix there.
 - **Trivial conflicts are NOT a reason to escalate** — auto-resolve by taking
   upstream: generated/published artifacts (e.g. `website/static/api/model-catalog.json`
   — handled by the merge driver above so it shouldn't even appear), pure
@@ -119,9 +124,13 @@ Resolution rules:
   FOLLOW the revert — drop it. It is NOT our feature; we forked before the revert.
   (Example: per-job cron profile, added by upstream then reverted in #43956 — we
   correctly dropped it.)
-- **Our fix vs upstream's fix for the same bug**: prefer upstream's current
-  approach unless ours is demonstrably more correct AND has a test proving it.
-  If we keep ours, the divergence must be deliberate and documented.
+- **Our fix vs upstream's fix for the same bug**: keep the better fix. If ours
+  is better, keep ours. If upstream's is better, take upstream. If both are
+  needed, keep both. Better means more correct for this fork: it fixes the
+  bug, preserves evolution behaviour we still rely on, and does not drop the
+  other side's unrelated improvement. Record the choice and why in the sync
+  report. A test that shows our fix is the evidence when one exists. A missing
+  test is not a reason to discard a better fork fix.
 - **Generated artifacts** (`website/static/api/model-catalog.json`): take upstream
   then regenerate from our source (`python scripts/build_model_catalog.py`).
 - **`uv.lock`**: after resolving `pyproject.toml`, run `uv lock` so it matches; CI
@@ -177,7 +186,7 @@ git commit -m "Merge upstream release $LR into fork — sync (<BEHIND> commits)"
 git push origin sync/upstream-release-$LR
 gh pr create --base main --head sync/upstream-release-$LR \
   --title "[UPSTREAM] Sync upstream release $LR (<BEHIND> commits)" \
-  --body "git merge $LR (latest upstream release). Conflicts resolved authorship-first (keep ours, follow upstream incl. reverts). See sync report."
+  --body "git merge $LR (latest upstream release). Conflicts resolved authorship-first (keep ours when ours is the better fix, follow upstream on files we do not customise and on upstream reverts). See sync report."
 ```
 
 - Merge into `main` only after **green CI** (`tests.yml` 6 shards + `lint.yml` +
