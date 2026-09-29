@@ -2,9 +2,7 @@
 
 These tests exercise end-to-end flows through the webhook adapter:
 1. GitHub PR webhook → agent MessageEvent created
-2. Skills config injects skill content into the prompt
-3. Cross-platform delivery routes to a mock Telegram adapter
-4. GitHub comment delivery invokes ``gh`` CLI (mocked subprocess)
+2. Cross-platform delivery routes to a mock Telegram adapter
 """
 
 import asyncio
@@ -308,84 +306,6 @@ class TestCrossPlatformDelivery:
         assert result.success is True
         mock_tg_adapter.send.assert_awaited_once_with(
             "12345", "I've acknowledged the alert.", metadata=None
-        )
-        # Delivery info is retained after send() so interim status messages
-        # don't strand the final response (TTL-based cleanup happens on POST).
-        assert chat_id in adapter._delivery_info
-
-
-# ===================================================================
-# Test 4: GitHub comment delivery via gh CLI
-# ===================================================================
-
-class TestGitHubCommentDelivery:
-
-    @pytest.mark.asyncio
-    async def test_github_comment_delivery(self):
-        """When deliver='github_comment', the adapter invokes
-        ``gh pr comment`` via subprocess.run (mocked)."""
-        routes = {
-            "pr-bot": {
-                "secret": _INSECURE_NO_AUTH,
-                "prompt": "Review: {pull_request.title}",
-                "deliver": "github_comment",
-                "deliver_extra": {
-                    "repo": "{repository.full_name}",
-                    "pr_number": "{number}",
-                },
-            }
-        }
-        adapter = _make_adapter(routes)
-        adapter.handle_message = AsyncMock()
-
-        # POST a webhook to set up delivery info
-        app = _create_app(adapter)
-        async with TestClient(TestServer(app)) as cli:
-            resp = await cli.post(
-                "/webhooks/pr-bot",
-                json=GITHUB_PR_PAYLOAD,
-                headers={
-                    "X-GitHub-Event": "pull_request",
-                    "X-GitHub-Delivery": "gh-comment-001",
-                },
-            )
-            assert resp.status == 202
-
-        chat_id = "webhook:pr-bot:gh-comment-001"
-        assert chat_id in adapter._delivery_info
-
-        # Verify deliver_extra was rendered with payload data
-        delivery = adapter._delivery_info[chat_id]
-        assert delivery["deliver_extra"]["repo"] == "org/repo"
-        assert delivery["deliver_extra"]["pr_number"] == "42"
-
-        # Mock subprocess.run and call send()
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "Comment posted"
-        mock_result.stderr = ""
-
-        with patch(
-            "gateway.platforms.webhook.subprocess.run",
-            return_value=mock_result,
-        ) as mock_run:
-            result = await adapter.send(
-                chat_id, "LGTM! The code looks great."
-            )
-
-        assert result.success is True
-        mock_run.assert_called_once_with(
-            [
-                "gh", "pr", "comment", "42",
-                "--repo", "org/repo",
-                "--body", "LGTM! The code looks great.",
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-            env=None,
         )
         # Delivery info is retained after send() so interim status messages
         # don't strand the final response (TTL-based cleanup happens on POST).

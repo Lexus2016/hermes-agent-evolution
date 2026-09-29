@@ -12,7 +12,6 @@ and query helpers for autonomous long-horizon runs.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-import fcntl
 import hashlib
 import json
 import os
@@ -26,6 +25,15 @@ from hermes_constants import get_hermes_home
 
 DEFAULT_RETENTION_DAYS = 90
 _GENESIS = "genesis"
+
+
+def _flock(fh, exclusive: bool) -> None:
+    """Best-effort exclusive lock. fcntl does not exist on Windows."""
+    if os.name == "nt":
+        return
+    import fcntl
+
+    fcntl.flock(fh, fcntl.LOCK_EX if exclusive else fcntl.LOCK_UN)
 
 WRITE_TOOLS = {
     "write_file",
@@ -162,7 +170,7 @@ def append(record: dict, *, path: Path | None = None) -> Optional[dict]:
     payload = json.dumps(record, sort_keys=True)
 
     with open(path, "a+", encoding="utf-8") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
+        _flock(fh, True)
         try:
             fh.seek(0)
             prev = _GENESIS
@@ -185,7 +193,7 @@ def append(record: dict, *, path: Path | None = None) -> Optional[dict]:
             fh.flush()
             return entry
         finally:
-            fcntl.flock(fh, fcntl.LOCK_UN)
+            _flock(fh, False)
 
 
 def extract_artifact_refs(
@@ -471,7 +479,7 @@ def prune(
     kept, removed = [], 0
 
     with open(path, "r+", encoding="utf-8") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
+        _flock(fh, True)
         try:
             fh.seek(0)
             for line in fh:
@@ -505,5 +513,5 @@ def prune(
             os.replace(tmp_path, path)
             return removed
         finally:
-            fcntl.flock(fh, fcntl.LOCK_UN)
+            _flock(fh, False)
 

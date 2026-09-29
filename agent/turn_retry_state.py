@@ -55,6 +55,8 @@ class TurnRetryState:
     # ── Auth-failure provider failover ───────────────────────────────────
     # Persistent 401/403 already escalated to the fallback chain once this attempt.
     auth_failover_attempted: bool = False
+    # Post-exhaustion auto-recovery cycles spent on this API call (agent.auto_recovery_cycles caps it).
+    auto_recovery_cycles_used: int = 0
 
     # Restart signals (read by the outer loop after the attempt)
     restart_with_compressed_messages: bool = False

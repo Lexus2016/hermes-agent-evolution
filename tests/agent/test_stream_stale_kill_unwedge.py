@@ -89,6 +89,27 @@ def test_shutdown_reaches_socket_through_real_httpx_wrapper_shape():
         reader.close()
         writer.close()
 
+def test_repeated_stale_kills_in_one_attempt_bump_the_streak_once():
+    """The monitor re-fires every stale interval while the reader unwinds.
+
+    Each tick must still try to abort the socket, but only the first tick of
+    an attempt counts toward the cross-turn breaker. Five ticks inside one
+    hang used to reach HERMES_STREAM_STALE_GIVEUP before the retry budget
+    did, and the next turn was refused without a provider call.
+    """
+    agent = _agent()
+    agent._consecutive_stale_streams = 0
+    call = _call(agent)
+    call._start_stream_attempt()
+    call._kill_stale_stream(3.0)
+    call._kill_stale_stream(3.0)
+    call._kill_stale_stream(3.0)
+    assert agent._consecutive_stale_streams == 1
+    call._start_stream_attempt()
+    call._kill_stale_stream(3.0)
+    assert agent._consecutive_stale_streams == 2
+
+
 # ── end to end: a reader parked on a silent provider must reconnect ──
 
 

@@ -90,31 +90,142 @@ def load_on_disk_store() -> "MemoryStore":
     store.load_from_disk()
     return store
 
-_BG_DELETE_ACTIONS = ("replace", "remove")
+
+def _pin_matched_entries(store: "MemoryStore", payload: Dict[str, Any]) -> Optional[str]:
+    """Record on each staged replace/remove the FULL entry its old_text selects now. Approval
+    then applies to exactly the entry the approver reviewed and refuses if it changed:
+    re-running the old_text search at approve time could hit a newer entry that still
+    contains it. Returns the JSON error when the search fails now, as the direct write would."""
+    target = payload.get("target", "memory")
+    if payload.get("action") == "batch":
+        result = store.resolve_batch_entries(target, payload["operations"])
+        if result.get("success"):
+            payload["operations"] = [op if entry is None else {**op, "matched_entry": entry}
+                                     for op, entry in zip(payload["operations"], result["matched_entries"])]
+    elif payload.get("action") in _BG_DELETE_ACTIONS:
+        result = store.resolve_entry(target, payload.get("old_text") or "", payload["action"])
+        if result.get("success"):
+            payload["matched_entry"] = result["matched_entry"]
+    else:
+        return None
+    return None if result.get("success") else json.dumps(result, ensure_ascii=False)
+
+
+def _gate_or_stage(store: "MemoryStore", summary: str, detail: str, payload: Dict[str, Any]) -> Optional[str]:
+    """JSON tool-result string when the write must NOT proceed (blocked or staged
+    for approval), None to proceed. Fails open if the gate module can't load."""
+    try:
+        from tools import write_approval as wa
+    except Exception:
+        return None
+    decision = wa.evaluate_gate(wa.MEMORY, inline_summary=summary, inline_detail=detail)
+    if decision.allow:
+        return None
+    if decision.blocked:
+        return tool_error(decision.message, success=False)
+    if (unmatched := _pin_matched_entries(store, payload)) is not None:
+        return unmatched
+    record = wa.stage_write(wa.MEMORY, payload, summary=f"{summary}: {detail[:120]}", origin=wa.current_origin())
+    return json.dumps({"success": True, "staged": True, "pending_id": record["id"], "message": decision.message},
+                      ensure_ascii=False)
+
+
+# action -> (store call, gate (summary, detail) text) for the live tool path and staged replay.
+# Provenance (#316) rides on add/replace; ``entry`` is the pinned matched_entry for replay.
+_STORE_ACTIONS = {
+    "add": (lambda store, target, content, old_text, entry=None, source_class=DEFAULT_SOURCE_CLASS, trust_tier=DEFAULT_TRUST_TIER:
+            store.add(target, content, source_class=source_class, trust_tier=trust_tier),
+            lambda label, content, old_text: (f"add to {label}", content or "")),
+    "replace": (lambda store, target, content, old_text, entry=None, source_class=DEFAULT_SOURCE_CLASS, trust_tier=DEFAULT_TRUST_TIER:
+                store.replace(target, old_text, content, source_class=source_class, trust_tier=trust_tier, matched_entry=entry),
+                lambda label, content, old_text: (f"replace in {label}",
+                                                  f"entry matching: {old_text}\nwhole entry becomes: {content}")),
+    "remove": (lambda store, target, content, old_text, entry=None, source_class=DEFAULT_SOURCE_CLASS, trust_tier=DEFAULT_TRUST_TIER:
+               store.remove(target, old_text, matched_entry=entry),
+               lambda label, content, old_text: (f"remove from {label}", old_text or ""))}
+
 
 def _batch_op_line(op: Dict[str, Any]) -> str:
     op = op or {}
     act, content, old = op.get("action", "?"), op.get("content") or op.get("new_text") or "", op.get("old_text", "")
     if act == "remove":
         return f"- remove: {old}"
-    return f"- replace: {old} -> {content}" if act == "replace" else f"- {act}: {content}"
+    # Whole-entry contract (#117952): the approver must not read this as a span patch.
+    return (f"- replace entry matching '{old}' -> whole entry becomes: {content}" if act == "replace"
+            else f"- {act}: {content}")
 
-def _background_delete_gate(action, operations, target="memory", content=None, old_text=None) -> Optional[str]:
-    """Fail-closed operation gate for unattended background-review forks (#105921)."""
+
+def _apply_write_gate(store: "MemoryStore", action: str, target: str, content: Optional[str],
+                      old_text: Optional[str], operations: Optional[List[Dict[str, Any]]] = None,
+                      source_class: str = DEFAULT_SOURCE_CLASS,
+                      trust_tier: str = DEFAULT_TRUST_TIER) -> Optional[str]:
+    """Gate one mutating op, or (``operations`` set) a whole batch as a single unit.
+
+    Provenance tags (#316) ride in the staged payload so an approved write keeps them.
+    """
+    label = "user profile" if target == "user" else "memory"
+    if operations is not None:
+        return _gate_or_stage(store, f"apply {len(operations)} op(s) to {label}",
+                              "\n".join(_batch_op_line(op) for op in operations),
+                              {"action": "batch", "target": target, "operations": operations,
+                               "source_class": source_class, "trust_tier": trust_tier})
+    return _gate_or_stage(store, *_STORE_ACTIONS[action][1](label, content, old_text),
+                          {"action": action, "target": target, "content": content, "old_text": old_text,
+                           "source_class": source_class, "trust_tier": trust_tier})
+
+
+def _validate_single_op(store, action, target, content, old_text) -> Optional[str]:
+    """Validate BEFORE the gate so an invalid write is rejected now, not at approve time.
+    Missing ``old_text`` is recoverable (it can't be schema-required — needs a combinator
+    the Codex backend rejects): return the inventory plus a retry instruction."""
+    if action == "add" and not content:
+        return tool_error("Content is required for 'add' action.", success=False)
+    if action in ("replace", "remove") and not old_text:
+        replace_hint = (" For 'replace', content is the COMPLETE new entry -- the whole "
+                        "matched entry is overwritten, not just the old_text span."
+                        if action == "replace" else "")
+        return json.dumps({
+            "success": False,
+            "error": (f"'{action}' needs old_text -- a short unique substring of the entry "
+                      f"to {action}. None was provided. Reissue the {action} with old_text "
+                      f"set to part of one of the current_entries below.{replace_hint}"),
+            "current_entries": store._entries_for(target), "usage": store._usage(target)}, ensure_ascii=False)
+    if action == "replace" and not content:
+        return tool_error("content is required for 'replace' action.", success=False)
+    return None
+
+
+_BG_DELETE_ACTIONS = ("replace", "remove")
+
+
+def destructive_ops(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The replace/remove ops of a staged memory payload, single-op or batch shape."""
+    ops = (payload.get("operations") or []) if payload.get("action") == "batch" else [payload]
+    return [op for op in ops if (op or {}).get("action") in _BG_DELETE_ACTIONS]
+
+
+def _background_delete_gate(store, action, operations, target="memory", content=None,
+                            old_text=None) -> Optional[str]:
+    """Fail-closed operation gate for unattended background-review forks (#105921): ``add``
+    stays available (it is all any review prompt asks for), while ``replace``/``remove`` —
+    single or inside a batch — are never applied unattended. The op is staged in the pending
+    store instead of merely denied: the fork's own review summary is never published back, so
+    a plain denial would drop the consolidation request with no surfacing path at all. A
+    staging failure fails closed to a plain denial."""
     from tools.skill_provenance import is_unattended_review
 
     if not is_unattended_review():
         return None
-    hit = action in _BG_DELETE_ACTIONS or any(
-        isinstance(op, dict) and op.get("action") in _BG_DELETE_ACTIONS for op in (operations or []))
-    if not hit:
-        return None
     payload = ({"action": "batch", "target": target, "operations": operations}
                if operations is not None else
                {"action": action, "target": target, "content": content, "old_text": old_text})
+    if not destructive_ops(payload):
+        return None
     detail = ("; ".join(_batch_op_line(op) for op in operations) if operations is not None
               else _batch_op_line({"action": action, "content": content, "old_text": old_text}))
     try:
+        if (unmatched := _pin_matched_entries(store, payload)) is not None:
+            return unmatched
         from tools import write_approval as wa
         record = wa.stage_write(
             wa.MEMORY, payload,
@@ -132,165 +243,6 @@ def _background_delete_gate(action, operations, target="memory", content=None, o
         return tool_error(
             "Background review may not delete memory entries ('replace'/'remove', including in a "
             "batch); 'add' is still available.", success=False)
-
-def _apply_write_gate(
-    action: str,
-    target: str,
-    content: Optional[str],
-    old_text: Optional[str],
-    source_class: str = DEFAULT_SOURCE_CLASS,
-    trust_tier: str = DEFAULT_TRUST_TIER,
-) -> Optional[str]:
-    """Evaluate the memory write gate. Returns a JSON tool-result string when
-    the write should NOT proceed normally (blocked or staged), or None when the
-    caller should perform the real write.
-
-    Only the mutating actions (add/replace/remove) are gated. Provenance tags
-    (#316) ride along in the staged payload so an approved write keeps them.
-    """
-    if action not in {"add", "replace", "remove"}:
-        return None
-
-    try:
-        from tools import write_approval as wa
-    except Exception:
-        # If the gate module can't load, fail open (current behaviour) rather
-        # than blocking all memory writes.
-        return None
-
-    # Build a small inline summary/detail for the foreground approval prompt.
-    label = "user profile" if target == "user" else "memory"
-    if action == "add":
-        summary = f"add to {label}"
-        detail = content or ""
-    elif action == "replace":
-        summary = f"replace in {label}"
-        detail = f"old: {old_text}\nnew: {content}"
-    else:  # remove
-        summary = f"remove from {label}"
-        detail = old_text or ""
-
-    decision = wa.evaluate_gate(wa.MEMORY, inline_summary=summary, inline_detail=detail)
-
-    if decision.allow:
-        return None
-
-    if decision.blocked:
-        return tool_error(decision.message, success=False)
-
-    # stage
-    payload = {
-        "action": action,
-        "target": target,
-        "content": content,
-        "old_text": old_text,
-        "source_class": source_class,
-        "trust_tier": trust_tier,
-    }
-    record = wa.stage_write(
-        wa.MEMORY,
-        payload,
-        summary=f"{summary}: {detail[:120]}",
-        origin=wa.current_origin(),
-    )
-    return json.dumps(
-        {
-            "success": True,
-            "staged": True,
-            "pending_id": record["id"],
-            "message": decision.message,
-        },
-        ensure_ascii=False,
-    )
-
-
-def _apply_batch_write_gate(
-    target: str, operations: List[Dict[str, Any]]
-) -> Optional[str]:
-    """Evaluate the write gate for a batch of memory operations.
-
-    Returns a JSON tool-result string when the batch should NOT proceed
-    (blocked or staged), or None when the caller should perform the real
-    batch write. The whole batch is gated as a single unit.
-    """
-    try:
-        from tools import write_approval as wa
-    except Exception:
-        return None
-
-    label = "user profile" if target == "user" else "memory"
-    summary = f"apply {len(operations)} op(s) to {label}"
-    detail_lines = []
-    for op in operations:
-        op = op or {}
-        act = op.get("action", "?")
-        _op_content = op.get("content") or op.get("new_text") or ""
-        if act == "remove":
-            detail_lines.append(f"- remove: {op.get('old_text', '')}")
-        elif act == "replace":
-            detail_lines.append(
-                f"- replace: {op.get('old_text', '')} -> {_op_content}"
-            )
-        else:
-            detail_lines.append(f"- {act}: {_op_content}")
-    detail = "\n".join(detail_lines)
-
-    decision = wa.evaluate_gate(wa.MEMORY, inline_summary=summary, inline_detail=detail)
-
-    if decision.allow:
-        return None
-
-    if decision.blocked:
-        return tool_error(decision.message, success=False)
-
-    payload = {"action": "batch", "target": target, "operations": operations}
-    record = wa.stage_write(
-        wa.MEMORY,
-        payload,
-        summary=f"{summary}: {detail[:120]}",
-        origin=wa.current_origin(),
-    )
-    return json.dumps(
-        {
-            "success": True,
-            "staged": True,
-            "pending_id": record["id"],
-            "message": decision.message,
-        },
-        ensure_ascii=False,
-    )
-
-
-def _missing_old_text_error(store: "MemoryStore", target: str, action: str) -> str:
-    """Build a recoverable error for a replace/remove call that arrived without
-    ``old_text``.
-
-    ``replace``/``remove`` are inherently targeted -- without ``old_text`` there
-    is no entry to act on, so we cannot fulfil the call. But returning a bare
-    "old_text is required" is a dead-end: some structured-output clients omit the
-    optional ``old_text`` field (it isn't, and can't be, schema-required without
-    a top-level combinator the Codex backend rejects -- see
-    tests/tools/test_memory_tool_schema.py). So instead we return the current
-    entry inventory plus an explicit retry instruction, letting the model reissue
-    the call with ``old_text`` set to a unique substring of the entry it means.
-    Mirrors the batch path's ``_batch_error`` shape. (issues #43412, #49466)
-    """
-    entries = store._entries_for(target)
-    current = store._char_count(target)
-    limit = store._char_limit(target)
-    return json.dumps(
-        {
-            "success": False,
-            "error": (
-                f"'{action}' needs old_text -- a short unique substring of the entry "
-                f"to {action}. None was provided. Reissue the {action} with old_text "
-                f"set to part of one of the current_entries below."
-            ),
-            "current_entries": entries,
-            "usage": f"{current:,}/{limit:,}",
-        },
-        ensure_ascii=False,
-    )
 
 
 def _memory_enriched_error(exc: Exception, action: str) -> str:
@@ -443,12 +395,12 @@ def memory_tool(
     if target is None:
         target = "memory"
 
-    bg_gate = _background_delete_gate(action, operations, target=target, content=content, old_text=old_text)
-    if bg_gate is not None:
-        return bg_gate
     target_error = _memory_target_error(store, target)
     if target_error is not None:
         return json.dumps(target_error)
+    bg_gate = _background_delete_gate(store, action, operations, target=target, content=content, old_text=old_text)
+    if bg_gate is not None:
+        return bg_gate
 
     # search is a read-only retrieval path — no gate, no required content.
     if action == "search":
@@ -486,83 +438,48 @@ def memory_tool(
                 "operations must be a list of {action, content?, old_text?} objects.",
                 success=False,
             )
-        gate_result = _apply_batch_write_gate(target, operations)
+        gate_result = _apply_write_gate(
+            store, "batch", target, None, None, operations,
+            source_class=source_class, trust_tier=trust_tier,
+        )
         if gate_result is not None:
             return gate_result
-        result = store.apply_batch(
-            target, operations, memory_char_limit=memory_char_limit
-        )
+        try:
+            result = store.apply_batch(target, operations, memory_char_limit=memory_char_limit)
+        except Exception as exc:
+            return _memory_enriched_error(exc, "batch")
         return json.dumps(result, ensure_ascii=False)
 
-    # --- Single-op path ---------------------------------------------------
-    # Validate required params BEFORE the gate so an invalid write is rejected
-    # immediately instead of being staged and only failing at approve time.
-    if action == "add" and not content:
-        return tool_error("Content is required for 'add' action.", success=False)
-    if action == "replace" and (not old_text or not content):
-        missing = "old_text" if not old_text else "content"
-        if not old_text:
-            # The client/model omitted old_text. Replace is inherently targeted
-            # -- we can't guess which entry. Return the current inventory plus a
-            # retry instruction so the model can reissue with old_text set,
-            # instead of hitting a dead-end error. (issues #43412, #49466)
-            return _missing_old_text_error(store, target, "replace")
-        return tool_error(f"{missing} is required for 'replace' action.", success=False)
-    if action == "remove" and not old_text:
-        return _missing_old_text_error(store, target, "remove")
-
-    # Approval gate: when on, stages the write (background/gateway) or prompts
-    # inline (interactive CLI); when off (default) passes straight through.
-    gate_result = _apply_write_gate(
-        action,
-        target,
-        content,
-        old_text,
-        source_class=source_class,
-        trust_tier=trust_tier,
-    )
-    if gate_result is not None:
-        return gate_result
-
-    if action == "add":
+    if action in ("add", "replace", "remove"):
+        invalid = _validate_single_op(store, action, target, content, old_text)
+        if invalid is not None:
+            return invalid
+        gate_result = _apply_write_gate(
+            store, action, target, content, old_text,
+            source_class=source_class, trust_tier=trust_tier,
+        )
+        if gate_result is not None:
+            return gate_result
         try:
-            result = store.add(
-                target, content, source_class=source_class, trust_tier=trust_tier
+            result = _STORE_ACTIONS[action][0](
+                store, target, content, old_text,
+                source_class=source_class, trust_tier=trust_tier,
             )
         except Exception as exc:
-            return _memory_enriched_error(exc, "add")
+            return _memory_enriched_error(exc, action)
+        return json.dumps(result, ensure_ascii=False)
 
-    elif action == "replace":
-        try:
-            result = store.replace(
-                target,
-                old_text,
-                content,
-                source_class=source_class,
-                trust_tier=trust_tier,
-            )
-        except Exception as exc:
-            return _memory_enriched_error(exc, "replace")
-
-    elif action == "remove":
-        try:
-            result = store.remove(target, old_text)
-        except Exception as exc:
-            return _memory_enriched_error(exc, "remove")
-
-    elif action == "supersede":
+    if action == "supersede":
         try:
             result = store.supersede(target, old_text)
         except Exception as exc:
             return _memory_enriched_error(exc, "supersede")
+        return json.dumps(result, ensure_ascii=False)
 
-    else:
-        return tool_error(
-            f"Unknown action '{action}'. Use: add, replace, remove, search, supersede",
-            success=False,
-        )
-
-    return json.dumps(result, ensure_ascii=False)
+    return tool_error(
+        f"Unknown action '{action}'. Use: add, replace, remove, search, compact, supersede",
+        success=False,
+    )
 
 
 def get_builtin_memory_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -625,36 +542,36 @@ def _memory_target_error(store: "MemoryStore", target: str) -> Optional[Dict[str
     }
 
 
-def apply_memory_pending(
-    payload: Dict[str, Any], store: "MemoryStore"
-) -> Dict[str, Any]:
-    """Replay a staged memory write directly against the store, bypassing the
-    write gate. Called by the /memory approve handler.
 
-    Returns the store's result dict.
+def apply_memory_pending(payload: Dict[str, Any], store: "MemoryStore") -> Dict[str, Any]:
+    """Replay a staged write against the store, bypassing the gate (/memory approve).
+
+    A replace/remove applies to exactly its pinned ``matched_entry`` or is refused; a record
+    staged before pinning has no verifiable target, so it is refused rather than replayed by
+    old_text (which could hit a newer entry the approver never saw). Provenance tags from the
+    staged payload are preserved (#316).
     """
-    action = payload.get("action")
-    target = payload.get("target", "memory")
+    action, target = payload.get("action"), payload.get("target", "memory")
     target_error = _memory_target_error(store, target)
     if target_error is not None:
         return target_error
+    if any(not op.get("matched_entry") for op in destructive_ops(payload)):
+        return {"success": False, "error": "This destructive pending write predates entry pinning and cannot be "
+                                           "verified; nothing was applied. Reject it and recreate the change."}
     content = payload.get("content") or ""
     old_text = payload.get("old_text") or ""
     source_class = payload.get("source_class", DEFAULT_SOURCE_CLASS)
     trust_tier = payload.get("trust_tier", DEFAULT_TRUST_TIER)
     if action == "batch":
         return store.apply_batch(target, payload.get("operations") or [])
-    if action == "add":
-        return store.add(
-            target, content, source_class=source_class, trust_tier=trust_tier
-        )
-    if action == "replace":
-        return store.replace(
-            target, old_text, content, source_class=source_class, trust_tier=trust_tier
-        )
-    if action == "remove":
-        return store.remove(target, old_text)
-    return {"success": False, "error": f"Unknown staged action '{action}'."}
+    if action == "supersede":
+        return store.supersede(target, old_text)
+    if action not in _STORE_ACTIONS:
+        return {"success": False, "error": f"Unknown staged action '{action}'."}
+    return _STORE_ACTIONS[action][0](
+        store, target, content, old_text, payload.get("matched_entry"),
+        source_class=source_class, trust_tier=trust_tier,
+    )
 
 
 # OpenAI Function-Calling Schema
@@ -706,19 +623,15 @@ MEMORY_SCHEMA = {
             },
             "content": {
                 "type": "string",
-                "description": "The entry content. Required for 'add' and 'replace' (single-op shape). Alias: 'new_text' is also accepted (mirrors old_text)."
+                "description": "The entry content. Required for 'add' and 'replace'. For 'replace' it is the COMPLETE new entry text: the whole matched entry is overwritten, so include everything you want to keep. Alias: 'new_text' is also accepted (same full-entry meaning)."
             },
             "old_text": {
                 "type": "string",
-                "description": "REQUIRED for 'replace' and 'remove' (single-op shape): a short unique substring identifying the existing entry to modify. Omit only for 'add'.",
+                "description": "REQUIRED for 'replace' and 'remove' (single-op shape): a short unique substring IDENTIFYING the existing entry to modify -- it locates the entry, it is not spliced out. Omit only for 'add'."
             },
             "new_text": {
                 "type": "string",
-                "description": "Alias for 'content' (single-op shape). Provided so the replace/remove old_text/new_text pairing works; if both are set, 'content' wins."
-            },
-            "new_text": {
-                "type": "string",
-                "description": "Alias for 'content' (single-op shape). Provided so the replace/remove old_text/new_text pairing works; if both are set, 'content' wins."
+                "description": "Alias for 'content' (single-op shape): the COMPLETE new entry for 'replace', not a patch of old_text. If both are set, 'content' wins."
             },
             "operations": {
                 "type": "array",
@@ -731,7 +644,7 @@ MEMORY_SCHEMA = {
                     "type": "object",
                     "properties": {
                         "action": {"type": "string", "enum": ["add", "replace", "remove"]},
-                        "content": {"type": "string", "description": "Entry content for add/replace. Alias: 'new_text'."},
+                        "content": {"type": "string", "description": "Entry content for add/replace. For replace, the COMPLETE new entry (whole entry is overwritten). Alias: 'new_text'."},
                         "new_text": {"type": "string", "description": "Alias for 'content' in a batch op."},
                         "old_text": {"type": "string", "description": "Substring identifying the entry for replace/remove."},
                     },

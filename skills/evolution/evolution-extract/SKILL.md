@@ -84,6 +84,7 @@ source (a draft with no traceable origin cannot be A/B tested or audited).
    the issues/analysis stages:
 
    ```bash
+   # no-tmp: ok — example recipe path, not a runtime default
    cat > /tmp/extract-draft.json <<'JSON'
    {
      "technique": "<the concrete strategy as the agent would apply it>",
@@ -92,6 +93,7 @@ source (a draft with no traceable origin cannot be A/B tested or audited).
      "source": "arXiv:2405.14980"
    }
    JSON
+   # no-tmp: ok — example recipe path, not a runtime default
    python scripts/evolution_extract.py validate /tmp/extract-draft.json
    ```
 

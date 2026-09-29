@@ -1,4 +1,4 @@
-"""Post-update maintenance for ``hermes update``: pre-update backup snapshot, state-db verify/restore, curator/FTS notices, FHS path guard, completion summary, stale-module purge.
+"""Post-update maintenance for ``hermes update``: pre-update backup snapshot, state-db verify/restore, curator/FTS notices, FHS path guard, completion summary.
 
 Split out of ``update_cmd.py``, which re-imports every name so ``hermes_cli.update_cmd.<name>``
 still resolves/monkeypatches. Origin helpers are imported lazily per function (no cycle;
@@ -22,24 +22,6 @@ from hermes_cli.update_cmd_common import _best_effort
 # Log-record parity with the origin module.
 logger = logging.getLogger("hermes_cli.update_cmd")
 
-
-_UPDATE_RUNTIME_RELOAD_MODULES = "hermes_constants", "tools.environments.local", "tools.lazy_deps"
-
-#: Modules EXECUTING the update survive the purge: evicting them buys nothing (running frames
-#: keep them alive) and reloading them mid-flight is the one genuinely unsafe move.
-#: Two root modules carry process-wide identity state and are refreshed in place by
-#: ``_reload_updated_runtime_modules`` instead: ``hermes_logging`` (a fresh copy starts a SECOND
-#: QueueListener over the same log files while the first keeps running) and ``hermes_constants``
-#: (its ``_HERMES_HOME_OVERRIDE`` ContextVar — a token taken through the old module cannot reset a
-#: fresh module's var, and an override set before the purge would silently vanish).
-_STALE_PURGE_PROTECTED = frozenset({"hermes_cli", "hermes_cli.main", "hermes_logging", "hermes_constants"})
-
-#: The updater's own module family (``update_cmd*``, ``update_receipt``, ``update_inventory``,
-#: ``update_lock``, ...) is protected as a prefix: these hold per-run state — the open receipt
-#: singleton, the pre-update plan's ``RuntimeRecord`` class identity, the lock — and evicting
-#: one swaps in a fresh module whose ``_current`` is None (receipt silently never written) or
-#: whose dataclass fails every ``isinstance`` against the plan built before the purge.
-_STALE_PURGE_PROTECTED_PREFIX = "hermes_cli.update_"
 
 _PRE_UPDATE_SNAPSHOT_KEEP = 1
 
@@ -75,6 +57,20 @@ def _load_updates_cfg() -> dict:
     updates = cfg.get("updates", {}) if isinstance(cfg, dict) else {}
     return updates if isinstance(updates, dict) else {}
 
+
+_UPDATE_RUNTIME_RELOAD_MODULES = "hermes_constants", "tools.environments.local", "tools.lazy_deps"
+
+#: Modules EXECUTING the update survive the purge: evicting them buys nothing (running frames
+#: keep them alive) and reloading them mid-flight is the one genuinely unsafe move.
+#: Two root modules carry process-wide identity state and are refreshed in place by
+#: ``_reload_updated_runtime_modules`` instead: ``hermes_logging`` (a fresh copy starts a SECOND
+#: QueueListener over the same log files while the first keeps running) and ``hermes_constants``
+#: (its ``_HERMES_HOME_OVERRIDE`` ContextVar — a token taken through the old module cannot reset a
+#: fresh module's var, and an override set before the purge would silently vanish).
+_STALE_PURGE_PROTECTED = frozenset({"hermes_cli", "hermes_cli.main", "hermes_logging", "hermes_constants"})
+
+#: The updater's own module family is protected as a prefix: these hold per-run state.
+_STALE_PURGE_PROTECTED_PREFIX = "hermes_cli.update_"
 
 def _resolve_pre_update_snapshot_max_file_size() -> int:
     """Resolve the pre-update quick-snapshot per-file size cap (#2489)."""
@@ -353,34 +349,6 @@ def _format_time_ago(iso_ts: str) -> str:
         return "recently"
 
 
-def _reload_process_scan_modules() -> None:
-    """Reload the process-scan modules, dependency-first, so ``dashboard_procs`` binds against a
-    fresh ``_subprocess_compat``: cleanup runs in the PRE-update process and a symbol the update
-    added would otherwise ImportError after the code update succeeded. Called from the cleanup
-    entry point so every caller (git path, ZIP fallback) is covered.
-
-    ``_finish_dashboard_update_cleanup`` runs in the PRE-update Python process, but
-    ``_scan_dashboard_processes`` does a function-level ``from hermes_cli._subprocess_compat import
-    bounded_probe_run``. If the update added a new symbol to ``_subprocess_compat`` (as #87134 did with
-    ``bounded_probe_run``), the cached OLD module object doesn't have it and the cleanup step crashes with
-    ImportError — after the code update itself already succeeded.
-
-    The helpers it imports from ``hermes_cli.main_dashboard`` / ``main_install_repair`` are NOT
-    refreshed here: ``hermes_cli.main`` imports those eagerly at CLI start, so reloading would
-    rewrite the module dict the running update still holds bindings into. The
-    ``_purge_stale_hermes_modules`` eviction, which runs earlier in the update, is what makes the
-    call-time ``from hermes_cli import main_dashboard`` re-read the pulled source (#112604).
-    """
-    _reload_modules(
-        ("hermes_cli._subprocess_compat", "hermes_cli.dashboard_procs"),
-        modules=sys.modules,
-        # warning, not debug: a failed reload surfaces as ImportError seconds later.
-        log=lambda name, exc: logger.warning(
-            "Could not reload %s for post-update cleanup: %s", name, exc
-        ),
-    )
-
-
 def _finish_dashboard_update_cleanup(
     node_failures: list[str], already_restarted_units: "set[str] | None" = None
 ) -> None:
@@ -391,18 +359,31 @@ def _finish_dashboard_update_cleanup(
 
     See #83595.
     """
-    from hermes_cli.update_cmd import _m, _reload_process_scan_modules
+    from hermes_cli.update_cmd import _m, _record_update_step
     if node_failures:
         print()
         print("  ℹ Leaving running dashboard process(es) untouched because the")
         print("    Node.js dependency refresh did not complete.")
         return
 
-    _reload_process_scan_modules()
-
-    stop_result = _m()._kill_stale_dashboard_processes(
-        restart_managed=True, already_restarted_units=already_restarted_units
-    )
+    try:
+        from hermes_constants import get_hermes_home
+        stop_result = _m()._kill_stale_dashboard_processes(
+            restart_managed=True, already_restarted_units=already_restarted_units,
+            scope_home=str(get_hermes_home()),
+        )
+    except Exception as exc:
+        # Isolated like every sibling post-update step: a failure here (#112604) used to abort
+        # the fleet matrix, reconciliation and the inner receipt finalize that follow it. A
+        # dashboard/serve left on pre-update code is still caught by the survivor probe →
+        # reconciliation (exit 1).
+        logger.warning("Post-update dashboard cleanup failed: %s", exc)
+        _record_update_step("dashboard_cleanup", False, f"{type(exc).__name__}: {exc}")
+        print()
+        print(f"⚠ Could not refresh running dashboard/serve process(es): {exc}")
+        print("  If one is still running, restart it so it serves the updated code:")
+        print("    hermes dashboard --port <port>   (or: systemctl --user restart hermes-dashboard)")
+        return
     if not stop_result.get("unrecovered"):
         return
 
@@ -527,6 +508,12 @@ def _print_update_summary(*, node_failures: list, desktop_build_ok: bool, pre_up
                 print(line)
     else:
         _print_update_completion(_update_complete_message(pre_update_version))
+    # A multi-profile host whose gateway came back standalone on a guard says so here too — the
+    # update summary is the one line operators read (the boot log under s6 is not).
+    with suppress(Exception):
+        from hermes_cli.gateway_multiplex_mode import consume_rewritten_notice, recorded_standalone_warning_lines
+        for line in [*consume_rewritten_notice(), *recorded_standalone_warning_lines()]:
+            print(line)
     return desktop_build_ok and sqlite_runtime_ok
 
 
@@ -912,8 +899,21 @@ def _run_pre_update_backup(args) -> Optional[str]:
         return None
 
     snapshot_id = None
-    with _best_effort('Pre-update snapshot failed: %s'):
+    try:
         snapshot_id = _run_quick_snapshots()
+    except Exception as exc:
+        logger.warning("Pre-update snapshot failed: %s", exc)
+        snapshot_detail = f" ({exc})"
+    else:
+        snapshot_detail = ""
+    if not snapshot_id:
+        # Best-effort by design (8ed599dc054: a broken backup never blocks the update), but a
+        # swallowed failure is how a user discovers post-hoc that the receipt says
+        # ``ok: false`` and nothing was there to restore (#114592). Say it on stdout, once,
+        # before any code moves.
+        print(f"  ⚠ Pre-update snapshot FAILED — no recovery point was saved{snapshot_detail}.")
+        print("  Continuing with update (set updates.pre_update_backup: off to silence this).")
+        print()
 
     if mode != "full":
         if snapshot_id:
@@ -979,8 +979,8 @@ def _sync_profiles_after_update() -> None:
             print(f"→ Seeded .env for {len(backfilled)} profile(s) (copied from default): {', '.join(backfilled)}")
 
     with suppress(Exception):
-        from plugins.memory.honcho.cli import sync_honcho_profiles_quiet
-        synced = sync_honcho_profiles_quiet()
+        from plugins.memory import import_provider_module
+        synced = import_provider_module("honcho", "cli").sync_honcho_profiles_quiet()
         if synced:
             print(f"\n-> Honcho: synced {synced} profile(s)")
 

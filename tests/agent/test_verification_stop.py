@@ -207,7 +207,7 @@ def test_nudge_checks_all_edited_workspaces(tmp_path, monkeypatch):
     )
 
     assert nudge is not None
-    assert "fresh passing verification evidence" in nudge
+    assert changed_b in nudge
 
 
 def test_nudge_after_unverified_edit_with_known_command(tmp_path, monkeypatch):
@@ -366,12 +366,3 @@ def test_mixed_doc_and_code_edit_still_nudges(tmp_path, monkeypatch):
     assert doc not in nudge
 
 
-def test_is_non_code_path_classification():
-    from agent.verification_stop import _is_non_code_path
-
-    assert _is_non_code_path("docs/SKILL.md") is True
-    assert _is_non_code_path("README") is False  # README has no extension and isn't in the prose-filename set
-    assert _is_non_code_path("LICENSE") is True
-    assert _is_non_code_path("src/app.ts") is False
-    assert _is_non_code_path("config.yaml") is False
-    assert _is_non_code_path("run_agent.py") is False

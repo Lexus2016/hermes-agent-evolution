@@ -131,6 +131,33 @@ class TestDetectDeadEndLoop:
         assert result is not None
         assert "strategy" in result.lower() or "different approach" in result.lower()
 
+    def test_new_human_message_starts_a_new_count(self):
+        """Four identical probes, each asked for by a new user message, are not one loop.
+
+        The guard used to count through those messages. The fourth request then
+        looked like a dead end, the nudge forced another identical call, and
+        the identical-result stub replaced the only new env snapshot.
+        """
+        msgs: list[dict] = []
+        for i, text in enumerate(("turn", "again", "after settings", "after churn")):
+            msgs.append({"role": "user", "content": text})
+            msgs.append(_make_tool_call("terminal", '{"command": "echo SNAPSHOT"}', str(i)))
+            msgs.append(_make_tool_result(str(i), "CWD=/work\n"))
+        assert detect_dead_end_loop(msgs) is None
+
+    def test_loop_guard_nudge_stays_inside_the_task(self):
+        """A nudge the guard itself appended must not reset the count."""
+        msgs: list[dict] = [{"role": "user", "content": "fix the tests"}]
+        for i in range(3):
+            msgs.append(_make_tool_call("terminal", '{"command": "pytest"}', f"a{i}"))
+            msgs.append(_make_tool_result(f"a{i}", "FAIL"))
+        msgs.append({"role": "user", "content": "[loop-guard] DEAD-END DETECTED"})
+        msgs.append(_make_tool_call("terminal", '{"command": "pytest"}', "a3"))
+        msgs.append(_make_tool_result("a3", "FAIL"))
+        result = detect_dead_end_loop(msgs)
+        assert result is not None
+        assert "4 times" in result
+
     def test_window_respected(self):
         """Calls outside the window should not be counted."""
         # Fill with 60 non-matching messages, then the identical run

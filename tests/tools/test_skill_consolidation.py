@@ -41,6 +41,9 @@ def test_run_consolidation_pass():
     with patch("tools.skill_consolidation.skill_usage") as mock_su, \
          patch("tools.skill_consolidation._build_skill_tokens") as mock_tok:
         mock_su.curated_report.return_value = rows
+        # The patch replaces the module, so is_bundled must be a bool. A bare
+        # MagicMock is truthy and would drop every row as bundled.
+        mock_su.is_bundled.return_value = False
         mock_tok.return_value = {"lora-ft": {"lora", "fine"}, "lora-tr": {"lora", "fine"}}
         result = run_consolidation_pass()
         assert len(result["clusters"]) == 1

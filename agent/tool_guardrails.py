@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Mapping
 
 from utils import safe_json_loads
-from agent.tool_result_classification import file_mutation_result_landed
+from agent.tool_result_classification import file_mutation_result_landed, is_guardrail_refusal
 
 if TYPE_CHECKING:  # avoid a circular import; policy_interceptors imports this module
     from agent.policy_interceptors import PolicyInterceptorRegistry
@@ -517,6 +517,13 @@ def classify_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str
     if result is None:
         return False, ""
     if file_mutation_result_landed(tool_name, result):
+        return False, ""
+
+    # A harness REFUSAL of a redundant call (repeated identical read/search) carries
+    # ``"error"`` for the model's benefit -- exactly what the substring test below keys
+    # on -- but nothing failed; counting it lets the cheap refusal feed the streak that
+    # fires the next, harder one. Mirrored in ``agent.display._detect_tool_failure``.
+    if is_guardrail_refusal(result):
         return False, ""
 
     # Terminal and process: non-zero exit code is the canonical failure
@@ -1523,6 +1530,31 @@ def append_toolguard_guidance(result: str, decision: ToolGuardrailDecision) -> s
     if decision.fallback_directive:
         suffix += f"\n[Fallback directive: {decision.fallback_directive}]"
     return (result or "") + suffix
+
+
+def append_non_retryable_notice(result: str, notice: str) -> str:
+    """Attach a non-retryable diagnostic without splitting a JSON tool result.
+
+    A trailing suffix after one JSON object is a second value: ``json.loads``
+    of the whole tool message raises Extra data, so previews and session rows
+    cannot read the refusal. Fold the notice into that object's ``error``
+    string. Plain-text results keep the trailing suffix.
+    """
+    if not isinstance(result, str) or not notice or "Non-retryable:" in result:
+        return result
+    text = result
+    stripped = text.strip()
+    payload = safe_json_loads(stripped) if stripped.startswith("{") else None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, str):
+            payload["error"] = f"{error}{notice}"
+        elif not error:
+            payload["error"] = notice.strip()
+        else:
+            payload["non_retryable"] = notice.strip()
+        return json.dumps(payload, ensure_ascii=False)
+    return text + notice
 
 
 def _tool_failure_recovery_hint(tool_name: str, count: int) -> str:

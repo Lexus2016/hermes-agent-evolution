@@ -10,8 +10,11 @@ from typing import Any, Dict, List, Optional
 BLOCK_THRESHOLD = 1.0
 
 _SHELL_TOOLS = ("shell", "terminal", "bash")
+# Root-shaped deletes only. "rm -rf /" as a prefix also matches
+# "rm -rf /tmp/victim", which blocked the approval prompt before the
+# terminal tool ran. A specific directory must fall through to approval.
 _HARM_RE = re.compile(
-    r"(?P<destructive>rm\s+-rf\s+/|mkfs\b|dd\s+.*of=/dev/|mv\s+/.*\s+/dev/null\b|"
+    r"(?P<destructive>rm\s+-rf\s+(?:/+\*?|/\./?\*?)(?=[\s;|&]|$)|mkfs\b|dd\s+.*of=/dev/|mv\s+/.*\s+/dev/null\b|"
     r"shutdown|reboot\b)"
     r"|(?P<exfil>\b(curl|wget|scp|nc|rsync)\b.*\bhttps?://|cat\s+.*\|\s*(curl|nc|ssh)\b)"
     r"|(?P<cred>\.ssh/|\.aws/credentials|/etc/passwd|/etc/shadow|id_rsa|\.env\b)"

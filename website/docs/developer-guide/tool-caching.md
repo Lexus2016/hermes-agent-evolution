@@ -69,6 +69,7 @@ def execute_tool():
 
 result, cache_hit = cached_tool_call(
     tool_name="read_file",
+    # no-tmp: ok — example path in a doc snippet
     tool_args={"path": "/tmp/file.txt"},
     executor=execute_tool,
     effective_task_id="task-123"
@@ -138,6 +139,7 @@ Cache keys are generated from:
 
 Example:
 ```python
+# no-tmp: ok — example path in a doc snippet
 key = cache.generate_cache_key("read_file", {"path": "/tmp/test"})
 # Returns: "a1b2c3d4..." (32-char hash)
 ```

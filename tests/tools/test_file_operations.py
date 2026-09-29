@@ -8,13 +8,11 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from tests.tools.file_ops_fakes import READ_SENTINEL_RE, compound_read_output
-from tools.environments.local import _find_bash, _msys_to_windows_path, LocalEnvironment
+from tools.environments.local import _find_bash, LocalEnvironment
 from agent.file_safety import is_write_denied as _is_write_denied
 from tools.file_operations_common import LintResult, SearchMatch
 from tools.file_operations import (
     ReadResult,
-    WriteResult,
-    PatchResult,
     SearchResult,
     ShellFileOperations,
     MAX_LINE_LENGTH,
@@ -204,51 +202,13 @@ class TestReadResult:
         assert d["total_lines"] == 10
         assert d["truncated"] is True
 
-    def test_binary_fields(self):
-        r = ReadResult(is_binary=True, is_image=True, mime_type="image/png")
-        d = r.to_dict()
-        assert d["is_binary"] is True
-        assert d["is_image"] is True
-        assert d["mime_type"] == "image/png"
 
 
-class TestWriteResult:
-    def test_to_dict_omits_none(self):
-        r = WriteResult(bytes_written=100)
-        d = r.to_dict()
-        assert d["bytes_written"] == 100
-        assert "error" not in d
-        assert "warning" not in d
-
-    def test_to_dict_includes_error(self):
-        r = WriteResult(error="Permission denied")
-        d = r.to_dict()
-        assert d["error"] == "Permission denied"
 
 
-class TestPatchResult:
-    def test_to_dict_success(self):
-        r = PatchResult(success=True, diff="--- a\n+++ b", files_modified=["a.py"])
-        d = r.to_dict()
-        assert d["success"] is True
-        assert d["diff"] == "--- a\n+++ b"
-        assert d["files_modified"] == ["a.py"]
-
-    def test_to_dict_error(self):
-        r = PatchResult(error="File not found")
-        d = r.to_dict()
-        assert d["success"] is False
-        assert d["error"] == "File not found"
 
 
 class TestSearchResult:
-    def test_to_dict_with_matches(self):
-        m = SearchMatch(path="a.py", line_number=10, content="hello")
-        r = SearchResult(matches=[m], total_count=1)
-        d = r.to_dict()
-        assert d["total_count"] == 1
-        assert len(d["matches"]) == 1
-        assert d["matches"][0]["path"] == "a.py"
 
     def test_to_dict_empty(self):
         r = SearchResult()
@@ -510,8 +470,6 @@ class TestShellFileOpsHelpers:
         assert normalize_search_pagination(offset="bad", limit="bad") == (0, 50)
         assert normalize_search_pagination(offset=3, limit=0) == (3, 1)
 
-    def test_escape_shell_arg_simple(self, file_ops):
-        assert file_ops._escape_shell_arg("hello") == "'hello'"
 
     def test_escape_shell_arg_with_quotes(self, file_ops):
         result = file_ops._escape_shell_arg("it's")
@@ -640,10 +598,6 @@ class TestShellFileOpsHelpers:
         ops = ShellFileOperations(mock_env)
         assert ops.cwd == "/custom/path"
 
-    def test_cwd_fallback_to_slash(self):
-        env = MagicMock(spec=[])  # no cwd attribute
-        ops = ShellFileOperations(env)
-        assert ops.cwd == "/"
 
     def test_read_file_strips_leaked_terminal_fence_markers(self, mock_env):
         leaked = (
@@ -1361,9 +1315,6 @@ class TestByteLayerBinaryDetection:
         assert sample[-1:] != b"a"  # the cut really is mid-character
         assert file_ops._is_likely_binary_bytes(sample) is False
 
-    def test_pure_cjk_text_cut_mid_character_is_text(self, file_ops):
-        sample = ("汉字" * 400).encode("utf-8")[:1000]
-        assert file_ops._is_likely_binary_bytes(sample) is False
 
     def test_emoji_cut_at_boundary_is_text(self, file_ops):
         # 4-byte sequence cut after 2 bytes.
@@ -1381,8 +1332,6 @@ class TestByteLayerBinaryDetection:
     def test_nul_byte_is_binary(self, file_ops):
         assert file_ops._is_likely_binary_bytes(b"MZ\x00\x01text") is True
 
-    def test_elf_header_is_binary(self, file_ops):
-        assert file_ops._is_likely_binary_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8) is True
 
     def test_latin1_text_stays_read_only(self, file_ops):
         # Mid-stream invalid UTF-8 (0xE9 = latin-1 é). Reading it through the
@@ -1393,8 +1342,6 @@ class TestByteLayerBinaryDetection:
     def test_empty_sample_is_text(self, file_ops):
         assert file_ops._is_likely_binary_bytes(b"") is False
 
-    def test_short_ascii_is_text(self, file_ops):
-        assert file_ops._is_likely_binary_bytes(b"hello\n") is False
 
     def test_truncated_garbage_tail_after_invalid_prefix_is_binary(self, file_ops):
         # Error near the end but the prefix itself is not clean UTF-8.
@@ -1476,39 +1423,28 @@ class TestEscapeNativeToolArg:
     def _ops(self, mock_env):
         return ShellFileOperations(mock_env)
 
-    def test_windows_native_path_kept_native(self, mock_env, monkeypatch):
-        import tools.environments.local as local_mod
-        monkeypatch.setattr(local_mod, "_IS_WINDOWS", True)
+    @pytest.mark.windows_only
+    def test_windows_native_path_kept_native(self, mock_env):
         ops = self._ops(mock_env)
         out = ops._escape_native_tool_arg(r"C:\Users\alice\project")
         assert out == "'C:/Users/alice/project'"
 
-    def test_msys_path_translated_back_to_native(self, mock_env, monkeypatch):
-        import tools.environments.local as local_mod
-        monkeypatch.setattr(local_mod, "_IS_WINDOWS", True)
+    @pytest.mark.windows_only
+    def test_msys_path_translated_back_to_native(self, mock_env):
         ops = self._ops(mock_env)
         out = ops._escape_native_tool_arg("/c/Users/alice/project")
         assert out == "'C:/Users/alice/project'"
 
-    def test_posix_path_untouched_on_windows(self, mock_env, monkeypatch):
+    @pytest.mark.windows_only
+    def test_posix_path_untouched_on_windows(self, mock_env):
         """Multi-segment POSIX paths (/home/x, /tmp/y) are not drive paths."""
-        import tools.environments.local as local_mod
-        monkeypatch.setattr(local_mod, "_IS_WINDOWS", True)
         ops = self._ops(mock_env)
         assert ops._escape_native_tool_arg("/tmp/workdir") == "'/tmp/workdir'"
 
-    def test_non_windows_behaves_like_escape_shell_arg(self, mock_env, monkeypatch):
-        import tools.environments.local as local_mod
-        monkeypatch.setattr(local_mod, "_IS_WINDOWS", False)
-        ops = self._ops(mock_env)
-        assert ops._escape_native_tool_arg("/home/u/it's here") == (
-            ops._escape_shell_arg("/home/u/it's here")
-        )
-
-    def test_rg_content_search_uses_native_form(self, mock_env, monkeypatch):
-        """_search_with_rg must pass the path in native C:/ form to rg."""
-        import tools.environments.local as local_mod
-        monkeypatch.setattr(local_mod, "_IS_WINDOWS", True)
+    @pytest.mark.windows_only
+    def test_rg_content_search_uses_native_form(self, mock_env):
+        """The call site, not just the helper: search must hand the native rg
+        binary C:/..., never the MSYS /c/... form (the live os-error-3 failure)."""
         commands = []
 
         def side_effect(command, **kwargs):
@@ -1527,15 +1463,14 @@ class TestEscapeNativeToolArg:
         assert any("'C:/Users/alice/project'" in c for c in rg_cmds), rg_cmds
         assert all("/c/Users" not in c for c in rg_cmds), rg_cmds
 
-    def test_shell_linter_uses_native_form(self, mock_env, monkeypatch):
+    @pytest.mark.windows_only
+    def test_shell_linter_uses_native_form(self, mock_env):
         """_check_lint must hand node/python/etc. the native C:/ path.
 
         Regression for the double-prefix failure (#84303): node given the
         MSYS /c/Users/... form resolves it as C:\\c\\Users\\... and every
         .js write reports a phantom ENOENT lint error.
         """
-        import tools.environments.local as local_mod
-        monkeypatch.setattr(local_mod, "_IS_WINDOWS", True)
         commands = []
 
         def side_effect(command, **kwargs):

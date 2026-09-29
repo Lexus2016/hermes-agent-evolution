@@ -17,6 +17,7 @@ These tests guard the schema against regressing back to a shape strict
 backends reject.
 """
 
+
 import json
 
 from tools.memory_tool import MEMORY_SCHEMA

@@ -74,6 +74,7 @@ Taking upstream `conversation_loop.py` risked silently dropping untested fork de
 `test_error_classifier` 202, `test_web_providers` 25, `test_jobs` 121, `test_auxiliary_client` 301,
 `test_cron` 8, `test_run_one_job` 6, `test_plugins` 100, `test_scheduler` 222, `test_delegate` 166,
 `test_approval` 296, `test_models` 84, `test_terminal_tool` 33.
+<!-- no-tmp: ok — historical note about a macOS symlink, not a path we write -->
 Env-only non-failures excluded from the gate: `test_file_tools` 2 cases assert `/tmp` but macOS resolves
 the symlink to `/private/tmp` (pass on Linux CI); `tests/hermes_cli/*` + 2 `test_approval` cases raise
 `ModuleNotFoundError: prompt_toolkit` (optional TUI dep absent in the local pypy env). Full suite runs on

@@ -198,6 +198,6 @@ def get_install_hint() -> str:
         return (
             f"PEP 668=yes (externally-managed).  Use `{pip} install <pkg>` "
             f"instead of `pip install`; or first create a venv: "
-            f"`python3 -m venv /tmp/venv && /tmp/venv/bin/pip install <pkg>`."
+            f"`python3 -m venv /tmp/venv && /tmp/venv/bin/pip install <pkg>`."  # no-tmp: ok — example command shown to the user
         )
     return "PEP 668=yes (externally-managed).  pip install will fail — create a venv first."

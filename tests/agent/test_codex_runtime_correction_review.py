@@ -38,6 +38,12 @@ class _FakeSession:
     def __init__(self, turn):
         self._turn = turn
 
+    def ensure_started(self):
+        # The turn finalizer calls this before run_turn. A stub that only
+        # implements run_turn aborts in the startup try and never reaches
+        # the correction review.
+        return self._turn.thread_id
+
     def run_turn(self, *, user_input):
         return self._turn
 

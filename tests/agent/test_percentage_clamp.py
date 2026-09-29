@@ -74,6 +74,10 @@ class TestSourceLinesAreClamped:
     """Production display paths clamp percentage at 100 when usage overshoots."""
 
     def test_gateway_run_clamped(self):
+        # The /usage stats handler was extracted from gateway/run.py into
+        # gateway/slash_commands.py and then gateway/slash_commands_status.py.
+        # Assert the clamp intent behaviourally: the shared ``_pct`` helper every
+        # gateway context gauge goes through clamps at 100 and guards a zero window.
         from gateway.slash_commands_status import _pct
 
         assert _pct(210_000, 200_000) == 100

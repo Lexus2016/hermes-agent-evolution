@@ -1,21 +1,15 @@
-"""Provider-drift fail-closed guard for cron jobs (#44585).
+"""Provider-drift fail-closed guard for cron jobs (#44585), plus the pinned lock.
 
-Background: an UNPINNED cron job follows the global default provider. If that
-global state is changed (e.g. a temporary switch to a paid provider like
-nous/claude-fable-5), the job would silently inherit it on its next tick and
-spend real money — the $7.73 incident.
+An unpinned job snapshots the provider/model resolution at creation. run_job
+fails closed when the currently resolved provider or model differs from that
+snapshot, so a later global default cannot spend money on a job the user did
+not re-pin. ``pinned=True`` is a separate lock: it stores the current main
+provider and model as an ordinary per-job pin. Legacy snapshot records still
+fail closed on drift; they do not silently follow a new main model.
 
-The fix has two halves:
-  - create_job() snapshots the provider resolution WOULD pick at creation into
-    job["provider_snapshot"] (only for unpinned, agent-backed jobs).
-  - run_job() fails closed when an unpinned job's CURRENTLY-resolved provider
-    differs from that snapshot: it skips the run, makes no paid call, and
-    delivers a loud actionable error.
-
-These tests exercise the full run_job path (real imports, mocked AIAgent +
-resolve_runtime_provider against a temp HERMES_HOME) and the create_job
-snapshot capture. They are load-bearing: without the guard, cases (b) call the
-agent and "succeed" instead of failing closed.
+These tests exercise run_job (real imports, mocked AIAgent and
+resolve_runtime_provider against a temp HERMES_HOME), create_job snapshot
+capture, resnapshot, and the pinned-lock helpers.
 """
 
 import sys
@@ -37,7 +31,6 @@ def _base_job(**overrides):
         "prompt": "hello",
         "model": None,
         "provider": None,
-        "provider_snapshot": None,
         "base_url": None,
     }
     job.update(overrides)
@@ -230,6 +223,57 @@ class TestCreateJobSnapshot:
         assert job["provider_snapshot"] is None
 
 
+
+class TestPinnedLocksTheMainModel:
+    """``pinned`` is a lock on the main model at the time it is set, stored as a plain pin."""
+
+    @staticmethod
+    def _store(monkeypatch, tmp_path, main_model="main-model", main_provider="openrouter"):
+        import cron.jobs as jobs
+        (tmp_path / "config.yaml").write_text(f"model:\n  default: {main_model}\n")
+        monkeypatch.setattr(jobs, "get_hermes_home", lambda: tmp_path, raising=True)
+        state = {"jobs": []}
+        monkeypatch.setattr(jobs, "load_jobs", lambda: list(state["jobs"]), raising=True)
+        monkeypatch.setattr(jobs, "save_jobs", lambda j: state.__setitem__("jobs", list(j)), raising=True)
+        monkeypatch.setattr(jobs, "resolve_job_ref", lambda ref: next(
+            (j for j in state["jobs"] if j["id"] == ref), None), raising=True)
+        resolver = MagicMock(return_value={"provider": main_provider})
+        monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", resolver)
+        return jobs, resolver
+
+    def test_pinned_true_locks_then_pinned_false_releases(self, monkeypatch, tmp_path):
+        jobs, _ = self._store(monkeypatch, tmp_path)
+
+        from tools.cronjob_job_args import _format_job
+
+        unpinned = jobs.create_job(prompt="do a thing", schedule="every 1 hour")
+        assert (unpinned["model"], unpinned["provider"]) == (None, None)
+        assert _format_job(unpinned)["pinned"] is False
+
+        locked = jobs.update_job(unpinned["id"], {"pinned": True})
+        assert (locked["model"], locked["provider"]) == ("main-model", "openrouter")
+        assert _format_job(locked)["pinned"] is True
+        assert "pinned" not in jobs.load_jobs()[0]  # derived, never stored
+
+        # The main model moves on; the locked job does not.
+        (tmp_path / "config.yaml").write_text("model:\n  default: newer-model\n")
+        assert jobs.update_job(locked["id"], {"name": "renamed"})["model"] == "main-model"
+
+        released = jobs.update_job(locked["id"], {"pinned": False})
+        assert (released["model"], released["provider"]) == (None, None)
+
+    def test_pinned_never_overrides_an_explicit_model(self, monkeypatch, tmp_path):
+        jobs, resolver = self._store(monkeypatch, tmp_path)
+
+        job = jobs.create_job(prompt="do a thing", schedule="every 1 hour", model="my-model",
+                              provider="nous", pinned=True)
+        assert (job["model"], job["provider"]) == ("my-model", "nous")
+        resolver.assert_not_called()
+
+        still = jobs.update_job(job["id"], {"pinned": True, "model": "other-model"})
+        assert still["model"] == "other-model"
+
+
 def _run_with_current_provider_and_model(
     job,
     current_provider,
@@ -401,9 +445,9 @@ class TestCronFleetDefaultModel:
 
 class TestRuntimeResolutionTargetModel:
     """run_job must resolve the primary provider against the model the job
-    will actually run (per-job pin > env > config default), so providers with
-    model-specific api_mode routing (e.g. OpenCode Zen/Go) pick the mode for
-    the pinned model instead of the stale persisted default."""
+    will actually run (per-job pin > cron.model > env > config default / main
+    agent model), so providers with model-specific api_mode routing pick the
+    mode for that model instead of the stale persisted default."""
 
     def test_primary_resolution_passes_effective_model(self, tmp_path):
         job = _base_job(model="my-pinned-model", provider="openrouter")

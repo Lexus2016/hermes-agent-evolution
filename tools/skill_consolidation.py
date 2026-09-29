@@ -108,7 +108,18 @@ def run_consolidation_pass(threshold: float = _SIMILARITY_THRESHOLD) -> Dict[str
         logger.debug("consolidation: curated_report() failed: %s", e)
         return {"clusters": [], "total_skills": 0, "clustered_skills": 0}
 
-    active = [r for r in rows if r.get("state", "active") == "active"]
+    # Same gate as the curator candidate list: bundled and disabled skills are
+    # not LLM-writable, so a cluster that names them invites refused writes.
+    from agent.skill_utils import get_disabled_skill_names
+
+    disabled = get_disabled_skill_names()
+    active = [
+        r for r in rows
+        if r.get("state", "active") == "active"
+        and r.get("name")
+        and not skill_usage.is_bundled(r["name"])
+        and r["name"] not in disabled
+    ]
     if len(active) < _MIN_CLUSTER_SIZE:
         return {"clusters": [], "total_skills": len(rows), "clustered_skills": 0}
 

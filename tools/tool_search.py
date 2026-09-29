@@ -16,14 +16,17 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Literal
 
+from hermes_cli.config_defaults import DEFAULT_CONFIG
 from tools.registry import tool_error
 from tools.tool_search_catalog import (
     BRIDGE_TOOL_NAMES, CHARS_PER_TOKEN, TOOL_CALL_NAME, TOOL_DESCRIBE_NAME, TOOL_SEARCH_NAME,
     CatalogEntry, _fn, _listing_group_label, _registry_entry, _registry_toolset,
     build_catalog, build_catalog_listing_with_form, search_catalog)
-from tools.tool_search_validation import normalize_tool_call_entries, validate_deferred_call_args
+from tools.tool_search_validation import (
+    local_batch_error, normalize_tool_call_entries, not_deferrable_error, validate_deferred_call_args)
 from tools.connectors import CONNECTOR_BATCH_SENTINEL, is_connector_name
-from tools.connectors.search import connections_in_scope, connector_entries_by_group, remote_schemas_for
+from tools.connectors.search import (
+    connections_in_scope, connector_entries_by_group, connectors_unavailable, remote_schemas_for)
 
 logger = logging.getLogger("tools.tool_search")
 
@@ -127,6 +130,14 @@ class ToolSearchConfig:
             raw = {"enabled": "off" if raw is False else "auto"}
         max_search_limit = _clamped_int(raw.get("max_search_limit"), 25, 1, 50)
         defer_raw = raw.get("defer")
+        if defer_raw is not None and not isinstance(defer_raw, (list, tuple, set)):
+            # Loud, then the curated default: a scalar here means the user tried to shrink the
+            # tool surface and got nothing — never silently ignore it (#116404).
+            logger.warning(
+                "tools.tool_search.defer is %r, expected a YAML list of tool names "
+                "(e.g. [todo_list, computer_use]; [] keeps every tool eager) - "
+                "using the curated default set.", defer_raw)
+            defer_raw = None
         streak_threshold = max(
             0, min(20, _clamped_int(raw.get("search_streak_threshold"), 3, 0, 20))
         )
@@ -228,17 +239,17 @@ def _hermes_core_tools() -> frozenset[str]:
 _core_tool_names = _hermes_core_tools
 
 # Session-gated GUI toolsets: off ``_HERMES_CORE_TOOLS`` so non-GUI clients never pay
-# their schema; once enabled they stay direct unless the deferral list names them.
-_DIRECT_SURFACE_TOOLSETS = frozenset({"desktop_ui", "project"})
+# their schema; once enabled they stay direct unless the deferral list names them. ``setup``
+# is the setup profile's whole job: a guide that has to search for its one tool first
+# answers the user's install request with a tool_search round trip.
+_DIRECT_SURFACE_TOOLSETS = frozenset({"desktop_ui", "project", "setup"})
 
-_DEFAULT_DEFERRED_TOOLS = frozenset({
-    "computer_use", "session_search", "image_generate",
-    "todo_list", "process_manage", "cronjob_manage",
-    # Desktop GUI surface (desktop_ui + project toolsets)
-    "drive_preview", "gui_tour", "desktop_preview", "annotate_preview",
-    "show_tip", "setup_mcp", "desktop_project", "close_terminal",
-    "apply_layout", "read_terminal", "read_window_below", "focus_pane",
-})
+# Event-triggered tools deferred BY DEFAULT (a catalog stub suffices). Keep the curated
+# list in DEFAULT_CONFIG so config discovery and runtime behavior cannot drift. An explicit
+# ``defer`` list replaces this wholesale ([] = everything eager). ``clarify`` is deliberately
+# absent: A/B showed deferring it collapsed structured-clarify usage (18/18 -> 7/18) — the
+# ask-the-user affordance must be ambient, a stub is not enough.
+_DEFAULT_DEFERRED_TOOLS = frozenset(DEFAULT_CONFIG["tools"]["tool_search"]["defer"])
 
 
 def _core_tools_in_toolsets(toolset_names: frozenset[str]) -> frozenset[str]:
@@ -411,30 +422,47 @@ _CONNECTIONS_HINT = (
     "is connected and gets the authorization link when it is not.")
 
 
-def _search_description(
-    deferred_count: int,
-    listing: Optional[str],
-    listing_form: str,
-    connections_granted: bool = False,
-) -> str:
-    count_phrase = (
-        f"{deferred_count} tools"
-        if deferred_count
-        else ("connected services" if connections_granted else "available tools")
-    )
-    base = (
-        f"Search {count_phrase} by intent or capability. Enter 1–7 short queries "
-        "(e.g. ['read pdf', 'fetch weather']). Empty queries are ignored; duplicates dedupe."
-    )
-    if listing_form == "names":
-        base += " The available tools are already listed below; search only when unsure."
-    elif listing_form == "groups":
-        base += " Toolsets with available tools are listed below; search to discover individual tools."
-    if connections_granted:
-        base += _CONNECTIONS_HINT
-    if listing:
-        return f"{base}\n\n{listing}"
-    return base
+def _search_description(deferred_count: int, listing: Optional[str], listing_form: str,
+                        connections_granted: bool = False) -> str:
+    """tool_search bridge description with the listing embedded (framing per ``listing_form``).
+    ``connections_granted`` adds the one sentence that ties ``connectors__`` names to
+    ``manage_connections``; without that tool in the session the sentence would name a tool
+    the model cannot call."""
+    desc = (
+        (f"Search {deferred_count} additional tools that are loaded on demand. "
+         if deferred_count else "Search remote connector tools (email, calendars, issue trackers, and more). ")
+        + "Takes a list of queries searched in parallel against the same "
+        "catalog; send one query per distinct capability you need. Queries are "
+        "keyword searches, not questions: the app or service name plus an action "
+        "and object, no filler words (`gmail send email`, `nvidia driver status`, "
+        "not `what's my GPU driver version?`); a word no tool contains makes the "
+        "query return nothing. Returns "
+        "matching tool names grouped per query plus a shared map with each "
+        "tool's description. Follow with "
+        f"`{TOOL_DESCRIBE_NAME}` to load full parameter schemas, "
+        f"then `{TOOL_CALL_NAME}` to invoke. Tools listed at the top of this "
+        "system prompt are already available and do not need to be searched."
+        + (_CONNECTIONS_HINT if connections_granted else ""))
+    if not listing:
+        return desc
+    if listing_form == "groups":
+        return desc + (
+            "\n\nThe servers below are connected and their tools ARE available "
+            "through this bridge. For any request in these domains, search "
+            "here FIRST — do not claim the capability is unavailable and do "
+            "not substitute a generic tool (terminal/browser) without "
+            "searching.\n\n" + listing)
+    desc += (
+        "\n\nEvery deferred capability is listed below. If a tool name "
+        "appears here, do NOT claim it is unavailable — load it with "
+        f"`{TOOL_DESCRIBE_NAME}` (skip `{TOOL_SEARCH_NAME}` when you "
+        "already see the exact name).")
+    if listing_form == "mixed":
+        desc += (
+            " For servers marked 'names not listed', the tools exist "
+            f"too — find them with `{TOOL_SEARCH_NAME}` before "
+            "concluding anything is missing.")
+    return desc + "\n\n" + listing
 
 
 def bridge_tool_schemas(
@@ -452,7 +480,7 @@ def bridge_tool_schemas(
                 "queries": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Search queries, each a few keywords describing one capability (e.g. ['create github issue', 'send slack message']). Searched in parallel; results come back grouped per query. A single string is accepted and treated as one query.",
+                    "description": "Keyword queries, one per capability: app or service name + action + object (e.g. ['github create issue', 'slack send message', 'gmail fetch emails']). Not questions or sentences: every word must appear in tool text, or the query returns nothing. Searched in parallel; results come back grouped per query. A single string is accepted and treated as one query.",
                 },
                 "limit": {
                     "type": "integer",
@@ -604,8 +632,12 @@ def _shared_tool_record(entry: CatalogEntry) -> Dict[str, Any]:
 
 
 def _available_source_summary(catalog: List[CatalogEntry]) -> List[Dict[str, Any]]:
+    """Deterministic summaries of connected and declared unavailable sources."""
+    from tools.tool_search_catalog import hidden_declared_sources
+
     counts = Counter(_listing_group_label(entry.source_name) for entry in catalog)
-    return [{"name": name, "tool_count": counts[name]} for name in sorted(counts)]
+    rows = [{"name": name, "tool_count": counts[name]} for name in sorted(counts)]
+    return sorted(rows + hidden_declared_sources(), key=lambda row: row["name"])
 
 
 def _string_list_arg(
@@ -747,11 +779,16 @@ def dispatch_tool_search(
         return _degraded_search_response(queries, current_tool_defs, limit, exc)
 
     remote_entries: List[List[CatalogEntry]] = [[] for _ in queries]
+    hosted_failure: Optional[str] = None
     if connections_in_scope(current_tool_defs):
-        remote_entries = connector_entries_by_group(queries, connector_search=connector_search)
+        remote_entries, hosted_failure = connector_entries_by_group(
+            queries, connector_search=connector_search)
     results: List[Dict[str, Any]] = []
     tools_map: Dict[str, Dict[str, Any]] = {}
-    available_sources = _available_source_summary(catalog) if catalog else []
+    # An empty lexical catalog still has declared-but-hidden MCP sources.
+    # Gating the summary on ``catalog`` dropped those rows and the empty-match
+    # hint never named the server the user had declared.
+    available_sources = _available_source_summary(catalog)
     all_hits: List[CatalogEntry] = []
     for position, query in enumerate(queries):
         corpus = catalog + remote_entries[position]
@@ -768,7 +805,7 @@ def dispatch_tool_search(
             tools_map.setdefault(h.name, _shared_tool_record(h))
         matches = [h.name for h in hits]
         group: Dict[str, Any] = {"query": query, "matches": matches}
-        if not matches and catalog:
+        if not matches and available_sources:
             group["available_sources"] = available_sources
             group["hint"] = (
                 "This query returned no lexical matches, but the sources above "
@@ -825,6 +862,8 @@ def dispatch_tool_search(
                         "parameters": fn.get("parameters", {}),
                     }
 
+    if hosted_failure:
+        result["connectors"] = connectors_unavailable(hosted_failure, verb="searched")
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -995,15 +1034,12 @@ def _dispatch_tool_describe_batched(
     if err:
         return err
     deferrable = _deferrable_in(current_tool_defs)
-    by_name = {
-        name: _fn(td)
-        for td, name in zip(deferrable, _tool_def_names(deferrable))
-        if name
-    }
-    remote_schemas = remote_schemas_for(names, current_tool_defs, connector_describe)
+    by_name = {name: _fn(td) for td, name in zip(deferrable, _tool_def_names(deferrable)) if name}
+    remote_schemas, hosted_failure = remote_schemas_for(names, current_tool_defs, connector_describe)
 
     tools: Dict[str, Dict[str, Any]] = {}
     not_found: List[str] = []
+    undescribed: List[str] = []
     errors: Dict[str, str] = {}
     for name in names:
         fn = by_name.get(name)
@@ -1019,14 +1055,12 @@ def _dispatch_tool_describe_batched(
                 "parameters": remote_fn.get("parameters", {}),
             }
         elif is_connector_name(name):
-            not_found.append(name)
+            (undescribed if hosted_failure else not_found).append(name)
         elif _registry_entry(name) is not None and not is_deferrable_tool_name(
             name, config=config
         ):
-            errors[name] = (
-                f"'{name}' is not a deferrable tool. If you see it in the tools list "
-                "already, call it directly; otherwise check the spelling against tool_search."
-            )
+            # Registered but bridge/core/GUI-surface: a real name, wrong door.
+            errors[name] = not_deferrable_error(name)
         else:
             not_found.append(name)
     result: Dict[str, Any] = {"tools": tools}
@@ -1035,6 +1069,8 @@ def _dispatch_tool_describe_batched(
         result["hint"] = "Names in not_found are not currently available. Re-run tool_search to refresh."
     if errors:
         result["errors"] = errors
+    if hosted_failure:
+        result["connectors"] = connectors_unavailable(hosted_failure, verb="described", names=undescribed)
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -1148,9 +1184,7 @@ def resolve_underlying_call(
         return None, {}, err
 
     if len(entries) > 1 and any(not is_connector_name(e["name"]) for e in entries):
-        return None, {}, (
-            "Local tools require one entry per tool_call; mixed and multi-local batches are not supported."
-        )
+        return None, {}, local_batch_error(entries)
     if is_connector_name(entries[0]["name"]):
         return CONNECTOR_BATCH_SENTINEL, {"calls": entries}, None
 
@@ -1158,7 +1192,14 @@ def resolve_underlying_call(
     raw_args = entries[0]["arguments"]
     defer_cfg = config if config is not None else load_config_readonly()
     if not is_deferrable_tool_name(name, config=defer_cfg):
-        return None, {}, _non_deferrable_error(name, config)
+        # Unknown names must not be told to "call it directly" — that is the
+        # opposite correction for a bare MCP suffix. Known core tools keep the
+        # enriched recovery when this session stripped them from the tool list.
+        from tools.tool_search_validation import not_deferrable_error
+        enriched = _non_deferrable_error(name, config)
+        if "not available" in enriched:
+            return None, {}, enriched
+        return None, {}, not_deferrable_error(name)
     return name, raw_args, None
 
 

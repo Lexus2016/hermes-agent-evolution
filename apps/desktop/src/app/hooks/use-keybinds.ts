@@ -30,8 +30,10 @@ import {
   openFindBar
 } from '@/store/find-in-page'
 import { toggleHud } from '@/store/hud'
+import { toggleSimpleMode } from '@/store/interface-mode'
 import { $capture, $comboIndex, endCapture, setBinding } from '@/store/keybinds'
 import {
+  cycleSidebarGrouping,
   requestSessionSearchFocus,
   setFileBrowserOpen,
   toggleFileBrowserOpen,
@@ -67,7 +69,12 @@ import { toggleStatusbarVisible } from '@/store/statusbar-prefs'
 import { openNewWindow } from '@/store/windows'
 import { useTheme } from '@/themes/context'
 
-import { requestComposerFocus, requestModelMenuToggle, requestVoiceToggle } from '../chat/composer/focus'
+import {
+  requestComposerDictation,
+  requestComposerFocus,
+  requestModelMenuToggle,
+  requestVoiceToggle
+} from '../chat/composer/focus'
 import { handleComposerFocusChord } from '../chat/composer/focus-chord'
 import { handleWindowPaste } from '../chat/composer/paste-to-focus'
 import { openSession } from '../open-session'
@@ -75,14 +82,14 @@ import {
   $workspaceIsPage,
   AGENTS_ROUTE,
   ARTIFACTS_ROUTE,
+  CAPABILITIES_ROUTE,
   CRON_ROUTE,
   MESSAGING_ROUTE,
   navigateToWorkspacePage,
   NEW_CHAT_ROUTE,
   PROFILES_ROUTE,
   sessionRoute,
-  SETTINGS_ROUTE,
-  SKILLS_ROUTE
+  SETTINGS_ROUTE
 } from '../routes'
 
 export interface KeybindRuntimeDeps {
@@ -195,6 +202,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
       }
     },
     'composer.voice': requestVoiceToggle,
+    'composer.dictate': requestComposerDictation,
 
     // On the Settings overlay, ⌘K scopes to settings search; the second press
     // (or Esc) still closes as usual via toggle.
@@ -210,7 +218,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     'nav.commandCenter': deps.toggleCommandCenter,
     'nav.settings': () => navigate(SETTINGS_ROUTE),
     'nav.profiles': () => navigate(PROFILES_ROUTE),
-    'nav.skills': () => navigateToWorkspacePage(navigate, SKILLS_ROUTE),
+    'nav.capabilities': () => navigateToWorkspacePage(navigate, CAPABILITIES_ROUTE),
     'nav.messaging': () => navigateToWorkspacePage(navigate, MESSAGING_ROUTE),
     'nav.artifacts': () => navigateToWorkspacePage(navigate, ARTIFACTS_ROUTE),
     'nav.cron': () => navigate(CRON_ROUTE),
@@ -244,6 +252,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
 
     // Narrow-viewport reveal is handled inside the store toggles now.
     'view.toggleSidebar': toggleSidebarOpen,
+    'view.cycleSidebarGrouping': cycleSidebarGrouping,
     // ⌘J toggles the right sidebar — but a layout with no right side (e.g.
     // terminal-on-bottom) would leave it a dead key, so it falls back to the
     // terminal there. The single "secondary panel" toggle.
@@ -252,6 +261,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     'view.toggleReview': toggleReview,
     'view.toggleStatusbar': toggleStatusbarVisible,
     'view.toggleProfileRail': toggleProfileRailVisible,
+    'view.toggleSimpleMode': toggleSimpleMode,
     'view.toggleTabStrip': () => void toggleTargetZoneTabStrip(),
     'view.showFiles': showFiles,
     'view.showBrowser': openBrowserTab,
@@ -320,6 +330,43 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
       ),
     []
   )
+
+  useEffect(() => {
+    const updateF12Ownership = () => {
+      const hasF12Binding = [...$comboIndex.get().keys()].some(combo => combo === 'f12' || combo.endsWith('+f12'))
+      window.hermesDesktop?.setF12ShortcutActive?.(hasF12Binding || $capture.get() !== null)
+    }
+
+    const stopBindings = $comboIndex.subscribe(updateF12Ownership)
+    const stopCapture = $capture.subscribe(updateF12Ownership)
+
+    return () => {
+      stopBindings()
+      stopCapture()
+      window.hermesDesktop?.setF12ShortcutActive?.(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const stopF12Shortcut = window.hermesDesktop?.onF12Shortcut?.(input => {
+      const target = document.activeElement ?? document.body ?? document.documentElement
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          altKey: input.alt,
+          bubbles: true,
+          cancelable: true,
+          code: input.code,
+          ctrlKey: input.control,
+          key: input.key,
+          metaKey: input.meta,
+          repeat: input.repeat,
+          shiftKey: input.shift
+        })
+      )
+    })
+
+    return () => stopF12Shortcut?.()
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

@@ -24,6 +24,24 @@ def test_gate_helper_blocks_risky_and_passes_benign(monkeypatch):
     reason = g("terminal", {"command": "rm -rf / --no-preserve-root"})
     assert reason is not None and "harm_score=1.0" in reason
     assert "destructive-command" in reason
+    for root_cmd in (
+        "rm -rf /",
+        "rm -rf /*",
+        "rm -rf //",
+        "rm -rf /.",
+        "rm -rf /./",
+        "sudo rm -rf /",
+    ):
+        root_reason = g("terminal", {"command": root_cmd})
+        assert root_reason is not None and "destructive-command" in root_reason, root_cmd
+    # A specific directory is dangerous but not a root wipe: the approval
+    # prompt must see it. Prefix-matching "rm -rf /" blocked these first.
+    for specific in (
+        "rm -rf /tmp/e2e-victim",
+        "rm -rf /var/folders/xx/victim-tag",
+        "rm -rf /tmp/hermes-e2e-approval-probe",
+    ):
+        assert g("terminal", {"command": specific}) is None, specific
     reason = g("file_write", {"path": "/etc/passwd", "content": "root::"})
     assert reason is not None and "credential-access" in reason
     assert g("file_write", {"path": "/tmp/notes.md", "content": "hi"}) is None

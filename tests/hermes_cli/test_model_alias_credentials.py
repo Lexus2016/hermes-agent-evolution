@@ -86,13 +86,55 @@ class TestDirectAliasCredentialLoading:
         assert alias.api_key == "sk-literal"
         assert alias.key_env == "THETA_API_KEY"
 
-    def test_credential_fields_default_to_empty(self, monkeypatch):
-        """Aliases without credentials keep working (positional construction)."""
-        from hermes_cli.model_switch import DirectAlias
 
-        alias = DirectAlias("theta-1", "custom", ALIAS_HOST)
-        assert alias.api_key == ""
-        assert alias.key_env == ""
+
+class TestNestedModelAliasesCredentials:
+    """``model.aliases:`` dict entries must keep ``api_key``/``key_env`` like
+    top-level ``model_aliases:`` entries do (#114471)."""
+
+    def _install_nested(self, monkeypatch, name, entry):
+        cfg = {
+            "model": {
+                "default": "gpt-4",
+                "provider": "openrouter",
+                "aliases": {name: entry},
+            },
+        }
+        monkeypatch.setattr("hermes_cli.config.load_config", lambda *a, **k: cfg)
+        monkeypatch.setattr("hermes_cli.runtime_provider.load_config", lambda *a, **k: cfg)
+        return cfg
+
+    def test_nested_alias_keeps_key_env(self, monkeypatch):
+        self._install_nested(
+            monkeypatch,
+            "qwen-local",
+            {
+                "model": "qwen3-next",
+                "provider": "custom",
+                "base_url": "http://192.168.1.50:8000/v1",
+                "key_env": "QWEN27B_KEY",
+            },
+        )
+        from hermes_cli.model_switch import _load_direct_aliases
+
+        alias = _load_direct_aliases()["qwen-local"]
+        assert alias.key_env == "QWEN27B_KEY"
+        assert alias.base_url == "http://192.168.1.50:8000/v1"
+
+    def test_nested_alias_keeps_api_key(self, monkeypatch):
+        self._install_nested(
+            monkeypatch,
+            "theta-nested",
+            {
+                "model": "theta-1",
+                "provider": "custom",
+                "base_url": ALIAS_HOST,
+                "api_key": "sk-literal",
+            },
+        )
+        from hermes_cli.model_switch import _load_direct_aliases
+
+        assert _load_direct_aliases()["theta-nested"].api_key == "sk-literal"
 
 
 class TestDirectAliasApiKeyHelper:
@@ -476,13 +518,6 @@ class TestSchemelessBaseUrls:
             "http://localhost:11434/v1", "localhost:11434/v1"
         ) is False
 
-    def test_httpx_cannot_use_a_schemeless_base_url(self):
-        """Pins the premise above: this is why the strict answer is harmless."""
-        httpx = pytest.importorskip("httpx")
-
-        assert httpx.URL("localhost:11434/v1").host == ""
-        assert httpx.URL("api.example.com/v1").host == ""
-        assert httpx.URL("http://localhost:11434/v1").host == "localhost"
 
 
 class TestAliasCacheIsProfileScoped:

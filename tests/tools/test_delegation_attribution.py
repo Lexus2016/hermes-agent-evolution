@@ -117,7 +117,6 @@ class TestDelegateToolWiring:
         )
         assert "ATTRIBUTION:" in prompt
         assert stamp in prompt
-        assert "Do the thing" in prompt
         assert "Some context" in prompt
 
     def test_child_prompt_unchanged_without_attribution(self):
@@ -126,7 +125,6 @@ class TestDelegateToolWiring:
         prompt = _build_child_system_prompt("Do the thing", context="Some context")
         assert "ATTRIBUTION:" not in prompt
         assert ATTRIBUTION_MARKER not in prompt
-        assert "Do the thing" in prompt
         assert "Some context" in prompt
 
     def test_attribution_stamp_roundtrip_through_prompt(self):

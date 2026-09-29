@@ -442,6 +442,20 @@ def _is_test_command(command: Optional[str]) -> bool:
     return any(pat.search(command) for pat in _TEST_CMD_PATTERNS)
 
 
+def _is_human_user_turn(msg: Dict[str, Any]) -> bool:
+    """A real user request, not a loop-guard nudge.
+
+    Nudges are user-role rows the guard appends to itself. They stay inside
+    the current task. A human message is a new task: identical calls from
+    the previous one must not count, or every fresh request that reuses a
+    command (an env probe once per turn) looks like a stuck loop.
+    """
+    if msg.get("role") != "user":
+        return False
+    content = msg.get("content", "")
+    return isinstance(content, str) and "[loop-guard]" not in content
+
+
 def detect_test_iteration_loop(
     messages: List[Dict[str, Any]],
 ) -> Optional[str]:
@@ -483,10 +497,8 @@ def detect_test_iteration_loop(
                     elif isinstance(tm, dict) and tm.get("role") == "assistant":
                         break
                 test_runs.append((cmd or "?", failed))
-        elif msg.get("role") == "user":
-            content = msg.get("content", "")
-            if isinstance(content, str) and "[loop-guard]" not in content:
-                break
+        elif _is_human_user_turn(msg):
+            break
         i -= 1
 
     if len(test_runs) < _TEST_LOOP_THRESHOLD:
@@ -573,6 +585,10 @@ def detect_dead_end_loop(
     the dead-end pattern: the agent re-issues the exact same arguments without
     any structural change, which means nothing new can happen.
 
+    Counting starts after the latest human user message. "Across turns" means
+    across tool rounds of one task (``edit → test → edit → test``), not across
+    a new request that legitimately repeats a command.
+
     Returns a nudge string asking for a structured
     ``{what_changed, why_expect_different_outcome}`` justification, or None.
     """
@@ -580,7 +596,12 @@ def detect_dead_end_loop(
 
     signatures: Counter[str] = Counter()
     sig_to_tool: dict[str, str] = {}
-    scan = messages[-_DEAD_END_WINDOW:] if len(messages) > _DEAD_END_WINDOW else messages
+    scan = messages[-_DEAD_END_WINDOW:] if len(messages) > _DEAD_END_WINDOW else list(messages)
+    start = 0
+    for i, msg in enumerate(scan):
+        if isinstance(msg, dict) and _is_human_user_turn(msg):
+            start = i + 1
+    scan = scan[start:]
 
     for msg in scan:
         if not isinstance(msg, dict):

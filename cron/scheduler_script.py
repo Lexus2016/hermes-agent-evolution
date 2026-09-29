@@ -343,6 +343,7 @@ def _run_job_script(
         return False, err
 
     run_env = os.environ.copy()
+    _profile_dotenv: dict[str, str] = {}
     try:
         hermes_home = _sched._get_hermes_home()
         run_env["HERMES_HOME"] = str(hermes_home)
@@ -358,6 +359,7 @@ def _run_job_script(
             for _k, _v in _env_data.items():
                 if _v is not None:
                     run_env[_k] = _v
+                    _profile_dotenv[_k] = _v
     except Exception:
         pass
 
@@ -372,7 +374,15 @@ def _run_job_script(
 
     try:
         from tools.environments.local import build_subprocess_env
-        popen_kwargs: dict[str, Any] = {"start_new_session": True}
+        # Lossy decode only: keep the platform-default (locale) encoding — gating ``encoding=``
+        # to win32 was deliberate (#66566: unconditional UTF-8 leaked into POSIX) — but
+        # ``errors=`` must not stay 'strict': one stray non-UTF-8 byte in the script's stdout
+        # or stderr raises UnicodeDecodeError in communicate() and fails the whole run,
+        # discarding the output (#105582; the Windows branch decodes lossily per #45099).
+        popen_kwargs: dict[str, Any] = {
+            "start_new_session": True,
+            "errors": "replace",
+        }
         if sys.platform == "win32":
             popen_kwargs = {
                 "creationflags": windows_hide_flags()
@@ -383,7 +393,15 @@ def _run_job_script(
                 # reader threads on non-UTF-8 Windows (#45099).
                 "encoding": "utf-8",
                 "errors": "replace"}
-        env = build_subprocess_env(run_env)
+        env = build_subprocess_env(strip_launch_profile=True)
+        # Owning-profile .env secrets for no_agent scripts (#124), applied after the
+        # launch-profile residue strip (#114209) so a routed job does not keep the
+        # launch profile's keys and still sees this home's API keys.
+        env.update(_profile_dotenv)
+        if run_env.get("HERMES_HOME"):
+            env["HERMES_HOME"] = run_env["HERMES_HOME"]
+        if run_env.get("HOME"):
+            env["HOME"] = run_env["HOME"]
         env.update(env_overlay)
         # Subprocess cwd only (default: scripts-dir parent). NEVER os.chdir() the process.
         # Use the job's workdir as the subprocess cwd when configured, otherwise default to the scripts-dir

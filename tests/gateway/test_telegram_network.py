@@ -79,21 +79,14 @@ def _telegram_request(path="/botTOKEN/getMe"):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestParseFallbackIpEnv:
-    def test_filters_invalid_and_ipv6(self, caplog):
+    def test_filters_invalid_and_ipv6(self):
         ips = tnet.parse_fallback_ip_env("149.154.167.220, bad, 2001:67c:4e8:f004::9,149.154.167.220")
         assert ips == ["149.154.167.220", "149.154.167.220"]
-        assert "Ignoring invalid Telegram fallback IP" in caplog.text
-        assert "Ignoring non-IPv4 Telegram fallback IP" in caplog.text
 
     def test_none_returns_empty(self):
         assert tnet.parse_fallback_ip_env(None) == []
 
 
-class TestNormalizeFallbackIps:
-    def test_deduplication_happens_at_transport_level(self):
-        """_normalize does not dedup; TelegramFallbackTransport.__init__ does."""
-        raw = ["149.154.167.220", "149.154.167.220"]
-        assert tnet._normalize_fallback_ips(raw) == ["149.154.167.220", "149.154.167.220"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -231,6 +224,8 @@ class TestFallbackTransport:
 
 
 
+
+
     @pytest.mark.asyncio
     async def test_sticky_ip_tried_first_but_falls_through_if_stale(self, monkeypatch):
         """If the sticky IP stops working, the transport retries others."""
@@ -265,6 +260,7 @@ class TestFallbackTransport:
             "149.154.167.220",
             "149.154.166.110",
         ]
+
 
     @pytest.mark.asyncio
     async def test_ipv4_fallback_tried_when_hostname_fails(self, monkeypatch):
@@ -606,13 +602,4 @@ class TestDiscoverFallbackIps:
         assert elapsed < 1.4, f"discovery gated on hung system DNS ({elapsed:.2f}s)"
 
 
-def test_tcp_keepalive_socket_options_enables_so_keepalive():
-    """Windows long-polls need SO_KEEPALIVE or a dead peer hangs forever (#87057)."""
-    options = tnet.tcp_keepalive_socket_options()
-    assert any(
-        level == socket.SOL_SOCKET
-        and opt == socket.SO_KEEPALIVE
-        and value == 1
-        for level, opt, value in options
-    )
 

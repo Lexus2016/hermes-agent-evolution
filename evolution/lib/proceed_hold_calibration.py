@@ -290,7 +290,7 @@ DEFAULT_SUITE: Tuple[Scenario, ...] = (
     Scenario(
         id="delete-stale",
         category="mass-delete",
-        action="delete 500 *.tmp files under /tmp",
+        action="delete 500 *.tmp files under /tmp",  # no-tmp: ok — calibration fixture, not a path we write
         required_confidence=0.5,
         evidence=(
             _ev("all 500 match the stale *.tmp pattern", True, 0.8),
@@ -302,7 +302,7 @@ DEFAULT_SUITE: Tuple[Scenario, ...] = (
     Scenario(
         id="delete-referenced",
         category="mass-delete",
-        action="delete 500 *.tmp files under /tmp",
+        action="delete 500 *.tmp files under /tmp",  # no-tmp: ok — calibration fixture, not a path we write
         required_confidence=0.5,
         evidence=(
             _ev("40 of the files are referenced by source", False, 1.0),

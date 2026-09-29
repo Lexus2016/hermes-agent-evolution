@@ -51,6 +51,7 @@ def test_jittered_backoff_increases_with_attempt():
 
 def test_jittered_backoff_respects_max_delay():
     assert jittered_backoff(100, base_delay=1.0, max_delay=30.0) <= 45.0
+from agent.retry_utils import adaptive_rate_limit_backoff, jittered_backoff
 
 
 def test_backoff_is_exponential():
@@ -73,6 +74,8 @@ def test_backoff_attempt_1_is_base():
     """First attempt delay should equal base_delay (with no jitter)."""
     delay = jittered_backoff(1, base_delay=3.0, max_delay=120.0, jitter_ratio=0.0)
     assert delay == 3.0
+
+
 
 
 def test_backoff_thread_safety():
@@ -193,7 +196,8 @@ def test_zai_overload_ceiling_makes_long_tier_reachable(monkeypatch):
             long_waits.append(_wait)
 
     assert long_waits, "long-backoff tier never reached within the retry ceiling"
-    assert long_waits == [30.0, 60.0, 90.0, 120.0]
+    from agent.retry_utils import _ZAI_CODING_OVERLOAD_LONG_BACKOFF
+    assert long_waits == list(_ZAI_CODING_OVERLOAD_LONG_BACKOFF)
 
 
 # ---------------------------------------------------------------------------

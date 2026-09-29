@@ -1,10 +1,4 @@
-"""Unit tests for TurnRetryState (god-file Phase 1b).
-
-The dataclass holds the inner-retry-loop's one-shot recovery guards + restart
-signals. These tests pin its shape and default semantics — the behavioral
-guarantee for the loop itself is the existing recovery-branch tests in
-tests/run_agent/ which now exercise these fields via `_retry.<flag>`.
-"""
+"""Copilot provider detection used by the turn-retry recovery gates."""
 
 from __future__ import annotations
 
@@ -45,6 +39,9 @@ EXPECTED_FIELDS = {
     # than by taking upstream's copy of this file, which has no counter fields
     # and no test_all_guards_default_false — both fork work (#704, #943, #1142).
     "restart_with_redirected_messages",
+    # Auto-recovery cycle counter (agent/turn_recovery_autorecover.py). An int,
+    # like the consecutive-hit counters — not a one-shot guard.
+    "auto_recovery_cycles_used",
 }
 
 
@@ -54,6 +51,7 @@ COUNTER_FIELDS = {
     "consecutive_rate_limit_hits",
     "consecutive_overload_hits",
     "consecutive_timeout_hits",
+    "auto_recovery_cycles_used",
 }
 
 

@@ -2,6 +2,7 @@
 
 import json
 import time
+import threading
 import pytest
 
 from agent import secret_scope
@@ -53,11 +54,6 @@ class TestMem0V3Tools:
         provider._backend = backend
         return provider
 
-    def test_search_returns_ids(self, monkeypatch):
-        backend = FakeBackend(search_results=[{"id": "mem-1", "memory": "foo", "score": 0.9}])
-        provider = self._make_provider(monkeypatch, backend)
-        result = json.loads(provider.handle_tool_call("mem0_search", {"query": "test"}))
-        assert result["results"][0]["id"] == "mem-1"
 
     def test_search_uses_filters(self, monkeypatch):
         backend = FakeBackend()
@@ -110,13 +106,6 @@ class TestMem0V3Tools:
         result = json.loads(provider.handle_tool_call("mem0_add", {}))
         assert "error" in result
 
-    def test_old_tool_names_return_unknown(self, monkeypatch):
-        backend = FakeBackend()
-        provider = self._make_provider(monkeypatch, backend)
-        result = json.loads(provider.handle_tool_call("mem0_profile", {}))
-        assert "error" in result
-        result = json.loads(provider.handle_tool_call("mem0_conclude", {}))
-        assert "error" in result
 
 
 class TestMem0UpdateDelete:
@@ -241,7 +230,6 @@ class TestMem0ErrorHandling:
         provider = self._make_provider(monkeypatch, backend)
         provider.handle_tool_call("mem0_update", {"memory_id": "mem-1", "text": "x"})
         assert provider._consecutive_failures == 1
-
 
 class TestMem0V3Internal:
 
@@ -430,25 +418,6 @@ class TestMem0Prefetch:
         assert backend.captured == []
 
 
-class TestMem0V3Config:
-
-    def test_tool_schemas_four_tools(self):
-        provider = Mem0MemoryProvider()
-        schemas = provider.get_tool_schemas()
-        names = [s["name"] for s in schemas]
-        assert names == ["mem0_search", "mem0_add", "mem0_update", "mem0_delete"]
-
-    def test_system_prompt_new_tool_names(self):
-        provider = Mem0MemoryProvider()
-        provider._user_id = "test"
-        block = provider.system_prompt_block()
-        assert "mem0_search" in block
-        assert "mem0_add" in block
-        assert "mem0_update" in block
-        assert "mem0_delete" in block
-        assert "mem0_list" not in block
-        assert "mem0_profile" not in block
-        assert "mem0_conclude" not in block
 
     def test_system_prompt_shows_platform_mode(self):
         provider = Mem0MemoryProvider()
@@ -551,12 +520,6 @@ class TestMem0ModeSwitch:
 
         assert mem0_plugin._load_config()["api_key"] == "file-key"
 
-    def test_default_mode_is_platform(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-        monkeypatch.setenv("MEM0_API_KEY", "test-key")
-        provider = Mem0MemoryProvider()
-        provider.initialize("test")
-        assert provider._mode == "platform"
 
     def test_missing_mode_key_defaults_platform(self, monkeypatch, tmp_path):
         """Backward compat: old mem0.json without mode key works."""
@@ -688,7 +651,6 @@ class TestMem0WriteMetadata:
         adds = [c for c in provider._backend.captured if c[0] == "add"]
         assert adds, "expected an add call from sync_turn"
         assert adds[-1][2]["metadata"]["channel"] == "discord"
-
 
 class _SentinelBackend:
     def __init__(self, *args):

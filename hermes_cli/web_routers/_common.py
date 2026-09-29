@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import sqlite3
 import time
 from typing import Any, Callable, Dict, Optional
@@ -20,6 +21,7 @@ from hermes_cli.web_server_profiles import _profile_cli_args
 log = logging.getLogger("hermes_cli.web_server")
 
 _profile_scope = late("_profile_scope", "hermes_cli.web_server_profiles")
+_config_profile_scope = late("_config_profile_scope", "hermes_cli.web_server_profiles")
 _spawn_hermes_action = late("_spawn_hermes_action", "hermes_cli.web_server_gateway")
 # Config read-modify-write serialization for off-loop handlers (live lock —
 # LateState supports ``with``-blocks).
@@ -43,6 +45,43 @@ async def scoped_to_thread(profile: Optional[str], fn: Callable[[], Any]) -> Any
             return fn()
 
     return await asyncio.to_thread(_run)
+
+
+async def config_scoped_to_thread(profile: Optional[str], fn: Callable[[], Any]) -> Any:
+    """Run ``fn()`` inside ``_config_profile_scope(profile)`` on a worker thread —
+    home + secret scope without the process-global skills-module swap."""
+
+    def _run():
+        with _config_profile_scope(profile):
+            return fn()
+
+    return await asyncio.to_thread(_run)
+
+
+def destructive_profile(profile: Optional[str], route: str) -> Optional[str]:
+    """The profile a DESTRUCTIVE or PRIVILEGED route acts on, or 400 when it is ambiguous.
+
+    One backend serves every profile, so an omitted ``profile`` on a route that deletes,
+    overwrites or privileges profile-owned data is not a default — it silently meant
+    "whichever home this process launched with". Named profile: honoured. Omitted:
+    rejected as soon as the process hosts more than one profile
+    (``is_multiplex_active()``, decided once at boot by
+    ``activate_multi_profile_hosting_eagerly``). A genuinely single-profile host has
+    nothing to confuse, so there an omitted profile keeps meaning the launch profile
+    and `curl` against a plain ``hermes serve`` is unchanged.
+
+    "Privileged" is the same class as "destructive": arming an auto-approved shell hook
+    in the wrong profile is at least as bad as removing one from it.
+    """
+    if (profile or "").strip():
+        return profile
+    from agent.secret_scope import is_multiplex_active
+    if is_multiplex_active():
+        raise HTTPException(
+            status_code=400,
+            detail=f"{route} requires an explicit profile: this backend serves several profiles, "
+                   "so an unnamed target would act on the wrong profile's data.")
+    return profile
 
 
 @contextlib.contextmanager
@@ -78,6 +117,36 @@ def require(value: Optional[str], detail: str) -> str:
     if not stripped:
         raise HTTPException(status_code=400, detail=detail)
     return stripped
+
+
+REDACTED_CREDENTIAL_WRITE_DETAIL = (
+    "Refusing to save a redacted credential preview; re-enter the full secret to replace it."
+)
+
+
+def redacted_credential_preview(value: Any) -> Optional[str]:
+    """Return a display-only credential sentinel that can never gain write authority."""
+    if not value:
+        return None
+    from hermes_cli.config import redact_key
+    return f"«redacted:{redact_key(str(value))}»"
+
+
+# Legacy bare masks (pre-sentinel pages, older Desktop builds) are recognised by the
+# producer shape of ``agent.redact.mask_secret`` — never by equality to the current
+# secret, which would authorise a stale preview after a rotation (#121002).
+_LEGACY_MASK_RE = re.compile(r".{4}\.\.\..{4}")
+
+
+def is_redacted_credential_preview(submitted: Any) -> bool:
+    """Recognize current, stale and legacy dashboard previews by shape alone."""
+    value = str(submitted or "")
+    # Any ``«redacted…`` value is already-masked output (the same test agent.redact uses
+    # to skip re-masking): our ``«redacted:…»`` sentinel, ``«redacted-secret»`` and the
+    # vault marker ``«redacted-vault-secret»``. Then the legacy bare mask shapes.
+    if value.startswith("«redacted"):
+        return True
+    return value == "***" or _LEGACY_MASK_RE.fullmatch(value) is not None
 
 
 # Corrupt-store reporting for polled read endpoints. The dashboard polls analytics every few

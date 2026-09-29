@@ -27,6 +27,11 @@ def _make_adapter():
     # pacer has its own tests; the dedup window here is time-based, so its production rate (at most
     # one action per chat per typing_retrigger_min_interval_seconds) is unaffected by pacing.
     adapter._send_pacer = None
+    # This test models a burst of streamed chunks landing back-to-back; the shared send+edit
+    # pacing slot (#116312) would space those sends out to ~1/s, so real time elapses between them
+    # and typing re-arms — exactly its collapse cadence. Shut the slot off to keep the burst
+    # instantaneous so only the per-chat collapse is measured.
+    adapter._telegram_chat_outbound_slot_secs = 0.0
     return adapter
 
 

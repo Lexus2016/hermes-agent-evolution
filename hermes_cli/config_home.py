@@ -8,8 +8,9 @@ class HomeInitializationError(RuntimeError):
     """The home skeleton is unavailable, not an invalid YAML document."""
 
 
+# no-tmp: ok — /tmp is a forbidden symlink target, not a scratch directory
 _SYSTEM_ROOT_SYMLINKS = frozenset({
-    Path("/var"), Path("/tmp"), Path("/etc"),
+    Path("/var"), Path("/tmp"), Path("/etc"),  # no-tmp: ok — forbidden symlink target
     Path("/bin"), Path("/lib"), Path("/lib64"), Path("/sbin"),
 })
 

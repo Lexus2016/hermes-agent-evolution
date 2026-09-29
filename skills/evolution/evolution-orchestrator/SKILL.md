@@ -62,9 +62,10 @@ candidates yourself and you do NOT loop — see *Scope boundary* below.
    angle). Save your angles to a file first so collection can map candidates back:
 
    ```bash
+   # no-tmp: ok — example recipe path, not a runtime default
    printf '%s\n' "official docs / source" "failure modes" "benchmarks" \
      | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))' \
-     > /tmp/angles.json
+     > /tmp/angles.json  # no-tmp: ok — example recipe path
    python scripts/evolution_orchestrator.py build \
        --subtask "How do top agents bound delegation depth?" \
        --angle "official docs / source" \
@@ -111,8 +112,9 @@ candidates yourself and you do NOT loop — see *Scope boundary* below.
    produced it:
 
    ```bash
+   # no-tmp: ok — example recipe path, not a runtime default
    echo "$DELEGATE_RESULTS_JSON" \
-     | python scripts/evolution_orchestrator.py collect --angles /tmp/angles.json
+     | python scripts/evolution_orchestrator.py collect --angles /tmp/angles.json  # no-tmp: ok — example recipe path
    ```
 
    It prints `{"candidates": [...], "ok": K, "failed": M}`. Each candidate is

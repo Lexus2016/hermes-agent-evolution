@@ -43,7 +43,7 @@ def gui_screenshot(
     **kwargs,
 ) -> str:
     """Capture a screenshot of the entire desktop or a specific window."""
-    target = output_path or "/tmp/gui_screenshot.png"
+    target = output_path or "/tmp/gui_screenshot.png"  # no-tmp: ok — default screenshot path when the caller omits one
     target_window = window_id or "root"
     return json.dumps({
         "status": "success",

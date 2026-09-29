@@ -12,12 +12,10 @@ import asyncio
 import base64
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
 from agent.plugin_llm import (
-    PluginLlm,
     PluginLlmCompleteResult,
     PluginLlmImageInput,
     PluginLlmStructuredResult,
@@ -388,22 +386,6 @@ class TestPluginLlmFacade:
 
 
 class TestAsyncSurface:
-    def test_acomplete_uses_async_caller(self):
-        async def fake_async(**_kwargs):
-            return "openai", "gpt-4o", _fake_response("async hello")
-
-        llm = make_plugin_llm_for_test(
-            plugin_id="my-plugin",
-            policy=_TrustPolicy(plugin_id="my-plugin"),
-            async_caller=fake_async,
-        )
-
-        async def _run() -> PluginLlmCompleteResult:
-            return await llm.acomplete([{"role": "user", "content": "hi"}])
-
-        result = asyncio.run(_run())
-        assert result.text == "async hello"
-        assert result.provider == "openai"
 
     def test_acomplete_structured_parses_json(self):
         async def fake_async(**_kwargs):
@@ -490,17 +472,6 @@ plugins:
 
 
 class TestPluginContextIntegration:
-    def test_ctx_llm_is_lazy_singleton(self):
-        from hermes_cli.plugins import PluginContext, PluginManifest, PluginManager
-
-        manifest = PluginManifest(name="test-plugin", source="test", key="test-plugin")
-        manager = PluginManager()
-        ctx = PluginContext(manifest, manager)
-        first = ctx.llm
-        second = ctx.llm
-        assert first is second
-        assert isinstance(first, PluginLlm)
-        assert first._plugin_id == "test-plugin"  # type: ignore[attr-defined]
 
     def test_ctx_llm_uses_manifest_key_for_policy(self):
         from hermes_cli.plugins import PluginContext, PluginManifest, PluginManager

@@ -108,8 +108,9 @@ ls -la ~/.hermes.backup.$BACKUP_DATE/profiles/
 #### Step 2: Clone Hermes Evolution
 
 ```bash
-# Clone to temporary location
+# no-tmp: ok — one-shot clone example
 git clone https://github.com/Lexus2016/hermes-agent-evolution.git /tmp/hermes-evolution
+# no-tmp: ok — one-shot clone example
 cd /tmp/hermes-evolution
 ```
 

@@ -216,12 +216,11 @@ def _build_entry(tqm_path: str) -> dict:
 def _register_in_config_file(config_path: Path, tqm_path: str) -> bool:
     """Insert ``mcp_servers.tqmemory`` into one config.yaml. Returns True if changed.
 
-    Raw YAML round-trip (read with ``yaml.safe_load``, write with
-    ``atomic_yaml_write``) preserves ``${ENV}`` reference templates because the
-    raw file is never expanded. Idempotent: skips when an entry already exists.
+    Round-trip through ``atomic_config_write`` so comments and ``${ENV}``
+    templates survive. Idempotent: skips when an entry already exists.
     """
     import yaml
-    from utils import atomic_yaml_write
+    from hermes_cli.config import atomic_config_write
 
     existed = config_path.exists()
     data: dict = {}
@@ -295,7 +294,7 @@ def _register_in_config_file(config_path: Path, tqm_path: str) -> bool:
     data["mcp_servers"] = servers
     try:
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_yaml_write(config_path, data)
+        atomic_config_write(config_path, data)
         try:
             os.chmod(config_path, 0o600)
         except OSError:

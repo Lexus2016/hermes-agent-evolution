@@ -40,10 +40,10 @@ curl -fsSL "https://cdn.jsdelivr.net/gh/Lexus2016/hermes-agent-evolution@main/up
 ```
 🧬 Upgrade to Hermes Evolution:
 
-1. git clone https://github.com/Lexus2016/hermes-agent-evolution.git /tmp/hermes-evolution
+1. git clone https://github.com/Lexus2016/hermes-agent-evolution.git /tmp/hermes-evolution  <!-- no-tmp: ok — one-shot clone example -->
 2. cp -r ~/.hermes ~/.hermes.backup.$(date +%Y%m%d_%H%M%S)
-3. bash /tmp/hermes-evolution/scripts/migrate-from-hermes.sh
-4. python3 /tmp/hermes-evolution/scripts/verify-migration.py ~/.hermes.backup.*
+3. bash /tmp/hermes-evolution/scripts/migrate-from-hermes.sh  <!-- no-tmp: ok — one-shot clone example -->
+4. python3 /tmp/hermes-evolution/scripts/verify-migration.py ~/.hermes.backup.*  <!-- no-tmp: ok — one-shot clone example -->
 5. hermes --help
 
 Your data is safe. All profiles, skills, cron jobs, and memories are preserved.

@@ -76,6 +76,9 @@ class TestReadFileResolvedPath(unittest.TestCase):
 
         fake_ops = MagicMock()
         fake_ops.read_file = _capture_read_file
+        # No env: host filesystem. A MagicMock env is not LocalEnvironment, so
+        # the sandbox branch would forward the raw relative path on purpose.
+        fake_ops.env = None
 
         with (
             patch("tools.file_tools._get_file_ops", return_value=fake_ops),
@@ -140,6 +143,7 @@ class TestReadFileResolvedPath(unittest.TestCase):
 
         fake_ops = MagicMock()
         fake_ops.read_file = _capture_read_file
+        fake_ops.env = None
 
         with (
             patch("tools.file_tools._get_file_ops", return_value=fake_ops),

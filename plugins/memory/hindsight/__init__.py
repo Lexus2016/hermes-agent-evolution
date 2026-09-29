@@ -87,7 +87,14 @@ _RETAIN_CONTEXT_DEFAULT = "conversation between Hermes Agent and the User"
 
 
 def _ensure_client_dependency() -> None:
-    """Lazily install the Hindsight client (``tools.lazy_deps``) before importing it."""
+    """Lazily install the Hindsight client (``tools.lazy_deps``) before importing it.
+
+    A caller that already injected ``hindsight`` (embedded runtime) or the
+    client API does not need a pip install. Tests do this; production reaches
+    ensure only when neither module is loaded.
+    """
+    if "hindsight" in sys.modules or "hindsight_client_api" in sys.modules:
+        return
     try:
         from tools.lazy_deps import ensure as _lazy_ensure
         _lazy_ensure("memory.hindsight", prompt=False)
@@ -777,13 +784,18 @@ class HindsightMemoryProvider(MemoryProvider):
     def _is_retain_op_complete(self, bank_id: str, op_id: str) -> bool:
         """True when a server-side retain op is done or gone (completed ops are evicted,
         so 404 = no longer pending). Transient errors -> False, caller keeps waiting."""
-        from hindsight_client_api.exceptions import NotFoundException
+        try:
+            from hindsight_client_api.exceptions import NotFoundException as _NotFound
+        except (ImportError, ModuleNotFoundError):
+            # Module-level fallback so a missing SDK does not crash the
+            # prefetch thread. Callers raise that same class.
+            _NotFound = NotFoundException
 
         try:
             resp = self._run_hindsight_operation(
                 lambda client: client.operations.get_operation_status(bank_id=bank_id, operation_id=op_id)
             )
-        except NotFoundException:
+        except _NotFound:
             return True
         except Exception as exc:
             logger.debug("Prefetch: operation status check failed for %s: %s", op_id, exc)

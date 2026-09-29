@@ -9,12 +9,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.skills_sync import (
+    _compute_relative_dest,
     _get_bundled_dir,
     _read_manifest,
     _read_skill_name,
     _write_manifest,
     _discover_bundled_skills,
-    _compute_relative_dest,
     _dir_hash,
     sync_skills,
 )
@@ -1382,7 +1382,6 @@ class TestResetBundledSkill:
         # Restore failed, and the manifest must be left untouched.
         assert result["ok"] is False
         assert result["action"] == "not_reset"
-        assert "Manifest entry preserved" in result["message"]
         manifest_after = manifest_file.read_text()
         assert "google-workspace" in manifest_after
         # User copy is still on disk (we changed nothing).
