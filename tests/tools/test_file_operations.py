@@ -1308,6 +1308,36 @@ class TestWriteRefusesNonRegularTarget:
         assert fifo.is_fifo()
         assert src.read_text() == "data\n"
 
+    def test_move_into_directory_refuses_fifo_with_same_name(self, tmp_path):
+        """``mv src dir`` lands on ``dir/<basename src>`` — the /dev bypass."""
+        ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path), include_stderr=True))
+        src = tmp_path / "pipe"
+        src.write_text("data\n")
+        dest = tmp_path / "devdir"
+        dest.mkdir()
+        os.mkfifo(dest / "pipe")
+
+        result = ops.move_file(str(src), str(dest))
+
+        assert result.error is not None
+        assert (dest / "pipe").is_fifo()
+        assert src.read_text() == "data\n"
+
+    def test_move_onto_symlink_to_fifo_replaces_link_only(self, tmp_path):
+        ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path)))
+        src = tmp_path / "src.txt"
+        src.write_text("data\n")
+        fifo = tmp_path / "pipe"
+        os.mkfifo(fifo)
+        link = tmp_path / "link"
+        link.symlink_to(fifo)
+
+        result = ops.move_file(str(src), str(link))
+
+        assert result.error is None, f"move failed: {result.error}"
+        assert link.read_text() == "data\n"
+        assert fifo.is_fifo()
+
     def test_move_into_directory_still_works(self, tmp_path):
         ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path)))
         src = tmp_path / "src.txt"
