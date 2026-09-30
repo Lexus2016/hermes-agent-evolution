@@ -396,6 +396,12 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
         gives umask-default perms instead of mktemp's 0600 — not ``$(umask)``
         arithmetic (zsh parses leading-zero constants as decimal), quoted so zsh
         doesn't =word-expand. ``trap ... EXIT`` removes the temp on every failure.
+
+        An existing target that is not a regular file (device, FIFO, socket,
+        directory — checked AFTER symlink resolution) is refused before any temp
+        is created: the rename would replace the node itself, e.g. turn
+        ``/dev/null`` into a plain file, which later broke every sandboxed systemd
+        unit on the host (systemd-resolved → host-wide DNS outage).
         """
         q_path = self._escape_shell_arg(path)
         q_parent = self._escape_shell_arg(os.path.dirname(path) or ".")
@@ -421,6 +427,10 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
             'if [ -L "$t" ]; then '
             'rt="$(readlink -f "$t" 2>/dev/null || realpath "$t" 2>/dev/null || true)"; '
             '[ -n "$rt" ] && { t="$rt"; d="$(dirname "$t")"; }; '
+            "fi; "
+            'if [ -e "$t" ] && [ ! -f "$t" ]; then '
+            'echo "atomic write: refusing to replace $t: not a regular file '
+            '(device, FIFO, socket or directory)" >&2; exit 1; '
             "fi; "
             'mkdir -p "$d"; '
             'tmp="$(mktemp -p "$d" ' + tmpl + ' 2>/dev/null '
@@ -1192,7 +1202,15 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
             denied = get_write_denied_error(p, verb="Move")
             if denied:
                 return WriteResult(error=denied)
-        result = self._exec(f"mv {self._escape_shell_arg(src)} {self._escape_shell_arg(dst)}")
+        # A special-file destination (e.g. /dev/null) would be replaced by the
+        # source; a directory destination is fine (mv moves INTO it).
+        q_dst = self._escape_shell_arg(dst)
+        result = self._exec(
+            f'd={q_dst}; '
+            'if [ -e "$d" ] && [ ! -f "$d" ] && [ ! -d "$d" ]; then '
+            'echo "refusing to replace $d: it is a device, FIFO or socket" >&2; exit 1; '
+            "fi; "
+            f'mv {self._escape_shell_arg(src)} "$d"')
         if result.exit_code != 0:
             return WriteResult(error=f"Failed to move {src} -> {dst}: {result.stdout}")
         return WriteResult()

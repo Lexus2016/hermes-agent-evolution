@@ -1249,6 +1249,78 @@ class TestAtomicWriteThroughSymlink:
         assert target.read_text() == "data\n"
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFOs")
+class TestWriteRefusesNonRegularTarget:
+    """write_file / move_file must never swap a special file for a plain one.
+
+    Regression: an agent called write_file on /dev/null; the temp + ``mv -f``
+    replaced the device with a regular file, and the next restart of
+    systemd-resolved failed (226/NAMESPACE), taking host DNS down. A FIFO
+    stands in for the device node (mknod needs root).
+    """
+
+    def test_write_refuses_fifo(self, tmp_path):
+        ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path), include_stderr=True))
+        fifo = tmp_path / "pipe"
+        os.mkfifo(fifo)
+
+        result = ops.write_file(str(fifo), "data\n")
+
+        assert result.error is not None
+        assert "not a regular file" in result.error
+        assert fifo.is_fifo(), "FIFO was replaced by a plain file"
+        assert not list(tmp_path.glob(".hermes-tmp.*"))
+
+    def test_write_refuses_fifo_behind_symlink(self, tmp_path):
+        ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path)))
+        fifo = tmp_path / "pipe"
+        os.mkfifo(fifo)
+        link = tmp_path / "out.log"
+        link.symlink_to(fifo)
+
+        result = ops.write_file(str(link), "data\n")
+
+        assert result.error is not None
+        assert fifo.is_fifo()
+        assert link.is_symlink()
+
+    def test_write_refuses_directory(self, tmp_path):
+        ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path)))
+        target = tmp_path / "subdir"
+        target.mkdir()
+
+        result = ops.write_file(str(target), "data\n")
+
+        assert result.error is not None
+        assert list(target.iterdir()) == [], "temp file was moved into the directory"
+
+    def test_move_refuses_fifo_destination(self, tmp_path):
+        ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path), include_stderr=True))
+        src = tmp_path / "src.txt"
+        src.write_text("data\n")
+        fifo = tmp_path / "pipe"
+        os.mkfifo(fifo)
+
+        result = ops.move_file(str(src), str(fifo))
+
+        assert result.error is not None
+        assert "device, FIFO or socket" in result.error
+        assert fifo.is_fifo()
+        assert src.read_text() == "data\n"
+
+    def test_move_into_directory_still_works(self, tmp_path):
+        ops = ShellFileOperations(make_real_subprocess_env(str(tmp_path)))
+        src = tmp_path / "src.txt"
+        src.write_text("data\n")
+        dest = tmp_path / "dest"
+        dest.mkdir()
+
+        result = ops.move_file(str(src), str(dest))
+
+        assert result.error is None, f"move failed: {result.error}"
+        assert (dest / "src.txt").read_text() == "data\n"
+
+
 class TestReadNonUtf8IsBinary:
     """Non-UTF-8 content must be flagged binary, not returned as lossy text.
 
