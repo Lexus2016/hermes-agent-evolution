@@ -117,7 +117,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Fail on missing label
-        if: steps.label-check.outputs.ci_reviewed != 'true'
+        if: github.repository == 'NousResearch/hermes-agent' && steps.label-check.outputs.ci_reviewed != 'true'
         run: |
           echo "::error::CI-sensitive changes require the ci-reviewed label. Add the label and re-run this check."
           exit 1
