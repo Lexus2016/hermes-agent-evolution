@@ -84,6 +84,7 @@ jobs:
   # OS's matrix so all combos cover the same set.
   pick-releases:
     name: Pick release tags
+    if: github.repository == 'NousResearch/hermes-agent' || github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -223,6 +224,7 @@ jobs:
   # looks it up by that name.
   leg-player:
     name: Upload leg player
+    if: github.repository == 'NousResearch/hermes-agent' || github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -246,7 +248,7 @@ jobs:
   # the per-OS aggregates.
   report:
     name: Result chart
-    if: always()
+    if: always() && (github.repository == 'NousResearch/hermes-agent' || github.event_name != 'schedule') && needs.pick-releases.result != 'skipped'
     needs: [leg-player, pick-releases, linux, windows, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 5

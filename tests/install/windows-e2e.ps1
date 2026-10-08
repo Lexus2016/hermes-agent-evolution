@@ -189,12 +189,18 @@ function Set-GitRedirect {
     }
     # first, get the set origin url
     $actualGitUrl = Invoke-Git @("-C", $RepoRoot, "remote", "get-url", "origin")
+    $actualGitBase = $actualGitUrl -replace '\.git$', ''
+    $repoHttpsBase = $RepoUrlHttps -replace '\.git$', ''
+    $repoSshBase = $RepoUrlSsh -replace '\.git$', ''
     # then override it 
     @"
 [url "$fileUrl"]
-	insteadOf = $actualGitUrl
-    insteadOf = $RepoUrlHttps
-    insteadOf = $RepoUrlSsh
+    insteadOf = $actualGitBase.git
+    insteadOf = $actualGitBase
+    insteadOf = $repoHttpsBase.git
+    insteadOf = $repoHttpsBase
+    insteadOf = $repoSshBase.git
+    insteadOf = $repoSshBase
 "@ | Set-Content -LiteralPath $gitCfg -Encoding ASCII
     $env:GIT_CONFIG_GLOBAL = $gitCfg
 
@@ -570,6 +576,10 @@ function Invoke-PhaseStage {
     # serves, so staging OLD means parking `main` there; the update phase
     # advances it to HEAD.
     Invoke-Git @("clone", "--bare", "--quiet", $RepoRoot, $ServeRepo) | Out-Null
+    $serveRepoGit = "$ServeRepo.git"
+    if (-not (Test-Path -LiteralPath $serveRepoGit)) {
+        try { New-Item -ItemType Junction -Path $serveRepoGit -Target $ServeRepo -Force | Out-Null } catch { }
+    }
     Invoke-Git @("-C", $ServeRepo, "update-ref", "refs/heads/main", $old) | Out-Null
     Invoke-Git @("-C", $ServeRepo, "symbolic-ref", "HEAD", "refs/heads/main") | Out-Null
 

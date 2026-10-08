@@ -123,6 +123,7 @@ HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 [ "$OLD_SHA" != "$HEAD_SHA" ] || fail "OLD ($INSTALL_REF) IS HEAD; no update would be available"
 
 git clone --bare --quiet "$REPO_ROOT" "$SERVE_REPO"
+ln -sfn "$(basename "$SERVE_REPO")" "$SERVE_REPO.git"
 git -C "$SERVE_REPO" update-ref refs/heads/main "$OLD_SHA"
 git -C "$SERVE_REPO" symbolic-ref HEAD refs/heads/main
 # The installer may pin a commit that is reachable but not at a ref tip.
@@ -135,12 +136,18 @@ arm_redirect() {
   # A driver-owned global gitconfig, NOT GIT_CONFIG_COUNT/KEY_n/VALUE_n env
   # config: install.sh sets those itself and would clobber ours.
   actual_git_url="$(git -C "$REPO_ROOT" remote get-url origin)"
+  actual_git_base="${actual_git_url%.git}"
+  repo_https_base="${REPO_URL_HTTPS%.git}"
+  repo_ssh_base="${REPO_URL_SSH%.git}"
   GIT_CFG="$WORK_ROOT/gitconfig"
   cat > "$GIT_CFG" <<EOF
 [url "file://$SERVE_REPO"]
-  insteadOf = $actual_git_url
-  insteadOf = $REPO_URL_HTTPS
-  insteadOf = $REPO_URL_SSH
+  insteadOf = ${actual_git_base}.git
+  insteadOf = ${actual_git_base}
+  insteadOf = ${repo_https_base}.git
+  insteadOf = ${repo_https_base}
+  insteadOf = ${repo_ssh_base}.git
+  insteadOf = ${repo_ssh_base}
 EOF
   export GIT_CONFIG_GLOBAL="$GIT_CFG"
 

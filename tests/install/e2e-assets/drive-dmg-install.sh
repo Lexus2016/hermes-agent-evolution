@@ -155,9 +155,10 @@ while :; do
   fi
   # Two consecutive error probes before switching click targets: a single
   # log-parse glitch must never redirect the clicker.
-  if [ "$PENDING_ERR_COUNT" -ge 2 ] && [ "$err" != "$LAST_ERR" ]; then
+  if [ "$PENDING_ERR_COUNT" -ge 2 ]; then
     LAST_ERR="$err"
     RETRIES=$((RETRIES + 1))
+    PENDING_ERR_COUNT=0
     log "bootstrap error (retry $RETRIES/$MAX_RETRIES): $err"
     shot "ERROR-bootstrap-attempt-$RETRIES"
     if [ "$RETRIES" -gt "$MAX_RETRIES" ]; then
