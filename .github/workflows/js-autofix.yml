@@ -57,6 +57,7 @@ concurrency:
 jobs:
   generate-patch:
     name: Generate eslint --fix patch
+    if: github.repository == 'NousResearch/hermes-agent'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:

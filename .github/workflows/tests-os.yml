@@ -26,6 +26,13 @@ name: OS-specific tests
 # exists to prevent.
 
 on:
+  workflow_dispatch:
+    inputs:
+      desktop_updater:
+        description: Run the Windows desktop-update hand-off integration tests
+        type: boolean
+        required: false
+        default: true
   workflow_call:
     inputs:
       desktop_updater:

@@ -81,12 +81,12 @@ runs:
         EVENT_NAME: ${{ github.event_name }}
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        BEFORE_SHA: ${{ github.event.before }}
+        AFTER_SHA: ${{ github.event.after }}
       run: |
         set -euo pipefail
 
-        # Only pull_request events are gated. Other events (push, release,
-        # dispatch) leave CHANGED empty, so the classifier fails open and every
-        # lane runs. Post-merge / on-demand validation is never weakened.
+        CHANGED=""
         if [ "$EVENT_NAME" = "pull_request" ]; then
           # Use the compare endpoint with the pinned base/head SHAs from the
           # event payload instead of the "current PR files" endpoint. The SHAs
@@ -103,7 +103,6 @@ runs:
           # die with "cannot iterate over: null", which fails every retry
           # and forces the fail-open path (seen on stacked PRs). The full
           # file list (up to the API's 300-file cap) is on page one.
-          CHANGED=""
           for i in 1 2 3; do
             if CHANGED="$(gh api \
               --paginate \
@@ -118,6 +117,22 @@ runs:
             fi
             echo "::warning::compare API failed (attempt $i); retrying in 10s"
             sleep 10
+          done
+        elif [ "$EVENT_NAME" = "push" ] && [ -n "${BEFORE_SHA:-}" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ] && [ "$REPO" != "NousResearch/hermes-agent" ]; then
+          # On forks, detect changed files on push to avoid running the full suite fail-open on every commit.
+          for i in 1 2 3; do
+            if CHANGED="$(gh api \
+              --paginate \
+              "repos/${REPO}/compare/${BEFORE_SHA}...${AFTER_SHA}" \
+              --jq '.files[]?.filename' 2>/dev/null)"; then
+              break
+            fi
+            if [ "$i" = 3 ]; then
+              echo "::warning::push compare API failed after 3 attempts — failing open (all lanes run)"
+              CHANGED=""
+              break
+            fi
+            sleep 5
           done
         fi
 

@@ -81,7 +81,7 @@ jobs:
   tests-os:
     name: OS-specific tests
     needs: detect
-    if: needs.detect.outputs.python == 'true'
+    if: (github.repository == 'NousResearch/hermes-agent' || contains(github.event.pull_request.labels.*.name, 'run-os-tests')) && needs.detect.outputs.python == 'true'
     uses: ./.github/workflows/tests-os.yml
     with:
       # The Windows lane spawns the real desktop-update hand-off script
