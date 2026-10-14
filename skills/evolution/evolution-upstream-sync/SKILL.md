@@ -89,6 +89,20 @@ git diff --name-only --diff-filter=U
   Do NOT blind-resolve a judgement-heavy merge autonomously — that is how features
   get silently dropped.
 
+#### Sizing a multi-release gap
+
+For a catch-up spanning several releases, size each candidate tag in a throwaway
+worktree (never pushes, never leaves a dirty tree) before attempting a real merge:
+
+```bash
+python scripts/sync_batch_probe.py --source origin/main --tags v0.21.6 v0.21.7 v0.22.0
+```
+
+One JSON object per tag (`total` + per-subsystem `buckets`), exit 2 if a probe
+errored. Use those totals as the escalation evidence — they reproduce the by-hand
+178 (v0.21.6) / 198 (v0.21.7); a total over the ≤10-conflict ceiling is an owner
+decision, never an autonomous merge.
+
 ### 2. Resolve conflicts — authorship-driven, keep OURS, follow upstream
 
 For EACH conflicted file, decide by **who authored each side**, not by guesswork.
