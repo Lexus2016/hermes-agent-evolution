@@ -12,6 +12,7 @@ whole-file overwrite of content this task never saw or that changed since.
 
 import fnmatch
 import os
+import re
 from pathlib import Path
 
 from agent.file_safety import get_nt_namespace_error
@@ -496,6 +497,60 @@ _READ_DEDUP_STATUS_MESSAGE = (
     "still current — refer to that instead of re-reading.")
 
 
+# ── write_file failure taxonomy (#3468) ──────────────────────────────────
+# write_file is core to every file-modification task and its failures were the
+# LAST undecomposed 'other' bucket: 32/34 write_file failures in the 7d window
+# (94%, 0.139/session) carried no reason subclass, so the model blind-retried
+# and the introspection digest could not attribute a regression in one mode
+# (#1325). Sibling tools already carry a coarse ``reason`` + a targeted
+# ``recovery_hint`` on the error envelope (process #2621, terminal #2717,
+# patch #1537); this is the same additive treatment. Order matters — first hit
+# wins, so the specific shapes precede the broader ones.
+WRITE_REASON_HINTS: tuple[tuple[str, str, str], ...] = (
+    ("write-sensitive-path",
+     r"refusing to write to sensitive system path|refusing to write to hermes config file",
+     "Pick a path outside the system/config set, or drive the change through terminal."),
+    ("write-protected-instruction",
+     r"steers? future agent behavior|protected (instruction|agent-instruction)",
+     "These files need interactive approval; ask the user, or edit them outside the agent."),
+    ("write-binary-content",
+     r"refusing to write plain text to|refusing to overwrite existing (binary|pdf)",
+     "write_file is text-only for these paths — use a binary-aware tool via terminal."),
+    ("write-stale-overwrite",
+     r"has not seen its full current content|was modified since you last read it",
+     "read_file the current content (every page), merge, then retry; patch for small edits."),
+    ("write-internal-content",
+     r"refusing to write internal read_file display text",
+     "Strip the read_file LINE_NUM| prefixes and pass the real file text."),
+    ("write-cross-profile",
+     r"cross-profile|cross profile",
+     "Pass cross_profile=true only when the mirror write is intentional."),
+    ("write-path-not-found",
+     r"no such file or directory|parent director|directory does not exist",
+     "Create the parent directory first (terminal: mkdir -p) or fix the path."),
+    ("write-path-is-directory",
+     r"is a directory",
+     "Target a file path, not a directory."),
+    ("write-content-too-large",
+     r"too large|exceeds (?:the )?(?:size|limit)|size limit",
+     "Split the content, or write it from a script via terminal."),
+)
+
+
+def write_failure_reason(message: str) -> tuple[str | None, str | None]:
+    """Return ``(reason, recovery_hint)`` for a write_file refusal message.
+
+    ``(None, None)`` when nothing in :data:`WRITE_REASON_HINTS` matches, so the
+    caller emits a bare ``{"error": ...}`` exactly as before — the envelope
+    change is additive and old consumers keep working (#3468).
+    """
+    text = str(message or "")
+    for reason, pattern, hint in WRITE_REASON_HINTS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return reason, hint
+    return None, None
+
+
 def _stale_overwrite_blocker(filepath: str, resolved: str | None, task_id: str) -> str | None:
     """Reason write_file must NOT replace the existing file, else ``None``.
 
@@ -543,6 +598,10 @@ def _stale_write_refusal(filepath: str, reason: str, resolved: str | None = None
             "existing unrelated changes are preserved."),
         "stale_write_blocked": True,
         "path": filepath,
+        "reason": "write-stale-overwrite",
+        "recovery_hint": (
+            "Reload the current contents with read_file, merge the change, then write again; "
+            "use patch for a targeted edit."),
     }
     if resolved:
         result["resolved_path"] = resolved

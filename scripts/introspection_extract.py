@@ -271,6 +271,38 @@ _PATCH_NO_MATCH_RE = re.compile(
     r"\b(could not find a match|could not find|cannot find a match)\b",
     re.IGNORECASE,
 )
+# write_file-specific sub-categories (#3468). The write refusal guards emit
+# canonical phrases that match NO generic regex, so 32/34 write_file failures
+# (94% per the 7d window) landed in the opaque 'other' bucket. These mirror the
+# reason tags the tool envelope itself now emits (tools/file_tools_write_guards.
+# WRITE_REASON_HINTS), so digest reasons and envelope reasons stay the same
+# vocabulary. Placed BEFORE _NO_MATCH_RE with the other tool-specific rules.
+_WRITE_SENSITIVE_PATH_RE = re.compile(
+    r"\brefusing to write to (?:sensitive system path|hermes config file)\b",
+    re.IGNORECASE,
+)
+_WRITE_PROTECTED_INSTRUCTION_RE = re.compile(
+    r"\bsteers? future agent behavior\b|\bprotected (?:instruction|agent-instruction) file",
+    re.IGNORECASE,
+)
+_WRITE_BINARY_CONTENT_RE = re.compile(
+    r"\brefusing to write plain text to\b|\brefusing to overwrite existing (?:binary|pdf)\b",
+    re.IGNORECASE,
+)
+_WRITE_STALE_OVERWRITE_RE = re.compile(
+    r"\bhas not seen its full current content\b|\bwas modified since you last read it\b",
+    re.IGNORECASE,
+)
+_WRITE_INTERNAL_CONTENT_RE = re.compile(
+    r"\brefusing to write internal read_file display text\b",
+    re.IGNORECASE,
+)
+_WRITE_CROSS_PROFILE_RE = re.compile(r"\bcross[- ]profile\b", re.IGNORECASE)
+_WRITE_PATH_IS_DIRECTORY_RE = re.compile(r"\bis a directory\b", re.IGNORECASE)
+_WRITE_CONTENT_TOO_LARGE_RE = re.compile(
+    r"\btoo large\b|\bexceeds (?:the )?(?:size|limit)\b|\bsize limit\b",
+    re.IGNORECASE,
+)
 
 
 def _classify_failure_reason(content: Any) -> Optional[str]:
@@ -342,6 +374,22 @@ def _classify_failure_reason(content: Any) -> Optional[str]:
         return "patch-ambiguous"
     if _PATCH_NO_MATCH_RE.search(haystack):
         return "patch-no-match"
+    if _WRITE_SENSITIVE_PATH_RE.search(haystack):
+        return "write-sensitive-path"
+    if _WRITE_PROTECTED_INSTRUCTION_RE.search(haystack):
+        return "write-protected-instruction"
+    if _WRITE_BINARY_CONTENT_RE.search(haystack):
+        return "write-binary-content"
+    if _WRITE_STALE_OVERWRITE_RE.search(haystack):
+        return "write-stale-overwrite"
+    if _WRITE_INTERNAL_CONTENT_RE.search(haystack):
+        return "write-internal-content"
+    if _WRITE_CROSS_PROFILE_RE.search(haystack):
+        return "write-cross-profile"
+    if _WRITE_PATH_IS_DIRECTORY_RE.search(haystack):
+        return "write-path-is-directory"
+    if _WRITE_CONTENT_TOO_LARGE_RE.search(haystack):
+        return "write-content-too-large"
     if _NO_MATCH_RE.search(haystack):
         return "no-match"
     if "exit_code" in data:

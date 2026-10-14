@@ -366,6 +366,32 @@ class TestFailureReasonClassification:
         s = scan_session(p)
         assert s["tool_failures_by_reason"] == {"patch": {"patch-no-match": 1}}
 
+    def test_write_file_refusals_classified_not_other(self, tmp_path):
+        """write_file guard phrases matched NO regex, so 32/34 write_file
+        failures (94% of the 7d window) fell into the opaque 'other' bucket —
+        the last undecomposed one (#3468). Both phrasings the guards emit are
+        now sub-classified, so a fix for one mode is rate-trackable."""
+        p = _session(
+            tmp_path,
+            "r5c",
+            [
+                _asst("write_file", "c1"),
+                _tool(
+                    "c1",
+                    _fail("Refusing to write to sensitive system path: /etc/hosts"),
+                ),
+                _asst("write_file", "c2"),
+                _tool(
+                    "c2",
+                    _fail("b.py exists but this task has not seen its full current content"),
+                ),
+            ],
+        )
+        s = scan_session(p)
+        assert s["tool_failures_by_reason"] == {
+            "write_file": {"write-sensitive-path": 1, "write-stale-overwrite": 1}
+        }
+
     def test_no_reason_for_successful_results(self, tmp_path):
         p = _session(
             tmp_path,

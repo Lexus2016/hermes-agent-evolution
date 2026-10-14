@@ -43,7 +43,8 @@ from tools.file_tools_paths import (
 from tools.file_tools_write_guards import (
     _READ_DEDUP_STATUS_MESSAGE, _check_approval_required_write, _check_binary_document_write,
     _check_cross_profile_path, _check_protected_instruction_write, _check_sensitive_path,
-    _is_internal_file_tool_content, _stale_overwrite_blocker, _stale_write_refusal)
+    _is_internal_file_tool_content, _stale_overwrite_blocker, _stale_write_refusal,
+    write_failure_reason)
 from tools.file_tools_read_tracking import (
     _bump_consecutive, _cap_read_tracker_data, _check_file_staleness, _check_not_found_cache,
     _file_metadata, _file_version,
@@ -1245,7 +1246,11 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
                "Strip read_file line-number prefixes or reconstruct the intended "
                "file contents before writing.")
     if err:
-        return tool_error(err)
+        # #3468 — a refusal without a reason is opaque to both the model (blind
+        # retries) and the introspection digest ('other' bucket); tag it.
+        reason, hint = write_failure_reason(err)
+        extra = {"reason": reason, "recovery_hint": hint} if reason else {}
+        return tool_error(err, **extra)
     try:
         # Resolution failure falls back to the legacy unlocked path (the write
         # still proceeds; the per-task staleness check still runs).
@@ -1289,7 +1294,9 @@ def write_file_tool(path: str, content: str, task_id: str = "default",
             logger.debug("write_file expected denial: %s: %s", type(e).__name__, e)
         else:
             logger.error("write_file error: %s: %s", type(e).__name__, e, exc_info=True)
-        return tool_error(str(e))
+        reason, hint = write_failure_reason(str(e))
+        extra = {"reason": reason, "recovery_hint": hint} if reason else {}
+        return tool_error(str(e), **extra)
 
 
 def _build_no_match_hint(
