@@ -58,48 +58,44 @@ def test_legacy_direct_json(tmp_path, committed):
     assert read_evidence(tmp_path, revision, PATH, blob) == blob(tmp_path, revision, PATH)
 
 
+def _add_nested_extra(part):
+    (part.parent / "extra").mkdir()
+    (part.parent / "extra/file").write_text("extra", encoding="utf-8")
+
+
+def _damage_package(repo, index, damage):
+    first = index["parts"][0]
+    part = repo / first["path"]
+    mutations = {
+        "missing": part.unlink,
+        "duplicate": lambda: index["parts"].__setitem__(1, first.copy()),
+        "reordered": index["parts"].reverse,
+        "tampered": lambda: part.write_bytes(b"xx"),
+        "extra": lambda: (part.parent / "extra.txt").write_text("extra", encoding="utf-8"),
+        "nested_extra": lambda: _add_nested_extra(part),
+        "escape": lambda: first.update(path="../escape"),
+        "absolute": lambda: first.update(path="/tmp/escape"),
+        "total": lambda: index.update(bytes=index["bytes"] + 1),
+        "digest": lambda: index.update(sha256="0" * 64),
+        "boolean": lambda: first.update(bytes=True),
+        "empty": lambda: first.update(bytes=0),
+        "oversize": lambda: (first.update(bytes=PART_BYTES + 1), index.update(bytes=MAX_BYTES + 1)),
+        "too_many": lambda: index.update(parts=index["parts"] * MAX_PARTS),
+        "unknown_key": lambda: index.update(entries=[]),
+        "unknown_format": lambda: index.update(format="unknown"),
+        "bad_digest": lambda: first.update(sha256=[]),
+    }
+    if damage != "direct":
+        mutations[damage]()
+
+
 @pytest.mark.parametrize("damage", ["missing", "duplicate", "reordered", "tampered", "extra", "nested_extra",
                                     "escape", "absolute", "direct", "total", "digest", "boolean", "empty",
                                     "oversize", "too_many", "unknown_key", "unknown_format", "bad_digest"])
 @pytest.mark.parametrize("committed", [False, True])
 def test_invalid_package_fails_closed(tmp_path, damage, committed):
     original, index = _package(tmp_path)
-    first = index["parts"][0]
-    part = tmp_path / first["path"]
-    if damage == "missing":
-        part.unlink()
-    elif damage == "duplicate":
-        index["parts"][1] = first.copy()
-    elif damage == "reordered":
-        index["parts"].reverse()
-    elif damage == "tampered":
-        part.write_bytes(b"xx")
-    elif damage == "extra":
-        (part.parent / "extra.txt").write_text("extra", encoding="utf-8")
-    elif damage == "nested_extra":
-        (part.parent / "extra").mkdir()
-        (part.parent / "extra/file").write_text("extra", encoding="utf-8")
-    elif damage in {"escape", "absolute"}:
-        first["path"] = "../escape" if damage == "escape" else "/tmp/escape"
-    elif damage == "total":
-        index["bytes"] += 1
-    elif damage == "digest":
-        index["sha256"] = "0" * 64
-    elif damage == "boolean":
-        first["bytes"] = True
-    elif damage == "empty":
-        first["bytes"] = 0
-    elif damage == "oversize":
-        first["bytes"] = PART_BYTES + 1
-        index["bytes"] = MAX_BYTES + 1
-    elif damage == "too_many":
-        index["parts"] *= MAX_PARTS
-    elif damage == "unknown_key":
-        index["entries"] = []
-    elif damage == "unknown_format":
-        index["format"] = "unknown"
-    elif damage == "bad_digest":
-        first["sha256"] = []
+    _damage_package(tmp_path, index, damage)
     _write_index(tmp_path, index)
     if damage == "direct":
         (tmp_path / PATH).write_bytes(original)
