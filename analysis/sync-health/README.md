@@ -171,3 +171,27 @@ and commands. These mocked/React tests do not replace hosted full Python,
 Hindsight protected API/lifecycle, native platform or full desktop typechecks.
 Boot recovery cannot cancel an already-started cloud ladder/reset; stale results
 are prevented from resetting or reloading a replacement owner.
+
+
+## Frozen d66b verification (2026-10-16)
+
+The exact source commit `d66b3ea03b130ee28b50533fe947af83098a200e`
+(tree `af70c706ccd76f9a3f24598b58b47f54ff9d6b72`) completed fresh health against
+main `365acb3229e7301a3b3566cc5b32114f06c023d1` in 537.3 seconds, exit 1.
+The verbatim report retains 1,126 raw blocking findings, 352 matched reviewed
+occurrences and **774 unresolved blockers**. Canonical full Ruff passed.
+No source moved during measurement; the previous 9ff0 report remains historical.
+
+The corrected desktop regression expanded to 410 passing tests across 25 suites,
+with all 39 selected source/test bindings unchanged. Group workspace extraction
+removed its integration-created growth while preserving parent state and callbacks.
+The media streaming correction has 128 passing tests and three native-platform
+skips. Its private descriptors and cleanup retain explicit non-POSIX ACL and
+check-before-rename/unlink limitations; codec derivative writers are outside that
+correction. These scoped receipts do not establish full desktop/native or hosted
+acceptance. Workflow source inventory remains identical across all 58 files.
+
+After this terminal run, separately reviewed metadata commit `c930dcfc2478` added
+only two CC dispositions (bootstrap event presentation and profile normalization),
+validated with 27 adapter tests. The manifest now has 338 entries and 354 occurrence
+budgets. The d66b report is not relabeled as a report for that later commit.

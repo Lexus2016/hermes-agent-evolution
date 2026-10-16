@@ -1,0 +1,14 @@
+{
+  "head": "d66b3ea03b130ee28b50533fe947af83098a200e",
+  "tree": "af70c706ccd76f9a3f24598b58b47f54ff9d6b72",
+  "clean": true,
+  "desktop_39_bindings_current": true,
+  "stream_3_bindings_current": true,
+  "manifest_entries": 336,
+  "manifest_occurrence_budgets": 352,
+  "all_manifest_candidate_validation_blobs_current": true,
+  "limits": [
+    "Source correspondence only; final full health/hosted and native gates remain separate.",
+    "Initial resolved-cache helper proof is historical at476b; streaming commit extends common helper and vision after that receipt."
+  ]
+}
