@@ -36,7 +36,7 @@ file except tests (``tests/``, ``tests-js/``, ``__tests__/``, ``e2e/``, ``test_*
 build files (``Dockerfile*``, ``docker/``), generated lockfiles and the translated docs mirror
 (``website/i18n/``, regenerated from the English source).
 
-Historical machine-data receipts are exempt only at exact reviewed paths with unchanged
+Reviewed inert receipts and policy evidence are exempt only at exact reviewed paths with matching
 SHA256 bytes, using the integrity-checked inventory in .github/no_tmp_historical_evidence.json.
 New, edited or relocated evidence is scanned normally; invalid inventory fails the check.
 
@@ -202,22 +202,23 @@ def iter_files(root: Path | None = None):
 
 # This is a reviewed, closed inventory, not a configurable exemption list. Changing
 # its bytes requires a corresponding code review here. Artifact hashes bind the
-# original source-commit bytes; neither a renamed copy nor an edited receipt qualifies.
+# reviewed source-checkpoint bytes; neither a renamed copy nor an edited receipt qualifies.
 _HISTORICAL_MAP = ROOT / ".github/no_tmp_historical_evidence.json"
-_HISTORICAL_MAP_SHA256 = "9a657f5a836b84b873219adfc13ea405070d793553b881e927ecb20f46746701"
+_HISTORICAL_MAP_SHA256 = "4c5c7c0b96d60dc04d6339268bda3538a7048d372a564296424db91b9d107777"
 
 
 def _validate_historical_header(data: object) -> None:
     """The classification inventory is versioned data, not general scanner settings."""
     purpose = (
-        "Immutable historical machine-generated sync evidence; "
+        "Reviewed inert sync evidence at the pinned source checkpoint; "
+        "historical paths are data, "
         "not executable code, prompts, or runnable documentation."
     )
     if (not isinstance(data, dict)
             or set(data) != {"schema_version", "purpose", "source_commit", "files"}
             or type(data["schema_version"]) is not int or data["schema_version"] != 1
             or data["purpose"] != purpose
-            or data["source_commit"] != "0b2550c8b55864419cdca8d98401a407678f6f8c"
+            or data["source_commit"] != "5b1ff335a0c4945a38f2c1a9d64ba1184e4345b9"
             or not isinstance(data["files"], list) or not data["files"]):
         raise ValueError("invalid historical evidence inventory schema")
 

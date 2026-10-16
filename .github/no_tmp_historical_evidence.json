@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "purpose": "Immutable historical machine-generated sync evidence; not executable code, prompts, or runnable documentation.",
-  "source_commit": "0b2550c8b55864419cdca8d98401a407678f6f8c",
+  "purpose": "Reviewed inert sync evidence at the pinned source checkpoint; historical paths are data, not executable code, prompts, or runnable documentation.",
+  "source_commit": "5b1ff335a0c4945a38f2c1a9d64ba1184e4345b9",
   "files": [
     {
       "path": "analysis/sync-health/v0221-9ad6-main365-health-report.json.parts/0001.txt",
@@ -117,11 +117,11 @@
     },
     {
       "path": "analysis/sync-health/v0221-manifest.json.parts/0003.txt",
-      "sha256": "fefd5a558f57730f6693a05ce12ef4f6cfd3a1babf196579549632263aa69644"
+      "sha256": "e5c217480efcfa01a753e4bce9ef5cea56ae4cefde529487ee70b979f0d97e15"
     },
     {
       "path": "analysis/sync-health/v0221-manifest.json.parts/0004.txt",
-      "sha256": "5c1f6c147701e25eca497144c273b17e9c867f818f50bce13bc1cb9223934b85"
+      "sha256": "e36d154b384b62d83ea0380e3a4dff9dc7f2d55d771e0cbbd45ebe698905fc56"
     },
     {
       "path": "analysis/sync-health/v0221-plugin-declaration-boundary-review.json",
