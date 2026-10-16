@@ -14397,6 +14397,272 @@
           "claim": "Exact caller dependency or retained failure test."
         }
       ]
+    },
+    {
+      "id": "main-bootstrap-profile-structural-01",
+      "status": "reviewed",
+      "path": "apps/desktop/electron/main.ts",
+      "scope": "broadcastBootstrapEvent",
+      "rule": "CC",
+      "detail": "CC 25 > 24, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "9db748184bdfd57a621466ed7607c72035449a6c",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/electron/main.ts",
+        "scope": "broadcastBootstrapEvent",
+        "blob": "c4d48481288540708156b370b370e9c345bcbd11",
+        "unit_body_hash": "ba96189fe0a3e370"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-authorized exact two-function structural preparation",
+        "compatibility": "CC 25 is concentrated in one synchronous event-to-snapshot dispatcher with shallow nesting 2 and 72 owned lines. The added local default and native artifact fact are cohesive setup-choice presentation normalization. Complete-body and binding review found no specific integration compatibility conflict; a source-bound CC-only disposition could be considered, with no growth permission or behavioral waiver.",
+        "module_bindings": "Complete function and delimited surrounding producer/consumer reads recorded in evidence, with all17 context file hashes bound. Native/credential/IPC/order/catch behavior remains outside the structural disposition.",
+        "receipt": "Read-only independent complete-body review plus canonical TypeScript measurement; no execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-main-bootstrap-profile-structural-review.json",
+          "blob": "f79aef1de969866988d2888ea74bcf57b9b3ef23",
+          "outcome": "passed",
+          "claim": "Two independent complete-body/context source reviews and canonical equal-body/equal-cap measurement; structural CC organization only. No runtime, native, credential, IPC, callback-ordering, catch or full-typecheck clearance."
+        },
+        {
+          "path": "apps/desktop/electron/main.ts",
+          "blob": "9db748184bdfd57a621466ed7607c72035449a6c",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/connection-config.ts",
+          "blob": "9378401dcc0b1c2c1cb987435f5ece48f682f64c",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/desktop-profile.ts",
+          "blob": "65c242280da9b1557d8edc120320826f1275b11a",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/bootstrap-state.ts",
+          "blob": "090466275edce760df756b22835a8d43dd31167f",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/install-stamp.ts",
+          "blob": "280b028393d603ed6f145f8efe9be0234f0f2bb0",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/first-run-setup-gate.ts",
+          "blob": "29101038eb2976ded2a51f1775482ffae6b0b65c",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/primary-backend-startup.ts",
+          "blob": "2a79fc8f346086c035b9bc46de4b3990a9b307c5",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/bootstrap-runner.ts",
+          "blob": "05465a84920a25dead52a379c86fb652dfbee645",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/desktop-remote-route.ts",
+          "blob": "f54299c6d1fca62ff01b4db055960af58a931e68",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/preload.ts",
+          "blob": "cbf019e930c9d9bac7cdbf3fef647f68bda6f9e3",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/connection-config.test.ts",
+          "blob": "8e4c4bf093d41bc726031d432cb95f34aac0ee49",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/bootstrap-state.test.ts",
+          "blob": "a9231b0c51806d44ed81a8b9686a7a19946f9cd4",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/first-run-setup-gate.test.ts",
+          "blob": "91221620689e90ad1c4d8287b3ea38a3b85df675",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/components/desktop-install-overlay.tsx",
+          "blob": "0cc4d279faa81e0294be51b03e2359ef42b54fc4",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/components/desktop-install-overlay.test.tsx",
+          "blob": "db67e72b6a28e7d837215eb36fbad95cfd82eef7",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/global.d.ts",
+          "blob": "22a34af5f3ec5d891c6a1f195b6e0332ab60dbca",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/components/desktop-install-local-card.ts",
+          "blob": "f79a0f0fc3bd3aacc3129acca0e97ae66b6c3fb6",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        }
+      ]
+    },
+    {
+      "id": "main-bootstrap-profile-structural-02",
+      "status": "reviewed",
+      "path": "apps/desktop/electron/main.ts",
+      "scope": "sanitizeConnectionProfiles",
+      "rule": "CC",
+      "detail": "CC 26 > 25, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "9db748184bdfd57a621466ed7607c72035449a6c",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/electron/main.ts",
+        "scope": "sanitizeConnectionProfiles",
+        "blob": "c4d48481288540708156b370b370e9c345bcbd11",
+        "unit_body_hash": "291da71c383f802e"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-authorized exact two-function structural preparation",
+        "compatibility": "CC 26 comes from one bounded per-profile normalization pass, with 99 owned lines and nesting 4. The added guarded remoteProfile field is cohesive schema preservation, required for the documented URL-remote alias contract. Complete-body/helper/caller review found no specific integration compatibility conflict; a source-bound CC-only disposition could be considered without credential or routing guarantees.",
+        "module_bindings": "Complete function and delimited surrounding producer/consumer reads recorded in evidence, with all17 context file hashes bound. Native/credential/IPC/order/catch behavior remains outside the structural disposition.",
+        "receipt": "Read-only independent complete-body review plus canonical TypeScript measurement; no execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-main-bootstrap-profile-structural-review.json",
+          "blob": "f79aef1de969866988d2888ea74bcf57b9b3ef23",
+          "outcome": "passed",
+          "claim": "Two independent complete-body/context source reviews and canonical equal-body/equal-cap measurement; structural CC organization only. No runtime, native, credential, IPC, callback-ordering, catch or full-typecheck clearance."
+        },
+        {
+          "path": "apps/desktop/electron/main.ts",
+          "blob": "9db748184bdfd57a621466ed7607c72035449a6c",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/connection-config.ts",
+          "blob": "9378401dcc0b1c2c1cb987435f5ece48f682f64c",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/desktop-profile.ts",
+          "blob": "65c242280da9b1557d8edc120320826f1275b11a",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/bootstrap-state.ts",
+          "blob": "090466275edce760df756b22835a8d43dd31167f",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/install-stamp.ts",
+          "blob": "280b028393d603ed6f145f8efe9be0234f0f2bb0",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/first-run-setup-gate.ts",
+          "blob": "29101038eb2976ded2a51f1775482ffae6b0b65c",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/primary-backend-startup.ts",
+          "blob": "2a79fc8f346086c035b9bc46de4b3990a9b307c5",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/bootstrap-runner.ts",
+          "blob": "05465a84920a25dead52a379c86fb652dfbee645",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/desktop-remote-route.ts",
+          "blob": "f54299c6d1fca62ff01b4db055960af58a931e68",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/preload.ts",
+          "blob": "cbf019e930c9d9bac7cdbf3fef647f68bda6f9e3",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/connection-config.test.ts",
+          "blob": "8e4c4bf093d41bc726031d432cb95f34aac0ee49",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/bootstrap-state.test.ts",
+          "blob": "a9231b0c51806d44ed81a8b9686a7a19946f9cd4",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/first-run-setup-gate.test.ts",
+          "blob": "91221620689e90ad1c4d8287b3ea38a3b85df675",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/components/desktop-install-overlay.tsx",
+          "blob": "0cc4d279faa81e0294be51b03e2359ef42b54fc4",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/components/desktop-install-overlay.test.tsx",
+          "blob": "db67e72b6a28e7d837215eb36fbad95cfd82eef7",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/global.d.ts",
+          "blob": "22a34af5f3ec5d891c6a1f195b6e0332ab60dbca",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/components/desktop-install-local-card.ts",
+          "blob": "f79a0f0fc3bd3aacc3129acca0e97ae66b6c3fb6",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        }
+      ]
     }
   ]
 }

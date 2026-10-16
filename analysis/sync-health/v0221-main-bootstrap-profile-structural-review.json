@@ -1,0 +1,1548 @@
+{
+  "reviewed_head": "d66b3ea03b130ee28b50533fe947af83098a200e",
+  "worker_source_review": {
+    "schema_version": 1,
+    "kind": "read-only complete-body structural review; not an allowance manifest",
+    "head_at_review": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+    "source": "297552a9d646119871391d202509822cd86330df",
+    "base": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+    "input_provenance": "/tmp/hermes-9ff0-main-ts-unit-provenance.json",
+    "measurement": "node scripts/code_health/ts_units.mjs <repo>/node_modules/typescript <snapshot-root>, bounded selected paths; canonical parse-only measurement, no full-health rerun",
+    "approval": {
+      "root_preparation": false,
+      "controller_second_read": false,
+      "activation": false
+    },
+    "findings": [
+      {
+        "scope": "broadcastBootstrapEvent",
+        "path": "apps/desktop/electron/main.ts",
+        "rule": "CC",
+        "raw_detail": "CC 25 > 24, its value on main (over target 20: it may only go down)",
+        "raw_finding": {
+          "path": "apps/desktop/electron/main.ts",
+          "rule": "CC",
+          "scope": "broadcastBootstrapEvent",
+          "line": 2512,
+          "detail": "CC 25 > 24, its value on main (over target 20: it may only go down)",
+          "blocking": true,
+          "allowed_reason": null,
+          "inherited_debt": null,
+          "exact_file_matches": [],
+          "exact_unit_matches": []
+        },
+        "versions": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "file_blob": "9db748184bdfd57a621466ed7607c72035449a6c",
+            "unit": {
+              "q": "broadcastBootstrapEvent",
+              "line": 2512,
+              "end": 2583,
+              "cc": 25,
+              "nesting": 2,
+              "hash": "ba96189fe0a3e370",
+              "lines": 72
+            },
+            "complete_function_text_sha256": "2c71274fb37d81807e4e58e51d55374dfa75f7483fba524bdcc259ebbb0cc256",
+            "complete_function_copy": "/tmp/hermes-main-bootstrap-profile-review/broadcastBootstrapEvent.current.ts.txt"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "file_blob": "c4d48481288540708156b370b370e9c345bcbd11",
+            "unit": {
+              "q": "broadcastBootstrapEvent",
+              "line": 2509,
+              "end": 2580,
+              "cc": 25,
+              "nesting": 2,
+              "hash": "ba96189fe0a3e370",
+              "lines": 72
+            },
+            "complete_function_text_sha256": "2c71274fb37d81807e4e58e51d55374dfa75f7483fba524bdcc259ebbb0cc256",
+            "complete_function_copy": "/tmp/hermes-main-bootstrap-profile-review/broadcastBootstrapEvent.upstream.ts.txt"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "file_blob": "2820a547ca61b6504cf3bc24721af3f2ef3a8579",
+            "unit": {
+              "q": "broadcastBootstrapEvent",
+              "line": 2227,
+              "end": 2296,
+              "cc": 24,
+              "nesting": 2,
+              "hash": "0ddab1c60b362258",
+              "lines": 70
+            },
+            "complete_function_text_sha256": "e8d35c2219aa7e6d8350bbfbff095ec572cc60c0126a0acca347018a34d401dc",
+            "complete_function_copy": "/tmp/hermes-main-bootstrap-profile-review/broadcastBootstrapEvent.base.ts.txt"
+          }
+        },
+        "exact_full_function_text_matches_upstream": true,
+        "canonical_caps_match_upstream": true,
+        "decision": "structural-review recommendation only; root preparation and controller second-read pending",
+        "eligible_for_runtime_or_security_claim": false,
+        "complete_body_review": [
+          "Read all eight event branches: manifest replaces stage records and activates; stage replaces one record; log retains a 500-entry ring; complete clears active/error/unsupported; failed retains the error and clears setup choice; unsupported stores installation help; setup-choice clears prior manifest/stages/error and stores presentation facts; dismissed resets the snapshot.",
+          "Read both native-window liveness guards and final raw-event send. State is updated before optional broadcast, allowing a reloaded renderer to retrieve the snapshot. Unknown event kinds are still forwarded without changing the stored state; this remains an internal producer contract, not arbitrary-input validation.",
+          "The extra CC is the local fallback in setup-choice. bundled is derived from installShape/immutable INSTALL_STAMP rather than accepting a renderer-controlled artifact claim. promptFirstRunSetupChoice also emits the same native-derived fields; older missing local values retain the none presentation.",
+          "Complete first-run gate and startup orchestration reads show that Continue Local retains the choice until manifest takes ownership, remote Apply hides/dismisses only an active waiter, normal retry resets the snapshot, and repair reopens the gate. No changed callback evaluation or ownership transfer is introduced by the two added setup-choice fields."
+        ],
+        "structural_rationale": "CC 25 is concentrated in one synchronous event-to-snapshot dispatcher with shallow nesting 2 and 72 owned lines. The added local default and native artifact fact are cohesive setup-choice presentation normalization. Complete-body and binding review found no specific integration compatibility conflict; a source-bound CC-only disposition could be considered, with no growth permission or behavioral waiver.",
+        "context_units": [
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "getBootstrapState",
+            "current": {
+              "q": "getBootstrapState",
+              "line": 2585,
+              "end": 2587,
+              "cc": 1,
+              "nesting": 0,
+              "hash": "cca18cb6df0cdfdf",
+              "lines": 3
+            },
+            "upstream": {
+              "q": "getBootstrapState",
+              "line": 2582,
+              "end": 2584,
+              "cc": 1,
+              "nesting": 0,
+              "hash": "cca18cb6df0cdfdf",
+              "lines": 3
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "resetBootstrapSnapshot",
+            "current": {
+              "q": "resetBootstrapSnapshot",
+              "line": 2589,
+              "end": 2601,
+              "cc": 1,
+              "nesting": 0,
+              "hash": "6f21b59ce4ad5438",
+              "lines": 13
+            },
+            "upstream": {
+              "q": "resetBootstrapSnapshot",
+              "line": 2586,
+              "end": 2598,
+              "cc": 1,
+              "nesting": 0,
+              "hash": "6f21b59ce4ad5438",
+              "lines": 13
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "promptFirstRunSetupChoice",
+            "current": {
+              "q": "promptFirstRunSetupChoice",
+              "line": 2603,
+              "end": 2612,
+              "cc": 4,
+              "nesting": 0,
+              "hash": "53a476417fd1fc14",
+              "lines": 10
+            },
+            "upstream": {
+              "q": "promptFirstRunSetupChoice",
+              "line": 2600,
+              "end": 2609,
+              "cc": 4,
+              "nesting": 0,
+              "hash": "53a476417fd1fc14",
+              "lines": 10
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "hideFirstRunSetupChoice",
+            "current": {
+              "q": "hideFirstRunSetupChoice",
+              "line": 2614,
+              "end": 2618,
+              "cc": 2,
+              "nesting": 1,
+              "hash": "5c7f74ffc71bdeb6",
+              "lines": 5
+            },
+            "upstream": {
+              "q": "hideFirstRunSetupChoice",
+              "line": 2611,
+              "end": 2615,
+              "cc": 2,
+              "nesting": 1,
+              "hash": "5c7f74ffc71bdeb6",
+              "lines": 5
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "getFirstRunSetupGate",
+            "current": {
+              "q": "getFirstRunSetupGate",
+              "line": 2620,
+              "end": 2642,
+              "cc": 2,
+              "nesting": 1,
+              "hash": "37a080e7229a3a54",
+              "lines": 11
+            },
+            "upstream": {
+              "q": "getFirstRunSetupGate",
+              "line": 2617,
+              "end": 2639,
+              "cc": 2,
+              "nesting": 1,
+              "hash": "37a080e7229a3a54",
+              "lines": 11
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "waitForFirstRunSetupChoice",
+            "current": {
+              "q": "waitForFirstRunSetupChoice",
+              "line": 2644,
+              "end": 2663,
+              "cc": 2,
+              "nesting": 1,
+              "hash": "166bc5d9bc9a7bc2",
+              "lines": 20
+            },
+            "upstream": {
+              "q": "waitForFirstRunSetupChoice",
+              "line": 2641,
+              "end": 2660,
+              "cc": 2,
+              "nesting": 1,
+              "hash": "166bc5d9bc9a7bc2",
+              "lines": 20
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "continueFirstRunLocalBootstrap",
+            "current": {
+              "q": "continueFirstRunLocalBootstrap",
+              "line": 2665,
+              "end": 2667,
+              "cc": 1,
+              "nesting": 0,
+              "hash": "8ab05dfd838b909a",
+              "lines": 3
+            },
+            "upstream": {
+              "q": "continueFirstRunLocalBootstrap",
+              "line": 2662,
+              "end": 2664,
+              "cc": 1,
+              "nesting": 0,
+              "hash": "8ab05dfd838b909a",
+              "lines": 3
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "abandonFirstRunSetupChoiceForRemoteApply",
+            "current": {
+              "q": "abandonFirstRunSetupChoiceForRemoteApply",
+              "line": 2669,
+              "end": 2683,
+              "cc": 3,
+              "nesting": 1,
+              "hash": "8e4271f12a3d6b0d",
+              "lines": 15
+            },
+            "upstream": {
+              "q": "abandonFirstRunSetupChoiceForRemoteApply",
+              "line": 2666,
+              "end": 2680,
+              "cc": 3,
+              "nesting": 1,
+              "hash": "8e4271f12a3d6b0d",
+              "lines": 15
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "ensureRuntime",
+            "current": {
+              "q": "ensureRuntime",
+              "line": 5216,
+              "end": 5355,
+              "cc": 10,
+              "nesting": 2,
+              "hash": "5ff4191239e7d21c",
+              "lines": 122
+            },
+            "upstream": {
+              "q": "ensureRuntime",
+              "line": 5213,
+              "end": 5352,
+              "cc": 10,
+              "nesting": 2,
+              "hash": "5ff4191239e7d21c",
+              "lines": 122
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/bootstrap-state.ts",
+            "scope": "bootstrapSnapshot",
+            "current": {
+              "q": "bootstrapSnapshot",
+              "line": 3,
+              "end": 8,
+              "cc": 1,
+              "nesting": 0,
+              "hash": "02c85faa42ab1946",
+              "lines": 6
+            },
+            "upstream": {
+              "q": "bootstrapSnapshot",
+              "line": 3,
+              "end": 8,
+              "cc": 1,
+              "nesting": 0,
+              "hash": "02c85faa42ab1946",
+              "lines": 6
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/install-stamp.ts",
+            "scope": "freezeStamp",
+            "current": {
+              "q": "freezeStamp",
+              "line": 103,
+              "end": 111,
+              "cc": 2,
+              "nesting": 1,
+              "hash": "946ccafa243d18c4",
+              "lines": 9
+            },
+            "upstream": {
+              "q": "freezeStamp",
+              "line": 103,
+              "end": 111,
+              "cc": 2,
+              "nesting": 1,
+              "hash": "946ccafa243d18c4",
+              "lines": 9
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/install-stamp.ts",
+            "scope": "installShape",
+            "current": {
+              "q": "installShape",
+              "line": 133,
+              "end": 135,
+              "cc": 2,
+              "nesting": 0,
+              "hash": "80adcc3b6caca378",
+              "lines": 3
+            },
+            "upstream": {
+              "q": "installShape",
+              "line": 133,
+              "end": 135,
+              "cc": 2,
+              "nesting": 0,
+              "hash": "80adcc3b6caca378",
+              "lines": 3
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/first-run-setup-gate.ts",
+            "scope": "createFirstRunSetupGate",
+            "current": {
+              "q": "createFirstRunSetupGate",
+              "line": 19,
+              "end": 148,
+              "cc": 1,
+              "nesting": 0,
+              "hash": "4041f7dc6abf1aff",
+              "lines": 37
+            },
+            "upstream": {
+              "q": "createFirstRunSetupGate",
+              "line": 19,
+              "end": 148,
+              "cc": 1,
+              "nesting": 0,
+              "hash": "4041f7dc6abf1aff",
+              "lines": 37
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/primary-backend-startup.ts",
+            "scope": "runPrimaryBackendStartup",
+            "current": {
+              "q": "runPrimaryBackendStartup",
+              "line": 97,
+              "end": 164,
+              "cc": 9,
+              "nesting": 2,
+              "hash": "9353d84876fdda80",
+              "lines": 57
+            },
+            "upstream": {
+              "q": "runPrimaryBackendStartup",
+              "line": 97,
+              "end": 164,
+              "cc": 9,
+              "nesting": 2,
+              "hash": "9353d84876fdda80",
+              "lines": 57
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/bootstrap-runner.ts",
+            "scope": "runBootstrap",
+            "current": {
+              "q": "runBootstrap",
+              "line": 856,
+              "end": 1031,
+              "cc": 28,
+              "nesting": 3,
+              "hash": "12eefe2c1d4b20ed",
+              "lines": 158
+            },
+            "upstream": {
+              "q": "runBootstrap",
+              "line": 856,
+              "end": 1031,
+              "cc": 28,
+              "nesting": 3,
+              "hash": "12eefe2c1d4b20ed",
+              "lines": 158
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/src/components/desktop-install-overlay.tsx",
+            "scope": "applyEvent",
+            "current": {
+              "q": "applyEvent",
+              "line": 197,
+              "end": 293,
+              "cc": 27,
+              "nesting": 2,
+              "hash": "1d71bbbf99286754",
+              "lines": 97
+            },
+            "upstream": {
+              "q": "applyEvent",
+              "line": 197,
+              "end": 293,
+              "cc": 27,
+              "nesting": 2,
+              "hash": "1d71bbbf99286754",
+              "lines": 97
+            },
+            "body_identical_to_upstream": true
+          }
+        ],
+        "other_read_bindings": [
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "lines": [
+              2480,
+              2511
+            ],
+            "meaning": "process-local snapshot declaration and 500-entry ring constant"
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "lines": [
+              14716,
+              14800
+            ],
+            "meaning": "bootstrap reset/repair registrations"
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "lines": [
+              14804,
+              14845
+            ],
+            "meaning": "continue/cancel/get registrations"
+          },
+          {
+            "path": "apps/desktop/electron/preload.ts",
+            "lines": [
+              628,
+              650
+            ],
+            "meaning": "typed snapshot invocation and live-event listener lifetime"
+          },
+          {
+            "path": "apps/desktop/src/global.d.ts",
+            "lines": [
+              1430,
+              1507
+            ],
+            "meaning": "event/snapshot data contract"
+          },
+          {
+            "path": "apps/desktop/src/components/desktop-install-overlay.tsx",
+            "lines": [
+              319,
+              353
+            ],
+            "meaning": "mount snapshot/listener effect"
+          },
+          {
+            "path": "apps/desktop/src/components/desktop-install-overlay.tsx",
+            "lines": [
+              409,
+              783
+            ],
+            "meaning": "choice, unsupported, active/failure presentation and retry action"
+          },
+          {
+            "path": "apps/desktop/src/components/desktop-install-local-card.ts",
+            "meaning": "complete presentation helper"
+          }
+        ],
+        "intent_evidence": [
+          {
+            "commit": "3d12e86ef13ec5fdbb4e1778ac3f3bf5ad853a74",
+            "meaning": "local installation-state presentation introduced with unified package-manager work"
+          },
+          {
+            "commit": "712734436ee8db6b05293ea02e4442d06bd13d1a",
+            "meaning": "explicit bootstrap/bundle ownership"
+          },
+          {
+            "commit": "7dd2b2dc77",
+            "meaning": "first-run Connect to existing Hermes gate and dismissed/reset behavior"
+          },
+          {
+            "path": "apps/desktop/src/components/desktop-install-overlay.test.tsx",
+            "lines": [
+              579,
+              615
+            ],
+            "meaning": "read existing installed/bundled/missing-local presentation cases; not executed here"
+          },
+          {
+            "path": "apps/desktop/electron/bootstrap-state.test.ts",
+            "meaning": "read artifact-fact retention across failure/reset tests; not executed here"
+          },
+          {
+            "path": "apps/desktop/electron/first-run-setup-gate.test.ts",
+            "meaning": "read full gate tests including concurrent waits, retry/repair, continue and remote-apply; not executed here"
+          }
+        ],
+        "compatibility_ownership_security_limits": [
+          "Global snapshot and current mainWindow destination remain native-process lifecycle assumptions. No per-attempt event correlation or IPC delivery-order guarantee has been established by this structural review.",
+          "Cancellation, failed installer cleanup, update/reset races, guest/sender authorization and installer/log security are outside this metric disposition. The catches in callers and runBootstrap are not approved by this review.",
+          "The manifest branch does not itself clear an old error and main stage snapshots do not carry renderer-only startedAt. This is pre-existing. The normal retry and repair traces inspected contain reset/gate clearing; no reachable new regression was established. Do not claim that all reload/order cases are validated."
+        ],
+        "concrete_defect_reproduction": "None justified by the bounded complete-body/context review. A failed\u2192manifest direct probe without the actual reset/gate lifecycle would not establish a production bug."
+      },
+      {
+        "scope": "sanitizeConnectionProfiles",
+        "path": "apps/desktop/electron/main.ts",
+        "rule": "CC",
+        "raw_detail": "CC 26 > 25, its value on main (over target 20: it may only go down)",
+        "raw_finding": {
+          "path": "apps/desktop/electron/main.ts",
+          "rule": "CC",
+          "scope": "sanitizeConnectionProfiles",
+          "line": 8581,
+          "detail": "CC 26 > 25, its value on main (over target 20: it may only go down)",
+          "blocking": true,
+          "allowed_reason": null,
+          "inherited_debt": null,
+          "exact_file_matches": [],
+          "exact_unit_matches": []
+        },
+        "versions": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "file_blob": "9db748184bdfd57a621466ed7607c72035449a6c",
+            "unit": {
+              "q": "sanitizeConnectionProfiles",
+              "line": 8581,
+              "end": 8679,
+              "cc": 26,
+              "nesting": 4,
+              "hash": "291da71c383f802e",
+              "lines": 99
+            },
+            "complete_function_text_sha256": "38a06af3a64ee022a6daa63223ad68745eafaf3d2e2a26e1480fd0450af6a3b9",
+            "complete_function_copy": "/tmp/hermes-main-bootstrap-profile-review/sanitizeConnectionProfiles.current.ts.txt"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "file_blob": "c4d48481288540708156b370b370e9c345bcbd11",
+            "unit": {
+              "q": "sanitizeConnectionProfiles",
+              "line": 8578,
+              "end": 8676,
+              "cc": 26,
+              "nesting": 4,
+              "hash": "291da71c383f802e",
+              "lines": 99
+            },
+            "complete_function_text_sha256": "38a06af3a64ee022a6daa63223ad68745eafaf3d2e2a26e1480fd0450af6a3b9",
+            "complete_function_copy": "/tmp/hermes-main-bootstrap-profile-review/sanitizeConnectionProfiles.upstream.ts.txt"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "file_blob": "2820a547ca61b6504cf3bc24721af3f2ef3a8579",
+            "unit": {
+              "q": "sanitizeConnectionProfiles",
+              "line": 9302,
+              "end": 9391,
+              "cc": 25,
+              "nesting": 4,
+              "hash": "821411a9ccc1a755",
+              "lines": 90
+            },
+            "complete_function_text_sha256": "f9cb1a2efaea958d99fce47902c9515a0bdb17c8bc8887fbc31f29580c4a5cda",
+            "complete_function_copy": "/tmp/hermes-main-bootstrap-profile-review/sanitizeConnectionProfiles.base.ts.txt"
+          }
+        },
+        "exact_full_function_text_matches_upstream": true,
+        "canonical_caps_match_upstream": true,
+        "decision": "structural-review recommendation only; root preparation and controller second-read pending",
+        "eligible_for_runtime_or_security_claim": false,
+        "complete_body_review": [
+          "Read raw-map and entry guards, profile-name filter, SSH normalization/token-envelope retention/continue, local savedSsh retention, remote/cloud/local mode selection, URL trimming, auth-mode default, token-envelope retention, remote-profile validation, header normalization, cloud display-name/org retention and final fresh-map return.",
+          "PROFILE_NAME_RE binds DESKTOP_PROFILE_NAME_RE /^[a-z0-9][a-z0-9_-]{0,63}$/. Entries are selected by Object.entries; __proto__ is rejected by that grammar. This is disk JSON normalization, not an evaluator or network operation.",
+          "Read complete normalizeRemoteProfileName: trim, same profile grammar, reserved hermes/test/tmp/root/sudo exclusion; default remains valid. Invalid/blank mappings are omitted, preserving historical same-name fallback.",
+          "Read the direct JSON-read caller, routing override helpers and profileRouteOptions. The persisted desktop label remains the map key; validated remoteProfile reaches backendProfile only through the existing override selection. The URL/SSH/cloud precedence and explicit self-query mapping remain separate policies.",
+          "Read token/header envelope boundaries. The sanitizer neither decrypts nor changes token-storage policy. normalizeRemoteHeaders filters reserved header names; decryptRemoteHeaders strips CR/LF after decryption. These observations do not establish credential security or authorize those separate behaviors."
+        ],
+        "structural_rationale": "CC 26 comes from one bounded per-profile normalization pass, with 99 owned lines and nesting 4. The added guarded remoteProfile field is cohesive schema preservation, required for the documented URL-remote alias contract. Complete-body/helper/caller review found no specific integration compatibility conflict; a source-bound CC-only disposition could be considered without credential or routing guarantees.",
+        "context_units": [
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "readDesktopConnectionConfig",
+            "current": {
+              "q": "readDesktopConnectionConfig",
+              "line": 8681,
+              "end": 8750,
+              "cc": 12,
+              "nesting": 2,
+              "hash": "92b5cb3922a1c239",
+              "lines": 70
+            },
+            "upstream": {
+              "q": "readDesktopConnectionConfig",
+              "line": 8678,
+              "end": 8747,
+              "cc": 12,
+              "nesting": 2,
+              "hash": "92b5cb3922a1c239",
+              "lines": 70
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "writeDesktopConnectionConfig",
+            "current": {
+              "q": "writeDesktopConnectionConfig",
+              "line": 8752,
+              "end": 8764,
+              "cc": 1,
+              "nesting": 0,
+              "hash": "4143aa04ca37155c",
+              "lines": 13
+            },
+            "upstream": {
+              "q": "writeDesktopConnectionConfig",
+              "line": 8749,
+              "end": 8761,
+              "cc": 1,
+              "nesting": 0,
+              "hash": "4143aa04ca37155c",
+              "lines": 13
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "profileRouteOptions",
+            "current": {
+              "q": "profileRouteOptions",
+              "line": 10755,
+              "end": 10783,
+              "cc": 5,
+              "nesting": 0,
+              "hash": "d6fac7d371e93395",
+              "lines": 29
+            },
+            "upstream": {
+              "q": "profileRouteOptions",
+              "line": 10752,
+              "end": 10780,
+              "cc": 5,
+              "nesting": 0,
+              "hash": "d6fac7d371e93395",
+              "lines": 29
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "decryptDesktopSecret",
+            "current": {
+              "q": "decryptDesktopSecret",
+              "line": 8378,
+              "end": 8410,
+              "cc": 8,
+              "nesting": 2,
+              "hash": "c1d795d869d3ae71",
+              "lines": 33
+            },
+            "upstream": {
+              "q": "decryptDesktopSecret",
+              "line": 8375,
+              "end": 8407,
+              "cc": 8,
+              "nesting": 2,
+              "hash": "c1d795d869d3ae71",
+              "lines": 33
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "scope": "decryptRemoteHeaders",
+            "current": {
+              "q": "decryptRemoteHeaders",
+              "line": 8412,
+              "end": 8430,
+              "cc": 3,
+              "nesting": 2,
+              "hash": "ded2ca4c3c27473c",
+              "lines": 19
+            },
+            "upstream": {
+              "q": "decryptRemoteHeaders",
+              "line": 8409,
+              "end": 8427,
+              "cc": 3,
+              "nesting": 2,
+              "hash": "ded2ca4c3c27473c",
+              "lines": 19
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "connectionScopeKey",
+            "current": {
+              "q": "connectionScopeKey",
+              "line": 300,
+              "end": 302,
+              "cc": 3,
+              "nesting": 0,
+              "hash": "44976a263d12dbdc",
+              "lines": 3
+            },
+            "upstream": {
+              "q": "connectionScopeKey",
+              "line": 300,
+              "end": 302,
+              "cc": 3,
+              "nesting": 0,
+              "hash": "44976a263d12dbdc",
+              "lines": 3
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "modeIsRemoteLike",
+            "current": {
+              "q": "modeIsRemoteLike",
+              "line": 431,
+              "end": 433,
+              "cc": 2,
+              "nesting": 0,
+              "hash": "28c59c56df8ff572",
+              "lines": 3
+            },
+            "upstream": {
+              "q": "modeIsRemoteLike",
+              "line": 431,
+              "end": 433,
+              "cc": 2,
+              "nesting": 0,
+              "hash": "28c59c56df8ff572",
+              "lines": 3
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "normAuthMode",
+            "current": {
+              "q": "normAuthMode",
+              "line": 326,
+              "end": 328,
+              "cc": 2,
+              "nesting": 0,
+              "hash": "2d18f5b6079c4ac3",
+              "lines": 3
+            },
+            "upstream": {
+              "q": "normAuthMode",
+              "line": 326,
+              "end": 328,
+              "cc": 2,
+              "nesting": 0,
+              "hash": "2d18f5b6079c4ac3",
+              "lines": 3
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "normalizeSshConfig",
+            "current": {
+              "q": "normalizeSshConfig",
+              "line": 435,
+              "end": 517,
+              "cc": 31,
+              "nesting": 2,
+              "hash": "5d695c2c40850a69",
+              "lines": 83
+            },
+            "upstream": {
+              "q": "normalizeSshConfig",
+              "line": 435,
+              "end": 517,
+              "cc": 31,
+              "nesting": 2,
+              "hash": "5d695c2c40850a69",
+              "lines": 83
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "normalizeRemoteProfileName",
+            "current": {
+              "q": "normalizeRemoteProfileName",
+              "line": 610,
+              "end": 618,
+              "cc": 4,
+              "nesting": 1,
+              "hash": "092bb30d9450b0b4",
+              "lines": 9
+            },
+            "upstream": {
+              "q": "normalizeRemoteProfileName",
+              "line": 610,
+              "end": 618,
+              "cc": 4,
+              "nesting": 1,
+              "hash": "092bb30d9450b0b4",
+              "lines": 9
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "normalizeRemoteHeaders",
+            "current": {
+              "q": "normalizeRemoteHeaders",
+              "line": 365,
+              "end": 401,
+              "cc": 20,
+              "nesting": 3,
+              "hash": "e311838891df645c",
+              "lines": 37
+            },
+            "upstream": {
+              "q": "normalizeRemoteHeaders",
+              "line": 365,
+              "end": 401,
+              "cc": 20,
+              "nesting": 3,
+              "hash": "e311838891df645c",
+              "lines": 37
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "sanitizeRemoteHeaderValue",
+            "current": {
+              "q": "sanitizeRemoteHeaderValue",
+              "line": 359,
+              "end": 363,
+              "cc": 2,
+              "nesting": 0,
+              "hash": "190b14a70756e72c",
+              "lines": 5
+            },
+            "upstream": {
+              "q": "sanitizeRemoteHeaderValue",
+              "line": 359,
+              "end": 363,
+              "cc": 2,
+              "nesting": 0,
+              "hash": "190b14a70756e72c",
+              "lines": 5
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "profileRemoteOverride",
+            "current": {
+              "q": "profileRemoteOverride",
+              "line": 578,
+              "end": 605,
+              "cc": 9,
+              "nesting": 1,
+              "hash": "10ceb00402235c39",
+              "lines": 28
+            },
+            "upstream": {
+              "q": "profileRemoteOverride",
+              "line": 578,
+              "end": 605,
+              "cc": 9,
+              "nesting": 1,
+              "hash": "10ceb00402235c39",
+              "lines": 28
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "profileSshOverride",
+            "current": {
+              "q": "profileSshOverride",
+              "line": 519,
+              "end": 524,
+              "cc": 2,
+              "nesting": 0,
+              "hash": "216bfe84f9ba88b2",
+              "lines": 6
+            },
+            "upstream": {
+              "q": "profileSshOverride",
+              "line": 519,
+              "end": 524,
+              "cc": 2,
+              "nesting": 0,
+              "hash": "216bfe84f9ba88b2",
+              "lines": 6
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "savedProfileSsh",
+            "current": {
+              "q": "savedProfileSsh",
+              "line": 526,
+              "end": 535,
+              "cc": 4,
+              "nesting": 1,
+              "hash": "5b371e901b86d7fe",
+              "lines": 10
+            },
+            "upstream": {
+              "q": "savedProfileSsh",
+              "line": 526,
+              "end": 535,
+              "cc": 4,
+              "nesting": 1,
+              "hash": "5b371e901b86d7fe",
+              "lines": 10
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "pathWithGlobalRemoteProfile",
+            "current": {
+              "q": "pathWithGlobalRemoteProfile",
+              "line": 931,
+              "end": 943,
+              "cc": 3,
+              "nesting": 1,
+              "hash": "7093f6bd37ab5787",
+              "lines": 13
+            },
+            "upstream": {
+              "q": "pathWithGlobalRemoteProfile",
+              "line": 931,
+              "end": 943,
+              "cc": 3,
+              "nesting": 1,
+              "hash": "7093f6bd37ab5787",
+              "lines": 13
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "translateSelfProfileQuery",
+            "current": {
+              "q": "translateSelfProfileQuery",
+              "line": 963,
+              "end": 1002,
+              "cc": 11,
+              "nesting": 2,
+              "hash": "32cac98d463dd8b8",
+              "lines": 40
+            },
+            "upstream": {
+              "q": "translateSelfProfileQuery",
+              "line": 963,
+              "end": 1002,
+              "cc": 11,
+              "nesting": 2,
+              "hash": "32cac98d463dd8b8",
+              "lines": 40
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "scope": "resolveProfileApiRequest",
+            "current": {
+              "q": "resolveProfileApiRequest",
+              "line": 1089,
+              "end": 1099,
+              "cc": 3,
+              "nesting": 0,
+              "hash": "7af0fc5afdf6562d",
+              "lines": 11
+            },
+            "upstream": {
+              "q": "resolveProfileApiRequest",
+              "line": 1089,
+              "end": 1099,
+              "cc": 3,
+              "nesting": 0,
+              "hash": "7af0fc5afdf6562d",
+              "lines": 11
+            },
+            "body_identical_to_upstream": true
+          },
+          {
+            "path": "apps/desktop/electron/desktop-remote-route.ts",
+            "scope": "resolveDesktopRemoteRoute",
+            "current": {
+              "q": "resolveDesktopRemoteRoute",
+              "line": 76,
+              "end": 178,
+              "cc": 22,
+              "nesting": 2,
+              "hash": "e7940fe6c5becacf",
+              "lines": 103
+            },
+            "upstream": {
+              "q": "resolveDesktopRemoteRoute",
+              "line": 76,
+              "end": 178,
+              "cc": 22,
+              "nesting": 2,
+              "hash": "e7940fe6c5becacf",
+              "lines": 103
+            },
+            "body_identical_to_upstream": true
+          }
+        ],
+        "other_read_bindings": [
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "lines": [
+              1363,
+              1365
+            ],
+            "meaning": "PROFILE_NAME_RE import binding"
+          },
+          {
+            "path": "apps/desktop/electron/desktop-profile.ts",
+            "lines": [
+              1,
+              13
+            ],
+            "meaning": "profile-name grammar export"
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "lines": [
+              45,
+              45
+            ],
+            "meaning": "reserved remote profile names"
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.ts",
+            "lines": [
+              330,
+              345
+            ],
+            "meaning": "remote-header name grammar and forbidden set"
+          },
+          {
+            "path": "apps/desktop/electron/main.ts",
+            "lines": [
+              10246,
+              10356
+            ],
+            "meaning": "read complete resolveRemoteBackend consumer to distinguish route selection from decryption/dialing; no metric recommendation for this scope"
+          }
+        ],
+        "intent_evidence": [
+          {
+            "commit": "39faafb61688282a372ff2d59191581588e9a003",
+            "meaning": "URL-remote per-profile routing label maps to backend profile via remoteProfile; exact sanitizer addition and adjacent routing changes read"
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.test.ts",
+            "lines": [
+              154,
+              312
+            ],
+            "meaning": "read no-entry/local/cloud/SSH, auth/header, valid/invalid/reserved mapping cases; not executed here"
+          },
+          {
+            "path": "apps/desktop/electron/connection-config.test.ts",
+            "lines": [
+              724,
+              760
+            ],
+            "meaning": "read explicit URL-alias translation and missing-mapping historical fallback; not executed here"
+          }
+        ],
+        "compatibility_ownership_security_limits": [
+          "Raw input comes from parsed local connection.json. Generic object/array tolerance and raw token object retention are existing compatibility behaviors, not a complete hostile-input schema validation guarantee.",
+          "No URL reachability, remote profile existence, API authorization, cookie/token storage, keyring availability, permission repair or SSH process ownership claim. Existing read-error fallback and decrypt-error catches remain outside the disposition.",
+          "Downstream route selection was read to establish mapping use; no blanket approval of resolveRemoteBackend, every REST endpoint, cross-profile behavior or concurrent connection changes."
+        ],
+        "concrete_defect_reproduction": "None justified by this bounded review. No synthetic or native calls made."
+      }
+    ],
+    "context_file_bindings": [
+      {
+        "path": "apps/desktop/electron/main.ts",
+        "current_blob": "9db748184bdfd57a621466ed7607c72035449a6c",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "9db748184bdfd57a621466ed7607c72035449a6c"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "c4d48481288540708156b370b370e9c345bcbd11"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "2820a547ca61b6504cf3bc24721af3f2ef3a8579"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/electron/connection-config.ts",
+        "current_blob": "9378401dcc0b1c2c1cb987435f5ece48f682f64c",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "9378401dcc0b1c2c1cb987435f5ece48f682f64c"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "9378401dcc0b1c2c1cb987435f5ece48f682f64c"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "0b376bdaeb632800e569a4ae4c6f7daf3c933444"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/electron/desktop-profile.ts",
+        "current_blob": "65c242280da9b1557d8edc120320826f1275b11a",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "65c242280da9b1557d8edc120320826f1275b11a"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "65c242280da9b1557d8edc120320826f1275b11a"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "65c242280da9b1557d8edc120320826f1275b11a"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/electron/bootstrap-state.ts",
+        "current_blob": "090466275edce760df756b22835a8d43dd31167f",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "090466275edce760df756b22835a8d43dd31167f"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "090466275edce760df756b22835a8d43dd31167f"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "absent": true
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/electron/install-stamp.ts",
+        "current_blob": "280b028393d603ed6f145f8efe9be0234f0f2bb0",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "280b028393d603ed6f145f8efe9be0234f0f2bb0"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "280b028393d603ed6f145f8efe9be0234f0f2bb0"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "absent": true
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/electron/first-run-setup-gate.ts",
+        "current_blob": "29101038eb2976ded2a51f1775482ffae6b0b65c",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "29101038eb2976ded2a51f1775482ffae6b0b65c"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "29101038eb2976ded2a51f1775482ffae6b0b65c"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "2d83cbeafe694ffd9043bdb7be8617ae19aae030"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/electron/primary-backend-startup.ts",
+        "current_blob": "2a79fc8f346086c035b9bc46de4b3990a9b307c5",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "2a79fc8f346086c035b9bc46de4b3990a9b307c5"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "2a79fc8f346086c035b9bc46de4b3990a9b307c5"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "6f57d819bd9d4659df3c4f44fe49907a62912b6a"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/electron/bootstrap-runner.ts",
+        "current_blob": "05465a84920a25dead52a379c86fb652dfbee645",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "05465a84920a25dead52a379c86fb652dfbee645"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "05465a84920a25dead52a379c86fb652dfbee645"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "a8d818e855cc766c2f343d32d76b0fdbacbfdb7e"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/electron/desktop-remote-route.ts",
+        "current_blob": "f54299c6d1fca62ff01b4db055960af58a931e68",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "f54299c6d1fca62ff01b4db055960af58a931e68"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "f54299c6d1fca62ff01b4db055960af58a931e68"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "56ca6b74a88293246dc9ad6e6bffc676c4515c30"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/electron/preload.ts",
+        "current_blob": "cbf019e930c9d9bac7cdbf3fef647f68bda6f9e3",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "cbf019e930c9d9bac7cdbf3fef647f68bda6f9e3"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "53997ec7326a978730fa9aa919b9277c6c173bfe"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "f6f772acf41c6442e7158bdfbdfcdf3eeb635041"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/electron/connection-config.test.ts",
+        "current_blob": "8e4c4bf093d41bc726031d432cb95f34aac0ee49",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "8e4c4bf093d41bc726031d432cb95f34aac0ee49"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "8e4c4bf093d41bc726031d432cb95f34aac0ee49"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "d2d7c26f30021e730a2d3295ecd3d704e5a4abc6"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/electron/bootstrap-state.test.ts",
+        "current_blob": "a9231b0c51806d44ed81a8b9686a7a19946f9cd4",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "a9231b0c51806d44ed81a8b9686a7a19946f9cd4"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "a9231b0c51806d44ed81a8b9686a7a19946f9cd4"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "absent": true
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/electron/first-run-setup-gate.test.ts",
+        "current_blob": "91221620689e90ad1c4d8287b3ea38a3b85df675",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "91221620689e90ad1c4d8287b3ea38a3b85df675"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "91221620689e90ad1c4d8287b3ea38a3b85df675"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "f8b53525f0fbbbb6d4fdb4cf5a3eccdf191b05d2"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/src/components/desktop-install-overlay.tsx",
+        "current_blob": "0cc4d279faa81e0294be51b03e2359ef42b54fc4",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "0cc4d279faa81e0294be51b03e2359ef42b54fc4"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "0cc4d279faa81e0294be51b03e2359ef42b54fc4"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "e7f51ae3c3a1b1c03550c6d50d0e181744791f33"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/src/components/desktop-install-overlay.test.tsx",
+        "current_blob": "db67e72b6a28e7d837215eb36fbad95cfd82eef7",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "db67e72b6a28e7d837215eb36fbad95cfd82eef7"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "db67e72b6a28e7d837215eb36fbad95cfd82eef7"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "7351280894c9dda3f636eb91f4a968972b548c84"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/src/global.d.ts",
+        "current_blob": "22a34af5f3ec5d891c6a1f195b6e0332ab60dbca",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "22a34af5f3ec5d891c6a1f195b6e0332ab60dbca"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "33da11bd05107ed07eac91d70eeb9329f6145ffe"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "blob": "a10fe6e89b3ef195cfe7a520becd762dabd687a3"
+          }
+        }
+      },
+      {
+        "path": "apps/desktop/src/components/desktop-install-local-card.ts",
+        "current_blob": "f79a0f0fc3bd3aacc3129acca0e97ae66b6c3fb6",
+        "refs": {
+          "current": {
+            "commit": "30fd3e8c90c3068bbc1929457f2f9c8044d6a8cc",
+            "blob": "f79a0f0fc3bd3aacc3129acca0e97ae66b6c3fb6"
+          },
+          "upstream": {
+            "commit": "297552a9d646119871391d202509822cd86330df",
+            "blob": "f79a0f0fc3bd3aacc3129acca0e97ae66b6c3fb6"
+          },
+          "base": {
+            "commit": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+            "absent": true
+          }
+        }
+      }
+    ],
+    "final_bound_blobs": {
+      "apps/desktop/electron/main.ts": "9db748184bdfd57a621466ed7607c72035449a6c",
+      "apps/desktop/electron/connection-config.ts": "9378401dcc0b1c2c1cb987435f5ece48f682f64c",
+      "apps/desktop/electron/desktop-profile.ts": "65c242280da9b1557d8edc120320826f1275b11a",
+      "apps/desktop/electron/bootstrap-state.ts": "090466275edce760df756b22835a8d43dd31167f",
+      "apps/desktop/electron/install-stamp.ts": "280b028393d603ed6f145f8efe9be0234f0f2bb0",
+      "apps/desktop/electron/first-run-setup-gate.ts": "29101038eb2976ded2a51f1775482ffae6b0b65c",
+      "apps/desktop/electron/primary-backend-startup.ts": "2a79fc8f346086c035b9bc46de4b3990a9b307c5",
+      "apps/desktop/electron/bootstrap-runner.ts": "05465a84920a25dead52a379c86fb652dfbee645",
+      "apps/desktop/electron/desktop-remote-route.ts": "f54299c6d1fca62ff01b4db055960af58a931e68",
+      "apps/desktop/electron/preload.ts": "cbf019e930c9d9bac7cdbf3fef647f68bda6f9e3",
+      "apps/desktop/electron/connection-config.test.ts": "8e4c4bf093d41bc726031d432cb95f34aac0ee49",
+      "apps/desktop/electron/bootstrap-state.test.ts": "a9231b0c51806d44ed81a8b9686a7a19946f9cd4",
+      "apps/desktop/electron/first-run-setup-gate.test.ts": "91221620689e90ad1c4d8287b3ea38a3b85df675",
+      "apps/desktop/src/components/desktop-install-overlay.tsx": "0cc4d279faa81e0294be51b03e2359ef42b54fc4",
+      "apps/desktop/src/components/desktop-install-overlay.test.tsx": "db67e72b6a28e7d837215eb36fbad95cfd82eef7",
+      "apps/desktop/src/global.d.ts": "22a34af5f3ec5d891c6a1f195b6e0332ab60dbca",
+      "apps/desktop/src/components/desktop-install-local-card.ts": "f79a0f0fc3bd3aacc3129acca0e97ae66b6c3fb6"
+    },
+    "bound_files_unchanged": true,
+    "limits": [
+      "Read-only source/intent review and canonical AST measurement only. No source, test, manifest or generated allowance edit; no activation or preparation approval.",
+      "No native Electron, installer, API, OAuth, SSH, credential/keyring or network call; no synthetic execution or tests run for this packet.",
+      "This is not a semantic typecheck, desktop test-suite pass, runtime safety certification, security audit or full-health pass. Existing full typecheck/native gaps remain.",
+      "Only the two named CC findings are reviewed. File size, other units, catches, timeouts, credentials and future growth have no disposition here.",
+      "Full-file bindings identify reviewed text, not complete review of every function in those files. Context scopes and read ranges below delimit the review.",
+      "Concurrent unrelated media privacy edits exist; no immutable whole-tree claim. All 17 bound desktop files are checked unchanged at packaging."
+    ],
+    "repository_edits_by_this_task": []
+  },
+  "independent_second_read": {
+    "reviewed_head": "d66b3ea03b130ee28b50533fe947af83098a200e",
+    "tree": "af70c706ccd76f9a3f24598b58b47f54ff9d6b72",
+    "worker_packet": "/tmp/hermes-main-bootstrap-profile-review/review.json",
+    "bound_blob_checks": {
+      "apps/desktop/electron/main.ts": true,
+      "apps/desktop/electron/connection-config.ts": true,
+      "apps/desktop/electron/desktop-profile.ts": true,
+      "apps/desktop/electron/bootstrap-state.ts": true,
+      "apps/desktop/electron/install-stamp.ts": true,
+      "apps/desktop/electron/first-run-setup-gate.ts": true,
+      "apps/desktop/electron/primary-backend-startup.ts": true,
+      "apps/desktop/electron/bootstrap-runner.ts": true,
+      "apps/desktop/electron/desktop-remote-route.ts": true,
+      "apps/desktop/electron/preload.ts": true,
+      "apps/desktop/electron/connection-config.test.ts": true,
+      "apps/desktop/electron/bootstrap-state.test.ts": true,
+      "apps/desktop/electron/first-run-setup-gate.test.ts": true,
+      "apps/desktop/src/components/desktop-install-overlay.tsx": true,
+      "apps/desktop/src/components/desktop-install-overlay.test.tsx": true,
+      "apps/desktop/src/global.d.ts": true,
+      "apps/desktop/src/components/desktop-install-local-card.ts": true
+    },
+    "complete_function_checks": [
+      {
+        "scope": "broadcastBootstrapEvent",
+        "complete_source_equal": true,
+        "sha256": "2c71274fb37d81807e4e58e51d55374dfa75f7483fba524bdcc259ebbb0cc256",
+        "cap": 25
+      },
+      {
+        "scope": "sanitizeConnectionProfiles",
+        "complete_source_equal": true,
+        "sha256": "38a06af3a64ee022a6daa63223ad68745eafaf3d2e2a26e1480fd0450af6a3b9",
+        "cap": 26
+      }
+    ],
+    "recommendation": "Prepare only the two exact CC structural entries for root decision; no activation authority inferred.",
+    "independent_source_reads": [
+      "Complete broadcastBootstrapEvent and setup-choice/reset/gate callers; renderer applyEvent and primary startup decision chain",
+      "Complete sanitizeConnectionProfiles and JSON-read/write callers, profileRouteOptions, SSH/remote-profile/header normalizers and override selection"
+    ],
+    "rationale": {
+      "broadcastBootstrapEvent": "Shallow synchronous eight-event snapshot dispatcher; the inherited extra branch normalizes setup-choice presentation. No identified compatibility conflict in inspected lifecycle.",
+      "sanitizeConnectionProfiles": "Bounded per-profile schema normalization; inherited added validated remoteProfile field preserves explicit backend alias mapping. No identified compatibility conflict in inspected callers."
+    },
+    "limits": [
+      "CC only, exact source/cap; no growth credit",
+      "No runtime test execution performed by this review",
+      "Native execution, full desktop types, credentials, IPC authority, bootstrap cancellation/order and caller catch behavior remain separate gates",
+      "Direct failed-to-manifest state injection without real retry/gate lifecycle does not establish a production defect"
+    ]
+  },
+  "status": "Preparation authorized after these source reviews; generated identities still require independent verification and owner activation.",
+  "limits": [
+    "Read-only source/intent review and canonical AST measurement only. No source, test, manifest or generated allowance edit; no activation or preparation approval.",
+    "No native Electron, installer, API, OAuth, SSH, credential/keyring or network call; no synthetic execution or tests run for this packet.",
+    "This is not a semantic typecheck, desktop test-suite pass, runtime safety certification, security audit or full-health pass. Existing full typecheck/native gaps remain.",
+    "Only the two named CC findings are reviewed. File size, other units, catches, timeouts, credentials and future growth have no disposition here.",
+    "Full-file bindings identify reviewed text, not complete review of every function in those files. Context scopes and read ranges below delimit the review.",
+    "Concurrent unrelated media privacy edits exist; no immutable whole-tree claim. All 17 bound desktop files are checked unchanged at packaging."
+  ]
+}
