@@ -12949,6 +12949,47 @@
           "claim": "Independent structural inspection passed for this exact test-only module organization and unchanged size. No runtime, catch, timeout, security or feature acceptance is implied."
         }
       ]
+    },
+    {
+      "id": "legacy-attribution-map-size-01",
+      "status": "reviewed",
+      "path": "scripts/releases/authors_legacy.py",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2043 > target 2000 (new code must meet the target)",
+      "candidate_blob": "c0e2c596c1b0c4a8f72754a700a5a1b230446552",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "scripts/releases/authors_legacy.py",
+        "scope": "<module>",
+        "blob": "c0e2c596c1b0c4a8f72754a700a5a1b230446552"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact structural metric preparation",
+        "compatibility": "Only FILE_LINES is eligible: the complete module is a frozen literal attribution lookup table, with no executable callbacks, imports, control flow or I/O. Its 2043-line organization preserves the existing literal-dict contract used by attribution tooling. Exact upstream bytes and count retained; splitting for the size cap would change data organization without addressing a functional defect. This classification makes no claim about attribution correctness or runtime behavior of callers.",
+        "receipt": "Independent exhaustive AST and consumer-contract review on 2026-10-15; no runtime execution or attribution-correctness claim."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-legacy-map-size-review.json",
+          "blob": "4231302f8ca1cc4d0720bd3775b62ccef43830f0",
+          "outcome": "passed",
+          "claim": "Exhaustive source inspection establishes a literal string mapping with no calls, imports or control flow; exact line count and upstream bytes verified."
+        },
+        {
+          "path": "scripts/releases/authors.py",
+          "blob": "aa696f10458046085680f1f74566a1dbb6b19b08",
+          "outcome": "passed",
+          "claim": "Reviewed literal lookup and overlay consumer contract; no runtime behavior or attribution-correctness claim."
+        },
+        {
+          "path": "scripts/add_contributor.py",
+          "blob": "7af8b182308ee5747cb8402c737e09103e1be716",
+          "outcome": "passed",
+          "claim": "Reviewed literal lookup and overlay consumer contract; no runtime behavior or attribution-correctness claim."
+        }
+      ]
     }
   ]
 }

@@ -1,0 +1,32 @@
+{
+  "head": "9ad6d6a828dab0f1345e2e528c6121e8cd430c8b",
+  "source": "297552a9d646119871391d202509822cd86330df",
+  "path": "scripts/releases/authors_legacy.py",
+  "finding": {
+    "path": "scripts/releases/authors_legacy.py",
+    "rule": "FILE_LINES",
+    "scope": "<module>",
+    "line": 1,
+    "detail": "lines 2043 > target 2000 (new code must meet the target)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  "candidate_blob": "c0e2c596c1b0c4a8f72754a700a5a1b230446552",
+  "source_blob": "c0e2c596c1b0c4a8f72754a700a5a1b230446552",
+  "lines": 2043,
+  "structural_evidence": {
+    "top_level_nodes": [
+      "docstring",
+      "literal string-to-string dict assignment"
+    ],
+    "literal_entries": 1985,
+    "calls_imports_functions_comprehensions": 0
+  },
+  "rationale": "Only FILE_LINES is eligible: the complete module is a frozen literal attribution lookup table, with no executable callbacks, imports, control flow or I/O. Its 2043-line organization preserves the existing literal-dict contract used by attribution tooling. Exact upstream bytes and count retained; splitting for the size cap would change data organization without addressing a functional defect. This classification makes no claim about attribution correctness or runtime behavior of callers.",
+  "inspected_consumers": [
+    "scripts/releases/authors.py:12,48 imports and overlays directory entries over the frozen dict",
+    "scripts/add_contributor.py:51-53 imports and performs get lookup"
+  ],
+  "status": "proposed"
+}

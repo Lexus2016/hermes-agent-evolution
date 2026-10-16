@@ -15,13 +15,13 @@ history. Once upstream is already an ancestor of the comparison base, this adapt
 is dormant and the ordinary ratchet applies with unchanged thresholds.
 
 The initial mechanism checkpoint has an empty manifest. Separately reviewed
-activations currently record **320 occurrences across 305 exact entries**. These
+activations currently record **321 occurrences across 306 exact entries**. These
 cover individually reviewed name bindings, bounded runtime/error boundaries,
-process-bootstrap options, metadata latency, and structural test metrics. The
+process-bootstrap options, metadata latency, structural test metrics, and a literal attribution-map size. The
 manifest contains each precise rationale, source identity and validation limit.
 Structural-only test-size dispositions claim unchanged test organization, not a
 runtime pass or general feature compatibility. Real bugs and behavioral findings
-remain separate blocking gates. Five deferred-annotation findings and the
+remain separate blocking gates. Two scheduler deferred-annotation findings and the
 unreadable-skill listing fallback remain unresolved.
 
 The manifest is the separate accepted-debt report; it never rewrites a raw receipt.
