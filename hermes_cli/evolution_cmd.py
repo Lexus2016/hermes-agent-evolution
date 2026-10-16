@@ -24,7 +24,7 @@ def _get_current_commit_sha() -> Optional[str]:
         res = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             check=True,
         )
         return res.stdout.strip()

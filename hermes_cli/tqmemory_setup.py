@@ -387,6 +387,7 @@ def verify_tqmemory(tqm_path: Optional[str] = None) -> bool:
         res = subprocess.run(
             [path, "--help"], check=False,
             capture_output=True, text=True, timeout=_VERIFY_TIMEOUT,
+            encoding="utf-8", errors="replace",
         )
         return res.returncode == 0
     except Exception as exc:
