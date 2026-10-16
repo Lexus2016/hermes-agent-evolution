@@ -208,7 +208,6 @@ async def _download_media(
     media_label: str, accept: str, max_bytes: int, timeout: float, retry_all: bool) -> Path:
     """SSRF-safe streaming download with exponential backoff (2s/4s/8s). ``retry_all=False`` (images)
     retries only :func:`_is_retryable_download_error` errors — a 404/403 never succeeds on retry."""
-    from utils import atomic_replace
     from tools.url_safety import create_ssrf_safe_async_client
     destination.parent.mkdir(parents=True, exist_ok=True)
     last_error = None
@@ -243,24 +242,21 @@ async def _download_media(
                 # Stream to a temp file, atomically moved onto destination on success.
                 tmp_destination = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
                 bytes_written = 0
-                try:
-                    with tmp_destination.open("wb") as f:
-                        async for chunk in response.aiter_bytes():
-                            if not chunk:
-                                continue
-                            bytes_written += len(chunk)
-                            if bytes_written > max_bytes:
-                                raise ValueError(
-                                    f"{media_label} too large ({bytes_written} bytes, max {max_bytes})"
-                                )
-                            f.write(chunk)
-                    atomic_replace(tmp_destination, destination)
-                except Exception:
-                    try:
-                        tmp_destination.unlink(missing_ok=True)
-                    except OSError:
-                        logger.debug("Could not delete partial download: %s", tmp_destination, exc_info=True)
-                    raise
+                from hermes_platform.media_cache_privacy import (
+                    private_temporary_file, publish_private_temporary_file,
+                )
+
+                with private_temporary_file(tmp_destination) as f:
+                    async for chunk in response.aiter_bytes():
+                        if not chunk:
+                            continue
+                        bytes_written += len(chunk)
+                        if bytes_written > max_bytes:
+                            raise ValueError(
+                                f"{media_label} too large ({bytes_written} bytes, max {max_bytes})"
+                            )
+                        f.write(chunk)
+                    publish_private_temporary_file(f, tmp_destination, destination)
             return destination
         except Exception as e:
             last_error = e

@@ -1,7 +1,9 @@
 """Permission-checked media cache creation, before any private payload is written."""
 
+import logging
 import os
 import stat
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -89,3 +91,86 @@ def write_cache_file(filepath: Path, data: bytes) -> None:
             handle.write(data)
     finally:
         os.close(directory_fd)
+
+
+def _remove_owned_temporary(filepath: Path, identity: tuple[int, int]) -> None:
+    """Leave replacements alone; this is an identity check, not an atomic unlink guarantee."""
+    try:
+        info = filepath.lstat()
+    except FileNotFoundError:
+        return
+    if (info.st_dev, info.st_ino) == identity:
+        filepath.unlink()
+
+
+def _finish_private_temporary(filepath, identity, close, failed: bool) -> None:
+    """Preserve the primary stream failure across close and owned-path cleanup."""
+    primary = failed
+    try:
+        try:
+            close()
+        except OSError as exc:
+            primary = True
+            if not failed:
+                raise
+            logging.getLogger(__name__).warning(
+                "Media temporary close incomplete (%s)", type(exc).__name__,
+            )
+    finally:
+        if identity is not None:
+            try:
+                _remove_owned_temporary(filepath, identity)
+            except OSError as exc:
+                if not primary:
+                    raise
+                logging.getLogger(__name__).warning(
+                    "Media temporary cleanup incomplete (%s)", type(exc).__name__,
+                )
+
+
+@contextmanager
+def private_temporary_file(filepath: Path):
+    """Yield an exclusive private stream without modifying its caller-owned parent.
+
+    POSIX ownership and mode are checked before yielding. On other hosts only
+    exclusive creation is guaranteed; native ACL privacy is outside this contract.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    if _posix_permissions():
+        flags |= os.O_NOFOLLOW
+    fd = os.open(filepath, flags, 0o600)
+    identity = None
+    failed = False
+    def close():
+        os.close(fd)
+    try:
+        info = os.fstat(fd)
+        identity = (info.st_dev, info.st_ino)
+        handle = os.fdopen(fd, "wb")
+        close = handle.close
+        if _posix_permissions():
+            from hermes_constants import _chown_to_hermes_uid
+
+            _chown_to_hermes_uid(handle.fileno())
+            info = os.fstat(handle.fileno())
+            _verify_owner(info)
+            if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+                raise PermissionError("Media stream file privacy could not be established")
+        yield handle
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        _finish_private_temporary(filepath, identity, close, failed)
+
+
+def publish_private_temporary_file(handle, temporary: Path, destination: Path) -> None:
+    """Publish only the captured stream inode; lstat→rename is not an atomic identity guard."""
+    from utils import atomic_replace
+
+    opened = os.fstat(handle.fileno())
+    handle.close()  # Windows requires closing before replacement.
+    current = temporary.lstat()
+    if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino) or not stat.S_ISREG(current.st_mode):
+        raise PermissionError("Media stream temporary ownership changed before publication")
+    atomic_replace(temporary, destination)
