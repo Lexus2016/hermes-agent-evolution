@@ -8984,7 +8984,7 @@
       "rule": "F821",
       "detail": "undefined name",
       "code": "return _sdk_build(DeleteMessageRequest, message_id=message_id)",
-      "candidate_blob": "34b25e6cff752d7a32fc8d7372d3302cb2fde367",
+      "candidate_blob": "b255d859caf8933eab6968fcc5549fe6cca91144",
       "source": {
         "commit": "297552a9d646119871391d202509822cd86330df",
         "path": "plugins/platforms/feishu/adapter.py",
@@ -8996,8 +8996,8 @@
       "review": {
         "reviewer": "Independent integration controller; owner-approved bounded preparation",
         "compatibility": "DeleteMessageRequest is inserted into module globals as None from _LARK_SDK_IMPORTS at import; _load_lark_oapi atomically replaces it with SDK class before FEISHU_AVAILABLE becomes True. _sdk_build handles None. Probe executes both None fallback and bound synthetic builder; TestDeleteMessage.test_delete_message_calls_im_message_delete exercises async public call.",
-        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation. Separately reviewed document-read correction: 84 passed,7 optional SDK skips; exact refreshed artifact records receipt and dependency identities.",
-        "module_bindings": "SDK import table, None initialization, atomic loader and delete request builder are unchanged; only document content reading delegates to a pure bounded helper through asyncio.to_thread. No other module binding changes."
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation. Separately reviewed document-read correction: 84 passed,7 optional SDK skips; exact refreshed artifact records receipt and dependency identities. Pure rendering extraction reviewed with 95 passing tests and 7 optional SDK skips; no live service or native execution claim.",
+        "module_bindings": "SDK import table, None initialization, atomic loader and delete request builder remain unchanged. Pure Markdown rendering helpers are extracted with exact full AST bodies and facade names/constants retained; the bounded document read remains unchanged."
       },
       "validation": [
         {
@@ -9008,7 +9008,7 @@
         },
         {
           "path": "plugins/platforms/feishu/adapter.py",
-          "blob": "34b25e6cff752d7a32fc8d7372d3302cb2fde367",
+          "blob": "b255d859caf8933eab6968fcc5549fe6cca91144",
           "outcome": "passed",
           "claim": "Reviewed SDK global initialization/atomic loader binding or mocked builder/public-delete execution test; no live SDK service call claimed."
         },
@@ -9041,6 +9041,24 @@
           "blob": "b3bb0896dedeba3a1bb64c21e1ac7a3c859b59b9",
           "outcome": "passed",
           "claim": "Exact bounded document-read helper and regression dependency reviewed."
+        },
+        {
+          "path": "analysis/sync-health/v0221-feishu-rendering-refresh.json",
+          "blob": "e76ee4fcf8c54d91dbd91d5728cdc8943cc040ab",
+          "outcome": "passed",
+          "claim": "Independent exact-body rendering extraction and unchanged SDK binding review, with 95-pass/7-skip canonical receipt."
+        },
+        {
+          "path": "plugins/platforms/feishu/feishu_text_rendering.py",
+          "blob": "ff133f9dd4cb2e1871e3dc476c32ace0edc91020",
+          "outcome": "passed",
+          "claim": "Exact reviewed rendering helper or regression dependency."
+        },
+        {
+          "path": "tests/plugins/platforms/test_feishu_text_rendering.py",
+          "blob": "bf51eab7b3e689c18b6948a159030c3b81421845",
+          "outcome": "passed",
+          "claim": "Exact reviewed rendering helper or regression dependency."
         }
       ]
     },
