@@ -38,8 +38,8 @@ def get_provider_env(name: str) -> str:
     except Exception as exc:
         try:
             from agent.secret_scope import UnscopedSecretError
-        except ImportError:
-            UnscopedSecretError = ()  # type: ignore[assignment,misc]
+        except Exception:
+            raise RuntimeError("Web provider profile scope is unavailable") from None
         if isinstance(exc, UnscopedSecretError):
             raise
         val = None
@@ -56,9 +56,11 @@ def get_provider_env(name: str) -> str:
 def _secret_scope_state() -> tuple[bool, bool]:
     try:
         from agent.secret_scope import current_secret_scope, is_multiplex_active
+
+        return current_secret_scope() is not None, is_multiplex_active()
     except Exception:
-        return False, False
-    return current_secret_scope() is not None, is_multiplex_active()
+        # Unknown scope state cannot authorize reading the launch profile's env.
+        raise RuntimeError("Web provider profile scope is unavailable") from None
 
 
 class WebSearchProvider(ProviderBase):
