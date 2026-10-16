@@ -12,6 +12,7 @@ Pure, injectable clock/check/update seams for hermetic tests.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from pathlib import Path
@@ -19,6 +20,15 @@ from typing import Callable, Optional
 
 _MARKERS_DIR = "plugin-update-checks"
 _DEFAULT_INTERVAL_HOURS = 24
+logger = logging.getLogger(__name__)
+_POLICY_READ_WARNING = (
+    "Plugin update checks skipped because the active configuration could not be read. "
+    "Run 'hermes config check' and repair the configuration before retrying."
+)
+
+
+class _PolicyReadError(RuntimeError):
+    """The canonical reader returned fallback data rather than an established policy."""
 
 
 def _marker_path() -> Path:
@@ -44,7 +54,8 @@ def check_interval_hours(config_get: Callable | None = None) -> float:
     try:
         value = config_get("plugins", "auto_update_check_hours")
     except Exception:
-        return _DEFAULT_INTERVAL_HOURS
+        logger.warning("%s", _POLICY_READ_WARNING)
+        return 0.0
     if value is None:
         return _DEFAULT_INTERVAL_HOURS
     try:
@@ -60,16 +71,18 @@ def auto_apply_enabled(config_get: Callable | None = None) -> bool:
     try:
         return bool(config_get("plugins", "auto_apply"))
     except Exception:
+        logger.warning("%s", _POLICY_READ_WARNING)
         return False
 
 
 def _default_config_get(section: str, key: str):
-    try:
-        from hermes_cli.config import cfg_get, load_config_readonly
+    from hermes_cli.config import cfg_get, load_config_readonly
+    from hermes_cli.config_read_errors import FailedConfigRead
 
-        return cfg_get(load_config_readonly(), section, key, default=None)
-    except Exception:
-        return None
+    config = load_config_readonly()
+    if isinstance(config, FailedConfigRead):
+        raise _PolicyReadError("Plugin update policy is unavailable")
+    return cfg_get(config, section, key, default=None)
 
 
 def check_due(now: Optional[float] = None, interval_hours: Optional[float] = None,
