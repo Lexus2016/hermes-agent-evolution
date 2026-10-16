@@ -574,7 +574,7 @@ def _setup_identity_mapping(cfg: dict, hermes_host: dict, current_peer: str, new
 def _ensure_sdk_installed() -> bool:
     """Check honcho-ai is importable; offer to install if not. Returns True if ready."""
     try:
-        import honcho  # noqa: F401
+        import honcho
         return True
     except ImportError:
         pass
@@ -583,14 +583,17 @@ def _ensure_sdk_installed() -> bool:
         print("  Skipping install. Run: pip install 'honcho-ai==2.2.0'\n")
         return False
     print("  Installing honcho-ai...", flush=True)
-    from tools.lazy_deps import install_specs  # env-aware: sealed hosted venvs redirect to the data volume
-    result = install_specs(["honcho-ai==2.2.0"])
-    if result.ok:
-        print("  Installed.\n")
-        return True
-    print(f"  Cannot install: {result.reason}\n" if result.blocked else
-          f"  Install failed:\n{(result.stderr or '').strip()}\n  Run manually: uv pip install 'honcho-ai==2.2.0'\n")
-    return False
+    try:
+        from pm import sync_venv
+        sync_venv(["honcho"], explicit=True)
+    except Exception as exc:
+        import logging
+        logging.exception("Memory dependency preparation failed",
+                          exc_info=(RuntimeError, RuntimeError(type(exc).__name__), None))
+        print(f"  Cannot install: {exc}\n  Run manually: hermes pm install --extra honcho\n")
+        return False
+    print("  Installed. Restart Hermes to use the selected dependency environment.\n")
+    return True
 
 
 def _device_login_available() -> bool:
@@ -949,7 +952,7 @@ def cmd_status(args) -> None:
         _cmd_status_all()
         return
     try:
-        import honcho  # noqa: F401
+        import honcho
     except ImportError:
         print("  honcho-ai is not installed. Run: hermes honcho setup\n")
         return
@@ -1661,7 +1664,7 @@ Honcho identity management
     p = Path(file_path).expanduser()
     if not p.exists():
         return print(f"  File not found: {p}\n")
-    content = p.read_text(encoding="utf-8").strip()
+    content = p.read_text(encoding="utf-8-sig").strip()
     if not content:
         return print(f"  File is empty: {p}\n")
     if mgr.seed_ai_identity(session_key, content, source=p.name):
@@ -1688,7 +1691,7 @@ def _migrate_upload(mgr, session_key: str, user_files: list[Path]) -> None:
 
 def _migrate_seed(mgr, session_key: str, agent_files: list[Path]) -> None:
     for f in agent_files:
-        content = f.read_text(encoding="utf-8").strip()
+        content = f.read_text(encoding="utf-8-sig").strip()
         if content:
             ok = mgr.seed_ai_identity(session_key, content, source=f.name)
             print(f"    {f.name}: {'seeded' if ok else 'failed'}")

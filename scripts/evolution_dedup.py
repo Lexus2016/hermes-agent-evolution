@@ -62,15 +62,15 @@ def idea_key(title: str) -> str:
     return hashlib.sha1(norm.encode("utf-8")).hexdigest()[:16]
 
 
-def load_cache(path: Path) -> Dict[str, Any]:
+def load_cache(path: Path) -> dict[str, Any]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
 
 
-def save_cache(path: Path, cache: Dict[str, Any]) -> None:
+def save_cache(path: Path, cache: dict[str, Any]) -> None:
     # Cap: drop oldest entries (by date) if over the limit, so the file stays small.
     if len(cache) > _MAX_ENTRIES:
         items = sorted(cache.items(), key=lambda kv: str(kv[1].get("date", "")))
@@ -79,14 +79,14 @@ def save_cache(path: Path, cache: Dict[str, Any]) -> None:
     path.write_text(json.dumps(cache, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def is_seen(cache: Dict[str, Any], title: str) -> bool:
+def is_seen(cache: dict[str, Any], title: str) -> bool:
     return idea_key(title) in cache
 
 
-def record(cache: Dict[str, Any], title: str, status: str, issue: Any = None, date: str = "") -> Dict[str, Any]:
+def record(cache: dict[str, Any], title: str, status: str, issue: Any = None, date: str = "") -> dict[str, Any]:
     """Add/update an entry. Returns the cache (mutated in place)."""
     key = idea_key(title)
-    entry: Dict[str, Any] = {"title": title, "status": status}
+    entry: dict[str, Any] = {"title": title, "status": status}
     if issue:
         entry["issue"] = issue
     if date:

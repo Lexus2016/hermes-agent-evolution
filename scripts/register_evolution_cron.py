@@ -34,6 +34,9 @@ import shutil
 import sys
 from pathlib import Path
 
+# Standalone source invocations must resolve the canonical repository YAML policy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 
 def _find_venv_python(repo_root: Path) -> str | None:
     """Locate the install's venv interpreter (has the full Hermes deps)."""
@@ -80,9 +83,9 @@ def _ensure_venv_python(repo_root: Path, argv: list[str]) -> None:
 
 
 def _load_yaml(path: Path) -> dict:
-    import yaml  # PyYAML ships with Hermes (used for cli-config.yaml etc.)
+    import hermes_yaml as yaml   # Use the canonical Hermes YAML policy.
 
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, "r", encoding="utf-8-sig") as fh:
         return yaml.safe_load(fh) or {}
 
 
@@ -361,7 +364,7 @@ def _evolution_sibling_modules(repo_root: Path, family: list[Path]) -> list[str]
     candidates: set[str] = set()
     for path in family:
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"))
         except (OSError, SyntaxError, ValueError):
             continue  # fail-open: an unparseable file must not block the deploy
         for node in ast.walk(tree):
@@ -484,9 +487,7 @@ def _ensure_evolution_labels(repo_root: Path, dry_run: bool = False) -> list[str
                 check=False,
                 timeout=30,
             )
-            if result.returncode == 0:
-                created.append(name)
-            elif "already exists" in (result.stderr or "").lower():
+            if result.returncode == 0 or "already exists" in (result.stderr or "").lower():
                 created.append(name)
             else:
                 print(

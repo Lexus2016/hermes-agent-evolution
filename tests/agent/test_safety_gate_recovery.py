@@ -130,3 +130,25 @@ def test_executor_publishes_terminal_refusal_as_failure(tmp_path, monkeypatch, d
     handler.assert_not_called()
     assert not report.exists()
     assert not _detect_tool_failure("terminal", {"exit_code": 0, "output": "ok"})[0]
+
+
+@pytest.mark.parametrize("tool", ["terminal", "process", "process_manage"])
+def test_guardrail_fallback_records_blocked_results_as_failures(tool):
+    from agent.display import _detect_tool_failure
+    from agent.tool_executor import _harm_blocked_tool_result
+    from agent.tool_guardrails import ToolCallGuardrailController, ToolCallSignature
+
+    result = _harm_blocked_tool_result("fixture refusal")
+    controller = ToolCallGuardrailController()
+    args = {"action": "fixture"}
+    controller.after_call(tool, args, result)  # exercise omitted failed= fallback
+    signature = ToolCallSignature.from_call(tool, args)
+    assert controller._exact_failure_counts[signature] == 1
+    assert controller._last_call_succeeded is False
+    assert _detect_tool_failure(tool, result)[0] is True
+    success = json.dumps({"exit_code": 0, "output": "ok"})
+    clean = ToolCallGuardrailController()
+    clean.after_call(tool, args, success)
+    assert clean._exact_failure_counts.get(signature, 0) == 0
+    assert clean._last_call_succeeded is True
+    assert _detect_tool_failure(tool, success)[0] is False

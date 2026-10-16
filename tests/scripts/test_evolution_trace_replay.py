@@ -13,12 +13,12 @@ for p in (str(ROOT / "scripts"), str(ROOT)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from agent.tool_call_capture import (  # noqa: E402
+from agent.tool_call_capture import (
     branch_trajectory,
     replay_trajectory,
     resume_index,
 )
-from evolution_trajectory_logger import TrajectoryLog, iter_trajectories  # noqa: E402
+from evolution_trajectory_logger import TrajectoryLog, iter_trajectories
 
 
 def _make_log(*statuses: str, session_id: str = "s1") -> TrajectoryLog:

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Path-based runtime governance — execution-path policy checker (#2284).
 
 Policies on Paths (arXiv:2603.16586, Kaptein/Khan/Podstavnychy — Kyvvu,
@@ -35,7 +34,7 @@ import logging
 import os
 import tempfile
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -44,8 +43,8 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "PathEvent",
     "PathLog",
-    "PathVerdict",
     "PathPolicyChecker",
+    "PathVerdict",
     "RiskBudget",
 ]
 
@@ -91,7 +90,7 @@ DESTRUCTIVE_TOOLS = ("delete_file", "delete_directory", "overwrite_file", "remov
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass
@@ -107,11 +106,11 @@ class PathEvent:
         if not self.timestamp:
             self.timestamp = _now_iso()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "PathEvent":
+    def from_dict(cls, d: dict[str, Any]) -> PathEvent:
         return cls(
             tool_name=str(d.get("tool_name", "")),
             args_summary=str(d.get("args_summary", "")),
@@ -132,7 +131,7 @@ class PathLog:
         self, max_entries: int = 200, log_path: Optional[Path | str] = None
     ) -> None:
         self.max_entries = max_entries
-        self._events: List[PathEvent] = []
+        self._events: list[PathEvent] = []
         self.log_path = Path(log_path) if log_path else None
 
     def record(
@@ -165,7 +164,7 @@ class PathLog:
         except OSError as exc:
             logger.debug("path-log disk append failed: %s", exc)
 
-    def recent(self, n: Optional[int] = None) -> List[PathEvent]:
+    def recent(self, n: Optional[int] = None) -> list[PathEvent]:
         """Return the most recent ``n`` events (all if ``n`` is None)."""
         if n is None:
             return list(self._events)
@@ -188,11 +187,11 @@ class PathVerdict:
     rule: str = ""
     reason: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "PathVerdict":
+    def from_dict(cls, d: dict[str, Any]) -> PathVerdict:
         return cls(
             tool_name=str(d.get("tool_name", "")),
             verdict=str(d.get("verdict", PASS)),

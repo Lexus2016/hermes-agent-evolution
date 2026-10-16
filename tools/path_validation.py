@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 
 
-def suggest_nearby_paths(path: str, max_results: int = 5) -> List[str]:
+def suggest_nearby_paths(path: str, max_results: int = 5) -> list[str]:
     """Return up to *max_results* paths near *path* the caller likely meant.
 
     Pure-Python existence check + similarity scoring (no shell). Returns
@@ -27,7 +27,7 @@ def suggest_nearby_paths(path: str, max_results: int = 5) -> List[str]:
     base_no_ext, ext = p.stem, p.suffix.lower()
     lower = filename.lower()
 
-    entries: List[str] = []
+    entries: list[str] = []
     target = dir_path
     while True:
         try:
@@ -39,7 +39,7 @@ def suggest_nearby_paths(path: str, max_results: int = 5) -> List[str]:
                 break
             target = parent
 
-    scored: List[tuple] = []
+    scored: list[tuple] = []
     for f in entries:
         lf = f.lower()
         score = 0
@@ -64,7 +64,7 @@ def suggest_nearby_paths(path: str, max_results: int = 5) -> List[str]:
     return [fp for _, fp in scored[:max_results]]
 
 
-def format_nearby_hint(path: str, nearby: List[str]) -> Optional[str]:
+def format_nearby_hint(path: str, nearby: list[str]) -> Optional[str]:
     """Build a human hint for a stale *path* given *nearby* candidates.
 
     Returns ``None`` when *nearby* is empty. Mirrors the #1587 "did you

@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_tts_baselines import (  # noqa: E402
+from evolution_tts_baselines import (
     baseline_curve,
     best_of_n,
     compare_against_baseline,

@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_disable_failed_mcp import (  # noqa: E402
+from evolution_disable_failed_mcp import (
     check_tqmemory_health,
     disable_in_profiles,
     main,
@@ -48,10 +48,10 @@ class TestCheckHealth:
 
 class TestDisableInProfiles:
     def test_already_disabled(self, tmp_path):
-        import yaml
+        import hermes_yaml as yaml
 
         cfg = tmp_path / "config.yaml"
-        cfg.write_text(yaml.dump({"mcp_servers": {"tqmemory": {"enabled": False}}}))
+        cfg.write_text(yaml.safe_dump({"mcp_servers": {"tqmemory": {"enabled": False}}}))
         mod = _mock_mod(paths=MagicMock(return_value=[cfg]))
         with patch("evolution_disable_failed_mcp._import_tqmemory", return_value=mod):
             assert disable_in_profiles(dry_run=False) == []

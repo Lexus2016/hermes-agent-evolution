@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # install_auto_update.sh — schedule the OFFICIAL `hermes update` to run daily.
 #
 # This replaces the old custom auto_update.sh (removed). That script reinvented

@@ -73,7 +73,7 @@ class TestReadFileFailureRateDirective:
             "/nonexistent/d.py",
         ]
         for p in paths:
-            r = json.loads(read_file_tool(p, task_id="test-diff"))
+            _r = json.loads(read_file_tool(p, task_id="test-diff"))
         # 4th failure should trigger directive
         r4 = json.loads(read_file_tool("/nonexistent/e.py", task_id="test-diff"))
         assert "_rate_directive" in r4

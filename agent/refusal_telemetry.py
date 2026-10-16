@@ -13,7 +13,7 @@ import logging
 import os
 import tempfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -72,28 +72,28 @@ def _telemetry_lock():
         if fcntl:
             try:
                 fcntl.flock(fd, fcntl.LOCK_UN)
-            except (OSError, IOError):
+            except OSError:
                 pass
         elif msvcrt:
             try:
                 fd.seek(0)
                 msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)
-            except (OSError, IOError):
+            except OSError:
                 pass
         fd.close()
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
-def _load_events() -> List[Dict[str, Any]]:
+def _load_events() -> list[dict[str, Any]]:
     """Load existing events from the sidecar. Returns an empty list on any error."""
     path = _telemetry_file()
     if not path.exists():
         return []
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         if isinstance(data, dict) and isinstance(data.get("events"), list):
             return data["events"]
         if isinstance(data, list):  # legacy flat-list format
@@ -103,7 +103,7 @@ def _load_events() -> List[Dict[str, Any]]:
     return []
 
 
-def _save_events(events: List[Dict[str, Any]]) -> None:
+def _save_events(events: list[dict[str, Any]]) -> None:
     """Atomically write events to the sidecar."""
     path = _telemetry_file()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -118,7 +118,7 @@ def _save_events(events: List[Dict[str, Any]]) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
         os.replace(tmp, path)
-    except (OSError, IOError) as e:
+    except OSError as e:
         logger.debug("refusal_telemetry: could not write sidecar: %s", e)
 
 
@@ -228,7 +228,7 @@ def record_transition_if_pending(agent, category_after: str, took_action: bool) 
     agent._pending_nudge_telemetry = None
 
 
-def load_events() -> List[Dict[str, Any]]:
+def load_events() -> list[dict[str, Any]]:
     """Public read accessor — returns all events from the sidecar."""
     try:
         with _telemetry_lock():

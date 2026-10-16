@@ -232,7 +232,7 @@ class TestMaybeCronRefusalRecovery:
             run_in_context=lambda f: f(),
         )
         assert len(calls) == 1
-        user_msg, history = calls[0]
+        _user_msg, history = calls[0]
         # Defect #2: the re-run is grounded — original history is passed through
         assert history == refusal["messages"]
         assert _count_tool_calls(out["messages"]) > 0

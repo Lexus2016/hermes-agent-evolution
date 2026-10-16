@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """RubricForge Slice 2 — labeled-set collection (#2781).
 
 Child of #2760. Persists ground-truth labeled examples for the Slice-1
@@ -41,7 +40,7 @@ def default_store_path() -> Path:
     return Path(base) / "rubric-forge" / "labeled.json"
 
 
-def _validate(example: Any) -> Optional[Dict[str, Any]]:
+def _validate(example: Any) -> Optional[dict[str, Any]]:
     """Normalize one candidate example; None when it carries no signal."""
     if not isinstance(example, dict):
         return None
@@ -52,11 +51,11 @@ def _validate(example: Any) -> Optional[Dict[str, Any]]:
     return {"requires": requires, "forbids": forbids, "label": bool(example.get("label"))}
 
 
-def _key(example: Dict[str, Any]) -> str:
+def _key(example: dict[str, Any]) -> str:
     return json.dumps(example, sort_keys=True)
 
 
-def load_labeled_set(store_path: Optional[Path] = None) -> List[Dict[str, Any]]:
+def load_labeled_set(store_path: Optional[Path] = None) -> list[dict[str, Any]]:
     """Read the store; a missing/corrupt file is an empty set (never raises)."""
     try:
         data = json.loads((store_path or default_store_path()).read_text(encoding="utf-8"))

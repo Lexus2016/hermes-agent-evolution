@@ -17,8 +17,7 @@ def test_analyze_refusal_telemetry(tmp_path: Path):
         {"category": "access_denied", "nudge_tier": "t2", "shifted": False},
     ]
     with open(log_file, "w") as f:
-        for d in data:
-            f.write(json.dumps(d) + "\n")
+        f.writelines(json.dumps(d) + "\n" for d in data)
 
     records = parse_refusal_telemetry_file(log_file)
     assert len(records) == 4

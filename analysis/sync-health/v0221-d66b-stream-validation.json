@@ -1,0 +1,20 @@
+{
+  "paths": {
+    "hermes_platform/media_cache_privacy.py": "7b8a3e4909f6084f9ddd0f04d92eecd5d0d2557c",
+    "tools/vision_tools.py": "c0b9706f974fc52d2671df2f1b3821acf4995b34",
+    "tests/tools/test_media_stream_privacy.py": "63b7358dc73865daa288a50d42c552338095faa2"
+  },
+  "receipt": "/tmp/hermes-stream-close-final-20261016T014000.log",
+  "receipt_sha256": "c817e5ebc30efc1e5b5f33f159b40b4979fe8525b1647a8ce2dbaee3888ea571",
+  "tests": "128 passed, 3 native Windows skips; six files",
+  "ratchet": "/tmp/hermes-stream-close-ratchet-20261016T014010.json",
+  "red": "/tmp/hermes-stream-red-20261016T013530.log",
+  "limits": [
+    "Non-POSIX ACL privacy not guaranteed; exclusive creation preserved.",
+    "Identity check then rename/unlink is not atomic against concurrent path mutation.",
+    "No caller parent permission change.",
+    "If fstat cannot establish identity, leave empty unverified temporary rather than risk removing replacement.",
+    "Codec-derived media writers remain outside this stream correction."
+  ],
+  "manifest_dependencies": []
+}

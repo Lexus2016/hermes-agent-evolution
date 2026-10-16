@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tool synthesis harness — synthesize + validate a tool from scratch (#2259).
 
 Slice A of the In-Situ Self-Evolving paradigm (parent #2248; Yunjue Agent):
@@ -29,22 +28,22 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "SandboxValidator",
     "SynthesizedTool",
     "ToolProposer",
-    "SandboxValidator",
     "ToolRegistry",
 ]
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass
@@ -61,11 +60,11 @@ class SynthesizedTool:
         if not self.created_at:
             self.created_at = _now_iso()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "SynthesizedTool":
+    def from_dict(cls, d: dict[str, Any]) -> SynthesizedTool:
         return cls(
             name=str(d.get("name", "")),
             description=str(d.get("description", "")),
@@ -125,6 +124,7 @@ class SandboxValidator:
                 capture_output=True,
                 text=True,
                 timeout=10,
+                check=False,
             )
             return proc.returncode == 0
         except (subprocess.TimeoutExpired, OSError):
@@ -141,7 +141,7 @@ class ToolRegistry:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
 
-    def _load(self) -> Dict[str, Dict[str, Any]]:
+    def _load(self) -> dict[str, dict[str, Any]]:
         if not self.path.exists():
             return {}
         try:
@@ -150,7 +150,7 @@ class ToolRegistry:
         except (OSError, json.JSONDecodeError):
             return {}
 
-    def _save(self, data: Dict[str, Dict[str, Any]]) -> None:
+    def _save(self, data: dict[str, dict[str, Any]]) -> None:
         import os
         import tempfile
 
@@ -184,5 +184,5 @@ class ToolRegistry:
             return None
         return SynthesizedTool.from_dict(entry)
 
-    def list_names(self) -> List[str]:
+    def list_names(self) -> list[str]:
         return sorted(self._load().keys())

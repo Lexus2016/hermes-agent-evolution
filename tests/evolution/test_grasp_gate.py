@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for evolution/lib/grasp_gate.py (#2840, GRASP regression gate)."""
 
 import sys
@@ -6,14 +5,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from evolution.lib.grasp_gate import (  # noqa: E402
+from evolution.lib.grasp_gate import (
     DECISION_ACCEPT,
     DECISION_REJECT,
     DECISION_REVISE,
     balanced_probe_split,
     grasp_regression_gate,
 )
-from evolution.lib.rubric_forge import RubricJudge  # noqa: E402
+from evolution.lib.rubric_forge import RubricJudge
 
 
 def _kw_judge(rubric: str, example) -> bool:
@@ -46,7 +45,7 @@ class TestBalancedProbeSplit:
     def test_split_is_deterministic_and_parallel(self):
         xs = list(range(8))
         lb = [False, True, False, True, False, True, False, True]
-        train_ex, train_lb, probe_ex, probe_lb = balanced_probe_split(xs, lb, probe_size=4)
+        train_ex, _train_lb, probe_ex, probe_lb = balanced_probe_split(xs, lb, probe_size=4)
         # Round-robin failing-then-passing: failing idx {0,2,...} fill odd i.
         assert probe_ex == [0, 1, 2, 3]
         assert probe_lb == [False, True, False, True]

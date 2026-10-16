@@ -30,10 +30,10 @@ def _make_tool_defs(*names: str) -> list:
 def _make_agent(tmp_path: Path) -> AIAgent:
     with (
         patch(
-            "run_agent.get_tool_definitions", return_value=_make_tool_defs("web_search")
+            "model_tools.get_tool_definitions", return_value=_make_tool_defs("web_search")
         ),
-        patch("run_agent.check_toolset_requirements", return_value={}),
-        patch("run_agent.OpenAI"),
+        patch("model_tools.check_toolset_requirements", return_value={}),
+        patch("run_agent.AIAgent._create_openai_client"),
     ):
         agent = AIAgent(
             api_key="test-key-12345678",

@@ -1,0 +1,41 @@
+{
+  "scope": "Existing single Feishu F821 binding refresh after pure rendering extraction; no added occurrence or changed frozen fixture evidence.",
+  "candidate_blob": "b255d859caf8933eab6968fcc5549fe6cca91144",
+  "source_blob": "950694c32df13751b5ad2cdef12f4a30742483d6",
+  "unit_body_hash": "a58098fd079efce9",
+  "retention": {
+    "exact_function_bodies": [
+      "_escape_markdown_text",
+      "_to_boolean",
+      "_is_style_enabled",
+      "_wrap_inline_code",
+      "_sanitize_fence_language",
+      "_render_text_element",
+      "_render_code_block_element",
+      "_strip_markdown_to_plain_text"
+    ],
+    "count": 8,
+    "adapter_lines": 4442,
+    "main_cap": 4447,
+    "late_patch_audit": "No external references or patch targets found for internal helper-to-helper dependencies; existing adapter exports retained. Plugin test loader requires absolute module import, corrected and tested."
+  },
+  "receipt": {
+    "path": "/tmp/hermes-feishu-rendering-reviewed-final.log",
+    "sha256": "fe7ff4eae48ef6279ffcd4c41472a0f6e394cdf6259796983b07f06d6d6eb6f4",
+    "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 5 test files (~91 tests) under ['tests/plugins/platforms/test_feishu_text_rendering.py', 'tests/plugins/platforms/test_feishu_text_documents.py', 'tests/gateway/test_feishu.py', 'tests/gateway/test_feishu_lazy_import.py', 'tests/gateway/test_feishu_table_markdown.py']; running with -j 9\n[  4.4% |     4/~91 | \u27138 | \u27170] \u2713 tests/plugins/platforms/test_feishu_text_rendering.py (8\u2713, 0.9s)\n[ 12.1% |    11/~91 | \u271322 | \u2717 0] \u2713 tests/plugins/platforms/test_feishu_text_documents.py (14\u2713, 1.0s)\n[ 14.3% |    13/~91 | \u271324 | \u2717 0] \u2713 tests/gateway/test_feishu_lazy_import.py (2\u2713, 1.1s)\n[ 15.4% |    14/~91 | \u271325 | \u2717 0] \u2713 tests/gateway/test_feishu_table_markdown.py (1\u2713, 1.2s)\n[100.0% |    91/~91 | \u271395 | \u2717 0] \u2713 tests/gateway/test_feishu.py (70\u2713 7s, 1.9s)\n\n=== Summary: 5 files, 95 tests passed, 0 failed, 7 skipped (100% complete) in 1.9s (9 workers) ===\n  Durations cached to test_durations.json (5 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   5\n  Total subprocess CPU-wall: 6.1s  (runner wall: 1.9s, parallelism: 9x)\n  P50: 1.13s  P90: 1.87s  P95: 1.87s  P99: 1.87s  Max: 1.87s\n  <1s: 1 files (20%)  <2s: 5 files (100%)\n  Top 10 slowest:\n      1.87s  tests/gateway/test_feishu.py\n      1.17s  tests/gateway/test_feishu_table_markdown.py\n      1.13s  tests/gateway/test_feishu_lazy_import.py\n      1.03s  tests/plugins/platforms/test_feishu_text_documents.py\n      0.95s  tests/plugins/platforms/test_feishu_text_rendering.py\n"
+  },
+  "dependencies": [
+    {
+      "path": "plugins/platforms/feishu/adapter.py",
+      "blob": "b255d859caf8933eab6968fcc5549fe6cca91144"
+    },
+    {
+      "path": "plugins/platforms/feishu/feishu_text_rendering.py",
+      "blob": "ff133f9dd4cb2e1871e3dc476c32ace0edc91020"
+    },
+    {
+      "path": "tests/plugins/platforms/test_feishu_text_rendering.py",
+      "blob": "bf51eab7b3e689c18b6948a159030c3b81421845"
+    }
+  ]
+}

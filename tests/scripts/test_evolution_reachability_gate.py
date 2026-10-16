@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for scripts/evolution_reachability_gate.py — deterministic dead-code reachability gate (#2498)."""
 
 from __future__ import annotations
@@ -8,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_reachability_gate import (  # noqa: E402
+from evolution_reachability_gate import (
     _is_source_python_file,
     _is_test_file,
     check_reachability,

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for decision-level regression metrics (#2917, slice 1 of #2899)."""
 
 from __future__ import annotations
@@ -9,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_decision_metrics import (  # noqa: E402
+from evolution_decision_metrics import (
     compute_run_metrics,
     scan_trajectories,
 )

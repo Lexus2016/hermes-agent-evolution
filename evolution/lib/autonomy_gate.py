@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Gate autonomy behind verification + 'safeguards disabled + internet' red-line (#2528).
 
 Safety signal: Anthropic's Aug 2026 risk report raised its catastrophic-
@@ -27,16 +26,16 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 __all__ = [
+    "HIGH_RISK_ACTIONS",
     "AutonomyVerdict",
     "RedLineVerdict",
-    "HIGH_RISK_ACTIONS",
     "check_autonomy_gate",
     "check_red_line_config",
 ]
 
 # High-risk autonomous actions that must be gated behind verification.
 # Each entry: (action_name, description).
-HIGH_RISK_ACTIONS: List[str] = [
+HIGH_RISK_ACTIONS: list[str] = [
     "send_message",
     "create_tweet",
     "git_push",
@@ -59,11 +58,11 @@ class AutonomyVerdict:
     reason: str
     verification_required: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "AutonomyVerdict":
+    def from_dict(cls, d: dict[str, Any]) -> AutonomyVerdict:
         return cls(
             action=str(d.get("action", "")),
             allowed=bool(d.get("allowed", False)),
@@ -81,11 +80,11 @@ class RedLineVerdict:
     internet_enabled: bool
     reason: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "RedLineVerdict":
+    def from_dict(cls, d: dict[str, Any]) -> RedLineVerdict:
         return cls(
             is_red_line=bool(d.get("is_red_line", False)),
             safeguards_disabled=bool(d.get("safeguards_disabled", False)),

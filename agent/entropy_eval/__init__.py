@@ -19,6 +19,7 @@ Reference
 """
 
 import math
+from itertools import pairwise
 import statistics
 from collections import Counter
 from typing import Any, Dict, List, Optional, Sequence
@@ -50,8 +51,8 @@ class SessionEntropyReport:
         tool_entropy: float,
         information_gain: float,
         exploration_ratio: float,
-        action_counts: Dict[str, int],
-        transition_counts: Dict[str, int],
+        action_counts: dict[str, int],
+        transition_counts: dict[str, int],
     ):
         self.session_id = session_id
         self.action_entropy = action_entropy
@@ -62,7 +63,7 @@ class SessionEntropyReport:
         self.action_counts = action_counts
         self.transition_counts = transition_counts
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
             "action_entropy": round(self.action_entropy, 4),
@@ -98,7 +99,7 @@ class EntropyEngine:
         self.baseline_actions = baseline_actions
 
     @staticmethod
-    def _extract_actions(messages: Sequence[Dict[str, Any]]) -> List[str]:
+    def _extract_actions(messages: Sequence[dict[str, Any]]) -> list[str]:
         """Build a flat action list from messages.
 
         Each action is represented as ``tool:<name>`` or ``role:<role>`` if there
@@ -109,7 +110,7 @@ class EntropyEngine:
         so pseudo-entries never pollute *tool_entropy* (which counts only real
         tool names).
         """
-        actions: List[str] = []
+        actions: list[str] = []
         for msg in messages:
             role = msg.get("role", "unknown")
             _tool_calls = msg.get("tool_calls") or []
@@ -145,9 +146,9 @@ class EntropyEngine:
     def analyze(
         self,
         session_id: str,
-        messages: Sequence[Dict[str, Any]],
+        messages: Sequence[dict[str, Any]],
         *,
-        _internal_actions: Optional[List[str]] = None,
+        _internal_actions: Optional[list[str]] = None,
     ) -> SessionEntropyReport:
         """Compute entropy metrics for *messages*."""
         actions = (
@@ -168,7 +169,7 @@ class EntropyEngine:
 
         # 3. trajectory_entropy (bigram over all actions)
         transitions: Counter = Counter()
-        for prev, nxt in zip(actions, actions[1:]):
+        for prev, nxt in pairwise(actions):
             transitions[f"{prev} >> {nxt}"] += 1
         transition_events = sum(transitions.values())
         trajectory_entropy = _safe_entropy(transitions, transition_events)
@@ -209,12 +210,12 @@ class MultiSessionAggregator:
     """Aggregate entropy reports across multiple sessions."""
 
     @staticmethod
-    def aggregate(reports: Sequence[SessionEntropyReport]) -> Dict[str, Any]:
+    def aggregate(reports: Sequence[SessionEntropyReport]) -> dict[str, Any]:
         """Return mean / std-dev / max for each numeric field."""
         if not reports:
             return {}
 
-        def stats(field_name: str) -> Dict[str, float]:
+        def stats(field_name: str) -> dict[str, float]:
             values = [getattr(r, field_name) for r in reports]
             return {
                 "mean": round(statistics.fmean(values), 4),

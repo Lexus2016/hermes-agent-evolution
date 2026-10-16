@@ -148,7 +148,7 @@ class TestCacheImageFromUrlConnectGuard:
         # through ``urllib.request.getproxies``, which on macOS falls back to the System
         # Configuration (``scutil --proxy``) when no proxy env var is set — so on a runner
         # with a system-wide proxy the request would dial the proxy, not the rebinding host.
-        monkeypatch.setattr("httpx._utils.getproxies", lambda: {})
+        monkeypatch.setattr("httpx._utils.getproxies", dict)
 
         answers = [
             [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))],
@@ -311,11 +311,11 @@ def _ensure_slack_mock():
 
 _ensure_slack_mock()
 
-import plugins.platforms.slack.adapter as _slack_mod  # noqa: E402
+import plugins.platforms.slack.adapter as _slack_mod
 _slack_mod.SLACK_AVAILABLE = True
 
-from plugins.platforms.slack.adapter import SlackAdapter  # noqa: E402
-from gateway.config import PlatformConfig  # noqa: E402
+from plugins.platforms.slack.adapter import SlackAdapter
+from gateway.config import PlatformConfig
 
 
 def _make_slack_adapter():
@@ -338,6 +338,16 @@ def _make_slack_adapter():
 # SlackAdapter._download_slack_file
 # ---------------------------------------------------------------------------
 
+@pytest.fixture
+def slack_public_dns(monkeypatch):
+    """Keep mocked Slack downloads offline while exercising URL safety checks."""
+    monkeypatch.setattr(
+        "tools.url_safety._getaddrinfo",
+        lambda host: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))],
+    )
+
+
+@pytest.mark.usefixtures("slack_public_dns")
 class TestSlackDownloadSlackFile:
     """Tests for SlackAdapter._download_slack_file"""
 
@@ -400,6 +410,7 @@ class TestSlackDownloadSlackFile:
 # SlackAdapter._download_slack_file_bytes
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("slack_public_dns")
 class TestSlackDownloadSlackFileBytes:
     """Tests for SlackAdapter._download_slack_file_bytes"""
 

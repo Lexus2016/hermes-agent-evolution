@@ -50,11 +50,11 @@ class _RateLimitError(Exception):
 
 def _make_agent(max_iterations: int = 10) -> AIAgent:
     with (
-        patch("run_agent.get_tool_definitions", return_value=_make_tool_defs("terminal")),
-        patch("run_agent.check_toolset_requirements", return_value={}),
+        patch("model_tools.get_tool_definitions", return_value=_make_tool_defs("terminal")),
+        patch("model_tools.check_toolset_requirements", return_value={}),
         patch("hermes_cli.config.load_config", return_value={}),
         patch("hermes_cli.config.load_config_readonly", return_value={}),
-        patch("run_agent.OpenAI"),
+        patch("run_agent.AIAgent._create_openai_client"),
     ):
         agent = AIAgent(
             api_key="test-key-1234567890",
@@ -78,9 +78,9 @@ def _make_agent(max_iterations: int = 10) -> AIAgent:
 def _fast_backoff_patches():
     """Make the single allowed backoff instant so the tests don't sleep."""
     return (
-        patch("agent.conversation_loop.jittered_backoff", return_value=0.01),
+        patch("agent.retry_utils.jittered_backoff", return_value=0.01),
         patch(
-            "agent.conversation_loop.adaptive_rate_limit_backoff",
+            "agent.retry_utils.adaptive_rate_limit_backoff",
             side_effect=lambda retry_count, **kw: (0.01, None),
         ),
     )

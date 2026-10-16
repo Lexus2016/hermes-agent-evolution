@@ -53,12 +53,15 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
+
+# Standalone source invocations must resolve the canonical repository YAML policy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from evolution_funnel import (  # noqa: E402
+from evolution_funnel import (
     is_evolution_halted,
     load_records,
     summarize,
@@ -121,7 +124,7 @@ class TunableParam:
 # Bounds [0.5, 0.9] keep the bar from ever falling to "accept anything" or
 # rising to "accept almost nothing"; step 0.05 caps how much any single
 # cycle's proposal can move it.
-TUNABLE_PARAMS: Dict[str, TunableParam] = {
+TUNABLE_PARAMS: dict[str, TunableParam] = {
     "research.min_priority_score": TunableParam(
         "research", "research.yaml", "limits", "min_priority_score", 0.5, 0.9, 0.05, 0.7
     ),
@@ -158,7 +161,7 @@ _LOW_REJECT_RATE = 0.20
 _MIN_CYCLES_FOR_PROPOSAL = 5
 
 
-def aggregate_state(evolution_dir: Path, last: int = 14) -> Dict[str, Any]:
+def aggregate_state(evolution_dir: Path, last: int = 14) -> dict[str, Any]:
     """Process-level state snapshot: the evidence this module reasons over.
 
     Deliberately minimal for this increment — reads only the funnel, the
@@ -192,9 +195,9 @@ def read_current_value(
         return None
     path = repo_root / "cron" / "evolution" / param.yaml_file
     try:
-        import yaml
+        import hermes_yaml as yaml
 
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(path.read_text(encoding="utf-8-sig")) or {}
     except (OSError, ValueError):
         return None
     except Exception:
@@ -218,17 +221,17 @@ def _clamp(value: float, lo: float, hi: float) -> float:
 
 
 def propose_edits(
-    state: Dict[str, Any],
-    current_values: Dict[str, Optional[float]],
-    params: Dict[str, TunableParam] = TUNABLE_PARAMS,
-) -> List[Dict[str, Any]]:
+    state: dict[str, Any],
+    current_values: dict[str, Optional[float]],
+    params: dict[str, TunableParam] = TUNABLE_PARAMS,
+) -> list[dict[str, Any]]:
     """Return zero or more bounded edit proposals for the given state.
 
     An empty list is the normal, expected outcome most cycles ("procedure
     looks fine, no changes proposed") — this is advisory data, not a job that
     must always produce output.
     """
-    proposals: List[Dict[str, Any]] = []
+    proposals: list[dict[str, Any]] = []
 
     if state.get("halted"):
         return proposals  # a halted pipeline has a bigger problem than tuning
@@ -287,7 +290,7 @@ def propose_edits(
                 "merged_zero_streak": state.get("merged_zero_streak"),
             },
         }
-        ok, err = validate_proposal(proposal, param)
+        ok, _err = validate_proposal(proposal, param)
         if ok:
             proposals.append(proposal)
         # An invalid proposal here would be a bug in this very function (the
@@ -303,8 +306,8 @@ def propose_edits(
 
 
 def validate_proposal(
-    proposal: Dict[str, Any], param: TunableParam
-) -> Tuple[bool, Optional[str]]:
+    proposal: dict[str, Any], param: TunableParam
+) -> tuple[bool, Optional[str]]:
     """Check ``proposal`` against ``param``'s declared bounds. Returns
     ``(True, None)`` when valid, ``(False, reason)`` otherwise. This is the
     module's validation gate: it re-checks bounds from scratch rather than
@@ -340,8 +343,8 @@ def validate_proposal(
 
 
 def validate_proposal_against_registry(
-    proposal: Dict[str, Any], params: Dict[str, TunableParam] = TUNABLE_PARAMS
-) -> Tuple[bool, Optional[str]]:
+    proposal: dict[str, Any], params: dict[str, TunableParam] = TUNABLE_PARAMS
+) -> tuple[bool, Optional[str]]:
     """Top-level validation gate: is ``proposal["name"]`` even a registered,
     legal edit target? Then defers to ``validate_proposal`` for the bounds
     check. Any name outside the registry is rejected outright — the registry
@@ -359,7 +362,7 @@ def validate_proposal_against_registry(
 
 
 def format_proposals(
-    date: str, state: Dict[str, Any], proposals: List[Dict[str, Any]]
+    date: str, state: dict[str, Any], proposals: list[dict[str, Any]]
 ) -> str:
     """One-line, log/agent-friendly rendering, matching the funnel/health
     sidecar convention (readable by stages without a terminal toolset)."""
@@ -380,7 +383,7 @@ def _pct(x: Optional[float]) -> str:
     return "n/a" if x is None else f"{x:.0%}"
 
 
-def write_meta_record(evolution_dir: Path, date: str, record: Dict[str, Any]) -> Path:
+def write_meta_record(evolution_dir: Path, date: str, record: dict[str, Any]) -> Path:
     """Write the proposal record for ``date``, overwriting any prior run for
     the same date (idempotent re-runs), matching the date-keyed stage report
     convention (analysis/{date}.json etc.)."""
@@ -391,7 +394,7 @@ def write_meta_record(evolution_dir: Path, date: str, record: Dict[str, Any]) ->
     return out_path
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     evolution_dir = Path(
         os.environ.get(
             "EVOLUTION_PROFILE_DIR",
@@ -402,7 +405,7 @@ def main(argv: List[str]) -> int:
     date = argv[1] if len(argv) > 1 and not argv[1].startswith("-") else ""
     date = date or os.environ.get("EVOLUTION_META_DATE", "")
     if not date:
-        date = datetime.now(timezone.utc).date().isoformat()
+        date = datetime.now(UTC).date().isoformat()
 
     state = aggregate_state(evolution_dir)
 

@@ -45,7 +45,7 @@ ACTIVATION_THRESHOLD = 2  # 2+ skills triggers composition monitoring
 MIN_FRAGMENT_LEN = 40
 
 # Regex for extracting base64-candidate tokens from skill content.
-_BASE64_RE = re.compile(r"[A-Za-z0-9+/]{%d,}={0,2}" % MIN_FRAGMENT_LEN)
+_BASE64_RE = re.compile(rf"[A-Za-z0-9+/]{{{MIN_FRAGMENT_LEN:d},}}={{0,2}}")
 
 # #1802 rework: conditional execution patterns MUST be inside a code block
 # (indented code or inside ``` fences) — NOT plain prose.

@@ -36,9 +36,9 @@ class AI4AITask:
     title: str
     description: str
     target_component: str
-    baseline_payload: Dict[str, Any]
-    eval_criteria: Dict[str, Any] = field(default_factory=dict)
-    invariants: List[str] = field(default_factory=list)
+    baseline_payload: dict[str, Any]
+    eval_criteria: dict[str, Any] = field(default_factory=dict)
+    invariants: list[str] = field(default_factory=list)
     weight: float = 1.0
 
 
@@ -51,7 +51,7 @@ class TaskResult:
     passed: bool
     score: float  # 0.0 to 1.0
     duration_ms: int
-    diagnostics: Dict[str, Any] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
     invariants_passed: bool = True
     error: Optional[str] = None
 
@@ -66,17 +66,17 @@ class BenchmarkRunResult:
     total_tasks: int
     passed_tasks: int
     pass_rate: float
-    stage_scores: Dict[str, float]  # e.g. {"research": 0.85, "proposal": 0.78, "patch": 0.90}
+    stage_scores: dict[str, float]  # e.g. {"research": 0.85, "proposal": 0.78, "patch": 0.90}
     composite_rsi_score: float  # 0.0 to 1.0
-    task_results: List[TaskResult]
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    task_results: list[TaskResult]
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         return d
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> BenchmarkRunResult:
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkRunResult:
         task_results = [
             TaskResult(**tr) if isinstance(tr, dict) else tr
             for tr in data.get("task_results", [])
@@ -99,7 +99,7 @@ class BenchmarkRunResult:
 # Builtin Held-Out Benchmark Suite
 # =============================================================================
 
-BUILTIN_TASKS: List[AI4AITask] = [
+BUILTIN_TASKS: list[AI4AITask] = [
     AI4AITask(
         task_id="ai4ai_diag_01_bottleneck_localization",
         stage="research",
@@ -173,7 +173,7 @@ BUILTIN_TASKS: List[AI4AITask] = [
 # Evaluation Engine
 # =============================================================================
 
-def evaluate_task(task: AI4AITask, solver_output: Optional[Dict[str, Any]] = None) -> TaskResult:
+def evaluate_task(task: AI4AITask, solver_output: Optional[dict[str, Any]] = None) -> TaskResult:
     """Evaluate a solver candidate against an AI4AI-Bench task."""
     start_t = time.monotonic()
 
@@ -185,7 +185,7 @@ def evaluate_task(task: AI4AITask, solver_output: Optional[Dict[str, Any]] = Non
     score = 0.0
     passed = False
     invariants_passed = True
-    diag: Dict[str, Any] = {}
+    diag: dict[str, Any] = {}
     err: Optional[str] = None
 
     try:
@@ -248,7 +248,7 @@ def evaluate_task(task: AI4AITask, solver_output: Optional[Dict[str, Any]] = Non
     )
 
 
-def _execute_baseline_solver(task: AI4AITask) -> Dict[str, Any]:
+def _execute_baseline_solver(task: AI4AITask) -> dict[str, Any]:
     """Default reference solver simulating the baseline capability."""
     if task.task_id == "ai4ai_diag_01_bottleneck_localization":
         events = task.baseline_payload.get("trace_events", [])
@@ -284,8 +284,8 @@ def _execute_baseline_solver(task: AI4AITask) -> Dict[str, Any]:
 
 
 def run_benchmark_suite(
-    tasks: Optional[List[AI4AITask]] = None,
-    solver: Optional[Callable[[AI4AITask], Dict[str, Any]]] = None,
+    tasks: Optional[list[AI4AITask]] = None,
+    solver: Optional[Callable[[AI4AITask], dict[str, Any]]] = None,
     commit_sha: Optional[str] = None,
 ) -> BenchmarkRunResult:
     """Execute the AI4AI-Bench task suite and aggregate recursive self-improvement metrics."""
@@ -293,9 +293,9 @@ def run_benchmark_suite(
     run_id = f"ai4ai-{uuid.uuid4().hex[:8]}"
     start_ts = int(time.time())
 
-    results: List[TaskResult] = []
-    stage_totals: Dict[str, float] = {}
-    stage_counts: Dict[str, float] = {}
+    results: list[TaskResult] = []
+    stage_totals: dict[str, float] = {}
+    stage_counts: dict[str, float] = {}
 
     for task in active_tasks:
         output = solver(task) if solver else None
@@ -305,7 +305,7 @@ def run_benchmark_suite(
         stage_totals[task.stage] = stage_totals.get(task.stage, 0.0) + (res.score * task.weight)
         stage_counts[task.stage] = stage_counts.get(task.stage, 0.0) + task.weight
 
-    stage_scores: Dict[str, float] = {}
+    stage_scores: dict[str, float] = {}
     for stg, total in stage_totals.items():
         count = stage_counts.get(stg, 1.0)
         stage_scores[stg] = round(total / count, 4) if count > 0 else 0.0
@@ -355,14 +355,14 @@ def record_benchmark_run(
 
 def load_benchmark_history(
     days: int = 7, metrics_path: Optional[Path] = None
-) -> List[BenchmarkRunResult]:
+) -> list[BenchmarkRunResult]:
     """Load benchmark run history within the specified lookback window."""
     path = get_metrics_path(metrics_path)
     if not path.exists():
         return []
 
     cutoff = int(time.time()) - (days * 86400)
-    runs: List[BenchmarkRunResult] = []
+    runs: list[BenchmarkRunResult] = []
 
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -378,7 +378,7 @@ def load_benchmark_history(
     return runs
 
 
-def compute_trend(history: List[BenchmarkRunResult]) -> Dict[str, Any]:
+def compute_trend(history: list[BenchmarkRunResult]) -> dict[str, Any]:
     """Compute 7-day trend statistics and detect self-improvement regressions."""
     if not history:
         return {

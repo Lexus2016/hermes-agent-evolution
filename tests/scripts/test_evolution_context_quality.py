@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for scripts/evolution_context_quality.py (#1163)."""
 
 import sys
@@ -6,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-import evolution_context_quality as cq  # noqa: E402
+import evolution_context_quality as cq
 
 
 def _strong_ctx():

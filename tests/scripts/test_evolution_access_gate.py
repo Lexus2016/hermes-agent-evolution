@@ -34,7 +34,7 @@ def _write_fake_gh(bin_dir: Path, *, perms: str | None, authed: bool = True) -> 
     if perms is None:
         perms = "{}"
     user_branch = 'echo "tester"\n  exit 0' if authed else "exit 1"
-    script = f"""#!/bin/bash
+    script = f"""#!/usr/bin/env bash
 if [ "$1" = "api" ] && [ "$2" = "user" ]; then
   {user_branch}
 fi
@@ -52,6 +52,7 @@ exit 1
 
 def _run_gate(tmp_path: Path, bin_dir: Path) -> str:
     """Run the gate with an isolated PATH/HERMES_HOME; return the last stdout line."""
+    (bin_dir / "bash").symlink_to(BASH)
     home = tmp_path / "hermes_home"
     home.mkdir(exist_ok=True)
     env = {
@@ -67,6 +68,7 @@ def _run_gate(tmp_path: Path, bin_dir: Path) -> str:
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr
     return proc.stdout.strip().splitlines()[-1]
@@ -135,7 +137,7 @@ def test_curl_fallback_keeps_token_off_argv(tmp_path: Path) -> None:
 
     curl = bin_dir / "curl"
     curl.write_text(
-        "#!/bin/bash\n"
+        "#!/usr/bin/env bash\n"
         # Record argv (printf is a builtin — works with the isolated PATH).
         f'printf "%s\\n" "$@" > "{argv_log}"\n'
         # Capture ALL of stdin using a bash builtin (no external `cat`, which is
@@ -148,6 +150,7 @@ def test_curl_fallback_keeps_token_off_argv(tmp_path: Path) -> None:
     )
     curl.chmod(curl.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
+    (bin_dir / "bash").symlink_to(BASH)
     home = tmp_path / "hermes_home"
     home.mkdir(exist_ok=True)
     env = {
@@ -156,7 +159,7 @@ def test_curl_fallback_keeps_token_off_argv(tmp_path: Path) -> None:
         "GITHUB_EVOLUTION_REPO": "Owner/repo",
         "GITHUB_PRIVATE_TOKEN": token,
     }
-    proc = subprocess.run([BASH, str(GATE)], capture_output=True, text=True, env=env)
+    proc = subprocess.run([BASH, str(GATE)], capture_output=True, text=True, env=env, check=False)
     assert proc.returncode == 0, proc.stderr
 
     # The gate still works (push:true → wake).

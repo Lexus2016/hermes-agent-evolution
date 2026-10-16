@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for causal topology discovery over Hydra dispatch (issue #2438)."""
 
 import json
@@ -118,8 +117,7 @@ class TestCausalTopology:
             {"tick": 2, "trigger_signal": "sig2", "stage": "stage1", "outcome": "real"},
         ]
         with open(jsonl_file, "w", encoding="utf-8") as f:
-            for r in records:
-                f.write(json.dumps(r) + "\n")
+            f.writelines(json.dumps(r) + "\n" for r in records)
 
         analyzer = DispatchTopologyAnalyzer()
         count = analyzer.ingest_from_jsonl(jsonl_file)

@@ -39,6 +39,15 @@ def _is_silence_narration(content: Optional[str]) -> bool:
     return bool(stripped) and len(stripped) <= 64 and bool(_SILENCE_NARRATION.match(stripped))
 
 
+class PartialDeliveryError(RuntimeError):
+    """A split send failed after earlier chunks were delivered (``raw_response["partial_overflow"]``).
+    Callers must not fall back to re-sending the whole payload: the recipient already has the head."""
+
+    def __init__(self, message: str, result: Any):
+        super().__init__(message)
+        self.result = result
+
+
 @dataclass(frozen=True)
 class DeliveryTransport:
     """Resolved live transport for one logical delivery platform."""
@@ -51,14 +60,14 @@ class DeliveryTransport:
         return self.transport_platform == Platform.RELAY
 
     async def send(self, logical_platform: Platform, chat_id: str, content: str,
-                   metadata: Optional[Dict[str, Any]]) -> Any:
+                   metadata: Optional[dict[str, Any]]) -> Any:
         """Send through this transport while preserving the logical platform."""
         return await (self.adapter.send_for_platform(logical_platform, chat_id, content, metadata=metadata)
                       if self.is_relay else self.adapter.send(chat_id, content, metadata=metadata))
 
 
 def resolve_delivery_transport(platform: Platform, config: GatewayConfig,
-                               adapters: Optional[Dict[Platform, Any]]) -> Optional[DeliveryTransport]:
+                               adapters: Optional[dict[Platform, Any]]) -> Optional[DeliveryTransport]:
     """Resolve a logical platform to its live delivery transport. A concrete native adapter always wins;
     Relay is eligible only when its authenticated transport explicitly advertises that it fronts the
     logical platform, so restart-time delivery is independent of per-chat caches without letting Relay
@@ -158,15 +167,15 @@ async def _ensure_named_dm_topic(adapter: Any, chat_id: str, name: str, *, refre
 class DeliveryRouter:
     """Resolves delivery targets and dispatches messages to platform adapters."""
 
-    def __init__(self, config: GatewayConfig, adapters: Dict[Platform, Any] = None,
+    def __init__(self, config: GatewayConfig, adapters: dict[Platform, Any] | None = None,
                  dead_targets: Optional[DeadTargetRegistry] = None):  # profile-local registry when omitted
         self.config = config
         self.adapters = adapters or {}
         self.output_dir = get_hermes_home() / "cron" / "output"
         self.dead_targets = dead_targets or DeadTargetRegistry()
 
-    async def deliver(self, content: str, targets: List[DeliveryTarget], job_id: Optional[str] = None,
-                      job_name: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def deliver(self, content: str, targets: list[DeliveryTarget], job_id: Optional[str] = None,
+                      job_name: Optional[str] = None, metadata: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         """Deliver content to all targets; returns per-target results keyed by target string."""
         results = {}
         for target in targets:
@@ -202,7 +211,7 @@ class DeliveryRouter:
         return results
 
     def _deliver_local(self, content: str, job_id: Optional[str], job_name: Optional[str],
-                       metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+                       metadata: Optional[dict[str, Any]]) -> dict[str, Any]:
         """Save content to local files."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = self.output_dir / (job_id or "misc") / f"{timestamp}.md"
@@ -294,7 +303,7 @@ class DeliveryRouter:
             getattr(adapter, "send_choice_picker", None))
 
     async def _deliver_as_document(self, adapter: Any, chat_id: str, content: str,
-                                   metadata: Optional[Dict[str, Any]], job_id: str) -> Dict[str, Any]:
+                                   metadata: Optional[dict[str, Any]], job_id: str) -> dict[str, Any]:
         """Send an over-cap reply as one Markdown file instead of several messages."""
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         tmp_dir = tempfile.mkdtemp(prefix="hermes-report-")
@@ -322,7 +331,7 @@ class DeliveryRouter:
                 os.rmdir(tmp_dir)
 
     async def _offer_long_reply_choice(self, adapter: Any, platform: str, chat_id: str,
-                                       metadata: Optional[Dict[str, Any]]) -> None:
+                                       metadata: Optional[dict[str, Any]]) -> None:
         """Offer the one-time split-or-file choice, after the report itself has been delivered.
 
         Order matters: the report goes out first, unchanged. Holding a scheduled report until a human
@@ -354,9 +363,9 @@ class DeliveryRouter:
             logger.debug("Long-reply choice prompt failed (chat=%s): %s", chat_id, exc)
 
     async def _deliver_to_platform(self, target: DeliveryTarget, content: str,
-                                   metadata: Optional[Dict[str, Any]],
+                                   metadata: Optional[dict[str, Any]],
                                    transport: Optional[DeliveryTransport] = None,
-                                   ) -> Dict[str, Any]:
+                                   ) -> dict[str, Any]:
         """Deliver content to a messaging platform.
 
         ``transport`` carries an already-authorized transport past resolution:
@@ -456,6 +465,9 @@ class DeliveryRouter:
                 target.to_string(),
                 fallback_path,
             )
+            from gateway.platforms.base import BasePlatformAdapter
+            if BasePlatformAdapter._is_partial_delivery(result):
+                raise PartialDeliveryError(error, result)
             raise RuntimeError(
                 error
                 or f"{target.platform.value} delivery failed — "

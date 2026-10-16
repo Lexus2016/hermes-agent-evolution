@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from agent.memory_conflicts import (  # noqa: E402
+from agent.memory_conflicts import (
     DEFAULT_CONFIG,
     ConflictReport,
     MemoryConflict,
@@ -287,7 +287,7 @@ def test_detect_memory_conflicts_passes_config_through(monkeypatch):
         captured["config"] = config
         return real_analyze(notes, config=config)
 
-    monkeypatch.setattr(mm, "collect_notes", lambda: [])
+    monkeypatch.setattr(mm, "collect_notes", list)
     monkeypatch.setattr(mc, "analyze_conflicts", fake_analyze)
 
     mm.detect_memory_conflicts(config={"topic_similarity_threshold": 0.9})
@@ -298,7 +298,7 @@ def test_detect_memory_conflicts_empty_corpus(monkeypatch):
     from agent.memory_manager import MemoryManager
 
     mm = MemoryManager()
-    monkeypatch.setattr(mm, "collect_notes", lambda: [])
+    monkeypatch.setattr(mm, "collect_notes", list)
     report = mm.detect_memory_conflicts()
     assert report.total_notes == 0
     assert report.conflicts == []

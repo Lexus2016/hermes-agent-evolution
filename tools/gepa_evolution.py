@@ -22,14 +22,14 @@ class Candidate:
     critique_summary: str = ""
     selected: bool = False
     pruned: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class EvolutionTree:
     """Auditable tree of evolved candidates with parent-child links."""
 
     def __init__(self) -> None:
-        self._nodes: Dict[str, Candidate] = {}
+        self._nodes: dict[str, Candidate] = {}
 
     def add(self, c: Candidate) -> Candidate:
         if c.id in self._nodes:
@@ -48,7 +48,7 @@ class EvolutionTree:
         return hashlib.sha256(f"{salt}:{text}".encode()).hexdigest()[:12]
 
 
-def _critique_signals(critiques: List[Critique]) -> Tuple[List[str], List[str]]:
+def _critique_signals(critiques: list[Critique]) -> tuple[list[str], list[str]]:
     success, failure = [], []
     for c in critiques:
         for s in c.signals:
@@ -60,10 +60,10 @@ def _critique_signals(critiques: List[Critique]) -> Tuple[List[str], List[str]]:
     return success, failure
 
 
-MutatorCallback = Callable[[str, List[Critique]], str]
+MutatorCallback = Callable[[str, list[Critique]], str]
 
 
-def _deterministic_mutate(text: str, critiques: List[Critique]) -> str:
+def _deterministic_mutate(text: str, critiques: list[Critique]) -> str:
     succ, fail = _critique_signals(critiques)
     parts = []
     if succ:
@@ -77,7 +77,7 @@ def _deterministic_mutate(text: str, critiques: List[Critique]) -> str:
 
 
 def mutate(
-    text: str, critiques: List[Critique], *, llm: Optional[MutatorCallback] = None
+    text: str, critiques: list[Critique], *, llm: Optional[MutatorCallback] = None
 ) -> str:
     if llm is not None:
         try:
@@ -90,7 +90,7 @@ def mutate(
 def run_gepa_generation(
     tree: EvolutionTree,
     parent: Candidate,
-    results: List[VariantResult],
+    results: list[VariantResult],
     *,
     mutate_llm: Optional[MutatorCallback] = None,
     reflect_llm: Optional[Callable] = None,

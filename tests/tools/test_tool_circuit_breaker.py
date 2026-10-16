@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for tools.tool_circuit_breaker (#3241)."""
 
 import pytest

@@ -45,7 +45,7 @@ class TestRouteSubagentModel:
         assert _route_subagent_model("write a poem", None, 0) is None
 
     def test_fail_open_on_missing_routing_key(self, monkeypatch):
-        monkeypatch.setattr("tools.delegate_tool._load_config", lambda: {})
+        monkeypatch.setattr("tools.delegate_tool._load_config", dict)
         assert _route_subagent_model("write a poem", None, 0) is None
 
 

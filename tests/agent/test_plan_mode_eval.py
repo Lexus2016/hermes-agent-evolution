@@ -51,7 +51,7 @@ class TestPlanModeFlagDefaultOff:
     def test_default_is_off_no_env_no_config(self, monkeypatch):
         monkeypatch.delenv(PLAN_MODE_ENV_VAR, raising=False)
         # Config loader returns an empty dict -> no opt-in anywhere -> off.
-        assert plan_mode_enabled(config_loader=lambda: {}) is False
+        assert plan_mode_enabled(config_loader=dict) is False
 
     def test_off_when_config_key_absent(self, monkeypatch):
         monkeypatch.delenv(PLAN_MODE_ENV_VAR, raising=False)
@@ -80,7 +80,7 @@ class TestPlanModeFlagDefaultOff:
     def test_env_var_truthy_values(self, monkeypatch):
         for val in ("1", "true", "yes", "on", "TRUE", "On"):
             monkeypatch.setenv(PLAN_MODE_ENV_VAR, val)
-            assert plan_mode_enabled(config_loader=lambda: {}) is True, val
+            assert plan_mode_enabled(config_loader=dict) is True, val
 
     def test_broken_config_loader_defaults_off(self, monkeypatch):
         monkeypatch.delenv(PLAN_MODE_ENV_VAR, raising=False)
@@ -145,12 +145,12 @@ class _HarnessAgent:
     """Stand-in exposing exactly the seams the plan-mode path touches."""
 
     def __init__(self):
-        self._status: List[str] = []
+        self._status: list[str] = []
 
     def _emit_status(self, text):
         self._status.append(text)
 
-    from run_agent import AIAgent  # type: ignore  # noqa: E402
+    from run_agent import AIAgent  # type: ignore
     _emit_plan_before_tool_calls = AIAgent._emit_plan_before_tool_calls
     _check_step_divergence_after_tool_calls = AIAgent._check_step_divergence_after_tool_calls
     _latest_tool_observation = staticmethod(AIAgent._latest_tool_observation)
@@ -193,7 +193,7 @@ class TaskFixture:
 
     name: str
     task: str
-    trajectory: List[str]
+    trajectory: list[str]
 
 
 def _run_baseline(fixture: TaskFixture) -> EvalMetrics:
@@ -249,7 +249,7 @@ def _run_plan_mode(fixture: TaskFixture) -> EvalMetrics:
         steps=steps,
         plan_emissions=emissions,
         divergences=sum(1 for s in agent._status if "diverged" in s),
-        replans=sum(1 for s in agent._status if "diverged" in s and False),  # no replanner wired
+        replans=0,  # no replanner wired
         plan_covered=covered,
     )
 
@@ -257,7 +257,7 @@ def _run_plan_mode(fixture: TaskFixture) -> EvalMetrics:
 # Two representative long-horizon fixtures. Trajectories are authored to be
 # on-plan: each recorded observation echoes the corresponding stub step's
 # expected keywords, so a healthy plan-mode run stays at zero divergences.
-_FIXTURES: List[TaskFixture] = [
+_FIXTURES: list[TaskFixture] = [
     TaskFixture(
         name="multi_file_refactor",
         task="Refactor the storage layer: rename save_blob across files and extract a helper",
@@ -342,12 +342,12 @@ class _GateAgent:
 
     def __init__(self, enabled: bool):
         self._enabled = enabled
-        self._status: List[str] = []
+        self._status: list[str] = []
 
     def _emit_status(self, text):
         self._status.append(text)
 
-    from run_agent import AIAgent  # type: ignore  # noqa: E402
+    from run_agent import AIAgent  # type: ignore
     _maybe_activate_plan_mode = AIAgent._maybe_activate_plan_mode
 
     def _plan_mode_enabled(self) -> bool:  # patch the single seam
@@ -458,7 +458,7 @@ class TestStepReasoningField:
 # Part 6 — LLM planner (build_llm_plan, issue #877)
 # ─────────────────────────────────────────────────────────────────────────────
 
-from agent.plan_mode import build_llm_plan  # noqa: E402
+from agent.plan_mode import build_llm_plan
 
 
 def _make_llm_response(steps_data: list, goal: str = "") -> str:
@@ -597,7 +597,7 @@ class TestLlmVsStubActionRecall:
     """
 
     @staticmethod
-    def _action_recall(plan: Optional[Plan], expected_keywords: List[str]) -> float:
+    def _action_recall(plan: Optional[Plan], expected_keywords: list[str]) -> float:
         """Fraction of expected keywords present across plan step intents."""
         if plan is None or not plan.steps:
             return 0.0

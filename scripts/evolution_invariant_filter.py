@@ -102,7 +102,7 @@ def _rules_path() -> Path:
     return Path(__file__).resolve().parent / _RULES_FILENAME
 
 
-def load_invariant_rules(path: Optional[Path] = None) -> Dict[str, Any]:
+def load_invariant_rules(path: Optional[Path] = None) -> dict[str, Any]:
     """Load + validate the versioned invariant rule set from disk.
 
     Returns ``{"version": int, "rules": [...]}``. Raises ``ValueError`` on a
@@ -111,7 +111,7 @@ def load_invariant_rules(path: Optional[Path] = None) -> Dict[str, Any]:
     """
     p = path or _rules_path()
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8-sig"))
     except OSError as exc:
         raise ValueError(f"cannot read invariant rules {p}: {exc}") from exc
     except ValueError as exc:
@@ -122,7 +122,7 @@ def load_invariant_rules(path: Optional[Path] = None) -> Dict[str, Any]:
     rules = data.get("rules")
     if not isinstance(rules, list) or not rules:
         raise ValueError(f"invariant rules {p} has no 'rules' list")
-    loaded: Dict[str, Any] = {"version": version, "rules": rules}
+    loaded: dict[str, Any] = {"version": version, "rules": rules}
     # Slice 4: carry the versioned safe-fallback set forward verbatim (if the
     # rules file declares one) so downstream consumers can resolve pinned
     # alternatives. Absent in older files -> the key is simply omitted.
@@ -139,16 +139,16 @@ def _as_text(value: Any) -> str:
     return str(value)
 
 
-def _walk_text_fields(obj: Any, fields: Tuple[str, ...]) -> Dict[str, str]:
+def _walk_text_fields(obj: Any, fields: tuple[str, ...]) -> dict[str, str]:
     """Collect the named scalar text fields (top-level) from a dict."""
     if not isinstance(obj, dict):
         return {}
     return {f: _as_text(obj[f]) for f in fields if f in obj}
 
 
-def _walk_paths(obj: Any, fields: Tuple[str, ...]) -> List[str]:
+def _walk_paths(obj: Any, fields: tuple[str, ...]) -> list[str]:
     """Collect path-bearing fields (str or list-of-str) from a dict."""
-    out: List[str] = []
+    out: list[str] = []
     if not isinstance(obj, dict):
         return out
     for f in fields:
@@ -177,7 +177,7 @@ def _stakes_rank(stakes: Any) -> int:
     return _STAKES_ORDER.index(_DEFAULT_STAKES)
 
 
-def classify_stakes(obj: Any) -> Tuple[str, str]:
+def classify_stakes(obj: Any) -> tuple[str, str]:
     """Classify a proposal's stakes as ``(label, source)``.
 
     ``label`` is one of ``low``/``medium``/``high``. ``source`` is ``"explicit"``
@@ -214,7 +214,7 @@ def classify_stakes(obj: Any) -> Tuple[str, str]:
     return _DEFAULT_STAKES, "default"
 
 
-def _rule_enforces_at(rule: Dict[str, Any], stakes_rank: int) -> bool:
+def _rule_enforces_at(rule: dict[str, Any], stakes_rank: int) -> bool:
     """True if a rule's ``enforce_at`` threshold is met at the given stakes.
 
     A rule with no ``enforce_at`` defaults to ``_DEFAULT_ENFORCE_AT`` (low) —
@@ -230,7 +230,7 @@ def _rule_enforces_at(rule: Dict[str, Any], stakes_rank: int) -> bool:
 # -- Slice 4: pinned safe-fallback set ----------------------------------------
 
 
-def load_safe_fallbacks(rules: Dict[str, Any]) -> List[Dict[str, Any]]:
+def load_safe_fallbacks(rules: dict[str, Any]) -> list[dict[str, Any]]:
     """Extract the versioned ``safe_fallbacks`` set from a loaded rules dict.
 
     Each entry is ``{"id", "target", "replacement"}``: a pinned, human-vetted
@@ -264,8 +264,8 @@ def load_safe_fallbacks(rules: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def resolve_pinned_fallback(
     proposal: Any,
-    rules: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
+    rules: Optional[dict[str, Any]] = None,
+) -> Optional[dict[str, Any]]:
     """Return a pinned safe fallback for a proposal that hit a forbidden path.
 
     Scans the versioned ``safe_fallbacks`` set for an entry whose ``target`` is
@@ -292,12 +292,12 @@ def resolve_pinned_fallback(
 
 
 def _check_human_gating(
-    proposal: Dict[str, Any], rule: Dict[str, Any]
-) -> List[Dict[str, Any]]:
+    proposal: dict[str, Any], rule: dict[str, Any]
+) -> list[dict[str, Any]]:
     """Flag an explicit weakening of human gating. Absence is NOT a violation —
     only a truthy ``auto_apply`` or an explicit ``requires_human_review=False``
     is."""
-    violations: List[Dict[str, Any]] = []
+    violations: list[dict[str, Any]] = []
     if proposal.get("auto_apply"):
         violations.append({"rule": rule["id"], "reason": "auto_apply is truthy"})
     if (
@@ -312,11 +312,11 @@ def _check_human_gating(
 
 
 def _check_forbidden_paths(
-    proposal: Dict[str, Any], rule: Dict[str, Any]
-) -> List[Dict[str, Any]]:
+    proposal: dict[str, Any], rule: dict[str, Any]
+) -> list[dict[str, Any]]:
     fields = tuple(rule.get("path_fields") or _DEFAULT_PATH_FIELDS)
     fragments = [str(f).lower() for f in rule.get("forbidden_fragments", [])]
-    violations: List[Dict[str, Any]] = []
+    violations: list[dict[str, Any]] = []
     for p in _walk_paths(proposal, fields):
         pl = p.lower()
         for frag in fragments:
@@ -330,11 +330,11 @@ def _check_forbidden_paths(
 
 
 def _check_forbidden_patterns(
-    proposal: Dict[str, Any], rule: Dict[str, Any]
-) -> List[Dict[str, Any]]:
+    proposal: dict[str, Any], rule: dict[str, Any]
+) -> list[dict[str, Any]]:
     fields = tuple(rule.get("text_fields") or _DEFAULT_TEXT_FIELDS)
     patterns = [re.compile(str(p), re.IGNORECASE) for p in rule.get("patterns", [])]
-    violations: List[Dict[str, Any]] = []
+    violations: list[dict[str, Any]] = []
     for field, text in _walk_text_fields(proposal, fields).items():
         for pat in patterns:
             if pat.search(text):
@@ -349,8 +349,8 @@ def _check_forbidden_patterns(
 
 
 def check_proposal(
-    proposal: Any, rules: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+    proposal: Any, rules: Optional[dict[str, Any]] = None
+) -> dict[str, Any]:
     """Screen ONE rewrite against the invariant rules.
 
     Returns ``{"ok": bool, "violations": [...]}`` where each violation is
@@ -377,8 +377,8 @@ def check_proposal(
     stakes, stakes_source = classify_stakes(proposal)
     stakes_rank = _stakes_rank(stakes)
 
-    blocking: List[Dict[str, Any]] = []
-    advisory: List[Dict[str, Any]] = []
+    blocking: list[dict[str, Any]] = []
+    advisory: list[dict[str, Any]] = []
     for rule in rules.get("rules", []):
         check = rule.get("check")
         if check == "human_gating":
@@ -396,7 +396,7 @@ def check_proposal(
         else:
             advisory.extend(found)
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "ok": not blocking,
         "violations": blocking,
         "advisory": advisory,
@@ -414,14 +414,14 @@ def check_proposal(
 
 
 def filter_proposals(
-    proposals: List[Any], rules: Optional[Dict[str, Any]] = None
-) -> Tuple[List[Any], List[Dict[str, Any]]]:
+    proposals: list[Any], rules: Optional[dict[str, Any]] = None
+) -> tuple[list[Any], list[dict[str, Any]]]:
     """Split proposals into ``(passing, rejected)``.
 
     Each ``rejected`` entry is ``{"proposal": <orig>, "violations": [...]}``.
     """
-    passing: List[Any] = []
-    rejected: List[Dict[str, Any]] = []
+    passing: list[Any] = []
+    rejected: list[dict[str, Any]] = []
     for p in proposals:
         result = check_proposal(p, rules=rules)
         if result["ok"]:
@@ -431,9 +431,9 @@ def filter_proposals(
     return passing, rejected
 
 
-def _load_proposal(path: Optional[str]) -> Tuple[Optional[Any], Optional[str]]:
+def _load_proposal(path: Optional[str]) -> tuple[Optional[Any], Optional[str]]:
     try:
-        raw = Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+        raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
     except OSError as exc:
         return None, f"cannot read input: {exc}"
     try:
@@ -443,7 +443,7 @@ def _load_proposal(path: Optional[str]) -> Tuple[Optional[Any], Optional[str]]:
     return data, None
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     positional = [a for a in argv[1:] if not a.startswith("-")]
     path = positional[0] if positional else None
     proposal, err = _load_proposal(path)

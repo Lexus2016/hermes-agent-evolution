@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Recheck Classifier: detect redundant self-verification steps.
 
 This module implements GitHub issue #1038: *Suppress redundant self-verification
@@ -41,11 +40,11 @@ from typing import Any, Dict, List, Optional
 __version__ = "1.0.0"
 
 __all__ = [
-    "RecheckVerdict",
+    "RecheckClassifier",
     "RecheckContext",
     "RecheckResult",
-    "RecheckClassifier",
     "RecheckSuppressionPolicy",
+    "RecheckVerdict",
     "__version__",
 ]
 
@@ -67,7 +66,7 @@ class RecheckVerdict(Enum):
     UNCERTAIN = "uncertain"
 
     @classmethod
-    def from_value(cls, value: Any) -> "RecheckVerdict":
+    def from_value(cls, value: Any) -> RecheckVerdict:
         """Coerce a raw value (string or member) into a :class:`RecheckVerdict`.
 
         Accepts the enum member itself, its ``.value``, or an upper/lower
@@ -112,7 +111,7 @@ class RecheckContext:
 
     tool_name: str = ""
     action: str = ""
-    recent_calls: List[Dict[str, Any]] = field(default_factory=list)
+    recent_calls: list[dict[str, Any]] = field(default_factory=list)
     target_description: str = ""
     call_count: Optional[int] = None
 
@@ -129,7 +128,7 @@ class RecheckContext:
             and c.get("action") == self.action
         )
 
-    def matching_calls(self) -> List[Dict[str, Any]]:
+    def matching_calls(self) -> list[dict[str, Any]]:
         """Return the subset of ``recent_calls`` that match tool+action."""
         return [
             c
@@ -167,7 +166,7 @@ class RecheckContext:
 
     # -- serialization ------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "tool_name": self.tool_name,
             "action": self.action,
@@ -177,7 +176,7 @@ class RecheckContext:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "RecheckContext":
+    def from_dict(cls, data: dict[str, Any]) -> RecheckContext:
         return cls(
             tool_name=data.get("tool_name", ""),
             action=data.get("action", ""),
@@ -202,7 +201,7 @@ class RecheckResult:
 
     # -- serialization ------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "verdict": self.verdict.value,
             "confidence": self.confidence,
@@ -211,7 +210,7 @@ class RecheckResult:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "RecheckResult":
+    def from_dict(cls, data: dict[str, Any]) -> RecheckResult:
         ctx_data = data.get("context")
         return cls(
             verdict=RecheckVerdict.from_value(data.get("verdict", "uncertain")),
@@ -272,7 +271,7 @@ class RecheckClassifier:
             )
             return result
 
-        matches = context.matching_calls()
+        _matches = context.matching_calls()
         count = context.resolved_call_count()
         intervening = context.has_intervening_different_action()
         recency = self._compute_recency_factor(context)
@@ -376,7 +375,7 @@ class RecheckClassifier:
 
     # -- statistics ---------------------------------------------------------
 
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> dict[str, int]:
         """Return cumulative classification counts.
 
         Keys: ``total``, ``recheck``, ``rethink``, ``uncertain``

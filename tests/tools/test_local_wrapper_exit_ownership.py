@@ -1,12 +1,12 @@
 """A supported interruption race can orphan a child before its first observation."""
 import shlex
 import sys
-import time
 
 import psutil
 import pytest
 
 from tools.environments import base, local
+from tests.waiting import wait_until
 
 
 def _interrupt_after_wrapper_exit(tmp_path, monkeypatch, mode="interrupt"):
@@ -40,21 +40,15 @@ def _interrupt_after_wrapper_exit(tmp_path, monkeypatch, mode="interrupt"):
             assert child.is_running()
             if mode in {"force", "deadline"}:
                 getattr(env, "_force_kill_process" if mode == "force" else "_kill_spawned_tree")(proc)
-                deadline = time.monotonic() + 3
-                while child.is_running() and child.status() != psutil.STATUS_ZOMBIE and time.monotonic() < deadline:
-                    time.sleep(.01)
-                assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE
+                wait_until(lambda: not child.is_running() or child.status() == psutil.STATUS_ZOMBIE,
+                           timeout=3, what="interrupted test-owned child exited")
             return mode != "timeout"
 
         monkeypatch.setattr(base, "is_interrupted", interrupted)
         result = env._wait_for_process(proc, timeout=0.001 if mode == "timeout" else 10)
         assert result["returncode"] == (124 if mode == "timeout" else 130)
-        deadline = time.monotonic() + 2
-        while child.is_running() and child.status() != psutil.STATUS_ZOMBIE and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE, (
-            "test-owned child survived interruption after wrapper exited before first observation"
-        )
+        wait_until(lambda: not child.is_running() or child.status() == psutil.STATUS_ZOMBIE,
+                   timeout=5, what="test-owned child exited after its wrapper")
     finally:
         # Only this test's captured children may be signalled, including on the red run.
         if child is not None and child.is_running():
@@ -67,14 +61,14 @@ def _interrupt_after_wrapper_exit(tmp_path, monkeypatch, mode="interrupt"):
             proc.release()
 
 
-@pytest.mark.linux_only
+@pytest.mark.platforms("linux")
 @pytest.mark.live_system_guard_bypass
 @pytest.mark.parametrize("mode", ["interrupt", "timeout", "force", "deadline"])
 def test_interruption_reaps_child_born_before_first_observation_linux(tmp_path, monkeypatch, mode):
     _interrupt_after_wrapper_exit(tmp_path, monkeypatch, mode)
 
 
-@pytest.mark.macos_only
+@pytest.mark.platforms("macos")
 @pytest.mark.live_system_guard_bypass
 @pytest.mark.parametrize("mode", ["interrupt", "timeout", "force", "deadline"])
 def test_interruption_reaps_child_born_before_first_observation_macos(tmp_path, monkeypatch, mode):

@@ -1224,7 +1224,7 @@ class TestInjectionAuditLog:
         records = [json.loads(line) for line in (tmp_path / "nested" / "injection.log").read_text().splitlines()]
         assert [r["reason"] for r in records] == ["injected", "trivial-prompt"]
         assert records[0]["turn"] == 3 and records[0]["session_key"] == "cli:test"
-        assert records[0]["bytes"] == len("## User Peer Card\nName: Eri".encode()) and records[1]["bytes"] == 0
+        assert records[0]["bytes"] == len(b"## User Peer Card\nName: Eri") and records[1]["bytes"] == 0
 
     def test_unwritable_path_never_raises(self, tmp_path):
         provider = _provider_with_raw({})

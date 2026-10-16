@@ -1,0 +1,159 @@
+{
+  "schema_version": 1,
+  "purpose": "Reviewed inert sync evidence at the pinned source checkpoint; historical paths are data, not executable code, prompts, or runnable documentation.",
+  "source_commit": "de4f4465b638430ce3506c21fbe0dd879fcb3f46",
+  "files": [
+    {
+      "path": "analysis/sync-health/v0221-9ad6-main365-health-report.json.parts/0001.txt",
+      "sha256": "35edfc22e6f6a89918c59b028e03ec77579f90506784e7f8e759a00bea4e191f"
+    },
+    {
+      "path": "analysis/sync-health/v0221-9ad6-main365-health-report.json.parts/0002.txt",
+      "sha256": "0d7c7c42f882150bf8e593dbd3e9670ebb321ef555d0bc0d56e9f235ef0ad626"
+    },
+    {
+      "path": "analysis/sync-health/v0221-9ff0-desktop-receipt.json",
+      "sha256": "af0a57d5d70dd843841589654b6a2532b584d70684ae857c03ae7756f8dc67f1"
+    },
+    {
+      "path": "analysis/sync-health/v0221-9ff0-main365-health-report.json.parts/0001.txt",
+      "sha256": "17291adc063ee0ec42aa2f19d649c3de23de1ea936365974ad52f98dfb1d4066"
+    },
+    {
+      "path": "analysis/sync-health/v0221-9ff0-main365-health-report.json.parts/0002.txt",
+      "sha256": "e6bc7c11e7e46211e0a535f692105ac2843abdf79c9b6a4f26a477bfff5e2932"
+    },
+    {
+      "path": "analysis/sync-health/v0221-agent-boundary-review.json",
+      "sha256": "e060c7302c1722da6f1a8cf9753daf89c1a9aac7d0a26c813dfe58ce0a8b732b"
+    },
+    {
+      "path": "analysis/sync-health/v0221-cli-failure-boundary-review.json",
+      "sha256": "2660716de6f144e0aacf535978654ae0588a139ab51445c70828b6ed2ccdedab"
+    },
+    {
+      "path": "analysis/sync-health/v0221-cron-loader-annotation-limitation.json",
+      "sha256": "a4aae430fbd0ca399d27df8dfcf07abe1a8b747888687564c02298ac77bf62a5"
+    },
+    {
+      "path": "analysis/sync-health/v0221-d66b-desktop-receipt.json",
+      "sha256": "96e5ead512e96fabe20e5f9216dd9b937800fd4bce3b3acf0c5bb107ce356611"
+    },
+    {
+      "path": "analysis/sync-health/v0221-d66b-main365-health-report.json.parts/0001.txt",
+      "sha256": "04f17116757d816562b1b15b19313dd31884e8db2951ecb6f9b5a45d16b88088"
+    },
+    {
+      "path": "analysis/sync-health/v0221-d66b-main365-health-report.json.parts/0002.txt",
+      "sha256": "e3caca019703d1829a8e9378e9d622de785239ad81fb0cf0271244a699d0fdaa"
+    },
+    {
+      "path": "analysis/sync-health/v0221-d66b-stream-validation.json",
+      "sha256": "f3e77768162c455040ebafc42615d8785c25876e8a95ea1b43341f838b5d8eaa"
+    },
+    {
+      "path": "analysis/sync-health/v0221-d66b-workflow-correspondence.json",
+      "sha256": "b34439cfc10471b5e935f697a6e091fcb3beff3bf961718bd872dddff2d530f0"
+    },
+    {
+      "path": "analysis/sync-health/v0221-desktop-core-structural-review.json",
+      "sha256": "983e2ad349bb23b73be442070170b44469c5516faf3e4be86ec4edd1f49f986f"
+    },
+    {
+      "path": "analysis/sync-health/v0221-dfbf-test-timing-validation.json",
+      "sha256": "78ae9cc72f7de41572db809ee4e70836fb22b6e84be6d98f3ea544fdf67dd09d"
+    },
+    {
+      "path": "analysis/sync-health/v0221-display-dispatch-structural-review.json",
+      "sha256": "05d1150c05c6901440d272ec9274abcc5f5d5b1d050703cf5c88eeb56f8a1445"
+    },
+    {
+      "path": "analysis/sync-health/v0221-ef4609-main9ef-health-report.json.parts/0001.txt",
+      "sha256": "31a893771234631bbfeb165a9ecaa0b2bfeec0d4216a79ab20c7493d5c388198"
+    },
+    {
+      "path": "analysis/sync-health/v0221-ef4609-main9ef-health-report.json.parts/0002.txt",
+      "sha256": "95b45e319725db96165fd821b5efaf467be8d1996036109cffc1e07ac9002f30"
+    },
+    {
+      "path": "analysis/sync-health/v0221-environment-boundary-review.json",
+      "sha256": "d9300f5e473dc6c55e0cd3f20a1d5b202ae4bd1f831dd83a3cfc012227f90da1"
+    },
+    {
+      "path": "analysis/sync-health/v0221-f821-binding-review.json",
+      "sha256": "73cf758975e70a0e13e4cbfe8effbd88caae5c5d7238886f28743edacc12f2ef"
+    },
+    {
+      "path": "analysis/sync-health/v0221-feishu-binding-refresh.json",
+      "sha256": "d8c3ff18c405bdb3e856a4043e4bb32cd54227a7b21abb7308e468ac3bab41b4"
+    },
+    {
+      "path": "analysis/sync-health/v0221-feishu-rendering-refresh.json",
+      "sha256": "e3158bb12d1f22985ef1c96a2d58e7710e2c501bcbe8fe59f13a9f5d495c0fd2"
+    },
+    {
+      "path": "analysis/sync-health/v0221-main-bootstrap-profile-structural-review.json",
+      "sha256": "e473a47c268cfc6d95f11a2929c7f7d288ab012189205f278abd447edbfb3acb"
+    },
+    {
+      "path": "analysis/sync-health/v0221-main1cf-plugin-host-refresh.json",
+      "sha256": "d613ab9a4d0101301094824c216876f8d99e4ce5381e246c68372a745ca69d0d"
+    },
+    {
+      "path": "analysis/sync-health/v0221-main1cf-reconciliation.json",
+      "sha256": "993c60557d7b478b8d61d7fce82d5eb78fd8a889d16a65479087a16ecf048c05"
+    },
+    {
+      "path": "analysis/sync-health/v0221-main365-baseline-review.json",
+      "sha256": "6c4ab71fc62e1d5ac18ec346ca630f6c854d3d889425609b8fb6fbe2ebae2f9c"
+    },
+    {
+      "path": "analysis/sync-health/v0221-main9ef-baseline-review.json",
+      "sha256": "f5c0bc01556e76c98c55275864558ff83541c6fb8f6b929e447ca99576bdb8bf"
+    },
+    {
+      "path": "analysis/sync-health/v0221-main9ef-lsp-metric-refresh.json",
+      "sha256": "cee1a12f9d614303500f1b9643aa6d27916f6e625d20f7810d28eb0a2badee8b"
+    },
+    {
+      "path": "analysis/sync-health/v0221-manifest.json.parts/0003.txt",
+      "sha256": "540ddc61b08d1b617f12d5c2b64a66db50c0a8d2c6cac4eb5057ce4662224a21"
+    },
+    {
+      "path": "analysis/sync-health/v0221-manifest.json.parts/0004.txt",
+      "sha256": "b6a7afca6bd7338a33be3d5d503bc330d48b51364334cb15bbf25197f2290bb1"
+    },
+    {
+      "path": "analysis/sync-health/v0221-plugin-declaration-boundary-review.json",
+      "sha256": "f72b9a4b81bfd288542a6c7ee4a6d9fc6b2a073ad6a84b031f8425d642c54c1d"
+    },
+    {
+      "path": "analysis/sync-health/v0221-plugin-host-dependency-refresh.json",
+      "sha256": "85e8e9e4888bdf33ae40fb1eceaf464ce57483be8bb5ed27910e01e7aee6e5ab"
+    },
+    {
+      "path": "analysis/sync-health/v0221-plugin-metadata-boundary-review.json",
+      "sha256": "abcf96c41b8e00ba364d25d307e88d9151e7df0d00ec4481865242a8b5886d62"
+    },
+    {
+      "path": "analysis/sync-health/v0221-remote-write-probe-review.json",
+      "sha256": "48844e9921239a817de1fd74ba90bad68b1d256c58d6d9ae029dfec7ec784fb6"
+    },
+    {
+      "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+      "sha256": "6ad46c5c35a933f44e06b4d1a809ab883243c64feb92fdb95d992b7760df7763"
+    },
+    {
+      "path": "analysis/sync-health/v0221-runtime-error-boundary-review.json",
+      "sha256": "52398ac144c6933c52e61da0f9ebf738168169a67430e252a7b953d694520eef"
+    },
+    {
+      "path": "analysis/sync-health/v0221-static-metric-validation.json",
+      "sha256": "0a22741728fe2fda5ad8c273594939df3a92c9b97b62ed39f6764e3e2f729f5a"
+    },
+    {
+      "path": "analysis/sync-health/v0221-write-approval-display-review.json",
+      "sha256": "576c7613db7c8c564e27897de8648afcc324ae44b3bb742a33f489ab09cac230"
+    }
+  ]
+}

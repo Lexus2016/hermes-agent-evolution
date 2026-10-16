@@ -201,7 +201,7 @@ class TestFailedAttemptPruning:
             },
             {"role": "user", "content": "continue"},
         ]
-        result, pruned = stub_compressor._prune_old_tool_results(
+        _result, pruned = stub_compressor._prune_old_tool_results(
             messages, protect_tail_count=2
         )
         # Standard Pass 2 prunes the large result

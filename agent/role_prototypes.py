@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Reusable executable role prototypes for subagent delegation (ExRole, issue #2383).
 
 Inspired by ExRole (arXiv:2608.11949): treats subagent delegation roles as learned,
@@ -24,10 +23,10 @@ from hermes_constants import get_hermes_home
 
 __all__ = [
     "RolePrototype",
-    "role_prototypes_path",
-    "load_role_prototypes",
-    "save_role_prototypes",
     "induce_role_prototypes_from_trajectories",
+    "load_role_prototypes",
+    "role_prototypes_path",
+    "save_role_prototypes",
     "suggest_delegation_role",
 ]
 
@@ -38,19 +37,19 @@ class RolePrototype:
 
     name: str
     description: str
-    target_tasks: List[str] = field(default_factory=list)
-    suggested_tools: List[str] = field(default_factory=list)
-    context_keys: List[str] = field(default_factory=list)
+    target_tasks: list[str] = field(default_factory=list)
+    suggested_tools: list[str] = field(default_factory=list)
+    context_keys: list[str] = field(default_factory=list)
     goal_template: str = ""
     recommended_model: str = ""
     success_rate: float = 1.0
     evidence_count: int = 1
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> RolePrototype:
+    def from_dict(cls, d: dict[str, Any]) -> RolePrototype:
         return cls(
             name=str(d.get("name", "")),
             description=str(d.get("description", "")),
@@ -69,13 +68,13 @@ def role_prototypes_path() -> Path:
     return get_hermes_home() / "evolution" / "role_prototypes.json"
 
 
-def load_role_prototypes() -> List[RolePrototype]:
+def load_role_prototypes() -> list[RolePrototype]:
     """Load role prototypes from disk."""
     path = role_prototypes_path()
     try:
         if not path.is_file():
             return []
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         if isinstance(data, list):
             return [
                 RolePrototype.from_dict(item) for item in data if isinstance(item, dict)
@@ -103,11 +102,11 @@ def save_role_prototypes(prototypes: Sequence[RolePrototype]) -> bool:
 
 
 def induce_role_prototypes_from_trajectories(
-    trajectories: Sequence[Dict[str, Any]],
+    trajectories: Sequence[dict[str, Any]],
     *,
     min_evidence: int = 1,
     min_success_rate: float = 0.5,
-) -> List[RolePrototype]:
+) -> list[RolePrototype]:
     """Induce reusable role prototypes from a collection of team collaboration traces.
 
     Each trajectory dictionary is expected to have:
@@ -117,7 +116,7 @@ def induce_role_prototypes_from_trajectories(
     - optional ``context_keys``: list of context fields accessed
     - optional ``model``: model identifier used
     """
-    groups: Dict[str, Dict[str, Any]] = {}
+    groups: dict[str, dict[str, Any]] = {}
 
     for t in trajectories:
         raw_role = str(t.get("role") or t.get("task_type") or "GeneralWorker").strip()
@@ -163,7 +162,7 @@ def induce_role_prototypes_from_trajectories(
         if model:
             g["models"][model] = g["models"].get(model, 0) + 1
 
-    prototypes: List[RolePrototype] = []
+    prototypes: list[RolePrototype] = []
     for role_name, g in groups.items():
         total = g["total_count"]
         if total < min_evidence:

@@ -76,7 +76,7 @@ logger = logging.getLogger(__name__)
 # Reuse the shipped evaluator gate — scoring + the bounded ACCEPT/OPTIMIZE/
 # STOP_BUDGET verdict are NOT reimplemented here.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from evolution_evaluator import (  # noqa: E402
+from evolution_evaluator import (
     ACCEPT,
     OPTIMIZE,
     STOP_BUDGET,
@@ -94,16 +94,16 @@ EXIT_BAD_INPUT = 2
 
 # Seam type aliases (documentation only — kept loose so stubs/lambdas slot in).
 EvaluateFn = Callable[
-    [List[Dict[str, Any]], int], Tuple[List[Dict[str, Any]], Dict[str, Any]]
+    [list[dict[str, Any]], int], tuple[list[dict[str, Any]], dict[str, Any]]
 ]
-RefineFn = Callable[[Optional[Dict[str, Any]], int], List[Dict[str, Any]]]
+RefineFn = Callable[[Optional[dict[str, Any]], int], list[dict[str, Any]]]
 
 
 def make_default_evaluate(
     *,
     threshold: float = DEFAULT_THRESHOLD,
     max_passes: int = DEFAULT_MAX_PASSES,
-    rubric: Optional[Dict[str, float]] = None,
+    rubric: Optional[dict[str, float]] = None,
 ) -> EvaluateFn:
     """Build the PRODUCTION ``evaluate`` seam over ``evolution_evaluator.decide``.
 
@@ -117,8 +117,8 @@ def make_default_evaluate(
     """
 
     def _evaluate(
-        candidates: List[Dict[str, Any]], current_pass: int
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        candidates: list[dict[str, Any]], current_pass: int
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         verdict = decide(
             candidates,
             threshold=threshold,
@@ -132,8 +132,8 @@ def make_default_evaluate(
 
 
 def _best_candidate(
-    candidates: List[Dict[str, Any]], best_index: Optional[int]
-) -> Optional[Dict[str, Any]]:
+    candidates: list[dict[str, Any]], best_index: Optional[int]
+) -> Optional[dict[str, Any]]:
     """Safely fetch the best candidate by index; ``None`` if absent/out of range."""
     if best_index is None:
         return None
@@ -143,12 +143,12 @@ def _best_candidate(
 
 
 def run_optimizer_loop(
-    candidates: List[Dict[str, Any]],
+    candidates: list[dict[str, Any]],
     *,
     evaluate: EvaluateFn,
     refine: RefineFn,
     max_passes: int = DEFAULT_MAX_PASSES,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run the bounded evaluator-optimizer loop and return its outcome.
 
     Starting from the first pass's ``candidates``, on each pass:
@@ -188,8 +188,8 @@ def run_optimizer_loop(
     """
     max_passes = max(1, int(max_passes))
     current_pass = 1
-    last_candidates: List[Dict[str, Any]] = list(candidates)
-    last_decision: Dict[str, Any] = {}
+    last_candidates: list[dict[str, Any]] = list(candidates)
+    last_decision: dict[str, Any] = {}
 
     while current_pass <= max_passes:
         # Crash-isolation (#1509): a single malformed episode (LLM call failure,
@@ -253,9 +253,9 @@ def _result(
     converged: bool,
     passes: int,
     max_passes: int,
-    candidates: List[Dict[str, Any]],
-    decision: Dict[str, Any],
-) -> Dict[str, Any]:
+    candidates: list[dict[str, Any]],
+    decision: dict[str, Any],
+) -> dict[str, Any]:
     """Assemble the loop's outcome record."""
     best_index = decision.get("best_index")
     return {
@@ -273,8 +273,8 @@ def _result(
 
 # ── CLI (non-LLM seams: score from carried ``scores``, refine is a no-op) ────────
 def _noop_refine(
-    best: Optional[Dict[str, Any]], current_pass: int
-) -> List[Dict[str, Any]]:
+    best: Optional[dict[str, Any]], current_pass: int
+) -> list[dict[str, Any]]:
     """CLI refinement seam: the terminal toolset has no model to call, so the
     'refinement' is the best candidate carried forward unchanged. The loop then
     re-evaluates it (same scores → same verdict) and the pass budget terminates
@@ -283,9 +283,9 @@ def _noop_refine(
     return [best] if best is not None else []
 
 
-def _parse_args(argv: List[str]) -> Tuple[Dict[str, Any], Optional[str]]:
+def _parse_args(argv: list[str]) -> tuple[dict[str, Any], Optional[str]]:
     """Hand-rolled arg parse matching the sibling evolution_* CLIs' style."""
-    opts: Dict[str, Any] = {
+    opts: dict[str, Any] = {
         "threshold": DEFAULT_THRESHOLD,
         "max_passes": DEFAULT_MAX_PASSES,
         "path": None,
@@ -315,13 +315,13 @@ def _parse_args(argv: List[str]) -> Tuple[Dict[str, Any], Optional[str]]:
 
 
 def _load_candidates(
-    opts: Dict[str, Any],
-) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    opts: dict[str, Any],
+) -> tuple[Optional[list[dict[str, Any]]], Optional[str]]:
     """Read candidates from the positional path or stdin. Accepts a bare JSON
     list or an object with a ``"candidates"`` key (the orchestrator's payload)."""
     path = opts.get("path")
     try:
-        raw = Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+        raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
     except OSError as exc:
         return None, f"cannot read input: {exc}"
     try:
@@ -335,7 +335,7 @@ def _load_candidates(
     return [c if isinstance(c, dict) else {} for c in data], None
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     opts, err = _parse_args(argv)
     if err:
         print(f"[evolution-optimizer] {err}", file=sys.stderr)

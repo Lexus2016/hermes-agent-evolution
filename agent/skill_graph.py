@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # The four AIP edge types, plus the order they are reported in.  ``requires`` is
 # the only directed edge type that participates in closure/topological ordering;
 # the others are governance/composition relations.
-EDGE_TYPES: Tuple[str, ...] = (
+EDGE_TYPES: tuple[str, ...] = (
     "requires",
     "conflicts-with",
     "composes-with",
@@ -52,7 +52,7 @@ EDGE_TYPES: Tuple[str, ...] = (
 )
 
 
-def _normalize_edge_targets(value: Any) -> List[str]:
+def _normalize_edge_targets(value: Any) -> list[str]:
     """Coerce a frontmatter edge value into a clean list of skill names.
 
     Accepts an already-parsed list (the YAML-normal case), a single string, or
@@ -68,8 +68,8 @@ def _normalize_edge_targets(value: Any) -> List[str]:
         if text.startswith("[") and text.endswith("]"):
             text = text[1:-1]
         items = text.split(",")
-    out: List[str] = []
-    seen: Set[str] = set()
+    out: list[str] = []
+    seen: set[str] = set()
     for item in items:
         name = str(item).strip().strip("\"'")
         if name and name not in seen:
@@ -78,7 +78,7 @@ def _normalize_edge_targets(value: Any) -> List[str]:
     return out
 
 
-def extract_skill_edges(frontmatter: Dict[str, Any]) -> Dict[str, List[str]]:
+def extract_skill_edges(frontmatter: dict[str, Any]) -> dict[str, list[str]]:
     """Extract the typed graph edges declared by a skill's frontmatter.
 
     Reads ``metadata.hermes.graph.<edge-type>`` for each of the four AIP edge
@@ -90,7 +90,7 @@ def extract_skill_edges(frontmatter: Dict[str, Any]) -> Dict[str, List[str]]:
     the skill declares nothing for that type).  Malformed structures are
     tolerated by returning empty lists rather than raising.
     """
-    edges: Dict[str, List[str]] = {etype: [] for etype in EDGE_TYPES}
+    edges: dict[str, list[str]] = {etype: [] for etype in EDGE_TYPES}
 
     metadata = frontmatter.get("metadata")
     if not isinstance(metadata, dict):
@@ -116,7 +116,7 @@ def extract_skill_edges(frontmatter: Dict[str, Any]) -> Dict[str, List[str]]:
     return edges
 
 
-def extract_skill_provides(frontmatter: Dict[str, Any]) -> List[str]:
+def extract_skill_provides(frontmatter: dict[str, Any]) -> list[str]:
     """Extract the capabilities a skill declares it ``provides`` (issue #297).
 
     Reads ``metadata.hermes.graph.provides`` — a flat list of capability names.
@@ -147,13 +147,13 @@ class SkillNode:
     name: str
     category: Optional[str] = None
     path: Optional[str] = None
-    edges: Dict[str, List[str]] = field(default_factory=dict)
-    provides: List[str] = field(default_factory=list)
+    edges: dict[str, list[str]] = field(default_factory=dict)
+    provides: list[str] = field(default_factory=list)
 
-    def targets(self, edge_type: str) -> List[str]:
+    def targets(self, edge_type: str) -> list[str]:
         return list(self.edges.get(edge_type, []))
 
-    def provided(self) -> List[str]:
+    def provided(self) -> list[str]:
         """Capabilities this skill declares it provides."""
         return list(self.provides)
 
@@ -186,22 +186,22 @@ class GraphValidation:
 
     ok: bool
     # Errors (drive ok=False):
-    missing_requires: List[Tuple[str, str]]  # (source, missing_required_target)
-    requires_cycles: List[List[str]]
+    missing_requires: list[tuple[str, str]]  # (source, missing_required_target)
+    requires_cycles: list[list[str]]
     # Warnings (do NOT drive ok):
-    missing_warnings: List[Tuple[str, str, str]]  # (source, edge_type, missing_target)
-    conflicts: List[Tuple[str, str]]  # sorted (a, b) pairs
-    capability_conflicts: List[Tuple[str, List[str]]]  # (capability, sorted providers)
+    missing_warnings: list[tuple[str, str, str]]  # (source, edge_type, missing_target)
+    conflicts: list[tuple[str, str]]  # sorted (a, b) pairs
+    capability_conflicts: list[tuple[str, list[str]]]  # (capability, sorted providers)
 
     @property
-    def missing_targets(self) -> List[Tuple[str, str, str]]:
+    def missing_targets(self) -> list[tuple[str, str, str]]:
         """All missing targets (errors + warnings), for callers that want one list."""
         merged = [(s, "requires", t) for (s, t) in self.missing_requires]
         merged.extend(self.missing_warnings)
         merged.sort()
         return merged
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "ok": self.ok,
             "missing_requires": [
@@ -228,19 +228,19 @@ class SkillGraph:
     pipeline before a skill is written to disk).
     """
 
-    def __init__(self, nodes: Dict[str, SkillNode]):
-        self._nodes: Dict[str, SkillNode] = nodes
+    def __init__(self, nodes: dict[str, SkillNode]):
+        self._nodes: dict[str, SkillNode] = nodes
 
     # ── Construction ──────────────────────────────────────────────────────
 
     @classmethod
     def from_frontmatters(
         cls,
-        skills: Iterable[Tuple[str, Dict[str, Any]]],
+        skills: Iterable[tuple[str, dict[str, Any]]],
         *,
-        categories: Optional[Dict[str, str]] = None,
-        paths: Optional[Dict[str, str]] = None,
-    ) -> "SkillGraph":
+        categories: Optional[dict[str, str]] = None,
+        paths: Optional[dict[str, str]] = None,
+    ) -> SkillGraph:
         """Build a graph from ``(skill_name, frontmatter_dict)`` pairs.
 
         Later entries with a name already seen are ignored (first definition
@@ -248,7 +248,7 @@ class SkillGraph:
         """
         categories = categories or {}
         paths = paths or {}
-        nodes: Dict[str, SkillNode] = {}
+        nodes: dict[str, SkillNode] = {}
         for name, frontmatter in skills:
             name = str(name).strip()
             if not name or name in nodes:
@@ -263,7 +263,7 @@ class SkillGraph:
         return cls(nodes)
 
     @classmethod
-    def from_skills_dirs(cls, skills_dirs: Iterable[Path]) -> "SkillGraph":
+    def from_skills_dirs(cls, skills_dirs: Iterable[Path]) -> SkillGraph:
         """Build a graph by scanning ``SKILL.md`` files under each directory.
 
         Directories are scanned in order; the first definition of a given skill
@@ -271,15 +271,15 @@ class SkillGraph:
         are skipped with a debug log, never raising — a single bad skill must
         not break graph queries over the rest.
         """
-        nodes: Dict[str, SkillNode] = {}
+        nodes: dict[str, SkillNode] = {}
         for skills_dir in skills_dirs:
             if not skills_dir.is_dir():
                 continue
             for skill_md in iter_skill_index_files(skills_dir, "SKILL.md"):
                 try:
-                    content = skill_md.read_text(encoding="utf-8")
+                    content = skill_md.read_text(encoding="utf-8-sig")
                     frontmatter, _ = parse_frontmatter(content)
-                except Exception as exc:  # noqa: BLE001 - one bad skill is non-fatal
+                except Exception as exc:
                     logger.debug("skill_graph: skipping %s: %s", skill_md, exc)
                     continue
                 name = str(frontmatter.get("name") or skill_md.parent.name).strip()
@@ -307,13 +307,13 @@ class SkillGraph:
     def __len__(self) -> int:
         return len(self._nodes)
 
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         return sorted(self._nodes)
 
     def node(self, name: str) -> Optional[SkillNode]:
         return self._nodes.get(name)
 
-    def edges_of(self, name: str) -> Dict[str, List[str]]:
+    def edges_of(self, name: str) -> dict[str, list[str]]:
         """Outbound edges of *name*, or all-empty lists if the skill is unknown."""
         node = self._nodes.get(name)
         if node is None:
@@ -345,8 +345,8 @@ class SkillGraph:
         ambiguous — is deferred to the topological-loader increment, #298.)
         """
         caps = self._capabilities()
-        missing_requires: List[Tuple[str, str]] = []
-        missing_warnings: List[Tuple[str, str, str]] = []
+        missing_requires: list[tuple[str, str]] = []
+        missing_warnings: list[tuple[str, str, str]] = []
         for node in self._nodes.values():
             for etype in EDGE_TYPES:
                 for target in node.targets(etype):
@@ -377,14 +377,14 @@ class SkillGraph:
             capability_conflicts=capability_conflicts,
         )
 
-    def _requires_targets(self, name: str) -> List[str]:
+    def _requires_targets(self, name: str) -> list[str]:
         """``requires`` targets of *name* that actually exist in the graph."""
         node = self._nodes.get(name)
         if node is None:
             return []
         return [t for t in node.targets("requires") if t in self._nodes]
 
-    def _find_requires_cycles(self) -> List[List[str]]:
+    def _find_requires_cycles(self) -> list[list[str]]:
         """Return every elementary cycle in the ``requires`` relation.
 
         Uses iterative DFS with a three-colour marking (white/grey/black).  A
@@ -394,18 +394,18 @@ class SkillGraph:
         member for stable output.
         """
         WHITE, GREY, BLACK = 0, 1, 2
-        colour: Dict[str, int] = {n: WHITE for n in self._nodes}
-        cycles: List[List[str]] = []
-        seen_cycle_keys: Set[frozenset] = set()
+        colour: dict[str, int] = {n: WHITE for n in self._nodes}
+        cycles: list[list[str]] = []
+        seen_cycle_keys: set[frozenset] = set()
 
         for start in sorted(self._nodes):
             if colour[start] != WHITE:
                 continue
             # Stack frames: (node, iterator over its requires targets).
-            stack: List[Tuple[str, Iterable[str]]] = [
+            stack: list[tuple[str, Iterable[str]]] = [
                 (start, iter(self._requires_targets(start)))
             ]
-            path: List[str] = [start]
+            path: list[str] = [start]
             colour[start] = GREY
             while stack:
                 node, it = stack[-1]
@@ -435,9 +435,9 @@ class SkillGraph:
         cycles.sort()
         return cycles
 
-    def _collect_conflicts(self) -> List[Tuple[str, str]]:
+    def _collect_conflicts(self) -> list[tuple[str, str]]:
         """Collect declared ``conflicts-with`` pairs (deduped, undirected)."""
-        pairs: Set[Tuple[str, str]] = set()
+        pairs: set[tuple[str, str]] = set()
         for node in self._nodes.values():
             for target in node.targets("conflicts-with"):
                 if target == node.name:
@@ -446,7 +446,7 @@ class SkillGraph:
                 pairs.add(pair)  # type: ignore[arg-type]
         return list(pairs)
 
-    def _collect_capability_conflicts(self) -> List[Tuple[str, List[str]]]:
+    def _collect_capability_conflicts(self) -> list[tuple[str, list[str]]]:
         """Capabilities provided by more than one skill (issue #299 warning)."""
         return [
             (cap, providers)
@@ -456,14 +456,14 @@ class SkillGraph:
 
     # ── Capabilities (governance surface, issue #299) ─────────────────────
 
-    def _capabilities(self) -> Set[str]:
+    def _capabilities(self) -> set[str]:
         """Every capability provided by any skill in the graph."""
-        caps: Set[str] = set()
+        caps: set[str] = set()
         for node in self._nodes.values():
             caps.update(node.provided())
         return caps
 
-    def capability_surface(self) -> Dict[str, List[str]]:
+    def capability_surface(self) -> dict[str, list[str]]:
         """The resolved "what can I do?" surface: capability -> providing skills.
 
         A capability is an abstract ability declared via ``provides``; one or
@@ -472,7 +472,7 @@ class SkillGraph:
         with two or more providers are also surfaced by :meth:`validate` as
         ``capability_conflicts`` (ambiguous resolution is a load-time warning).
         """
-        surface: Dict[str, Set[str]] = {}
+        surface: dict[str, set[str]] = {}
         for node in self._nodes.values():
             for cap in node.provided():
                 surface.setdefault(cap, set()).add(node.name)
@@ -480,7 +480,7 @@ class SkillGraph:
 
     # ── Queries ───────────────────────────────────────────────────────────
 
-    def closure(self, name: str) -> List[str]:
+    def closure(self, name: str) -> list[str]:
         """Minimal set of skills that must be loaded to satisfy *name*.
 
         Returns the transitive ``requires`` closure of *name* **including**
@@ -496,7 +496,7 @@ class SkillGraph:
             raise KeyError(name)
 
         # Collect the reachable set via the requires relation.
-        reachable: Set[str] = set()
+        reachable: set[str] = set()
         stack = [name]
         while stack:
             current = stack.pop()
@@ -509,7 +509,7 @@ class SkillGraph:
 
         return self._topo_sort(reachable)
 
-    def blast(self, name: str) -> Dict[str, List[str]]:
+    def blast(self, name: str) -> dict[str, list[str]]:
         """Every skill affected if *name* were added, changed, or removed.
 
         Returns a dict with three keys:
@@ -528,7 +528,7 @@ class SkillGraph:
             raise KeyError(name)
 
         # Reverse requires-reachability: who depends on `name`?
-        dependents: Set[str] = set()
+        dependents: set[str] = set()
         stack = [name]
         while stack:
             current = stack.pop()
@@ -540,7 +540,7 @@ class SkillGraph:
                     stack.append(other.name)
         dependents.discard(name)
 
-        conflicts: Set[str] = set()
+        conflicts: set[str] = set()
         node = self._nodes[name]
         for target in node.targets("conflicts-with"):
             if target in self._nodes and target != name:
@@ -551,7 +551,7 @@ class SkillGraph:
             if name in other.targets("conflicts-with"):
                 conflicts.add(other.name)
 
-        composes: Set[str] = {
+        composes: set[str] = {
             t for t in node.targets("composes-with") if t in self._nodes and t != name
         }
 
@@ -561,7 +561,7 @@ class SkillGraph:
             "composes": sorted(composes),
         }
 
-    def topological_order(self) -> List[str]:
+    def topological_order(self) -> list[str]:
         """Full graph in dependency-first ``requires`` order.
 
         A skill appears after every skill it requires.  If ``requires`` cycles
@@ -570,7 +570,7 @@ class SkillGraph:
         """
         return self._topo_sort(set(self._nodes))
 
-    def _topo_sort(self, subset: Set[str]) -> List[str]:
+    def _topo_sort(self, subset: set[str]) -> list[str]:
         """Dependency-first topological sort restricted to *subset*.
 
         Deterministic (ties broken by name).  Cycle-tolerant: nodes still in the
@@ -578,12 +578,12 @@ class SkillGraph:
         the result is always a complete permutation of *subset*.
         """
         # Build in-degree over the requires relation, restricted to subset.
-        deps: Dict[str, Set[str]] = {}
+        deps: dict[str, set[str]] = {}
         for n in subset:
             deps[n] = {t for t in self._requires_targets(n) if t in subset}
 
-        result: List[str] = []
-        placed: Set[str] = set()
+        result: list[str] = []
+        placed: set[str] = set()
         remaining = set(subset)
         while remaining:
             ready = sorted(
@@ -609,11 +609,11 @@ class SkillGraph:
         ``composes-with`` dotted, ``deprecates`` bold grey.  ``conflicts-with``
         is rendered once per undirected pair to avoid double arrows.
         """
-        lines: List[str] = ["digraph skills {", "  rankdir=LR;", "  node [shape=box];"]
+        lines: list[str] = ["digraph skills {", "  rankdir=LR;", "  node [shape=box];"]
         for name in sorted(self._nodes):
             lines.append(f'  "{name}";')
 
-        seen_conflicts: Set[Tuple[str, str]] = set()
+        seen_conflicts: set[tuple[str, str]] = set()
         styles = {
             "requires": '[label="requires"]',
             "conflicts-with": '[label="conflicts-with" color="red" style="dashed" dir="none"]',
@@ -634,7 +634,7 @@ class SkillGraph:
         return "\n".join(lines)
 
 
-def _canonical_cycle(cycle: List[str]) -> List[str]:
+def _canonical_cycle(cycle: list[str]) -> list[str]:
     """Rotate *cycle* to start at its lexicographically smallest member.
 
     Keeps cycle reporting stable regardless of which node the DFS entered from.

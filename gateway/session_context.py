@@ -90,19 +90,6 @@ def set_current_session_id(session_id: str) -> None:
     os.environ["HERMES_SESSION_ID"] = session_id
 
 
-@contextmanager
-def scoped_current_session_id(session_id: str | None = None) -> Iterator[None]:
-    """Bind a task-local session id and restore the prior value on exit; never touches
-    ``os.environ``.  ``session_id=None`` is a pure save/restore boundary."""
-    previous = _SESSION_ID.get()
-    if session_id is not None:
-        _SESSION_ID.set(session_id)
-    try:
-        yield
-    finally:
-        _SESSION_ID.set(previous)
-
-
 def source_route_metadata(source: Any, metadata: dict | None) -> dict | None:
     """Keep inbound route anchors for durable deliveries after the source is gone."""
     anchors = {key: str(value) for key in ("scope_id", "parent_chat_id")
@@ -207,9 +194,12 @@ def declare_stateless_channel() -> None:
 
 def async_delivery_supported() -> bool:
     """Whether the current session can deliver a background completion later.  False for
-    stateless channels (:func:`declare_stateless_channel`) and Kanban workers
-    (``HERMES_KANBAN_TASK``: one-shot subprocesses whose parent disappears after the turn)."""
-    if os.environ.get("HERMES_KANBAN_TASK"):
+    stateless channels (:func:`declare_stateless_channel`), Kanban workers
+    (``HERMES_KANBAN_TASK``: one-shot subprocesses whose parent disappears after the turn) and
+    registered worker processes: a managed worker exits at its turn boundary, so detached work
+    it scheduled would be lost (recovered ``unknown``) and its completion queue has no reader."""
+    from agent.runtime_session_store import is_worker_process
+    if os.environ.get("HERMES_KANBAN_TASK") or is_worker_process():
         return False
     value = _SESSION_ASYNC_DELIVERY.get()
     return True if value is _UNSET else bool(value)

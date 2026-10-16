@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for :mod:`tools.schema_validator` (issue #49).
 
 Covers the structural JSON-Schema checks the Pydantic layer enforces:

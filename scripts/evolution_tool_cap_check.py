@@ -36,7 +36,7 @@ from typing import Any, Dict, List, Optional
 # Code fallback for the caps table — the shipped JSON
 # (``scripts/evolution_tool_caps.json``) is the editable source of truth and
 # overrides this when both exist.
-BUILTIN_CAPS: Dict[str, Dict[str, int]] = {
+BUILTIN_CAPS: dict[str, dict[str, int]] = {
     "default": {"max_bytes": 1_048_576, "max_args": 16},
     "read_file": {"max_bytes": 262_144, "max_args": 4},
     "write_file": {"max_bytes": 524_288, "max_args": 6},
@@ -53,7 +53,7 @@ DEFAULT_CAPS_PATH = Path(__file__).resolve().parent / "evolution_tool_caps.json"
 ENV_CAPS_OVERRIDE = "EVOLUTION_TOOL_CAPS"  # path to an alternate caps JSON
 
 
-def load_caps(path: Optional[str] = None) -> Dict[str, Dict[str, int]]:
+def load_caps(path: Optional[str] = None) -> dict[str, dict[str, int]]:
     """Load the per-tool caps table.
 
     Resolution order: explicit ``path`` argument > ``EVOLUTION_TOOL_CAPS``
@@ -63,7 +63,7 @@ def load_caps(path: Optional[str] = None) -> Dict[str, Dict[str, int]]:
     to fail loudly, but a broken gate must not crash the pipeline — the CLI
     and lint both surface the fallback via their normal output paths).
     """
-    candidates: List[Optional[str]] = [path]
+    candidates: list[Optional[str]] = [path]
     if path is None:
         env = os.environ.get(ENV_CAPS_OVERRIDE)
         if env:
@@ -73,7 +73,7 @@ def load_caps(path: Optional[str] = None) -> Dict[str, Dict[str, int]]:
         if not cand:
             continue
         try:
-            data = json.loads(Path(cand).read_text(encoding="utf-8"))
+            data = json.loads(Path(cand).read_text(encoding="utf-8-sig"))
             if isinstance(data, dict) and data:
                 return {str(k): dict(v) for k, v in data.items()}
         except (OSError, ValueError, TypeError):
@@ -81,7 +81,7 @@ def load_caps(path: Optional[str] = None) -> Dict[str, Dict[str, int]]:
     return dict(BUILTIN_CAPS)
 
 
-def declared_input_size(args: Optional[Dict[str, Any]]) -> int:
+def declared_input_size(args: Optional[dict[str, Any]]) -> int:
     """Serialized size of the DECLARED input values, in characters.
 
     Strings/bytes count their length directly; everything else counts its
@@ -101,9 +101,9 @@ def declared_input_size(args: Optional[Dict[str, Any]]) -> int:
 
 def check_input_caps(
     tool_name: str,
-    args: Optional[Dict[str, Any]],
-    caps: Optional[Dict[str, Dict[str, int]]] = None,
-) -> List[Dict[str, str]]:
+    args: Optional[dict[str, Any]],
+    caps: Optional[dict[str, dict[str, int]]] = None,
+) -> list[dict[str, str]]:
     """Reject-early: do the DECLARED inputs exceed the per-tool caps?
 
     ``caps`` is a ``{tool_name: {"max_bytes": int, "max_args": int}}`` table
@@ -121,7 +121,7 @@ def check_input_caps(
     cap_table = caps if caps is not None else load_caps()
     entry = cap_table.get(tool_name) or cap_table.get("default") or {}
     argv = dict(args or {})
-    out: List[Dict[str, str]] = []
+    out: list[dict[str, str]] = []
 
     try:
         max_args = int(entry.get("max_args") or 0)
@@ -156,7 +156,7 @@ def check_input_caps(
     return out
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     args = argv[1:]
     if not args or args[0] in ("-h", "--help"):
         print(

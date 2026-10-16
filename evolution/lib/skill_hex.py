@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Hypothesis→test self-verifier + tree search for skill revision (SkillHEX, issue #2287).
 
 Adopts SkillHEX (arXiv:2608.05628 cs.AI Aug 2026):
@@ -45,16 +44,16 @@ class RevisionHypothesis:
     confidence: float = 0.5
     proposed_fix: str = ""
     falsification_condition: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.confidence = max(0.0, min(1.0, float(self.confidence)))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> RevisionHypothesis:
+    def from_dict(cls, data: dict[str, Any]) -> RevisionHypothesis:
         return cls(
             hypothesis_id=str(data.get("hypothesis_id", "")),
             description=str(data.get("description", "")),
@@ -77,13 +76,13 @@ class VerificationTest:
     test_id: str
     hypothesis_id: str
     name: str
-    test_input: Dict[str, Any]
+    test_input: dict[str, Any]
     expected_behavior: str
     assertion_type: str = "output_contains"  # output_contains, exit_code, regex_match, json_valid, custom_eval
     expected_value: Any = None
     weight: float = 1.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "test_id": self.test_id,
             "hypothesis_id": self.hypothesis_id,
@@ -96,7 +95,7 @@ class VerificationTest:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> VerificationTest:
+    def from_dict(cls, data: dict[str, Any]) -> VerificationTest:
         return cls(
             test_id=str(data.get("test_id", "")),
             hypothesis_id=str(data.get("hypothesis_id", "")),
@@ -118,16 +117,16 @@ class TestExecutionResult:
     test_id: str
     hypothesis_id: str
     passed: bool
-    actual_output: Dict[str, Any]
+    actual_output: dict[str, Any]
     evidence: str = ""
     score: float = 0.0
     execution_time_sec: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> TestExecutionResult:
+    def from_dict(cls, data: dict[str, Any]) -> TestExecutionResult:
         return cls(
             test_id=str(data.get("test_id", "")),
             hypothesis_id=str(data.get("hypothesis_id", "")),
@@ -146,9 +145,9 @@ class HypothesisVerifier:
     def generate_verification_tests(
         hypothesis: RevisionHypothesis,
         skill_name: str = "target_skill",
-    ) -> List[VerificationTest]:
+    ) -> list[VerificationTest]:
         """Synthesize concrete executable verification tests from a failure-cause hypothesis."""
-        tests: List[VerificationTest] = []
+        tests: list[VerificationTest] = []
         hid = hypothesis.hypothesis_id
 
         # 1. Direct validation test for the proposed fix
@@ -191,8 +190,8 @@ class HypothesisVerifier:
     @staticmethod
     def evaluate_test_assertion(
         test: VerificationTest,
-        execution_output: Dict[str, Any],
-    ) -> Tuple[bool, str]:
+        execution_output: dict[str, Any],
+    ) -> tuple[bool, str]:
         """Evaluate a test assertion against execution outputs."""
         atype = test.assertion_type
         exp = test.expected_value
@@ -240,14 +239,14 @@ class HypothesisVerifier:
     def verify_hypothesis(
         cls,
         hypothesis: RevisionHypothesis,
-        candidate_runner: Callable[[Dict[str, Any]], Dict[str, Any]],
-        tests: Optional[List[VerificationTest]] = None,
-    ) -> Tuple[float, List[TestExecutionResult]]:
+        candidate_runner: Callable[[dict[str, Any]], dict[str, Any]],
+        tests: Optional[list[VerificationTest]] = None,
+    ) -> tuple[float, list[TestExecutionResult]]:
         """Run verification tests against a candidate revision and return (evidence_score, results)."""
         if tests is None:
             tests = cls.generate_verification_tests(hypothesis)
 
-        results: List[TestExecutionResult] = []
+        results: list[TestExecutionResult] = []
         total_weight = sum(t.weight for t in tests) or 1.0
         weighted_score = 0.0
 
@@ -295,10 +294,10 @@ class SkillRevisionNode:
     visit_count: int = 0
     value: float = 0.0  # Cumulative evaluated score
     evidence_score: float = 0.0  # Dense verification evidence from self-verifier
-    children_ids: List[str] = field(default_factory=list)
+    children_ids: list[str] = field(default_factory=list)
     depth: int = 0
     status: str = "pending"  # pending, verified, falsified, accepted, pruned
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def mean_value(self) -> float:
         return self.value / self.visit_count if self.visit_count > 0 else 0.0
@@ -322,7 +321,7 @@ class SkillRevisionNode:
         evidence_term = evidence_weight * self.evidence_score
         return exploitation + exploration + evidence_term
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "node_id": self.node_id,
             "parent_id": self.parent_id,
@@ -339,7 +338,7 @@ class SkillRevisionNode:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> SkillRevisionNode:
+    def from_dict(cls, data: dict[str, Any]) -> SkillRevisionNode:
         hyp_data = data.get("hypothesis")
         hyp = RevisionHypothesis.from_dict(hyp_data) if hyp_data else None
         return cls(
@@ -363,7 +362,7 @@ class SkillRevisionTree:
 
     def __init__(self, root_node: SkillRevisionNode) -> None:
         self.root_id = root_node.node_id
-        self.nodes: Dict[str, SkillRevisionNode] = {root_node.node_id: root_node}
+        self.nodes: dict[str, SkillRevisionNode] = {root_node.node_id: root_node}
 
     @property
     def root(self) -> SkillRevisionNode:
@@ -420,15 +419,15 @@ class SkillRevisionTree:
         revision_generator: Callable[[str, RevisionHypothesis], str],
         verifier: Optional[HypothesisVerifier] = None,
         mock_runner_factory: Optional[
-            Callable[[str], Callable[[Dict[str, Any]], Dict[str, Any]]]
+            Callable[[str], Callable[[dict[str, Any]], dict[str, Any]]]
         ] = None,
-    ) -> List[SkillRevisionNode]:
+    ) -> list[SkillRevisionNode]:
         """Expand a node by generating revision branches for each candidate hypothesis."""
         parent = self.nodes.get(node_id)
         if not parent:
             raise KeyError(f"Node '{node_id}' not found in revision tree.")
 
-        new_children: List[SkillRevisionNode] = []
+        new_children: list[SkillRevisionNode] = []
         for i, hyp in enumerate(hypotheses, 1):
             child_id = f"{parent.node_id}_rev_{i}"
             revised_code = revision_generator(parent.skill_code, hyp)
@@ -493,14 +492,14 @@ class SkillRevisionTree:
             ),
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "root_id": self.root_id,
             "nodes": {nid: n.to_dict() for nid, n in self.nodes.items()},
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> SkillRevisionTree:
+    def from_dict(cls, data: dict[str, Any]) -> SkillRevisionTree:
         nodes_dict = data.get("nodes", {})
         root_id = str(data.get("root_id", "root"))
         if root_id not in nodes_dict:
@@ -528,11 +527,11 @@ class SkillRevisionTree:
 
 def generate_hypotheses_from_failure(
     skill_name: str,
-    failure_trace: Dict[str, Any],
-) -> List[RevisionHypothesis]:
+    failure_trace: dict[str, Any],
+) -> list[RevisionHypothesis]:
     """Heuristic / pattern-based hypothesis generator from a recorded failure trace."""
     error_msg = str(failure_trace.get("error", failure_trace.get("stderr", "")))
-    hypotheses: List[RevisionHypothesis] = []
+    hypotheses: list[RevisionHypothesis] = []
 
     if "syntax" in error_msg.lower() or "ast" in error_msg.lower():
         hypotheses.append(
@@ -607,16 +606,16 @@ class SkillHEXOptimizer:
         self,
         skill_name: str,
         initial_skill_code: str,
-        hypothesis_generator: Callable[[str, Dict[str, Any]], List[RevisionHypothesis]],
+        hypothesis_generator: Callable[[str, dict[str, Any]], list[RevisionHypothesis]],
         revision_generator: Callable[[str, RevisionHypothesis], str],
         evaluator: Callable[[str], float],
         *,
         max_iterations: int = 5,
         target_score_threshold: float = 0.85,
         mock_runner_factory: Optional[
-            Callable[[str], Callable[[Dict[str, Any]], Dict[str, Any]]]
+            Callable[[str], Callable[[dict[str, Any]], dict[str, Any]]]
         ] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run evidence-guided tree search over skill revision branches.
 
         Args:
@@ -690,8 +689,7 @@ class SkillHEXOptimizer:
                 tree.backpropagate(
                     child.node_id, reward=score, evidence_score=child.evidence_score
                 )
-                if score > best_overall_score:
-                    best_overall_score = score
+                best_overall_score = max(best_overall_score, score)
                 if score >= target_score_threshold:
                     child.status = "accepted"
                     converged = True

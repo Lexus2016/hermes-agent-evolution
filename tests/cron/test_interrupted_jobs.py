@@ -98,7 +98,7 @@ class TestRecoverInterruptedJobs:
         assert stored["next_run_at"] == next_before  # untouched — waits for its slot
 
     def test_healthy_jobs_untouched(self, tmp_cron_dir):
-        job = _make_job()
+        _job = _make_job()
         before = load_jobs()[0]
         recovered = recover_interrupted_jobs()
         assert recovered == []

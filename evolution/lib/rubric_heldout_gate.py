@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """RubricForge Slice 3 — held-out false-pass gate (#2782).
 
 Child of #2760. An evolved rubric may overfit the labeled set it was
@@ -22,7 +21,7 @@ from evolution.lib.rubric_forge import RubricJudge, score_rubric
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["HeldOutVerdict", "split_labeled_set", "held_out_false_pass_gate"]
+__all__ = ["HeldOutVerdict", "held_out_false_pass_gate", "split_labeled_set"]
 
 
 @dataclass
@@ -41,7 +40,7 @@ def split_labeled_set(
     labels: Sequence[bool],
     *,
     holdout: int = 3,
-) -> Tuple[List[Any], List[bool], List[Any], List[bool]]:
+) -> tuple[list[Any], list[bool], list[Any], list[bool]]:
     """Deterministic tail split: the LAST ``holdout`` examples are held out.
 
     Deterministic (no RNG) so adoption decisions are reproducible; callers
@@ -72,7 +71,7 @@ def _false_pass_rate(
         try:
             if bool(judge(rubric, ex)):
                 false_passes += 1
-        except Exception:  # noqa: BLE001 - a throwing judge accepts nothing
+        except Exception:
             pass
     return false_passes / len(bad)
 

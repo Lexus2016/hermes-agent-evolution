@@ -155,3 +155,62 @@ Available in `hybrid` and `tools` memory modes:
 ## Client Version
 
 Requires `hindsight-client >= 0.6.1`. The plugin auto-upgrades on session start if an older version is detected.
+
+## Isolated embedded runtime (fork compatibility)
+
+`local_embedded` uses a PM-managed side environment containing
+`hindsight-all==0.6.1`, `hindsight-embed==0.6.1`, `hindsight-client==0.6.1`,
+`pg0-embedded==0.15.2`, and `psutil==7.2.2`, using a separately selected managed
+Python 3.12 interpreter. Core Hermes can continue using Python 3.14.
+Run `hermes memory setup` and choose local embedded to provision it. These server
+packages are never installed into the core Hermes environment. A missing or
+broken side environment disables embedded startup with an actionable error;
+availability checks do not install packages. Cloud and local-external clients
+continue to use the lightweight `hindsight` PM extra.
+
+Hermes owns each local daemon process, reserves an ephemeral IPv4 loopback socket,
+and uses Hindsight's built-in API-key tenant extension with an in-memory random
+per-instance key. Keys travel over a private parent/child pipe, not argv. The
+host async client is closed before the last daemon lease is released. Startup,
+health checks and shutdown are bounded. Idle timeout remains supported; the next operation can restart the owned daemon
+only after its private generation-matched cleanup receipt and verification that
+tracked processes stopped. An unexpected crash or partial/lost receipt leaves a
+profile-scoped lifecycle record and blocks restart, including after Hermes restarts.
+An operator must verify the recorded process identities and database are stopped,
+preserve/back up the database, and only then clear that lifecycle record. Do not
+kill processes by raw PID/port or remove the record merely to silence the error. A second Hermes process attempting to
+write the same profile database fails visibly; it does not adopt or kill an
+unrelated listener. This is application-level profile separation, not an OS
+sandbox against other processes running as the same user. The vendor's `/health`
+endpoint is intentionally unauthenticated; readiness is not an authentication test.
+Bank/data endpoints are protected by the per-instance token.
+PostgreSQL ownership is checked using a separate private nonce generated inside
+the launcher and inherited by its child, plus process creation-time identity.
+This nonce is never written to the lifecycle record or protocol receipts. Missing,
+inaccessible, or mismatched ownership evidence fails closed. Shutdown signals the
+captured process identity, never a mutable instance name.
+
+### Existing embedded database rollout
+
+The canonical default Hermes profile retains its legacy `hindsight-embed-<profile>`
+pg0 database. Named profiles receive a stable namespace derived from their
+canonical Hermes home. If a legacy shared database exists, a named profile will
+refuse startup rather than copy another profile's memories or silently start empty.
+
+Before upgrading a named profile that previously used embedded memory:
+
+1. Stop all processes using the legacy Hindsight database.
+2. Back up the legacy pg0 instance directory and the matching Hindsight profile
+   configuration. Work on a disposable backup copy first; do not copy a live
+   PostgreSQL data directory.
+3. Identify which profile owns the stored memories. There is no automatic
+   ownership inference or import. An operator must review and perform a supported
+   Hindsight/PostgreSQL export/import into the intended profile's instance, first
+   validating it on the backup copy.
+4. If the intended choice is a separate empty database, explicitly set
+   `"embedded_database_choice": "fresh"` in that profile's
+   `hindsight/config.json`. This leaves every legacy file unchanged.
+
+The compatibility release does not automatically migrate ambiguous shared data.
+Plan this operator decision before rollout. Never point multiple named profiles
+at a shared legacy database merely to bypass the guard.

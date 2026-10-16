@@ -12,6 +12,7 @@ import pytest
 
 from tools.environments import local
 from tools import process_registry as pr
+from tests.waiting import wait_until
 
 
 _CHILD = """
@@ -80,10 +81,7 @@ while True:
 
 
 def _wait_until(predicate, description, timeout=15):
-    deadline = time.monotonic() + timeout
-    while not predicate():
-        assert time.monotonic() < deadline, description
-        time.sleep(0.01)
+    wait_until(predicate, timeout=timeout, what=description)
 
 
 def _alive(proc):
@@ -205,14 +203,14 @@ _CASES = ["self_managing", "two_grace_windows", "zero_grace_retry", "parent_exit
           "escaped_natural_finish"]
 
 
-@pytest.mark.linux_only
+@pytest.mark.platforms("linux")
 @pytest.mark.live_system_guard_bypass
 @pytest.mark.parametrize("case", _CASES)
 def test_adopted_registry_lifetime_linux(tmp_path, monkeypatch, case):
     _contract(tmp_path, monkeypatch, case)
 
 
-@pytest.mark.macos_only
+@pytest.mark.platforms("macos")
 @pytest.mark.live_system_guard_bypass
 @pytest.mark.parametrize("case", _CASES)
 def test_adopted_registry_lifetime_macos(tmp_path, monkeypatch, case):

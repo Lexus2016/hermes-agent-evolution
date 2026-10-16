@@ -65,6 +65,14 @@ def _discover_venv() -> list[Component]:
         except Exception:
             continue
         version = (dist.version or "").strip()
+        if name.lower().replace("_", "-") == "hermes-agent" and version == "0.0.0":
+            # pyproject declares 0.0.0 in source trees, which matches every advisory ever filed:
+            # audit the running release instead, and skip the dist when no release is known.
+            from hermes_cli.version_info import get_version_info
+
+            version = get_version_info().base_version
+            if version == "unknown":
+                continue
         if name and version:
             out.setdefault((name.lower(), version), Component(name=name, version=version, ecosystem="PyPI", source="venv"))
     return list(out.values())
@@ -117,7 +125,7 @@ def _discover_plugins(hermes_home: Path) -> list[Component]:
         for filename, parse in _PLUGIN_PIN_FILES:
             path = plugin_dir / filename
             try:
-                pins = parse(path.read_text(encoding="utf-8", errors="replace")) if path.is_file() else []
+                pins = parse(path.read_text(encoding="utf-8-sig", errors="replace")) if path.is_file() else []
             except OSError:
                 continue
             out.extend(Component(name=n, version=v, ecosystem="PyPI", source=f"plugin:{plugin_dir.name}") for n, v in pins)
@@ -299,7 +307,7 @@ def _load_mcp_secret_audit_module():
     if spec is None or spec.loader is None:
         return None
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # noqa: S102 - loading a first-party repo script
+    spec.loader.exec_module(mod)
     return mod
 
 
@@ -313,7 +321,7 @@ def _run_mcp_secret_audit(hermes_home: Path) -> tuple[list[dict], int]:
     mod = _load_mcp_secret_audit_module()
     if mod is None:
         return [], 0
-    servers, _source = mod._load_mcp_servers(str(hermes_home / "config.yaml"))  # noqa: SLF001
+    servers, _source = mod._load_mcp_servers(str(hermes_home / "config.yaml"))
     return mod.audit_mcp_servers(servers), len(servers)
 
 

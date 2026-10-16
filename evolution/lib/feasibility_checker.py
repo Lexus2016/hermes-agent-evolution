@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Feasibility checking for plan execution (issue #1031, child of #1021).
 
 PIVOT-style plan-feasibility validation run *before* execution.  Each
@@ -27,16 +26,16 @@ from enum import Enum
 from typing import Any, Callable, Iterable, Optional
 
 __all__ = [
-    "FeasibilityStatus",
-    "FeasibilityResult",
+    "DirectoryExistenceCheck",
     "FeasibilityCheck",
+    "FeasibilityGate",
+    "FeasibilityResult",
+    "FeasibilityStatus",
     "FileExistenceCheck",
+    "NonEmptyStringCheck",
+    "RegexValidCheck",
     "ToolAvailabilityCheck",
     "WritePathCheck",
-    "DirectoryExistenceCheck",
-    "RegexValidCheck",
-    "NonEmptyStringCheck",
-    "FeasibilityGate",
 ]
 
 # ---------------------------------------------------------------------------
@@ -106,7 +105,7 @@ class FeasibilityResult:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "FeasibilityResult":
+    def from_dict(cls, data: dict[str, Any]) -> FeasibilityResult:
         """Reconstruct from a :meth:`to_dict` payload."""
         status_val = data["status"]
         if isinstance(status_val, str):
@@ -560,7 +559,7 @@ class FeasibilityGate:
         for chk in self.checks:
             try:
                 results.append(chk.check(step))
-            except Exception as exc:  # noqa: BLE001 - surface as UNCERTAIN
+            except Exception as exc:
                 results.append(
                     FeasibilityResult(
                         status=FeasibilityStatus.UNCERTAIN,

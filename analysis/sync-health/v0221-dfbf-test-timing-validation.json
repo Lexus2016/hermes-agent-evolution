@@ -1,0 +1,283 @@
+{
+  "head": "dfbffa67c4a15f76d3b2d4f7af383453780dcc90",
+  "tree": "29dd1591b2cf9a44c3d7a1f169b40548ecd74fd7",
+  "clean_after_checks": true,
+  "review": {
+    "schema_version": 1,
+    "task": "Authorized deterministic test-only HX013 repairs; ready for root independent review",
+    "repository": "/workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015",
+    "base_head": "9b8a65f17e96b13a354a9c7cc09a809842926986",
+    "head_unchanged": true,
+    "modified_paths": [
+      "tests/agent/test_aux_progress_streaming.py",
+      "tests/agent/test_codex_ttfb_watchdog.py",
+      "tests/agent/test_credential_pool_refresh_sweep_spacing.py"
+    ],
+    "production_changes": false,
+    "policy_or_allowance_changes": false,
+    "patch": {
+      "path": "/tmp/hermes-hx013-test-only-repair.patch",
+      "sha256": "135d5954f2dfdd7607c166ec64c186028ba82069cf25166a68e7a36b48de649f",
+      "bytes": 5813
+    },
+    "prior_read_only_review": {
+      "path": "/tmp/hermes-hx013-wait-review.json",
+      "sha256": "1971381f498c4a28b1be0b2f3369fe3f12b24f1a5ab66ac3098ebfe284f96034",
+      "bytes": 23818
+    },
+    "identity_comparison": {
+      "path": "/tmp/hermes-hx013-test-identity-comparison.json",
+      "sha256": "1e60b1ee0bcb60d8a3f83a087699cc2b532a6c46480b48412a73347e0bcb45b0",
+      "bytes": 71151
+    },
+    "source_manifest": [
+      {
+        "path": "tests/agent/test_aux_progress_streaming.py",
+        "base_git_blob": "94b063d401081f3ba0427662a58e2071074195b7",
+        "after_git_blob": "befb91d7d9479094f8080fa47f82abd14cb554e4",
+        "after_sha256": "2be1ccdcc2285d172ef726de309ea111e819c8a8c1e30e015dc8c61ba1243abb",
+        "bytes": 36095
+      },
+      {
+        "path": "tests/agent/test_codex_ttfb_watchdog.py",
+        "base_git_blob": "7947a13f2f99a958167a22d3a044a6c019c10cb0",
+        "after_git_blob": "b053058b3b5879a9d34c3f4b127959e7f01e0f13",
+        "after_sha256": "4eb5992048c7ded186cb88a0be755eeac1d6d651173c6e44a8d67f11c602eb73",
+        "bytes": 27409
+      },
+      {
+        "path": "tests/agent/test_credential_pool_refresh_sweep_spacing.py",
+        "base_git_blob": "51e2154d8efeaf7cc7a3eacb3cc2a26f45656432",
+        "after_git_blob": "b5c11a33f545b146d212b24080d50fef0823fd32",
+        "after_sha256": "415c23fd4e9e78ab0d8ed51a6306c45a241ed1210937f610e8594d0f179a333c",
+        "bytes": 2063
+      }
+    ],
+    "contract_map": [
+      {
+        "occurrences": [
+          {
+            "path": "tests/agent/test_aux_progress_streaming.py",
+            "original_line": 421
+          }
+        ],
+        "change": "Replace the unobserved 200ms race opportunity with an Event set on return from the selected real _shutdown_socket call. B remains gated until this completion is observed.",
+        "retained": "Real OpenAI SDK and loopback HTTP transport, original request-local shutdown path, three-second synchronization bounds, A TimeoutError and B successful-content assertions.",
+        "limits": "This closes the observed-shutdown ordering gap. The existing test still does not positively identify a reused connection; no stronger reuse proof is claimed."
+      },
+      {
+        "occurrences": [
+          {
+            "path": "tests/agent/test_codex_ttfb_watchdog.py",
+            "original_line": 354
+          },
+          {
+            "path": "tests/agent/test_codex_ttfb_watchdog.py",
+            "original_line": 357
+          }
+        ],
+        "change": "Advance a local logical clock at existing stream boundaries, and use tests.waiting.wait_until to observe request-token retirement.",
+        "retained": "Real worker and stream-consumer behavior; existing mocked event source/client only; lifecycle arrival at logical 0.7s, unchanged 0.9s budgets, required no-substantive-progress TimeoutError and codex_progress_kill reason; original <1.5s discriminator is explicitly logical.",
+        "completion_guard": "wait_until keeps its existing default 10s real monotonic completion deadline. Global time is not patched; only chat_completion_helpers.time and codex_runtime.time bindings use the logical clock.",
+        "limits": "This proves attempt-origin deadline semantics independent of scheduler load. It is not a new claim of <1.5s real host latency and does not cover external-provider transport."
+      },
+      {
+        "occurrences": [
+          {
+            "path": "tests/agent/test_credential_pool_refresh_sweep_spacing.py",
+            "original_line": 30
+          }
+        ],
+        "change": "Remove the irrelevant simulated 50ms POST delay, place the release timestamp after real lock release, and strengthen the original at-least-one-gap>=0.4s assertion to every-gap>=0.4s.",
+        "retained": "Real auth-store lock, temporary file I/O, real production 0.5s inter-refresh spacing, three-refresh count, unchanged 0.4s minimum.",
+        "limits": "No competing waiter is introduced; does not prove scheduling fairness. Observed gaps remain wall-clock measurements."
+      }
+    ],
+    "two_second_loopback_prefill": {
+      "unchanged": true,
+      "helper_ast_identical": true,
+      "no_allowance_added": true
+    },
+    "tests": {
+      "before": {
+        "receipt": {
+          "path": "/tmp/hermes-hx013-wait-review-9b8a65f-receipt.log",
+          "sha256": "7bdfd7973aa0d2cd752ba57bf6b6981ff89d126c2f495e36a735a71a4d3d38e2",
+          "bytes": 1506
+        },
+        "passed": 83,
+        "failed": 0,
+        "exit_code": 0,
+        "seconds": 39.5
+      },
+      "after": {
+        "receipt": {
+          "path": "/tmp/hermes-hx013-after-receipt.log",
+          "sha256": "ac0b33206f0d5ed1a15d800cea41ae05da1613f27a0a4f6ee761d8047088a2de",
+          "bytes": 1572
+        },
+        "passed": 83,
+        "failed": 0,
+        "exit_code": 0,
+        "seconds": 38.9,
+        "file_counts": {
+          "auxiliary": 56,
+          "codex": 26,
+          "spacing": 1
+        },
+        "command": "HOME=/tmp/hermes-hx013-after-home-4YOTA5 HERMES_HOME=/tmp/hermes-hx013-after-home-4YOTA5/test-hermes HERMES_PYTHON=$PWD/.venv/bin/python HERMES_TEST_FILE_RETRIES=0 scripts/run_tests.sh tests/agent/test_aux_progress_streaming.py tests/agent/test_codex_ttfb_watchdog.py tests/agent/test_credential_pool_refresh_sweep_spacing.py -j 1 --file-timeout 120 --tb=short -o cache_dir=/tmp/hermes-hx013-after-cache-nQj0vG"
+      },
+      "collection": {
+        "before": 83,
+        "after": 83,
+        "same_exact_cases": true,
+        "test_definitions_before": 46,
+        "test_definitions_after": 46,
+        "same_test_names_and_decorators": true,
+        "changed_enclosing_test_bodies": 3,
+        "authorized_sleep_occurrences_repaired": 4,
+        "collection_only_runner_exit_note": "Before-case discovery used canonical --collect-only with debug traces. Per-file collection succeeded; the canonical runner returned1 because its execution guard correctly reports no tests ran. Those collection calls are not counted as passing test receipts."
+      },
+      "isolation": [
+        "HOME and Path.home verified against an isolated temp directory.",
+        "Canonical fixtures isolate HERMES_HOME before collection and per test.",
+        "Canonical clean environment removes credential variables.",
+        "No external provider calls or real credentials.",
+        "Real loopback tests executed without bypassing protections."
+      ]
+    },
+    "checks": [
+      {
+        "name": "ordinary scoped health and growth",
+        "command": ".venv/bin/python -m scripts.code_health --base 9b8a65f17e96b13a354a9c7cc09a809842926986 --json",
+        "paths": [
+          "tests/agent/test_aux_progress_streaming.py",
+          "tests/agent/test_codex_ttfb_watchdog.py",
+          "tests/agent/test_credential_pool_refresh_sweep_spacing.py"
+        ],
+        "result": [],
+        "exit_code": 0,
+        "receipt": {
+          "path": "/tmp/hermes-hx013-scoped-health.json",
+          "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+          "bytes": 3
+        },
+        "limit": "Diff-scoped against unchanged HEAD; not a full integration-health rerun and not disposition acceptance."
+      },
+      {
+        "name": "Ruff",
+        "command": ".venv/bin/python -m ruff check tests/agent/test_aux_progress_streaming.py tests/agent/test_codex_ttfb_watchdog.py tests/agent/test_credential_pool_refresh_sweep_spacing.py",
+        "version": "0.15.10",
+        "exit_code": 0,
+        "receipt": {
+          "path": "/tmp/hermes-hx013-ruff.log",
+          "sha256": "6b1bddb27bd2740b4d235a0781aff73e793265ceee27ec5a96a6a58fe452e9ee",
+          "bytes": 392
+        },
+        "note": "Only normal preview-selection warnings, followed by All checks passed."
+      },
+      {
+        "name": "git diff --check",
+        "command": "git diff --check",
+        "exit_code": 0,
+        "receipt": {
+          "path": "/tmp/hermes-hx013-diff-check.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    ],
+    "check_exit_receipt": {
+      "path": "/tmp/hermes-hx013-check-exits.log",
+      "sha256": "a0d101eafc77826bbf2841b732b82ccf1b2002d2ed664c20cf99d867ebc0c823",
+      "bytes": 44
+    },
+    "review_state": "Root independently approved the exact diff and negative control. Three source blobs are frozen. Lead owns staging, commit, and final exact-source validation; this worker makes no further source edits.",
+    "negative_control": {
+      "path": "/tmp/hermes-hx013-negative-control-report.json",
+      "sha256": "6492260b2e307b9cdd3ff1e66aa4aa1e25a7979d56503915ecb0488152ce2d8f",
+      "bytes": 2402
+    },
+    "negative_control_result": {
+      "expected_failure_observed": true,
+      "runner_exit": 1,
+      "failed": 1,
+      "deselected": 25,
+      "failure": "AssertionError: timed out after 10.0s waiting for lifecycle-only request retirement",
+      "source_restored_exactly": true,
+      "production_source_edited": false,
+      "restored_positive_passed": 1,
+      "restored_positive_exit": 0
+    },
+    "frozen_test_blobs": {
+      "tests/agent/test_aux_progress_streaming.py": "befb91d7d9479094f8080fa47f82abd14cb554e4",
+      "tests/agent/test_codex_ttfb_watchdog.py": "b053058b3b5879a9d34c3f4b127959e7f01e0f13",
+      "tests/agent/test_credential_pool_refresh_sweep_spacing.py": "b5c11a33f545b146d212b24080d50fef0823fd32"
+    },
+    "index_untouched_by_this_worker": true,
+    "staged_files_at_initial_review_snapshot": []
+  },
+  "negative_control": {
+    "test_path": "tests/agent/test_codex_ttfb_watchdog.py",
+    "source_before_sha256": "4eb5992048c7ded186cb88a0be755eeac1d6d651173c6e44a8d67f11c602eb73",
+    "source_restored_sha256": "4eb5992048c7ded186cb88a0be755eeac1d6d651173c6e44a8d67f11c602eb73",
+    "source_restored_exactly": true,
+    "temporary_test_fixture": {
+      "path": "/tmp/hermes-hx013-negative-control-fixture.py",
+      "sha256": "342cccf121f5a54f585dc59f20c49f7ce0a52671eaef307abec02119228a2a41"
+    },
+    "production_source_edited": false,
+    "command": [
+      "scripts/run_tests.sh",
+      "tests/agent/test_codex_ttfb_watchdog.py",
+      "-k",
+      "test_large_codex_lifecycle_only_stream_hits_attempt_progress_budget",
+      "-j",
+      "1",
+      "--file-timeout",
+      "120",
+      "--tb=short"
+    ],
+    "environment": {
+      "HOME": "/tmp/hermes-hx013-negative-home-ae99b34b",
+      "HERMES_HOME": "/tmp/hermes-hx013-negative-home-ae99b34b/test-hermes",
+      "HERMES_PYTHON": "/workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python",
+      "HERMES_TEST_FILE_RETRIES": "0"
+    },
+    "runner_exit": 1,
+    "expected_failure_text": "timed out after 10.0s waiting for lifecycle-only request retirement",
+    "expected_failure_observed": true,
+    "receipt": {
+      "path": "/tmp/hermes-hx013-negative-control.log",
+      "sha256": "4dfcfa3d3b56fec028df7c8113f8e425c8206313f2cb677a3ded92619d8cd7ee"
+    },
+    "interpretation": "The existing modified test fails because the regressed attempt origin moves to logical 0.7 while time is held at logical 1.0; only 0.3 of the new 0.9 budget has elapsed. The bounded real 10s retirement waiter raises its named AssertionError instead of the required no-substantive-progress TimeoutError. No unrelated transport/background error is used as evidence.",
+    "restored_positive_control": {
+      "receipt": {
+        "path": "/tmp/hermes-hx013-restored-positive.log",
+        "sha256": "98e503efcf9c80f37060904d2289e5c31ab117fbf30725b7c7308c912fd2368c",
+        "bytes": 965
+      },
+      "passed": 1,
+      "failed": 0,
+      "runner_exit": 0,
+      "runner_seconds": 3.0,
+      "command": "HERMES_PYTHON=$PWD/.venv/bin/python HERMES_TEST_FILE_RETRIES=0 scripts/run_tests.sh tests/agent/test_codex_ttfb_watchdog.py -k test_large_codex_lifecycle_only_stream_hits_attempt_progress_budget -j 1 --file-timeout 120 --tb=short",
+      "isolation": "Fresh temporary HOME/HERMES_HOME plus canonical hermetic fixtures and clean environment."
+    }
+  },
+  "final_tests": {
+    "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 3 test files (~46 tests) under ['tests/agent/test_aux_progress_streaming.py', 'tests/agent/test_codex_ttfb_watchdog.py', 'tests/agent/test_credential_pool_refresh_sweep_spacing.py']; running with -j 1\n[ 65.2% |    30/~46 | \u271356 | \u2717 0] \u2713 tests/agent/test_aux_progress_streaming.py (56\u2713, 9.4s)\n[ 97.8% |    45/~46 | \u271382 | \u2717 0] \u2713 tests/agent/test_codex_ttfb_watchdog.py (26\u2713, 27.1s)\n[100.0% |    46/~46 | \u271383 | \u2717 0] \u2713 tests/agent/test_credential_pool_refresh_sweep_spacing.py (1\u2713, 1.6s)\n\n=== Summary: 3 files, 83 tests passed, 0 failed (100% complete) in 38.0s (1 workers) ===\n  Durations cached to test_durations.json (3 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   3\n  Total subprocess CPU-wall: 38.0s  (runner wall: 38.0s, parallelism: 1x)\n  P50: 9.39s  P90: 27.06s  P95: 27.06s  P99: 27.06s  Max: 27.06s\n  <1s: 0 files (0%)  <2s: 1 files (33%)\n  Top 10 slowest:\n     27.06s  tests/agent/test_codex_ttfb_watchdog.py\n      9.39s  tests/agent/test_aux_progress_streaming.py\n      1.58s  tests/agent/test_credential_pool_refresh_sweep_spacing.py\n",
+    "sha256": "b2400ea03a388748a68ea8faaa9902f74f6c8488583d2deadab4e7c9593337ee"
+  },
+  "canonical_ruff": {
+    "text": "\nscripts/check: 1 checks, ok\n",
+    "sha256": "96cdc003eca93231f74b8bd45ef7aa11f2a42987f98cd0d5c822e7bdf771bcfb"
+  },
+  "terminal_status": "tests_exit=0\nruff_exit=0\n",
+  "limits": [
+    "Test-only synchronization/logical-clock correction; production and policy unchanged.",
+    "Same83 cases; loopback transport preserved;2second prefill has no inherited disposition.",
+    "Latest full health remains failed774 at earlierd66b; no relabel or inferred current full-suite pass."
+  ]
+}

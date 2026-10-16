@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 class PipelineStageTrace:
     stage_name: str  # research, issues, analysis, implementation, integration
     sub_goal: str
-    tool_calls: List[str]
+    tool_calls: list[str]
     result_summary: str
     verification_status: str  # "sufficient" | "insufficient"
     turn_index: int
@@ -39,7 +39,7 @@ class PipelineTraceRecorder:
         self,
         stage_name: str,
         sub_goal: str,
-        tool_calls: List[str],
+        tool_calls: list[str],
         result_summary: str,
         verification_status: str,
         turn_index: int,

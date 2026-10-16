@@ -59,7 +59,7 @@ def _report_dict(home: Path, report: IntegrityReport) -> dict:
 
 
 def _format_report(home: Path, report: IntegrityReport) -> str:
-    lines: List[str] = [
+    lines: list[str] = [
         "=" * 60,
         f"Prompt-file integrity (#98): {home}",
         f"Protected files: {', '.join(PROTECTED_FILES)}",
@@ -75,7 +75,7 @@ def _format_report(home: Path, report: IntegrityReport) -> str:
     return "\n".join(lines)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     parser.add_argument(

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for :mod:`evolution.lib.harness_inventory` (issue #39, slice 1).
 
 The inventory is the "component observability" foundation for the forge

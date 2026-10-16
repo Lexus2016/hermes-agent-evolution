@@ -27,7 +27,7 @@ from typing import Dict, List, Sequence, Set, Tuple
 from tools.threat_patterns import scan_for_threats
 
 # Instruction files conventionally placed at a project root.
-INSTRUCTION_FILE_NAMES: Tuple[str, ...] = (
+INSTRUCTION_FILE_NAMES: tuple[str, ...] = (
     "AGENTS.md",
     "CLAUDE.md",
     ".cursorrules",
@@ -53,15 +53,15 @@ class Finding:
         return f"{loc}: threat pattern {self.pattern_id!r}"
 
 
-def collect_target_files(roots: Sequence[Path]) -> List[Path]:
+def collect_target_files(roots: Sequence[Path]) -> list[Path]:
     """Return the instruction/config files to lint under ``roots``.
 
     Matches: root-level instruction files; ``SKILL.md`` under any directory
     named ``skills``; any file under a directory named ``hooks``.  Results
     are de-duplicated across roots and sorted for deterministic output.
     """
-    seen: Set[str] = set()
-    files: List[Path] = []
+    seen: set[str] = set()
+    files: list[Path] = []
     for root in roots:
         root = Path(root)
         if not root.is_dir():
@@ -90,7 +90,7 @@ def collect_target_files(roots: Sequence[Path]) -> List[Path]:
     return files
 
 
-def lint_paths(roots: Sequence[Path], *, scope: str = "context") -> List[Finding]:
+def lint_paths(roots: Sequence[Path], *, scope: str = "context") -> list[Finding]:
     """Lint instruction/config files under ``roots``; return findings.
 
     ``scope`` maps directly to :func:`tools.threat_patterns.scan_for_threats`:
@@ -103,22 +103,22 @@ def lint_paths(roots: Sequence[Path], *, scope: str = "context") -> List[Finding
     Findings are sorted by path, line, pattern id.  Never raises on
     unreadable files (skipped).
     """
-    findings: List[Finding] = []
+    findings: list[Finding] = []
     for path in collect_target_files(roots):
         try:
-            content = path.read_text(encoding="utf-8", errors="replace")
+            content = path.read_text(encoding="utf-8-sig", errors="replace")
         except OSError:
             continue
         findings.extend(_lint_content(content, path, scope=scope))
     return sorted(findings, key=lambda f: (str(f.path), f.line, f.pattern_id))
 
 
-def _lint_content(content: str, path: Path, *, scope: str) -> List[Finding]:
+def _lint_content(content: str, path: Path, *, scope: str) -> list[Finding]:
     """Scan one file's content; attribute hits to lines where possible."""
     hits = set(scan_for_threats(content, scope=scope))
     if not hits:
         return []
-    by_line: Dict[str, int] = {}
+    by_line: dict[str, int] = {}
     for lineno, line in enumerate(content.splitlines(), start=1):
         for pid in scan_for_threats(line, scope=scope):
             if pid not in by_line:
@@ -129,9 +129,9 @@ def _lint_content(content: str, path: Path, *, scope: str) -> List[Finding]:
     ]
 
 
-def default_lint_roots() -> List[Path]:
+def default_lint_roots() -> list[Path]:
     """Default scan roots: enclosing git root (or cwd) plus HERMES_HOME."""
-    roots: List[Path] = []
+    roots: list[Path] = []
     try:
         from agent.skill_utils import find_project_root
 
@@ -178,8 +178,8 @@ def cmd_config_lint(args) -> int:
 
 
 __all__ = [
-    "Finding",
     "INSTRUCTION_FILE_NAMES",
+    "Finding",
     "cmd_config_lint",
     "collect_target_files",
     "default_lint_roots",

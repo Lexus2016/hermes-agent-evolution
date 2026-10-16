@@ -112,7 +112,7 @@ class DivergenceResult:
     overlap: float = 0.0
 
 
-def _keywords(text: str) -> List[str]:
+def _keywords(text: str) -> list[str]:
     """Lowercased, de-stopworded word tokens of ``text`` (length >= 3)."""
     tokens = re.findall(r"[a-z0-9_]+", text.lower())
     return [t for t in tokens if len(t) >= 3 and t not in _STOPWORDS]

@@ -16,7 +16,7 @@ def _make_file_ops(tmp):
     ops._expand_path = lambda s: s if s.startswith("/") else str(tmp / s)
 
     def _exec(cmd):
-        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=str(tmp), timeout=5)
+        r = subprocess.run(cmd, check=False, shell=True, capture_output=True, text=True, cwd=str(tmp), timeout=5)
 
         class _R:
             exit_code = r.returncode
@@ -110,7 +110,7 @@ class TestAmbiguousLineNumbers:
             assert n in err
 
     def test_replace_all_still_works(self):
-        new, c, _, err = fuzzy_find_and_replace("x=1\nx=1\n", "x=1", "x=2", replace_all=True)
+        _new, c, _, err = fuzzy_find_and_replace("x=1\nx=1\n", "x=1", "x=2", replace_all=True)
         assert err is None and c == 2
 
 

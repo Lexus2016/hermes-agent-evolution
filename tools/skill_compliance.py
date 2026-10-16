@@ -45,11 +45,11 @@ def record_tool_call_for_active_skill(tool_name: str) -> None:
     _tool_calls.set(calls)
 
 
-def get_active_skill_tool_calls() -> List[str]:
+def get_active_skill_tool_calls() -> list[str]:
     return list(_get_calls())
 
 
-def _read_forbidden_tools(name: str) -> Set[str]:
+def _read_forbidden_tools(name: str) -> set[str]:
     try:
         from tools.skill_manager_tool import _find_skill
         found = _find_skill(name)
@@ -58,7 +58,7 @@ def _read_forbidden_tools(name: str) -> Set[str]:
         skill_md = Path(found["path"]) / "SKILL.md"
         if not skill_md.exists():
             return set()
-        content = skill_md.read_text(encoding="utf-8", errors="replace")
+        content = skill_md.read_text(encoding="utf-8-sig", errors="replace")
     except Exception:
         return set()
 
@@ -68,7 +68,7 @@ def _read_forbidden_tools(name: str) -> Set[str]:
     if not end:
         return set()
     try:
-        import yaml
+        import hermes_yaml as yaml
         parsed = yaml.safe_load(content[3:end.start() + 3])
     except Exception:
         return set()
@@ -80,7 +80,7 @@ def _read_forbidden_tools(name: str) -> Set[str]:
     return {str(t).lower() for t in forbidden} if isinstance(forbidden, list) else set()
 
 
-def check_boundary_violations(skill_name: str, tool_calls_made: List[str]) -> bool:
+def check_boundary_violations(skill_name: str, tool_calls_made: list[str]) -> bool:
     forbidden = _read_forbidden_tools(skill_name)
     if not forbidden:
         return False

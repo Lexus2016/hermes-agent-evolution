@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Subagent deviation monitoring with steer-not-isolate governance (Issue #2487, Slice A, AcMAS).
 
 Monitors fan-out subagent tool-calling behaviors and provenance against learned benign
@@ -36,12 +35,12 @@ class SubagentActionTrace:
 
     subagent_id: str
     tool_name: str
-    arguments: Dict[str, Any] = field(default_factory=dict)
-    provenance_sources: List[str] = field(default_factory=list)
+    arguments: dict[str, Any] = field(default_factory=dict)
+    provenance_sources: list[str] = field(default_factory=list)
     timestamp_ms: float = field(default_factory=lambda: time.time() * 1000.0)
     risk_score: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -53,10 +52,10 @@ class DeviationSignal:
     deviation_score: float
     is_deviating: bool
     steering_action: str  # "continue" | "steer_warning" | "steer_guidance" | "escalate"
-    reasons: List[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
     suggested_steering_prompt: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -65,8 +64,8 @@ class SubagentTrustMonitor:
 
     def __init__(self, deviation_threshold: float = 0.6) -> None:
         self.deviation_threshold = deviation_threshold
-        self._history: Dict[str, List[SubagentActionTrace]] = {}
-        self._benign_patterns: List[List[str]] = [
+        self._history: dict[str, list[SubagentActionTrace]] = {}
+        self._benign_patterns: list[list[str]] = [
             ["read_file", "search", "write_file"],
             ["web_search", "read_file", "calc"],
             ["context_var", "harness", "read_file"],
@@ -76,8 +75,8 @@ class SubagentTrustMonitor:
         self,
         subagent_id: str,
         tool_name: str,
-        arguments: Dict[str, Any],
-        provenance_sources: Optional[List[str]] = None,
+        arguments: dict[str, Any],
+        provenance_sources: Optional[list[str]] = None,
     ) -> SubagentActionTrace:
         """Capture subagent tool call, computing baseline risk score and provenance."""
         prov = provenance_sources or []
@@ -104,11 +103,11 @@ class SubagentTrustMonitor:
         self._history[subagent_id].append(trace)
         return trace
 
-    def get_action_history(self, subagent_id: str) -> List[SubagentActionTrace]:
+    def get_action_history(self, subagent_id: str) -> list[SubagentActionTrace]:
         """Return full action history for a specific subagent."""
         return list(self._history.get(subagent_id, []))
 
-    def set_benign_reference(self, patterns: List[List[str]]) -> None:
+    def set_benign_reference(self, patterns: list[list[str]]) -> None:
         """Set expected benign tool-call sequence patterns."""
         self._benign_patterns = patterns
 
@@ -131,7 +130,7 @@ class SubagentTrustMonitor:
 
         window_traces = history[-recent_window:]
         recent_tools = [t.tool_name for t in window_traces]
-        reasons: List[str] = []
+        reasons: list[str] = []
         score = 0.0
 
         # Check high-risk provenance contamination

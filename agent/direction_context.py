@@ -54,7 +54,7 @@ def detect_handoff_direction(
 
 
 def compose_directional_context(
-    turns: List[Dict[str, Any]],
+    turns: list[dict[str, Any]],
     goal: str,
     direction: HandoffDirection,
     existing_context: Optional[str] = None,

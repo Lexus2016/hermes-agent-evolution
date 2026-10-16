@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Multi-hypothesis failure diagnosis for the tool-failure handler.
 
 Second slice of SAGE-style Multi-Hypothesis Failure Attribution (issue #1029,
@@ -37,13 +36,13 @@ from tools.tool_failure_classifier import (
 )
 
 __all__ = [
+    "DIAGNOSIS_GUIDANCE_PREFIX",
+    "Diagnosis",
     "DiagnosisMode",
     "Hypothesis",
-    "Diagnosis",
     "HypothesisHistory",
     "diagnose_failure",
     "maybe_append_diagnosis",
-    "DIAGNOSIS_GUIDANCE_PREFIX",
 ]
 
 DIAGNOSIS_GUIDANCE_PREFIX = "Failure diagnosis"
@@ -62,7 +61,7 @@ class DiagnosisMode(str, Enum):
     multi_hypothesis = "multi-hypothesis"
 
     @classmethod
-    def coerce(cls, value: Any) -> "DiagnosisMode":
+    def coerce(cls, value: Any) -> DiagnosisMode:
         if isinstance(value, cls):
             return value
         text = str(value or "").strip().lower().replace("_", "-")
@@ -161,7 +160,7 @@ def diagnose_failure(
     stdout: str = "",
     stderr: str = "",
     max_hypotheses: int = 3,
-    history: "HypothesisHistory | None" = None,
+    history: HypothesisHistory | None = None,
     history_key: str | None = None,
 ) -> Diagnosis:
     """Produce a ranked multi-hypothesis diagnosis for a failed tool call.
@@ -245,7 +244,7 @@ def maybe_append_diagnosis(
     mode: Any,
     consecutive_count: int = 0,
     max_hypotheses: int = 3,
-    history: "HypothesisHistory | None" = None,
+    history: HypothesisHistory | None = None,
     history_key: str | None = None,
 ) -> str:
     """Runtime seam: append a ranked failure diagnosis to a failed result.

@@ -4,7 +4,7 @@ import json
 from unittest.mock import patch
 
 import pytest
-import yaml
+import hermes_yaml as yaml
 
 from tools.skill_contracts import applicability, check_contract_edit
 from tools.skill_retrieval import rank_skills
@@ -97,11 +97,12 @@ def test_complexity_and_schema_bounds(field, value):
     assert check_contract_edit(content(c))
 
 
-def test_live_registry_search_consumes_contract(tmp_path):
+@pytest.mark.parametrize("padding", ["", "x" * 4500])
+def test_live_registry_search_consumes_contract(tmp_path, padding):
     from tools.skills_tool import skills_search
     skill = tmp_path / "research"
     skill.mkdir()
-    (skill / "SKILL.md").write_text(content(contract()), encoding="utf-8")
+    (skill / "SKILL.md").write_text(content(contract()).replace("---\n", "---\nextra: " + padding + "\n", 1), encoding="utf-8")
     with patch("tools.skills_tool.SKILLS_DIR", tmp_path), patch("agent.skill_utils.get_all_skills_dirs", return_value=[tmp_path]):
         assert json.loads(skills_search("email"))["skills"] == []
         result = json.loads(skills_search("research email"))

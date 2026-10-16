@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for references-not-rules memory framing + consensus (#2576)."""
 
 from evolution.lib.memory_framing import (

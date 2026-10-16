@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_merge_gate import (  # noqa: E402
+from evolution_merge_gate import (
     check_flip_gate,
     check_merge_method_policy,
     check_merge_policy,
@@ -68,6 +68,14 @@ class TestCheckMergePolicy:
             "tools/approval.py",
             "scripts/evolution_merge_gate.py",
             "scripts/register_evolution_cron.py",
+            "scripts/code_health/inherited_debt.py",
+            "scripts/code_health/nested/rules.py",
+            "analysis/sync-health/v0221-manifest.json",
+            "analysis/sync-health/v0221-raw-report.json",
+            "scripts/check",
+            "scripts/ci/profile_scope_patterns.json",
+            "ruff.toml",
+            ".npmrc",
         ):
             v = check_merge_policy([_f(p, 3, 1)])
             assert any("HIGH_RISK_PATH" in x for x in v), p
@@ -238,7 +246,7 @@ class TestMainWiring:
     function.
     """
 
-    def test_main_calls_quality_gate(self, monkeypatch):
+    def test_main_calls_quality_gate(self, monkeypatch, tmp_path):
         """Verify main() routes through check_merge_policy_with_quality.
 
         The closed PR #1212 was rejected because main() called
@@ -249,6 +257,8 @@ class TestMainWiring:
         """
         import evolution_merge_gate as emg
 
+        monkeypatch.setattr(emg.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
         called = {"quality": False}
         orig_quality = emg.check_merge_policy_with_quality
 

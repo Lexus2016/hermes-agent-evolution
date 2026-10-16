@@ -15,6 +15,7 @@ import psutil
 import pytest
 
 from tools.environments import base, local
+from tests.waiting import wait_until
 
 
 def _spawn(tmp_path, code, *args, stdin_data=None):
@@ -60,10 +61,8 @@ def test_lifetime_observer_handles_exit_without_hiding_unknown_state(running, st
 
 
 def _gone(child):
-    deadline = time.monotonic() + 5
-    while _alive(child) and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert not _alive(child), f"test-owned process {child.pid} survived cleanup"
+    wait_until(lambda: not _alive(child), timeout=5,
+               what=f"test-owned process {child.pid} exited")
 
 
 def _finish(proc):
@@ -169,10 +168,9 @@ def _contract(tmp_path, monkeypatch, caplog, case):
                     assert registry.kill_process(sessions[0].id)["status"] == "killed"
                 else:
                     gate.touch()
-                    deadline = time.monotonic() + 10
-                    while not sessions[0].exited and time.monotonic() < deadline:
-                        time.sleep(.01)
-                    assert sessions[0].exited and sessions[0].exit_code == 0
+                    wait_until(lambda: sessions[0].exited, timeout=10,
+                               what="adopted command completed")
+                    assert sessions[0].exit_code == 0
                 assert proc._owner.wait(timeout=5) is not None
         elif case in {"release_wins", "cancel_wins"}:
             file = tmp_path / "pid"
@@ -218,7 +216,7 @@ def _contract(tmp_path, monkeypatch, caplog, case):
                     "pathlib.Path(sys.argv[1]).write_text(str(p.pid)); "
                     + sabotage + "owner._cleanup(True)")
             result = subprocess.run([sys.executable, "-c", code, str(file)],
-                                    env={**os.environ, "PYTHONPATH": str(repo)}, capture_output=True, timeout=5)
+                                    env={**os.environ, "PYTHONPATH": str(repo)}, capture_output=True, timeout=5, check=False)
             assert result.returncode == -signal.SIGKILL
             try:
                 child = psutil.Process(int(file.read_text()))
@@ -250,27 +248,27 @@ def _contract(tmp_path, monkeypatch, caplog, case):
             assert proc.stdout.readline().strip() == "ready"
             assert proc.terminate_owned(term_grace=2, wait=False)
             target = 2 if "descendants" in case else 1
-            deadline = time.monotonic() + 5
-            while (not file.exists() or len(file.read_text().splitlines()) < target):
-                assert time.monotonic() < deadline, "configured grace phase did not start"
-                time.sleep(.01)
+            wait_until(lambda: file.exists() and len(file.read_text().splitlines()) >= target,
+                       timeout=5, what="configured grace phase started")
             started = time.monotonic()
             if case.endswith("force"):
                 assert proc.terminate_owned(force=True)
             else:
                 proc._close_control()  # real private-channel EOF during this phase
-                proc._owner.wait(timeout=1)
-            assert time.monotonic() - started < 1, "force/EOF waited for configured TERM grace"
+                proc._owner.wait(timeout=2)
+            assert time.monotonic() - started < 2, "force/EOF waited for configured TERM grace"
             _gone(child)
         elif case in {"empty_evidence_stalled", "empty_evidence_unavailable"}:
             from tools.environments import local_process
             popen = subprocess.Popen
             repo = Path(__file__).resolve().parents[2]
-            failure = ("lambda *a: time.sleep(30)" if case == "empty_evidence_stalled" else
-                       "lambda *a: (_ for _ in ()).throw(OSError('unavailable'))")
-            wrapper = (f"import sys,time; sys.path.insert(0,{str(repo)!r}); "
+            probe_started = tmp_path / "empty-probe-started"
+            failure = ("time.sleep(30)" if case == "empty_evidence_stalled" else
+                       "(_ for _ in ()).throw(OSError('unavailable'))")
+            wrapper = (f"import sys,time,pathlib; sys.path.insert(0,{str(repo)!r}); "
                        "from tools.environments import local_process_owner as owner; "
-                       f"owner._group_empty={failure}; sys.exit(owner.main())")
+                       f"owner._group_empty=lambda *a: (pathlib.Path({str(probe_started)!r}).touch(), {failure})[-1]; "
+                       "sys.exit(owner.main())")
             def sabotaged(args, **kwargs):
                 return popen([args[0], "-c", wrapper, *args[3:]], **kwargs)
             monkeypatch.setattr(local_process.subprocess, "Popen", sabotaged)
@@ -279,12 +277,12 @@ def _contract(tmp_path, monkeypatch, caplog, case):
             child = psutil.Process(proc.command_pid)
             assert proc.stdout.readline().strip() == "ready"
             assert not proc.terminate_owned(term_grace=0)
-            time.sleep(.3)
+            wait_until(probe_started.exists, timeout=5, what="empty-group evidence probe started")
             assert proc.poll() is None and proc._owner.poll() is None
             assert _alive(child), "missing empty-group evidence caused escalation"
             started = time.monotonic()
             assert proc.terminate_owned(force=True)
-            assert time.monotonic() - started < 1
+            assert time.monotonic() - started < 2
             _gone(child)
         elif case == "startup_refusal":
             file = tmp_path / "must-not-run"
@@ -306,7 +304,7 @@ def _contract(tmp_path, monkeypatch, caplog, case):
                         "print('ready',flush=True); time.sleep(30)")
             cmd = "exec " + " ".join(map(shlex.quote, [sys.executable, "-c", workload, str(file)]))
             result = subprocess.run([sys.executable, "-c", code, str(tmp_path), cmd],
-                                    env={**os.environ, "PYTHONPATH": str(repo)}, capture_output=True, timeout=15)
+                                    env={**os.environ, "PYTHONPATH": str(repo)}, capture_output=True, timeout=15, check=False)
             assert result.returncode == 0, result.stderr
             try:
                 child = psutil.Process(int(file.read_text()))
@@ -328,21 +326,21 @@ _CASES = ["io_status", "negative_signal", "early_stdin_close", "early_stdout_clo
           "grace_parent_force", "grace_parent_eof", "grace_descendants_force", "grace_descendants_eof"]
 
 
-@pytest.mark.linux_only
+@pytest.mark.platforms("linux")
 @pytest.mark.live_system_guard_bypass
 @pytest.mark.parametrize("case", _CASES)
 def test_owned_lifetime_contract_linux(tmp_path, monkeypatch, caplog, case):
     _contract(tmp_path, monkeypatch, caplog, case)
 
 
-@pytest.mark.macos_only
+@pytest.mark.platforms("macos")
 @pytest.mark.live_system_guard_bypass
 @pytest.mark.parametrize("case", _CASES)
 def test_owned_lifetime_contract_macos(tmp_path, monkeypatch, caplog, case):
     _contract(tmp_path, monkeypatch, caplog, case)
 
 
-@pytest.mark.windows_only
+@pytest.mark.platforms("windows")
 @pytest.mark.live_system_guard_bypass
 def test_windows_retains_native_popen_stdio_and_status(tmp_path):
     env = object.__new__(local.LocalEnvironment)

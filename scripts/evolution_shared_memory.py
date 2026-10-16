@@ -53,7 +53,7 @@ def _cache_path() -> Path:
 
 def _query_global_scope(
     query: str = "evolution lesson pattern", limit: int = 20
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Query the tqmemory global scope for cross-instance notes.
 
     Tries the tqmemory MCP server's Python API first, then falls back to
@@ -111,7 +111,7 @@ def _query_global_scope(
     notes = []
     for note_file in global_notes_dir.glob("*.json"):
         try:
-            data = json.loads(note_file.read_text(encoding="utf-8"))
+            data = json.loads(note_file.read_text(encoding="utf-8-sig"))
             tags = data.get("tags", [])
             # Only include evolution-tagged notes for cross-instance sharing
             if any("evolution" in str(t).lower() for t in tags):
@@ -128,7 +128,7 @@ def _query_global_scope(
     return notes[:limit]
 
 
-def retrieve_shared_experiences(query: str = "evolution") -> List[Dict[str, Any]]:
+def retrieve_shared_experiences(query: str = "evolution") -> list[dict[str, Any]]:
     """Retrieve cross-instance experiences from the shared memory tier.
 
     Called by evolution cycles to enrich context with lessons other
@@ -145,13 +145,13 @@ def retrieve_shared_experiences(query: str = "evolution") -> List[Dict[str, Any]
     return _read_cache()
 
 
-def _read_cache() -> List[Dict[str, Any]]:
+def _read_cache() -> list[dict[str, Any]]:
     """Read the shared memory cache file."""
     cache = _cache_path()
     if not cache.exists():
         return []
     try:
-        data = json.loads(cache.read_text(encoding="utf-8"))
+        data = json.loads(cache.read_text(encoding="utf-8-sig"))
         if isinstance(data, dict):
             return data.get("notes", [])
         if isinstance(data, list):
@@ -161,7 +161,7 @@ def _read_cache() -> List[Dict[str, Any]]:
     return []
 
 
-def _write_cache(notes: List[Dict[str, Any]]) -> None:
+def _write_cache(notes: list[dict[str, Any]]) -> None:
     """Write notes to the shared memory cache file."""
     cache = _cache_path()
     cache.parent.mkdir(parents=True, exist_ok=True)
@@ -175,7 +175,7 @@ def _write_cache(notes: List[Dict[str, Any]]) -> None:
     )
 
 
-def run_shared_memory_sync() -> Dict[str, Any]:
+def run_shared_memory_sync() -> dict[str, Any]:
     """Run one shared-memory sync pass: query global scope, update cache.
 
     Returns a summary dict. This is the entry point for the cron job.

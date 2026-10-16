@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
+import hermes_yaml as yaml
 
 from agent import i18n
 
@@ -68,6 +68,14 @@ def test_catalog_placeholders_match_english(lang: str):
             f"{lang}.yaml key={key!r}: placeholders {lang_placeholders} "
             f"don't match English {en_placeholders}"
         )
+
+
+@pytest.mark.parametrize("lang", list(i18n.SUPPORTED_LANGUAGES))
+def test_catalog_values_have_no_escaped_newlines(lang: str):
+    """A double-escaped ``\\\\n`` in YAML loads as a visible backslash-n, so
+    pickers render ``\\n`` text instead of line breaks (e.g. /reasoning, /fast)."""
+    escaped = [key for key, value in _flatten(_load_raw(lang)).items() if "\\n" in value]
+    assert not escaped, f"{lang}.yaml has literal \\n in: {escaped}"
 
 
 # ---------------------------------------------------------------------------
@@ -168,3 +176,113 @@ def test_locales_dir_env_override_ignored_when_missing(tmp_path, monkeypatch):
     assert result.name == "locales"
 
 
+
+
+@pytest.fixture
+def isolated_language_profiles(monkeypatch, tmp_path):
+    from agent import secret_scope
+    import hermes_constants
+
+    launch = tmp_path / "launch"
+    routed = tmp_path / "routed"
+    launch.mkdir()
+    routed.mkdir()
+    (launch / "config.yaml").write_text("display:\n  language: fr\n", encoding="utf-8")
+    (routed / "config.yaml").write_text("display:\n  language: de\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HERMES_HOME", str(launch))
+    monkeypatch.setenv("HERMES_LANGUAGE", "zh")
+    monkeypatch.setattr(hermes_constants, "_PINNED_PROCESS_HERMES_HOME", None)
+    secret_scope.set_multiplex_active(True)
+    token = secret_scope.set_secret_scope(None)
+    i18n.reset_language_cache()
+    try:
+        yield launch, routed
+    finally:
+        secret_scope.reset_secret_scope(token)
+        secret_scope.set_multiplex_active(False)
+        i18n.reset_language_cache()
+
+
+def test_unscoped_language_routes_a_b_a_without_launch_environment_bleed(isolated_language_profiles, monkeypatch):
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+
+    launch, routed = isolated_language_profiles
+    for home, expected in ((launch, "zh"), (routed, "de"), (launch, "zh")):
+        token = set_hermes_home_override(home)
+        # A host may mirror its current route into environ; the process pin stays A.
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        try:
+            assert i18n.get_language() == expected
+        finally:
+            reset_hermes_home_override(token)
+
+
+def test_unscoped_language_unknown_process_identity_uses_config(isolated_language_profiles):
+    from hermes_constants import pin_process_hermes_home
+
+    pin_process_hermes_home(None)
+    assert i18n.get_language() == "fr"
+
+
+def test_unscoped_language_failed_identity_resolution_uses_config(isolated_language_profiles, monkeypatch):
+    import hermes_constants
+
+    def unavailable():
+        raise OSError("synthetic identity failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(hermes_constants, "get_pinned_process_hermes_home", unavailable)
+        assert i18n.get_language() == "fr"
+
+
+@pytest.mark.parametrize("config_error", [False, True])
+def test_unscoped_routed_language_uses_safe_default_without_config(isolated_language_profiles, monkeypatch, config_error):
+    import hermes_cli.config
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+
+    _, routed = isolated_language_profiles
+    (routed / "config.yaml").unlink()
+    if config_error:
+        def unavailable():
+            raise OSError("synthetic config failure")
+        monkeypatch.setattr(hermes_cli.config, "load_config_readonly", unavailable)
+    token = set_hermes_home_override(routed)
+    try:
+        assert i18n.get_language() == "en"
+    finally:
+        reset_hermes_home_override(token)
+
+
+def test_valid_scoped_language_keeps_precedence(isolated_language_profiles):
+    from agent import secret_scope
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+
+    _, routed = isolated_language_profiles
+    token = secret_scope.set_secret_scope({"HERMES_LANGUAGE": "es"}, profile_home=str(routed))
+    home = set_hermes_home_override(routed)
+    try:
+        assert i18n.get_language() == "es"
+    finally:
+        reset_hermes_home_override(home)
+        secret_scope.reset_secret_scope(token)
+
+
+def test_nonmultiplex_language_keeps_environment_precedence(isolated_language_profiles):
+    from agent import secret_scope
+
+    secret_scope.set_multiplex_active(False)
+    assert i18n.get_language() == "zh"
+
+
+@pytest.mark.parametrize("pin", ["", "   ", ".", "$HERMES_HOME", "absolute_env"])
+def test_unscoped_language_does_not_expand_or_guess_process_pin(isolated_language_profiles, monkeypatch, pin):
+    from hermes_constants import pin_process_hermes_home
+
+    launch, _ = isolated_language_profiles
+    monkeypatch.setenv("PINNED_PROFILE_NAME", launch.name)
+    if pin == "absolute_env":
+        pin = str(launch.parent / "$PINNED_PROFILE_NAME")
+    pin_process_hermes_home(pin)
+    assert i18n.get_language() == "fr"

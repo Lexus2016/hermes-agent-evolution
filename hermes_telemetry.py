@@ -81,9 +81,9 @@ def _ensure_init() -> None:
     # Opt-in backend: lazy-install OTel at first enabled use (prompt=False so a
     # cron tick never blocks on input()). Any failure degrades to no-op below.
     try:
-        from tools import lazy_deps
+        from pm.extras import ensure_import
 
-        lazy_deps.ensure("telemetry.otel", prompt=False)
+        ensure_import("otel")
     except Exception:
         pass
     try:

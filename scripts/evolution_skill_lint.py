@@ -67,6 +67,9 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+# Standalone source invocations must resolve the canonical repository YAML policy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from typing import Any, Dict, List, Optional
 
 # A script invocation the stage is told to RUN — `python/python3/bash/sh scripts/X`
@@ -77,7 +80,7 @@ _RUN_RE = re.compile(r"(?:(?:python3?|bash|sh)\s+|\./)(scripts/[A-Za-z0-9_./-]+\
 _NAME_RE = re.compile(r"^name:\s*(\S+)\s*$", re.MULTILINE)
 
 
-def extract_run_commands(text: str) -> List[str]:
+def extract_run_commands(text: str) -> list[str]:
     """Return the distinct ``scripts/...`` paths the text instructs running."""
     return sorted({m.group(1) for m in _RUN_RE.finditer(text or "")})
 
@@ -109,7 +112,7 @@ def check_skill_edit_budget(
     removed: int,
     ratio: float = DEFAULT_EDIT_BUDGET_RATIO,
     min_lines: int = MIN_SKILL_LINES_FOR_BUDGET,
-) -> Optional[Dict[str, str]]:
+) -> Optional[dict[str, str]]:
     """Pure check for one changed ``SKILL.md``. ``before_lines`` is the file's
     line count at the base ref; ``added``/``removed`` are the diff's numstat
     counts. A brand-new file has ``before_lines == 0`` and is exempt (creation
@@ -133,13 +136,13 @@ def check_skill_edit_budget(
 
 
 def find_edit_budget_violations(
-    diffs: List[Dict[str, Any]],
+    diffs: list[dict[str, Any]],
     ratio: float = DEFAULT_EDIT_BUDGET_RATIO,
     min_lines: int = MIN_SKILL_LINES_FOR_BUDGET,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Pure core, mirrors ``find_violations``. ``diffs`` = [{path, before_lines,
     added, removed}, ...] for changed ``skills/**/SKILL.md`` files. No git IO."""
-    out: List[Dict[str, str]] = []
+    out: list[dict[str, str]] = []
     for d in diffs:
         v = check_skill_edit_budget(
             path=str(d.get("path") or ""),
@@ -155,14 +158,14 @@ def find_edit_budget_violations(
 
 
 def find_violations(
-    stages: List[Dict[str, Any]],
-    skill_texts: Dict[str, str],
+    stages: list[dict[str, Any]],
+    skill_texts: dict[str, str],
     existing_scripts: set,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Pure core. ``stages`` = [{name, skills:[ref], toolsets:[..]}]; ``skill_texts``
     maps skill frontmatter-name -> SKILL.md text; ``existing_scripts`` = set of
     ``scripts/X`` paths that exist. Returns a list of violation dicts."""
-    out: List[Dict[str, str]] = []
+    out: list[dict[str, str]] = []
     for stage in stages:
         toolsets = set(stage.get("toolsets") or [])
         has_terminal = "terminal" in toolsets
@@ -239,7 +242,7 @@ def _cap_checker():
     return None, None
 
 
-def extract_declared_inputs(skill_text: str) -> List[Dict[str, Any]]:
+def extract_declared_inputs(skill_text: str) -> list[dict[str, Any]]:
     """Parse the ``declared_inputs:`` frontmatter block of a SKILL.md.
 
     Declarations are OPT-IN: a skill with no block yields ``[]`` and is not
@@ -258,7 +261,7 @@ def extract_declared_inputs(skill_text: str) -> List[Dict[str, Any]]:
     crash the gate, and an absent one is simply no declaration.
     """
     try:
-        import yaml
+        import hermes_yaml as yaml
     except Exception:
         return []
     text = skill_text or ""
@@ -273,7 +276,7 @@ def extract_declared_inputs(skill_text: str) -> List[Dict[str, Any]]:
     except Exception:
         return []
     raw = fm.get("declared_inputs")
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     if raw is None:
         return out
     if isinstance(raw, dict):
@@ -300,9 +303,9 @@ def extract_declared_inputs(skill_text: str) -> List[Dict[str, Any]]:
 
 
 def find_cap_violations(
-    declared_inputs: List[Dict[str, Any]],
-    caps: Optional[Dict[str, Dict[str, int]]] = None,
-) -> List[Dict[str, str]]:
+    declared_inputs: list[dict[str, Any]],
+    caps: Optional[dict[str, dict[str, int]]] = None,
+) -> list[dict[str, str]]:
     """Run declared tool inputs through the S1 cap checker.
 
     Pure core, mirrors ``find_violations``. Each returned dict gains the
@@ -316,7 +319,7 @@ def find_cap_violations(
         return []
     if caps is None and loader is not None:
         caps = loader()
-    out: List[Dict[str, str]] = []
+    out: list[dict[str, str]] = []
     for decl in declared_inputs or []:
         tool = decl.get("tool") or ""
         args = decl.get("args")
@@ -336,13 +339,13 @@ def find_cap_violations(
 
 
 # ── IO boundary ────────────────────────────────────────────────────────────────
-def _load_stages(cron_dir: Path) -> List[Dict[str, Any]]:
-    import yaml
+def _load_stages(cron_dir: Path) -> list[dict[str, Any]]:
+    import hermes_yaml as yaml
 
-    stages: List[Dict[str, Any]] = []
+    stages: list[dict[str, Any]] = []
     for y in sorted(cron_dir.glob("*.yaml")):
         try:
-            d = yaml.safe_load(y.read_text(encoding="utf-8")) or {}
+            d = yaml.safe_load(y.read_text(encoding="utf-8-sig")) or {}
         except Exception:
             continue
         if d.get("no_agent"):  # script-only stages own no skills
@@ -357,17 +360,17 @@ def _load_stages(cron_dir: Path) -> List[Dict[str, Any]]:
     return stages
 
 
-def _load_skill_texts(skills_dir: Path) -> Dict[str, str]:
-    texts: Dict[str, str] = {}
+def _load_skill_texts(skills_dir: Path) -> dict[str, str]:
+    texts: dict[str, str] = {}
     for md in skills_dir.glob("**/SKILL.md"):
-        text = md.read_text(encoding="utf-8")
+        text = md.read_text(encoding="utf-8-sig")
         m = _NAME_RE.search(text)
         name = m.group(1) if m else md.parent.name
         texts[name] = text
     return texts
 
 
-def lint_repo(repo_root: Optional[Path] = None) -> List[Dict[str, str]]:
+def lint_repo(repo_root: Optional[Path] = None) -> list[dict[str, str]]:
     """Lint the real repo: evolution cron stages × their skills × scripts/."""
     root = Path(repo_root) if repo_root else Path(__file__).resolve().parents[1]
     stages = _load_stages(root / "cron" / "evolution")
@@ -430,7 +433,7 @@ def _git_merge_base(repo_root: Path, base_ref: str) -> Optional[str]:
     return proc.stdout.strip() or None
 
 
-def _git_skill_md_diffs(repo_root: Path, base_ref: str) -> List[Dict[str, Any]]:
+def _git_skill_md_diffs(repo_root: Path, base_ref: str) -> list[dict[str, Any]]:
     """Real git IO: numstat for changed ``skills/**/SKILL.md`` files vs the
     merge-base of ``HEAD`` and ``base_ref``, plus each file's pre-change line
     count. Diffed against the WORKING TREE (not just HEAD) so this can run
@@ -451,7 +454,7 @@ def _git_skill_md_diffs(repo_root: Path, base_ref: str) -> List[Dict[str, Any]]:
         return []
     if proc.returncode != 0:
         return []
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for line in proc.stdout.splitlines():
         parts = line.split("\t")
         if len(parts) != 3:
@@ -476,7 +479,7 @@ def _git_skill_md_diffs(repo_root: Path, base_ref: str) -> List[Dict[str, Any]]:
 
 def lint_skill_edit_budget(
     repo_root: Optional[Path] = None, base_ref: str = "origin/main"
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Lint the real repo's pending diff: does any changed ``SKILL.md`` blow its
     per-cycle edit budget vs ``base_ref``? Meant to run pre-PR in the
     evolution-implementation stage (see skills/evolution/evolution-implementation),
@@ -491,7 +494,7 @@ def lint_skill_edit_budget(
     return find_edit_budget_violations(diffs, ratio=ratio)
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     args = argv[1:]
     if "--skill-edit-budget" in args:
         base_ref = args[args.index("--base") + 1] if "--base" in args else "origin/main"

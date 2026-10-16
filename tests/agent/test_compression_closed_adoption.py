@@ -24,7 +24,6 @@ from types import SimpleNamespace
 from hermes_state import SessionDB
 from run_agent import AIAgent
 
-
 def _flush_agent(db, session_id):
     """Bind the real flush methods onto a stand-in over a live SessionDB."""
     agent = SimpleNamespace(
@@ -60,7 +59,6 @@ def _flush_agent(db, session_id):
     )
     return agent
 
-
 def _build_compression_chain(db: SessionDB, chain: list[str]) -> tuple[str, str]:
     """Create ``chain[0] -> ... -> chain[-1]`` where every session except the
     last is compression-ended and the last is live. Returns (root, live_head).
@@ -71,7 +69,6 @@ def _build_compression_chain(db: SessionDB, chain: list[str]) -> tuple[str, str]
         if i < len(chain) - 1:
             db.end_session(sid, "compression")
     return chain[0], chain[-1]
-
 
 def test_flush_adopts_unique_live_continuation(tmp_path: Path) -> None:
     db = SessionDB(db_path=tmp_path / "state.db")
@@ -100,7 +97,6 @@ def test_flush_adopts_unique_live_continuation(tmp_path: Path) -> None:
     finally:
         db.close()
 
-
 def test_flush_adopts_live_head_across_compression_chain(tmp_path: Path) -> None:
     """A stale writer behind a chain of >=2 compressions adopts the live head.
 
@@ -125,7 +121,6 @@ def test_flush_adopts_live_head_across_compression_chain(tmp_path: Path) -> None
     finally:
         db.close()
 
-
 def test_flush_fails_closed_when_no_continuation(tmp_path: Path) -> None:
     db = SessionDB(db_path=tmp_path / "state.db")
     try:
@@ -143,7 +138,6 @@ def test_flush_fails_closed_when_no_continuation(tmp_path: Path) -> None:
         assert agent._last_persistence_error_cause == "compression_closed"
     finally:
         db.close()
-
 
 def test_flush_fails_closed_when_tip_is_stale_closed(tmp_path: Path) -> None:
     """The canonical tip walk may land on a stale closed sibling (e.g.
@@ -165,7 +159,6 @@ def test_flush_fails_closed_when_tip_is_stale_closed(tmp_path: Path) -> None:
         assert agent._compression_adoption_failed is True
     finally:
         db.close()
-
 
 def test_flush_adopts_exactly_once_no_retry_loop(tmp_path: Path, monkeypatch) -> None:
     """Adoption budget: the tip lookup runs at most once per flush, and a
@@ -204,11 +197,9 @@ def test_flush_adopts_exactly_once_no_retry_loop(tmp_path: Path, monkeypatch) ->
     finally:
         db.close()
 
-
 # ---------------------------------------------------------------------------
 # Diagnostics: the failure must never read like a disk problem.
 # ---------------------------------------------------------------------------
-
 
 def test_compression_closed_error_classifies_as_compression_closed() -> None:
     from hermes_state import classify_persistence_error
@@ -222,7 +213,3 @@ def test_compression_closed_error_classifies_as_compression_closed() -> None:
         classify_persistence_error(str(CompressionSessionClosedError("session-abc")))
         == "compression_closed"
     )
-
-
-
-

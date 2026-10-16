@@ -34,9 +34,9 @@ def _lock_append_handle(f, acquire: bool) -> None:
         fcntl.flock(f.fileno(), fcntl.LOCK_EX if acquire else fcntl.LOCK_UN)
 
 
-def save_trajectory(trajectory: List[Dict[str, Any]], model: str,
-                    completed: bool, filename: str = None,
-                    model_calls: Optional[List[Dict[str, Any]]] = None):
+def save_trajectory(trajectory: list[dict[str, Any]], model: str,
+                    completed: bool, filename: str | None = None,
+                    model_calls: Optional[list[dict[str, Any]]] = None):
     """Append a trajectory entry to a JSONL file.
 
     Args:

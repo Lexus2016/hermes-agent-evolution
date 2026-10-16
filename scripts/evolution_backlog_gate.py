@@ -54,14 +54,14 @@ def _default_evolution_dir() -> Path:
     )
 
 
-def _load_records(metrics_file: Path) -> list[Dict[str, Any]]:
+def _load_records(metrics_file: Path) -> list[dict[str, Any]]:
     """Read metrics.jsonl-style records (one JSON object per line), skipping
     blank/malformed lines. Kept local so the gate has no import dependency on
     evolution_funnel at runtime."""
-    out: list[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     if not metrics_file.exists():
         return out
-    for ln in metrics_file.read_text(encoding="utf-8").splitlines():
+    for ln in metrics_file.read_text(encoding="utf-8-sig").splitlines():
         ln = ln.strip()
         if not ln:
             continue
@@ -74,7 +74,7 @@ def _load_records(metrics_file: Path) -> list[Dict[str, Any]]:
     return out
 
 
-def _merged_zero_streak(records: list[Dict[str, Any]]) -> int:
+def _merged_zero_streak(records: list[dict[str, Any]]) -> int:
     """Trailing run of cycles with merged == 0."""
     streak = 0
     for r in reversed(records):
@@ -85,7 +85,7 @@ def _merged_zero_streak(records: list[Dict[str, Any]]) -> int:
     return streak
 
 
-def _cycle_success_rate(records: list[Dict[str, Any]]) -> float:
+def _cycle_success_rate(records: list[dict[str, Any]]) -> float:
     """Fraction of active cycles (selected > 0 or issues_created > 0) that landed
     >=1 merge over the trailing window."""
     active = [
@@ -101,7 +101,7 @@ def _cycle_success_rate(records: list[Dict[str, Any]]) -> float:
 
 
 def resolve_dynamic_cap(
-    records: list[Dict[str, Any]],
+    records: list[dict[str, Any]],
     base_cap: int = DEFAULT_CAP,
 ) -> int:
     """Shrink the feature-backlog cap when integration is stuck.
@@ -125,7 +125,7 @@ def resolve_dynamic_cap(
 
 def resolve_cap(
     arg_cap: int | None = None,
-    records: list[Dict[str, Any]] | None = None,
+    records: list[dict[str, Any]] | None = None,
     evolution_dir: Path | None = None,
 ) -> int:
     """Cap resolution: --cap arg > env EVOLUTION_FEATURE_BACKLOG_CAP > dynamic
@@ -150,7 +150,7 @@ def resolve_cap(
     return resolve_dynamic_cap(records, DEFAULT_CAP)
 
 
-def is_bug(issue: Dict[str, Any]) -> bool:
+def is_bug(issue: dict[str, Any]) -> bool:
     """True when an issue is a bug/[FIX] (never throttled)."""
     title = (issue.get("title") or "").lstrip()
     if title.upper().startswith("[FIX]"):
@@ -163,7 +163,7 @@ def is_bug(issue: Dict[str, Any]) -> bool:
     return "bug" in names
 
 
-def count_open_features(issues: List[Dict[str, Any]]) -> int:
+def count_open_features(issues: list[dict[str, Any]]) -> int:
     """Count open issues that are FEATURE-like (i.e. not bugs)."""
     return sum(1 for it in issues if not is_bug(it))
 
@@ -173,7 +173,7 @@ def should_throttle(open_features: int, cap: int) -> bool:
     return open_features >= cap
 
 
-def _default_runner(cmd: List[str]) -> Tuple[int, str]:
+def _default_runner(cmd: list[str]) -> tuple[int, str]:
     proc = subprocess.run(
         cmd,
         capture_output=True,
@@ -181,13 +181,14 @@ def _default_runner(cmd: List[str]) -> Tuple[int, str]:
         encoding="utf-8",
         errors="replace",
         timeout=30,
+        check=False,
     )
     return proc.returncode, (proc.stdout or "")
 
 
 def fetch_open_issues(
-    runner: Callable[[List[str]], Tuple[int, str]] | None = None,
-) -> List[Dict[str, Any]] | None:
+    runner: Callable[[list[str]], tuple[int, str]] | None = None,
+) -> list[dict[str, Any]] | None:
     """Return the list of open issues, or None if gh failed (fail-open)."""
     runner = runner or _default_runner
     rc, out = runner([
@@ -214,8 +215,8 @@ def fetch_open_issues(
 
 def evaluate(
     cap: int,
-    runner: Callable[[List[str]], Tuple[int, str]] | None = None,
-) -> Dict[str, Any]:
+    runner: Callable[[list[str]], tuple[int, str]] | None = None,
+) -> dict[str, Any]:
     """Compute the gate decision. Fail-OPEN (throttle=False) if gh is unavailable
     — never block bug/feature generation just because the count couldn't be read."""
     issues = fetch_open_issues(runner)
@@ -230,7 +231,7 @@ def evaluate(
     return {"open_features": n, "cap": cap, "throttle": should_throttle(n, cap)}
 
 
-def main(argv: List[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Throttle FEATURE proposals when the open backlog is full "
         "(bugs are never throttled)."

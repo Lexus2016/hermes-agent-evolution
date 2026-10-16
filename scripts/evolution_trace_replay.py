@@ -40,8 +40,8 @@ for p in (str(ROOT / "scripts"), str(ROOT)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from agent.tool_call_capture import branch_trajectory, replay_trajectory, resume_index  # noqa: E402
-from evolution_trajectory_logger import iter_trajectories  # noqa: E402
+from agent.tool_call_capture import branch_trajectory, replay_trajectory, resume_index
+from evolution_trajectory_logger import iter_trajectories
 
 EXIT_OK = 0
 EXIT_BAD_INPUT = 2
@@ -54,11 +54,11 @@ def _load_single(path: Path) -> Optional[Any]:
     return logs[0] if logs else None
 
 
-def _print_json(obj: Dict[str, Any]) -> None:
+def _print_json(obj: dict[str, Any]) -> None:
     print(json.dumps(obj, indent=2, sort_keys=True))
 
 
-def cmd_replay(argv: List[str]) -> int:
+def cmd_replay(argv: list[str]) -> int:
     path = argv[0]
     start_at = 0
     stop_at = None
@@ -94,7 +94,7 @@ def cmd_replay(argv: List[str]) -> int:
     return EXIT_OK
 
 
-def cmd_resume(argv: List[str]) -> int:
+def cmd_resume(argv: list[str]) -> int:
     path = argv[0]
     log = _load_single(Path(path))
     if log is None:
@@ -112,7 +112,7 @@ def cmd_resume(argv: List[str]) -> int:
     return EXIT_OK
 
 
-def cmd_branch(argv: List[str]) -> int:
+def cmd_branch(argv: list[str]) -> int:
     path = argv[0]
     up_to = None
     out_dir: Optional[Path] = None
@@ -148,7 +148,7 @@ def _err(msg: str) -> int:
     return EXIT_BAD_INPUT
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(
             "usage: evolution_trace_replay.py <replay|resume|branch> <path> [opts]",

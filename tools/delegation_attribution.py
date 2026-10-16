@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Delegation attribution markers (issue #67, slice 1).
 
 Anthropic's multiagent red-team research (the source of #67) found that in
@@ -34,7 +33,7 @@ the other standalone tools modules.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from typing import Optional
 
 __all__ = [
@@ -76,7 +75,7 @@ class AttributionStamp:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def build_attribution_stamp(

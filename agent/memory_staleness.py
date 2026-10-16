@@ -34,27 +34,27 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from enum import Enum
 from typing import Any, Iterable
 
 __all__ = [
-    "Note",
-    "StalenessReason",
-    "StalenessFlag",
-    "ConsolidationGroup",
-    "StalenessReport",
     "DEFAULT_CONFIG",
-    "jaccard_similarity",
+    "ConsolidationGroup",
+    "Note",
+    "StalenessFlag",
+    "StalenessReason",
+    "StalenessReport",
+    "analyze",
+    "build_consolidation_groups",
     "detect_age",
     "detect_contradictions",
-    "detect_low_quality",
-    "detect_duplicates",
-    "detect_superseded",
     "detect_deprecated_but_referenced",
-    "build_consolidation_groups",
+    "detect_duplicates",
+    "detect_low_quality",
+    "detect_superseded",
+    "jaccard_similarity",
     "quality_score",
-    "analyze",
     "render_report",
 ]
 
@@ -122,12 +122,12 @@ class Note:
         ref = self.updated_at or self.created_at
         if ref is None:
             return 0.0
-        anchor = now or datetime.now(timezone.utc)
+        anchor = now or datetime.now(UTC)
         # Normalize naive timestamps to UTC so the delta is always well-defined.
         if ref.tzinfo is None:
-            ref = ref.replace(tzinfo=timezone.utc)
+            ref = ref.replace(tzinfo=UTC)
         if anchor.tzinfo is None:
-            anchor = anchor.replace(tzinfo=timezone.utc)
+            anchor = anchor.replace(tzinfo=UTC)
         delta = anchor - ref
         return max(delta.total_seconds(), 0.0) / 86400.0
 
@@ -518,12 +518,12 @@ def build_consolidation_groups(
             continue  # no duplicates to consolidate
 
         def sort_key(n: Note) -> tuple[Any, ...]:
-            updated = n.updated_at or datetime.min.replace(tzinfo=timezone.utc)
-            created = n.created_at or datetime.min.replace(tzinfo=timezone.utc)
+            updated = n.updated_at or datetime.min.replace(tzinfo=UTC)
+            created = n.created_at or datetime.min.replace(tzinfo=UTC)
             if updated.tzinfo is None:
-                updated = updated.replace(tzinfo=timezone.utc)
+                updated = updated.replace(tzinfo=UTC)
             if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
+                created = created.replace(tzinfo=UTC)
             # Newest first: highest timestamp wins; id breaks ties deterministically.
             return (updated, created, n.id)
 

@@ -31,23 +31,23 @@ import math
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Iterable
 
 __all__ = [
-    "MemoryEvent",
-    "EpisodicMemoryStore",
-    "score_importance",
-    "apply_temporal_decay",
-    "tokenize",
-    "jaccard_similarity",
     "DEFAULT_HALF_LIFE_DAYS",
     "DEFAULT_SIGNAL_WEIGHTS",
+    "REVOCATION_REASON_CONTRADICTION",
     "SIGNAL_WEIGHTS",
     "VALIDITY_ACTIVE",
     "VALIDITY_REVOKED",
-    "REVOCATION_REASON_CONTRADICTION",
+    "EpisodicMemoryStore",
+    "MemoryEvent",
+    "apply_temporal_decay",
+    "jaccard_similarity",
+    "score_importance",
+    "tokenize",
 ]
 
 # ---------------------------------------------------------------------------
@@ -92,7 +92,7 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 
 def _now_iso() -> str:
     """Return the current UTC time as an ISO-8601 string."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _parse_iso(ts: str | datetime | None) -> datetime:
@@ -102,17 +102,17 @@ def _parse_iso(ts: str | datetime | None) -> datetime:
     normalized.  ``None`` defaults to *now*.
     """
     if ts is None:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     if isinstance(ts, datetime):
         if ts.tzinfo is None:
-            return ts.replace(tzinfo=timezone.utc)
+            return ts.replace(tzinfo=UTC)
         return ts
     cleaned = ts.strip()
     if cleaned.endswith("Z"):
         cleaned = cleaned[:-1] + "+00:00"
     dt = datetime.fromisoformat(cleaned)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -220,7 +220,7 @@ def apply_temporal_decay(
     ref = (
         _parse_iso(reference_time)
         if reference_time is not None
-        else datetime.now(timezone.utc)
+        else datetime.now(UTC)
     )
     ev = _parse_iso(event_time)
     elapsed = (ref - ev).total_seconds() / 86400.0
@@ -783,7 +783,7 @@ class EpisodicMemoryStore:
         """Load a store from a JSON file written by :meth:`save`."""
         p = Path(path)
         # ruff: PLW1514 — explicit encoding required by repo lint policy.
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8-sig"))
         return cls.from_dict(data)
 
     # -- convenience ------------------------------------------------------

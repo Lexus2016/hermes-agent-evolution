@@ -12,14 +12,14 @@ import json
 import os
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 __all__ = [
+    "FailureExample",
     "ToolMemoryRecord",
     "ToolMemoryStore",
-    "FailureExample",
     "load_store",
     "main",
 ]
@@ -33,9 +33,9 @@ class FailureExample:
 
     def __post_init__(self) -> None:
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "scenario": self.scenario,
             "error": self.error,
@@ -43,7 +43,7 @@ class FailureExample:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "FailureExample":
+    def from_dict(cls, d: dict[str, Any]) -> FailureExample:
         return cls(
             scenario=d.get("scenario", ""),
             error=d.get("error", ""),
@@ -55,13 +55,13 @@ class FailureExample:
 class ToolMemoryRecord:
     tool_name: str
     capability: str = ""
-    failure_boundaries: List[str] = field(default_factory=list)
-    composition_partners: List[str] = field(default_factory=list)
+    failure_boundaries: list[str] = field(default_factory=list)
+    composition_partners: list[str] = field(default_factory=list)
     last_verified: str = ""
     verified_count: int = 0
-    failure_examples: List[FailureExample] = field(default_factory=list)
+    failure_examples: list[FailureExample] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "tool_name": self.tool_name,
             "capability": self.capability,
@@ -73,7 +73,7 @@ class ToolMemoryRecord:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ToolMemoryRecord":
+    def from_dict(cls, d: dict[str, Any]) -> ToolMemoryRecord:
         return cls(
             tool_name=d.get("tool_name", ""),
             capability=d.get("capability", ""),
@@ -94,16 +94,16 @@ class ToolMemoryStore:
 
     def __init__(self, storage_dir: Path) -> None:
         self.storage_dir = storage_dir
-        self._records: Dict[str, ToolMemoryRecord] = {}
+        self._records: dict[str, ToolMemoryRecord] = {}
 
     @classmethod
-    def load(cls, d: Path) -> "ToolMemoryStore":
+    def load(cls, d: Path) -> ToolMemoryStore:
         store = cls(d)
         if not d.is_dir():
             return store
         for p in sorted(d.glob("*.json")):
             try:
-                data = json.loads(p.read_text(encoding="utf-8"))
+                data = json.loads(p.read_text(encoding="utf-8-sig"))
             except (OSError, ValueError):
                 continue
             if isinstance(data, dict):
@@ -129,12 +129,12 @@ class ToolMemoryStore:
         )
         return p
 
-    def save_all(self) -> List[Path]:
+    def save_all(self) -> list[Path]:
         return [p for p in (self.save_record(n) for n in self._records) if p]
 
     def query(
         self, capability: str = "", composition_partner: str = ""
-    ) -> List[ToolMemoryRecord]:
+    ) -> list[ToolMemoryRecord]:
         cap, part = capability.lower(), composition_partner.lower()
         results = []
         for r in self._records.values():
@@ -146,7 +146,7 @@ class ToolMemoryStore:
         results.sort(key=lambda r: r.tool_name)
         return results
 
-    def list_tools(self) -> List[str]:
+    def list_tools(self) -> list[str]:
         return sorted(self._records.keys())
 
     def count(self) -> int:
@@ -166,7 +166,7 @@ class ToolMemoryStore:
             self._records[name] = r
         if capability:
             r.capability = capability
-        r.last_verified = datetime.now(timezone.utc).isoformat()
+        r.last_verified = datetime.now(UTC).isoformat()
         r.verified_count += 1
 
 
@@ -186,7 +186,7 @@ def load_store(d: Optional[Path] = None) -> ToolMemoryStore:
     return ToolMemoryStore.load(d or _default_dir())
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     args = argv[1:]
     if not args or args[0] not in ("list", "query", "show", "verify"):
         print("usage: evolution_tool_memory.py {list|query|show|verify} [options]")

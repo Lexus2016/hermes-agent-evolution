@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
 
-def _run(cmd: List[str], cwd: Optional[str] = None) -> Tuple[int, str, str]:
+def _run(cmd: list[str], cwd: Optional[str] = None) -> tuple[int, str, str]:
     p = subprocess.run(
         cmd,
         capture_output=True,
@@ -34,13 +34,14 @@ def _run(cmd: List[str], cwd: Optional[str] = None) -> Tuple[int, str, str]:
         encoding="utf-8",
         errors="replace",
         cwd=cwd,
+        check=False,
     )
     return p.returncode, p.stdout, p.stderr
 
 
 def get_changed_files(
     base: str = "origin/main", cwd: Optional[str] = None
-) -> List[str]:
+) -> list[str]:
     """Return Python files changed vs ``base`` that still exist on disk."""
     code, out, _ = _run(["git", "diff", "--name-only", base], cwd=cwd)
     if code != 0:
@@ -55,7 +56,7 @@ def get_changed_files(
 
 def format_files(
     files: Sequence[str], *, dry_run: bool = False, runner=subprocess.run
-) -> Tuple[bool, List[str]]:
+) -> tuple[bool, list[str]]:
     """Run ``ruff check --fix`` + ``ruff format`` on ``files``.
 
     Returns ``(success, messages)``. Dry-run uses ``--check`` variants.
@@ -63,7 +64,7 @@ def format_files(
     if not files:
         return True, ["no Python files to format"]
 
-    messages: List[str] = []
+    messages: list[str] = []
     # Step 1: ruff check --fix (lint auto-fix; --exit-zero in dry-run)
     check_cmd = ["ruff", "check", "--exit-zero" if dry_run else "--fix", *files]
     p = runner(check_cmd, capture_output=True, text=True)
@@ -86,7 +87,7 @@ def format_files(
     return True, messages
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Auto-format changed Python files before CI"
     )

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Co-evolution loop — agents and tools improve together (#2262, parent #2251).
 
 Slice B of the dual asset banks: the agent bank (``agent/experience_bank.py``,
@@ -48,8 +47,8 @@ def _task_type_from_goal(goal: str) -> str:
     return text[:_MAX_TASK_TYPE_LEN].strip()
 
 
-def _tool_names(tool_calls: Sequence[Any]) -> List[str]:
-    names: List[str] = []
+def _tool_names(tool_calls: Sequence[Any]) -> list[str]:
+    names: list[str] = []
     for call in tool_calls or ():
         if isinstance(call, str):
             name = call.strip()
@@ -62,10 +61,10 @@ def _tool_names(tool_calls: Sequence[Any]) -> List[str]:
     return names
 
 
-def _load_tags(path: Path) -> Dict[str, Any]:
+def _load_tags(path: Path) -> dict[str, Any]:
     """Load the tag store; corrupt or missing files degrade to empty."""
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             data = json.load(fh)
         if isinstance(data, dict):
             return data
@@ -74,7 +73,7 @@ def _load_tags(path: Path) -> Dict[str, Any]:
     return {}
 
 
-def _subdict(parent: Dict[str, Any], key: str) -> Dict[str, Any]:
+def _subdict(parent: dict[str, Any], key: str) -> dict[str, Any]:
     """Return ``parent[key]`` if it is a dict, else a fresh empty dict."""
     value = parent.get(key)
     return value if isinstance(value, dict) else {}
@@ -83,7 +82,7 @@ def _subdict(parent: Dict[str, Any], key: str) -> Dict[str, Any]:
 def record_delegation_and_tools(
     session_key: str,
     goal: str,
-    outcome: Dict[str, Any],
+    outcome: dict[str, Any],
     tool_calls: Sequence[Any],
     bank: Any = None,
     *,
@@ -144,7 +143,7 @@ def suggest_configuration(
     goal: str,
     bank: Any = None,
     tags_path: Optional[Path] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build a retrieval-only configuration suggestion for a goal.
 
     STRICTLY read-only: loads the agent bank and the tag store, never writes,
@@ -154,7 +153,7 @@ def suggest_configuration(
     bank = bank if bank is not None else experience_bank
     task_type = _task_type_from_goal(goal)
 
-    matched: List[Dict[str, Any]] = []
+    matched: list[dict[str, Any]] = []
     try:
         for pattern in bank.find_matching_delegation_patterns(task_type):
             to_dict = getattr(pattern, "to_dict", None)
@@ -162,10 +161,10 @@ def suggest_configuration(
     except Exception as exc:  # fail-open: suggestions are advisory only
         logger.debug("delegation pattern lookup failed: %s", exc)
 
-    suggested: List[str] = []
+    suggested: list[str] = []
     if task_type:
         path = Path(tags_path) if tags_path is not None else tool_usage_tags_path()
-        totals: Dict[str, List[int]] = {}
+        totals: dict[str, list[int]] = {}
         for stored, entry in _subdict(_load_tags(path), "tasks").items():
             stored_type = str(stored).lower().strip()
             similar = stored_type == task_type or stored_type in task_type or task_type in stored_type
@@ -175,7 +174,7 @@ def suggest_configuration(
                 agg = totals.setdefault(str(name), [0, 0])
                 agg[0] += int(stats.get("success", 0))
                 agg[1] += int(stats.get("total", 0))
-        def _rate(agg: List[int]) -> float:
+        def _rate(agg: list[int]) -> float:
             return agg[0] / agg[1] if agg[1] else 0.0
 
         ranked = sorted(totals.items(), key=lambda kv: (-_rate(kv[1]), -kv[1][1]))

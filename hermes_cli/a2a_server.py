@@ -78,18 +78,18 @@ class A2ATask:
     id: str
     context_id: str
     tool: str
-    arguments: Dict[str, Any]
+    arguments: dict[str, Any]
     state: str = SUBMITTED
     result: Optional[str] = None
     error: Optional[str] = None
-    history: List[Dict[str, str]] = field(default_factory=list)
+    history: list[dict[str, str]] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize as an A2A ``Task`` object (camelCase)."""
-        status: Dict[str, Any] = {"state": self.state, "timestamp": _now_iso()}
+        status: dict[str, Any] = {"state": self.state, "timestamp": _now_iso()}
         if self.error:
             status["message"] = _agent_text(self.error)
-        task: Dict[str, Any] = {
+        task: dict[str, Any] = {
             "id": self.id,
             "contextId": self.context_id,
             "kind": "task",
@@ -104,7 +104,7 @@ class TaskStore:
     """Thread-safe, bounded in-memory task store (FIFO eviction)."""
 
     def __init__(self, max_tasks: int = MAX_TASKS) -> None:
-        self._tasks: "OrderedDict[str, A2ATask]" = OrderedDict()
+        self._tasks: OrderedDict[str, A2ATask] = OrderedDict()
         self._lock = Lock()
         self._max = max_tasks
 
@@ -129,7 +129,7 @@ _STORE = TaskStore()
 # --------------------------------------------------------------------------
 
 
-async def handle_rpc(payload: Any, store: Optional[TaskStore] = None) -> Dict[str, Any]:
+async def handle_rpc(payload: Any, store: Optional[TaskStore] = None) -> dict[str, Any]:
     """Handle a non-streaming JSON-RPC call, returning a response envelope.
 
     Supports ``message/send`` (create + run a task to completion),
@@ -193,7 +193,7 @@ async def sse_stream(
     yield _sse(_rpc_result(rid, _status_event(task, final=True)))
 
 
-def parse_error_response() -> Dict[str, Any]:
+def parse_error_response() -> dict[str, Any]:
     """Envelope for an unparseable request body (id is null per JSON-RPC)."""
     return _rpc_error(None, A2AError(PARSE_ERROR, "parse error"))
 
@@ -203,7 +203,7 @@ def parse_error_response() -> Dict[str, Any]:
 # --------------------------------------------------------------------------
 
 
-def _new_task(params: Dict[str, Any]) -> A2ATask:
+def _new_task(params: dict[str, Any]) -> A2ATask:
     """Build a task from ``message/send`` params, authorizing the mapped tool."""
     message = params.get("message")
     tool, args = _extract_tool_call(message)
@@ -228,7 +228,7 @@ async def _run(task: A2ATask) -> None:
         ok, payload = await asyncio.wait_for(
             asyncio.to_thread(_run_tool, task), TOOL_TIMEOUT_S
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _finish(task, FAILED, error=f"tool timed out after {int(TOOL_TIMEOUT_S)}s")
         return
     except Exception as exc:  # pragma: no cover - defensive
@@ -263,7 +263,7 @@ def _finish(
     _set_state(task, state)
 
 
-def _run_tool(task: A2ATask) -> Tuple[bool, str]:
+def _run_tool(task: A2ATask) -> tuple[bool, str]:
     """Execute the tool via the registry dispatch seam. Returns (ok, payload).
 
     ``registry.dispatch`` already catches handler exceptions, sanitizes error
@@ -299,7 +299,7 @@ def _dispatch_error(raw: str) -> Optional[str]:
 
 def _parse_envelope(
     payload: Any,
-) -> Tuple[Any, str, Dict[str, Any], Optional[A2AError]]:
+) -> tuple[Any, str, dict[str, Any], Optional[A2AError]]:
     """Validate the JSON-RPC envelope. Returns (id, method, params, error)."""
     if not isinstance(payload, dict):
         return None, "", {}, A2AError(INVALID_REQUEST, "request must be a JSON object")
@@ -322,7 +322,7 @@ def _parse_envelope(
     return rid, method, params, None
 
 
-def _extract_tool_call(message: Any) -> Tuple[str, Dict[str, Any]]:
+def _extract_tool_call(message: Any) -> tuple[str, dict[str, Any]]:
     """Pull ``(tool, arguments)`` out of an A2A message.
 
     Two carriers, in priority order: a ``data`` part
@@ -347,7 +347,7 @@ def _extract_tool_call(message: Any) -> Tuple[str, Dict[str, Any]]:
     )
 
 
-def _validate_call(data: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+def _validate_call(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     tool = data.get("tool")
     if not isinstance(tool, str) or not tool:
         raise A2AError(INVALID_PARAMS, "'tool' must be a non-empty string")
@@ -380,7 +380,7 @@ def _set_state(task: A2ATask, state: str) -> None:
     task.state = state
 
 
-def _lookup(params: Dict[str, Any], store: TaskStore) -> A2ATask:
+def _lookup(params: dict[str, Any], store: TaskStore) -> A2ATask:
     task_id = params.get("id")
     if not isinstance(task_id, str) or not task_id:
         raise A2AError(INVALID_PARAMS, "'id' is required")
@@ -390,12 +390,12 @@ def _lookup(params: Dict[str, Any], store: TaskStore) -> A2ATask:
     return task
 
 
-def _status_event(task: A2ATask, *, final: bool) -> Dict[str, Any]:
+def _status_event(task: A2ATask, *, final: bool) -> dict[str, Any]:
     """An A2A ``status-update`` streaming event for ``task``'s current state."""
-    status: Dict[str, Any] = {"state": task.state, "timestamp": _now_iso()}
+    status: dict[str, Any] = {"state": task.state, "timestamp": _now_iso()}
     if final and task.error:
         status["message"] = _agent_text(task.error)
-    event: Dict[str, Any] = {
+    event: dict[str, Any] = {
         "taskId": task.id,
         "contextId": task.context_id,
         "kind": "status-update",
@@ -407,7 +407,7 @@ def _status_event(task: A2ATask, *, final: bool) -> Dict[str, Any]:
     return event
 
 
-def _artifacts(task: A2ATask) -> List[Dict[str, Any]]:
+def _artifacts(task: A2ATask) -> list[dict[str, Any]]:
     if task.result is None:
         return []
     return [
@@ -418,22 +418,22 @@ def _artifacts(task: A2ATask) -> List[Dict[str, Any]]:
     ]
 
 
-def _agent_text(text: str) -> Dict[str, Any]:
+def _agent_text(text: str) -> dict[str, Any]:
     return {"role": "agent", "parts": [{"kind": "text", "text": text}]}
 
 
-def _rpc_result(rid: Any, result: Dict[str, Any]) -> Dict[str, Any]:
+def _rpc_result(rid: Any, result: dict[str, Any]) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": rid, "result": result}
 
 
-def _rpc_error(rid: Any, err: A2AError) -> Dict[str, Any]:
-    error: Dict[str, Any] = {"code": err.code, "message": err.message}
+def _rpc_error(rid: Any, err: A2AError) -> dict[str, Any]:
+    error: dict[str, Any] = {"code": err.code, "message": err.message}
     if err.data is not None:
         error["data"] = err.data
     return {"jsonrpc": "2.0", "id": rid, "error": error}
 
 
-def _sse(obj: Dict[str, Any]) -> str:
+def _sse(obj: dict[str, Any]) -> str:
     return f"data: {json.dumps(obj)}\n\n"
 
 

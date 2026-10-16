@@ -3,9 +3,11 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_metrics import compute_health, format_health  # noqa: E402
+from evolution_metrics import compute_health, format_health, main
 
 
 def _rec(date, created=0, selected=0, rejected=0, merged=0):
@@ -200,9 +202,7 @@ class TestStageGateIntegration:
 
         evolution_dir.mkdir(parents=True, exist_ok=True)
         with open(evolution_dir / "stage_gate.jsonl", "w", encoding="utf-8") as fh:
-            for b in branches:
-                fh.write(
-                    json.dumps(
+            fh.writelines(json.dumps(
                         {
                             "branch": b,
                             "stage": stage,
@@ -212,8 +212,7 @@ class TestStageGateIntegration:
                             "retained_evidence": [],
                         }
                     )
-                    + "\n"
-                )
+                    + "\n" for b in branches)
 
     def test_healthy_gate_keeps_the_healthy_tail(self, tmp_path):
         d = tmp_path / "evolution"
@@ -248,3 +247,140 @@ class TestStageGateIntegration:
             fh.write(json.dumps({"branch": "accept", "stage": 42}) + "\n")
         line = format_health(compute_health([], 30, d))
         assert "HIGH_STAGE_RESTART_RATE:local_triage" in line, line
+
+
+class TestEvolutionDirectoryResolution:
+    def test_health_reads_active_home(self, tmp_path, monkeypatch):
+        home = tmp_path / "profile"
+        evolution = home / "evolution"
+        evolution.mkdir(parents=True)
+        (evolution / "halt-state.txt").write_text("HALTED\n", encoding="utf-8")
+        TestStageGateIntegration._ledger(
+            evolution, "restart", "restart", "restart", "accept"
+        )
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        monkeypatch.delenv("EVOLUTION_PROFILE_DIR", raising=False)
+
+        health = compute_health([])
+
+        assert health["halted"] is True
+        assert "HIGH_STAGE_RESTART_RATE:local_triage" in format_health(health)
+
+    def test_cli_reads_evolution_override_before_active_home(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        import json
+
+        home = tmp_path / "profile"
+        evolution = home / "evolution"
+        evolution.mkdir(parents=True)
+        (evolution / "halt-state.txt").write_text("HALTED\n", encoding="utf-8")
+        (evolution / "metrics.jsonl").write_text(
+            json.dumps({**_rec("d1", selected=2, merged=1), "skipped": 0}) + "\n", encoding="utf-8"
+        )
+        override = tmp_path / "override"
+        override.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        monkeypatch.delenv("EVOLUTION_PROFILE_DIR", raising=False)
+
+        assert main(["evolution_metrics.py"]) == 0
+        default_line = capsys.readouterr().out
+        assert "selected=2 merged=1" in default_line
+        assert "HALTED" in default_line
+
+        monkeypatch.setenv("EVOLUTION_PROFILE_DIR", str(override))
+        assert main(["evolution_metrics.py"]) == 0
+        override_line = capsys.readouterr().out
+        assert "selected=0 merged=0" in override_line
+        assert override_line.rstrip().endswith("| healthy")
+        assert compute_health([])["halted"] is False
+        assert compute_health([], evolution_dir=evolution)["halted"] is True
+
+    def test_installed_metrics_uses_explicit_home_without_checkout(
+        self, tmp_path, monkeypatch
+    ):
+        import json
+        import os
+        import subprocess
+
+        from scripts.register_evolution_cron import _install_evolution_helpers
+
+        home = tmp_path / "profile"
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        _install_evolution_helpers(Path(__file__).resolve().parents[2])
+        evolution = home / "evolution"
+        evolution.mkdir()
+        (evolution / "halt-state.txt").write_text("HALTED\n", encoding="utf-8")
+        (evolution / "metrics.jsonl").write_text(
+            json.dumps({**_rec("d1", selected=2, merged=1), "skipped": 0}) + "\n",
+            encoding="utf-8",
+        )
+        env = {
+            "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+            "HERMES_HOME": str(home), "PATH": "", "TZ": "UTC", "LANG": "C.UTF-8",
+        }
+        if "SYSTEMROOT" in os.environ:
+            env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+
+        def run():
+            return subprocess.run(
+                [sys.executable, "-E", "-S", "-B",
+                 str(home / "scripts" / "evolution_metrics.py")],
+                cwd=tmp_path, env=env, capture_output=True, text=True,
+                encoding="utf-8", timeout=30, check=False,
+            )
+
+        result = run()
+        assert result.returncode == 0, result.stderr
+        assert "selected=2 merged=1" in result.stdout
+        assert "HALTED" in result.stdout
+
+        env["EVOLUTION_PROFILE_DIR"] = str(tmp_path / "override")
+        result = run()
+        assert result.returncode == 0, result.stderr
+        assert "selected=0 merged=0" in result.stdout
+        assert result.stdout.rstrip().endswith("| healthy")
+
+        del env["HERMES_HOME"]
+        assert run().returncode == 0  # Explicit evolution directory is sufficient.
+        del env["EVOLUTION_PROFILE_DIR"]
+        result = run()
+        assert result.returncode != 0
+        assert "requires HERMES_HOME or EVOLUTION_PROFILE_DIR" in result.stderr
+
+        env["HERMES_HOME"] = " \t "
+        result = run()
+        assert result.returncode != 0
+        assert "requires HERMES_HOME or EVOLUTION_PROFILE_DIR" in result.stderr
+
+    @pytest.mark.parametrize("failure", ["nested_import", "canonical_runtime"])
+    def test_canonical_failures_do_not_fall_back_to_environment(
+        self, tmp_path, monkeypatch, failure
+    ):
+        import builtins
+
+        import hermes_constants
+
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "profile"))
+        monkeypatch.delenv("EVOLUTION_PROFILE_DIR", raising=False)
+        if failure == "nested_import":
+            original_import = builtins.__import__
+            error = ModuleNotFoundError("missing canonical dependency", name="canonical_dependency")
+
+            def import_with_missing_dependency(name, *args, **kwargs):
+                if name == "hermes_constants":
+                    raise error
+                return original_import(name, *args, **kwargs)
+
+            monkeypatch.setattr(builtins, "__import__", import_with_missing_dependency)
+        else:
+            error = RuntimeError("canonical resolver failed")
+
+            def failed_home():
+                raise error
+
+            monkeypatch.setattr(hermes_constants, "get_hermes_home", failed_home)
+
+        with pytest.raises(type(error)) as raised:
+            compute_health([])
+        assert raised.value is error

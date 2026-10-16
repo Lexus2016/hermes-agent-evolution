@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for parallel batch tool evolution + transfer gate (#2260)."""
 
 from evolution.lib.tool_batch_evolution import (

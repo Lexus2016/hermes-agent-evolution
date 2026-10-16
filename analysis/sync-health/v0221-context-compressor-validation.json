@@ -1,0 +1,9 @@
+{
+  "claim": "Canonical test_context_compressor.py regression execution passed 302 tests; only this exact unchanged test-file FILE_LINES finding is covered. No acceptance of production complexity or other test files.",
+  "source_blob": "c1806e20e8f75cae9aa2ebe8178ca732654c1450",
+  "command": "HERMES_PYTHON=.venv/bin/python scripts/run_tests.sh (selected transport/compressor suite)",
+  "passed": 302,
+  "failed": 0,
+  "log_sha256": "6b37d69cf0840b64d94392b3d2180e6ae087607035c5cde40f6449893d31d77a",
+  "review": "Independent controller inspected the 302-pass receipt; owner approved preparation of this exact file-size entry on 2026-10-15."
+}

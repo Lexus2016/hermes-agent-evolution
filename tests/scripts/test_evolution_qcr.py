@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_qcr import (  # noqa: E402
+from evolution_qcr import (
     QCR_FIELDS,
     QcrNote,
     build_qcr_note,

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """C-A-F loop — Context-Action-Feedback (Issue #2258, Slice B, parent #2247).
 
 Sandbox-test candidates against a verifier, accumulate execution-grounded
@@ -13,13 +12,13 @@ import logging
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
-Verifier = Union[Callable[[str, str], bool], str, Path]
+Verifier = Callable[[str, str], bool] | str | Path
 
 
 def _default_base_dir() -> Path:
@@ -50,10 +49,10 @@ class CafRecord:
 
     def __post_init__(self) -> None:
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            self.timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "CafRecord":
+    def from_dict(cls, d: dict[str, Any]) -> CafRecord:
         return cls(
             str(d.get("task_dim", "")), str(d.get("model", "")),
             bool(d.get("passed", False)), str(d.get("timestamp", "")),
@@ -82,6 +81,7 @@ class CafSandboxVerifier:
                 capture_output=True,
                 text=True,
                 timeout=self.timeout_seconds,
+                check=False,
             )
             return proc.returncode == 0
         except (subprocess.TimeoutExpired, OSError) as exc:
@@ -92,7 +92,7 @@ class CafSandboxVerifier:
 class CafExperience:
     """Append-only JSONL store of pass/fail records (B3), fail-open on read."""
 
-    def __init__(self, path: Optional[Union[str, Path]] = None) -> None:
+    def __init__(self, path: Optional[str | Path] = None) -> None:
         self.path = Path(path) if path is not None else default_experience_path()
 
     def record(self, task_dim: str, model: str, passed: bool) -> CafRecord:
@@ -102,7 +102,7 @@ class CafExperience:
             f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
         return rec
 
-    def load(self) -> List[CafRecord]:
+    def load(self) -> list[CafRecord]:
         """Load records; corrupt/blank lines are skipped, never fatal."""
         if not self.path.exists():
             return []
@@ -110,7 +110,7 @@ class CafExperience:
             lines = self.path.read_text(encoding="utf-8").splitlines()
         except OSError:
             return []
-        records: List[CafRecord] = []
+        records: list[CafRecord] = []
         for line in lines:
             try:
                 records.append(CafRecord.from_dict(json.loads(line)))
@@ -119,12 +119,12 @@ class CafExperience:
         return records
 
 
-def cumulative_regret(records: List[CafRecord], model: str) -> float:
+def cumulative_regret(records: list[CafRecord], model: str) -> float:
     """Regret of *model* vs the per-dimension best model (B2, pure function):
     trial-weighted average of ``p_best - p_model`` per dimension — 0.0 for
     the best model (or no/unknown records)."""
 
-    by_dim: Dict[str, Dict[str, List[bool]]] = {}
+    by_dim: dict[str, dict[str, list[bool]]] = {}
     for r in records:
         by_dim.setdefault(r.task_dim, {}).setdefault(r.model, []).append(r.passed)
     total_trials = 0
@@ -145,18 +145,18 @@ def cumulative_regret(records: List[CafRecord], model: str) -> float:
 def run_caf_cycle(
     task_dim: str,
     task: str,
-    candidates: Dict[str, str],
+    candidates: dict[str, str],
     verifier: Verifier,
     table: Any,
     experience: Optional[CafExperience] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Sandbox-test each candidate (model → answer); record outcomes in the
     experience store AND ``table.record_outcome``. Returns
     ``{"task_dim", "results", "best_model", "regret"}``."""
 
     exp = experience if experience is not None else CafExperience()
     sandbox = CafSandboxVerifier()
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for model, answer in candidates.items():
         passed = sandbox.verify(task, answer, verifier)
         exp.record(task_dim=task_dim, model=model, passed=passed)
@@ -171,7 +171,7 @@ def run_caf_cycle(
     }
 
 
-def save_routing_table(table: Any, path: Optional[Union[str, Path]] = None) -> Path:
+def save_routing_table(table: Any, path: Optional[str | Path] = None) -> Path:
     """Persist a RoutingTable as JSON at *path* (default: profile-aware)."""
     p = Path(path) if path is not None else default_routing_table_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -179,7 +179,7 @@ def save_routing_table(table: Any, path: Optional[Union[str, Path]] = None) -> P
     return p
 
 
-def load_routing_table(path: Optional[Union[str, Path]] = None) -> Any:
+def load_routing_table(path: Optional[str | Path] = None) -> Any:
     """Load a RoutingTable from *path*; fail-open to an empty table."""
     from tools.model_routing_table import RoutingTable
     p = Path(path) if path is not None else default_routing_table_path()

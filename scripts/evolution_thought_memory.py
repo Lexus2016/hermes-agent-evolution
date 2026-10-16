@@ -26,7 +26,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -90,11 +90,11 @@ class Thought:
 
     def __post_init__(self) -> None:
         if not self.captured_at:
-            self.captured_at = datetime.now(timezone.utc).isoformat()
+            self.captured_at = datetime.now(UTC).isoformat()
         if not self.dedup_key:
             self.dedup_key = thought_dedup_key(self.text)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
             "text": self.text,
@@ -106,7 +106,7 @@ class Thought:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Thought":
+    def from_dict(cls, data: dict[str, Any]) -> Thought:
         return cls(
             text=str(data.get("text", "")),
             captured_at=str(data.get("captured_at", "")),
@@ -127,14 +127,14 @@ def _archive_path(store_dir: Optional[Path] = None) -> Path:
     return base / f"{_FILE_PREFIX}archive.jsonl"
 
 
-def load_thoughts(store_dir: Optional[Path] = None) -> List[Thought]:
+def load_thoughts(store_dir: Optional[Path] = None) -> list[Thought]:
     """Every thought in the store, oldest first. Corrupt lines are skipped."""
     path = _store_path(store_dir)
     if not path.exists():
         return []
-    out: List[Thought] = []
+    out: list[Thought] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return []
     for line in lines:
@@ -150,7 +150,7 @@ def load_thoughts(store_dir: Optional[Path] = None) -> List[Thought]:
     return out
 
 
-def _next_version(thoughts: List[Thought]) -> int:
+def _next_version(thoughts: list[Thought]) -> int:
     return (max((t.version for t in thoughts), default=0) or 0) + 1
 
 
@@ -174,8 +174,7 @@ def _archive_overflow(store_dir: Path) -> None:
     archive = _archive_path(store_dir)
     archive.parent.mkdir(parents=True, exist_ok=True)
     with open(archive, "a", encoding="utf-8") as fh:
-        for t in overflow:
-            fh.write(json.dumps(t.to_dict(), sort_keys=True) + "\n")
+        fh.writelines(json.dumps(t.to_dict(), sort_keys=True) + "\n" for t in overflow)
     path = _store_path(store_dir)
     path.write_text(
         "".join(json.dumps(t.to_dict(), sort_keys=True) + "\n" for t in keep),
@@ -220,7 +219,7 @@ def retrieve_thoughts(
     *,
     k: int = DEFAULT_RETRIEVE_K,
     store_dir: Optional[Path] = None,
-) -> List[Thought]:
+) -> list[Thought]:
     """Return the top-k thoughts most relevant to ``query``.
 
     Deterministic token-overlap scoring over the normalized text — no LLM, no
@@ -230,7 +229,7 @@ def retrieve_thoughts(
     q_tokens = set(normalize_thought(query).lower().split())
     if not q_tokens:
         return []
-    scored: List[tuple] = []
+    scored: list[tuple] = []
     for t in load_thoughts(store_dir):
         t_tokens = set(normalize_thought(t.text).lower().split())
         if not t_tokens:
@@ -242,7 +241,7 @@ def retrieve_thoughts(
     return [t for _, t in scored[:k]]
 
 
-def stats(store_dir: Optional[Path] = None) -> Dict[str, Any]:
+def stats(store_dir: Optional[Path] = None) -> dict[str, Any]:
     thoughts = load_thoughts(store_dir)
     versions = [t.version for t in thoughts]
     return {
@@ -263,7 +262,7 @@ def _usage() -> str:
     )
 
 
-def _opt(args: List[str], name: str, default: str = "") -> str:
+def _opt(args: list[str], name: str, default: str = "") -> str:
     if name in args:
         i = args.index(name)
         if i + 1 < len(args):
@@ -271,7 +270,7 @@ def _opt(args: List[str], name: str, default: str = "") -> str:
     return default
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     if not args or "--help" in args or "-h" in args:
         print(_usage())

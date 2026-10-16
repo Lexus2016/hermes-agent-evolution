@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Claim Check — producer-side grounding gate tests (#2809)."""
 
 import sys
@@ -6,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from evolution.lib.claim_check import (  # noqa: E402
+from evolution.lib.claim_check import (
     build_execution_record,
     check_claims_grounded,
 )

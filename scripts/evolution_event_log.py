@@ -15,11 +15,11 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List
 
-STRATEGY_PRESETS: Dict[str, Dict[str, int]] = {
+STRATEGY_PRESETS: dict[str, dict[str, int]] = {
     "balanced": {"innovation": 50, "optimization": 30, "repair": 20},
     "harden": {"innovation": 20, "optimization": 40, "repair": 40},
     "repair-only": {"innovation": 0, "optimization": 20, "repair": 80},
@@ -42,7 +42,7 @@ def select_strategy(open_issue_count: int) -> str:
     return "repair-only" if open_issue_count >= _THRESHOLD else "balanced"
 
 
-def classify_evolution_type(labels: List[str]) -> str:
+def classify_evolution_type(labels: list[str]) -> str:
     """Classify an issue: bug → repair, improvement → optimization, else innovation."""
     ls = {l.lower() for l in (labels or [])}
     if "bug" in ls:
@@ -53,8 +53,8 @@ def classify_evolution_type(labels: List[str]) -> str:
 
 
 def log_event(
-    event: Dict[str, Any], evolution_dir: Path | None = None
-) -> Dict[str, Any]:
+    event: dict[str, Any], evolution_dir: Path | None = None
+) -> dict[str, Any]:
     """Append a typed evolution event to the append-only JSONL log."""
     if evolution_dir is None:
         evolution_dir = _evolution_dir()
@@ -65,7 +65,7 @@ def log_event(
     if ev_type not in _TYPES:
         raise ValueError(f"invalid evolution_type '{ev_type}'")
     finalized = {
-        "timestamp": event.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        "timestamp": event.get("timestamp") or datetime.now(UTC).isoformat(),
         "action": action,
         "evolution_type": ev_type,
         "issue_number": event.get("issue_number"),
@@ -80,15 +80,15 @@ def log_event(
     return finalized
 
 
-def load_events(evolution_dir: Path | None = None) -> List[Dict[str, Any]]:
+def load_events(evolution_dir: Path | None = None) -> list[dict[str, Any]]:
     """Read all events from the append-only log, oldest-first."""
     if evolution_dir is None:
         evolution_dir = _evolution_dir()
     log_path = evolution_dir / "evolution_events.jsonl"
     if not log_path.exists():
         return []
-    events: List[Dict[str, Any]] = []
-    for ln in log_path.read_text(encoding="utf-8").splitlines():
+    events: list[dict[str, Any]] = []
+    for ln in log_path.read_text(encoding="utf-8-sig").splitlines():
         ln = ln.strip()
         if not ln:
             continue
@@ -101,10 +101,10 @@ def load_events(evolution_dir: Path | None = None) -> List[Dict[str, Any]]:
     return events
 
 
-def event_summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+def event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     """Summarize events by action and evolution_type."""
-    ba: Dict[str, int] = {}
-    bt: Dict[str, int] = {}
+    ba: dict[str, int] = {}
+    bt: dict[str, int] = {}
     for e in events:
         for key, target in (("action", ba), ("evolution_type", bt)):
             k = e.get(key, "?")
@@ -112,7 +112,7 @@ def event_summary(events: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"total": len(events), "by_action": ba, "by_type": bt}
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     evolution_dir: Path | None = None
     args = argv[1:]
     if "--evolution-dir" in args:

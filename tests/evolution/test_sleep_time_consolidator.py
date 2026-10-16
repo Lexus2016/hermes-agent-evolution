@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for Sleep-Time Compute memory consolidator (#2358)."""
 
 import pytest
@@ -74,7 +73,7 @@ class TestSleepTimeMemoryConsolidator:
         assert report.actions[0].action_type == "promote"
         assert report.actions[0].target_id == "n1"
 
-        promoted_note = [n for n in consolidated if n["id"] == "n1"][0]
+        promoted_note = next(n for n in consolidated if n["id"] == "n1")
         assert promoted_note["tier"] == "durable"
 
     def test_link_detection(self):
@@ -85,7 +84,7 @@ class TestSleepTimeMemoryConsolidator:
                 "tier": "durable",
             },
         ]
-        consolidated, report = SleepTimeMemoryConsolidator.consolidate_notes(notes)
+        _consolidated, report = SleepTimeMemoryConsolidator.consolidate_notes(notes)
         assert report.linked_count == 1
         assert report.actions[0].action_type == "link"
         assert report.actions[0].metadata["relation_type"] == "supersedes"

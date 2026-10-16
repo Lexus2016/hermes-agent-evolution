@@ -1,0 +1,208 @@
+{
+  "scope": "Only independently second-reviewed UI metric indices63,64,80,90; no other candidates or held findings accepted.",
+  "entries": [
+    {
+      "index": 63,
+      "path": "apps/desktop/src/app/settings/local-models-model-rows.tsx",
+      "scope": "CatalogModelRow",
+      "rule": "CC",
+      "detail": "CC 33 > target 20 (new code must meet the target)",
+      "current_blob": "bb98ebaed09a0323a499859adfb0f3fc35d7f650",
+      "source_blob": "bb98ebaed09a0323a499859adfb0f3fc35d7f650",
+      "current_unit": {
+        "q": "CatalogModelRow",
+        "line": 137,
+        "end": 285,
+        "cc": 33,
+        "nesting": 0,
+        "hash": "744628dac14d2139",
+        "lines": 146
+      },
+      "source_unit": {
+        "q": "CatalogModelRow",
+        "line": 137,
+        "end": 285,
+        "cc": 33,
+        "nesting": 0,
+        "hash": "744628dac14d2139",
+        "lines": 146
+      },
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "raw_detail": "CC 33 > target 20 (new code must meet the target)",
+      "exact_source_and_unit_equal": true,
+      "candidate_cap": 33,
+      "status": "candidate",
+      "exclusions": [
+        "Structural disposition only; not approval or activation.",
+        "No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior.",
+        "No desktop test pass claim; typecheck exit 137 remains unresolved.",
+        "Generated manifest identity/cap and controller verification required before any activation."
+      ],
+      "inspected_ranges": [
+        [
+          1,
+          338
+        ]
+      ],
+      "bindings": [
+        "Exported CatalogModelRow props, residencyOf/runningActivation/anyActivationRunning, ResidencyPills, EjectModelButton/DeleteModelButton, LocalModelsActionScope imports"
+      ],
+      "structural_rationale": "CC is primarily catalog-row action/render variants for download, active/loading/resident model, memory-fit/context/vision/recommendation pills. Actions preserve the owning LocalModelsActionScope rather than reaching directly into machine APIs. Complete component plus local helpers/adjacent sideload binding reviewed; exact upstream source/cap with no identified structural conflict. Download/delete/activation failure semantics are not approved.",
+      "current_source_reverified": true,
+      "metric_disposition_scope": "Exact identified structural metric and cap only; all other findings and behavior remain independently actionable."
+    },
+    {
+      "index": 64,
+      "path": "apps/desktop/src/app/settings/local-models-runtime-section.tsx",
+      "scope": "LocalModelsRuntimeSection",
+      "rule": "CC",
+      "detail": "CC 26 > target 20 (new code must meet the target)",
+      "current_blob": "acde9534a1267a015e1f31a7255fe7bfe43673f6",
+      "source_blob": "acde9534a1267a015e1f31a7255fe7bfe43673f6",
+      "current_unit": {
+        "q": "LocalModelsRuntimeSection",
+        "line": 20,
+        "end": 163,
+        "cc": 26,
+        "nesting": 0,
+        "hash": "c7ae3185beb70414",
+        "lines": 131
+      },
+      "source_unit": {
+        "q": "LocalModelsRuntimeSection",
+        "line": 20,
+        "end": 163,
+        "cc": 26,
+        "nesting": 0,
+        "hash": "c7ae3185beb70414",
+        "lines": 131
+      },
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "raw_detail": "CC 26 > target 20 (new code must meet the target)",
+      "exact_source_and_unit_equal": true,
+      "candidate_cap": 26,
+      "status": "candidate",
+      "exclusions": [
+        "Structural disposition only; not approval or activation.",
+        "No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior.",
+        "No desktop test pass claim; typecheck exit 137 remains unresolved.",
+        "Generated manifest identity/cap and controller verification required before any activation."
+      ],
+      "inspected_ranges": [
+        [
+          1,
+          163
+        ]
+      ],
+      "bindings": [
+        "Exported LocalModelsRuntimeSection props, owning action scope, localModelsKey/runningRuntimeInstall/startLocalRuntimeInstall, nested handleServer"
+      ],
+      "structural_rationale": "CC arises from runtime installed/running/installing/paused/update/error render states and repeated action variants. Mutation key and job actions retain explicit owner/client scope; up-to-date derives from authoritative status tags. Complete body/bindings equal upstream at the exact cap with no structural conflict identified. Runtime install/server action and error/timeout contracts excluded.",
+      "current_source_reverified": true,
+      "metric_disposition_scope": "Exact identified structural metric and cap only; all other findings and behavior remain independently actionable."
+    },
+    {
+      "index": 80,
+      "path": "apps/desktop/src/components/remote-setup/fields.tsx",
+      "scope": "RemoteSetupFields",
+      "rule": "CC",
+      "detail": "CC 35 > target 20 (new code must meet the target)",
+      "current_blob": "75e016ae99df3a8250176aa5eccbb22076d8b173",
+      "source_blob": "75e016ae99df3a8250176aa5eccbb22076d8b173",
+      "current_unit": {
+        "q": "RemoteSetupFields",
+        "line": 39,
+        "end": 155,
+        "cc": 35,
+        "nesting": 0,
+        "hash": "6ce578f3a659ebd4",
+        "lines": 99
+      },
+      "source_unit": {
+        "q": "RemoteSetupFields",
+        "line": 39,
+        "end": 155,
+        "cc": 35,
+        "nesting": 0,
+        "hash": "6ce578f3a659ebd4",
+        "lines": 99
+      },
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "raw_detail": "CC 35 > target 20 (new code must meet the target)",
+      "exact_source_and_unit_equal": true,
+      "candidate_cap": 35,
+      "status": "candidate",
+      "exclusions": [
+        "Structural disposition only; not approval or activation.",
+        "No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior.",
+        "No desktop test pass claim; typecheck exit 137 remains unresolved.",
+        "Generated manifest identity/cap and controller verification required before any activation."
+      ],
+      "inspected_ranges": [
+        [
+          1,
+          155
+        ]
+      ],
+      "bindings": [
+        "RemoteSetupFields typed setup/disabled/urlDisabled/urlOnly callback props; local Field component, RemoteSetup hook interface; settings/registry/first-run call-site search"
+      ],
+      "structural_rationale": "CC is UI branching by host, explicit token/OAuth mode, probe status, connected status and input/button availability. Full function and binding context reviewed, and actual upstream source/unit cap match. No identified structural conflict. Credential masking/storage/sign-in/sign-out and remote authentication behavior are not approved or waived.",
+      "current_source_reverified": true,
+      "metric_disposition_scope": "Exact identified structural metric and cap only; all other findings and behavior remain independently actionable."
+    },
+    {
+      "index": 90,
+      "path": "apps/desktop/src/plugins/hermes-bots/bot-row.tsx",
+      "scope": "BotRow",
+      "rule": "CC",
+      "detail": "CC 42 > 40, its value on main (over target 20: it may only go down)",
+      "current_blob": "c5d24667ec238a9da27d836f1007229104ee9074",
+      "source_blob": "c5d24667ec238a9da27d836f1007229104ee9074",
+      "current_unit": {
+        "q": "BotRow",
+        "line": 116,
+        "end": 495,
+        "cc": 42,
+        "nesting": 0,
+        "hash": "11a54efa2784c850",
+        "lines": 254
+      },
+      "source_unit": {
+        "q": "BotRow",
+        "line": 116,
+        "end": 495,
+        "cc": 42,
+        "nesting": 0,
+        "hash": "11a54efa2784c850",
+        "lines": 254
+      },
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "raw_detail": "CC 42 > 40, its value on main (over target 20: it may only go down)",
+      "exact_source_and_unit_equal": true,
+      "candidate_cap": 42,
+      "status": "candidate",
+      "exclusions": [
+        "Structural disposition only; not approval or activation.",
+        "No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior.",
+        "No desktop test pass claim; typecheck exit 137 remains unresolved.",
+        "Generated manifest identity/cap and controller verification required before any activation."
+      ],
+      "inspected_ranges": [
+        [
+          1,
+          495
+        ]
+      ],
+      "bindings": [
+        "Exported BotRow props, rowAge, source-qualified selection/meta/attention/owner helpers, canonical session ID helper and openRosterBot; complete context menu handlers"
+      ],
+      "structural_rationale": "Full row read; CC is identity/status/preview/age/attention and context menu presentation. Main click and explicit Bot Chat action delegate to openRosterBot; recent session remains a separately named menu action. Actual upstream source/unit cap matches and no new structural binding divergence identified. The pre-existing preview fallback to last_session when canonical_session is absent is not validated here; canonical resolution, metadata writes, warm catches and source ownership remain outside disposition.",
+      "unknown_behavior": [
+        "Older/missing canonical_session payload uses last_session preview; this review does not certify that runtime fallback or canonical chat behavior."
+      ],
+      "current_source_reverified": true,
+      "metric_disposition_scope": "Exact identified structural metric and cap only; all other findings and behavior remain independently actionable."
+    }
+  ]
+}

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Cross-task sub-skill schema, extraction, retrieval, and transfer (issues #3067, #3070, #3071).
 
 Defines reusable execution primitives extracted from completed tasks, enabling
@@ -32,7 +31,7 @@ class SubSkillProvenance:
     task_id: str
     extracted_at: int
     extractor_version: str = "1.0.0"
-    source_tools: List[str] = field(default_factory=list)
+    source_tools: list[str] = field(default_factory=list)
     commit_sha: Optional[str] = None
 
 
@@ -41,7 +40,7 @@ class SubSkill:
     sub_skill_id: str
     name: str
     description: str
-    preconditions: List[str]
+    preconditions: list[str]
     action_template: str
     provenance: SubSkillProvenance
     status: str = "candidate"
@@ -49,13 +48,13 @@ class SubSkill:
     confidence_score: float = 0.8
     usage_count: int = 0
     success_count: int = 0
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> SubSkill:
+    def from_dict(cls, data: dict[str, Any]) -> SubSkill:
         prov_data = data.get("provenance", {})
         prov = SubSkillProvenance(**prov_data) if isinstance(prov_data, dict) else prov_data
         return cls(
@@ -73,7 +72,7 @@ class SubSkill:
             tags=list(data.get("tags", [])),
         )
 
-    def validate_safety(self) -> Tuple[bool, Optional[str]]:
+    def validate_safety(self) -> tuple[bool, Optional[str]]:
         content_to_scan = f"{self.name}\n{self.description}\n{self.action_template}"
         is_safe, reasons = scan_skill_for_misevolution(content_to_scan)
         if not is_safe:
@@ -90,14 +89,14 @@ class SubSkillExtractor:
         self,
         session_id: str,
         task_id: str,
-        actions: Sequence[Dict[str, Any]],
+        actions: Sequence[dict[str, Any]],
         task_description: str = "",
         success: bool = True,
-    ) -> List[SubSkill]:
+    ) -> list[SubSkill]:
         if not success or len(actions) < self.min_trace_length:
             return []
 
-        candidates: List[SubSkill] = []
+        candidates: list[SubSkill] = []
         now = int(time.time())
         tool_names = [a.get("tool", "") for a in actions if isinstance(a, dict)]
 
@@ -149,7 +148,7 @@ class SubSkillExtractor:
 class SubSkillStore:
     def __init__(self, store_path: Optional[Path] = None):
         self.store_path = store_path or (get_hermes_home() / _DEFAULT_SUB_SKILLS_RELPATH)
-        self._skills: Dict[str, SubSkill] = {}
+        self._skills: dict[str, SubSkill] = {}
         self._load()
 
     def _load(self) -> None:
@@ -176,7 +175,7 @@ class SubSkillStore:
         self.store_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
     def add(self, skill: SubSkill) -> None:
-        is_safe, reason = skill.validate_safety()
+        is_safe, _reason = skill.validate_safety()
         if not is_safe:
             skill.status = "quarantined"
         self._skills[skill.sub_skill_id] = skill
@@ -185,7 +184,7 @@ class SubSkillStore:
     def get(self, sub_skill_id: str) -> Optional[SubSkill]:
         return self._skills.get(sub_skill_id)
 
-    def list_all(self, status: Optional[str] = None) -> List[SubSkill]:
+    def list_all(self, status: Optional[str] = None) -> list[SubSkill]:
         if status:
             return [s for s in self._skills.values() if s.status == status]
         return list(self._skills.values())
@@ -215,15 +214,15 @@ class SubSkillStore:
         preconditions: Optional[Sequence[str]] = None,
         top_k: int = 3,
         approved_only: bool = True,
-    ) -> List[SubSkill]:
+    ) -> list[SubSkill]:
         candidates = [
             s for s in self._skills.values()
             if (not approved_only or s.status in ("approved", "promoted"))
         ]
 
-        scored: List[Tuple[float, SubSkill]] = []
+        scored: list[tuple[float, SubSkill]] = []
         query_terms = set(re.findall(r"\w+", query.lower()))
-        filter_preconds = set([p.lower() for p in (preconditions or [])])
+        filter_preconds = {p.lower() for p in (preconditions or [])}
 
         for skill in candidates:
             match_score = 0.0

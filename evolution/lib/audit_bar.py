@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Non-stationary audit bar — the Red-Queen rising audit standard (issue #63).
 
 A frozen audit standard stalls a self-improving system: once an audit has
@@ -33,7 +32,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -54,7 +53,7 @@ _IDENTITY_KEYS = frozenset({"kind", "name"})
 # Rotation cycles through these in order; each variant re-frames the audit so
 # a frozen checklist cannot keep rubber-stamping the accepted baseline.
 
-AUDIT_RUBRIC_VARIANTS: Tuple[str, ...] = (
+AUDIT_RUBRIC_VARIANTS: tuple[str, ...] = (
     # v1 — baseline discipline (the shipped default).
     """1. CORPUS COVERAGE — every skill in the usage sidecar is audited this
    run; a skill that is silently skipped is drift.
@@ -98,7 +97,7 @@ AUDIT_RUBRIC_VARIANTS: Tuple[str, ...] = (
 # ── Observation identity / classification (pure) ────────────────────────────
 
 
-def observation_id(observation: Dict[str, Any]) -> str:
+def observation_id(observation: dict[str, Any]) -> str:
     """Stable identity for an observation: ``<kind>:<name>``.
 
     Two observations with the same id are the *same thing*; content drift is
@@ -109,7 +108,7 @@ def observation_id(observation: Dict[str, Any]) -> str:
     return f"{kind or 'observation'}:{name or '<unnamed>'}"
 
 
-def _same_content(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+def _same_content(a: dict[str, Any], b: dict[str, Any]) -> bool:
     """Content equality ignoring the identity keys."""
     ca = {k: v for k, v in a.items() if k not in _IDENTITY_KEYS}
     cb = {k: v for k, v in b.items() if k not in _IDENTITY_KEYS}
@@ -117,8 +116,8 @@ def _same_content(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
 
 
 def classify_observation(
-    observation: Dict[str, Any],
-    accepted: Sequence[Dict[str, Any]],
+    observation: dict[str, Any],
+    accepted: Sequence[dict[str, Any]],
 ) -> str:
     """Classify one observation against the accepted (trap) pool.
 
@@ -136,17 +135,17 @@ def classify_observation(
 
 
 def traps_in(
-    observations: Sequence[Dict[str, Any]],
-    accepted: Sequence[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    observations: Sequence[dict[str, Any]],
+    accepted: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """The observations that are calibration traps (known + unchanged)."""
     return [o for o in observations if classify_observation(o, accepted) == TRAP]
 
 
 def find_new_drift(
-    observations: Sequence[Dict[str, Any]],
-    accepted: Sequence[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    observations: Sequence[dict[str, Any]],
+    accepted: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """NEW drift among ``observations``: known items whose content changed
     plus items that were never accepted.  Traps are excluded."""
     return [
@@ -155,9 +154,9 @@ def find_new_drift(
 
 
 def find_missing(
-    observations: Sequence[Dict[str, Any]],
-    accepted: Sequence[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    observations: Sequence[dict[str, Any]],
+    accepted: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Accepted observations that are absent from the current corpus.
 
     A previously-accepted entity vanishing is drift too (e.g. a skill dropped
@@ -186,7 +185,7 @@ def active_rubric(
     return variants[idx]
 
 
-def _observation_line(observation: Dict[str, Any]) -> str:
+def _observation_line(observation: dict[str, Any]) -> str:
     """One-line summary of an observation for the prompt's trap list."""
     oid = observation_id(observation)
     content = ", ".join(
@@ -198,7 +197,7 @@ def _observation_line(observation: Dict[str, Any]) -> str:
 def build_audit_prompt(
     variants: Sequence[str],
     variant_index: int,
-    accepted: Sequence[Dict[str, Any]],
+    accepted: Sequence[dict[str, Any]],
     miss_threshold: int = DEFAULT_MISS_THRESHOLD,
 ) -> str:
     """Compose the audit prompt/checklist for this run.
@@ -254,12 +253,12 @@ class AuditBarState:
     tune it in the state file); ``rotations`` is the rotation history.
     """
 
-    accepted_observations: List[Dict[str, Any]] = field(default_factory=list)
+    accepted_observations: list[dict[str, Any]] = field(default_factory=list)
     miss_count: int = 0
     rubric_variant: int = 0
     miss_threshold: int = DEFAULT_MISS_THRESHOLD
     last_run_at: Optional[str] = None
-    rotations: List[Dict[str, Any]] = field(default_factory=list)
+    rotations: list[dict[str, Any]] = field(default_factory=list)
 
 
 def default_state(miss_threshold: int = DEFAULT_MISS_THRESHOLD) -> AuditBarState:
@@ -274,7 +273,7 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return default
 
 
-def state_to_dict(state: AuditBarState) -> Dict[str, Any]:
+def state_to_dict(state: AuditBarState) -> dict[str, Any]:
     """JSON-serialisable dict for the state file."""
     return {
         "accepted_observations": list(state.accepted_observations),
@@ -353,7 +352,7 @@ def rotate_rubric(
 ) -> AuditBarState:
     """Advance the active rubric variant (wraps around) and record the
     rotation.  Returns a NEW state; the input is never mutated."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     count = max(1, len(variants))
     old = state.rubric_variant
     new_variant = (old + 1) % count
@@ -375,9 +374,9 @@ def rotate_rubric(
 
 
 def _merge_accepted(
-    previous: Sequence[Dict[str, Any]],
-    observations: Sequence[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    previous: Sequence[dict[str, Any]],
+    observations: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Carry the trap pool forward, upserting by id with latest content.
 
     Previously-accepted observations persist (the spec: carry the previous
@@ -385,7 +384,7 @@ def _merge_accepted(
     pool; an item whose content changed takes its newest content so the next
     run judges drift from the newly-accepted state (the bar rises).
     """
-    merged: Dict[str, Dict[str, Any]] = {}
+    merged: dict[str, dict[str, Any]] = {}
     for obs in list(previous) + list(observations):
         merged[observation_id(obs)] = dict(obs)
     return list(merged.values())
@@ -396,10 +395,10 @@ def update_bar_state(
     *,
     drift_occurred: bool,
     drift_reported: bool,
-    observations: Sequence[Dict[str, Any]],
+    observations: Sequence[dict[str, Any]],
     miss_threshold: Optional[int] = None,
     now: Optional[datetime] = None,
-) -> Tuple[AuditBarState, List[str]]:
+) -> tuple[AuditBarState, list[str]]:
     """Apply one audit run to the bar state.
 
     Rules:
@@ -418,7 +417,7 @@ def update_bar_state(
     Returns ``(new_state, events)``; ``events`` is human-readable lines for
     the audit's report.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     new_state = AuditBarState(
         accepted_observations=list(state.accepted_observations),
         miss_count=state.miss_count,
@@ -431,7 +430,7 @@ def update_bar_state(
         last_run_at=state.last_run_at,
         rotations=list(state.rotations),
     )
-    events: List[str] = []
+    events: list[str] = []
 
     if drift_occurred and not drift_reported:
         new_state.miss_count += 1

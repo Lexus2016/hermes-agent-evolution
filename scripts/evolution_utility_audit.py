@@ -27,7 +27,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -92,7 +92,7 @@ def _parse_iso(value: Any) -> Optional[datetime]:
         parsed = datetime.fromisoformat(str(value))
     except (TypeError, ValueError):
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _tokens(text: Optional[str]) -> set:
@@ -122,9 +122,9 @@ class SkillAudit:
     verdict: str
 
 
-def skill_utility(record: Dict[str, Any], now: Optional[datetime] = None) -> float:
+def skill_utility(record: dict[str, Any], now: Optional[datetime] = None) -> float:
     """Recency-weighted activity score (exponential half-life decay)."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     total = 0
     for key in ("use_count", "view_count", "patch_count"):
         try:
@@ -141,13 +141,13 @@ def skill_utility(record: Dict[str, Any], now: Optional[datetime] = None) -> flo
 
 
 def audit_corpus(
-    usage: Dict[str, Dict[str, Any]],
+    usage: dict[str, dict[str, Any]],
     now: Optional[datetime] = None,
-) -> List[SkillAudit]:
+) -> list[SkillAudit]:
     """Leave-one-out utility audit over a usage map (name -> record, as
     returned by ``tools.skill_usage.load_usage()``).  Returns one
     :class:`SkillAudit` per skill, sorted by utility descending."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     utilities = {n: skill_utility(r, now) for n, r in usage.items()}
     total = sum(utilities.values())
     tokens = {
@@ -157,7 +157,7 @@ def audit_corpus(
         for n in usage
     }
 
-    audits: List[SkillAudit] = []
+    audits: list[SkillAudit] = []
     for name, utility in utilities.items():
         share = (utility / total) if total > 0 else 0.0
         activity = 0
@@ -189,18 +189,18 @@ def _usage_file() -> Path:
     return base / "skills" / ".usage.json"
 
 
-def _load_usage() -> Dict[str, Dict[str, Any]]:
+def _load_usage() -> dict[str, dict[str, Any]]:
     path = _usage_file()
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return {}
     return {k: v for k, v in data.items() if isinstance(v, dict)}
 
 
-def _save_usage(data: Dict[str, Dict[str, Any]]) -> None:
+def _save_usage(data: dict[str, dict[str, Any]]) -> None:
     path = _usage_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
@@ -211,8 +211,8 @@ def _save_usage(data: Dict[str, Dict[str, Any]]) -> None:
 
 
 def apply_demotions(
-    audits: List[SkillAudit], usage: Dict[str, Dict[str, Any]]
-) -> List[str]:
+    audits: list[SkillAudit], usage: dict[str, dict[str, Any]]
+) -> list[str]:
     """Stamp ``trust_state: demoted`` on every ``demote`` verdict.
 
     This is the audit's one real action (issue #2286): a low-utility,
@@ -221,7 +221,7 @@ def apply_demotions(
     list of skill names that were newly demoted.  Best-effort — a missing or
     corrupt sidecar is a no-op, never a crash.
     """
-    demoted: List[str] = []
+    demoted: list[str] = []
     for a in audits:
         if a.verdict != "demote":
             continue
@@ -231,7 +231,7 @@ def apply_demotions(
         if rec.get("trust_state") == "demoted":
             continue
         rec["trust_state"] = "demoted"
-        rec["demoted_at"] = datetime.now(timezone.utc).isoformat()
+        rec["demoted_at"] = datetime.now(UTC).isoformat()
         demoted.append(a.name)
     if demoted:
         _save_usage(usage)
@@ -256,7 +256,7 @@ class RetrievalPrecision:
     gate_triggered: bool
 
 
-def _load_retrieval_events() -> List[Dict[str, Any]]:
+def _load_retrieval_events() -> list[dict[str, Any]]:
     """Load retrieval events (JSONL: ts/query/retrieved) from the sidecar.
 
     Best-effort: missing/corrupt lines are skipped — the precision report
@@ -267,9 +267,9 @@ def _load_retrieval_events() -> List[Dict[str, Any]]:
     path = base / "skills" / "retrieval_events.jsonl"
     if not path.exists():
         return []
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     try:
-        with path.open("r", encoding="utf-8") as fh:
+        with path.open("r", encoding="utf-8-sig") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
@@ -285,7 +285,7 @@ def _load_retrieval_events() -> List[Dict[str, Any]]:
     return events
 
 
-def _used_names(usage: Dict[str, Dict[str, Any]]) -> set:
+def _used_names(usage: dict[str, dict[str, Any]]) -> set:
     """Skill names with recorded actual use (use_count/patch_count > 0)."""
     used = set()
     for name, rec in usage.items():
@@ -311,7 +311,7 @@ def _normalize_identifier(value: str) -> str:
 
 
 def retrieval_precision(
-    events: List[Dict[str, Any]], usage: Dict[str, Dict[str, Any]]
+    events: list[dict[str, Any]], usage: dict[str, dict[str, Any]]
 ) -> RetrievalPrecision:
     """Actual-use precision over retrieval events joined to usage (used =
     identifier slug/tail matches a usage name with recorded actual use)."""
@@ -358,7 +358,7 @@ def _evolution_dir() -> Path:
     return Path(os.environ.get("EVOLUTION_PROFILE_DIR", str(hermes_home / "evolution")))
 
 
-def _bar_observations(audits: List[SkillAudit]) -> List[Dict[str, Any]]:
+def _bar_observations(audits: list[SkillAudit]) -> list[dict[str, Any]]:
     """The audit's observations as the bar's trap pool entries."""
     return [
         {
@@ -374,12 +374,12 @@ def _bar_observations(audits: List[SkillAudit]) -> List[Dict[str, Any]]:
 
 
 def _run_audit_bar(
-    audits: List[SkillAudit],
+    audits: list[SkillAudit],
     evolution_dir: Path,
     *,
     miss_threshold: int = DEFAULT_MISS_THRESHOLD,
     silent: bool = False,
-) -> Tuple[Optional[Any], List[str], List[str]]:
+) -> tuple[Optional[Any], list[str], list[str]]:
     """Wire the non-stationary audit bar (issue #63) into the daily run.
 
     Loads the persisted bar state, detects NEW drift against the previous
@@ -471,7 +471,7 @@ def _run_audit_bar(
     return new_state, events, report
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     if "--help" in args or "-h" in args:
         print(_usage())

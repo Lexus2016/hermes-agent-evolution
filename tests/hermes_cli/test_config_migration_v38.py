@@ -5,9 +5,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import yaml  # noqa: E402
+import hermes_yaml as yaml
 
-from hermes_cli.config_migrations import _migrate_to_38  # noqa: E402
+from hermes_cli.config_migrations import _migrate_to_38
 
 
 def _write_cfg(tmp_path, tools):
@@ -32,12 +32,12 @@ def test_messaging_rewritten_to_platform_toolset(tmp_path, monkeypatch):
 def test_unknown_names_dropped_valid_kept(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     cfg = _write_cfg(tmp_path, {
-        "google_chat": {"enabled": ["hermes-google_chat", "spotify"]},
+        "google_chat": {"enabled": ["hermes-google_chat", "terminal"]},
         "teams": {"disabled": ["hermes-teams", "vision"]},
     })
     _migrate_to_38({"config_added": []}, quiet=True)
     out = yaml.safe_load(cfg.read_text())
-    assert out["tools"]["google_chat"]["enabled"] == ["spotify"]
+    assert out["tools"]["google_chat"]["enabled"] == ["terminal"]
     assert out["tools"]["teams"]["disabled"] == ["vision"]
 
 

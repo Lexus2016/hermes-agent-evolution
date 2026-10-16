@@ -1,0 +1,17 @@
+{
+  "format": "hermes-reviewed-evidence-parts-v1",
+  "bytes": 519685,
+  "sha256": "1b511fdd12f0539d9fd7c5a61520dcb398bba9f5521bcc4ff76ca7005b2a8c46",
+  "parts": [
+    {
+      "path": "analysis/sync-health/v0221-9ad6-main365-health-report.json.parts/0001.txt",
+      "bytes": 262111,
+      "sha256": "35edfc22e6f6a89918c59b028e03ec77579f90506784e7f8e759a00bea4e191f"
+    },
+    {
+      "path": "analysis/sync-health/v0221-9ad6-main365-health-report.json.parts/0002.txt",
+      "bytes": 257574,
+      "sha256": "0d7c7c42f882150bf8e593dbd3e9670ebb321ef555d0bc0d56e9f235ef0ad626"
+    }
+  ]
+}

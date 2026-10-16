@@ -88,7 +88,7 @@ class TestReadFileResolvedPath(unittest.TestCase):
             # If the raw path is forwarded, it would be "target.py" and
             # the shell would look in its own cwd (likely the repo root).
             # The fix ensures the resolved absolute path is used.
-            result = read_file_tool("target.py", task_id="test_resolved")
+            _result = read_file_tool("target.py", task_id="test_resolved")
 
         # The path captured by FileOperations.read_file must be the
         # resolved absolute path, not the raw relative "target.py".

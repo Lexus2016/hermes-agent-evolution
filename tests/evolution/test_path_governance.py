@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for path-based runtime governance (#2284)."""
 
 from pathlib import Path

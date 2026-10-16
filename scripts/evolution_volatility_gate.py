@@ -20,9 +20,9 @@ from typing import Any, Dict, List
 
 _LEVELS = {"volatile", "stable", "strategic"}
 _PATTERNS = [
-    re.compile(r"https?://[^\s\"')]+", re.I),
+    re.compile(r"https?://[^\s\"')]+", re.IGNORECASE),
     re.compile(r"\b(v\d+\.\d+(?:\.\d+)?)\b"),
-    re.compile(r"\b(api|endpoint|schema)[-_]?(name|key|version)\b", re.I),
+    re.compile(r"\b(api|endpoint|schema)[-_]?(name|key|version)\b", re.IGNORECASE),
 ]
 
 
@@ -34,13 +34,13 @@ def _path(d: Path | None = None) -> Path:
     return Path(home) / "evolution" / "volatility_index.json"
 
 
-def load_index(d: Path | None = None) -> Dict[str, str]:
+def load_index(d: Path | None = None) -> dict[str, str]:
     """Load note-id → volatility-level mapping."""
     p = _path(d)
     if not p.exists():
         return {}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8-sig"))
         return (
             {k: v for k, v in data.items() if v in _LEVELS}
             if isinstance(data, dict)
@@ -50,7 +50,7 @@ def load_index(d: Path | None = None) -> Dict[str, str]:
         return {}
 
 
-def tag_note(note_id: str, vol: str, d: Path | None = None) -> Dict[str, str]:
+def tag_note(note_id: str, vol: str, d: Path | None = None) -> dict[str, str]:
     """Tag a note with a volatility level. Returns the updated index."""
     if vol not in _LEVELS:
         raise ValueError(f"invalid volatility '{vol}'; must be one of {_LEVELS}")
@@ -68,10 +68,10 @@ def classify_volatility(content: str) -> str:
 
 
 def anti_recitation_check(
-    content: str, idx: Dict[str, str] | None = None
-) -> List[Dict[str, Any]]:
+    content: str, idx: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
     """Check if volatile values are being hardcoded into a durable file."""
-    warnings: List[Dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
     vi = idx or {}
     for nid in [n for n, v in vi.items() if v == "volatile"]:
         if nid in content:
@@ -92,7 +92,7 @@ def anti_recitation_check(
 
 def ab_release_test(
     note_id: str, q_before: float, q_after: float, threshold: float = 0.05
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """A/B release test: after internalizing a stable note, check if quality dropped."""
     delta = q_before - q_after
     can = delta < threshold
@@ -104,7 +104,7 @@ def ab_release_test(
     }
 
 
-def list_notes(vol: str | None = None, d: Path | None = None) -> Dict[str, str]:
+def list_notes(vol: str | None = None, d: Path | None = None) -> dict[str, str]:
     """List notes optionally filtered by volatility level."""
     idx = load_index(d)
     if vol:
@@ -114,7 +114,7 @@ def list_notes(vol: str | None = None, d: Path | None = None) -> Dict[str, str]:
     return idx
 
 
-def volatility_summary(idx: Dict[str, str]) -> Dict[str, int]:
+def volatility_summary(idx: dict[str, str]) -> dict[str, int]:
     counts = {"volatile": 0, "stable": 0, "strategic": 0}
     for v in idx.values():
         if v in counts:
@@ -123,7 +123,7 @@ def volatility_summary(idx: Dict[str, str]) -> Dict[str, int]:
     return counts
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     d: Path | None = None
     args = argv[1:]
     if "--evolution-dir" in args:

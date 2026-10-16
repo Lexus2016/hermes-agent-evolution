@@ -101,8 +101,8 @@ class CalibrationCase:
     """
 
     session_id: str
-    trace_summary: Dict[str, Any]
-    judge_verdict: Dict[str, Any]
+    trace_summary: dict[str, Any]
+    judge_verdict: dict[str, Any]
     human_label: Optional[bool]
     created_at: float = field(default_factory=time.time)
 
@@ -114,11 +114,11 @@ class CalibrationCase:
             return 0.0
 
     @property
-    def dimension_scores(self) -> Dict[str, float]:
+    def dimension_scores(self) -> dict[str, float]:
         raw = self.judge_verdict.get("dimension_scores")
         if not isinstance(raw, dict):
             return {}
-        out: Dict[str, float] = {}
+        out: dict[str, float] = {}
         for key, value in raw.items():
             try:
                 out[str(key)] = float(value)
@@ -188,7 +188,7 @@ class CalibrationStore:
             logger.debug("judge_calibration: WAL unsupported, using default journal")
         return conn
 
-    def open(self) -> "CalibrationStore":
+    def open(self) -> CalibrationStore:
         """Create the schema if needed and return ``self`` (idempotent)."""
         if self._initialised:
             return self
@@ -199,10 +199,10 @@ class CalibrationStore:
         self._initialised = True
         return self
 
-    def __enter__(self) -> "CalibrationStore":
+    def __enter__(self) -> CalibrationStore:
         return self.open()
 
-    def __exit__(self, *exc: Any) -> None:
+    def __exit__(self, *exc: object) -> None:
         return None
 
     # -- writes --------------------------------------------------------------
@@ -210,8 +210,8 @@ class CalibrationStore:
     def record_case(
         self,
         session_id: str,
-        trace_summary: Dict[str, Any],
-        judge_verdict: Dict[str, Any],
+        trace_summary: dict[str, Any],
+        judge_verdict: dict[str, Any],
         human_label: Any,
     ) -> CalibrationCase:
         """Persist one calibration case and return it.
@@ -264,7 +264,7 @@ class CalibrationStore:
 
     # -- reads ---------------------------------------------------------------
 
-    def cases(self, session_id: Optional[str] = None) -> List[CalibrationCase]:
+    def cases(self, session_id: Optional[str] = None) -> list[CalibrationCase]:
         """Return stored cases (newest first), optionally filtered by session.
 
         Malformed rows (un-decodable JSON in ``trace_summary`` /
@@ -281,7 +281,7 @@ class CalibrationStore:
         with closing(self._connect()) as conn:
             rows = conn.execute(sql, params).fetchall()
 
-        out: List[CalibrationCase] = []
+        out: list[CalibrationCase] = []
         for row in rows:
             try:
                 summary = json.loads(row["trace_summary"])
@@ -330,7 +330,7 @@ def derive_weight_adjustments(
     rubric: Rubric,
     *,
     threshold: float = 0.7,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Derive a multiplicative weight factor per rubric dimension from history.
 
     PURE — no I/O.  Returns ``{dimension_key: factor}`` for every dimension in
@@ -353,7 +353,7 @@ def derive_weight_adjustments(
     overall *away* from the human's truth is down-weighted; one that pulled
     *toward* it is up-weighted.  Agreement cases are skipped entirely.
     """
-    factors: Dict[str, float] = {d.key: 1.0 for d in rubric.dimensions}
+    factors: dict[str, float] = {d.key: 1.0 for d in rubric.dimensions}
     keys = set(factors)
 
     for case in cases:
@@ -398,7 +398,7 @@ def recalibrated_rubric(
     ``Rubric.total_weight`` would otherwise have to special-case).
     """
     factors = derive_weight_adjustments(cases, rubric, threshold=threshold)
-    new_dimensions: List[RubricDimension] = []
+    new_dimensions: list[RubricDimension] = []
     for dim in rubric.dimensions:
         factor = factors.get(dim.key, 1.0)
         new_weight = max(_MIN_WEIGHT, dim.weight * factor)
@@ -418,7 +418,7 @@ def recalibrated_rubric(
 
 def recalibrate_and_score(
     session_id: str,
-    messages: Sequence[Dict[str, Any]],
+    messages: Sequence[dict[str, Any]],
     cases: Sequence[CalibrationCase],
     *,
     base_rubric: Optional[Rubric] = None,

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for AgentOpt Slice 1 telemetry hook (#2741)."""
 
 import json
@@ -8,7 +7,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from agent.agentopt_telemetry import (  # noqa: E402
+from agent.agentopt_telemetry import (
     agentopt_enabled,
     append_record,
     estimate_cost,

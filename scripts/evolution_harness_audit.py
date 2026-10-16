@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Harness-integrity audit gate — the seven BenchJack exploit classes (#2808).
 
 Berkeley RDI (arXiv 2605.12673) broke eight top agent benchmarks without
@@ -35,18 +34,18 @@ E5_WEAK_MATCH = "E5_weak_string_match"        # substring pass on verbose answer
 E6_NO_GROUND_TRUTH = "E6_never_compares"      # verdict without comparing
 E7_TRUST_UNTRUSTED_CODE = "E7_trust_output"   # executing agent-supplied verify
 
-_E3_RE = re.compile(r"\beval\s*\(\s*[a-z_]*(?:output|result|answer|response|content|text)", re.I)
-_E4_RAW_FMT = re.compile(r"(?:judge|verdict|grade|rubric)_prompt[^\n]*\{(?:answer|output|result|response)\b", re.I)
+_E3_RE = re.compile(r"\beval\s*\(\s*[a-z_]*(?:output|result|answer|response|content|text)", re.IGNORECASE)
+_E4_RAW_FMT = re.compile(r"(?:judge|verdict|grade|rubric)_prompt[^\n]*\{(?:answer|output|result|response)\b", re.IGNORECASE)
 _E5_RE = re.compile(
     r"(?:expected|gold|answer)[^\n]{0,40}\bin\b[^\n]{0,40}(?:output|result|answer|response)[^\n]{0,20}\.lower\(\)"
     r"|(?:output|result|answer|response)\.lower\(\)[^\n]{0,20}\bin\b[^\n]{0,40}(?:expected|gold|answer)",
-    re.I,
+    re.IGNORECASE,
 )
 _E6_CONST_RETURN = re.compile(
-    r"return\s+(?:True|1(?:\.0)?|\"pass(?:ed)?\"|'pass(?:ed)?')\s*(?:#.*)?$", re.I
+    r"return\s+(?:True|1(?:\.0)?|\"pass(?:ed)?\"|'pass(?:ed)?')\s*(?:#.*)?$", re.IGNORECASE
 )
-_E6_DEF = re.compile(r"def\s+(?:validate|score|grade|verdict)[a-z_]*\s*\(", re.I)
-_E7_RE = re.compile(r"(?:subprocess|os\.system|os\.popen)[^\n]*(?:run|call|check_output|Popen)?\([^\n]*(?:verify|check)_?(?:script|cmd|command|output)", re.I)
+_E6_DEF = re.compile(r"def\s+(?:validate|score|grade|verdict)[a-z_]*\s*\(", re.IGNORECASE)
+_E7_RE = re.compile(r"(?:subprocess|os\.system|os\.popen)[^\n]*(?:run|call|check_output|Popen)?\([^\n]*(?:verify|check)_?(?:script|cmd|command|output)", re.IGNORECASE)
 _GOLD_KEYS = ("gold", "answer", "expected_output", "expected_result", "solution")
 
 
@@ -61,7 +60,7 @@ class AuditFinding:
 
 @dataclass
 class HarnessAuditReport:
-    findings: List[AuditFinding] = field(default_factory=list)
+    findings: list[AuditFinding] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -76,8 +75,8 @@ class HarnessAuditReport:
         return "\n".join(lines)
 
 
-def _findings_for(path: Path, text: str) -> List[AuditFinding]:
-    out: List[AuditFinding] = []
+def _findings_for(path: Path, text: str) -> list[AuditFinding]:
+    out: list[AuditFinding] = []
     rel = str(path)
 
     def line_of(m: re.Match) -> int:
@@ -86,7 +85,7 @@ def _findings_for(path: Path, text: str) -> List[AuditFinding]:
     # E1: harness imports/executes the CANDIDATE's code in-process (the
     # conftest-rewrites-tests shape): applying a patch/file write inside the
     # same process that then scores it.
-    if re.search(r"(?:apply_patch|write_text|shutil\.copy)[^\n]{0,80}(?:conftest|test_)", text, re.I):
+    if re.search(r"(?:apply_patch|write_text|shutil\.copy)[^\n]{0,80}(?:conftest|test_)", text, re.IGNORECASE):
         out.append(AuditFinding(E1_SHARED_CONTAINER, rel, 0, "",
             "harness writes into test/conftest files in-process — score the "
             "verified state transition in an ISOLATED process/container, never "
@@ -120,7 +119,7 @@ def _findings_for(path: Path, text: str) -> List[AuditFinding]:
         if ret and not re.search(
             r"\b(?:expected|gold|ground_truth|ground|label|answer_key)\b",
             body[: ret.start()],
-            re.I,
+            re.IGNORECASE,
         ):
             out.append(AuditFinding(E6_NO_GROUND_TRUTH, rel, line_of(m), m.group(0)[:80],
                 "a validate/score path returns a constant verdict without "
@@ -137,7 +136,7 @@ def audit_harness_files(paths: Sequence[Path]) -> HarnessAuditReport:
     report = HarnessAuditReport()
     for p in paths:
         try:
-            text = Path(p).read_text(encoding="utf-8", errors="replace")
+            text = Path(p).read_text(encoding="utf-8-sig", errors="replace")
         except OSError:
             continue
         report.findings.extend(_findings_for(Path(p), text))
@@ -145,13 +144,13 @@ def audit_harness_files(paths: Sequence[Path]) -> HarnessAuditReport:
     return report
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     roots = [Path(a) for a in argv[1:]] or [
         Path("scripts/evolution_evaluator.py"),
         Path("scripts/evolution_rubric_judge.py"),
         Path("scripts/eval_runner.py"),
     ]
-    files: List[Path] = []
+    files: list[Path] = []
     for root in roots:
         if root.is_file():
             files.append(root)

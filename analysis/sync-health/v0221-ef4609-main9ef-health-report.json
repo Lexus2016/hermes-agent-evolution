@@ -1,0 +1,22 @@
+{
+  "format": "hermes-reviewed-evidence-parts-v1",
+  "bytes": 531370,
+  "sha256": "f8f7c2dfb93aee0ca46a5b1c309256bce2b7c3665ac42f79bed65bbef0e20182",
+  "parts": [
+    {
+      "path": "analysis/sync-health/v0221-ef4609-main9ef-health-report.json.parts/0001.txt",
+      "bytes": 262129,
+      "sha256": "31a893771234631bbfeb165a9ecaa0b2bfeec0d4216a79ab20c7493d5c388198"
+    },
+    {
+      "path": "analysis/sync-health/v0221-ef4609-main9ef-health-report.json.parts/0002.txt",
+      "bytes": 262144,
+      "sha256": "95b45e319725db96165fd821b5efaf467be8d1996036109cffc1e07ac9002f30"
+    },
+    {
+      "path": "analysis/sync-health/v0221-ef4609-main9ef-health-report.json.parts/0003.txt",
+      "bytes": 7097,
+      "sha256": "5231954a283f2a6f84621e75a6f41bd877496c38f2d4a7d19f8994d5590ea11a"
+    }
+  ]
+}

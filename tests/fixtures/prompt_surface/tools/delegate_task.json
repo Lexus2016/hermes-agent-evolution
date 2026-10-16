@@ -1,0 +1,122 @@
+{
+  "description": "Spawn subagents in isolated contexts; each gets its own conversation, terminal session, and toolset, and only its final summary returns to you. Pass every task in `tasks` — one entry spawns one subagent, several run in parallel (limit in the tasks description).\n\nSessions without a later-result consumer (including one-shot CLI and cron) join parallel children and return results in this tool call. Otherwise runs in the background: dispatch returns live transcript paths and results re-enter as a new message when subagents finish (one message per call). Background results are delivered only BETWEEN your turns: finish whatever does not depend on them, then give a one-line status and END YOUR TURN. Never wait or poll on transcripts, artifact files, or CI for a child. While children run, `action` (list/steer/stop) controls them live.\n\nUSE FOR: reasoning-heavy subtasks, work that would flood your context, or independent parallel workstreams.\nDO NOT USE FOR (use these instead):\n- Mechanical multi-step work with no reasoning needed -> execute_code\n- A single tool call -> call the tool directly\n- Tasks needing user interaction -> subagents cannot ask questions\n- Durable work that must survive this session -> cronjob or terminal(background=True, notify=True); /stop, /new, or process exit halts running subagents (whole tree); each returns an 'interrupted' completion with partial output.\n\nRULES:\n- Children know nothing of this conversation: pass everything needed via 'context', including any required output language, tone, or style (e.g. \"respond in Chinese\").\n- Child summaries are SELF-REPORTS, not verified facts: a child claiming \"uploaded successfully\" or \"file written\" may be wrong. For external side effects (uploads, remote writes, publishing), require a verifiable handle (URL, ID, absolute path) and verify it yourself before telling the user the operation succeeded.\n- Children cannot close tracked work: a child asked to close it returns findings instead; the parent applies the transition.\n- Children cannot call delegate_task, clarify, memory, or cronjob.\n- Children inherit the parent model unless pinned via delegation.provider / delegation.model in config.yaml.",
+  "name": "delegate_task",
+  "parameters": {
+    "properties": {
+      "acp_args": {
+        "description": "Do NOT set unless the user explicitly told you the ACP CLI arguments.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "acp_command": {
+        "description": "Do NOT set unless the user explicitly told you to run the child through an ACP CLI that is already installed on this machine.",
+        "type": "string"
+      },
+      "action": {
+        "description": "Default 'spawn'. Live control of running children: 'list' = ids/goals/status/transcripts; 'steer' = queue course-correction text into one child (subagent_id + message) without stopping it; 'stop' = end one child early (subagent_id; partial result still returns). Control actions return immediately; goal/tasks are ignored unless spawning.",
+        "enum": [
+          "spawn",
+          "list",
+          "steer",
+          "stop"
+        ],
+        "type": "string"
+      },
+      "grader": {
+        "description": "Optional rubric grader that runs in a separate subagent context after each child returns. The grader receives only the rubric + the child's summary (no parent context) to avoid anchoring. If the score falls below 'min_score', the child is re-invoked with the grader's feedback appended to its goal, up to 'max_revisions' times. Hard fails (tests don't pass, secrets in output) always trigger revision.",
+        "properties": {
+          "max_revisions": {
+            "description": "Max revision rounds. 0 = grade only (no re-invoke). Default 1.",
+            "type": "integer"
+          },
+          "min_score": {
+            "description": "Minimum acceptable score (0-10). Below this, the child is re-invoked with feedback. Default 7.0.",
+            "type": "number"
+          },
+          "model": {
+            "description": "Optional model override for the grader subagent (e.g. 'openai/gpt-4o'). Defaults to the parent's model.",
+            "type": "string"
+          },
+          "rubric": {
+            "description": "Markdown rubric describing pass/fail criteria. The grader scores the child's summary against this.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rubric"
+        ],
+        "type": "object"
+      },
+      "handoff_mode": {
+        "description": "Optional handoff strategy for parent conversation history. Omit (default) and children receive ONLY the explicit 'context' you write — they never see your conversation history. Options: 'graph' (compact typed dependency graph of files and tool actions; saves 40-60% tokens for code/technical tasks), 'collapsed_summary' (full prose summary of prior conversation), or 'auto' (adaptively selects graph vs prose based on task requirements).",
+        "enum": [
+          "collapsed_summary",
+          "graph",
+          "auto"
+        ],
+        "type": "string"
+      },
+      "memory_briefing": {
+        "description": "Optional memory priming for spawned children. Omit/false (default) and children receive only the explicit 'context' you write. Set true to additionally prepend a bounded long-term-memory briefing — the parent's memory store queried via the standard prefetch path for the task's goals — ahead of each task's 'context', clearly marked as untrusted reference data. Use it for domain-knowledge-heavy tasks where the child would otherwise start cold. Adds retrieval work at spawn when enabled.",
+        "type": "boolean"
+      },
+      "message": {
+        "description": "For action='steer': the course correction, appended to the child's next tool result mid-run. Be directive and specific.",
+        "type": "string"
+      },
+      "subagent_id": {
+        "description": "Target for action='steer'/'stop' (ids from the spawn response or action='list').",
+        "type": "string"
+      },
+      "tasks": {
+        "description": "The task(s), up to 10 in parallel for this user (set via delegation.max_concurrent_children). Each entry spawns one subagent with isolated context and terminal session; a single task is a one-entry array. Required when spawning.",
+        "items": {
+          "properties": {
+            "acp_args": {
+              "description": "Do NOT set unless the user explicitly told you the ACP CLI arguments for this child.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "acp_command": {
+              "description": "Do NOT set unless the user explicitly told you to run this child through an ACP CLI that is already installed on this machine.",
+              "type": "string"
+            },
+            "context": {
+              "description": "Background THIS child needs: file paths, error messages, constraints. Each child sees only its own context — repeat shared background in every task that needs it.",
+              "type": "string"
+            },
+            "goal": {
+              "description": "What this subagent should accomplish. Be specific and self-contained — it knows nothing about your conversation history.",
+              "type": "string"
+            },
+            "images": {
+              "description": "Optional images this child must SEE (max 8): local file paths or http(s) URLs — e.g. a screenshot the user sent, a design mock, a chart. Vision-capable children receive the pixels on their first turn; non-vision children get path hints for vision_analyze. Text files do NOT belong here — put paths in 'context' instead.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "output_schema": {
+              "description": "Optional JSON Schema this child's final answer must validate against (told to the child up front; parent validates with one bounded correction retry; result gains schema_valid, plus schema_errors on failure — the child's raw text is still returned as summary, never discarded). Keep it forgiving — require only fields you will read.",
+              "properties": {},
+              "required": [],
+              "type": "object"
+            }
+          },
+          "required": [
+            "goal"
+          ],
+          "type": "object"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

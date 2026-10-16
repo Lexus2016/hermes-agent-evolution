@@ -1,0 +1,112 @@
+{
+  "scope": "Exactly two QQ metadata preflight latency findings; unhealthy/network filesystem latency is explicitly not bounded. Feishu excluded.",
+  "candidates": [
+    {
+      "path": "tools/send_message_senders.py",
+      "scope": "_qqbot_upload_local_file",
+      "line_range": [
+        654,
+        672
+      ],
+      "worktree_git_blob": "0e60ba0139eba24cbf52e4cf141fdb3b1c691b2d",
+      "worktree_sha256": "559c3c34c603e8e4c629d6b879a87a8248c4fab3e4cecf765b16c27c7224ba7d",
+      "scope_source_sha256": "fb2efa48caecf2f1c0cbb4fcb0f78ad4fa0899e838e34284b9c13471258d5948",
+      "scope_hash_contract": "UTF-8 source lines from def through end_lineno inclusive, joined with LF and final LF",
+      "reference_git_blobs": {
+        "reviewed_head": "0e60ba0139eba24cbf52e4cf141fdb3b1c691b2d",
+        "main": "81eae913b36860620e1e29d1075d5ecbeeb8f267",
+        "upstream": "0e60ba0139eba24cbf52e4cf141fdb3b1c691b2d"
+      },
+      "rule": "ASYNC240",
+      "review_disposition": "candidate_for_individual_inherited_acceptance_only",
+      "rationale": [
+        "The flagged operations expand/resolve a local path and test existence/file type. They do not read media contents or scale their byte work with media size.",
+        "ChunkedUploader.upload offloads whole-file hashing with run_in_executor; _upload_one_part offloads chunk reading the same way. The potentially large media I/O is already outside the event loop.",
+        "The standard synchronous send_message tool dispatches _send_to_platform through model_tools._run_async; these direct REST helper probes are separate from the QQ websocket adapter sender. _run_async uses the tool/worker loop and creates a fresh worker when called under an existing running loop.",
+        "The uploader flow tests cover a real temporary 8 MB file split across two parts with fake HTTP, plus group endpoint behavior. Direct-send routing/fallback tests also pass."
+      ],
+      "supporting_locations": [
+        "tools/send_message_senders.py:654-673",
+        "gateway/platforms/qqbot/chunked_upload.py:142-148",
+        "gateway/platforms/qqbot/chunked_upload.py:178-183",
+        "tools/send_message_tool.py:268-275",
+        "model_tools.py:94-152"
+      ],
+      "receipt_ids": [
+        "qq_uploader_delivery_scope"
+      ],
+      "verification_limits": [
+        "Direct-send media tests substitute the upload helper at their transport seam; actual file hashing/part reads are covered separately by ChunkedUploader tests. No slow-mount latency guarantee was measured."
+      ],
+      "unhealthy_filesystem_caveat": "Path resolution, existence/type checks, and the uploader preflight stat can block on unhealthy or network-mounted filesystems despite not reading file contents. Any acceptance must be limited to this existing metadata-preflight scope."
+    },
+    {
+      "path": "tools/send_message_senders.py",
+      "scope": "_send_qqbot",
+      "line_range": [
+        757,
+        849
+      ],
+      "worktree_git_blob": "0e60ba0139eba24cbf52e4cf141fdb3b1c691b2d",
+      "worktree_sha256": "559c3c34c603e8e4c629d6b879a87a8248c4fab3e4cecf765b16c27c7224ba7d",
+      "scope_source_sha256": "89a9a3c285875c40bfaa64820353fb1343e368f5057cb17bebce15c11aa7ed50",
+      "scope_hash_contract": "UTF-8 source lines from def through end_lineno inclusive, joined with LF and final LF",
+      "reference_git_blobs": {
+        "reviewed_head": "0e60ba0139eba24cbf52e4cf141fdb3b1c691b2d",
+        "main": "81eae913b36860620e1e29d1075d5ecbeeb8f267",
+        "upstream": "0e60ba0139eba24cbf52e4cf141fdb3b1c691b2d"
+      },
+      "rule": "ASYNC240",
+      "review_disposition": "candidate_for_individual_inherited_acceptance_only",
+      "rationale": [
+        "The flagged operation is one os.path.exists metadata probe per nonempty media item. It performs no bulk file read. URL media is subsequently recognized and passed to the URL-upload path.",
+        "A missing local file produces an omission warning and continues delivery; when all media fail, the caption/message is delivered as text. Existing tests explicitly verify those preservation contracts.",
+        "The downstream local upload path already offloads content hashing and chunk reads. Profile-scoped direct-send credential tests pass alongside media delivery tests.",
+        "As with _qqbot_upload_local_file, the production direct-send entry is routed through model_tools._run_async rather than being the QQ websocket adapter sender."
+      ],
+      "supporting_locations": [
+        "tools/send_message_senders.py:757-851",
+        "tools/send_message_senders.py:814-820",
+        "tools/send_message_tool.py:268-275",
+        "model_tools.py:94-152"
+      ],
+      "receipt_ids": [
+        "qq_uploader_delivery_scope"
+      ],
+      "verification_limits": [
+        "The number of metadata probes scales with the requested attachment list; there is no claimed strict wall-clock bound. Tests use fake provider transport and do not exercise live QQ service or pathological storage."
+      ],
+      "unhealthy_filesystem_caveat": "A single exists probe can still stall on unhealthy or network-backed storage. This is bounded metadata work per attachment, not a proof of nonblocking operation and not a general async-I/O allowance."
+    }
+  ],
+  "receipt": {
+    "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 3 test files (~78 tests) under ['tests/gateway/test_qqbot.py', 'tests/gateway/test_qqbot_scope_paths.py', 'tests/tools/test_qqbot_send_message_media.py']; running with -j 3\n[ 15.4% |    12/~78 | \u271312 | \u2717 0] \u2713 tests/gateway/test_qqbot_scope_paths.py (12\u2713, 1.4s)\n[ 84.6% |    66/~78 | \u271366 | \u2717 0] \u2713 tests/gateway/test_qqbot.py (54\u2713, 1.6s)\n[100.0% |    78/~78 | \u271378 | \u2717 0] \u2713 tests/tools/test_qqbot_send_message_media.py (12\u2713, 1.9s)\n\n=== Summary: 3 files, 78 tests passed, 0 failed (100% complete) in 2.0s (3 workers) ===\n  Durations cached to test_durations.json (3 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   3\n  Total subprocess CPU-wall: 5.0s  (runner wall: 2.0s, parallelism: 3x)\n  P50: 1.65s  P90: 1.94s  P95: 1.94s  P99: 1.94s  Max: 1.94s\n  <1s: 0 files (0%)  <2s: 3 files (100%)\n  Top 10 slowest:\n      1.94s  tests/tools/test_qqbot_send_message_media.py\n      1.65s  tests/gateway/test_qqbot.py\n      1.42s  tests/gateway/test_qqbot_scope_paths.py\n",
+    "sha256": "450733cbddfcc459b370a6b0f8f48c76495c8988be3acc58b71a5e766b3cec00"
+  },
+  "dependencies": [
+    {
+      "path": "gateway/platforms/qqbot/chunked_upload.py",
+      "blob": "f74ef1ae6559b263115a7942fdf74de7561b529d"
+    },
+    {
+      "path": "tools/send_message_tool.py",
+      "blob": "28815e637e9d50363356e6f44c1bd89ae34607a8"
+    },
+    {
+      "path": "model_tools.py",
+      "blob": "b7c7cffa23a2b484f8e048371e6055d05e14ba67"
+    },
+    {
+      "path": "tests/gateway/test_qqbot.py",
+      "blob": "df6b436fd8a2da2ef97da056875c30cc10d1dd2f"
+    },
+    {
+      "path": "tests/gateway/test_qqbot_scope_paths.py",
+      "blob": "30890e41d42cbf0ca46cea8a3d5ecdd5a0787011"
+    },
+    {
+      "path": "tests/tools/test_qqbot_send_message_media.py",
+      "blob": "2760f65e706a7853b4c342090c288120ae634f7c"
+    }
+  ]
+}

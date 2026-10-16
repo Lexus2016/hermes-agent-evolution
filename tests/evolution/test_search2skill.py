@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for Search2Skill External-Source Skill Capture (#2291)."""
 
 import pytest
@@ -55,6 +54,6 @@ class TestSearch2SkillEngine:
 
         # Check frontmatter rules (description <= 60 chars)
         lines = spec.distilled_markdown.splitlines()
-        desc_line = [l for l in lines if l.startswith("description:")][0]
+        desc_line = next(l for l in lines if l.startswith("description:"))
         desc_val = desc_line.replace("description:", "").strip()
         assert len(desc_val) <= 60

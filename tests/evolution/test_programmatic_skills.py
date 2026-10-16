@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for Programmatic Skills and SpeedRunner synthesizer (#2384)."""
 
 from pathlib import Path

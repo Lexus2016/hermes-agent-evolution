@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Redundant self-verification recheck suppression (issue #1041, child of #1020).
 
 Second slice of recheck suppression. The first slice
@@ -31,12 +30,12 @@ from enum import Enum
 from typing import Any, Deque, Mapping
 
 __all__ = [
-    "RecheckVerdict",
-    "RecheckResult",
-    "RecheckSuppressionConfig",
     "CalibrationLog",
     "RecheckClassifier",
     "RecheckController",
+    "RecheckResult",
+    "RecheckSuppressionConfig",
+    "RecheckVerdict",
 ]
 
 
@@ -75,7 +74,7 @@ class RecheckSuppressionConfig:
     log_capacity: int = 200
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "RecheckSuppressionConfig":
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> RecheckSuppressionConfig:
         if not isinstance(data, Mapping):
             return cls()
         defaults = cls()
@@ -97,7 +96,7 @@ class CalibrationLog:
     """Bounded in-memory record of suppression decisions for calibration."""
 
     capacity: int = 200
-    _entries: Deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=200))
+    _entries: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=200))
 
     def __post_init__(self) -> None:
         # Rebuild the deque with the requested capacity.
@@ -205,6 +204,6 @@ class RecheckController:
         return suppress, result
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "RecheckController":
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> RecheckController:
         config = RecheckSuppressionConfig.from_mapping(data)
         return cls(config=config)

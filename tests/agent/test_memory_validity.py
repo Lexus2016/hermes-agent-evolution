@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for TEPA revocable memory state (#154).
 
 Covers the explicit-validity extension of the episodic tier
@@ -13,7 +12,7 @@ Only stdlib + pytest + unittest.mock. No live network calls.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 
 import pytest
 
@@ -31,7 +30,7 @@ def _event(
 ) -> MemoryEvent:
     """Build a MemoryEvent with a fixed (or auto) timestamp."""
     if when is None:
-        when = datetime.now(timezone.utc).isoformat()
+        when = datetime.now(UTC).isoformat()
     return MemoryEvent(what=what, importance=importance, when=when)
 
 
@@ -218,7 +217,7 @@ class TestWritePathRevocation:
         stored = _event("the nas is healthy")
         manager.episodic_store.add(stored)
 
-        def boom(event_id, **kwargs):  # noqa: ARG001
+        def boom(event_id, **kwargs):
             raise RuntimeError("storage exploded")
 
         manager.episodic_store.revoke = boom  # type: ignore[method-assign]

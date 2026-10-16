@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Harness component inventory CLI (issue #39, slice 1).
 
 Prints the file-level inventory of editable harness components (skills,

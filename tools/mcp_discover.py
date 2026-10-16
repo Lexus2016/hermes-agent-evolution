@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """MCP Stateless 2026-07-28 server/discover RPC and capability cache (#3247, child of #3240).
 
 Implements the server/discover pre-flight RPC for stateless MCP servers:
@@ -26,9 +25,9 @@ class MCPCapabilityCache:
     def __init__(self, default_ttl: float = DEFAULT_CAPABILITY_TTL_SECONDS) -> None:
         self._lock = threading.Lock()
         self._default_ttl = default_ttl
-        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._cache: dict[str, dict[str, Any]] = {}
 
-    def get(self, server_key: str) -> Optional[Dict[str, Any]]:
+    def get(self, server_key: str) -> Optional[dict[str, Any]]:
         with self._lock:
             k = str(server_key or "").strip()
             entry = self._cache.get(k)
@@ -43,7 +42,7 @@ class MCPCapabilityCache:
     def set(
         self,
         server_key: str,
-        capabilities: Dict[str, Any],
+        capabilities: dict[str, Any],
         ttl_seconds: Optional[float] = None,
     ) -> None:
         with self._lock:
@@ -81,7 +80,7 @@ class MCPCapabilityCache:
 CAPABILITY_CACHE = MCPCapabilityCache()
 
 
-def parse_discover_response(response_data: Any) -> Dict[str, Any]:
+def parse_discover_response(response_data: Any) -> dict[str, Any]:
     """Parse server/discover RPC response payload into standard capabilities map."""
     if isinstance(response_data, str):
         try:
@@ -115,7 +114,7 @@ def discover_server_capabilities(
     server_key: str,
     raw_response: Optional[Any] = None,
     ttl_seconds: Optional[float] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Record and cache server capabilities from server/discover response."""
     caps = parse_discover_response(raw_response) if raw_response is not None else {}
     if caps:

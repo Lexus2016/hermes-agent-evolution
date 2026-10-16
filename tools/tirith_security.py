@@ -6,6 +6,7 @@ enriches findings. Operational failures (spawn error, timeout, unknown exit) res
 GitHub releases to $HERMES_HOME/bin/tirith in a background thread -- SHA-256 always verified,
 cosign provenance when cosign is on PATH."""
 
+from hermes_platform.resolver import LookupContext, locate_command
 import hashlib
 import json
 import logging
@@ -44,13 +45,8 @@ def _env_int(key: str, default: int) -> int:
 
 def _load_security_config() -> dict:
     """Security settings from config.yaml, with env var overrides."""
-    from tools.tirith_config import read_security_policy
-    cfg = read_security_policy()
-    return {
-        "tirith_enabled": _env_bool("TIRITH_ENABLED", cfg.get("tirith_enabled", True)),
-        "tirith_path": os.getenv("TIRITH_BIN", cfg.get("tirith_path", "tirith")),
-        "tirith_timeout": _env_int("TIRITH_TIMEOUT", cfg.get("tirith_timeout", 5)),
-        "tirith_fail_open": _env_bool("TIRITH_FAIL_OPEN", cfg.get("tirith_fail_open", True))}
+    from tools.tirith_config import load_security_config
+    return load_security_config(default_enabled=True)
 
 
 # --- Module state ---
@@ -146,7 +142,7 @@ def _read_failure_reason() -> str | None:
         p = _failure_marker_path()
         if (time.time() - os.path.getmtime(p)) >= _MARKER_TTL:
             return None
-        with open(p, "r", encoding="utf-8") as f:
+        with open(p, "r", encoding="utf-8-sig") as f:
             return f.read().strip()
     except OSError:
         return None
@@ -156,7 +152,7 @@ def _is_install_failed_on_disk() -> bool:
     """True if a recent install failure was persisted and is still non-retryable.
     A 'cosign_missing' marker is auto-cleared once cosign appears on PATH."""
     reason = _read_failure_reason()
-    if reason == "cosign_missing" and shutil.which("cosign"):
+    if reason == "cosign_missing" and next(iter(locate_command("cosign").command), None):
         _clear_install_failed()
         return False
     return reason is not None
@@ -224,7 +220,7 @@ def _download_file(url: str, dest: str, timeout: int = 10):
 
 def _verify_cosign(checksums_path: str, sig_path: str, cert_path: str) -> bool | None:
     """Cosign provenance of checksums.txt: True verified, False rejected, None if cosign absent/failed."""
-    if not (cosign := shutil.which("cosign")):
+    if not (cosign := next(iter(locate_command("cosign").command), None)):
         logger.info("cosign not found on PATH")
         return None
     try:
@@ -232,7 +228,7 @@ def _verify_cosign(checksums_path: str, sig_path: str, cert_path: str) -> bool |
             [cosign, "verify-blob", "--certificate", cert_path, "--signature", sig_path,
              "--certificate-identity-regexp", _COSIGN_IDENTITY_REGEXP,
              "--certificate-oidc-issuer", _COSIGN_ISSUER, checksums_path],
-            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15, stdin=subprocess.DEVNULL)
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15, stdin=subprocess.DEVNULL, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("cosign execution failed: %s", exc)
         return None
@@ -246,7 +242,7 @@ def _verify_cosign(checksums_path: str, sig_path: str, cert_path: str) -> bool |
 def _verify_release_provenance(base_url: str, tmpdir: str, checksums_path: str, log) -> tuple[bool, str]:
     """Cosign step of the install -> ``(cosign_verified, failure_reason)``. Only an explicit
     cosign rejection aborts; missing/broken cosign or artifacts fall back to SHA-256 only."""
-    if not shutil.which("cosign"):
+    if not next(iter(locate_command("cosign").command), None):
         logger.info("cosign not on PATH — installing tirith with SHA-256 verification only "
                     "(install cosign for full supply chain verification)")
         return False, ""
@@ -268,7 +264,7 @@ def _verify_release_provenance(base_url: str, tmpdir: str, checksums_path: str, 
 
 def _verify_checksum(archive_path: str, checksums_path: str, archive_name: str) -> bool:
     """Verify SHA-256 of the archive against checksums.txt ("<hash>  <filename>" lines)."""
-    with open(checksums_path, encoding="utf-8") as f:
+    with open(checksums_path, encoding="utf-8-sig") as f:
         parsed = (line.strip().split("  ", 1) for line in f)
         expected = next((h for h, *n in parsed if n == [archive_name]), None)
     if not expected:
@@ -363,7 +359,7 @@ def _is_executable(path: str) -> bool:
 def _find_local_tirith() -> str | None:
     """Cheap local lookup for the default "tirith": PATH, then $HERMES_HOME/bin."""
     hermes_bin = os.path.join(_hermes_bin_dir(), "tirith")
-    return shutil.which("tirith") or (hermes_bin if _is_executable(hermes_bin) else None)
+    return next(iter(locate_command("tirith").command), None) or (hermes_bin if _is_executable(hermes_bin) else None)
 
 
 def _resolve_locally(configured_path: str, *, warn_missing: bool) -> tuple[str | None, bool]:
@@ -374,7 +370,7 @@ def _resolve_locally(configured_path: str, *, warn_missing: bool) -> tuple[str |
     expanded = os.path.expanduser(configured_path)
     # An explicit (non-"tirith") path is authoritative: never auto-download a replacement.
     if configured_path != "tirith":
-        if found := (expanded if _is_executable(expanded) else shutil.which(expanded)):
+        if found := (expanded if _is_executable(expanded) else next(iter(locate_command(expanded).command), None)):
             _store_resolved(found)
             return found, False
         if warn_missing:
@@ -390,7 +386,7 @@ def _resolve_locally(configured_path: str, *, warn_missing: bool) -> tuple[str |
     # Previous install failed: skip the network retry unless the retryable cosign_missing
     # cause has been resolved in-process.
     if _resolved_path is _INSTALL_FAILED:
-        if _install_failure_reason != "cosign_missing" or not shutil.which("cosign"):
+        if _install_failure_reason != "cosign_missing" or not next(iter(locate_command("cosign").command), None):
             return None, False
         _resolved_path, _install_failure_reason = None, ""
         _clear_install_failed()
@@ -510,13 +506,13 @@ def _crash(fail_open: bool, open_summary: str, closed_summary: str) -> dict:
     return _fail(fail_open, open_summary, closed_summary)
 
 
-def check_command_security(command: str) -> dict:
+def check_command_security(command: str, *, _config: dict | None = None) -> dict:
     """Run the tirith scan on a command -> ``{"action": allow|warn|block, "findings", "summary"}``.
     Exit code determines the action; JSON enriches. Spawn failures/timeouts respect fail_open."""
     global _crash_count, _circuit_open, _circuit_open_at
     from tools.tirith_config import TirithConfigurationError, configuration_error_result
     try:
-        cfg = _load_security_config()
+        cfg = _load_security_config() if _config is None else _config
     except TirithConfigurationError:
         return configuration_error_result()
     if not cfg["tirith_enabled"]:
@@ -544,7 +540,7 @@ def check_command_security(command: str) -> dict:
         result = subprocess.run(
             [tirith_path, "check", "--json", "--non-interactive", "--shell", "posix", "--", command],
             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout,
-            stdin=subprocess.DEVNULL)
+            stdin=subprocess.DEVNULL, check=False)
     except OSError as exc:
         # FileNotFoundError / PermissionError / exec format error: dedupe by (class, errno)
         # so each failure mode surfaces once, not per command.

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
-import evolution_dream_contradiction_scan as runner  # noqa: E402
+import evolution_dream_contradiction_scan as runner
 
 
 def _write_note(root: Path, note_id: str, title: str, created_at: str) -> None:

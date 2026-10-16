@@ -6,7 +6,7 @@ channels, and the reconcile gating — without ever touching the network or uv.
 """
 
 import pytest
-import yaml
+import hermes_yaml as yaml
 
 import hermes_cli.tqmemory_setup as tqm
 
@@ -161,7 +161,7 @@ class TestOptOut:
 
     def test_default_not_opted_out(self, monkeypatch):
         monkeypatch.delenv(tqm.OPT_OUT_ENV, raising=False)
-        monkeypatch.setattr("hermes_cli.config.read_raw_config", lambda: {})
+        monkeypatch.setattr("hermes_cli.config.read_raw_config", dict)
         assert tqm.opted_out() is False
 
 

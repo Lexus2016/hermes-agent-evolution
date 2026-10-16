@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from mcp_secret_audit import (  # noqa: E402
+from mcp_secret_audit import (
     _looks_plaintext_secret,
     audit_mcp_servers,
     main,
@@ -132,11 +132,11 @@ class TestNonDictInputs:
 
 class TestMain:
     def test_clean_exits_zero(self, tmp_path, capsys):
-        import yaml
+        import hermes_yaml as yaml
 
         cfg = tmp_path / "config.yaml"
         cfg.write_text(
-            yaml.dump({
+            yaml.safe_dump({
                 "mcp_servers": {"ok": {"command": "npx", "env": {"KEY": "${KEY}"}}}
             }),
             encoding="utf-8",
@@ -145,11 +145,11 @@ class TestMain:
         assert "no plaintext" in capsys.readouterr().out
 
     def test_findings_exit_one_and_json(self, tmp_path, capsys):
-        import yaml
+        import hermes_yaml as yaml
 
         cfg = tmp_path / "config.yaml"
         cfg.write_text(
-            yaml.dump({
+            yaml.safe_dump({
                 "mcp_servers": {"bad": {"env": {"API_KEY": _FAKE_OPENAI_STYLE_KEY}}}
             }),
             encoding="utf-8",

@@ -28,7 +28,7 @@ class TestParseToolArgumentsEnrichment:
 
     def test_json_parse_error_is_enriched(self):
         """Malformed JSON should produce an error identifying the parse position."""
-        args, err = _parse_tool_arguments('{"command": bad json}')
+        _args, err = _parse_tool_arguments('{"command": bad json}')
         assert err is not None
         result = json.loads(err)
         assert "JSON parse error" in result["error"]
@@ -36,21 +36,21 @@ class TestParseToolArgumentsEnrichment:
 
     def test_non_dict_json_is_identified(self):
         """A JSON list should produce a 'not a JSON object' error."""
-        args, err = _parse_tool_arguments("[1, 2, 3]")
+        _args, err = _parse_tool_arguments("[1, 2, 3]")
         assert err is not None
         result = json.loads(err)
         assert "not a JSON object" in result["error"]
 
     def test_none_arguments_produces_missing_error(self):
         """None arguments should produce a 'Missing' error."""
-        args, err = _parse_tool_arguments(None)
+        _args, err = _parse_tool_arguments(None)
         assert err is not None
         result = json.loads(err)
         assert "Missing" in result["error"]
 
     def test_non_string_arguments_produces_type_error(self):
         """A non-string argument should produce a type error."""
-        args, err = _parse_tool_arguments(42)
+        _args, err = _parse_tool_arguments(42)
         assert err is not None
         result = json.loads(err)
         assert "wrong type" in result["error"]
@@ -83,12 +83,12 @@ class TestTerminalBareStringFallback:
 
     def test_bare_string_non_terminal_still_errors(self):
         """Bare string for non-terminal tools should still error."""
-        args, err = _parse_tool_arguments("some text", function_name="read_file")
+        _args, err = _parse_tool_arguments("some text", function_name="read_file")
         assert err is not None
 
     def test_empty_string_terminal_errors(self):
         """Empty string should not be extracted as a command."""
-        args, err = _parse_tool_arguments("", function_name="terminal")
+        _args, err = _parse_tool_arguments("", function_name="terminal")
         assert err is not None
 
     def test_function_name_defaults_to_empty_string(self):
@@ -216,17 +216,17 @@ class TestMemoryToolErrorIntegration:
 
         store = MagicMock(spec=MemoryStore)
         store.add.side_effect = OSError("disk full")
-        result = json.loads(memory_tool(action="add", content="test", store=store))
+        result = json.loads(memory_tool(action="add", target="memory", content="test", store=store))
         assert result["error_category"] == "io-error"
         assert result["success"] is False
 
-    def test_replace_failure_returns_enriched_error(self):
+    def test_patch_failure_returns_enriched_error(self):
         from tools.memory_tool import memory_tool, MemoryStore
 
         store = MagicMock(spec=MemoryStore)
-        store.replace.side_effect = PermissionError("denied")
+        store.patch.side_effect = PermissionError("denied")
         result = json.loads(
-            memory_tool(action="replace", old_text="old", content="new", store=store)
+            memory_tool(action="patch", target="memory", old_text="old", content="new", store=store)
         )
         assert result["error_category"] == "permission-denied"
 
@@ -235,5 +235,5 @@ class TestMemoryToolErrorIntegration:
 
         store = MagicMock(spec=MemoryStore)
         store.remove.side_effect = TimeoutError("lock")
-        result = json.loads(memory_tool(action="remove", old_text="x", store=store))
+        result = json.loads(memory_tool(action="remove", target="memory", old_text="x", store=store))
         assert result["error_category"] == "timeout"

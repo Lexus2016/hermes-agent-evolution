@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_meta_editor import (  # noqa: E402
+from evolution_meta_editor import (
     TUNABLE_PARAMS,
     TunableParam,
     aggregate_state,

@@ -77,9 +77,9 @@ def validate_health_text(text: str) -> TelemetryVerdict:
     return TelemetryVerdict(True)
 
 
-def check_telemetry(evolution_dir: Path) -> Dict[str, Any]:
+def check_telemetry(evolution_dir: Path) -> dict[str, Any]:
     """Validate steering telemetry; fail-closed aggregate (any unsafe -> unsafe)."""
-    checks: Dict[str, Any] = {}
+    checks: dict[str, Any] = {}
     metrics_file = evolution_dir / "metrics.jsonl"
     if metrics_file.exists():
         verdicts = [

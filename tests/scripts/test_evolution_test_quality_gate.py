@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_test_quality_gate import (  # noqa: E402
+from evolution_test_quality_gate import (
     DEFAULT_MOCK_RATIO_THRESHOLD,
     detect_fabricated_reproduction,
     compute_mock_ratio,

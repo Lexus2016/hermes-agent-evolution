@@ -11,18 +11,18 @@ import json
 import os
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 __all__ = [
-    "TrajectoryEntry",
     "CoordinationEdge",
+    "TrajectoryEntry",
     "TrajectoryLog",
-    "redact_args",
-    "summarize_result",
     "load_trajectory",
     "main",
+    "redact_args",
+    "summarize_result",
 ]
 
 _REDACT_ARG_KEYS = frozenset({
@@ -44,11 +44,11 @@ _REDACT_ARG_KEYS = frozenset({
 _MAX_RESULT_SUMMARY_LEN = 500
 
 
-def redact_args(args: Dict[str, Any]) -> Dict[str, Any]:
+def redact_args(args: dict[str, Any]) -> dict[str, Any]:
     """Redact sensitive argument values. Recursively handles nested dicts/lists."""
     if not isinstance(args, dict):
         return args  # type: ignore[return-value]
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     for k, v in args.items():
         if isinstance(k, str) and k.lower() in _REDACT_ARG_KEYS:
             out[k] = "[REDACTED]"
@@ -105,10 +105,10 @@ class CoordinationEdge:
         self.target = target
         self.edge_type = edge_type
         self.cost_tokens = cost_tokens
-        self.timestamp = timestamp or datetime.now(timezone.utc).isoformat()
+        self.timestamp = timestamp or datetime.now(UTC).isoformat()
 
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
             "timestamp": self.timestamp,
             "source": self.source,
             "target": self.target,
@@ -119,7 +119,7 @@ class CoordinationEdge:
         return d
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "CoordinationEdge":
+    def from_dict(cls, d: dict[str, Any]) -> CoordinationEdge:
         return cls(
             source=str(d.get("source", "")),
             target=str(d.get("target", "")),
@@ -132,7 +132,7 @@ class CoordinationEdge:
 @dataclass
 class TrajectoryEntry:
     tool: str
-    args_summary: Dict[str, Any] = field(default_factory=dict)
+    args_summary: dict[str, Any] = field(default_factory=dict)
     result_status: str = "unknown"
     result_summary: str = ""
     timestamp: str = ""
@@ -141,9 +141,9 @@ class TrajectoryEntry:
 
     def __post_init__(self) -> None:
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = {
             "timestamp": self.timestamp,
             "tool": self.tool,
@@ -165,12 +165,12 @@ class TrajectoryEntry:
     def from_tool_call(
         cls,
         tool: str,
-        args: Dict[str, Any],
+        args: dict[str, Any],
         result: Any = None,
         status: str = "success",
         duration_ms: Optional[int] = None,
         reasoning_summary: str = "",
-    ) -> "TrajectoryEntry":
+    ) -> TrajectoryEntry:
         return cls(
             tool=tool,
             args_summary=redact_args(args) if isinstance(args, dict) else {},
@@ -181,7 +181,7 @@ class TrajectoryEntry:
         )
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "TrajectoryEntry":
+    def from_dict(cls, d: dict[str, Any]) -> TrajectoryEntry:
         """Rebuild an entry from its ``to_dict()`` shape (tolerant of gaps).
 
         Unknown statuses and missing fields are preserved as-is rather than
@@ -208,8 +208,8 @@ class TrajectoryLog:
         task_key: str = "",
     ) -> None:
         self.session_id = session_id
-        self.date = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        self.entries: List[TrajectoryEntry] = []
+        self.date = date or datetime.now(UTC).strftime("%Y-%m-%d")
+        self.entries: list[TrajectoryEntry] = []
         # Task-level outcome and pairing key (#1363). Both are optional so the
         # existing cron-stage caller is unaffected, and both are omitted from
         # to_dict() when unset so old readers see the exact shape they expect.
@@ -224,7 +224,7 @@ class TrajectoryLog:
         # Coordination network edges (#2996). Optional, append-only; empty by
         # default so existing callers are unaffected and the serialized shape
         # of a trajectory with no edges is byte-identical to before.
-        self.edges: List[CoordinationEdge] = []
+        self.edges: list[CoordinationEdge] = []
 
     def add(self, entry: TrajectoryEntry) -> None:
         self.entries.append(entry)
@@ -246,7 +246,7 @@ class TrajectoryLog:
     def add_tool_call(
         self,
         tool: str,
-        args: Dict[str, Any],
+        args: dict[str, Any],
         result: Any = None,
         status: str = "success",
         duration_ms: Optional[int] = None,
@@ -258,8 +258,8 @@ class TrajectoryLog:
             )
         )
 
-    def to_dict(self) -> Dict[str, Any]:
-        out: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
             "date": self.date,
             "session_id": self.session_id,
             "entries": [e.to_dict() for e in self.entries],
@@ -318,14 +318,14 @@ class TrajectoryLog:
         return path
 
     @property
-    def tool_sequence(self) -> List[str]:
+    def tool_sequence(self) -> list[str]:
         return [e.tool for e in self.entries]
 
     def tools_used(self) -> set[str]:
         return {e.tool for e in self.entries}
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "TrajectoryLog":
+    def from_dict(cls, d: dict[str, Any]) -> TrajectoryLog:
         """Rebuild a log from its ``to_dict()`` shape.
 
         Shared by ``load_trajectory`` and ``iter_trajectories`` so the
@@ -365,7 +365,7 @@ def _default_trajectory_dir() -> Path:
 
 def load_trajectory(path: Path) -> Optional[TrajectoryLog]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return None
     if not isinstance(data, dict):
@@ -373,7 +373,7 @@ def load_trajectory(path: Path) -> Optional[TrajectoryLog]:
     return TrajectoryLog.from_dict(data)
 
 
-def iter_trajectories(path: Path) -> List[TrajectoryLog]:
+def iter_trajectories(path: Path) -> list[TrajectoryLog]:
     """Load every trajectory in a file, in order — both storage formats.
 
     ``save()`` writes one pretty-printed JSON object (``.json``);
@@ -382,7 +382,7 @@ def iter_trajectories(path: Path) -> List[TrajectoryLog]:
     (covers the .json format), then line-by-line (covers .jsonl). Malformed
     lines are skipped — a torn write must never take a replay down (#85)."""
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8-sig")
     except OSError:
         return []
     stripped = raw.strip()
@@ -396,7 +396,7 @@ def iter_trajectories(path: Path) -> List[TrajectoryLog]:
     except ValueError:
         pass
     # JSONL append format: one compact object per line.
-    logs: List[TrajectoryLog] = []
+    logs: list[TrajectoryLog] = []
     for line in raw.splitlines():
         s = line.strip()
         if not s:
@@ -410,7 +410,7 @@ def iter_trajectories(path: Path) -> List[TrajectoryLog]:
     return logs
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     args = argv[1:]
     if not args:
         print("usage: evolution_trajectory_logger.py <date> [--dir DIR] | --file PATH")

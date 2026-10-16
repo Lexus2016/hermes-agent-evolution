@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Evolution wake-gate: only wake the LLM agent if the authenticated GitHub
 # account has WRITE (push) access to the evolution repo.
 #

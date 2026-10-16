@@ -40,7 +40,7 @@ def test_grounding_survives_real_reload_without_promoting_claimed_trust(tmp_path
             assert row["text"] in prompt
         assert path.read_bytes() == before
         # Approval to STORE content is not approval to perform an arrangement.
-        assert apply_memory_pending({"action": "add", "content": "A stored proposal"}, reloaded)["success"]
+        assert apply_memory_pending({"action": "add", "target": "memory", "content": "A stored proposal"}, reloaded)["success"]
         assert reloaded.search("memory")[-1]["authorizes_actions"] is False
         assert reloaded.format_for_system_prompt("memory") == prompt
     with profile(tmp_path / "b"):
@@ -74,3 +74,17 @@ def test_legacy_and_superseded_entries_have_safe_grounding_without_disk_migratio
     reloaded = MemoryStore()
     reloaded.load_from_disk()
     assert "grounding=revised" in reloaded.format_for_system_prompt("memory")
+
+
+def test_grounding_annotation_does_not_change_memory_budget_or_frozen_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    store = MemoryStore()
+    store.load_from_disk()
+    assert store.add("memory", "A durable note")["success"]
+    store.load_from_disk()
+    count = store._char_count("memory")
+    snapshot = store.format_for_system_prompt("memory")
+    assert f"{count:,}/{store._char_limit('memory'):,} chars" in snapshot
+    assert "authority=none" in snapshot
+    assert store.add("memory", "A later note")["success"]
+    assert store.format_for_system_prompt("memory") == snapshot

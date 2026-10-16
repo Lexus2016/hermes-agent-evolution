@@ -34,7 +34,8 @@ class _Adapter:
         return {"success": True}
 
     async def send_document(self, chat_id=None, file_path=None, caption=None, metadata=None):
-        body = open(file_path, encoding="utf-8").read()
+        from pathlib import Path
+        body = Path(file_path).read_text(encoding="utf-8-sig")
         self.documents.append({"caption": caption, "body": body, "name": file_path})
         return SimpleNamespace(success=self._document_succeeds, message_id="doc-1", error="nope")
 

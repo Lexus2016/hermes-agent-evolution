@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -42,7 +42,7 @@ def record_compaction_event(
     compression pass completes. Best-effort; failures log at DEBUG.
     """
     event = {
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "session_id": (session_id or "")[:200],
         "messages_before": int(messages_before),
         "messages_after": int(messages_after),
@@ -59,7 +59,7 @@ def record_compaction_event(
         logger.debug("record_compaction_event failed: %s", e)
 
 
-def get_eval_summary() -> Dict[str, Any]:
+def get_eval_summary() -> dict[str, Any]:
     """Summarize compaction events for the curator/evolution pipeline.
 
     Returns aggregate stats: total events, avg compression ratio, success rate
@@ -68,9 +68,9 @@ def get_eval_summary() -> Dict[str, Any]:
     path = _events_file()
     if not path.exists():
         return {"total_events": 0, "avg_ratio": 0.0, "success_rate": None, "total_tokens_saved": 0}
-    events: List[Dict[str, Any]] = []
+    events: list[dict[str, Any]] = []
     try:
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
             line = line.strip()
             if line:
                 events.append(json.loads(line))

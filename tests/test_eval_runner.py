@@ -20,7 +20,7 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
 )
 
-from eval_baseline import (  # noqa: E402
+from eval_baseline import (
     NULL_AGENT_REFUSAL,
     _null_agent_factory,
     _null_run_conversation,
@@ -30,14 +30,14 @@ from eval_baseline import (  # noqa: E402
     summarize,
     write_scores,
 )
-from eval_runner import (  # noqa: E402
+from eval_runner import (
     EvalTrajectory,
     build_pinned_config,
     run_eval_task,
     run_task_set,
     write_trajectories,
 )
-from eval_tasks import EvalTask, latest_version, load_task_set  # noqa: E402
+from eval_tasks import EvalTask, latest_version, load_task_set
 
 
 def _task(**kw) -> EvalTask:

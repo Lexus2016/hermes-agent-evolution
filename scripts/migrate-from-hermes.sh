@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Migration Script: Hermes Agent → Hermes Evolution
 # This script migrates existing Hermes Agent installation to Hermes Evolution
 # without losing any data, skills, configurations, or cron jobs.

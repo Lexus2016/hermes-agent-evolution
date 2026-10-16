@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """CodeAct-style deterministic tool-call coalescing (Issue #2485, Slice A).
 
 Coalesces N deterministic tool calls into a single sandboxed code round-trip,
@@ -34,14 +33,14 @@ class ToolCallSpec:
     """Specification of an individual tool call within a coalesced sequence."""
 
     name: str
-    arguments: Dict[str, Any] = field(default_factory=dict)
+    arguments: dict[str, Any] = field(default_factory=dict)
     call_id: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ToolCallSpec:
+    def from_dict(cls, data: dict[str, Any]) -> ToolCallSpec:
         args = data.get("arguments", {})
         if isinstance(args, str):
             try:
@@ -71,12 +70,12 @@ class CoalescedItemResult:
 class CoalescedExecutionResult:
     """Aggregate result from a coalesced multi-tool round trip."""
 
-    results: List[CoalescedItemResult]
+    results: list[CoalescedItemResult]
     total_duration_ms: float = 0.0
     coalesced_round_trip: bool = True
     call_count: int = 0
 
-    def to_tool_messages(self) -> List[Dict[str, Any]]:
+    def to_tool_messages(self) -> list[dict[str, Any]]:
         """Convert results to standard tool response message dicts."""
         msgs = []
         for item in self.results:
@@ -98,7 +97,7 @@ class ToolCallCoalescer:
     """Orchestrates deterministic multi-tool coalescing into a single execution round-trip."""
 
     @staticmethod
-    def can_coalesce(tool_calls: List[Any]) -> bool:
+    def can_coalesce(tool_calls: list[Any]) -> bool:
         """Check whether a batch of tool calls consists of coalescible tools."""
         if not tool_calls or len(tool_calls) <= 1:
             return False
@@ -121,7 +120,7 @@ class ToolCallCoalescer:
         return True
 
     @staticmethod
-    def generate_codeact_script(tool_calls: List[ToolCallSpec]) -> str:
+    def generate_codeact_script(tool_calls: list[ToolCallSpec]) -> str:
         """Generate a Python script executing the tool sequence in CodeAct pattern."""
         lines = [
             "# CodeAct coalesced execution bundle",
@@ -132,8 +131,8 @@ class ToolCallCoalescer:
             args_repr = json.dumps(tc.arguments)
             lines.append(
                 f"# Call {idx + 1}: {tc.name} ({tc.call_id})\n"
-                f"_res_{idx} = call_tool({repr(tc.name)}, {args_repr})\n"
-                f"results.append({{'call_id': {repr(tc.call_id)}, 'name': {repr(tc.name)}, 'result': _res_{idx}}})"
+                f"_res_{idx} = call_tool({tc.name!r}, {args_repr})\n"
+                f"results.append({{'call_id': {tc.call_id!r}, 'name': {tc.name!r}, 'result': _res_{idx}}})"
             )
         lines.append("return results")
         return "\n".join(lines)
@@ -141,11 +140,11 @@ class ToolCallCoalescer:
     @classmethod
     def coalesce_and_execute(
         cls,
-        tool_calls: List[Any],
-        handler_fn: Callable[[str, Dict[str, Any]], Any],
+        tool_calls: list[Any],
+        handler_fn: Callable[[str, dict[str, Any]], Any],
     ) -> CoalescedExecutionResult:
         """Execute all tool calls in a single deterministic coalesced pass."""
-        specs: List[ToolCallSpec] = []
+        specs: list[ToolCallSpec] = []
         for tc in tool_calls:
             if isinstance(tc, ToolCallSpec):
                 specs.append(tc)
@@ -157,7 +156,7 @@ class ToolCallCoalescer:
                 args = getattr(tc, "arguments", {}) or getattr(tc, "args", {})
                 cid = getattr(tc, "id", "") or getattr(tc, "call_id", "")
                 if not name and hasattr(tc, "function"):
-                    fn = getattr(tc, "function")
+                    fn = tc.function
                     name = getattr(fn, "name", "")
                     args = getattr(fn, "arguments", {})
                 if isinstance(args, str):
@@ -168,7 +167,7 @@ class ToolCallCoalescer:
                 specs.append(ToolCallSpec(name=name, arguments=args or {}, call_id=cid))
 
         start_time = time.perf_counter()
-        results: List[CoalescedItemResult] = []
+        results: list[CoalescedItemResult] = []
 
         for spec in specs:
             item_start = time.perf_counter()

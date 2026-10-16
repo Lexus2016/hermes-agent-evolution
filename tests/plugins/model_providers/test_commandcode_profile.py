@@ -24,7 +24,7 @@ import pytest
 @pytest.fixture
 def commandcode_profile():
     """Resolve the registered CommandCode (chat_completions) profile."""
-    import model_tools  # noqa: F401 — triggers discovery
+    import model_tools
     import providers
 
     profile = providers.get_provider_profile("commandcode")
@@ -35,12 +35,29 @@ def commandcode_profile():
 @pytest.fixture
 def commandcode_anthropic_profile():
     """Resolve the registered CommandCode Anthropic profile."""
-    import model_tools  # noqa: F401 — triggers discovery
+    import model_tools
     import providers
 
     profile = providers.get_provider_profile("commandcode-anthropic")
     assert profile is not None, "commandcode-anthropic profile must be registered"
     return profile
+
+
+@pytest.fixture
+def commandcode_catalog(monkeypatch):
+    """A catalog row with a different key name from the bundled profile."""
+    from agent.models_dev import ProviderInfo
+    from hermes_cli import providers as provider_defs
+
+    info = ProviderInfo(
+        id="commandcode", name="CommandCode catalog fixture",
+        env=("CMD_API_KEY",), api="https://catalog.example.invalid/v1",
+    )
+    monkeypatch.setattr(
+        provider_defs, "_models_dev_info",
+        lambda name, *args, **kwargs: info if name == info.id else None,
+    )
+    return info
 
 
 # ── Chat Completions profile ──────────────────────────────────────────────────
@@ -140,7 +157,7 @@ class TestCommandCodeFetchModelsPickerContract:
     """
 
 
-    def test_resolve_provider_full(self):
+    def test_resolve_provider_full(self, monkeypatch):
         """Both profiles must resolve through the model-switch path.
 
         Regression: ``resolve_provider_full`` only knew models.dev + overlay
@@ -148,16 +165,76 @@ class TestCommandCodeFetchModelsPickerContract:
         "Unknown provider" on /model switches even though the picker listed
         them.
         """
+        from hermes_cli import providers as provider_defs
         from hermes_cli.providers import resolve_provider_full
+
+        # This contract covers plugin-only providers. A changing remote catalog
+        # must not decide whether the plugin fallback is exercised.
+        monkeypatch.setattr(provider_defs, "_models_dev_info", lambda *args, **kwargs: None)
 
         chat = resolve_provider_full("commandcode", {}, [])
         assert chat is not None and chat.id == "commandcode"
+        assert chat.source == "plugin-profile"
         assert chat.transport == "openai_chat"
         assert "COMMANDCODE_API_KEY" in chat.api_key_env_vars
 
         anth = resolve_provider_full("commandcode-anthropic", {}, [])
         assert anth is not None and anth.id == "commandcode-anthropic"
+        assert anth.source == "plugin-profile"
         assert anth.transport == "anthropic_messages"
+
+    def test_catalog_metadata_precedes_plugin_fallback(self, commandcode_catalog):
+        from hermes_cli.providers import resolve_provider_full
+
+        chat = resolve_provider_full("commandcode", {}, [])
+        assert chat is not None and chat.id == "commandcode"
+        assert chat.source == "models.dev"
+        assert chat.transport == "openai_chat"
+        assert chat.api_key_env_vars == commandcode_catalog.env
+        assert chat.base_url == commandcode_catalog.api
+
+        anth = resolve_provider_full("commandcode-anthropic", {}, [])
+        assert anth is not None and anth.id == "commandcode-anthropic"
+        assert anth.source == "plugin-profile"
+        assert anth.transport == "anthropic_messages"
+        assert "COMMANDCODE_API_KEY" in anth.api_key_env_vars
+
+    def test_catalog_key_name_does_not_replace_profile_credentials(
+        self, monkeypatch, commandcode_profile, commandcode_catalog,
+    ):
+        """The auth consumer uses the profile registry independently of catalog metadata."""
+        from dataclasses import replace
+
+        from hermes_cli import auth, auth_plugin_providers, config
+        from hermes_cli.providers import resolve_provider_full
+
+        profile = replace(commandcode_profile, base_url="https://profile.example.invalid/v1")
+        monkeypatch.setattr(auth, "PROVIDER_REGISTRY", {})
+        monkeypatch.setattr(auth_plugin_providers, "PLUGIN_MIRRORED_PROVIDERS", set())
+        auth_plugin_providers.register_plugin_provider(profile)
+        monkeypatch.setattr(config, "load_config", lambda: {"model": {"provider": profile.name}})
+        monkeypatch.setattr(auth, "_provider_env_base_url", lambda pconfig: "")
+        values = {
+            "COMMANDCODE_API_KEY": "sk-commandcode-fixture-value",
+            "CMD_API_KEY": "sk-catalog-fixture-value",
+        }
+        reads = []
+
+        def read_fixture_value(name):
+            reads.append(name)
+            return values.get(name, "")
+
+        monkeypatch.setattr(config, "get_env_value_prefer_dotenv", read_fixture_value)
+        metadata = resolve_provider_full("commandcode", {}, [])
+        assert metadata.source == "models.dev"
+        assert metadata.api_key_env_vars == commandcode_catalog.env
+        assert auth.PROVIDER_REGISTRY[profile.name].api_key_env_vars == ("COMMANDCODE_API_KEY",)
+
+        credentials = auth.resolve_api_key_provider_credentials(profile.name)
+        assert credentials["api_key"] == values["COMMANDCODE_API_KEY"]
+        assert credentials["source"] == "COMMANDCODE_API_KEY"
+        assert credentials["base_url"] == profile.base_url
+        assert reads == ["COMMANDCODE_API_KEY"]
 
 
 # ── base_url endpoint override ───────────────────────────────────────────────

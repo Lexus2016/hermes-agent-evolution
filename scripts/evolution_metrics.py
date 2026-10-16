@@ -30,24 +30,45 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from evolution_funnel import is_evolution_halted, load_records  # noqa: E402
+from evolution_funnel import is_evolution_halted, load_records
 
 
-def _int(rec: Dict[str, Any], key: str) -> int:
+def _default_evolution_dir() -> Path:
+    override = os.environ.get("EVOLUTION_PROFILE_DIR")
+    if override is not None:
+        return Path(override)
+    try:
+        from hermes_constants import get_hermes_home
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_constants":
+            raise
+        # Installed stdlib-only copies have no core modules. The scheduler must
+        # supply their owning profile explicitly; never infer it from ambient HOME.
+        home = os.environ.get("HERMES_HOME", "")
+        if not home.strip():
+            raise RuntimeError(
+                "Standalone evolution metrics requires HERMES_HOME or EVOLUTION_PROFILE_DIR"
+            ) from exc
+        return Path(os.path.expanduser(os.path.expandvars(home))) / "evolution"
+    return get_hermes_home() / "evolution"
+
+
+def _int(rec: dict[str, Any], key: str) -> int:
     try:
         return int(rec.get(key, 0) or 0)
     except (TypeError, ValueError):
         return 0
 
 
-def _is_active(rec: Dict[str, Any]) -> bool:
+def _is_active(rec: dict[str, Any]) -> bool:
     """A cycle that actually had work — not an idle day or a premature/artifact
     all-zero record. Idle days must not drag down success rate."""
     return _int(rec, "selected") > 0 or _int(rec, "issues_created") > 0
 
 
-def _trend(values: List[int]) -> str:
+def _trend(values: list[int]) -> str:
     """improving / flat / declining by comparing 2nd-half mean to 1st-half mean."""
     n = len(values)
     if n < 2:
@@ -67,20 +88,15 @@ def _trend(values: List[int]) -> str:
 
 
 def compute_health(
-    records: List[Dict[str, Any]],
+    records: list[dict[str, Any]],
     last: int = 30,
     evolution_dir: Path | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     window = records[-last:] if last and last > 0 else list(records)
     active = [r for r in window if _is_active(r)]
 
     if evolution_dir is None:
-        evolution_dir = Path(
-            os.environ.get(
-                "EVOLUTION_PROFILE_DIR",
-                str(Path.home() / ".hermes" / "evolution"),
-            )
-        )
+        evolution_dir = _default_evolution_dir()
 
     sel = sum(_int(r, "selected") for r in active)
     mrg = sum(_int(r, "merged") for r in active)
@@ -123,7 +139,7 @@ def compute_health(
         selection_efficiency = (mrg / sel) if sel else None
     reject_rate = (rej / triaged) if triaged else None
 
-    flags: List[str] = []
+    flags: list[str] = []
     # Only judge once there is enough signal to mean anything.
     if len(active) >= 3:
         if cycle_success_rate is not None and cycle_success_rate < 0.34:
@@ -160,7 +176,7 @@ def compute_health(
     # would fire a permanent false alarm. Riding the existing flags list means a
     # mis-tuned boundary reaches the owner through the channel that already
     # works.
-    gate_rates: Dict[str, Any] = {}
+    gate_rates: dict[str, Any] = {}
     try:
         from evolution.lib.stage_gate import (
             compute_gate_rates,
@@ -201,7 +217,7 @@ def _pct(x: Optional[float]) -> str:
     return "n/a" if x is None else f"{x:.0%}"
 
 
-def format_health(h: Dict[str, Any]) -> str:
+def format_health(h: dict[str, Any]) -> str:
     tail = " | ".join(h["flags"]) if h["flags"] else "healthy"
     # NOTE: effort_budget rides in the BODY, never the tail. evolution_watchdog
     # keys on `.endswith("| healthy")` / `| <FLAG>`, so the flags must stay the
@@ -230,15 +246,8 @@ def format_health(h: Dict[str, Any]) -> str:
     )
 
 
-def main(argv: List[str]) -> int:
-    import os
-
-    evolution_dir = Path(
-        os.environ.get(
-            "EVOLUTION_PROFILE_DIR",
-            str(Path.home() / ".hermes" / "evolution"),
-        )
-    )
+def main(argv: list[str]) -> int:
+    evolution_dir = _default_evolution_dir()
     args = argv[1:]
     last = 30
     if "--last" in args:

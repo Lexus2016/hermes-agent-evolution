@@ -1,0 +1,25 @@
+{
+  "head": "ef4609bc96f59c3354cd76daadebf861e44580ff",
+  "tree": "f236a9b5da1df9cc6776f4e9fdffebc6a606dc75",
+  "base": "9efba6dcfa78013a3763778aaca4fe37921c495e",
+  "exit": 1,
+  "total_findings": 1287,
+  "raw_blocking": 1122,
+  "reviewed_disposition_matched": 354,
+  "unresolved": 768,
+  "inline_allowed": 124,
+  "advisory": 41,
+  "unresolved_rules": {
+    "HX006": 106,
+    "BLE001": 352,
+    "FILE_LINES": 19,
+    "S110": 31,
+    "FUNC_LINES": 21,
+    "CC": 109,
+    "HX002": 1,
+    "NESTING": 2,
+    "HX011": 15,
+    "HX013": 112
+  },
+  "report_sha256": "f8f7c2dfb93aee0ca46a5b1c309256bce2b7c3665ac42f79bed65bbef0e20182"
+}

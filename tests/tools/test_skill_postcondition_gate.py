@@ -2,7 +2,7 @@
 
 import pytest
 
-from tools.skill_postcondition_gate import (  # noqa: E402
+from tools.skill_postcondition_gate import (
     CaptureRecord,
     Postcondition,
     validate_capture,

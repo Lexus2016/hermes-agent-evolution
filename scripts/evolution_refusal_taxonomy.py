@@ -17,7 +17,7 @@ RECOVERABLE_ERROR = "recoverable_error"
 SPURIOUS = "spurious"
 
 _REFUSAL_PAT = re.compile(
-    "|".join([  # fmt: skip
+    "|".join([
         r"i can'?t",
         r"i can not",
         r"i don'?t have (?:access|permission)",
@@ -33,7 +33,7 @@ _FP_RE = re.compile(
     r"i can'?t (?:stress|emphasize|overstate|imagine|believe|say|thank|praise|wait)",
     re.IGNORECASE,
 )
-_RECOVERY: Dict[str, str] = {  # fmt: skip
+_RECOVERY: dict[str, str] = {
     TRUE_CAPABILITY_GAP: "Install or configure the missing capability, or route to a tool that has it.",
     OVER_REFUSAL: "The capability exists locally — use the available tool directly.",
     MISSING_SKILL_TRIGGER: "Activate the relevant skill with /skills install or load it explicitly.",
@@ -43,12 +43,12 @@ _RECOVERY: Dict[str, str] = {  # fmt: skip
 }
 
 
-def detect_refusals(text: str) -> List[Dict[str, Any]]:
+def detect_refusals(text: str) -> list[dict[str, Any]]:
     """Detect refusal phrases in text, filtering rhetorical false positives."""
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for m in _REFUSAL_PAT.finditer(text):
         snippet = text[m.start() : m.start() + 40]
-        results.append({"phrase": m.group(0), "start": m.start(), "end": m.end(), "is_refusal": not _FP_RE.match(snippet)})  # fmt: skip
+        results.append({"phrase": m.group(0), "start": m.start(), "end": m.end(), "is_refusal": not _FP_RE.match(snippet)})
     return results
 
 
@@ -77,20 +77,20 @@ def recovery_suggestion(category: str) -> str:
 
 def analyze_session(
     text: str, *, has_tool_failure: bool = False, skill_available: bool = False
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Analyze a session for refusals and return a report with recovery suggestions."""
     refusals = [r for r in detect_refusals(text) if r["is_refusal"]]
     if not refusals:
-        return {"refusal_count": 0, "categories": [], "suggestions": [], "has_refusals": False}  # fmt: skip
-    cats: List[str] = []
+        return {"refusal_count": 0, "categories": [], "suggestions": [], "has_refusals": False}
+    cats: list[str] = []
     for r in refusals:
-        cat = classify_refusal(text[r["start"] : r["end"] + 80], has_tool_failure=has_tool_failure, skill_available=skill_available)  # fmt: skip
+        cat = classify_refusal(text[r["start"] : r["end"] + 80], has_tool_failure=has_tool_failure, skill_available=skill_available)
         if cat not in cats:
             cats.append(cat)
-    return {"refusal_count": len(refusals), "categories": cats, "suggestions": [recovery_suggestion(c) for c in cats], "has_refusals": True}  # fmt: skip
+    return {"refusal_count": len(refusals), "categories": cats, "suggestions": [recovery_suggestion(c) for c in cats], "has_refusals": True}
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(
             "usage: evolution_refusal_taxonomy.py {detect,classify,analyze} ...",

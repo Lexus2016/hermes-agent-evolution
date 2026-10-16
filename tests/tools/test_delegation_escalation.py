@@ -60,7 +60,7 @@ def test_real_result_commit_preserves_roles_and_denials(tmp_path, monkeypatch):
 
 def test_default_runs_profile_isolation_and_verified_learning(tmp_path, monkeypatch):
     from tools import delegate_tool
-    monkeypatch.setattr(delegate_tool, "_load_config", lambda: {})
+    monkeypatch.setattr(delegate_tool, "_load_config", dict)
     monkeypatch.setattr(EscalationRun, "_consult", lambda *_: (_ for _ in ()).throw(AssertionError("default must not spend")))
     paths = [tmp_path / "a", tmp_path / "b", tmp_path / "a"]
     for home, invalid in zip(paths, [[], {"schema": "delegation-action-values-v1", "values": []}, {"values": None}]):

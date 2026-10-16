@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for agent.stepguard_monitor (#3245)."""
 
 import pytest

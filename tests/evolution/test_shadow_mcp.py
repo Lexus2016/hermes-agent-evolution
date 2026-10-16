@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for shadow-MCP outbound endpoint governance (issue #90, rework r2).
 
 The rework (post PR #3056 review) made the matcher bypass-proof. These tests

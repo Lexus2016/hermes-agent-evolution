@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Parallel batch tool evolution + cross-domain transfer gate (#2260).
 
 Slice B of the In-Situ Self-Evolving paradigm (parent #2248; Slice A is
@@ -37,11 +36,11 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "VariantResult",
+    "accept_best",
     "propose_variants",
     "run_batch",
     "select_best",
     "transferability_score",
-    "accept_best",
 ]
 
 # Deterministic mutation hints cycled across variants; the variant index
@@ -79,7 +78,7 @@ def propose_variants(
     base_tool: SynthesizedTool,
     n_variants: int,
     proposer: Optional[Callable[[SynthesizedTool, int], SynthesizedTool]] = None,
-) -> List[SynthesizedTool]:
+) -> list[SynthesizedTool]:
     """Propose *n_variants* mutation variants of *base_tool*.
 
     *proposer* is a callable ``(base_tool, index) -> SynthesizedTool``;
@@ -93,7 +92,7 @@ def run_batch(
     variants: Sequence[SynthesizedTool],
     validator: Callable[[SynthesizedTool], float],
     max_workers: int = 4,
-) -> List[VariantResult]:
+) -> list[VariantResult]:
     """Validate *variants* in parallel; collect pass/fail + score each.
 
     *validator* returns a score; bool validators score 1.0/0.0. A

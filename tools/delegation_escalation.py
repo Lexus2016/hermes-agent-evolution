@@ -37,7 +37,7 @@ def load_values(path):
     if not path:
         return values
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
         if not isinstance(data, dict) or data.get("schema") != "delegation-action-values-v1" or not isinstance(data.get("values"), dict):
             return values
         for state, row in data["values"].items():

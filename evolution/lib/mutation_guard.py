@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Mutating-step safety: snapshot-before-destructive primitive + failure-cause counter (#3014, #2995).
 
 Implements the SABER / Do-over mutating-step safety pattern:
@@ -18,6 +17,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
+from datetime import UTC
 
 __version__ = "1.1.0"
 
@@ -39,7 +39,7 @@ class FailureCauseSummary:
     other_cause: int = 0
     mutating_share: Optional[float] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-compatible dict (for realized-impact metrics)."""
         return {
             "failed_runs": self.failed_runs,
@@ -61,7 +61,7 @@ class MutatingFailureCounter:
     recorded.
     """
 
-    def __init__(self, ledger_file: Optional[Union[os.PathLike, str]] = None) -> None:
+    def __init__(self, ledger_file: Optional[os.PathLike | str] = None) -> None:
         """Initialize with an optional ledger path."""
         if ledger_file is None:
             base = Path(
@@ -85,7 +85,7 @@ class MutatingFailureCounter:
         if not recorded_at:
             from datetime import datetime, timezone
 
-            recorded_at = datetime.now(timezone.utc).date().isoformat()
+            recorded_at = datetime.now(UTC).date().isoformat()
         rec = {
             "run_id": str(run_id),
             "outcome": "failed",
@@ -132,9 +132,9 @@ class FileSnapshot:
     and context-manager rollback on unhandled exceptions.
     """
 
-    def __init__(self, paths: Sequence[Union[os.PathLike, str]]) -> None:
+    def __init__(self, paths: Sequence[os.PathLike | str]) -> None:
         """Snapshot the given paths (files that exist or might be created)."""
-        self._snapshots: Dict[Path, Optional[bytes]] = {}
+        self._snapshots: dict[Path, Optional[bytes]] = {}
         for p in paths:
             path = Path(p).resolve()
             if path.is_file():
@@ -143,7 +143,7 @@ class FileSnapshot:
                 self._snapshots[path] = None
 
     @property
-    def paths(self) -> List[Path]:
+    def paths(self) -> list[Path]:
         """List of snapshotted file paths."""
         return list(self._snapshots.keys())
 
@@ -181,14 +181,14 @@ class FileSnapshot:
                     restored_count += 1
         return restored_count
 
-    def __enter__(self) -> "FileSnapshot":
+    def __enter__(self) -> FileSnapshot:
         return self
 
     def __exit__(
         self,
-        exc_type: Optional[type],
+        exc_type: type[BaseException] | None,
         exc_val: Optional[BaseException],
-        exc_tb: Optional[Any],
+        exc_tb: object,
     ) -> bool:
         if exc_type is not None:
             self.restore()

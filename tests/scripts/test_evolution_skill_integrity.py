@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_skill_lint import (  # noqa: E402
+from evolution_skill_lint import (
     check_skill_edit_budget,
     extract_run_commands,
     find_edit_budget_violations,

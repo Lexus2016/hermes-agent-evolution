@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Bi-level RSI evaluation protocol (issue #1166).
 
 Adopts the AIDE² evaluation discipline (Weco AI, 2026) for the evolution
@@ -32,16 +31,16 @@ from enum import Enum
 from typing import Any, Mapping, Sequence
 
 __all__ = [
-    "Split",
-    "EvalCase",
-    "CostBudget",
     "BiLevelDecision",
+    "CostBudget",
+    "EvalCase",
     "McNemarResult",
-    "partition_scores",
-    "mcnemar_test",
+    "Split",
     "bilevel_decision",
     "evaluate",
     "main",
+    "mcnemar_test",
+    "partition_scores",
 ]
 
 
@@ -57,7 +56,7 @@ class EvalCase:
     split: Split = Split.public
 
     @classmethod
-    def from_dict(cls, d: Mapping[str, Any]) -> "EvalCase":
+    def from_dict(cls, d: Mapping[str, Any]) -> EvalCase:
         return cls(
             id=str(d["id"]),
             task_class=str(d.get("task_class", "default")),
@@ -362,7 +361,7 @@ def main(argv: list[str] | None = None) -> int:
         "--payload", required=True, help="path to the eval payload JSON"
     )
     args = parser.parse_args(argv)
-    with open(args.payload, encoding="utf-8") as fh:
+    with open(args.payload, encoding="utf-8-sig") as fh:
         payload = json.load(fh)
     result = evaluate(payload)
     print(json.dumps(result, ensure_ascii=False, indent=2))

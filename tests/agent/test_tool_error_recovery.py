@@ -193,7 +193,7 @@ class TestClassifyToolException:
             RecoveryAction,
         )
 
-        f = classify_tool_exception("tool_call", asyncio.TimeoutError())
+        f = classify_tool_exception("tool_call", TimeoutError())
         assert f.error_class == ToolErrorClass.transient
         assert f.recovery_action == RecoveryAction.retry
 

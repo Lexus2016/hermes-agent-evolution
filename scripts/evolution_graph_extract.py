@@ -18,8 +18,8 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 __all__ = [
     "ControlFlowEdge",
     "DataFlowEdge",
-    "FunctionGraph",
     "FileGraph",
+    "FunctionGraph",
     "extract_file_graph",
     "extract_graph",
     "graph_to_json",
@@ -33,7 +33,7 @@ class ControlFlowEdge:
     line: int
     detail: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = {"type": self.type, "line": self.line}
         if self.detail:
             d["detail"] = self.detail
@@ -47,7 +47,7 @@ class DataFlowEdge:
     target: str = ""
     source: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = {"type": self.type, "line": self.line}
         if self.target:
             d["target"] = self.target
@@ -60,10 +60,10 @@ class DataFlowEdge:
 class FunctionGraph:
     name: str
     line: int
-    control_flow: List[ControlFlowEdge] = field(default_factory=list)
-    data_flow: List[DataFlowEdge] = field(default_factory=list)
+    control_flow: list[ControlFlowEdge] = field(default_factory=list)
+    data_flow: list[DataFlowEdge] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "line": self.line,
@@ -75,9 +75,9 @@ class FunctionGraph:
 @dataclass
 class FileGraph:
     path: str
-    functions: List[FunctionGraph] = field(default_factory=list)
+    functions: list[FunctionGraph] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"path": self.path, "functions": [f.to_dict() for f in self.functions]}
 
 
@@ -86,7 +86,7 @@ class _Extractor(ast.NodeVisitor):
 
     def __init__(self) -> None:
         self.current_func: Optional[FunctionGraph] = None
-        self._functions: List[FunctionGraph] = []
+        self._functions: list[FunctionGraph] = []
 
     def _txt(self, node: ast.expr) -> str:
         try:
@@ -94,7 +94,7 @@ class _Extractor(ast.NodeVisitor):
         except Exception:
             return type(node).__name__
 
-    def _handle_func(self, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> None:
+    def _handle_func(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         parent = self.current_func
         fg = FunctionGraph(name=node.name, line=node.lineno)
         self.current_func = fg
@@ -206,7 +206,7 @@ class _Extractor(ast.NodeVisitor):
             )
         self.generic_visit(node)
 
-    def extract(self, tree: ast.AST) -> List[FunctionGraph]:
+    def extract(self, tree: ast.AST) -> list[FunctionGraph]:
         self._functions = []
         self.current_func = None
         self.visit(tree)
@@ -221,7 +221,7 @@ def extract_file_graph(source: str, path: str = "<string>") -> Optional[FileGrap
     return FileGraph(path=path, functions=_Extractor().extract(tree))
 
 
-def extract_graph(paths: Sequence[Union[str, Path]]) -> Dict[str, Any]:
+def extract_graph(paths: Sequence[str | Path]) -> dict[str, Any]:
     files_data, errors = [], []
     for p in paths:
         path = Path(p)
@@ -229,7 +229,7 @@ def extract_graph(paths: Sequence[Union[str, Path]]) -> Dict[str, Any]:
             errors.append(str(path))
             continue
         try:
-            src = path.read_text(encoding="utf-8")
+            src = path.read_text(encoding="utf-8-sig")
         except OSError:
             errors.append(str(path))
             continue
@@ -241,11 +241,11 @@ def extract_graph(paths: Sequence[Union[str, Path]]) -> Dict[str, Any]:
     return {"files": files_data, "errors": errors}
 
 
-def graph_to_json(g: Dict[str, Any]) -> str:
+def graph_to_json(g: dict[str, Any]) -> str:
     return json.dumps(g, indent=2, sort_keys=True)
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     args = argv[1:]
     paths = [a for a in args if not a.startswith("--")]
     if not paths:

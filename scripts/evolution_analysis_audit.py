@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 # The two budgets the metric script is allowed to prescribe (#519 contract).
 # Anything else means the agent invented a number instead of copying one.
-LEGAL_BUDGETS: Tuple[float, ...] = (1.5, 3.0)
+LEGAL_BUDGETS: tuple[float, ...] = (1.5, 3.0)
 _EPS = 1e-9
 
 # A repo-relative file path cited in prose: at least one "/" and a file
@@ -40,7 +40,7 @@ _CITED_PATH_RE = re.compile(
 
 
 # Candidate/issue collection keys the analysis report may carry (#2468/#2494).
-_CANDIDATE_KEYS: Tuple[str, ...] = (
+_CANDIDATE_KEYS: tuple[str, ...] = (
     "candidates",
     "proposals",
     "evaluated_issues",
@@ -62,10 +62,10 @@ def _num(x: Any) -> Optional[float]:
 # Observed shapes (analysis reports): ``{"limit": 3.0, ...}`` (2026-08-29),
 # ``{"max": 3.0, "used": 2.7, ...}`` (2026-08-28). The audit must read the
 # scalar explicitly from whichever key the producer chose (#168).
-_EFFORT_BUDGET_KEYS: Tuple[str, ...] = ("limit", "max", "selected_total", "used")
+_EFFORT_BUDGET_KEYS: tuple[str, ...] = ("limit", "max", "selected_total", "used")
 
 
-def _scalar_effort_budget(report: Dict[str, Any], default: float = 3.0) -> float:
+def _scalar_effort_budget(report: dict[str, Any], default: float = 3.0) -> float:
     """Extract a scalar effort budget from scalar OR nested report shapes.
 
     The analysis report's ``effort_budget`` was historically a scalar float;
@@ -89,7 +89,7 @@ def _scalar_effort_budget(report: Dict[str, Any], default: float = 3.0) -> float
     return default
 
 
-def check_effort_budget_shape(report: Dict[str, Any]) -> List[str]:
+def check_effort_budget_shape(report: dict[str, Any]) -> list[str]:
     """Schema check on the report's ``effort_budget`` field (loud, no crash).
 
     Returns violation strings (empty == shape is readable). A future shape
@@ -123,7 +123,7 @@ def check_effort_budget_shape(report: Dict[str, Any]) -> List[str]:
     ]
 
 
-def _selection_constraints(report: Dict[str, Any]) -> Dict[str, Any]:
+def _selection_constraints(report: dict[str, Any]) -> dict[str, Any]:
     """``max_total_effort`` lives under ``scoring_model.selection_constraints``
     (observed shape), but tolerate a top-level ``selection_constraints`` too so a
     future report layout does not silently skip the check."""
@@ -136,8 +136,8 @@ def _selection_constraints(report: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def audit_analysis(
-    report: Dict[str, Any], legal_budgets: Sequence[float] = LEGAL_BUDGETS
-) -> List[str]:
+    report: dict[str, Any], legal_budgets: Sequence[float] = LEGAL_BUDGETS
+) -> list[str]:
     """Return human-readable violation strings (empty == clean).
 
     Missing or non-numeric fields are SKIPPED, never flagged — a partial,
@@ -146,7 +146,7 @@ def audit_analysis(
     """
     if not isinstance(report, dict):
         return []
-    out: List[str] = []
+    out: list[str] = []
 
     # Schema check (#168): effort_budget may be scalar or a known nested dict.
     # Flag (not crash) when the producer shipped a shape the consumer can't
@@ -176,7 +176,7 @@ def audit_analysis(
     return out
 
 
-def extract_cited_paths(text: str) -> List[str]:
+def extract_cited_paths(text: str) -> list[str]:
     """Extract repo-relative file paths cited in text."""
     if not text:
         return []
@@ -184,7 +184,7 @@ def extract_cited_paths(text: str) -> List[str]:
 
 
 def verify_implementation_claim(
-    item: Dict[str, Any], repo_root: Optional[Path]
+    item: dict[str, Any], repo_root: Optional[Path]
 ) -> bool:
     """Verify whether an already_implemented claim refers to real code artifacts in repo_root.
 
@@ -211,7 +211,7 @@ def verify_implementation_claim(
         str(item.get("evidence") or ""),
         str(item.get("description") or ""),
     ]
-    cited: List[str] = []
+    cited: list[str] = []
     for blob in text_blobs:
         for p in extract_cited_paths(blob):
             if p not in cited:
@@ -223,8 +223,8 @@ def verify_implementation_claim(
 
 
 def audit_implemented_claims(
-    report: Dict[str, Any], repo_root: Optional[Path]
-) -> List[str]:
+    report: dict[str, Any], repo_root: Optional[Path]
+) -> list[str]:
     """Catch unverified `already_implemented` claims in analysis reports (#2468).
 
     If a candidate or proposal is marked `already_implemented: True` (or similar)
@@ -239,9 +239,9 @@ def audit_implemented_claims(
     except OSError:
         return []
 
-    out: List[str] = []
+    out: list[str] = []
     # Inspect all possible candidate/issue collection keys
-    items_to_check: List[Dict[str, Any]] = []
+    items_to_check: list[dict[str, Any]] = []
     for key in _CANDIDATE_KEYS:
         val = report.get(key)
         if isinstance(val, list):
@@ -280,9 +280,9 @@ def audit_implemented_claims(
 
 
 def reconcile_implemented_candidates(
-    candidates: Sequence[Dict[str, Any]],
+    candidates: Sequence[dict[str, Any]],
     repo_root: Optional[Path],
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Verify and reconcile already_implemented claims against the live worktree (#2468).
 
     If an issue was marked `already_implemented: True` based on a stale/fabricated claim
@@ -290,7 +290,7 @@ def reconcile_implemented_candidates(
     """
     if not candidates:
         return []
-    reconciled: List[Dict[str, Any]] = []
+    reconciled: list[dict[str, Any]] = []
     for cand in candidates:
         if not isinstance(cand, dict):
             continue
@@ -310,15 +310,15 @@ def reconcile_implemented_candidates(
 
 
 def reconcile_report(
-    report: Dict[str, Any], repo_root: Optional[Path]
-) -> Tuple[Dict[str, Any], List[str]]:
+    report: dict[str, Any], repo_root: Optional[Path]
+) -> tuple[dict[str, Any], list[str]]:
     """Clear unverified ``already_implemented`` flags across candidate collections (#2494).
 
     Returns ``(report, notes)``; ``notes`` lists each cleared claim for audit.
     """
     if not isinstance(report, dict):
         return report, []
-    notes: List[str] = []
+    notes: list[str] = []
     for key in _CANDIDATE_KEYS:
         val = report.get(key)
         if not isinstance(val, list):
@@ -348,7 +348,7 @@ def _is_dated_report_name(name: str) -> bool:
     return name[4] == "-" and name[7] == "-"
 
 
-def reconcile_latest(evolution_dir: Path, repo_root: Optional[Path]) -> List[str]:
+def reconcile_latest(evolution_dir: Path, repo_root: Optional[Path]) -> list[str]:
     """Reconcile the latest dated analysis report and write it back atomically (#2494)."""
     if repo_root is None:
         return []
@@ -362,7 +362,7 @@ def reconcile_latest(evolution_dir: Path, repo_root: Optional[Path]) -> List[str
         return []
     latest = dated[-1]
     try:
-        report = json.loads(latest.read_text(encoding="utf-8"))
+        report = json.loads(latest.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return []
     report, notes = reconcile_report(report, repo_root)
@@ -376,7 +376,7 @@ def reconcile_latest(evolution_dir: Path, repo_root: Optional[Path]) -> List[str
     return notes
 
 
-def audit_rejections(report: Dict[str, Any], repo_root: Optional[Path]) -> List[str]:
+def audit_rejections(report: dict[str, Any], repo_root: Optional[Path]) -> list[str]:
     """Catch FABRICATED ``already-exists`` rejections — the #83 class, where the
     analysis agent CLOSED an issue claiming the feature already exists and cited a
     repo path that does not exist (the real #83 cited ``scripts/evolution_watchdog.sh``;
@@ -393,7 +393,7 @@ def audit_rejections(report: Dict[str, Any], repo_root: Optional[Path]) -> List[
             return []
     except OSError:
         return []
-    out: List[str] = []
+    out: list[str] = []
     for rej in report.get("rejected") or []:
         if not isinstance(rej, dict):
             continue
@@ -409,7 +409,7 @@ def audit_rejections(report: Dict[str, Any], repo_root: Optional[Path]) -> List[
     return out
 
 
-def _record_meta_skill_trace(report: Dict[str, Any], evolution_dir: Path) -> None:
+def _record_meta_skill_trace(report: dict[str, Any], evolution_dir: Path) -> None:
     """Wire #1876: append a per-cycle meta-skill trace record.
 
     Called from ``audit_latest`` after the analysis JSON is read, so the trace
@@ -422,7 +422,7 @@ def _record_meta_skill_trace(report: Dict[str, Any], evolution_dir: Path) -> Non
         return
 
     selected = report.get("selected_for_implementation") or []
-    merged_issue_ids: List[int] = []
+    merged_issue_ids: list[int] = []
     # Merged issues are not known at audit time — the implementation stage
     # fills those in.  Record what we have: date, variant, selection counts.
     selected_issue_ids = [
@@ -444,7 +444,7 @@ def _record_meta_skill_trace(report: Dict[str, Any], evolution_dir: Path) -> Non
         pass
 
 
-def audit_latest(evolution_dir: Path, repo_root: Optional[Path] = None) -> List[str]:
+def audit_latest(evolution_dir: Path, repo_root: Optional[Path] = None) -> list[str]:
     """Audit the most recent dated analysis report under ``<dir>/analysis/``.
 
     Runs the budget checks (``audit_analysis``) plus — when ``repo_root`` is given
@@ -466,7 +466,7 @@ def audit_latest(evolution_dir: Path, repo_root: Optional[Path] = None) -> List[
         return []
     latest = dated[-1]
     try:
-        report = json.loads(latest.read_text(encoding="utf-8"))
+        report = json.loads(latest.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return []
     violations = (
@@ -481,7 +481,7 @@ def audit_latest(evolution_dir: Path, repo_root: Optional[Path] = None) -> List[
     return [f"({latest.stem}) {v}" for v in violations]
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     import os
 
     evolution_dir = Path(

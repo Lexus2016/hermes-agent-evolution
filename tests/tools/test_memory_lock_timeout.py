@@ -127,7 +127,7 @@ def test_acquire_fcntl_lock_with_contention_retries(tmp_path):
         releaser.join(timeout=2)
         try:
             fcntl.flock(held_fd, fcntl.LOCK_UN)
-        except (OSError, IOError):
+        except OSError:
             pass
         held_fd.close()
 

@@ -463,7 +463,7 @@ class HonchoClientConfig:
 
         try:
             root = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, encoding='utf-8',
-                                  errors='replace', cwd=cwd, timeout=5, stdin=subprocess.DEVNULL)
+                                  errors='replace', cwd=cwd, timeout=5, stdin=subprocess.DEVNULL, check=False)
         except (OSError, subprocess.TimeoutExpired):
             return None
         return Path(root.stdout.strip()).name if root.returncode == 0 else None
@@ -540,13 +540,13 @@ class HonchoClientConfig:
 
 
 # Threads keyed by the provider or manager that owns them, so shutdown never waits on another agent's work.
-_plugin_threads: "weakref.WeakKeyDictionary[Any, weakref.WeakSet]" = weakref.WeakKeyDictionary()
+_plugin_threads: weakref.WeakKeyDictionary[Any, weakref.WeakSet] = weakref.WeakKeyDictionary()
 _plugin_threads_lock = _threading.Lock()
 
 
 def spawn_context_thread(
     target, *, name: str, daemon: bool = True, args: tuple = (), owner: Any = None,
-) -> "_threading.Thread":
+) -> _threading.Thread:
     """agent.memory_provider.spawn_context_thread plus an ``owner``: the thread is registered so
     join_plugin_threads can wait on exactly the threads this provider or manager spawned."""
     thread = _spawn_context_thread(target, name=name, daemon=daemon, args=args)
@@ -627,11 +627,11 @@ def get_honcho_client(config: HonchoClientConfig | None = None) -> Honcho:
     return slot.get(lambda: _build_client(config))
 
 
-def _build_client(config: HonchoClientConfig) -> "Honcho":
+def _build_client(config: HonchoClientConfig) -> Honcho:
     """Construct the SDK client (runs inside the slot factory so racing callers share one)."""
     with contextlib.suppress(Exception):  # lazy-dep failures fall through to the canonical import error below
-        from tools.lazy_deps import ensure as _lazy_ensure
-        _lazy_ensure("memory.honcho", prompt=False)
+        from pm.extras import ensure_import
+        ensure_import("honcho")
     try:
         from honcho import Honcho
     except ImportError:
@@ -698,7 +698,5 @@ def __getattr__(name):  # PEP 562 — lazy so no import cycles
     if target is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     import importlib
-    from hermes_cli.plugin_compat import warn_once
-    warn_once(__name__, name, *target)
     return getattr(importlib.import_module(target[0]), target[1])
 # ---- END PLUGIN-COMPAT ----

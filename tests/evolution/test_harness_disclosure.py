@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for harness configuration disclosure (#2481)."""
 
 import json

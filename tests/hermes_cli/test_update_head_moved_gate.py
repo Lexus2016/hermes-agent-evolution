@@ -14,10 +14,9 @@ from types import SimpleNamespace
 import pytest
 
 from hermes_cli import main as hermes_main
-import hermes_cli.main_web_build as main_web_build
-import hermes_cli.main_install_repair as main_install_repair
+from hermes_cli import main_web_build
+from hermes_cli import main_install_repair
 from hermes_cli import update_cmd
-
 
 def _make_head_pinned_side_effect(sha="abc123"):
     """Simulate a detached checkout pinned to ``sha``: HEAD never moves."""
@@ -37,7 +36,6 @@ def _make_head_pinned_side_effect(sha="abc123"):
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     return side_effect
-
 
 def _patch_update_deps(monkeypatch, tmp_path, run_side_effect):
     """Patch the hermes_cli.main helpers ``_cmd_update_impl`` touches.
@@ -98,16 +96,13 @@ def _patch_update_deps(monkeypatch, tmp_path, run_side_effect):
     monkeypatch.setattr(
         hermes_gateway, "find_profile_gateway_processes", lambda *a, **k: []
     )
-    import hermes_cli.update_cmd_fleet as update_cmd_fleet
+    from hermes_cli import update_cmd_fleet
     monkeypatch.setattr(
         update_cmd, "_restart_macos_launchd_gateways", lambda *a, **k: None
     )
     monkeypatch.setattr(
         update_cmd_fleet, "_restart_macos_launchd_gateways", lambda *a, **k: None
     )
-
-
-
 
 def test_update_fails_loudly_when_head_pinned(monkeypatch, tmp_path, capsys):
     """A detached/pinned HEAD that never moves must fail loudly, not print
@@ -121,4 +116,3 @@ def test_update_fails_loudly_when_head_pinned(monkeypatch, tmp_path, capsys):
     assert exc_info.value.code == 1
     out = capsys.readouterr().out
     assert "✓ Code updated!" not in out
-

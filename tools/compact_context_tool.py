@@ -36,7 +36,7 @@ def compact_context_tool(
     *,
     focus_topic: str = "",
     agent=None,
-    messages: list = None,
+    messages: list | None = None,
 ) -> str:
     """Invoke agent-driven context compaction.
 
@@ -186,7 +186,7 @@ COMPACT_CONTEXT_SCHEMA = {
 
 
 # --- Registry ---
-from tools.registry import registry  # noqa: E402
+from tools.registry import registry
 
 registry.register(
     name="compact_context",

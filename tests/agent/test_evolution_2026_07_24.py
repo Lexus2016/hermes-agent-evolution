@@ -83,7 +83,7 @@ class TestIdenticalEditSuccess:
             ops._detect_line_ending = lambda s: None
             ops.write_file = lambda p, c: type("W", (), {"error": None})()
             def _exec(cmd):
-                r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=str(tmp), timeout=5)
+                r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=str(tmp), timeout=5, check=False)
                 class _R:
                     exit_code = r.returncode
                     stdout = r.stdout

@@ -40,7 +40,7 @@ DEFAULT_MIN_COUNT = 5  # a cluster must recur this often to become a weakness
 # root cause so the downstream proposer can generate typed, scoped edits rather
 # than broad prose rewrites.  This layer is deterministic and uses only the
 # anonymized fields already emitted by the miner.
-DIAGNOSIS_TEMPLATES: Dict[str, Dict[str, str]] = {
+DIAGNOSIS_TEMPLATES: dict[str, dict[str, str]] = {
     "tool_failure": {
         "component_scope": "tool_wrapper",
         "likely_root_cause": "argument validation or result-shape mismatch",
@@ -62,7 +62,7 @@ DIAGNOSIS_TEMPLATES: Dict[str, Dict[str, str]] = {
 }
 
 
-def diagnose_record(record: Dict[str, Any]) -> Dict[str, Any]:
+def diagnose_record(record: dict[str, Any]) -> dict[str, Any]:
     """Attach a deterministic, component-scoped diagnosis skeleton to a weakness
     record.  The diagnosis never uses raw trace content; it only reflects the
     anonymized kind + counts already present.  Returns a fresh dict so the input
@@ -80,13 +80,13 @@ def diagnose_record(record: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def mine_weaknesses(digest: Dict[str, Any], min_count: int = DEFAULT_MIN_COUNT) -> List[Dict[str, Any]]:
+def mine_weaknesses(digest: dict[str, Any], min_count: int = DEFAULT_MIN_COUNT) -> list[dict[str, Any]]:
     """Turn an introspection digest's aggregated signals into structured weakness
     records for clusters that recur >= ``min_count`` times. Pure + deterministic;
     operates only on the anonymized digest, never raw traces."""
     signals = digest.get("signals", {}) if isinstance(digest, dict) else {}
     window = digest.get("window_days", 0) if isinstance(digest, dict) else 0
-    records: List[Dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
 
     # Repeated tool failures attributed to a tool.
     for tool, n in (signals.get("tool_failures") or {}).items():
@@ -133,7 +133,7 @@ def mine_weaknesses(digest: Dict[str, Any], min_count: int = DEFAULT_MIN_COUNT) 
     return [diagnose_record(r) for r in records]
 
 
-def format_weaknesses(records: List[Dict[str, Any]], window_days: int = 0) -> str:
+def format_weaknesses(records: list[dict[str, Any]], window_days: int = 0) -> str:
     """One-line-per-record human summary for the issues-stage prompt / watchdog."""
     if not records:
         return f"[evolution-trace-miner] no recurring weaknesses (window {window_days}d)"
@@ -143,7 +143,7 @@ def format_weaknesses(records: List[Dict[str, Any]], window_days: int = 0) -> st
     return "\n".join(lines)
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     days = 7
     min_count = DEFAULT_MIN_COUNT
     for a in argv[1:]:

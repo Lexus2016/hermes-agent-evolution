@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-import evolution_sea_eval as sea  # noqa: E402
+import evolution_sea_eval as sea
 
 
 def _rec(date, **kw):

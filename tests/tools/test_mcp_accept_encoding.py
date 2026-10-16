@@ -70,7 +70,7 @@ def _drive_run_http(server, config):
         ), patch.object(MCPServerTask, "_discover_tools", new=AsyncMock()):
             try:
                 await asyncio.wait_for(server._run_http(config), timeout=2.0)
-            except (asyncio.TimeoutError, StopAsyncIteration, Exception):
+            except (TimeoutError, StopAsyncIteration, Exception):
                 pass
 
     asyncio.run(drive())

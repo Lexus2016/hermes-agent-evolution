@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """MCP Tasks extension support for long-running operations (MCP 2026-07-28 spec, issue #2285).
 
 Implements the MCP Tasks extension (io.modelcontextprotocol/tasks):
@@ -59,7 +58,7 @@ class MCPTask:
     server_name: str = ""
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
-    raw_payload: Dict[str, Any] = field(default_factory=dict)
+    raw_payload: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_terminal(self) -> bool:
@@ -69,7 +68,7 @@ class MCPTask:
     def is_successful(self) -> bool:
         return self.status.lower() in {"completed", "success", "done"}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "taskId": self.task_id,
             "status": self.status,
@@ -84,7 +83,7 @@ class MCPTask:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], server_name: str = "") -> MCPTask:
+    def from_dict(cls, data: dict[str, Any], server_name: str = "") -> MCPTask:
         # Handle both camelCase and snake_case keys
         tid = str(data.get("taskId") or data.get("task_id") or data.get("id") or "")
         status = str(data.get("status") or "working")
@@ -111,7 +110,7 @@ class MCPTask:
         )
 
 
-def extract_task_info(result: Any) -> Optional[Tuple[str, str]]:
+def extract_task_info(result: Any) -> Optional[tuple[str, str]]:
     """Extract (task_id, status) from a tool call result if it represents a Tasks-extension response.
 
     Returns None if result is a regular tool result without a task handle.
@@ -168,7 +167,7 @@ def extract_task_info(result: Any) -> Optional[Tuple[str, str]]:
 
 
 async def send_mcp_rpc_request(
-    session: Any, method: str, params: Dict[str, Any]
+    session: Any, method: str, params: dict[str, Any]
 ) -> Any:
     """Send a generic JSON-RPC request over the MCP session."""
     if session is None:
@@ -311,12 +310,12 @@ class MCPTaskManager:
     """In-process manager to wrap long-running operations as MCP Tasks."""
 
     def __init__(self) -> None:
-        self._tasks: Dict[str, MCPTask] = {}
-        self._async_handles: Dict[str, asyncio.Task[Any]] = {}
+        self._tasks: dict[str, MCPTask] = {}
+        self._async_handles: dict[str, asyncio.Task[Any]] = {}
 
     def create_task(
         self,
-        coro_or_fn: Union[Callable[..., Coroutine[Any, Any, Any]], Callable[..., Any]],
+        coro_or_fn: Callable[..., Coroutine[Any, Any, Any]] | Callable[..., Any],
         *args: Any,
         **kwargs: Any,
     ) -> MCPTask:

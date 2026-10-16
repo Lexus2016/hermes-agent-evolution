@@ -16,6 +16,11 @@ name: Lockfile diff
 
 on:
   workflow_call:
+    inputs:
+      commit:
+        description: Commit to test and build. Empty keeps the triggering commit.
+        type: string
+        default: ''
     outputs:
       changed:
         description: Whether package-lock.json changed relative to the target branch.
@@ -28,8 +33,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: lockfile-diff-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: lockfile-diff-${{ inputs.commit != '' && github.run_id || github.event.pull_request.number || github.ref }}
+  # A stable run is on the default branch. It must not queue behind or cancel a push.
+  cancel-in-progress: ${{ inputs.commit == '' }}
 
 jobs:
   diff:
@@ -43,6 +49,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.commit }}
           fetch-depth: 0 # need history for the merge base
 
       - name: Generate semantic lockfile diff
@@ -79,7 +86,7 @@ jobs:
 
           if [ "$CHANGED" = "true" ]; then
             CONTENT=$(cat /tmp/lockfile-diff.md | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
-            STATUS="[{\"source\":\"lockfile-diff\",\"results\":[{\"kind\":\"action_required\",\"title\":\"package-lock.json\",\"summary\":\"Locked npm dependency versions changed.\",\"detail\":${CONTENT},\"how_to_fix\":\"Add the \`ci-reviewed\` label after verifying the version changes are expected.\"}]}]"
+            STATUS="[{\"source\":\"lockfile-diff\",\"results\":[{\"kind\":\"action_required\",\"title\":\"package-lock.json\",\"summary\":\"Locked npm dependency versions changed.\",\"detail\":${CONTENT},\"how_to_fix\":\"Verify the version changes are expected. package-lock.json changes need a hermes-agent-core review.\"}]}]"
           else
             STATUS="[]"
           fi
@@ -90,7 +97,7 @@ jobs:
       - name: Upload review status artifact
         if: always() && steps.emit-status.outcome != 'skipped'
         continue-on-error: true
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: review-status-lockfile-diff
           path: review-status.json
@@ -99,7 +106,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload diff artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: lockfile-diff
           path: /tmp/lockfile-diff.md

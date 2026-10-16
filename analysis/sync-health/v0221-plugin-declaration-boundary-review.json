@@ -1,0 +1,79 @@
+{
+  "scope": "Only two malformed declaration/refusal/display boundaries. Three cadence findings excluded and held for correction. No successful installation/activation rollback claim.",
+  "findings": [
+    {
+      "path": "hermes_cli/plugins_cmd_install.py",
+      "scope": "_install_plugin_python_deps",
+      "rule": "BLE001",
+      "line": 91,
+      "detail": "blind `except Exception`",
+      "disposition": "independent-controller-approved-exact-declaration-boundary",
+      "reason": "Malformed actual TOML returns explicit manifest_invalid refusal even with assume_yes; active replacement publish_plugin raises classified PluginOperationError before sync_venv and keeps installed tree byte-identical.",
+      "candidate_blob": "2aee13fdd3fbfe3b7c3299de4819aa9e114bd3e1",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugins_cmd_install.py",
+        "scope": "_install_plugin_python_deps",
+        "blob": "2aee13fdd3fbfe3b7c3299de4819aa9e114bd3e1"
+      },
+      "dependencies": [
+        {
+          "path": "hermes_cli/plugins_transaction.py",
+          "blob": "1838658cd7c26f935ccf29d5e9e30e1446f0e5ab"
+        },
+        {
+          "path": "pm/plugin_declarations.py",
+          "blob": "210cabe36b29b87272cdda0add85174c17809f6d"
+        }
+      ],
+      "tests": {
+        "path": "tests/hermes_cli/test_plugin_policy_failure_boundaries.py",
+        "blob": "33d86372d5eb44b66fb6235cd5f9362375017846",
+        "scopes": [
+          "test_invalid_declaration_refuses_consent_even_when_preapproved",
+          "test_active_replacement_parse_failure_preserves_installed_tree_and_environment"
+        ]
+      },
+      "limits": "Only named refusal/config-accessor catch paths tested. Successful environment resolution, activation rollback, previous admission fixture setup failures and native hosted CI remain outside this proof."
+    },
+    {
+      "path": "hermes_cli/plugins_cmd_install.py",
+      "scope": "_python_dependency_summary",
+      "rule": "BLE001",
+      "line": 170,
+      "detail": "blind `except Exception`",
+      "disposition": "independent-controller-approved-exact-declaration-boundary",
+      "reason": "Malformed declaration yields empty UI detail with visible warning; same input independently refuses consent so empty display does not grant installation.",
+      "candidate_blob": "2aee13fdd3fbfe3b7c3299de4819aa9e114bd3e1",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugins_cmd_install.py",
+        "scope": "_python_dependency_summary",
+        "blob": "2aee13fdd3fbfe3b7c3299de4819aa9e114bd3e1"
+      },
+      "dependencies": [
+        {
+          "path": "hermes_cli/plugins_transaction.py",
+          "blob": "1838658cd7c26f935ccf29d5e9e30e1446f0e5ab"
+        },
+        {
+          "path": "pm/plugin_declarations.py",
+          "blob": "210cabe36b29b87272cdda0add85174c17809f6d"
+        }
+      ],
+      "tests": {
+        "path": "tests/hermes_cli/test_plugin_policy_failure_boundaries.py",
+        "blob": "33d86372d5eb44b66fb6235cd5f9362375017846",
+        "scopes": [
+          "test_unreadable_dependency_summary_warns_without_granting_consent"
+        ]
+      },
+      "limits": "Only named refusal/config-accessor catch paths tested. Successful environment resolution, activation rollback, previous admission fixture setup failures and native hosted CI remain outside this proof."
+    }
+  ],
+  "receipt": {
+    "path": "/tmp/hermes-cadence-read-final.log",
+    "sha256": "636d40871c598bd89c53f269d645854cd3a4f7768780241764952ce06f0ce7c8",
+    "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 3 test files (~12 tests) under ['tests/hermes_cli/test_plugin_cadence_config_read_failure.py', 'tests/hermes_cli/test_plugin_policy_failure_boundaries.py', 'tests/hermes_cli/test_plugins_cadence.py']; running with -j 9\n[  8.3% |     1/~12 | \u27136 | \u27170] \u2713 tests/hermes_cli/test_plugin_cadence_config_read_failure.py (6\u2713, 1.1s)\n[ 41.7% |     5/~12 | \u271312 | \u2717 0] \u2713 tests/hermes_cli/test_plugin_policy_failure_boundaries.py (6\u2713, 1.1s)\n[100.0% |    12/~12 | \u271321 | \u2717 0] \u2713 tests/hermes_cli/test_plugins_cadence.py (9\u2713, 1.6s)\n\n=== Summary: 3 files, 21 tests passed, 0 failed (100% complete) in 1.6s (9 workers) ===\n  Durations cached to test_durations.json (3 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   3\n  Total subprocess CPU-wall: 3.8s  (runner wall: 1.6s, parallelism: 9x)\n  P50: 1.12s  P90: 1.57s  P95: 1.57s  P99: 1.57s  Max: 1.57s\n  <1s: 0 files (0%)  <2s: 3 files (100%)\n  Top 10 slowest:\n      1.57s  tests/hermes_cli/test_plugins_cadence.py\n      1.12s  tests/hermes_cli/test_plugin_policy_failure_boundaries.py\n      1.10s  tests/hermes_cli/test_plugin_cadence_config_read_failure.py\n"
+  }
+}

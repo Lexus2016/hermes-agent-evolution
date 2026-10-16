@@ -80,8 +80,8 @@ class SharedMemo:
 
     def __init__(self, path: Optional[Path] = None) -> None:
         self.path = Path(path) if path is not None else default_memo_path()
-        self.retrievals: Dict[str, str] = {}
-        self.failures: Dict[str, str] = {}
+        self.retrievals: dict[str, str] = {}
+        self.failures: dict[str, str] = {}
         self._load()
 
     # ── persistence ────────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ class SharedMemo:
         if not self.path.exists():
             return
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            data = json.loads(self.path.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             return  # missing/corrupt memo = empty memo, never a crash
         if not isinstance(data, dict):
@@ -151,7 +151,7 @@ class SharedMemo:
         return True
 
     # ── introspection ──────────────────────────────────────────────────────
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """Memo health summary (counts + path) for CLI/status output."""
         return {
             "path": str(self.path),
@@ -168,7 +168,7 @@ def load_memo(path: Optional[Path] = None) -> SharedMemo:
 
 def consult_before_fetch(
     memo: SharedMemo, url: str, fetch_fn: Callable[[str], str]
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Consult the memo BEFORE fetching ``url``.
 
     Returns ``(source, content)`` where ``source`` is ``"memo"`` (the fetch
@@ -188,7 +188,7 @@ def consult_before_fetch(
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
-def _flag(args: List[str], name: str) -> Optional[str]:
+def _flag(args: list[str], name: str) -> Optional[str]:
     if name in args:
         i = args.index(name)
         if i + 1 < len(args):
@@ -196,14 +196,14 @@ def _flag(args: List[str], name: str) -> Optional[str]:
     return None
 
 
-def _strip_flag(args: List[str], name: str) -> Tuple[List[str], Optional[str]]:
+def _strip_flag(args: list[str], name: str) -> tuple[list[str], Optional[str]]:
     """Remove ``name <value>`` from ``args``, returning (remaining, value).
 
     Unlike :func:`_flag`, the flag AND its value are consumed so positional
     arguments never absorb the memo path (e.g. a multi-word summary followed
     by ``--memo PATH``).
     """
-    remaining: List[str] = []
+    remaining: list[str] = []
     value: Optional[str] = None
     i = 0
     while i < len(args):
@@ -216,7 +216,7 @@ def _strip_flag(args: List[str], name: str) -> Tuple[List[str], Optional[str]]:
     return remaining, value
 
 
-def _cmd_lookup(args: List[str]) -> int:
+def _cmd_lookup(args: list[str]) -> int:
     args, memo_path = _strip_flag(args, "--memo")
     positional = [a for a in args if not a.startswith("-")]
     if not positional:
@@ -239,7 +239,7 @@ def _cmd_lookup(args: List[str]) -> int:
     return 0
 
 
-def _cmd_record(args: List[str]) -> int:
+def _cmd_record(args: list[str]) -> int:
     args, memo_path = _strip_flag(args, "--memo")
     positional = [a for a in args if not a.startswith("-")]
     if len(positional) < 2:
@@ -261,7 +261,7 @@ def _cmd_record(args: List[str]) -> int:
     return 0
 
 
-def _cmd_failing(args: List[str]) -> int:
+def _cmd_failing(args: list[str]) -> int:
     args, memo_path = _strip_flag(args, "--memo")
     positional = [a for a in args if not a.startswith("-")]
     if len(positional) < 2:
@@ -278,14 +278,14 @@ def _cmd_failing(args: List[str]) -> int:
     return 0
 
 
-def _cmd_status(args: List[str]) -> int:
+def _cmd_status(args: list[str]) -> int:
     memo_path = _flag(args, "--memo")
     memo = load_memo(Path(memo_path) if memo_path else None)
     print(json.dumps(memo.stats(), ensure_ascii=False))
     return 0
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(
             "usage: evolution_shared_memo.py {lookup,record,failing,status} ...",

@@ -81,8 +81,8 @@ class TurnScore:
     session_id: str = ""
     turn_index: int = 0
     n_calls: int = 0
-    scores: Dict[str, float] = field(default_factory=dict)
-    notes: List[str] = field(default_factory=list)
+    scores: dict[str, float] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
 
     @property
     def overall(self) -> float:
@@ -90,7 +90,7 @@ class TurnScore:
             return 0.0
         return round(sum(self.scores.values()) / len(self.scores), 4)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
             "turn_index": self.turn_index,
@@ -101,7 +101,7 @@ class TurnScore:
         }
 
 
-def _call_signature(entry: Dict[str, Any]) -> str:
+def _call_signature(entry: dict[str, Any]) -> str:
     """Identity of a call for redundancy purposes: tool + its argument shape."""
     args = entry.get("args_summary")
     try:
@@ -111,17 +111,17 @@ def _call_signature(entry: Dict[str, Any]) -> str:
     return f"{entry.get('tool', '')}::{args_repr}"
 
 
-def _failed(entry: Dict[str, Any]) -> bool:
+def _failed(entry: dict[str, Any]) -> bool:
     return str(entry.get("result_status", "")).lower() in ("failure", "error")
 
 
-def _looks_like_parse_error(entry: Dict[str, Any]) -> bool:
+def _looks_like_parse_error(entry: dict[str, Any]) -> bool:
     blob = f"{entry.get('result_summary', '')}".lower()
     return any(marker in blob for marker in _PARSE_ERROR_MARKERS)
 
 
 def score_turn(
-    entries: List[Dict[str, Any]],
+    entries: list[dict[str, Any]],
     *,
     session_id: str = "",
     turn_index: int = 0,
@@ -197,7 +197,7 @@ def score_turn(
     return score
 
 
-def load_turns(trajectory_dir: Path) -> List[Dict[str, Any]]:
+def load_turns(trajectory_dir: Path) -> list[dict[str, Any]]:
     """Read captured turns, preserving session and turn boundaries.
 
     Reads only the ``.jsonl`` files written by the #1363 capture. The funnel's
@@ -205,12 +205,12 @@ def load_turns(trajectory_dir: Path) -> List[Dict[str, Any]]:
     are deliberately skipped — scoring them was the core defect in the previous
     attempt.
     """
-    turns: List[Dict[str, Any]] = []
+    turns: list[dict[str, Any]] = []
     if not trajectory_dir.is_dir():
         return turns
     for path in sorted(trajectory_dir.glob("*.jsonl")):
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
+            lines = path.read_text(encoding="utf-8-sig").splitlines()
         except OSError:
             continue
         for idx, line in enumerate(lines):
@@ -228,7 +228,7 @@ def load_turns(trajectory_dir: Path) -> List[Dict[str, Any]]:
     return turns
 
 
-def score_corpus(turns: List[Dict[str, Any]]) -> Dict[str, Any]:
+def score_corpus(turns: list[dict[str, Any]]) -> dict[str, Any]:
     """Average per-turn scores into the summary the funnel consumes.
 
     Turns are scored individually and then averaged — never merged into one
@@ -244,7 +244,7 @@ def score_corpus(turns: List[Dict[str, Any]]) -> Dict[str, Any]:
     ]
     scored = [s for s in per_turn if s.n_calls]
 
-    dims: Dict[str, Optional[float]] = {}
+    dims: dict[str, Optional[float]] = {}
     for dim in DIMENSIONS:
         values = [s.scores[dim] for s in scored if dim in s.scores]
         dims[dim] = round(sum(values) / len(values), 4) if values else None
@@ -261,7 +261,7 @@ def score_corpus(turns: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def format_summary(summary: Dict[str, Any]) -> str:
+def format_summary(summary: dict[str, Any]) -> str:
     """One line for the evolution-health sidecar / a log."""
     if not summary.get("turns_scored"):
         return "[tooluse-rubric] no captured turns to score"
@@ -289,7 +289,7 @@ def _default_trajectory_dir() -> Path:
     )
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     if "--help" in args or "-h" in args:
         print(

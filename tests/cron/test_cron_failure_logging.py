@@ -20,8 +20,8 @@ from unittest.mock import patch
 
 import pytest
 
-import cron.jobs as jobs
-import cron.scheduler as scheduler
+from cron import jobs
+from cron import scheduler
 from cron.scheduler import build_cron_failure_digest
 
 
@@ -83,9 +83,9 @@ def test_save_job_failure_success_marker_overwrites_digest_state(tmp_path):
 
 def test_list_and_get_latest_failure(tmp_path):
     job = {"id": "j3", "name": "multi"}
-    p1 = jobs.save_job_failure(job, success=False, error="first")
+    _p1 = jobs.save_job_failure(job, success=False, error="first")
     time.sleep(0.05)
-    p2 = jobs.save_job_failure(job, success=False, error="second")
+    _p2 = jobs.save_job_failure(job, success=False, error="second")
 
     latest = jobs.get_latest_failure("j3")
     assert latest["error"] == "second"
@@ -207,3 +207,34 @@ def test_run_one_job_failure_record_logs_warning(caplog, monkeypatch):
         scheduler.run_one_job({"id": "j8", "name": "warn job"})
 
     assert any("failure record saved" in rec.message for rec in caplog.records)
+
+
+def test_failure_records_follow_bound_profile_store(tmp_path):
+    first, second = tmp_path / "first", tmp_path / "second"
+    with jobs.use_cron_store(first):
+        saved = jobs.save_job_failure({"id": "same"}, success=False, error="first profile")
+        assert first in saved.parents
+    with jobs.use_cron_store(second):
+        assert jobs.get_latest_failure("same") is None
+        jobs.save_job_failure({"id": "same"}, success=False, error="second profile")
+    with jobs.use_cron_store(first):
+        assert jobs.get_latest_failure("same")["error"] == "first profile"
+
+
+def test_failure_audit_error_keeps_traceback_and_completes_run(caplog, monkeypatch):
+    completed = []
+    monkeypatch.setattr(scheduler, "run_job", lambda job, **kw: (False, "out", "", "bang"))
+    monkeypatch.setattr(scheduler, "save_job_output", lambda jid, out: Path("/tmp/out.md"))
+    monkeypatch.setattr(scheduler, "_deliver_result", lambda *a, **kw: None)
+    monkeypatch.setattr(scheduler, "mark_job_run", lambda *a, **kw: completed.append(a) or True)
+
+    def fail_audit(*args, **kwargs):
+        raise OSError("audit store unavailable")
+
+    monkeypatch.setattr(scheduler, "save_job_failure", fail_audit)
+    with caplog.at_level(logging.ERROR, logger="cron.scheduler"):
+        scheduler.run_one_job({"id": "audit-error", "name": "audit error job"})
+    errors = [r for r in caplog.records if "Could not save cron failure record" in r.message]
+    assert len(errors) == 1
+    assert errors[0].exc_info[0] is OSError
+    assert completed and completed[0][0] == "audit-error"

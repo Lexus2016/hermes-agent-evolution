@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Message provenance: the ``origin`` column on ``messages``.
 
 Phase 1a of the pinned-constraint plan. A security gate in
@@ -154,7 +153,7 @@ class TestSchemaMigration:
     def test_legacy_database_is_migrated_on_open(self, tmp_path):
         path = str(tmp_path / "legacy.db")
         legacy = re.sub(
-            r",\n(?:\s*--[^\n]*\n)+\s*origin TEXT\n\);", "\n);", SCHEMA_SQL, count=1
+            r"(?:[ \t]*--[^\n]*\n)+[ \t]*origin TEXT,?\n", "", SCHEMA_SQL, count=1
         )
         messages_block = legacy.split("CREATE TABLE IF NOT EXISTS messages")[1].split(
             ");"

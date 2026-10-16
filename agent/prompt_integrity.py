@@ -73,7 +73,7 @@ def load_registry(home: Path) -> dict[str, str]:
     """Read the stored registry; empty dict when absent or malformed (fail open)."""
     rp = registry_path(home)
     try:
-        raw = json.loads(rp.read_text(encoding="utf-8"))
+        raw = json.loads(rp.read_text(encoding="utf-8-sig"))
         if not isinstance(raw, dict):
             return {}
         return {str(k): str(v) for k, v in raw.items() if isinstance(v, str)}

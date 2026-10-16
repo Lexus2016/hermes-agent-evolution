@@ -19,7 +19,7 @@ DIFFABLE_KINDS = ("retry_spiral", "provider_error")
 RETRY_SPIRAL_CAP = 3
 
 
-def _normalize_surface(surface: Any) -> Dict[str, Any]:
+def _normalize_surface(surface: Any) -> dict[str, Any]:
     s = surface if isinstance(surface, dict) else {}
     b = s.get("backoff") if isinstance(s.get("backoff"), dict) else {}
     guards = s.get("guard_conditions") if isinstance(s.get("guard_conditions"), list) else []
@@ -32,13 +32,13 @@ def _normalize_surface(surface: Any) -> Dict[str, Any]:
     }
 
 
-def _evidence_of(weakness: Dict[str, Any]) -> Dict[str, Any]:
+def _evidence_of(weakness: dict[str, Any]) -> dict[str, Any]:
     allowed = ("kind", "tool", "signature", "occurrences", "severity",
                "label", "max_consecutive", "sessions")
     return {k: weakness[k] for k in allowed if k in weakness}
 
 
-def _render_diff(surface: Dict[str, Any], changes: List[Dict[str, Any]]) -> str:
+def _render_diff(surface: dict[str, Any], changes: list[dict[str, Any]]) -> str:
     after = {"retry_count": surface["retry_count"], "backoff": dict(surface["backoff"]),
              "guard_conditions": list(surface["guard_conditions"])}
     for c in changes:
@@ -49,8 +49,8 @@ def _render_diff(surface: Dict[str, Any], changes: List[Dict[str, Any]]) -> str:
 
 
 def build_retry_policy_diff(
-    weakness: Dict[str, Any], surface: Optional[Dict[str, Any]] = None
-) -> Optional[Dict[str, Any]]:
+    weakness: dict[str, Any], surface: Optional[dict[str, Any]] = None
+) -> Optional[dict[str, Any]]:
     """Return a structured retry-policy code diff for one weakness, or ``None``.
 
     Deterministic and inert: the returned dict follows the schema documented in
@@ -60,7 +60,7 @@ def build_retry_policy_diff(
         return None
     s = _normalize_surface(surface)
     kind = weakness["kind"]
-    changes: List[Dict[str, Any]] = []
+    changes: list[dict[str, Any]] = []
     guards = list(s["guard_conditions"])
 
     if kind == "retry_spiral":
@@ -69,9 +69,9 @@ def build_retry_policy_diff(
                 "field": "retry_count", "before": s["retry_count"],
                 "after": RETRY_SPIRAL_CAP,
                 "reason": "cap consecutive retries after a spiral "
-                          "(observed %s consecutive)" % weakness.get("max_consecutive"),
+                          f"(observed {weakness.get('max_consecutive')} consecutive)",
             })
-        guard = "non-retryable after %d consecutive attempts" % RETRY_SPIRAL_CAP
+        guard = f"non-retryable after {RETRY_SPIRAL_CAP:d} consecutive attempts"
         if weakness.get("tool"):
             guard += f" for `{weakness['tool']}`"
         if guard not in guards:

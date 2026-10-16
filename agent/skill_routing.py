@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Compositional skill routing: SAD re-decomposition + listwise reranking (#1137).
 
 Adopts the two empirically-validated mechanisms from Compositional Skill Routing
@@ -34,11 +33,11 @@ from typing import Any, Callable, Mapping, Sequence
 
 __all__ = [
     "SkillRoutingConfig",
-    "load_skill_routing_config",
-    "listwise_rerank",
-    "sad_redecompose",
-    "maybe_rerank_hits",
     "lexical_listwise_score",
+    "listwise_rerank",
+    "load_skill_routing_config",
+    "maybe_rerank_hits",
+    "sad_redecompose",
 ]
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
@@ -53,7 +52,7 @@ class SkillRoutingConfig:
     rerank_top_k: int = 10
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "SkillRoutingConfig":
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> SkillRoutingConfig:
         if not isinstance(data, Mapping):
             return cls()
         defaults = cls()

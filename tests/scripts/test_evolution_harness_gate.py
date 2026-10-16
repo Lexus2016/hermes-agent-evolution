@@ -15,14 +15,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_harness_gate import (  # noqa: E402
+from evolution_harness_gate import (
     GATE_SIDECAR,
     apply_validated,
     main,
     run_cron_pass,
     run_gate,
 )
-from evolution_harness_sandbox import GateResult  # noqa: E402
+from evolution_harness_sandbox import GateResult
 
 SURFACE = {
     "retry_count": 10,
@@ -136,7 +136,7 @@ def test_cron_mode_silent_without_sidecar(tmp_path, monkeypatch, capsys):
 
 def test_cron_yaml_registers_the_gate():
     """The YAML must declare the no_agent job register_evolution_cron.py picks up."""
-    import yaml
+    import hermes_yaml as yaml
 
     repo = Path(__file__).resolve().parents[2]
     spec = yaml.safe_load((repo / "cron/evolution/harness-gate.yaml").read_text())

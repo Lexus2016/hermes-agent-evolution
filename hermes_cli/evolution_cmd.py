@@ -24,7 +24,7 @@ def _get_current_commit_sha() -> Optional[str]:
         res = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             check=True,
         )
         return res.stdout.strip()
@@ -58,7 +58,7 @@ def cmd_evolution(args) -> None:
                 print(json.dumps(out, indent=2, ensure_ascii=False))
                 return
 
-            print(f"═══ AI4AI-Bench Recursive Self-Improvement Benchmark ═══")
+            print("═══ AI4AI-Bench Recursive Self-Improvement Benchmark ═══")
             print(f"Run ID: {result.run_id} | Commit: {result.commit_sha or 'unknown'}")
             print(
                 f"Composite RSI Score: {result.composite_rsi_score * 100:.1f}% "

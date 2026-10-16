@@ -36,7 +36,7 @@ BASE_URL = "http://peer.test"
 # --------------------------------------------------------------------------
 
 
-def _sse(*frames: Dict[str, Any]) -> bytes:
+def _sse(*frames: dict[str, Any]) -> bytes:
     """Serialise JSON-RPC result frames as an SSE ``text/event-stream`` body."""
     chunks = []
     for frame in frames:
@@ -46,7 +46,7 @@ def _sse(*frames: Dict[str, Any]) -> bytes:
 
 def _status_frame(
     request_id: Any, task_id: str, state: str, *, final: bool = False
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return {
         "jsonrpc": "2.0",
         "id": request_id,
@@ -63,9 +63,9 @@ class MockA2AServer:
     """
 
     def __init__(self) -> None:
-        self.requests: List[httpx.Request] = []
-        self.bodies: List[Dict[str, Any]] = []
-        self.card: Dict[str, Any] = {
+        self.requests: list[httpx.Request] = []
+        self.bodies: list[dict[str, Any]] = []
+        self.card: dict[str, Any] = {
             "name": "PeerBot",
             "url": "/a2a",  # relative -> resolved against BASE_URL
             "version": "1.0.0",
@@ -80,13 +80,13 @@ class MockA2AServer:
                 }
             ],
         }
-        self.send_result: Callable[[str, Dict[str, Any]], Dict[str, Any]] = (
+        self.send_result: Callable[[str, dict[str, Any]], dict[str, Any]] = (
             lambda tid, params: {"id": tid, "status": {"state": "completed"}}
         )
-        self.get_result: Callable[[str, Dict[str, Any]], Dict[str, Any]] = (
+        self.get_result: Callable[[str, dict[str, Any]], dict[str, Any]] = (
             lambda tid, params: {"id": tid, "status": {"state": "working"}}
         )
-        self.cancel_result: Callable[[str, Dict[str, Any]], Dict[str, Any]] = (
+        self.cancel_result: Callable[[str, dict[str, Any]], dict[str, Any]] = (
             lambda tid, params: {"id": tid, "status": {"state": "canceled"}}
         )
         self.stream_body: Optional[Callable[[Any, str], bytes]] = None
@@ -138,7 +138,7 @@ class MockA2AServer:
         )
 
     @staticmethod
-    def _result(request_id: Any, result: Dict[str, Any]) -> httpx.Response:
+    def _result(request_id: Any, result: dict[str, Any]) -> httpx.Response:
         return httpx.Response(
             200, json={"jsonrpc": "2.0", "id": request_id, "result": result}
         )
@@ -287,7 +287,7 @@ def test_send_task_auto_discovers_then_invokes(server):
 
 def test_send_task_attaches_bearer_token(server):
     server.client(auth_token="secret-abc").send_task(text_message("hi"), task_id="t")
-    invoke = [r for r in server.requests if r.url.path == "/a2a"][0]
+    invoke = next(r for r in server.requests if r.url.path == "/a2a")
     assert invoke.headers["Authorization"] == "Bearer secret-abc"
 
 

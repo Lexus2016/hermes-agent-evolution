@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_extract import (  # noqa: E402
+from evolution_extract import (
     EXIT_BAD_INPUT,
     EXIT_INVALID,
     EXIT_VALID,
@@ -67,7 +67,7 @@ class TestInjectionAndHiddenChars:
         assert not looks_like_injection(_good_draft()["technique"])
 
     def test_zero_width_char_detected(self):
-        assert has_hidden_chars("plan​before acting")  # zero-width space
+        assert has_hidden_chars("plan\u200bbefore acting")  # zero-width space
 
     def test_clean_text_has_no_hidden_chars(self):
         assert not has_hidden_chars("plain ascii text")

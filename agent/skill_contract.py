@@ -84,7 +84,7 @@ _KNOWN_TOOLS = frozenset({
 
 def extract_skill_contract(skill_markdown: str) -> SkillContract:
     """Extract a typed structural contract from raw skill markdown."""
-    import yaml
+    from utils import fast_safe_load
 
     content = skill_markdown.strip()
     raw_len = len(content)
@@ -96,7 +96,7 @@ def extract_skill_contract(skill_markdown: str) -> SkillContract:
     fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
     if fm_match:
         try:
-            fm_data = yaml.safe_load(fm_match.group(1)) or {}
+            fm_data = fast_safe_load(fm_match.group(1)) or {}
             interface.name = str(fm_data.get("name", ""))
             interface.description = str(fm_data.get("description", ""))
             interface.version = str(fm_data.get("version", "1.0.0"))

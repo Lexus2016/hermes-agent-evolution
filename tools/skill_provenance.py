@@ -10,6 +10,7 @@ later slices can taint-flag untrusted provenance sources.
 import contextvars
 import logging
 from typing import Any, Dict, List, Optional
+from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -106,13 +107,13 @@ def add_provenance_entry(source_type: str, source_id: str = "") -> None:
     })
 
 
-def get_recorded_chain() -> List[Dict[str, Any]]:
+def get_recorded_chain() -> list[dict[str, Any]]:
     """Return the current source chain (for skill_manage to attach at creation)."""
     chain = _source_chain.get()
     return list(chain) if chain else []
 
 
-def get_skill_provenance(skill_name: str) -> List[Dict[str, Any]]:
+def get_skill_provenance(skill_name: str) -> list[dict[str, Any]]:
     """Retrieve the persisted source chain for a skill.
 
     Reads from the skill's usage record in .usage.json (stored under the
@@ -166,12 +167,12 @@ def provenance_ok(
 
 
 def debias_outcome_credit(
-    co_retrieved: List[str],
-    load_bearing: List[str],
+    co_retrieved: list[str],
+    load_bearing: list[str],
     outcome_reward: float,
     *,
     max_utility: float = MAX_OUTCOME_UTILITY,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Assign outcome credit ONLY to memories that were actually load-bearing.
 
     The memory-reward trap (#2898, RoMeRL arXiv:2608.02508): when trajectory
@@ -199,7 +200,7 @@ def record_promotion(
     skill_name: str,
     reason: str = "",
     *,
-    attribution: Optional[List[str]] = None,
+    attribution: Optional[list[str]] = None,
     outcome_reward: float = 0.0,
 ) -> None:
     """Stamp the usage record that this skill passed the provenance gate and
@@ -223,7 +224,7 @@ def record_promotion(
         )
 
         def _apply(rec: dict) -> None:
-            rec["promoted_at"] = datetime.now(timezone.utc).isoformat()
+            rec["promoted_at"] = datetime.now(UTC).isoformat()
             rec["promotion_reason"] = (reason or "provenance_ok")[:200]
             if attribution:
                 rec["attribution"] = list(attribution)

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Hybrid workflow optimization recipe: select > generate > edit (#2254).
 
 Implements the hybrid workflow recipe from 'From Static Templates to Dynamic Runtime
@@ -138,7 +137,7 @@ def route_workflow(
             sk.get("description") if isinstance(sk, Mapping) else ""
         )
         name_lower = str(name).lower()
-        desc_lower = str(desc).lower()
+        _desc_lower = str(desc).lower()
 
         # Word token overlap
         words = [

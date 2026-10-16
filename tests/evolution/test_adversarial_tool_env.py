@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Regression suite for the adversarial tool environment (Issue #2639, ToolHazard)."""
 
 from __future__ import annotations

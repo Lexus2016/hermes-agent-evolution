@@ -1,0 +1,1253 @@
+          "path": "apps/desktop/electron/linux-gpu-fallback.ts",
+          "blob": "101c66bccdf231050d2fb4ffc391f8e1fc58d0b3",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        },
+        {
+          "path": "apps/desktop/electron/windows-stack-cookie-fallback.ts",
+          "blob": "7df2ab0c177a8e6cb0551a858de6ecb791087a90",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        }
+      ]
+    },
+    {
+      "id": "desktop-core-structure-02",
+      "status": "reviewed",
+      "path": "apps/desktop/electron/linux-nvidia-egl-fallback.ts",
+      "scope": "decideNvidiaEglFallback",
+      "rule": "CC",
+      "detail": "CC 26 > target 20 (new code must meet the target)",
+      "candidate_blob": "527d3482aa986c5d9dc8c62b2491f08fbf1e79de",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/electron/linux-nvidia-egl-fallback.ts",
+        "scope": "decideNvidiaEglFallback",
+        "blob": "527d3482aa986c5d9dc8c62b2491f08fbf1e79de",
+        "unit_body_hash": "fa8eaf1e61c97740"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller and desktop structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC 26 is a single shallow priority ladder for NVIDIA launch decisions. Early returns preserve opt-out, platform/driver gating, GPU override, remote/WSL exclusion, forced fallback, same-version marker and aborted-boot cases; all paths return enable/reason/nextMarker. Exact upstream source is retained without adding another fallback branch. No compatibility conflict identified in this complete static function/binding review. Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval. No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived. No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved. Candidate only: root approval for preparation and controller verification of generated identities are required before activation.",
+        "module_bindings": "Read marker/state/decision interfaces, OVERRIDE_ON/OFF sets, and nvidiaEglFallbackMarker constructor. Native filesystem imports belong to sibling read/write helpers and are not invoked by this decision unit. Hardware, relaunch, and marker persistence behavior is excluded.",
+        "receipt": "Complete source and surrounding-binding structural review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-core-structural-review.json",
+          "blob": "78260702b557c3b3b0c6f9de27b14e6dfad7df06",
+          "outcome": "passed",
+          "claim": "Independent complete function/binding organization review for this exact structural metric only; behavioral exclusions retained."
+        },
+        {
+          "path": "apps/desktop/electron/linux-nvidia-egl-fallback.ts",
+          "blob": "527d3482aa986c5d9dc8c62b2491f08fbf1e79de",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        }
+      ]
+    },
+    {
+      "id": "desktop-core-structure-03",
+      "status": "reviewed",
+      "path": "apps/desktop/src/app/contrib/hooks/desktop-onboarding-metrics.ts",
+      "scope": "onboardingTransition",
+      "rule": "CC",
+      "detail": "CC 26 > target 20 (new code must meet the target)",
+      "candidate_blob": "8fbbe568cd8a414ee887ee3a85b2cfa71b880fc6",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/contrib/hooks/desktop-onboarding-metrics.ts",
+        "scope": "onboardingTransition",
+        "blob": "8fbbe568cd8a414ee887ee3a85b2cfa71b880fc6",
+        "unit_body_hash": "bf6ea74d5148b3c8"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller and desktop structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC 26 represents adjacent transition observations for a closed onboarding event set, with manual flows excluded before any emission, previous/next comparisons, and final skip/free-tier edges. The complete function is one observer rather than multiple independent ownership paths; the metric is inherited organization debt. No compatibility conflict identified in this complete static function/binding review. Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval. No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived. No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved. Candidate only: root approval for preparation and controller verification of generated identities are required before activation.",
+        "module_bindings": "Read providerStepFor, OAUTH_PENDING, all observer subscriptions and teardown, and named imports from desktop-metrics/onboarding/free-tier state. This is not a pure computation: it emits metrics, so telemetry consent/delivery remains explicitly outside this metric disposition.",
+        "receipt": "Complete source and surrounding-binding structural review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-core-structural-review.json",
+          "blob": "78260702b557c3b3b0c6f9de27b14e6dfad7df06",
+          "outcome": "passed",
+          "claim": "Independent complete function/binding organization review for this exact structural metric only; behavioral exclusions retained."
+        },
+        {
+          "path": "apps/desktop/src/app/contrib/hooks/desktop-onboarding-metrics.ts",
+          "blob": "8fbbe568cd8a414ee887ee3a85b2cfa71b880fc6",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        }
+      ]
+    },
+    {
+      "id": "desktop-core-structure-04",
+      "status": "reviewed",
+      "path": "apps/desktop/src/components/sync-status.ts",
+      "scope": "deriveSyncStatusSummary",
+      "rule": "CC",
+      "detail": "CC 21 > target 20 (new code must meet the target)",
+      "candidate_blob": "5c403683e39bf2d99ab178e6806b0ce72a1eba8e",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/components/sync-status.ts",
+        "scope": "deriveSyncStatusSummary",
+        "blob": "5c403683e39bf2d99ab178e6806b0ce72a1eba8e",
+        "unit_body_hash": "ad97b5ed49c911fe"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller and desktop structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC 21 is the receipt normalization and ordered display-priority ladder in one 66-line function. Legacy/current aliases converge before error, needs-fixing, disabled-plugin, and available-update display selection; collection transforms construct fresh output arrays. No behavior or call-site change is introduced. No compatibility conflict identified in this complete static function/binding review. Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval. No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived. No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved. Candidate only: root approval for preparation and controller verification of generated identities are required before activation.",
+        "module_bindings": "Only DesktopSyncReceipt is imported as a type; SyncStatusSummary and the local empty/result values are read in full. Optional section defaults and final return match the presentation contract.",
+        "receipt": "Complete source and surrounding-binding structural review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-core-structural-review.json",
+          "blob": "78260702b557c3b3b0c6f9de27b14e6dfad7df06",
+          "outcome": "passed",
+          "claim": "Independent complete function/binding organization review for this exact structural metric only; behavioral exclusions retained."
+        },
+        {
+          "path": "apps/desktop/src/components/sync-status.ts",
+          "blob": "5c403683e39bf2d99ab178e6806b0ce72a1eba8e",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        }
+      ]
+    },
+    {
+      "id": "desktop-core-structure-05",
+      "status": "reviewed",
+      "path": "apps/desktop/src/lib/deeplink-routes.ts",
+      "scope": "resolveDeepLinkAction",
+      "rule": "CC",
+      "detail": "CC 28 > 23, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "158254050ea47c95513ff57d10c2d8cc1ff093bb",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/lib/deeplink-routes.ts",
+        "scope": "resolveDeepLinkAction",
+        "blob": "158254050ea47c95513ff57d10c2d8cc1ff093bb",
+        "unit_body_hash": "3d4062f1f268d69b"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller and desktop structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC 28 is a single discriminated action decoder with deliberate precedence: blueprint, connection completion, catalog claiming, skill, then legacy plugin forms. It returns action descriptions and performs no installation. Complete branch review found no added fallthrough or missing final ignore relative to the exact upstream function. No compatibility conflict identified in this complete static function/binding review. Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval. No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived. No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved. Candidate only: root approval for preparation and controller verification of generated identities are required before activation.",
+        "module_bindings": "DeepLinkPayload/DeepLinkAction unions and truthyParam were read in full. PluginInstallLegacyHint is type-only. Catalog claiming precedes repo parsing; connection status is payload data, not an authoritative mutation. Installation authorization, URL trust, and execution remain excluded.",
+        "receipt": "Complete source and surrounding-binding structural review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-core-structural-review.json",
+          "blob": "78260702b557c3b3b0c6f9de27b14e6dfad7df06",
+          "outcome": "passed",
+          "claim": "Independent complete function/binding organization review for this exact structural metric only; behavioral exclusions retained."
+        },
+        {
+          "path": "apps/desktop/src/lib/deeplink-routes.ts",
+          "blob": "158254050ea47c95513ff57d10c2d8cc1ff093bb",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        }
+      ]
+    },
+    {
+      "id": "desktop-core-structure-06",
+      "status": "reviewed",
+      "path": "apps/desktop/src/plugins/hermes-bots/labels.ts",
+      "scope": "displayName",
+      "rule": "CC",
+      "detail": "CC 22 > target 20 (was 16)",
+      "candidate_blob": "b8aab26119cb51dfe63daeba64b589e3b5fa24f7",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/plugins/hermes-bots/labels.ts",
+        "scope": "displayName",
+        "blob": "b8aab26119cb51dfe63daeba64b589e3b5fa24f7",
+        "unit_body_hash": "88597ca8d6a924aa"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller and desktop structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC 22 is a cohesive display-name precedence ladder: alias-aware backend title, thin remote default label, explicit metadata title, backend/core display names, alias, default Hermes label, normalized raw name. The named function retains a single string output and no mutation. No compatibility conflict identified in this complete static function/binding review. Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval. No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived. No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved. Candidate only: root approval for preparation and controller verification of generated identities are required before activation.",
+        "module_bindings": "Read complete labels module and aliasIdentityFor in routing.ts lines382-405. That helper is a connection-exact alias map lookup with active connection fallback only for unannotated local-rich rows; current imported binding was checked rather than assumed pure. BotMeta/RosterRow are type-only.",
+        "receipt": "Complete source and surrounding-binding structural review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-core-structural-review.json",
+          "blob": "78260702b557c3b3b0c6f9de27b14e6dfad7df06",
+          "outcome": "passed",
+          "claim": "Independent complete function/binding organization review for this exact structural metric only; behavioral exclusions retained."
+        },
+        {
+          "path": "apps/desktop/src/plugins/hermes-bots/labels.ts",
+          "blob": "b8aab26119cb51dfe63daeba64b589e3b5fa24f7",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        },
+        {
+          "path": "apps/desktop/src/plugins/hermes-bots/routing.ts",
+          "blob": "ef4053f65cb523536d80294c232a23a5303933f9",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        }
+      ]
+    },
+    {
+      "id": "desktop-core-structure-07",
+      "status": "reviewed",
+      "path": "apps/desktop/src/store/profile-dot-state.ts",
+      "scope": "$profileDotStateByScope",
+      "rule": "CC",
+      "detail": "CC 36 > target 20 (new code must meet the target)",
+      "candidate_blob": "37c0a47a54287715f9f4974d35daafb7ece1ae12",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/store/profile-dot-state.ts",
+        "scope": "$profileDotStateByScope",
+        "blob": "37c0a47a54287715f9f4974d35daafb7ece1ae12",
+        "unit_body_hash": "8c010865aa952509"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller and desktop structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC 36 is the outer computed projection across three explicit passes: loaded rows, unlisted active runtime owners, and unambiguous persisted unread scopes, followed by stable summary publication. Complete callback including nested tally helpers was read. Structural organization preserves source/profile boundaries and priority; no new coupling identified. No compatibility conflict identified in this complete static function/binding review. Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval. No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived. No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved. Candidate only: root approval for preparation and controller verification of generated identities are required before activation.",
+        "module_bindings": "Read full module including computed dependency array, profileDotScopeKey, rowScopeOf, internSummary cache and prev, plus backendScopeKey, runtimeSessionOwner and stableRecord implementations. Session identity and store imports remain the same surrounding bindings as upstream. Runtime freshness, profile ambiguity cases, cache bounds and integration are not certified.",
+        "receipt": "Complete source and surrounding-binding structural review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-core-structural-review.json",
+          "blob": "78260702b557c3b3b0c6f9de27b14e6dfad7df06",
+          "outcome": "passed",
+          "claim": "Independent complete function/binding organization review for this exact structural metric only; behavioral exclusions retained."
+        },
+        {
+          "path": "apps/desktop/src/lib/stable-array.ts",
+          "blob": "05ae6a2b911465856adf367909207ae0b8ab9c06",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        },
+        {
+          "path": "apps/desktop/src/store/profile-dot-state.ts",
+          "blob": "37c0a47a54287715f9f4974d35daafb7ece1ae12",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        },
+        {
+          "path": "apps/desktop/src/store/session-states.ts",
+          "blob": "95c9201a98221158c943a06c3ee04cf7cad72714",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        },
+        {
+          "path": "apps/shared/src/backend-scope.ts",
+          "blob": "5a2be28974c99360ac5f8041ff1926c50b72fc21",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        }
+      ]
+    },
+    {
+      "id": "desktop-core-structure-08",
+      "status": "reviewed",
+      "path": "apps/desktop/src/themes/skin.ts",
+      "scope": "skinToDesktopTheme",
+      "rule": "CC",
+      "detail": "CC 26 > 25, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "618942a2d65f10eb445739033a0e100ed497cc5e",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/themes/skin.ts",
+        "scope": "skinToDesktopTheme",
+        "blob": "618942a2d65f10eb445739033a0e100ed497cc5e",
+        "unit_body_hash": "f4994f1e0a1f45da"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller and desktop structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC 26 comes mostly from explicit palette fallbacks and dark/light ternaries in a single palette converter. Full source read confirms early invalid-input return, normalized color selection, contrast-aware accent, and a complete DesktopTheme result with the same palette in both mode slots. No compatibility conflict identified in this complete static function/binding review. Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval. No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived. No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved. Candidate only: root approval for preparation and controller verification of generated identities are required before activation.",
+        "module_bindings": "Read complete skin converter, local pick/titleCase helpers, themes/color normalization/luminance/readableInk, and shared parse/mix/readableOn/ensureContrast implementations. Type-only skin/theme imports and ACCENT_MIN_CONTRAST are unchanged. Custom CSS trust/rendering and visual accessibility are excluded.",
+        "receipt": "Complete source and surrounding-binding structural review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-core-structural-review.json",
+          "blob": "78260702b557c3b3b0c6f9de27b14e6dfad7df06",
+          "outcome": "passed",
+          "claim": "Independent complete function/binding organization review for this exact structural metric only; behavioral exclusions retained."
+        },
+        {
+          "path": "apps/desktop/src/themes/color.ts",
+          "blob": "60019414580db48f1d47ee7b79c783cb6b7fd321",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        },
+        {
+          "path": "apps/desktop/src/themes/skin.ts",
+          "blob": "618942a2d65f10eb445739033a0e100ed497cc5e",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        },
+        {
+          "path": "apps/shared/src/color.ts",
+          "blob": "e4c9f4e6abbabfc2b41ac0e1077bde44aecc2fd0",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        }
+      ]
+    },
+    {
+      "id": "display-dispatch-structure-01",
+      "status": "reviewed",
+      "path": "hermes_cli/cli_info_mixin.py",
+      "scope": "CLIInfoMixin.show_help",
+      "rule": "CC",
+      "detail": "CC 24 > 21, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "4e87791a14843b770a25d7cbbec004c589bda00e",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/cli_info_mixin.py",
+        "scope": "CLIInfoMixin.show_help",
+        "blob": "4e87791a14843b770a25d7cbbec004c589bda00e",
+        "unit_body_hash": "854608f7130982bf"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller and lead complete-scope review; owner-approved exact preparation",
+        "compatibility": "Complete help-rendering method and adjacent availability helper reviewed. Complexity comes from skills/filter modes, category/subgroup enumeration, aliases, bundles, quick-command listings and platform-specific hint selection. It does not execute selected commands; registry/skill discovery and display callbacks remain actual dependencies. Existing skin fallback catch is separate and not accepted by this CC-only disposition. cli.py _ensure_skill_commands/get_skill_bundles and the mixin imports/availability method inspected; discovery may read/cache metadata and output uses console callbacks, so this is not claimed to be side-effect-free. No command authorization, filesystem discovery, skin failure or native rendering correctness claim.",
+        "module_bindings": "cli.py _ensure_skill_commands/get_skill_bundles and the mixin imports/availability method inspected; discovery may read/cache metadata and output uses console callbacks, so this is not claimed to be side-effect-free. No command authorization, filesystem discovery, skin failure or native rendering correctness claim.",
+        "receipt": "Independent structural source review plus 28 passing bounded help visibility/prefix and icon failure-reporting cases; no full icon render/native execution or general feature compatibility claim."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-display-dispatch-structural-review.json",
+          "blob": "a003cfdf2a6788b0d7db3944068bccc6954db095",
+          "outcome": "passed",
+          "claim": "Exact complete-scope structural review and bounded28-pass receipt, with resource/catch/auth/render limitations explicit."
+        },
+        {
+          "path": "cli.py",
+          "blob": "989bbdc5b590fe9f03f72540227fa0ad29b7fbd7",
+          "outcome": "passed",
+          "claim": "Reviewed helper binding or exact scoped regression dependency; no broader runtime guarantee."
+        },
+        {
+          "path": "tests/hermes_cli/test_cli_prefix_matching.py",
+          "blob": "73063319e963fe156f3afe8ec5cde51782a5bfc3",
+          "outcome": "passed",
+          "claim": "Reviewed helper binding or exact scoped regression dependency; no broader runtime guarantee."
+        },
+        {
+          "path": "tests/hermes_cli/test_skill_collision_visibility.py",
+          "blob": "a429cfd79b7223d360163675d0a5df298fe098b3",
+          "outcome": "passed",
+          "claim": "Reviewed helper binding or exact scoped regression dependency; no broader runtime guarantee."
+        }
+      ]
+    },
+    {
+      "id": "display-dispatch-structure-02",
+      "status": "reviewed",
+      "path": "scripts/generate_icons.py",
+      "scope": "target_bytes",
+      "rule": "CC",
+      "detail": "CC 22 > target 20 (new code must meet the target)",
+      "candidate_blob": "0f47b48759905a464ecc7fe98216c2b9c7c34ef8",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "scripts/generate_icons.py",
+        "scope": "target_bytes",
+        "blob": "0f47b48759905a464ecc7fe98216c2b9c7c34ef8",
+        "unit_body_hash": "974e157528bd285f"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller and lead complete-scope review; owner-approved exact preparation",
+        "compatibility": "Complete target_bytes dispatch reviewed: each existing named format selects a renderer/container encoder or direct SVG/manifest bytes; the long shallow kind ladder, ICO/ICNS frame comprehensions and dark/light variants account for complexity. Unknown kind raises ValueError. It returns bytes into an in-memory buffer; writing final artifacts is owned by separate cmd_write. Module imports, target catalogue, rendering helpers and cmd_write caller inspected. One branch reads the declared source PNG; renderer/Pillow operations may fail and output fidelity is not established here. Only unchanged branch organization is eligible, not image correctness, resource lifecycle, package integrity or release publication.",
+        "module_bindings": "Module imports, target catalogue, rendering helpers and cmd_write caller inspected. One branch reads the declared source PNG; renderer/Pillow operations may fail and output fidelity is not established here. Only unchanged branch organization is eligible, not image correctness, resource lifecycle, package integrity or release publication.",
+        "receipt": "Independent structural source review plus 28 passing bounded help visibility/prefix and icon failure-reporting cases; no full icon render/native execution or general feature compatibility claim."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-display-dispatch-structural-review.json",
+          "blob": "a003cfdf2a6788b0d7db3944068bccc6954db095",
+          "outcome": "passed",
+          "claim": "Exact complete-scope structural review and bounded28-pass receipt, with resource/catch/auth/render limitations explicit."
+        },
+        {
+          "path": "tests/scripts/test_icon_generation_exit.py",
+          "blob": "cf70e7a405e207a3f2def99e9608e73fbd22d91a",
+          "outcome": "passed",
+          "claim": "Reviewed helper binding or exact scoped regression dependency; no broader runtime guarantee."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-069",
+      "status": "reviewed",
+      "path": "apps/desktop/src/app/shell/model-catalog-menu.tsx",
+      "scope": "ModelFamilyRow",
+      "rule": "CC",
+      "detail": "CC 44 > target 20 (new code must meet the target)",
+      "candidate_blob": "7e344a747f94b1fd1221b035a346932de72ee76b",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/shell/model-catalog-menu.tsx",
+        "scope": "ModelFamilyRow",
+        "blob": "7e344a747f94b1fd1221b035a346932de72ee76b",
+        "unit_body_hash": "d02d28a3bfcfbeeb"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC is the family row's active/base-fast matching, preset/capability/price/progress/settings display and submenu render branching. Selection and options remain supplied controller actions; star click stops propagation. Full function/binding read and exact upstream unit/cap identify no structural integration conflict. Async selection failure, provider limits and option semantics remain unverified runtime contracts. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "ModelFamilyRow local function + complete props, ModelMenuController contract/close context, familyLimit, model-family/preset/pricing and UI imports",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-subset-review.json",
+          "blob": "91d4af2208b5f687e6d564fe4df3eee2a940dce9",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; callbacks/hooks/parser/task-state and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-072",
+      "status": "reviewed",
+      "path": "apps/desktop/src/components/assistant-ui/tool/fallback-model/index.ts",
+      "scope": "buildToolView",
+      "rule": "CC",
+      "detail": "CC 41 > 40, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "91f86eefb7b2a67ad3ea50a6238b5f8e086719b1",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/components/assistant-ui/tool/fallback-model/index.ts",
+        "scope": "buildToolView",
+        "blob": "91f86eefb7b2a67ad3ea50a6238b5f8e086719b1",
+        "unit_body_hash": "27424418a400cd9f"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "Complete function is a pure presentation-object assembly: pending/success/error/unavailable titles, optional search/count/image/preview data and separate terminal streams. It retains the input inlineDiff and explicit statuses rather than executing tools. Actual upstream file/unit/cap match; no structural binding conflict identified. The correctness of heuristic tool result/status parsers and URL safety is not waived by this CC candidate. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "Exported buildToolView(part,inlineDiff) with ToolPart/ToolView types and formatting imports; full neighboring toolPreviewOutcome, file-local helper declaration lookup for tool status/meta/title/subtitle/detail/count/preview/streams; bound by ToolEntry view memo",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-subset-review.json",
+          "blob": "91d4af2208b5f687e6d564fe4df3eee2a940dce9",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; callbacks/hooks/parser/task-state and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-100",
+      "status": "reviewed",
+      "path": "apps/desktop/src/plugins/hermes-bots/screen-hero.tsx",
+      "scope": "ScreenHeroContent",
+      "rule": "CC",
+      "detail": "CC 21 > target 20 (was 20)",
+      "candidate_blob": "74bfb538613c7a9351c765623cb98f73498b6a0a",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/plugins/hermes-bots/screen-hero.tsx",
+        "scope": "ScreenHeroContent",
+        "blob": "74bfb538613c7a9351c765623cb98f73498b6a0a",
+        "unit_body_hash": "dd4daae95e787e3c"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC describes tone-to-caption/CTA/icon/ring and live/stale image presentation. The wrapper remounts by bot identity; unsupported/unavailable states are explicitly hidden and user click owns opening. Entire component and local hook context read; actual upstream source/unit unchanged. Timer, thumbnail failure/privacy, display control and polling contracts are not waived. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "ScreenHero wrapper keyed by botSelectionKey, ScreenHeroContent props, full useLiveThumbnail binding, useScreenPortalState/displayRequest/openBotScreen",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-subset-review.json",
+          "blob": "91d4af2208b5f687e6d564fe4df3eee2a940dce9",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; callbacks/hooks/parser/task-state and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-102",
+      "status": "reviewed",
+      "path": "apps/desktop/src/plugins/kanban/board.tsx",
+      "scope": "CardFooter",
+      "rule": "CC",
+      "detail": "CC 31 > 29, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "8b05b1fbb2c2fab18da0576a1c51618481d3f4fa",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/plugins/kanban/board.tsx",
+        "scope": "CardFooter",
+        "blob": "8b05b1fbb2c2fab18da0576a1c51618481d3f4fa",
+        "unit_body_hash": "4a188c908ef10f7d"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC describes queued/running/stale/blocked indicators, explicit/default/orchestrator assignee display, timestamps and optional priority/progress/comments/links/warnings. Complete function with imports and helper binding context read; output is presentation, no task dispatch/write occurs here. Exact upstream source/cap with no identified structural conflict. Dispatcher assignment and heartbeat truth are not validated by this candidate. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "Local CardFooter(arc,task), Meta, KanbanTask/ArcState, useKanban/useDefaultAssignee/useOrchestration, columnMeta and presentational child imports",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-subset-review.json",
+          "blob": "91d4af2208b5f687e6d564fe4df3eee2a940dce9",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; callbacks/hooks/parser/task-state and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-063",
+      "status": "reviewed",
+      "path": "apps/desktop/src/app/settings/local-models-model-rows.tsx",
+      "scope": "CatalogModelRow",
+      "rule": "CC",
+      "detail": "CC 33 > target 20 (new code must meet the target)",
+      "candidate_blob": "bb98ebaed09a0323a499859adfb0f3fc35d7f650",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/settings/local-models-model-rows.tsx",
+        "scope": "CatalogModelRow",
+        "blob": "bb98ebaed09a0323a499859adfb0f3fc35d7f650",
+        "unit_body_hash": "744628dac14d2139"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC is primarily catalog-row action/render variants for download, active/loading/resident model, memory-fit/context/vision/recommendation pills. Actions preserve the owning LocalModelsActionScope rather than reaching directly into machine APIs. Complete component plus local helpers/adjacent sideload binding reviewed; exact upstream source/cap with no identified structural conflict. Download/delete/activation failure semantics are not approved. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "Exported CatalogModelRow props, residencyOf/runningActivation/anyActivationRunning, ResidencyPills, EjectModelButton/DeleteModelButton, LocalModelsActionScope imports",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-second-subset-review.json",
+          "blob": "b37d1c5eb589751ec3ddc6e4da9cc0750dbc86f1",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; installer/auth/roster/route and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-064",
+      "status": "reviewed",
+      "path": "apps/desktop/src/app/settings/local-models-runtime-section.tsx",
+      "scope": "LocalModelsRuntimeSection",
+      "rule": "CC",
+      "detail": "CC 26 > target 20 (new code must meet the target)",
+      "candidate_blob": "acde9534a1267a015e1f31a7255fe7bfe43673f6",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/settings/local-models-runtime-section.tsx",
+        "scope": "LocalModelsRuntimeSection",
+        "blob": "acde9534a1267a015e1f31a7255fe7bfe43673f6",
+        "unit_body_hash": "c7ae3185beb70414"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC arises from runtime installed/running/installing/paused/update/error render states and repeated action variants. Mutation key and job actions retain explicit owner/client scope; up-to-date derives from authoritative status tags. Complete body/bindings equal upstream at the exact cap with no structural conflict identified. Runtime install/server action and error/timeout contracts excluded. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "Exported LocalModelsRuntimeSection props, owning action scope, localModelsKey/runningRuntimeInstall/startLocalRuntimeInstall, nested handleServer",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-second-subset-review.json",
+          "blob": "b37d1c5eb589751ec3ddc6e4da9cc0750dbc86f1",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; installer/auth/roster/route and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-080",
+      "status": "reviewed",
+      "path": "apps/desktop/src/components/remote-setup/fields.tsx",
+      "scope": "RemoteSetupFields",
+      "rule": "CC",
+      "detail": "CC 35 > target 20 (new code must meet the target)",
+      "candidate_blob": "75e016ae99df3a8250176aa5eccbb22076d8b173",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/components/remote-setup/fields.tsx",
+        "scope": "RemoteSetupFields",
+        "blob": "75e016ae99df3a8250176aa5eccbb22076d8b173",
+        "unit_body_hash": "6ce578f3a659ebd4"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC is UI branching by host, explicit token/OAuth mode, probe status, connected status and input/button availability. Full function and binding context reviewed, and actual upstream source/unit cap match. No identified structural conflict. Credential masking/storage/sign-in/sign-out and remote authentication behavior are not approved or waived. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "RemoteSetupFields typed setup/disabled/urlDisabled/urlOnly callback props; local Field component, RemoteSetup hook interface; settings/registry/first-run call-site search",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-second-subset-review.json",
+          "blob": "b37d1c5eb589751ec3ddc6e4da9cc0750dbc86f1",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; installer/auth/roster/route and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-090",
+      "status": "reviewed",
+      "path": "apps/desktop/src/plugins/hermes-bots/bot-row.tsx",
+      "scope": "BotRow",
+      "rule": "CC",
+      "detail": "CC 42 > 40, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "c5d24667ec238a9da27d836f1007229104ee9074",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/plugins/hermes-bots/bot-row.tsx",
+        "scope": "BotRow",
+        "blob": "c5d24667ec238a9da27d836f1007229104ee9074",
+        "unit_body_hash": "11a54efa2784c850"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "Full row read; CC is identity/status/preview/age/attention and context menu presentation. Main click and explicit Bot Chat action delegate to openRosterBot; recent session remains a separately named menu action. Actual upstream source/unit cap matches and no new structural binding divergence identified. The pre-existing preview fallback to last_session when canonical_session is absent is not validated here; canonical resolution, metadata writes, warm catches and source ownership remain outside disposition. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "Exported BotRow props, rowAge, source-qualified selection/meta/attention/owner helpers, canonical session ID helper and openRosterBot; complete context menu handlers",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-second-subset-review.json",
+          "blob": "b37d1c5eb589751ec3ddc6e4da9cc0750dbc86f1",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; installer/auth/roster/route and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "plugin-declaration-boundary-01",
+      "status": "reviewed",
+      "path": "hermes_cli/plugins_cmd_install.py",
+      "scope": "_install_plugin_python_deps",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as exc:",
+      "candidate_blob": "2aee13fdd3fbfe3b7c3299de4819aa9e114bd3e1",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugins_cmd_install.py",
+        "scope": "_install_plugin_python_deps",
+        "blob": "2aee13fdd3fbfe3b7c3299de4819aa9e114bd3e1"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; root approved preparation only",
+        "compatibility": "Malformed actual TOML returns explicit manifest_invalid refusal even with assume_yes; active replacement publish_plugin raises classified PluginOperationError before sync_venv and keeps installed tree byte-identical. Only named refusal/config-accessor catch paths tested. Successful environment resolution, activation rollback, previous admission fixture setup failures and native hosted CI remain outside this proof.",
+        "module_bindings": "Actual malformed TOML reader, consent refusal and public replacement publication gate; sync_venv never called on this failure. Dashboard detail warnings never grant consent.",
+        "receipt": "/tmp/hermes-cadence-read-final.log:21passed; exact named failure tests test_invalid_declaration_refuses_consent_even_when_preapproved,test_active_replacement_parse_failure_preserves_installed_tree_and_environment"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-plugin-declaration-boundary-review.json",
+          "blob": "7cec2905cfd944791284d35533e1cfbb5d4eb08e",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical receipt and bounded independent source/failure-path review; cadence and successful admission excluded."
+        },
+        {
+          "path": "hermes_cli/plugins_transaction.py",
+          "blob": "1838658cd7c26f935ccf29d5e9e30e1446f0e5ab",
+          "outcome": "passed",
+          "claim": "Exact reviewed dependency or targeted test of this refusal/display boundary."
+        },
+        {
+          "path": "pm/plugin_declarations.py",
+          "blob": "210cabe36b29b87272cdda0add85174c17809f6d",
+          "outcome": "passed",
+          "claim": "Exact reviewed dependency or targeted test of this refusal/display boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_policy_failure_boundaries.py",
+          "blob": "33d86372d5eb44b66fb6235cd5f9362375017846",
+          "outcome": "passed",
+          "claim": "Exact reviewed dependency or targeted test of this refusal/display boundary."
+        }
+      ]
+    },
+    {
+      "id": "plugin-declaration-boundary-02",
+      "status": "reviewed",
+      "path": "hermes_cli/plugins_cmd_install.py",
+      "scope": "_python_dependency_summary",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as exc:",
+      "candidate_blob": "2aee13fdd3fbfe3b7c3299de4819aa9e114bd3e1",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugins_cmd_install.py",
+        "scope": "_python_dependency_summary",
+        "blob": "2aee13fdd3fbfe3b7c3299de4819aa9e114bd3e1"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; root approved preparation only",
+        "compatibility": "Malformed declaration yields empty UI detail with visible warning; same input independently refuses consent so empty display does not grant installation. Only named refusal/config-accessor catch paths tested. Successful environment resolution, activation rollback, previous admission fixture setup failures and native hosted CI remain outside this proof.",
+        "module_bindings": "Actual malformed TOML reader, consent refusal and public replacement publication gate; sync_venv never called on this failure. Dashboard detail warnings never grant consent.",
+        "receipt": "/tmp/hermes-cadence-read-final.log:21passed; exact named failure tests test_unreadable_dependency_summary_warns_without_granting_consent"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-plugin-declaration-boundary-review.json",
+          "blob": "7cec2905cfd944791284d35533e1cfbb5d4eb08e",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical receipt and bounded independent source/failure-path review; cadence and successful admission excluded."
+        },
+        {
+          "path": "hermes_cli/plugins_transaction.py",
+          "blob": "1838658cd7c26f935ccf29d5e9e30e1446f0e5ab",
+          "outcome": "passed",
+          "claim": "Exact reviewed dependency or targeted test of this refusal/display boundary."
+        },
+        {
+          "path": "pm/plugin_declarations.py",
+          "blob": "210cabe36b29b87272cdda0add85174c17809f6d",
+          "outcome": "passed",
+          "claim": "Exact reviewed dependency or targeted test of this refusal/display boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_policy_failure_boundaries.py",
+          "blob": "33d86372d5eb44b66fb6235cd5f9362375017846",
+          "outcome": "passed",
+          "claim": "Exact reviewed dependency or targeted test of this refusal/display boundary."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-019",
+      "status": "reviewed",
+      "path": "apps/desktop/src/app/chat/composer/status-stack/index.tsx",
+      "scope": "ComposerStatusStack",
+      "rule": "CC",
+      "detail": "CC 32 > 26, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "754b1c9ec5e24d394531c83e7cb1070147cc579a",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/chat/composer/status-stack/index.tsx",
+        "scope": "ComposerStatusStack",
+        "blob": "754b1c9ec5e24d394531c83e7cb1070147cc579a",
+        "unit_body_hash": "8455246c167d27a6"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "Full component read: complexity comes from composing ordered status sections, goal/subagent/todo visibility, optional session/billing/preview/queue rows and display conditionals. Session identity remains an explicit prop/store read, notices retain one-owner ordering, and mutations stay in imported actions. Actual full source and unit/cap equal upstream; no structural compatibility conflict identified. Background polling and action failure contracts remain outside this disposition. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "Exported ComposerStatusStack props, session-view/store imports, group tier/icon/label helpers, owned free-tier/metrics notice claim, session-slice and pane-visible hooks",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "apps/desktop/src/components/free-tier/notice-strip.tsx",
+          "blob": "c2e8ce2e5232d0349b13bd79a64c5a39c8bd6935",
+          "outcome": "passed",
+          "claim": "Independently reviewed surrounding notice ownership/session-slice binding; no runtime correctness claim"
+        },
+        {
+          "path": "apps/desktop/src/lib/use-session-slice.ts",
+          "blob": "a7399f588b358112973d056b16fbe5c8c55172a7",
+          "outcome": "passed",
+          "claim": "Independently reviewed surrounding notice ownership/session-slice binding; no runtime correctness claim"
+        },
+        {
+          "path": "analysis/sync-health/v0221-composer-status-review.json",
+          "blob": "e676b2e9738c6ebe416719cb51dd8e48673f1eba",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; hydration/polling/callback/notice ownership and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "cron-loader-metadata-load_cron_scheduler",
+      "status": "reviewed",
+      "path": "plugins/cron_providers/__init__.py",
+      "scope": "load_cron_scheduler",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "def load_cron_scheduler(name: str) -> Optional[CronScheduler]:",
+      "candidate_blob": "8651836d50688ade46a2da1582e628386075d63d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "plugins/cron_providers/__init__.py",
+        "scope": "load_cron_scheduler",
+        "blob": "8651836d50688ade46a2da1582e628386075d63d",
+        "unit_body_hash": "5c8720fcf60fee0d"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Root-approved bounded preparation; independent controller approval pending",
+        "compatibility": "The names occur only in postponed return annotations. Current supported discovery and provider execution never evaluate these annotations: real named/directory loaders return canonical ABC instances, and resolver/fallback contracts pass. Importing discovery remains lazy with no cron package initialization. Retaining this metadata defect does not alter these demonstrated fork paths. Generic typing.get_type_hints on either function DOES raise NameError, even after provider execution. This is an unresolved introspection limitation, not corrected typing or a general F821 exemption. No supported in-repository consumer evaluates these two annotations; external reflection/documentation consumers are not proven safe. A new such consumer invalidates this rationale. Lazy metadata resolution was rejected because it initializes cron/profile scaffolding during introspection.",
+        "receipt": "/tmp/hermes-cron-annotation-existing-callers-20261016T002825.log; 7 passed plus embedded isolated actual-loader and failed-introspection probes."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cron-loader-annotation-limitation.json",
+          "blob": "a402cd66f5a08bdd1faf1145764603b86864e742",
+          "outcome": "passed",
+          "claim": "Bounded supported-caller compatibility evidence with explicit unresolved generic introspection failure; no claim that get_type_hints succeeds."
+        },
+        {
+          "path": "cron/scheduler_provider.py",
+          "blob": "040909363a220d3adb40f4fb0ae2bcad20f6aa6a",
+          "outcome": "passed",
+          "claim": "resolve_cron_scheduler directly calls named loader, checks availability and returns canonical provider/builtin fallback; no loader-annotation evaluation."
+        },
+        {
+          "path": "plugins/plugin_loader.py",
+          "blob": "21ac41376f19cd34e66da15d84bde1f8c24ebda7",
+          "outcome": "passed",
+          "claim": "load_named directly invokes callback; instance_from_module uses canonical base class and subclass checks, not type hints."
+        },
+        {
+          "path": "cron/__init__.py",
+          "blob": "ad13295b2ca09dbfede004ac0fcc28b32c646b3a",
+          "outcome": "passed",
+          "claim": "Importing the canonical ABC requires package initialization, including bootstrap and scheduler imports; eager metadata resolution would change lazy discovery startup."
+        },
+        {
+          "path": "cron/worker_bootstrap.py",
+          "blob": "e95e2229389c3905a7f7104c3eb1ce7ee36fa9ee",
+          "outcome": "passed",
+          "claim": "Existing worker bootstrap is invoked by cron package initialization; no changes proposed."
+        },
+        {
+          "path": "hermes_cli/web_read_coalescing.py",
+          "blob": "3f5b5498a95b21022711da9e1a0152dd183b8e11",
+          "outcome": "passed",
+          "claim": "Runtime get_type_hints consumer wraps web route callables, not cron discovery functions."
+        },
+        {
+          "path": "scripts/gen_gateway_contracts.py",
+          "blob": "5c281a21a7716fb60ee13636a78b2d0c09407fa5",
+          "outcome": "passed",
+          "claim": "Build-time get_type_hints consumer evaluates gateway ToolsRead model fields, not cron discovery functions."
+        },
+        {
+          "path": "tests/cron/test_scheduler_provider.py",
+          "blob": "d0ebeed8c3d63dd428d5aff6e84444f3168449b5",
+          "outcome": "passed",
+          "claim": "Seven selected canonical tests passed: default/missing/unknown/unavailable/available resolver behavior, package shadowing and additive ABC contract."
+        }
+      ]
+    },
+    {
+      "id": "cron-loader-metadata-load_provider_from_dir",
+      "status": "reviewed",
+      "path": "plugins/cron_providers/__init__.py",
+      "scope": "_load_provider_from_dir",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "def _load_provider_from_dir(provider_dir: Path) -> Optional[CronScheduler]:",
+      "candidate_blob": "8651836d50688ade46a2da1582e628386075d63d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "plugins/cron_providers/__init__.py",
+        "scope": "_load_provider_from_dir",
+        "blob": "8651836d50688ade46a2da1582e628386075d63d",
+        "unit_body_hash": "6b53e679215bdf48"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Root-approved bounded preparation; independent controller approval pending",
+        "compatibility": "The names occur only in postponed return annotations. Current supported discovery and provider execution never evaluate these annotations: real named/directory loaders return canonical ABC instances, and resolver/fallback contracts pass. Importing discovery remains lazy with no cron package initialization. Retaining this metadata defect does not alter these demonstrated fork paths. Generic typing.get_type_hints on either function DOES raise NameError, even after provider execution. This is an unresolved introspection limitation, not corrected typing or a general F821 exemption. No supported in-repository consumer evaluates these two annotations; external reflection/documentation consumers are not proven safe. A new such consumer invalidates this rationale. Lazy metadata resolution was rejected because it initializes cron/profile scaffolding during introspection.",
+        "receipt": "/tmp/hermes-cron-annotation-existing-callers-20261016T002825.log; 7 passed plus embedded isolated actual-loader and failed-introspection probes."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cron-loader-annotation-limitation.json",
+          "blob": "a402cd66f5a08bdd1faf1145764603b86864e742",
+          "outcome": "passed",
+          "claim": "Bounded supported-caller compatibility evidence with explicit unresolved generic introspection failure; no claim that get_type_hints succeeds."
+        },
+        {
+          "path": "cron/scheduler_provider.py",
+          "blob": "040909363a220d3adb40f4fb0ae2bcad20f6aa6a",
+          "outcome": "passed",
+          "claim": "resolve_cron_scheduler directly calls named loader, checks availability and returns canonical provider/builtin fallback; no loader-annotation evaluation."
+        },
+        {
+          "path": "plugins/plugin_loader.py",
+          "blob": "21ac41376f19cd34e66da15d84bde1f8c24ebda7",
+          "outcome": "passed",
+          "claim": "load_named directly invokes callback; instance_from_module uses canonical base class and subclass checks, not type hints."
+        },
+        {
+          "path": "cron/__init__.py",
+          "blob": "ad13295b2ca09dbfede004ac0fcc28b32c646b3a",
+          "outcome": "passed",
+          "claim": "Importing the canonical ABC requires package initialization, including bootstrap and scheduler imports; eager metadata resolution would change lazy discovery startup."
+        },
+        {
+          "path": "cron/worker_bootstrap.py",
+          "blob": "e95e2229389c3905a7f7104c3eb1ce7ee36fa9ee",
+          "outcome": "passed",
+          "claim": "Existing worker bootstrap is invoked by cron package initialization; no changes proposed."
+        },
+        {
+          "path": "hermes_cli/web_read_coalescing.py",
+          "blob": "3f5b5498a95b21022711da9e1a0152dd183b8e11",
+          "outcome": "passed",
+          "claim": "Runtime get_type_hints consumer wraps web route callables, not cron discovery functions."
+        },
+        {
+          "path": "scripts/gen_gateway_contracts.py",
+          "blob": "5c281a21a7716fb60ee13636a78b2d0c09407fa5",
+          "outcome": "passed",
+          "claim": "Build-time get_type_hints consumer evaluates gateway ToolsRead model fields, not cron discovery functions."
+        },
+        {
+          "path": "tests/cron/test_scheduler_provider.py",
+          "blob": "d0ebeed8c3d63dd428d5aff6e84444f3168449b5",
+          "outcome": "passed",
+          "claim": "Seven selected canonical tests passed: default/missing/unknown/unavailable/available resolver behavior, package shadowing and additive ABC contract."
+        }
+      ]
+    },
+    {
+      "id": "plugin-metadata-boundary-01",
+      "status": "reviewed",
+      "path": "hermes_cli/plugins_updates.py",
+      "scope": "_owning_distribution",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception:",
+      "candidate_blob": "5e301bb8c841e616cb66a2dcca6fdbd7baf90ff5",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugins_updates.py",
+        "scope": "_owning_distribution",
+        "blob": "01fe0512c7907daeb58b65dcbda84502ff89f5a0",
+        "unit_body_hash": "70cd360fbb2d3b42"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; root approved preparation only",
+        "compatibility": "Unreadable owning-distribution metadata yields None without retaining the exception. The real caller emits a fixed unknown reason and performs neither package-name guessing nor installed-version/PyPI lookup. Actual scheduled check preserves healthy-neighbor apply, suppresses the unknown plugin, and persists its fixed reason. Only _owning_distribution metadata access catch. No claim about distribution attribute getters outside its try, successful network access, parse/mismatch/PyPI branches, or the separately corrected lookup catches. Completed scan remains rate-limited.",
+        "module_bindings": "Actual run_checks/check_pip_plugins and scheduled cadence/receipt; metadata access raises locally and package/version/PyPI callbacks must remain uncalled.",
+        "receipt": "/tmp/hermes-plugin-update-confidentiality-final.log:43passed; exact metadata parameter case plus neighbors"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-plugin-metadata-boundary-review.json",
+          "blob": "a1509427b2fd28fc5eab91493b404017d41ba4c1",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical receipt, exact source/dependency identities and bounded failure review."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_update_failure_boundaries.py",
+          "blob": "9cac1d346019bab439ece27cdbbfc2f2320b4407",
+          "outcome": "passed",
+          "claim": "Exact caller dependency or retained failure test."
+        },
+        {
+          "path": "hermes_cli/plugins_provenance.py",
+          "blob": "c753fe00b0eb94228406f32acb62fb0da9310d2a",
+          "outcome": "passed",
+          "claim": "Exact caller dependency or retained failure test."
+        },
+        {
+          "path": "hermes_cli/plugins_cadence.py",
+          "blob": "cbbc0462681bfd599f265a73ef4be44ea9a1ccf9",
+          "outcome": "passed",
+          "claim": "Exact caller dependency or retained failure test."
+        },
+        {
+          "path": "pm/receipt.py",
+          "blob": "95df41457ac3f249f39936bc0ce4535391d78c97",
+          "outcome": "passed",
+          "claim": "Exact caller dependency or retained failure test."
+        }
+      ]
+    },
+    {
+      "id": "main-bootstrap-profile-structural-01",
+      "status": "reviewed",
+      "path": "apps/desktop/electron/main.ts",
+      "scope": "broadcastBootstrapEvent",
+      "rule": "CC",
+      "detail": "CC 25 > 24, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "9db748184bdfd57a621466ed7607c72035449a6c",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/electron/main.ts",
+        "scope": "broadcastBootstrapEvent",
+        "blob": "c4d48481288540708156b370b370e9c345bcbd11",
+        "unit_body_hash": "ba96189fe0a3e370"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-authorized exact two-function structural preparation",
+        "compatibility": "CC 25 is concentrated in one synchronous event-to-snapshot dispatcher with shallow nesting 2 and 72 owned lines. The added local default and native artifact fact are cohesive setup-choice presentation normalization. Complete-body and binding review found no specific integration compatibility conflict; a source-bound CC-only disposition could be considered, with no growth permission or behavioral waiver.",
+        "module_bindings": "Complete function and delimited surrounding producer/consumer reads recorded in evidence, with all17 context file hashes bound. Native/credential/IPC/order/catch behavior remains outside the structural disposition.",
+        "receipt": "Read-only independent complete-body review plus canonical TypeScript measurement; no execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-main-bootstrap-profile-structural-review.json",
+          "blob": "f79aef1de969866988d2888ea74bcf57b9b3ef23",
+          "outcome": "passed",
+          "claim": "Two independent complete-body/context source reviews and canonical equal-body/equal-cap measurement; structural CC organization only. No runtime, native, credential, IPC, callback-ordering, catch or full-typecheck clearance."
+        },
+        {
+          "path": "apps/desktop/electron/main.ts",
+          "blob": "9db748184bdfd57a621466ed7607c72035449a6c",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/connection-config.ts",
+          "blob": "9378401dcc0b1c2c1cb987435f5ece48f682f64c",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/desktop-profile.ts",
+          "blob": "65c242280da9b1557d8edc120320826f1275b11a",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/bootstrap-state.ts",
+          "blob": "090466275edce760df756b22835a8d43dd31167f",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/install-stamp.ts",
+          "blob": "280b028393d603ed6f145f8efe9be0234f0f2bb0",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/first-run-setup-gate.ts",
+          "blob": "29101038eb2976ded2a51f1775482ffae6b0b65c",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/primary-backend-startup.ts",
+          "blob": "2a79fc8f346086c035b9bc46de4b3990a9b307c5",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/bootstrap-runner.ts",
+          "blob": "05465a84920a25dead52a379c86fb652dfbee645",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/desktop-remote-route.ts",
+          "blob": "f54299c6d1fca62ff01b4db055960af58a931e68",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/preload.ts",
+          "blob": "cbf019e930c9d9bac7cdbf3fef647f68bda6f9e3",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/connection-config.test.ts",
+          "blob": "8e4c4bf093d41bc726031d432cb95f34aac0ee49",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/bootstrap-state.test.ts",
+          "blob": "a9231b0c51806d44ed81a8b9686a7a19946f9cd4",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/first-run-setup-gate.test.ts",
+          "blob": "91221620689e90ad1c4d8287b3ea38a3b85df675",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/components/desktop-install-overlay.tsx",
+          "blob": "0cc4d279faa81e0294be51b03e2359ef42b54fc4",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/components/desktop-install-overlay.test.tsx",
+          "blob": "db67e72b6a28e7d837215eb36fbad95cfd82eef7",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/global.d.ts",
+          "blob": "22a34af5f3ec5d891c6a1f195b6e0332ab60dbca",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/components/desktop-install-local-card.ts",
+          "blob": "f79a0f0fc3bd3aacc3129acca0e97ae66b6c3fb6",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        }
+      ]
+    },
+    {
+      "id": "main-bootstrap-profile-structural-02",
+      "status": "reviewed",
+      "path": "apps/desktop/electron/main.ts",
+      "scope": "sanitizeConnectionProfiles",
+      "rule": "CC",
+      "detail": "CC 26 > 25, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "9db748184bdfd57a621466ed7607c72035449a6c",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/electron/main.ts",
+        "scope": "sanitizeConnectionProfiles",
+        "blob": "c4d48481288540708156b370b370e9c345bcbd11",
+        "unit_body_hash": "291da71c383f802e"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-authorized exact two-function structural preparation",
+        "compatibility": "CC 26 comes from one bounded per-profile normalization pass, with 99 owned lines and nesting 4. The added guarded remoteProfile field is cohesive schema preservation, required for the documented URL-remote alias contract. Complete-body/helper/caller review found no specific integration compatibility conflict; a source-bound CC-only disposition could be considered without credential or routing guarantees.",
+        "module_bindings": "Complete function and delimited surrounding producer/consumer reads recorded in evidence, with all17 context file hashes bound. Native/credential/IPC/order/catch behavior remains outside the structural disposition.",
+        "receipt": "Read-only independent complete-body review plus canonical TypeScript measurement; no execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-main-bootstrap-profile-structural-review.json",
+          "blob": "f79aef1de969866988d2888ea74bcf57b9b3ef23",
+          "outcome": "passed",
+          "claim": "Two independent complete-body/context source reviews and canonical equal-body/equal-cap measurement; structural CC organization only. No runtime, native, credential, IPC, callback-ordering, catch or full-typecheck clearance."
+        },
+        {
+          "path": "apps/desktop/electron/main.ts",
+          "blob": "9db748184bdfd57a621466ed7607c72035449a6c",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/connection-config.ts",
+          "blob": "9378401dcc0b1c2c1cb987435f5ece48f682f64c",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/desktop-profile.ts",
+          "blob": "65c242280da9b1557d8edc120320826f1275b11a",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/bootstrap-state.ts",
+          "blob": "090466275edce760df756b22835a8d43dd31167f",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/install-stamp.ts",
+          "blob": "280b028393d603ed6f145f8efe9be0234f0f2bb0",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/first-run-setup-gate.ts",
+          "blob": "29101038eb2976ded2a51f1775482ffae6b0b65c",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/primary-backend-startup.ts",
+          "blob": "2a79fc8f346086c035b9bc46de4b3990a9b307c5",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/bootstrap-runner.ts",
+          "blob": "05465a84920a25dead52a379c86fb652dfbee645",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/desktop-remote-route.ts",
+          "blob": "f54299c6d1fca62ff01b4db055960af58a931e68",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/preload.ts",
+          "blob": "cbf019e930c9d9bac7cdbf3fef647f68bda6f9e3",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/connection-config.test.ts",
+          "blob": "8e4c4bf093d41bc726031d432cb95f34aac0ee49",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/bootstrap-state.test.ts",
+          "blob": "a9231b0c51806d44ed81a8b9686a7a19946f9cd4",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/electron/first-run-setup-gate.test.ts",
+          "blob": "91221620689e90ad1c4d8287b3ea38a3b85df675",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/components/desktop-install-overlay.tsx",
+          "blob": "0cc4d279faa81e0294be51b03e2359ef42b54fc4",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/components/desktop-install-overlay.test.tsx",
+          "blob": "db67e72b6a28e7d837215eb36fbad95cfd82eef7",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/global.d.ts",
+          "blob": "22a34af5f3ec5d891c6a1f195b6e0332ab60dbca",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        },
+        {
+          "path": "apps/desktop/src/components/desktop-install-local-card.ts",
+          "blob": "f79a0f0fc3bd3aacc3129acca0e97ae66b6c3fb6",
+          "outcome": "passed",
+          "claim": "Exact reviewed context binding for the delimited source read; no whole-file runtime or security certification."
+        }
+      ]
+    }
+  ]
+}

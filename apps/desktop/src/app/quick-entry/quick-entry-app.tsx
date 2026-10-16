@@ -1,14 +1,32 @@
-import { useEffect, useReducer, useRef } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 
 import { isSubmitEnter } from '@/lib/ime'
-import {
-  initialQuickComposerState,
-  QUICK_TARGET_CURRENT,
-  QUICK_TARGET_NEW,
-  type QuickComposerEvent,
-  quickComposerReducer,
-  type QuickComposerState
-} from '@/store/quick-entry'
+import { QUICK_TARGET_CURRENT, QUICK_TARGET_NEW, QuickComposerController } from '@/store/quick-entry'
+
+// Native select popups do not reliably inherit the closed control's colors.
+// Paint both sides of the contrast pair on every option so Chromium cannot
+// combine a dark-theme foreground with an OS-provided light popup surface.
+const QUICK_TARGET_OPTION_STYLE = {
+  backgroundColor: 'var(--ui-bg-elevated, var(--background))',
+  color: 'var(--ui-text-primary, var(--foreground))'
+}
+
+let documentController: QuickComposerController | null = null
+
+function getQuickEntryController(): QuickComposerController {
+  // Capture the document's bridge once. A wrapper changing object identity is
+  // not authority to abandon pending requests or create another controller.
+  documentController ??= new QuickComposerController(window.hermesDesktop.quickEntry)
+
+  return documentController
+}
+
+export function disposeQuickEntryController(): void {
+  documentController?.dispose()
+  documentController = null
+}
+
+window.addEventListener('pagehide', disposeQuickEntryController)
 
 /**
  * The Quick Entry composer — the whole renderer surface of the global-hotkey
@@ -28,49 +46,22 @@ import {
  */
 export function QuickEntryApp() {
   const inputRef = useRef<HTMLInputElement>(null)
+  const controller = getQuickEntryController()
+  const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
+  const { state } = snapshot
+  const dispatch = controller.dispatch
 
-  // The reducer returns { send, state }; this wrapper performs the side effect
-  // (hand the payload to the shell, ask to hide) and stores the next state, so
-  // the decision stays pure and testable while the effects stay in one place.
-  const [state, dispatch] = useReducer((current: QuickComposerState, event: QuickComposerEvent) => {
-    const { send, state: next } = quickComposerReducer(current, event)
-    const api = window.hermesDesktop?.quickEntry
-
-    if (send) {
-      api?.submit(send)
-    } else if (!next.visible && current.visible) {
-      api?.dismiss()
-    }
-
-    return next
-  }, initialQuickComposerState)
-
-  // Re-summoned by the chord: the shell reuses the window, so reset the draft
-  // and take the keyboard back for a fresh capture. Also adopt gateway-state
-  // pushes (connection + recent sessions) relayed from the primary renderer.
   useEffect(() => {
-    const api = window.hermesDesktop?.quickEntry
+    controller.connect()
+    // The document, not this view, owns pending work. StrictMode and a genuine
+    // remount detach only the React subscriber, never the native listeners.
+  }, [controller])
 
-    const offShown = api?.onShown(() => {
-      dispatch({ type: 'shown' })
-      requestAnimationFrame(() => inputRef.current?.focus())
-    })
-
-    const offState = api?.onState(payload => {
-      dispatch({
-        connected: payload?.connected === true,
-        sessions: Array.isArray(payload?.sessions) ? payload.sessions : [],
-        type: 'state'
-      })
-    })
-
-    inputRef.current?.focus()
-
-    return () => {
-      offShown?.()
-      offState?.()
+  useEffect(() => {
+    if (state.visible) {
+      inputRef.current?.focus()
     }
-  }, [])
+  }, [snapshot.focusVersion, state.visible])
 
   return (
     <div
@@ -89,7 +80,11 @@ export function QuickEntryApp() {
           background: 'var(--ui-bg-elevated, var(--background))',
           border: '1px solid var(--ui-stroke-secondary, rgba(127,127,127,0.35))',
           borderRadius: 12,
-          boxShadow: '0 18px 48px rgba(0,0,0,0.38)',
+          // Shadow budget is capped by the 12px transparent padding around the
+          // card: extent (offset + blur) beyond 12px gets clipped by the fixed
+          // 640x168 window bounds, slicing the gradient into a hard edge.
+          // 2 + 8 = 10px stays inside the padding and fades out cleanly.
+          boxShadow: '0 2px 8px rgba(0,0,0,0.22)',
           display: 'flex',
           flexDirection: 'column',
           gap: 8,
@@ -183,15 +178,24 @@ export function QuickEntryApp() {
             }}
             value={state.target}
           >
-            <option value={QUICK_TARGET_CURRENT}>Current chat</option>
-            <option value={QUICK_TARGET_NEW}>New session</option>
+            <option style={QUICK_TARGET_OPTION_STYLE} value={QUICK_TARGET_CURRENT}>
+              Current chat
+            </option>
+            <option style={QUICK_TARGET_OPTION_STYLE} value={QUICK_TARGET_NEW}>
+              New session
+            </option>
             {state.sessions.map(session => (
-              <option key={session.id} value={session.id}>
+              <option key={session.id} style={QUICK_TARGET_OPTION_STYLE} value={session.id}>
                 {session.title}
               </option>
             ))}
           </select>
         </div>
+        {state.error || snapshot.sessionError ? (
+          <div role="alert" style={{ color: 'var(--destructive, #ef4444)', fontSize: 11 }}>
+            {state.error || snapshot.sessionError}
+          </div>
+        ) : null}
       </div>
     </div>
   )

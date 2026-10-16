@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # upgrade.sh — switch an EXISTING Hermes Agent install onto Hermes Evolution and
 # keep it auto-updating. One command, idempotent, safe to re-run.
 #

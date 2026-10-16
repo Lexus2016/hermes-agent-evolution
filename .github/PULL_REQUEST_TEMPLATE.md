@@ -29,7 +29,9 @@ Please fill out this template to help reviewers understand your changes.
 - [ ] I have made corresponding changes to the documentation
 - [ ] My changes generate no new warnings
 - [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing tests pass locally with my changes
+- [ ] New and existing tests pass through `scripts/run_tests.sh`
+- [ ] `python scripts/check` passes
+- [ ] I checked cross-platform impact and updated config/schema docs where needed
 - [ ] Any dependent changes have been merged and published
 
 ## 🔗 Related Issues/PRs

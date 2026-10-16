@@ -18,6 +18,8 @@ from tools.approval import (
     set_hermes_subagent_context,
 )
 
+pytestmark = pytest.mark.usefixtures("tirith_binary_unavailable")
+
 
 class TestIsUnattendedContext:
     """_is_unattended_context() requires a positive cron/subagent signal.

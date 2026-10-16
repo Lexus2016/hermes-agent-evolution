@@ -9,10 +9,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-import evolution_experience_harvest as eh  # noqa: E402
-from agent import experience_bank as eb  # noqa: E402
-from agent.experience_bank import get_harvest_state, iter_entries  # noqa: E402
-from hermes_state import SessionDB  # noqa: E402
+import evolution_experience_harvest as eh
+from agent import experience_bank as eb
+from agent.experience_bank import get_harvest_state, iter_entries
+from hermes_state import SessionDB
 
 # Fixed clock: sessions are aged 1h behind "now" so they clear the 30-minute
 # possibly-active grace window with room to spare.
@@ -795,7 +795,7 @@ class TestDistillation:
 
 class TestLock:
     def test_second_concurrent_instance_exits_cleanly(self, tmp_path, capsys):
-        db, db_path = _make_db(tmp_path)
+        db, _db_path = _make_db(tmp_path)
         _add_session(db, "s-clean", [_user(), _assistant()])
         db.close()
 

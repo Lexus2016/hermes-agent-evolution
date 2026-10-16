@@ -80,20 +80,20 @@ _SYSTEM_PREAMBLE = (
 
 
 # --- ShareGPT message builders (match agent_runtime_helpers wire format) -----
-def _system_msg(tools: List[Dict[str, Any]]) -> Dict[str, str]:
+def _system_msg(tools: list[dict[str, Any]]) -> dict[str, str]:
     tools_json = "\n".join(json.dumps(t, ensure_ascii=False) for t in tools)
     return {"from": "system", "value": _SYSTEM_PREAMBLE.format(tools=tools_json)}
 
 
-def _human_msg(text: str) -> Dict[str, str]:
+def _human_msg(text: str) -> dict[str, str]:
     return {"from": "human", "value": text}
 
 
-def _gpt_msg(think: str, tool_calls: List[Dict[str, Any]] | None = None,
-             content: str = "") -> Dict[str, str]:
+def _gpt_msg(think: str, tool_calls: list[dict[str, Any]] | None = None,
+             content: str = "") -> dict[str, str]:
     """A ``gpt`` turn. Always carries a <think> block (matching the live
     converter, which injects an empty one if reasoning is absent)."""
-    parts: List[str] = [f"<think>\n{think}\n</think>"]
+    parts: list[str] = [f"<think>\n{think}\n</think>"]
     if content:
         parts.append(content)
     for call in (tool_calls or []):
@@ -106,10 +106,10 @@ def _gpt_msg(think: str, tool_calls: List[Dict[str, Any]] | None = None,
     return {"from": "gpt", "value": "\n".join(parts).rstrip()}
 
 
-def _tool_msg(results: List[Dict[str, Any]]) -> Dict[str, str]:
+def _tool_msg(results: list[dict[str, Any]]) -> dict[str, str]:
     """A ``tool`` turn wrapping each result, mirroring the live converter's
     ``{tool_call_id, name, content}`` payload."""
-    blocks: List[str] = []
+    blocks: list[str] = []
     for r in results:
         payload = {
             "tool_call_id": r.get("tool_call_id", ""),
@@ -174,7 +174,7 @@ _TOOLS_LIBRARY = {
 }
 
 
-def _scenario_tool_augmented_planning(rng: random.Random, params: Dict[str, Any]):
+def _scenario_tool_augmented_planning(rng: random.Random, params: dict[str, Any]):
     """A tool-augmented planning episode: the agent decomposes a goal into an
     explicit plan, then executes it with simulated tool calls/responses.
 
@@ -195,7 +195,7 @@ def _scenario_tool_augmented_planning(rng: random.Random, params: Dict[str, Any]
         "Summarize the result for the user.",
     ]
 
-    convs: List[Dict[str, str]] = [_system_msg(tools)]
+    convs: list[dict[str, str]] = [_system_msg(tools)]
     convs.append(_human_msg(f"In the {project} repo, {goal}."))
 
     # gpt turn 1: state the plan (no tool call yet) — the "planning" signal.
@@ -210,7 +210,7 @@ def _scenario_tool_augmented_planning(rng: random.Random, params: Dict[str, Any]
     # A deterministic pattern derived from the goal (no NLP, just a stable token).
     pattern = "TODO" if "TODO" in goal else goal.split()[0].rstrip(".,").upper()
 
-    tools_used: List[str] = []
+    tools_used: list[str] = []
 
     # step 1: list_files
     convs.append(_gpt_msg(
@@ -268,15 +268,15 @@ def _scenario_tool_augmented_planning(rng: random.Random, params: Dict[str, Any]
 
 
 # --- registry + framework ---------------------------------------------------
-ScenarioFn = Callable[[random.Random, Dict[str, Any]],
-                      "tuple[List[Dict[str, str]], Dict[str, Any], bool]"]
+ScenarioFn = Callable[[random.Random, dict[str, Any]],
+                      "tuple[list[dict[str, str]], dict[str, Any], bool]"]
 
-SCENARIOS: Dict[str, ScenarioFn] = {
+SCENARIOS: dict[str, ScenarioFn] = {
     "tool_augmented_planning": _scenario_tool_augmented_planning,
 }
 
 
-def generate_episode(scenario: str, seed_params: Dict[str, Any]) -> Dict[str, Any]:
+def generate_episode(scenario: str, seed_params: dict[str, Any]) -> dict[str, Any]:
     """Generate one labeled synthetic episode.
 
     ``seed_params`` must contain ``seed`` (int); the same params yield the same
@@ -297,7 +297,7 @@ def generate_episode(scenario: str, seed_params: Dict[str, Any]) -> Dict[str, An
     }
 
 
-def validate_episode_schema(episode: Dict[str, Any]) -> bool:
+def validate_episode_schema(episode: dict[str, Any]) -> bool:
     """Return True iff ``episode`` round-trips the persisted trajectory schema.
 
     Checks the canonical entry keys plus the ShareGPT message shape. The extra
@@ -326,7 +326,7 @@ def validate_episode_schema(episode: Dict[str, Any]) -> bool:
     return True
 
 
-def generate_batch(scenario: str, n: int, base_seed: int = 0) -> List[Dict[str, Any]]:
+def generate_batch(scenario: str, n: int, base_seed: int = 0) -> list[dict[str, Any]]:
     """Generate ``n`` distinct deterministic episodes for ``scenario``.
 
     Episode ``i`` uses ``seed = base_seed + i``, so the batch is reproducible
@@ -336,7 +336,7 @@ def generate_batch(scenario: str, n: int, base_seed: int = 0) -> List[Dict[str, 
     return [generate_episode(scenario, {"seed": base_seed + i}) for i in range(n)]
 
 
-def to_trajectory_entry(episode: Dict[str, Any]) -> Dict[str, Any]:
+def to_trajectory_entry(episode: dict[str, Any]) -> dict[str, Any]:
     """Strip the synthetic-only ``labels`` field, leaving the byte-identical
     persisted trajectory entry (``conversations``/``timestamp``/``model``/
     ``completed``)."""
@@ -373,8 +373,7 @@ def _cmd_batch(args: argparse.Namespace) -> int:
     lines = [json.dumps(to_trajectory_entry(ep), ensure_ascii=False) for ep in eps]
     if args.out:
         with open(args.out, "a", encoding="utf-8") as f:
-            for line in lines:
-                f.write(line + "\n")
+            f.writelines(line + "\n" for line in lines)
         print(f"wrote {len(lines)} episodes to {args.out}")
     else:
         for line in lines:
@@ -382,7 +381,7 @@ def _cmd_batch(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="evolution_synthetic_trajectory.py")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

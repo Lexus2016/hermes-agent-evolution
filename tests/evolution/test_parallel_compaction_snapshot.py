@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for pre-compaction snapshot virtual file storage and recovery (Issue #2471)."""
 
 from __future__ import annotations

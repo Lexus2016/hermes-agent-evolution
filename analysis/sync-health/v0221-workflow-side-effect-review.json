@@ -1,0 +1,492 @@
+{
+  "reviewed_commit": "418ec2770212cbdc6d779e93fd6bd21dd3a4e33e",
+  "comparison_commit": "7ff2ef91d978b125d4737943dc74ae0414bbf9f9",
+  "workflow_directory_changed": false,
+  "status": "reviewed-source-graph-only",
+  "conclusion": "No ordinary fork branch/PR/main route to canary tags, pruning, releases or deployment found in reviewed graph. Explicit manual publication remains available.",
+  "limits": [
+    "Not a hosted execution receipt or repository settings/protection verification.",
+    "Final report must compare every workflow path/blob to this inventory; changes require renewed review.",
+    "Does not authorize dispatch, publication, deployment or credential access."
+  ],
+  "workflow_inventory": [
+    {
+      "path": ".github/workflows/archive-inputs.yml",
+      "blob": "1ec41e6ff5e0f735ac99429b92d24a0539a1d447"
+    },
+    {
+      "path": ".github/workflows/blob-size-check.yml",
+      "blob": "78ebf56c87661d16844e979ab6b378c6f0a32bb4"
+    },
+    {
+      "path": ".github/workflows/bootstrap-installer-build.yml",
+      "blob": "96800f68b9fb8c07c48fc523ded91dcdfa0c94cb"
+    },
+    {
+      "path": ".github/workflows/bootstrap-installer.yml",
+      "blob": "61bfb38b06fd51740fc3cee480d2deae68372dd1"
+    },
+    {
+      "path": ".github/workflows/canary-release.yml",
+      "blob": "ab39b96d8c2dd8d7ace97ce4ec13ecb1b183b9cc"
+    },
+    {
+      "path": ".github/workflows/case-collision-check.yml",
+      "blob": "b82579d0a0a84889e394e132b2c5ae2586473ad6"
+    },
+    {
+      "path": ".github/workflows/ci-review-comment.yml",
+      "blob": "1f02e5254c24675b2b99001a1bb769421ea09540"
+    },
+    {
+      "path": ".github/workflows/ci.yaml",
+      "blob": "2fd018da1b2be4ed47be086cbb2e0f34022879c3"
+    },
+    {
+      "path": ".github/workflows/contributor-check.yml",
+      "blob": "331ad426edddb2eb7282094b5f7217d8e2dca1ea"
+    },
+    {
+      "path": ".github/workflows/deploy-site.yml",
+      "blob": "c2a2a0c8c7817a5d31825b851cf021d473a5cffd"
+    },
+    {
+      "path": ".github/workflows/desktop-bundle-smoke.yml",
+      "blob": "72d012e5d0c33ea6b806ba611174a2964543e3f4"
+    },
+    {
+      "path": ".github/workflows/desktop-bundled-release.yml",
+      "blob": "215de2dc44fcce1e401e4bb2f04e38bab4de00ec"
+    },
+    {
+      "path": ".github/workflows/docker-lint.yml",
+      "blob": "9d66f70b17b233876e684c1e9c8cd86495ddbc15"
+    },
+    {
+      "path": ".github/workflows/docker.yml",
+      "blob": "7c4f9ff8b8399173045add7b2032b30b09ef9c73"
+    },
+    {
+      "path": ".github/workflows/docs-search-monitor.yml",
+      "blob": "d17cbc2822b923e00b86173f8882dc2018b05a2e"
+    },
+    {
+      "path": ".github/workflows/docs-site-checks.yml",
+      "blob": "8d6b26f06985253adc4a09e3b4e2491c693639b4"
+    },
+    {
+      "path": ".github/workflows/e2e-desktop-core.yml",
+      "blob": "9512763dab162ba87f823efdd68a158dee3713e5"
+    },
+    {
+      "path": ".github/workflows/e2e-desktop-update.yml",
+      "blob": "cedede266cf2efaa94593f3ddfd0b1b844445c70"
+    },
+    {
+      "path": ".github/workflows/e2e-desktop.yml",
+      "blob": "42c91c3e00c602408f6c06dd0098d156836cc62c"
+    },
+    {
+      "path": ".github/workflows/history-check.yml",
+      "blob": "7416e0d8f0c7595222e8af2103f52160664be9e8"
+    },
+    {
+      "path": ".github/workflows/icons-freshness-check.yml",
+      "blob": "207cd64240dc965403dbc2cea2a5a9cb9ce96941"
+    },
+    {
+      "path": ".github/workflows/infographic-check.yml",
+      "blob": "822baf453f7955811584d51cbcffab8ac51ec00c"
+    },
+    {
+      "path": ".github/workflows/install-e2e-macos-run.yml",
+      "blob": "be8f1c01fdee6a44f28815e80b7bf7ec5cefc02f"
+    },
+    {
+      "path": ".github/workflows/install-e2e-red.yml",
+      "blob": "381f6cff96ebe2885b77ece21bcc4caa20e6efa8"
+    },
+    {
+      "path": ".github/workflows/install-e2e-run.yml",
+      "blob": "64f67fa09c6e2e7981718f19b59bf621478e8ad7"
+    },
+    {
+      "path": ".github/workflows/install-e2e-windows-run.yml",
+      "blob": "4f80a3c792a2c3b645e780b090a1c20c1ecbb158"
+    },
+    {
+      "path": ".github/workflows/install-e2e.yml",
+      "blob": "f19ae6044338909a9a930fa6f2f432284172a9e8"
+    },
+    {
+      "path": ".github/workflows/js-autofix.yml",
+      "blob": "fbf5828247a18c07308596b84ed2dcbed6942e5e"
+    },
+    {
+      "path": ".github/workflows/js-tests.yml",
+      "blob": "6fa12bfebfa07d8d0210c4878f3f80ff61ceccca"
+    },
+    {
+      "path": ".github/workflows/label-rerun.yml",
+      "blob": "65c9100c4b1b7ac516195eda019e3f137829069c"
+    },
+    {
+      "path": ".github/workflows/lazy-deps-guard.yml",
+      "blob": "8a451742fa680cb46b2d225128185fa663130a8d"
+    },
+    {
+      "path": ".github/workflows/lint.yml",
+      "blob": "9f79b23f86d952f7f0c1e366406146b967a857b0"
+    },
+    {
+      "path": ".github/workflows/live-providers.yml",
+      "blob": "779b5b0625adef2b6157036490e2533076e918b0"
+    },
+    {
+      "path": ".github/workflows/lockfile-diff.yml",
+      "blob": "d6dcf6ba9a6b190b758aa4bea38d65f987361546"
+    },
+    {
+      "path": ".github/workflows/nix-lockfile-fix.yml",
+      "blob": "f7f04cbabfce7c37d6d57a6eaaf1b49e38739858"
+    },
+    {
+      "path": ".github/workflows/nix.yml",
+      "blob": "3ea7c0d0f006539ee7a6beb83d3bc9531cebc82b"
+    },
+    {
+      "path": ".github/workflows/no-conflict-markers.yml",
+      "blob": "5326c2eb6e55fda165f45c874bb12e74ad6fddf5"
+    },
+    {
+      "path": ".github/workflows/osv-scanner.yml",
+      "blob": "93840d6535639361f0dabdb86739d041dce5b161"
+    },
+    {
+      "path": ".github/workflows/plugin-catalog-ci.yml",
+      "blob": "3fe7d2353aec2bb748c2a02e47beb2b5602cccfb"
+    },
+    {
+      "path": ".github/workflows/pm-bundle.yml",
+      "blob": "203de931b2589680152b4e99cc081d74036557cb"
+    },
+    {
+      "path": ".github/workflows/pr-auto-label.yml",
+      "blob": "49c9f59111b2e9bb226e28e0c2ea98f74fb22cab"
+    },
+    {
+      "path": ".github/workflows/profile-artifact-check.yml",
+      "blob": "030d828a352ff6bc25323ee291e3b8e43dd58496"
+    },
+    {
+      "path": ".github/workflows/prompt-surface-diff.yml",
+      "blob": "b321e36fa76c43d0e784dbd3e52f426763550501"
+    },
+    {
+      "path": ".github/workflows/remote-backends.yml",
+      "blob": "394f2f2ce0cdd5451ce885c68be9f2828773c3d4"
+    },
+    {
+      "path": ".github/workflows/rust-tests.yml",
+      "blob": "e4b1f50bcbf3981d9f52b461669554af9d496472"
+    },
+    {
+      "path": ".github/workflows/sandbox-image.yml",
+      "blob": "71a2d37db1d954f8dbb7572a43072bb8c520b788"
+    },
+    {
+      "path": ".github/workflows/skills-index-freshness.yml",
+      "blob": "e02d9df58e7e85c68b04bdaef5c5d5c0a3f41e1c"
+    },
+    {
+      "path": ".github/workflows/skills-index.yml",
+      "blob": "9b2956a27b60b71983866d59cc44adc02546c997"
+    },
+    {
+      "path": ".github/workflows/stable-release-publication.yml",
+      "blob": "8cc0298b23c25ee48d9915fe7f6028992422292b"
+    },
+    {
+      "path": ".github/workflows/stable-release.yml",
+      "blob": "8ada2c10896793346151964bd3d7f76f4d114c6b"
+    },
+    {
+      "path": ".github/workflows/supply-chain-audit.yml",
+      "blob": "97cabeea41dc899b08763f8b99431b7327474c04"
+    },
+    {
+      "path": ".github/workflows/termux-verify.yml",
+      "blob": "2ae94ebe431b356ff3c1d4cf39910cdc73e1877c"
+    },
+    {
+      "path": ".github/workflows/tests-os.yml",
+      "blob": "a9b9449c9e240365aba92177ebf8f9255726426b"
+    },
+    {
+      "path": ".github/workflows/tests.yml",
+      "blob": "22cd5b7aa8f05fc788bd8d78a2cf8723dcc903cd"
+    },
+    {
+      "path": ".github/workflows/uv-lockfile-check.yml",
+      "blob": "4248b356227ff783a9ab29707621bf38e6983cb7"
+    },
+    {
+      "path": ".github/workflows/windows-bundle-sdk.yml",
+      "blob": "0cf2e097dcd94df33d3f0bb1e99d57ef82a4b73d"
+    },
+    {
+      "path": ".github/workflows/windows-install-update-e2e.yml",
+      "blob": "17b4be6563460f609e17925f0ce3e63f1f6affe5"
+    },
+    {
+      "path": ".github/workflows/windows-venv-e2e.yml",
+      "blob": "111d390095d00e4fb178e85a9c3848491cd0bb3f"
+    }
+  ],
+  "checks": [
+    {
+      "path": ".github/workflows/canary-release.yml",
+      "rationale": "Tag and prune require upstream repository; tag additionally requires default branch.",
+      "locations": [
+        {
+          "line": 32,
+          "text": "if: github.repository == 'NousResearch/hermes-agent' && github.ref_name == github.event.repository.default_branch"
+        },
+        {
+          "line": 47,
+          "text": "python3 scripts/release.py --canary --publish --remote origin"
+        },
+        {
+          "line": 57,
+          "text": "if: always() && github.repository == 'NousResearch/hermes-agent' && needs.tag.result != 'cancelled' && needs.tag.result != 'skipped'"
+        },
+        {
+          "line": 74,
+          "text": "run: python3 scripts/release.py --prune-canaries --publish --remote origin"
+        },
+        {
+          "line": 76,
+          "text": "if: env.CLOUDFLARE_R2_ACCOUNT_ID != ''"
+        },
+        {
+          "line": 80,
+          "text": "if: env.CLOUDFLARE_R2_ACCOUNT_ID != ''"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/deploy-site.yml",
+      "rationale": "Both deploy jobs require upstream repository; Vercel also restricts release/manual events.",
+      "locations": [
+        {
+          "line": 45,
+          "text": "if: github.repository == 'NousResearch/hermes-agent' && (github.event_name == 'release' || github.event_name == 'workflow_dispatch')"
+        },
+        {
+          "line": 53,
+          "text": "if: github.repository == 'NousResearch/hermes-agent'"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/skills-index.yml",
+      "rationale": "Deployment dispatch depends on successful upstream-only build-index; skipped fork build prevents dependent trigger.",
+      "locations": [
+        {
+          "line": 21,
+          "text": "if: github.repository == 'NousResearch/hermes-agent'"
+        },
+        {
+          "line": 86,
+          "text": "needs: build-index"
+        },
+        {
+          "line": 87,
+          "text": "if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
+        },
+        {
+          "line": 108,
+          "text": "run: gh workflow run deploy-site.yml --repo ${{ github.repository }} -f skills_index_run_id=${{ github.run_id }}"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/js-autofix.yml",
+      "rationale": "Automatic generator is upstream-only; write job requires successful generator output.",
+      "locations": [
+        {
+          "line": 60,
+          "text": "if: github.repository == 'NousResearch/hermes-agent'"
+        },
+        {
+          "line": 137,
+          "text": "if: needs.generate-patch.outputs.has-fixes == 'true'"
+        },
+        {
+          "line": 192,
+          "text": "git push --force origin HEAD:\"$BOT_BRANCH\""
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/nix-lockfile-fix.yml",
+      "rationale": "Automatic main write requires upstream repository. Explicit manual/comment path remains available with actor write-permission authorization.",
+      "locations": [
+        {
+          "line": 45,
+          "text": "if: github.event_name == 'push' && github.repository == 'NousResearch/hermes-agent'"
+        },
+        {
+          "line": 73,
+          "text": "if: steps.apply.outputs.changed == 'true'"
+        },
+        {
+          "line": 105,
+          "text": "if git push origin HEAD:main; then"
+        },
+        {
+          "line": 131,
+          "text": "if: |"
+        },
+        {
+          "line": 148,
+          "text": "await github.rest.repos.getCollaboratorPermissionLevel({"
+        },
+        {
+          "line": 210,
+          "text": "if: steps.resolve.outputs.pr != ''"
+        },
+        {
+          "line": 236,
+          "text": "if: steps.apply.outputs.changed == 'true'"
+        },
+        {
+          "line": 244,
+          "text": "git push"
+        },
+        {
+          "line": 247,
+          "text": "if: steps.apply.outputs.changed == 'true' && steps.resolve.outputs.pr != ''"
+        },
+        {
+          "line": 258,
+          "text": "if: steps.apply.outputs.changed == 'false' && steps.resolve.outputs.pr != ''"
+        },
+        {
+          "line": 269,
+          "text": "if: failure() && steps.resolve.outputs.pr != ''"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/bootstrap-installer.yml",
+      "rationale": "Install test git push is to fresh runner-local bare repository, not external publication.",
+      "locations": [
+        {
+          "line": 12,
+          "text": "workflow_call:"
+        },
+        {
+          "line": 67,
+          "text": "mirror=\"$RUNNER_TEMP/source-mirror.git\""
+        },
+        {
+          "line": 68,
+          "text": "git init --bare \"$mirror\""
+        },
+        {
+          "line": 70,
+          "text": "git push \"$mirror\" \"HEAD:refs/heads/ci-under-test\""
+        },
+        {
+          "line": 71,
+          "text": "echo \"mirror=$mirror\" >> \"$GITHUB_OUTPUT\""
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/stable-release.yml",
+      "rationale": "Release entry is explicit workflow_dispatch; reusable release calls remain available for approved manual publication.",
+      "locations": [
+        {
+          "line": 8,
+          "text": "workflow_dispatch:"
+        },
+        {
+          "line": 164,
+          "text": "uses: ./.github/workflows/desktop-bundled-release.yml"
+        },
+        {
+          "line": 187,
+          "text": "uses: ./.github/workflows/desktop-bundled-release.yml"
+        },
+        {
+          "line": 208,
+          "text": "uses: ./.github/workflows/desktop-bundled-release.yml"
+        },
+        {
+          "line": 231,
+          "text": "uses: ./.github/workflows/desktop-bundled-release.yml"
+        },
+        {
+          "line": 256,
+          "text": "uses: ./.github/workflows/desktop-bundled-release.yml"
+        },
+        {
+          "line": 280,
+          "text": "uses: ./.github/workflows/desktop-bundled-release.yml"
+        },
+        {
+          "line": 573,
+          "text": "uses: ./.github/workflows/desktop-bundled-release.yml"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/stable-release-publication.yml",
+      "rationale": "Explicit dispatch or completion of manually dispatched Stable Release; ordinary PR/main does not initiate release chain.",
+      "locations": [
+        {
+          "line": 4,
+          "text": "workflow_dispatch:"
+        },
+        {
+          "line": 13,
+          "text": "workflow_run:"
+        },
+        {
+          "line": 14,
+          "text": "workflows: ['Stable Release']"
+        },
+        {
+          "line": 33,
+          "text": "github.event.workflow_run.event == 'workflow_dispatch' &&"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/desktop-bundled-release.yml",
+      "rationale": "Build/publication entry is workflow_call or workflow_dispatch, not push/PR; manual publication remains available.",
+      "locations": [
+        {
+          "line": 87,
+          "text": "workflow_call:"
+        },
+        {
+          "line": 139,
+          "text": "workflow_dispatch:"
+        }
+      ]
+    },
+    {
+      "path": ".github/workflows/bootstrap-installer-build.yml",
+      "rationale": "Explicit manual signed artifact build; no ordinary push/PR entry.",
+      "locations": [
+        {
+          "line": 12,
+          "text": "workflow_dispatch:"
+        }
+      ]
+    }
+  ]
+}

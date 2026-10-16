@@ -65,6 +65,7 @@ def _at(ref: str, path: str) -> dict[str, str]:
         text=True,
         encoding="utf-8",
         errors="replace",
+        check=False,
     )
     return _tests(blob.stdout) if blob.returncode == 0 else {}
 
@@ -102,7 +103,7 @@ def main() -> int:
         base = _at(args.base, path)
         fork = _at(args.fork, path)
         try:
-            current = set(_tests(Path(path).read_text(encoding="utf-8")))
+            current = set(_tests(Path(path).read_text(encoding="utf-8-sig")))
         except OSError:
             current = set()
 

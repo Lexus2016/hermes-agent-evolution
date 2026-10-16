@@ -8,6 +8,10 @@ observe → commit → project pipeline so the tool-result wire shape is produce
 
 from __future__ import annotations
 
+from agent.tool_argument_parser import (
+    _parse_tool_arguments,
+)
+
 import concurrent.futures
 import contextlib
 import json
@@ -30,7 +34,11 @@ from agent.display import (
     redact_tool_args_for_display as _redact_tool_args_for_display,
     _detect_tool_failure,
 )
+from agent.compression_marker import _COMPRESSION_MARKER_PREFIX
+from agent.interrupt_control import _REASON_USER_INTERRUPT, interrupt_skip_wording
 from agent.message_sanitization import coalesce_tool_call_id
+from agent.onboarding import observe_tool_result as observe_onboarding_result
+from agent import plugin_live_notes
 from agent.inline_tool_executors import (
     INLINE_TOOL_EXECUTORS,
     InlineToolContext,
@@ -44,9 +52,11 @@ from agent.tool_dispatch_helpers import (
     _is_multimodal_tool_result,
     _multimodal_text_summary,
     _append_subdir_hint_to_multimodal,
+    _context_pruned_argument_paths,
     _plan_tool_batch_segments,
     make_tool_result_message,
 )
+from utils import safe_json_loads
 from tools.terminal_tool_lifecycle import get_active_env
 from tools.thread_context import propagate_context_to_thread
 from tools.tool_result_storage import (
@@ -55,6 +65,7 @@ from tools.tool_result_storage import (
     extract_persisted_path,
 )
 from tools.budget_config import BudgetConfig, DEFAULT_BUDGET, budget_for_context_window
+from hermes_cli.observability.shared_metrics_efficiency import note_tool_result, record_tool_batch
 
 # A tool result this large (raw stdout, file dumps) is the biggest allocation a turn ever drops.
 # The commit only flags it: the string is still referenced by the publish frames here, so the
@@ -163,122 +174,6 @@ class _BatchAbandoned(BaseException):
     so ``except Exception`` handlers in the middleware chain can't swallow it."""
 
 
-def _parse_tool_arguments(
-    raw_arguments: Any,
-    function_name: str = "",
-    *,
-    agent: Any = None,
-) -> tuple[dict, Optional[str]]:
-    """Parse model-emitted arguments without repairing or coercing them.
-
-    When parsing fails, the error message identifies *why* it failed so the
-    model can correct the malformed field on retry instead of blind-retrying
-    the same payload (issue #1647 — 285 terminal parse-error failures / 7d).
-
-    For the terminal tool specifically, if the raw payload is a bare string
-    (a common model failure mode — emitting ``ls -la`` instead of
-    ``{"command": "ls -la"}``), we extract it as the ``command`` argument
-    so the command executes instead of producing a parse error.
-    """
-    if raw_arguments is None:
-        return {}, json.dumps(
-            {
-                "error": "Missing tool arguments",
-                "message": (
-                    "The tool was not executed. No arguments were provided. "
-                    "Check the tool's parameter schema and provide a valid "
-                    "JSON object with all required fields."
-                ),
-            },
-            ensure_ascii=False,
-        )
-
-    # Bare-string fallback for terminal (issue #1647): models sometimes emit
-    # a bare command string instead of a JSON object.  Extract it so the
-    # command runs instead of producing a parse-error spiral.
-    if function_name == "terminal" and isinstance(raw_arguments, str):
-        stripped = raw_arguments.strip()
-        if stripped and not stripped.startswith("{"):
-            logger.info(
-                "terminal tool received bare-string arguments — "
-                "extracting as command (len=%d)",
-                len(stripped),
-            )
-            return {"command": stripped}, None
-
-    try:
-        arguments = json.loads(raw_arguments)
-    except json.JSONDecodeError as exc:
-        return {}, json.dumps(
-            {
-                "error": "Invalid tool arguments (JSON parse error)",
-                "message": (
-                    f"The tool was not executed. Its arguments could not be "
-                    f"parsed as JSON: {exc.msg} at position {exc.pos}. "
-                    f"Provide a valid JSON object with the correct field "
-                    f"names and types for this tool."
-                ),
-            },
-            ensure_ascii=False,
-        )
-    except TypeError:
-        return {}, json.dumps(
-            {
-                "error": "Invalid tool arguments (wrong type)",
-                "message": (
-                    f"The tool was not executed. Its arguments must be a "
-                    f"JSON string, got {type(raw_arguments).__name__}. "
-                    f"Provide a valid JSON object with the correct field "
-                    f"names for this tool."
-                ),
-            },
-            ensure_ascii=False,
-        )
-
-    if isinstance(arguments, dict):
-        # search_files preflight: a missing `pattern` argument is a frequent
-        # model failure mode. Return a correction hint immediately so the agent
-        # fixes the call on the same turn instead of blind-retrying.
-        if function_name == "search_files" and "pattern" not in arguments:
-            count = 0
-            if agent is not None:
-                count = getattr(agent, "_search_files_missing_pattern_count", 0) + 1
-                agent._search_files_missing_pattern_count = count
-            return {}, json.dumps(
-                {
-                    "error": "Missing required argument: pattern",
-                    "tool": "search_files",
-                    "missing": ["pattern"],
-                    "correction": {
-                        "pattern": "function_name_or_regex",
-                        "target": "content",
-                        "path": ".",
-                    },
-                    "message": (
-                        "`search_files` requires a `pattern` argument. "
-                        "Provide a regex/glob pattern and optionally "
-                        "`target='files'` for filename searches. "
-                        "Example: `search_files(pattern='*.py', target='files', path='.')`."
-                    ),
-                    "search_files_missing_pattern_count": count,
-                    "argument_shape_spiral": count >= 3,
-                },
-                ensure_ascii=False,
-            )
-        return arguments, None
-
-    # Parsed successfully but not a dict (e.g. a JSON list or scalar).
-    return {}, json.dumps(
-        {
-            "error": "Invalid tool arguments (not a JSON object)",
-            "message": (
-                f"The tool was not executed. Its arguments parsed as "
-                f"{type(arguments).__name__}, but a JSON object is required. "
-                f'Wrap the arguments in curly braces: {{"field": value}}.'
-            ),
-        },
-        ensure_ascii=False,
-    )
 
 
 def _resolve_concurrent_tool_timeout() -> float | None:
@@ -403,7 +298,7 @@ class _ToolCallRef:
 
     def emit_cancelled(self, agent, start_time: float) -> str:
         """Synthesize the ``cancelled`` result for a KeyboardInterrupt mid-tool and emit its hook."""
-        message = "Tool execution cancelled by user interrupt"
+        message = f"Tool execution cancelled. {interrupt_skip_wording(agent)}"
         result = json.dumps({"error": message, "status": "cancelled"}, ensure_ascii=False)
         self.emit_post(
             agent, result, duration_ms=int((time.time() - start_time) * 1000),
@@ -530,7 +425,6 @@ def _record_tool_circuit_breaker(agent, tool_name: str, result: Any, is_error: b
 
 def _run_tool(*args, **kwargs):
     """Compatibility alias for tool runner."""
-    pass
 
 def _append_skipped_tool_results(
     agent,
@@ -545,18 +439,19 @@ def _append_skipped_tool_results(
     stop_on_flush_failure: bool = True,
 ) -> bool:
     """Append one ``tool`` result per unstarted call so the assistant tool-call turn never
-    lacks matching results (role alternation). ``content`` is formatted with ``{name}``;
+    lacks matching results (role alternation). ``{name}`` in ``content`` is substituted with
+    ``str.replace``, never ``str.format`` (a recorded reason may contain braces);
     ``hook_error_type`` also emits the terminal ``post_tool_call`` (status=cancelled) per
     call with ``hook_id`` overriding the hook's id; ``flush_stage`` flushes after each
     append and returns False on the first failed flush when ``stop_on_flush_failure``."""
     for tc in tool_calls:
         name = _tc_name(tc)
-        result = content.format(name=name)
+        result = content.replace("{name}", name)
         messages.append(make_tool_result_message(name, result, _pairing_tool_call_id(tc), effect_disposition="none"))
         if hook_error_type is not None:
             _ToolCallRef(name, {}, effective_task_id, (hook_id or _pairing_tool_call_id)(tc), []).emit_post(
                 agent, result,
-                status="cancelled", error_type=hook_error_type, error_message="Tool execution skipped due to user interrupt",
+                status="cancelled", error_type=hook_error_type, error_message=f"Tool execution skipped. {interrupt_skip_wording(agent)}",
             )
         if flush_stage is not None:
             flushed = _flush_session_db_after_tool_progress(agent, messages, stage=f"{flush_stage} {name}")
@@ -631,8 +526,11 @@ def _unwrap_tool_search_call(
             # in the batch dispatcher, not against a synthetic registry name.
             return function_name, function_args, None
         if underlying not in _tool_search_scoped_names(agent):
+            # Session-gated GUI tools name their missing surface (#120413);
+            # anything else keeps the generic block.
             return function_name, function_args, (
-                f"'{underlying}' is not available in this session. Use tool_search to find tools you can call."
+                _ts.out_of_scope_reason(underlying)
+                or f"'{underlying}' is not available in this session. Use tool_search to find tools you can call."
             )
         # Validate before unwrapping: the generic bridge hides the concrete
         # parameter schema from provider-native tool-call validation.
@@ -853,11 +751,21 @@ def _run_with_activity_heartbeat(agent, function_name: str, fn):
         thread.join(timeout=2.0)
 
 
-def _blocked_tool_result(agent, ref: _ToolCallRef, *, block_message: Optional[str], block_error_type: str, guardrail_decision) -> str:
-    """Synthesize the result for a call blocked by scope/plugin (``block_message``) or by
-    guardrail policy (``guardrail_decision``) and emit its terminal post_tool_call."""
-    if block_message is not None:
-        result, error_type, error_message = json.dumps({"error": block_message}, ensure_ascii=False), block_error_type, block_message
+_PRUNED_TOOL_ARGUMENTS_ERROR = "suspected_pruned_tool_arguments"
+_PRUNED_TOOL_ARGUMENTS_MESSAGE = (
+    "Tool was not executed because effect-capable arguments contain a Hermes context-compression artifact. "
+    "Recover the exact content from its durable source or re-read it, then issue a complete new call; "
+    "do not retry these arguments. To remove a marker that already landed in a file, match it by its "
+    f"{_COMPRESSION_MARKER_PREFIX.strip('⟪:')} prefix (e.g. a terminal sed on that line) instead of quoting the full marker."
+)
+
+
+def _blocked_tool_result(agent, ref: _ToolCallRef, *, block_body: dict[str, Any] | None, block_error_type: str, guardrail_decision) -> str:
+    """Synthesize the result for a call blocked by scope/plugin/pruned-args (``block_body``, the
+    JSON the model sees) or by guardrail policy (``guardrail_decision``) and emit its terminal post_tool_call."""
+    if block_body is not None:
+        result = json.dumps(block_body, ensure_ascii=False)
+        error_type, error_message = block_error_type, block_body.get("message") or block_body["error"]
     else:
         result = agent._guardrail_block_result(guardrail_decision)
         error_type = "guardrail_block"
@@ -894,7 +802,7 @@ def _dispatch_authorized_once(
     begin_execution,
     authorization_gate: _ConcurrentToolAuthorizationGate | None,
 ) -> Any:
-    """Hermes policy (scope → plugin pre-hooks → guardrails) then the one real dispatch.
+    """Hermes policy (scope → plugin pre-hooks → pruned-arg check → guardrails) then the one real dispatch.
 
     Plugin ``modify`` hooks may rewrite ``ref.args`` (mirrored into ``state.args``).
     ``begin_execution`` (concurrent start-order gate) is advanced exactly once on every
@@ -909,22 +817,36 @@ def _dispatch_authorized_once(
     block_message, block_error_type = scope_block, "tool_scope_block"
     if block_message is None:
         block_error_type = "plugin_block"
-        resolve = lambda: _pre_tool_block(agent, ref)  # noqa: E731
+        resolve = lambda: _pre_tool_block(agent, ref)
         block_message, ref.args = resolve() if authorization_gate is None else authorization_gate.run(resolve)
         state.args = ref.args
+    block_body = None if block_message is None else {"error": block_message}
+
+    # Checked once, after plugin modify hooks (which may replace arguments) and
+    # before guardrails or real dispatch: a copied compression marker in an
+    # effect-capable argument must never reach the tool.
+    if block_body is None:
+        pruned_paths = _context_pruned_argument_paths(ref.name, ref.args)
+        if pruned_paths:
+            block_body = {
+                "error": _PRUNED_TOOL_ARGUMENTS_ERROR,
+                "message": _PRUNED_TOOL_ARGUMENTS_MESSAGE,
+                "argument_paths": pruned_paths,
+            }
+            block_error_type = _PRUNED_TOOL_ARGUMENTS_ERROR
 
     guardrail_decision = None
-    if block_message is None:
+    if block_body is None:
         guardrail_decision = agent._tool_guardrails.before_call(ref.name, ref.args)
         if guardrail_decision.allows_execution:
             guardrail_decision = None
 
-    if block_message is not None or guardrail_decision is not None:
+    if block_body is not None or guardrail_decision is not None:
         _advance_start_order()
         state.blocked = True
         return _blocked_tool_result(
             agent, ref,
-            block_message=block_message, block_error_type=block_error_type, guardrail_decision=guardrail_decision,
+            block_body=block_body, block_error_type=block_error_type, guardrail_decision=guardrail_decision,
         )
 
     if ref.name == "memory":
@@ -1096,7 +1018,10 @@ def _run_sequential_tool_execution_middleware(
     generic deadline would report ``tool_timeout`` while the prompt is still live. They
     are ``_NEVER_PARALLEL_TOOLS`` and run inline below, before any deadline is armed, so
     they need no ``_SEQUENTIAL_DEADLINE_EXEMPT_TOOLS`` entry."""
+    from agent.tool_dispatch_helpers import _extend_tool_timeout
+
     timeout_s = None if function_name in _SEQUENTIAL_DEADLINE_EXEMPT_TOOLS else _resolve_sequential_tool_timeout()
+    timeout_s = _extend_tool_timeout(function_name, timeout_s)
     ref = _ToolCallRef(function_name, function_args, effective_task_id, tool_call_id, middleware_trace)
     kwargs = dict(ref.middleware_kwargs(), execute=execute, scope_block=scope_block, display_index=display_index)
     from agent.terminal_approval_batch import take_prepared_call
@@ -1163,7 +1088,12 @@ def _run_sequential_tool_execution_middleware(
             # A timed-out shell may still be unwinding. Never release a later
             # prepared command into overlapping execution.
             prepared.batch.close()
-            agent.interrupt("terminal batch tool did not complete")
+            if state == "timeout":
+                # Label the abort as the batch guard's own, not a user stop (#130207). No message:
+                # ``_interrupt_message`` is what gateway/CLI re-queue as the user's next turn. On the
+                # interrupted branch the stop is already published; re-interrupting would rebook it
+                # and null the user's queued message and redirect.
+                agent.interrupt(tool_reason="terminal batch timeout")
         future.cancel()
         if state == "timeout":
             _interrupt_worker_tids(agent, worker_tid)
@@ -1265,6 +1195,11 @@ def _commit_tool_result(
     pre-persist content for UI previews) or ``None`` when the flush failed (stop the batch).
     """
     function_name, function_args, tool_call_id, effective_task_id = ref.name, ref.args, ref.call_id, ref.task_id
+    from hermes_cli.observability.shared_metrics_harness import observe_tool_outcome
+
+    observe_tool_outcome(agent, function_name, is_error)
+    if not (blocked or is_error):
+        function_result = observe_onboarding_result(agent, function_name, function_args, function_result)
     if observed:
         if not blocked:
             function_result = agent._append_guardrail_observation(
@@ -1304,22 +1239,12 @@ def _commit_tool_result(
             config=budget,
         )
     _record_persisted_path_for_stub(agent, tool_call_id, persisted_result)
+    note_tool_result(agent, function_name, tool_call_id, function_result, persisted_result)
 
-    # The delegated controller consumes the real result before the append-only
-    # persistence fence. Advice remains tool data, never a synthetic user turn.
-    escalation = getattr(agent, "_delegation_escalation", None)
-    if escalation is not None:
-        from tools.delegation_escalation import EscalationRun
-        if isinstance(escalation, EscalationRun):
-            try:
-                advice = escalation.contact(function_name, function_result, blocked=blocked)
-                if advice:
-                    if _is_multimodal_tool_result(persisted_result):
-                        _append_subdir_hint_to_multimodal(persisted_result, advice)
-                    else:
-                        persisted_result += advice
-            except Exception:
-                logging.warning("Delegation contact processing failed", exc_info=True)
+    from agent.tool_result_advisor import attach_delegation_advice
+    persisted_result = attach_delegation_advice(
+        agent, function_name, function_result, persisted_result, blocked=blocked,
+    )
 
     subdir_hints = agent._subdirectory_hints.check_tool_call(function_name, function_args)
     if subdir_hints:
@@ -1333,6 +1258,8 @@ def _commit_tool_result(
     # string-safe fallback so a rejected image result never poisons history.
     _tool_content = agent._tool_result_content_for_active_model(function_name, persisted_result)
     tool_message = make_tool_result_message(function_name, _tool_content, tool_call_id, effect_disposition=effect_disposition)
+    # A plugin that went live during this turn is told on this new row (outside any untrusted-data wrapper).
+    plugin_live_notes.attach_to_tool_message(agent, tool_message)
     # Prepare presentation data before the append. The emitting completion callback
     # stays below the durability fence; raw tool/model content remains unchanged.
     prepare_metadata = getattr(agent, "tool_result_metadata_callback", None)
@@ -1367,15 +1294,18 @@ def _persist_multimodal_text_parts(result: dict, tool_name: str, tool_call_id: s
     entirely and ride every later request inline. Image parts are left untouched (their size is
     governed by the vision embed budget); a fresh dict is returned so history is never mutated."""
     parts = result.get("content") or []
-    bounded_parts, first_replacement = [], None
+    bounded_parts, first_replacement, spilled = [], None, 0
     for part in parts:
         text = part.get("text") if isinstance(part, dict) and part.get("type") == "text" else None
         if isinstance(text, str):
-            replaced = maybe_persist_tool_result(content=text, tool_name=tool_name, tool_use_id=tool_call_id,
+            # One spill file per part: a second oversized part under the same id would overwrite the first's file.
+            part_id = tool_call_id if not spilled else f"{tool_call_id}_part{spilled}"
+            replaced = maybe_persist_tool_result(content=text, tool_name=tool_name, tool_use_id=part_id,
                                                  env=env, config=budget)
             if replaced != text:
                 part = {**part, "text": replaced}
                 first_replacement = first_replacement or replaced
+                spilled += 1
         bounded_parts.append(part)
     if first_replacement is None:
         return result
@@ -1393,7 +1323,11 @@ def _finalize_tool_batch(agent, messages: list, effective_task_id: str, num_tool
     steer marker is never truncated/discarded when enforcement replaces a result."""
     if num_tools <= 0:
         return
-    enforce_turn_budget(messages[-num_tools:], env=get_active_env(effective_task_id), config=budget)
+    batch = messages[-num_tools:]
+    contents_before = [message.get("content") for message in batch]
+    enforce_turn_budget(batch, env=get_active_env(effective_task_id), config=budget)
+    plugin_live_notes.keep_after_turn_budget(agent, batch)
+    record_tool_batch(agent, batch, contents_before)
     agent._apply_pending_steer_to_tool_results(messages, num_tools)
 
 
@@ -1537,7 +1471,7 @@ class _ConcurrentBatch:
             return None
         except KeyboardInterrupt:
             with contextlib.suppress(Exception):
-                agent.interrupt("keyboard interrupt")
+                agent.interrupt("keyboard interrupt", tool_reason=_REASON_USER_INTERRUPT)
             result = ref.emit_cancelled(agent, start)
             duration = time.time() - start
             logger.info("tool %s cancelled (%.2fs)", ref.name, duration)
@@ -1695,8 +1629,9 @@ def _unfinished_tool_result(agent, ref: _ToolCallRef, *, timed_out: bool, timeou
         outcome = dict(duration_ms=int((timeout_s or 0.0) * 1000), status="timeout", error_type="tool_timeout", error_message=function_result)
         tool_duration, effect_disposition = float(timeout_s or 0.0), "unknown"
     elif agent._interrupt_requested:
-        function_result = f"[Tool execution cancelled — {ref.name} was skipped due to user interrupt]"
-        outcome = dict(status="cancelled", error_type="keyboard_interrupt", error_message="Tool execution cancelled by user interrupt")
+        why = interrupt_skip_wording(agent)
+        function_result = f"[Tool execution cancelled — {ref.name} was skipped. {why}]"
+        outcome = dict(status="cancelled", error_type="keyboard_interrupt", error_message=f"Tool execution cancelled. {why}")
         tool_duration, effect_disposition = 0.0, None
     else:
         function_result = f"Error executing tool '{ref.name}': thread did not return a result"
@@ -1755,7 +1690,7 @@ def execute_tool_calls_concurrent(agent, assistant_message, messages: list, effe
         print(f"{agent.log_prefix}⚡ Interrupt: skipping {num_tools} tool call(s)")
         _append_skipped_tool_results(
             agent, messages, tool_calls, effective_task_id,
-            content="[Tool execution cancelled — {name} was skipped due to user interrupt]",
+            content=f"[Tool execution cancelled — {{name}} was skipped. {interrupt_skip_wording(agent)}]",
             hook_error_type="user_interrupt",
             flush_stage="cancelled tool result",
             stop_on_flush_failure=False,
@@ -1955,12 +1890,13 @@ def _run_sequential_call(
     except KeyboardInterrupt:
         if not dispatch.handles_keyboard_interrupt:
             raise
-        _spinner_result = ref.emit_cancelled(agent, tool_start_time)
+        # Publish the user-interrupt reason BEFORE emitting, so the hook sees it (as the concurrent path does).
         with contextlib.suppress(Exception):
-            agent.interrupt("keyboard interrupt")
+            agent.interrupt("keyboard interrupt", tool_reason=_REASON_USER_INTERRUPT)
+        _spinner_result = ref.emit_cancelled(agent, tool_start_time)
         _append_skipped_tool_results(
             agent, messages, remaining_calls, ref.task_id,
-            content="[Tool execution cancelled — {name} was skipped due to keyboard interrupt]",
+            content=f"[Tool execution cancelled — {{name}} was skipped. {interrupt_skip_wording(agent)}]",
         )
         raise
     except Exception as tool_error:
@@ -2015,6 +1951,13 @@ def _publish_sequential_result(agent, messages: list, ref: _ToolCallRef, managed
         return False
     function_result, display_function_result, risk_metadata = committed
 
+    # Terminal approval batching (#113158): once this slot's failure is
+    # published, the informed consent collected for later slots describes a
+    # batch state that no longer holds — flag it so consume_prepared_guard
+    # drops their pre-made decisions and the live guard flow re-runs.
+    from agent.terminal_approval_batch import mark_batch_outcome
+    mark_batch_outcome(_is_error_result or bool(managed.blocked))
+
     _emit_tool_complete_and_risk(agent, ref, display_function_result, risk_metadata, managed.blocked)
     if _tool_progress_enabled(agent):
         _print_tool_completed(agent, index, tool_duration, function_result)
@@ -2048,7 +1991,7 @@ def _execute_tool_calls_sequential(agent, assistant_message, messages: list, eff
             if not _skip_remaining_sequential(
                 agent, messages, tool_calls[i - 1:], effective_task_id,
                 notice="tool call(s)",
-                content="[Tool execution cancelled — {name} was skipped due to user interrupt]",
+                content=f"[Tool execution cancelled — {{name}} was skipped. {interrupt_skip_wording(agent)}]",
                 hook_error_type="user_interrupt",
                 hook_id=lambda tc: getattr(tc, "id", "") or "",
                 flush_stage="cancelled tool result",
@@ -2081,7 +2024,7 @@ def _execute_tool_calls_sequential(agent, assistant_message, messages: list, eff
             if not _skip_remaining_sequential(
                 agent, messages, tool_calls[i:], effective_task_id,
                 notice="remaining tool call(s)",
-                content="[Tool execution skipped — {name} was not started. User sent a new message]",
+                content=f"[Tool execution skipped — {{name}} was not started. {interrupt_skip_wording(agent)}]",
                 flush_stage="skipped tool result",
             ):
                 return
@@ -2120,6 +2063,6 @@ def execute_tool_calls_segmented(agent, assistant_message, messages: list, effec
 
 __all__ = [
     "execute_tool_calls_concurrent",
-    "execute_tool_calls_sequential",
     "execute_tool_calls_segmented",
+    "execute_tool_calls_sequential",
 ]

@@ -36,6 +36,10 @@ file except tests (``tests/``, ``tests-js/``, ``__tests__/``, ``e2e/``, ``test_*
 build files (``Dockerfile*``, ``docker/``), generated lockfiles and the translated docs mirror
 (``website/i18n/``, regenerated from the English source).
 
+Reviewed inert receipts and policy evidence are exempt only at exact reviewed paths with matching
+SHA256 bytes, using the integrity-checked inventory in .github/no_tmp_historical_evidence.json.
+New, edited or relocated evidence is scanned normally; invalid inventory fails the check.
+
 Run: python scripts/check_no_tmp_literals.py [--all] [--print-baseline] [paths...]
   --all              ignore ``_BASELINE`` and report every hit (burn-down view)
   --print-baseline   print a ``_BASELINE`` literal matching the current tree
@@ -45,12 +49,14 @@ Exit 1 on any violation, 0 when clean.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import subprocess
 import re
 import sys
 import warnings
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent.parent
 SELF = Path(__file__).resolve()
@@ -194,19 +200,92 @@ def iter_files(root: Path | None = None):
                 yield path
 
 
+# This is a reviewed, closed inventory, not a configurable exemption list. Changing
+# its bytes requires a corresponding code review here. Artifact hashes bind the
+# reviewed source-checkpoint bytes; neither a renamed copy nor an edited receipt qualifies.
+_HISTORICAL_MAP = ROOT / ".github/no_tmp_historical_evidence.json"
+_HISTORICAL_MAP_SHA256 = "8874d77451ab3bf697cf89724654ef64489c0330c1b571f6045c7bde6c8ef9fa"
+
+
+def _validate_historical_header(data: object) -> None:
+    """The classification inventory is versioned data, not general scanner settings."""
+    purpose = (
+        "Reviewed inert sync evidence at the pinned source checkpoint; "
+        "historical paths are data, "
+        "not executable code, prompts, or runnable documentation."
+    )
+    if (not isinstance(data, dict)
+            or set(data) != {"schema_version", "purpose", "source_commit", "files"}
+            or type(data["schema_version"]) is not int or data["schema_version"] != 1
+            or data["purpose"] != purpose
+            or data["source_commit"] != "de4f4465b638430ce3506c21fbe0dd879fcb3f46"
+            or not isinstance(data["files"], list) or not data["files"]):
+        raise ValueError("invalid historical evidence inventory schema")
+
+
+def _validate_historical_entry(entry: object) -> tuple[str, str]:
+    """Reject ambiguous locations and non-data targets before using an entry."""
+    if not isinstance(entry, dict) or set(entry) != {"path", "sha256"}:
+        raise ValueError("invalid historical evidence entry")
+    rel, digest = entry["path"], entry["sha256"]
+    if not isinstance(rel, str) or not isinstance(digest, str):
+        raise ValueError("invalid historical evidence entry types")
+    path = PurePosixPath(rel)
+    if (path.is_absolute() or path.as_posix() != rel or ".." in path.parts
+            or "\\" in rel or ":" in rel
+            or path.parts[:2] != ("analysis", "sync-health")
+            or not (path.suffix == ".json" or
+                    (path.suffix == ".txt" and path.parent.name.endswith(".json.parts")))
+            or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+        raise ValueError("invalid historical evidence path or digest")
+    return rel, digest
+
+
+def _historical_evidence() -> dict[str, str]:
+    """Load the protected exact-path inventory, failing closed on invalid policy data."""
+    raw = _HISTORICAL_MAP.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != _HISTORICAL_MAP_SHA256:
+        raise ValueError("historical evidence inventory digest mismatch")
+    data = json.loads(raw)
+    _validate_historical_header(data)
+    result = {}
+    for entry in data["files"]:
+        rel, digest = _validate_historical_entry(entry)
+        if rel in result:
+            raise ValueError("duplicate historical evidence path")
+        result[rel] = digest
+    return result
+
+
+def _is_historical_evidence(path: Path, root: Path, raw: bytes, inventory: dict[str, str]) -> bool:
+    """Only original bytes at their exact non-symlink location are historical data."""
+    if path.resolve() != path:
+        return False
+    try:
+        rel = path.relative_to(root).as_posix()
+    except ValueError:
+        return False
+    expected = inventory.get(rel)
+    return expected is not None and hashlib.sha256(raw).hexdigest() == expected
+
+
 def scan(paths=None, root: Path | None = None) -> dict[str, list[tuple[int, str]]]:
     """Repo-relative POSIX path -> [(lineno, line)] for every file with at least one hit."""
     root = (root or ROOT).resolve()
+    inventory = _historical_evidence()
     hits: dict[str, list[tuple[int, str]]] = {}
     files = list(paths) if paths else list(iter_files(root))
     for path in files:
-        path = Path(path).resolve()
+        path = Path(os.path.abspath(path))
         if paths and _skip_file(path):
             continue
         try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
+            raw = path.read_bytes()
         except OSError:
             continue
+        if _is_historical_evidence(path, root, raw, inventory):
+            continue
+        text = raw.decode("utf-8-sig", errors="ignore")
         found = list(_iter_lines_with_hits(text, path.suffix))
         if found:
             try:
@@ -238,7 +317,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--strict-baseline", action="store_true", help="also fail when _BASELINE overstates a file")
     args = ap.parse_args(argv)
 
-    hits = scan(args.paths or None)
+    try:
+        hits = scan(args.paths or None)
+    except (OSError, ValueError) as exc:
+        print(f"invalid historical evidence inventory: {exc}", file=sys.stderr)
+        return 1
     if args.print_baseline:
         print(_format_baseline(hits))
         return 0

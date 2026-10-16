@@ -72,7 +72,7 @@ def cmd_run(args) -> int:
         print(json.dumps(out, indent=2, ensure_ascii=False))
         return 0
 
-    print(f"═══ AI4AI-Bench Recursive Self-Improvement Benchmark ═══")
+    print("═══ AI4AI-Bench Recursive Self-Improvement Benchmark ═══")
     print(f"Run ID: {result.run_id} | Commit: {result.commit_sha or 'unknown'}")
     print(f"Composite RSI Score: {result.composite_rsi_score * 100:.1f}% (Pass Rate: {result.pass_rate * 100:.1f}%, {result.passed_tasks}/{result.total_tasks} tasks)")
     print()

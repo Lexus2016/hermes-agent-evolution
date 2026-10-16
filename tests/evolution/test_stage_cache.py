@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for evolution pipeline node-level caching (issue #2434)."""
 
 import time

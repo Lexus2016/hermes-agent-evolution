@@ -53,6 +53,8 @@ class TurnRetryState:
     fail_fast_attempted: bool = False
 
     # ── Auth-failure provider failover ───────────────────────────────────
+    # Credit-limited 402 ("can only afford N tokens") already retried with a lowered output cap.
+    affordable_402_clamp_attempted: bool = False
     # Persistent 401/403 already escalated to the fallback chain once this attempt.
     auth_failover_attempted: bool = False
     # Post-exhaustion auto-recovery cycles spent on this API call (agent.auto_recovery_cycles caps it).
@@ -72,11 +74,3 @@ class TurnRetryState:
         # Convenience for debugging / tests: iterate (name, value) pairs.
         for f in fields(self):
             yield f.name, getattr(self, f.name)
-
-
-# ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
-# Names external plugins imported from this module before the Sep 2026 decomposition.
-# Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
-# The whole block is removed by reverting the commit that added it.
-from dataclasses import fields  # noqa: F401,E402
-# ---- END PLUGIN-COMPAT ----

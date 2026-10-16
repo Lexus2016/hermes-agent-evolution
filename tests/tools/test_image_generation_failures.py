@@ -47,7 +47,7 @@ class TestCategorizeImageError:
         from tools.image_generation_tool import _categorize_image_error
 
         exc = ValueError("FAL_KEY is not set")
-        error_type, msg = _categorize_image_error(exc)
+        error_type, _msg = _categorize_image_error(exc)
         assert error_type == "authentication_error"
 
     def test_payload_validation_error_for_unsupported_param(self):
@@ -62,14 +62,14 @@ class TestCategorizeImageError:
         from tools.image_generation_tool import _categorize_image_error
 
         exc = ValueError("Unknown size_style: 'bogus'")
-        error_type, msg = _categorize_image_error(exc)
+        error_type, _msg = _categorize_image_error(exc)
         assert error_type == "payload_validation_error"
 
     def test_edit_capability_mismatch_is_payload_validation(self):
         from tools.image_generation_tool import _categorize_image_error
 
         exc = ValueError("Model 'Flux' is not capable of image-to-image / editing.")
-        error_type, msg = _categorize_image_error(exc)
+        error_type, _msg = _categorize_image_error(exc)
         assert error_type == "payload_validation_error"
 
     def test_connection_error_is_provider_unavailable(self):
@@ -84,7 +84,7 @@ class TestCategorizeImageError:
         from tools.image_generation_tool import _categorize_image_error
 
         exc = TimeoutError("Request timed out")
-        error_type, msg = _categorize_image_error(exc)
+        error_type, _msg = _categorize_image_error(exc)
         assert error_type == "provider_unavailable"
 
     def test_import_error_is_authentication_error(self):

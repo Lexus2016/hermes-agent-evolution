@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Hardening of the pinned-constraint mechanism (Slices A and B).
 
 These are language-independent correctness and security fixes to the existing

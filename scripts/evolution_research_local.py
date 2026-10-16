@@ -30,7 +30,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 
 # Live web/research tools the research stage normally needs. If NONE are
@@ -95,7 +95,7 @@ def _load_records(metrics_file: Path) -> list[dict]:
     if not metrics_file.exists():
         return out
     try:
-        lines = metrics_file.read_text(encoding="utf-8").splitlines()
+        lines = metrics_file.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return out
     for raw in lines:
@@ -138,7 +138,7 @@ def _latest_report_age_days(research_dir: Path, now: datetime) -> int | None:
     if not reports:
         return None
     newest = max(reports, key=lambda f: f.stat().st_mtime)
-    newest_mtime = datetime.fromtimestamp(newest.stat().st_mtime, tz=timezone.utc)
+    newest_mtime = datetime.fromtimestamp(newest.stat().st_mtime, tz=UTC)
     return max(0, (now - newest_mtime).days)
 
 
@@ -264,7 +264,7 @@ def mine_findings(
 
 def run_local_research(evolution_dir: Path) -> dict:
     """Mine local telemetry and return a research-report dict (no network)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     today = now.strftime("%Y-%m-%d")
 
     records = _load_records(evolution_dir / "metrics.jsonl")
@@ -273,7 +273,7 @@ def run_local_research(evolution_dir: Path) -> dict:
     funnel_file = evolution_dir / "funnel-summary.txt"
     if funnel_file.exists():
         try:
-            funnel_summary = funnel_file.read_text(encoding="utf-8")
+            funnel_summary = funnel_file.read_text(encoding="utf-8-sig")
         except OSError:
             funnel_summary = ""
 
@@ -342,7 +342,7 @@ def render_report(result: dict) -> str:
 
 def _today_str() -> str:
     """UTC date string for checkpoint naming (import-safe, no hermes_time)."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 def _run_with_durability(evolution_dir: Path, date: str) -> dict:
@@ -406,7 +406,7 @@ def main(argv: list[str] | None = None) -> int:
     # Don't clobber a live (non-local) report already written today.
     if out_path.exists():
         try:
-            existing = out_path.read_text(encoding="utf-8")
+            existing = out_path.read_text(encoding="utf-8-sig")
         except OSError:
             existing = ""
         if _LOCAL_MARKER not in existing:

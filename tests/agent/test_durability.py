@@ -20,7 +20,7 @@ class _RecordingBackend:
         self.resumes = []
         self._stored = {}
 
-    def run(self, fn, checkpoint_id=None):  # noqa: ANN001
+    def run(self, fn, checkpoint_id=None):
         self.runs.append(checkpoint_id)
         if checkpoint_id and checkpoint_id in self._stored:
             return self._stored[checkpoint_id]
@@ -29,7 +29,7 @@ class _RecordingBackend:
             self._stored[checkpoint_id] = result
         return result
 
-    def resume_from(self, checkpoint_id):  # noqa: ANN001
+    def resume_from(self, checkpoint_id):
         self.resumes.append(checkpoint_id)
         return self._stored.get(checkpoint_id)
 

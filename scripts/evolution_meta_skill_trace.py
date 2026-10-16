@@ -39,8 +39,8 @@ class MetaSkillTrace:
     variant_id: str = DEFAULT_VARIANT_ID
     selected: int = 0
     merged: int = 0
-    selected_issue_ids: List[int] = field(default_factory=list)
-    merged_issue_ids: List[int] = field(default_factory=list)
+    selected_issue_ids: list[int] = field(default_factory=list)
+    merged_issue_ids: list[int] = field(default_factory=list)
     skills_created: int = 0
     skills_merged: int = 0
     realized_impact: str = ""
@@ -52,7 +52,7 @@ class MetaSkillTrace:
             self.timestamp = time.time()
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "MetaSkillTrace":
+    def from_dict(cls, d: dict[str, Any]) -> MetaSkillTrace:
         return cls(**{
             k: d.get(k, cls.__dataclass_fields__[k].default)
             for k in d
@@ -69,13 +69,13 @@ def append_trace(trace: MetaSkillTrace, evolution_dir: Optional[Path] = None) ->
     return p
 
 
-def load_traces(evolution_dir: Optional[Path] = None) -> List[MetaSkillTrace]:
+def load_traces(evolution_dir: Optional[Path] = None) -> list[MetaSkillTrace]:
     """Load all traces. Missing file → empty list."""
     p = trace_path(evolution_dir)
     if not p.exists():
         return []
-    traces: List[MetaSkillTrace] = []
-    for line in p.read_text(encoding="utf-8").splitlines():
+    traces: list[MetaSkillTrace] = []
+    for line in p.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -89,13 +89,13 @@ def load_traces(evolution_dir: Optional[Path] = None) -> List[MetaSkillTrace]:
 
 
 def variant_summary(
-    traces: List[MetaSkillTrace], min_cycles: int = 3
-) -> Dict[str, Dict[str, Any]]:
+    traces: list[MetaSkillTrace], min_cycles: int = 3
+) -> dict[str, dict[str, Any]]:
     """Aggregate per-variant outcome metrics for the slow loop."""
-    by_variant: Dict[str, List[MetaSkillTrace]] = {}
+    by_variant: dict[str, list[MetaSkillTrace]] = {}
     for t in traces:
         by_variant.setdefault(t.variant_id, []).append(t)
-    summary: Dict[str, Dict[str, Any]] = {}
+    summary: dict[str, dict[str, Any]] = {}
     for vid, records in sorted(by_variant.items()):
         sel = sum(r.selected for r in records)
         mrg = sum(r.merged for r in records)

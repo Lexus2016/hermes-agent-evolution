@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for task-decoupled planning (#1138)."""
 
 from __future__ import annotations

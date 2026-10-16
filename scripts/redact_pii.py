@@ -50,7 +50,7 @@ import argparse
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Optional
 
@@ -162,7 +162,7 @@ def _write_quarantine(
     """
     try:
         quarantine_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%S")
         path = quarantine_dir / f"{timestamp}_{slug}.md"
         header_lines = [
             "# Quarantined evolution issue body",
@@ -208,7 +208,7 @@ def main(argv: list[str]) -> int:
     src = sys.stdin.read()
     if args.path:
         try:
-            with open(args.path, "r", encoding="utf-8") as fh:
+            with open(args.path, "r", encoding="utf-8-sig") as fh:
                 src = fh.read()
         except OSError as exc:
             print(f"[redact-pii] error reading {args.path}: {exc}", file=sys.stderr)

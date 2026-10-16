@@ -33,6 +33,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from datetime import UTC
 
 VERDICTS_GOOD = {"confirmed"}
 # ``VERDICTS_BAD`` is a real regression — the change made things worse and
@@ -48,7 +49,7 @@ VERDICTS_NEUTRAL = {"no-signal"}
 VERDICTS_ANY = VERDICTS_GOOD | VERDICTS_BAD | VERDICTS_NEUTRAL
 
 
-def load_ledger(ledger_file: Path) -> List[Dict[str, Any]]:
+def load_ledger(ledger_file: Path) -> list[dict[str, Any]]:
     """Read the realized-impact ledger (one JSON object per line), oldest-first.
 
     Folds multiple lines for the same ``issue`` into one record: merge metadata
@@ -57,9 +58,9 @@ def load_ledger(ledger_file: Path) -> List[Dict[str, Any]]:
     """
     if not ledger_file.exists():
         return []
-    folded: Dict[Any, Dict[str, Any]] = {}
-    order: List[Any] = []
-    for ln in ledger_file.read_text(encoding="utf-8").splitlines():
+    folded: dict[Any, dict[str, Any]] = {}
+    order: list[Any] = []
+    for ln in ledger_file.read_text(encoding="utf-8-sig").splitlines():
         ln = ln.strip()
         if not ln:
             continue
@@ -80,7 +81,7 @@ def load_ledger(ledger_file: Path) -> List[Dict[str, Any]]:
     return [folded[k] for k in order]
 
 
-def append_ledger_record(ledger_file: Path, record: Dict[str, Any]) -> None:
+def append_ledger_record(ledger_file: Path, record: dict[str, Any]) -> None:
     """Append a single JSON line to the ledger atomically.
 
     Creates parent directories if missing. Malformed records are rejected with
@@ -101,7 +102,7 @@ def record_merge(
     predicted_impact: float,
     target: str,
     baseline_failure_rate: Optional[float] = None,
-    baseline_failure_rate_by_reason: Optional[Dict[str, float]] = None,
+    baseline_failure_rate_by_reason: Optional[dict[str, float]] = None,
 ) -> None:
     """Record a merge event in the realized-impact ledger.
 
@@ -114,7 +115,7 @@ def record_merge(
     targets. The aggregate tool rate is dominated by unaffected reasons, so a
     reason-scoped baseline lets the verdict detect the targeted mode's drop.
     """
-    rec: Dict[str, Any] = {
+    rec: dict[str, Any] = {
         "issue": issue,
         "merged_at": merged_at,
         "predicted_impact": predicted_impact,
@@ -180,7 +181,7 @@ def classify_verdict_by_rate(
 # focused regression rather than silently closing it.
 
 
-def signal_verified(records: List[Dict[str, Any]], issue: int) -> bool:
+def signal_verified(records: list[dict[str, Any]], issue: int) -> bool:
     """Whether a merged issue has a CONFIRMED signal-drop verdict.
 
     Returns True only if the issue has a merge record AND a verdict of
@@ -195,12 +196,12 @@ def signal_verified(records: List[Dict[str, Any]], issue: int) -> bool:
 
 
 def should_close_issue(
-    records: List[Dict[str, Any]],
+    records: list[dict[str, Any]],
     issue: int,
     today: str,
     maturity_days: int = 5,
     current_failure_rate: Optional[float] = None,
-    current_failure_rate_by_reason: Optional[Dict[str, float]] = None,
+    current_failure_rate_by_reason: Optional[dict[str, float]] = None,
     regression_threshold: float = 0.20,
 ) -> tuple:
     """Gate for closing an issue after a fix PR merges.
@@ -338,12 +339,12 @@ def _days_between(a: Optional[str], b: Optional[str]) -> Optional[int]:
 
 
 def compute_realized(
-    records: List[Dict[str, Any]],
+    records: list[dict[str, Any]],
     today: str,
     last: int = 30,
     maturity_days: int = 5,
     streak_k: int = 3,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Aggregate the ledger into a realized-impact signal.
 
     ``today`` is passed in (never read the clock here — keeps it deterministic
@@ -357,7 +358,7 @@ def compute_realized(
     that made the rate crater from ~55% to 20% in five merges' time on real
     data. Filtering first gives a stable, apples-to-apples sample.
     """
-    def _is_mature(r: Dict[str, Any]) -> bool:
+    def _is_mature(r: dict[str, Any]) -> bool:
         days = _days_between(r.get("merged_at"), today)
         return days is not None and days >= maturity_days
 
@@ -395,7 +396,7 @@ def compute_realized(
         else:
             break
 
-    flags: List[str] = []
+    flags: list[str] = []
     if len(verdicted) >= streak_k and streak >= streak_k:
         flags.append(
             f"REALIZED_IMPACT_LOW: last {streak} merged changes delivered no real "
@@ -431,7 +432,7 @@ def _pct(x: Optional[float]) -> str:
     return "n/a" if x is None else f"{x:.0%}"
 
 
-def format_realized(h: Dict[str, Any]) -> str:
+def format_realized(h: dict[str, Any]) -> str:
     tail = " | ".join(h["flags"]) if h["flags"] else "healthy"
     return (
         f"[evolution-realized-impact] tracked={h['merged_tracked']} "
@@ -451,7 +452,7 @@ def _evolution_dir() -> Path:
     )
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     evolution_dir = _evolution_dir()
     ledger_file = evolution_dir / "realized" / "ledger.jsonl"
     args = argv[1:]
@@ -518,7 +519,7 @@ def main(argv: List[str]) -> int:
         if not today:
             from datetime import datetime, timezone
 
-            today = datetime.now(timezone.utc).date().isoformat()
+            today = datetime.now(UTC).date().isoformat()
         # Optional --current-rate <rate>: current per-session failure rate for the
         # rate-normalization override (#1324). Enables re-checking a "regressed"
         # verdict against the stored baseline rate instead of raw counts.
@@ -555,7 +556,7 @@ def main(argv: List[str]) -> int:
         # The only clock read, and only in the CLI entrypoint (not the pure core).
         from datetime import date, timezone, datetime
 
-        today = datetime.now(timezone.utc).date().isoformat()
+        today = datetime.now(UTC).date().isoformat()
 
     records = load_ledger(ledger_file)
     health = compute_realized(records, today=today, last=last)

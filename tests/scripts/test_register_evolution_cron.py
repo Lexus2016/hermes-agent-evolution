@@ -112,7 +112,7 @@ class TestNoAgentJobs:
         import cron.jobs as jobs_mod
 
         monkeypatch.setattr(jobs_mod, "create_job", fake_create_job)
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
 
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
 
@@ -139,7 +139,7 @@ class TestNoAgentJobs:
 
         import cron.jobs as jobs_mod
 
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
 
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
         assert rc == 2  # registration failure reported
@@ -448,7 +448,7 @@ class TestDynamicInferenceRouting:
 
         import cron.jobs as jobs_mod
 
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
         monkeypatch.setattr(
             jobs_mod,
             "create_job",
@@ -642,8 +642,9 @@ class TestInstallEvolutionHelpers:
 
         assert mod._install_evolution_helpers(repo) == []
 
+    @pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
     def test_installs_only_imported_siblings_despite_unparseable_family_file(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, encoding
     ):
         """Missing/non-local imports and one broken file cannot stop the install."""
         mod = _import_module()
@@ -660,7 +661,7 @@ class TestInstallEvolutionHelpers:
             "    from scripts.delegation_escalation_report import summarize\n"
             "except ModuleNotFoundError:\n"
             "    from delegation_escalation_report import summarize\n",
-            encoding="utf-8",
+            encoding=encoding,
         )
         (scripts / "evolution_broken.py").write_text("def (:\n", encoding="utf-8")
         home = tmp_path / "hermes-home"
@@ -718,7 +719,7 @@ class TestInstallEvolutionHelpers:
         def run(*args, cwd=tmp_path):
             result = subprocess.run(
                 [sys.executable, "-E", "-S", "-B", *map(str, args)],
-                cwd=cwd, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30,
+                cwd=cwd, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30, check=False,
             )
             assert result.returncode == 0, result.stdout + result.stderr
             return result
@@ -922,7 +923,7 @@ class TestSkillToolsetPreflightRegistration:
         import cron.jobs as jobs_mod
 
         monkeypatch.setattr(jobs_mod, "create_job", fake_create_job)
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
 
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
         return rc, created
@@ -994,7 +995,7 @@ class TestCadenceAndWriteGate:
             "create_job",
             lambda **kw: created.append(kw) or {"id": "x", "name": kw["name"]},
         )
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
         assert rc == 0
         assert created == []
@@ -1112,7 +1113,7 @@ class TestCadenceAndWriteGate:
             "create_job",
             lambda **kw: created.append(kw) or {"id": "wd", "name": kw["name"]},
         )
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
         assert rc == 0
         assert len(created) == 1

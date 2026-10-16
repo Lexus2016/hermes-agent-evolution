@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Code-enforced claim checks: producer-side grounding of numerical claims (#2809).
 
 OmniScientist pattern (arXiv 2608.13558): claim verification is a
@@ -37,12 +36,12 @@ _NUM_CLAIM_RE = re.compile(
 class ClaimCheckResult:
     """Post-condition verdict on one artifact's numerical claims."""
 
-    grounded: List[str] = field(default_factory=list)
-    ungrounded: List[str] = field(default_factory=list)
+    grounded: list[str] = field(default_factory=list)
+    ungrounded: list[str] = field(default_factory=list)
     passed: bool = True
 
     @property
-    def flags(self) -> List[Dict[str, Any]]:
+    def flags(self) -> list[dict[str, Any]]:
         """Claim-level flags composable with the judge's triage taxonomy."""
         return [
             {"claim": c, "verdict": "ungrounded_number", "gate": "claim_check"}
@@ -52,8 +51,8 @@ class ClaimCheckResult:
 
 def build_execution_record(
     *sources: str,
-    metrics: Optional[Dict[str, float]] = None,
-) -> Dict[str, Any]:
+    metrics: Optional[dict[str, float]] = None,
+) -> dict[str, Any]:
     """Deterministic execution record from raw artifact/log text.
 
     ``sources`` are execution outputs (logs, metric dumps, analysis JSON
@@ -77,12 +76,12 @@ def build_execution_record(
     }
 
 
-def _sentences(text: str) -> List[str]:
+def _sentences(text: str) -> list[str]:
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text or "") if s.strip()]
 
 
 def _sentence_grounds(
-    sentence: str, record: Dict[str, Any]
+    sentence: str, record: dict[str, Any]
 ) -> bool:
     """A numerical sentence is grounded when each claimed number appears in
     the execution record's produced values (exact or scaled-percent form)."""
@@ -113,7 +112,7 @@ def _sentence_grounds(
 
 def check_claims_grounded(
     artifact_text: str,
-    execution_record: Dict[str, Any],
+    execution_record: dict[str, Any],
     *,
     max_claims: int = 200,
 ) -> ClaimCheckResult:

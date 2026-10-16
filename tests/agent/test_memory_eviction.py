@@ -226,7 +226,7 @@ def test_memory_entry_round_trip():
 
 def test_memory_entry_size_computed_when_absent():
     e = MemoryEntry(id="x", content="héllo", created_at=0.0, last_access=0.0)
-    assert e.size() == len("héllo".encode("utf-8"))
+    assert e.size() == len("héllo".encode())
     e2 = MemoryEntry(
         id="x", content="héllo", created_at=0.0, last_access=0.0, size_bytes=1
     )

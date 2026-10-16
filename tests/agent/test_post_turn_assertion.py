@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from agent.post_turn_assertion import (  # noqa: E402
+from agent.post_turn_assertion import (
     _assistant_text,
     evaluate,
     run_if_enabled,

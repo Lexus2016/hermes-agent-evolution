@@ -23,13 +23,13 @@ class UIElement:
     id: str
     type: str  # button, input, text, window, checkbox, menu, tab
     label: str
-    bounds: List[int]  # [x, y, width, height]
+    bounds: list[int]  # [x, y, width, height]
     enabled: bool = True
     focused: bool = False
 
 
 # Mock/simulated screen element store for headless environments and tests
-_ACTIVE_UI_ELEMENTS: Dict[str, UIElement] = {
+_ACTIVE_UI_ELEMENTS: dict[str, UIElement] = {
     "btn-submit": UIElement("btn-submit", "button", "Submit Form", [100, 200, 80, 30]),
     "inp-username": UIElement("inp-username", "input", "Username", [100, 100, 200, 30]),
     "inp-search": UIElement("inp-search", "input", "Search", [100, 50, 300, 30]),

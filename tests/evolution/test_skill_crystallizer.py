@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for Automatic Skill Crystallization (#2359)."""
 
 from pathlib import Path

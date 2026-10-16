@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Integration tests proving verification scope enforcement in real execution path (#2458)."""
 
 import json

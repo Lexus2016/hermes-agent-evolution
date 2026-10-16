@@ -48,7 +48,7 @@ _BROWSER_ERROR_RULES: tuple[tuple[re.Pattern, str], ...] = (
     # command: the requested browser command is not available here. ``classify``
     # would call this ``not_found`` (change-and-retry); ``missing_command`` is
     # the deterministic non-retryable class, which is the correct signal.
-    (re.compile(r"tool does not exist|available tools:|unknown ref|no such tool", re.I),
+    (re.compile(r"tool does not exist|available tools:|unknown ref|no such tool", re.IGNORECASE),
      "missing_command"),
     # CDP / Chrome backend down or unreachable is a dead provider: retrying the
     # same navigation keeps failing — route to the web_extract / web_search
@@ -56,14 +56,14 @@ _BROWSER_ERROR_RULES: tuple[tuple[re.Pattern, str], ...] = (
     (re.compile(
         r"\bCDP\b|chrome devtools|websocketdebugger|could not connect to (chrome|browser)"
         r"|browser (backend|session) (unavailable|not)",
-        re.I,
+        re.IGNORECASE,
     ),
      "provider_dead"),
     # Navigation / page timeouts.
-    (re.compile(r"timed out|timeout|deadline exceeded|navigation timeout|Page\.navigate", re.I),
+    (re.compile(r"timed out|timeout|deadline exceeded|navigation timeout|Page\.navigate", re.IGNORECASE),
      "timeout"),
     # DOM / selector read failures are runtime errors against the live page.
-    (re.compile(r"could not compute box model|detached|stale element|DOM|selector|element not found", re.I),
+    (re.compile(r"could not compute box model|detached|stale element|DOM|selector|element not found", re.IGNORECASE),
      "runtime_error"),
 )
 
@@ -122,7 +122,7 @@ def reset_nav_failures(url: str) -> None:
     _nav_failures.pop(url, None)
 
 
-def web_extract_fallback(url: str) -> Tuple[Optional[str], Optional[str]]:
+def web_extract_fallback(url: str) -> tuple[Optional[str], Optional[str]]:
     """Attempt ``web_extract`` for the URL. Returns (content, error).
 
     Runs the async web_extract tool in a fresh event loop. If a loop is already

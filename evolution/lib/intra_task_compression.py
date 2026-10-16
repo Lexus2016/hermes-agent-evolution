@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Intra-task context compression with knowledge consolidation.
 
 Issue #1033 — child of #995 (Active Intra-Trajectory Context Compression).
@@ -59,11 +58,11 @@ class CompressionConfig:
     preserve_system_messages: bool = True
     max_compressions_per_task: int = 3
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "CompressionConfig":
+    def from_dict(cls, d: dict[str, Any]) -> CompressionConfig:
         return cls(**{k: d[k] for k in d if k in cls.__dataclass_fields__})
 
 
@@ -81,7 +80,7 @@ class TokenEstimator:
     def __init__(self, token_func: Optional[Callable[[str], int]] = None) -> None:
         self._token_func = token_func
 
-    def estimate_message(self, msg: Dict[str, Any]) -> int:
+    def estimate_message(self, msg: dict[str, Any]) -> int:
         """Estimate tokens in a single message dict."""
         if self._token_func is not None:
             content = msg.get("content", "")
@@ -93,7 +92,7 @@ class TokenEstimator:
             return max(1, len(content) // 4)
         return max(1, len(str(content)) // 4)
 
-    def estimate(self, messages: List[Dict[str, Any]]) -> int:
+    def estimate(self, messages: list[dict[str, Any]]) -> int:
         """Estimate total tokens across all messages."""
         if not messages:
             return 0
@@ -113,7 +112,7 @@ class CompressionTriggerEvaluator:
     def evaluate(
         self,
         token_count: int,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         compression_count: int,
     ) -> CompressionTrigger:
         """Return the trigger that applies, or ``NONE``."""
@@ -152,7 +151,7 @@ class CompressionResult:
     trigger: str
     messages_preserved: int
     messages_compressed: int
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def tokens_saved(self) -> int:
@@ -164,11 +163,11 @@ class CompressionResult:
             return 1.0
         return self.compressed_token_count / self.original_token_count
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "CompressionResult":
+    def from_dict(cls, d: dict[str, Any]) -> CompressionResult:
         return cls(**{k: d[k] for k in d if k in cls.__dataclass_fields__})
 
 
@@ -177,15 +176,15 @@ class CompressionResult:
 # ---------------------------------------------------------------------------
 
 # Patterns that signal a "key fact" or "decision" worth preserving.
-_KNOWLEDGE_PATTERNS: List[Tuple[str, re.Pattern]] = [
+_KNOWLEDGE_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("decision", re.compile(
-        r"(?:decid|chose|will |select|adopt|prefer|going to )", re.I)),
+        r"(?:decid|chose|will |select|adopt|prefer|going to )", re.IGNORECASE)),
     ("file_path", re.compile(
         r"(?:^|\s)([/~][\w./\-]+\.\w+)")),
     ("error", re.compile(
-        r"(?:error|fail|exception|traceback)", re.I)),
+        r"(?:error|fail|exception|traceback)", re.IGNORECASE)),
     ("result", re.compile(
-        r"(?:result|outcome|output|return)\s*[:=]", re.I)),
+        r"(?:result|outcome|output|return)\s*[:=]", re.IGNORECASE)),
     ("numeric", re.compile(r"\b\d+\b")),
 ]
 
@@ -193,14 +192,14 @@ _KNOWLEDGE_PATTERNS: List[Tuple[str, re.Pattern]] = [
 class KnowledgeBlockExtractor:
     """Extract key facts / decisions from messages as knowledge blocks."""
 
-    def __init__(self, patterns: Optional[List[Tuple[str, re.Pattern]]] = None) -> None:
+    def __init__(self, patterns: Optional[list[tuple[str, re.Pattern]]] = None) -> None:
         self._patterns = patterns or _KNOWLEDGE_PATTERNS
 
     # -- public API --------------------------------------------------------
 
-    def extract(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def extract(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Extract knowledge blocks from a list of messages."""
-        blocks: List[Dict[str, Any]] = []
+        blocks: list[dict[str, Any]] = []
         for idx, msg in enumerate(messages):
             block = self.extract_from_message(msg)
             if block is not None:
@@ -208,7 +207,7 @@ class KnowledgeBlockExtractor:
                 blocks.append(block)
         return blocks
 
-    def extract_from_message(self, msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def extract_from_message(self, msg: dict[str, Any]) -> Optional[dict[str, Any]]:
         """Pull key information from a single message.
 
         Returns ``None`` when no recognisable knowledge pattern is found.
@@ -217,7 +216,7 @@ class KnowledgeBlockExtractor:
         if not content or not isinstance(content, str):
             return None
 
-        found: List[str] = []
+        found: list[str] = []
         for label, pattern in self._patterns:
             if pattern.search(content):
                 found.append(label)
@@ -246,15 +245,15 @@ class IntraTaskCompressor:
         self._extractor = KnowledgeBlockExtractor()
         self._stats_total = 0
         self._stats_tokens_saved = 0
-        self._stats_ratios: List[float] = []
+        self._stats_ratios: list[float] = []
 
     # -- main entry --------------------------------------------------------
 
     def compress(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         trigger: CompressionTrigger = CompressionTrigger.TOKEN_THRESHOLD,
-    ) -> Tuple[List[Dict[str, Any]], CompressionResult]:
+    ) -> tuple[list[dict[str, Any]], CompressionResult]:
         """Compress *messages* and return (new_messages, result).
 
         ``trigger`` records *why* compression fired and is echoed back on the
@@ -303,8 +302,8 @@ class IntraTaskCompressor:
             older = list(messages)
 
         # Split older into system (preserve) and non-system (compress)
-        system_msgs: List[Dict[str, Any]] = []
-        to_compress: List[Dict[str, Any]] = []
+        system_msgs: list[dict[str, Any]] = []
+        to_compress: list[dict[str, Any]] = []
         for m in older:
             if preserve_system and m.get("role") == "system":
                 system_msgs.append(m)
@@ -313,7 +312,7 @@ class IntraTaskCompressor:
 
         compressed = self._compress_old_messages(to_compress)
 
-        new_messages: List[Dict[str, Any]] = []
+        new_messages: list[dict[str, Any]] = []
         new_messages.extend(system_msgs)
         if compressed is not None:
             new_messages.append(compressed)
@@ -346,8 +345,8 @@ class IntraTaskCompressor:
     # -- helpers -----------------------------------------------------------
 
     def _compress_old_messages(
-        self, messages: List[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+        self, messages: list[dict[str, Any]]
+    ) -> Optional[dict[str, Any]]:
         """Compress a list of old messages into a single summary dict."""
         if not messages:
             return None
@@ -365,7 +364,7 @@ class IntraTaskCompressor:
         )
         budget = max(200, min(1000, int(original_chars * self.config.compression_ratio)))
 
-        summary_parts: List[str] = []
+        summary_parts: list[str] = []
         for kb in knowledge_blocks:
             summary_parts.append(kb["content"])
 
@@ -398,7 +397,7 @@ class IntraTaskCompressor:
             "_compressed": True,
         }
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Return cumulative statistics."""
         avg_ratio = (
             sum(self._stats_ratios) / len(self._stats_ratios)
@@ -417,11 +416,11 @@ class IntraTaskCompressor:
 # ---------------------------------------------------------------------------
 
 __all__ = [
-    "CompressionTrigger",
     "CompressionConfig",
-    "TokenEstimator",
-    "CompressionTriggerEvaluator",
     "CompressionResult",
-    "KnowledgeBlockExtractor",
+    "CompressionTrigger",
+    "CompressionTriggerEvaluator",
     "IntraTaskCompressor",
+    "KnowledgeBlockExtractor",
+    "TokenEstimator",
 ]

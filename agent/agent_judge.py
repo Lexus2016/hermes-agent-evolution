@@ -103,7 +103,7 @@ class Rubric:
         if len(keys) != len(set(keys)):
             raise ValueError("Rubric dimension keys must be unique")
 
-    def keys(self) -> List[str]:
+    def keys(self) -> list[str]:
         return [d.key for d in self.dimensions]
 
     def total_weight(self) -> float:
@@ -179,9 +179,9 @@ class TraceSummary:
     repeated_tool_runs: int = 0
     refusals: int = 0
     has_final_answer: bool = False
-    tool_names: List[str] = field(default_factory=list)
+    tool_names: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "message_count": self.message_count,
             "user_turns": self.user_turns,
@@ -200,7 +200,7 @@ class TraceSummary:
 # (single source of truth, consistent with introspection_extract.py), keeping
 # a small literal fallback so this module stays importable standalone.
 try:  # pragma: no cover - exercised indirectly; import shape varies by tree
-    from agent.loop_guard import _looks_like_failure as _looks_like_failure
+    from agent.loop_guard import _looks_like_failure
 except Exception:  # pragma: no cover
     _FAILURE_MARKERS = (
         "error:", "failed", "permission denied", "command not found",
@@ -231,7 +231,7 @@ def _tool_name(tool_call: Any) -> str:
     return str(tool_call.get("name") or "unknown")
 
 
-def summarize_trace(messages: Sequence[Dict[str, Any]]) -> TraceSummary:
+def summarize_trace(messages: Sequence[dict[str, Any]]) -> TraceSummary:
     """Extract structural signals from a session message list.
 
     Pure and deterministic — no LLM, no I/O.  Drives the heuristic score and
@@ -291,7 +291,7 @@ class JudgeVerdict:
 
     session_id: str
     overall_score: float
-    dimension_scores: Dict[str, float]
+    dimension_scores: dict[str, float]
     rationale: str
     method: str  # "llm" | "heuristic"
     trace_summary: TraceSummary
@@ -301,7 +301,7 @@ class JudgeVerdict:
         """Whether the verdict clears a pass/fail threshold (default 0.7)."""
         return self.overall_score >= threshold
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
             "overall_score": round(self.overall_score, 4),
@@ -331,7 +331,7 @@ def build_judge_messages(
     transcript_excerpt: str,
     rubric: Rubric,
     task: Optional[str],
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Assemble the chat messages for an LLM scoring call.
 
     The system prompt pins the output to a strict JSON schema; the user message
@@ -369,7 +369,7 @@ def build_judge_messages(
 _JSON_DECODER = json.JSONDecoder()
 
 
-def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
+def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
     """Pull the first parseable top-level JSON object out of model text.
 
     Tolerates code fences and leading/trailing prose (small models sometimes
@@ -396,7 +396,7 @@ def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def parse_judge_response(text: str, rubric: Rubric) -> Optional[Dict[str, Any]]:
+def parse_judge_response(text: str, rubric: Rubric) -> Optional[dict[str, Any]]:
     """Validate and normalise a raw LLM judge response.
 
     Enforces the strict schema: a ``scores`` object must be present and must
@@ -412,7 +412,7 @@ def parse_judge_response(text: str, rubric: Rubric) -> Optional[Dict[str, Any]]:
     raw_scores = obj.get("scores")
     if not isinstance(raw_scores, dict):
         return None
-    scores: Dict[str, float] = {}
+    scores: dict[str, float] = {}
     for key in rubric.keys():
         if key not in raw_scores:
             return None  # incomplete -> reject, fall back to heuristic
@@ -423,7 +423,7 @@ def parse_judge_response(text: str, rubric: Rubric) -> Optional[Dict[str, Any]]:
     return {"scores": scores, "rationale": rationale.strip()}
 
 
-def _weighted_overall(scores: Dict[str, float], rubric: Rubric) -> float:
+def _weighted_overall(scores: dict[str, float], rubric: Rubric) -> float:
     total_w = rubric.total_weight()
     acc = 0.0
     for d in rubric.dimensions:
@@ -436,7 +436,7 @@ def _weighted_overall(scores: Dict[str, float], rubric: Rubric) -> float:
 
 def score_trace_heuristic(
     session_id: str,
-    messages: Sequence[Dict[str, Any]],
+    messages: Sequence[dict[str, Any]],
     rubric: Rubric = DEFAULT_RUBRIC,
     *,
     summary: Optional[TraceSummary] = None,
@@ -453,7 +453,7 @@ def score_trace_heuristic(
     still produces a usable score rather than crashing.
     """
     summary = summary if summary is not None else summarize_trace(messages)
-    scores: Dict[str, float] = {}
+    scores: dict[str, float] = {}
 
     # task_completion: did the agent deliver a final answer, undamaged by
     # refusal? Heavily binary by nature.
@@ -513,7 +513,7 @@ def score_trace_heuristic(
 
 
 def render_transcript_excerpt(
-    messages: Sequence[Dict[str, Any]],
+    messages: Sequence[dict[str, Any]],
     *,
     max_chars: int = 6000,
     max_messages: int = 40,
@@ -525,7 +525,7 @@ def render_transcript_excerpt(
     and tail are kept (the task setup and the outcome are the most diagnostic
     parts) with an elision marker between them.
     """
-    rendered: List[str] = []
+    rendered: list[str] = []
     for msg in messages:
         if not isinstance(msg, dict):
             continue
@@ -567,12 +567,12 @@ def render_transcript_excerpt(
 
 def score_trace_llm(
     session_id: str,
-    messages: Sequence[Dict[str, Any]],
+    messages: Sequence[dict[str, Any]],
     rubric: Rubric = DEFAULT_RUBRIC,
     *,
     task: Optional[str] = None,
     timeout: float = 60.0,
-    main_runtime: Optional[Dict[str, Any]] = None,
+    main_runtime: Optional[dict[str, Any]] = None,
     summary: Optional[TraceSummary] = None,
 ) -> Optional[JudgeVerdict]:
     """Score a trace with an LLM via the shared auxiliary client.
@@ -662,12 +662,12 @@ class AgentJudge:
     def score(
         self,
         session_id: str,
-        messages: Sequence[Dict[str, Any]],
+        messages: Sequence[dict[str, Any]],
         *,
         task: Optional[str] = None,
         use_llm: bool = True,
         timeout: float = 60.0,
-        main_runtime: Optional[Dict[str, Any]] = None,
+        main_runtime: Optional[dict[str, Any]] = None,
     ) -> JudgeVerdict:
         """Score a trace, preferring the LLM and falling back to the heuristic.
 
@@ -695,11 +695,11 @@ class AgentJudge:
     def score_replay(
         self,
         session_id: str,
-        messages: Sequence[Dict[str, Any]],
+        messages: Sequence[dict[str, Any]],
         *,
         task: Optional[str] = None,
         use_llm: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Score a trace step-by-step: overall verdict + per-step heuristic.
 
         Engine-level entry point onto :func:`score_replayed_trace`, so the replay
@@ -750,7 +750,7 @@ def _replay_content_text(content: Any) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        parts: List[str] = []
+        parts: list[str] = []
         for block in content:
             if isinstance(block, str):
                 parts.append(block)
@@ -761,8 +761,8 @@ def _replay_content_text(content: Any) -> str:
 
 
 def replay_trace_steps(
-    messages: Sequence[Dict[str, Any]],
-) -> Iterator[Dict[str, Any]]:
+    messages: Sequence[dict[str, Any]],
+) -> Iterator[dict[str, Any]]:
     """Yield the high-level decision steps in a recorded trace.
 
     Emits one record per assistant turn that either (a) contains plain text
@@ -795,7 +795,7 @@ def replay_trace_steps(
         if not text.strip() and not tool_calls:
             continue
         step += 1
-        tool_results: List[Dict[str, Any]] = []
+        tool_results: list[dict[str, Any]] = []
         if tool_calls:
             # Collect the next contiguous tool result messages.
             j = i + 1
@@ -817,12 +817,12 @@ def replay_trace_steps(
 
 def score_replayed_trace(
     session_id: str,
-    messages: Sequence[Dict[str, Any]],
+    messages: Sequence[dict[str, Any]],
     rubric: Rubric = DEFAULT_RUBRIC,
     *,
     task: Optional[str] = None,
     use_llm: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Score a recorded trace step-by-step.
 
     Returns a dict containing the original ``AgentJudge`` verdict plus a
@@ -836,7 +836,7 @@ def score_replayed_trace(
     verdict = AgentJudge(rubric).score(
         session_id, messages, task=task, use_llm=use_llm
     )
-    steps: List[Dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
     for step in replay_trace_steps(messages):
         failures = sum(
             1

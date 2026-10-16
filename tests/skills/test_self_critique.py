@@ -16,7 +16,7 @@ SCRIPTS_DIR = (
 )
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-import self_critique  # noqa: E402
+import self_critique
 
 
 def _fn(payload: dict):

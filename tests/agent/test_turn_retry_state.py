@@ -8,6 +8,7 @@ from agent.turn_retry_state import TurnRetryState
 
 
 EXPECTED_FIELDS = {
+    "affordable_402_clamp_attempted",
     "codex_auth_retry_attempted",
     "anthropic_auth_retry_attempted",
     "nous_auth_retry_attempted",

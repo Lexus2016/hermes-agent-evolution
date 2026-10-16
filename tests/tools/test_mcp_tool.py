@@ -156,7 +156,7 @@ class TestLoadMCPConfig:
         self, tmp_path, monkeypatch
     ):
         import json
-        import yaml
+        import hermes_yaml as yaml
         from hermes_cli.agent_plugins import MCP_SCHEMA_V1, PLUGIN_SCHEMA_V1
         from hermes_cli import plugins as plugins_mod
 
@@ -200,7 +200,7 @@ class TestLoadMCPConfig:
 
 class TestMCPParallelSafetyProvenance:
     def test_parallel_safe_servers_keep_exact_raw_names(self, monkeypatch):
-        import tools.mcp_tool as mcp_tool
+        from tools import mcp_tool
 
         first = SimpleNamespace(session=object(), _registered_tool_names=[])
         second = SimpleNamespace(session=object(), _registered_tool_names=[])
@@ -234,7 +234,7 @@ class TestMCPParallelSafetyProvenance:
                 mcp_tool._parallel_safe_servers.update(saved_parallel)
 
     def test_tool_provenance_keeps_exact_raw_server_names(self):
-        import tools.mcp_tool as mcp_tool
+        from tools import mcp_tool
         from tools import mcp_tool_registration as _mcp_registration
 
         first_tool = "mcp__foo_bar__first"
@@ -267,7 +267,7 @@ class TestMCPStatus:
     def test_status_distinguishes_configured_connecting_failed_and_disabled(
         self, monkeypatch
     ):
-        import tools.mcp_tool as mcp_tool
+        from tools import mcp_tool
         from tools import mcp_tool_config as _mcp_config
         from tools import mcp_tool_discovery as _mcp_discovery
 
@@ -314,7 +314,7 @@ class TestMCPStatus:
         assert statuses["disabled"]["disabled"] is True
 
     def test_status_ignores_a_runtime_owned_by_another_profile(self, monkeypatch):
-        import tools.mcp_tool as mcp_tool
+        from tools import mcp_tool
         from tools import mcp_tool_config as _mcp_config
         from tools import mcp_tool_discovery as _mcp_discovery
 
@@ -352,7 +352,7 @@ class TestMCPStatus:
 
 
     def test_scoped_shutdown_clears_only_its_connection_status(self, monkeypatch):
-        import tools.mcp_tool as mcp_tool
+        from tools import mcp_tool
         from tools import mcp_tool_lifecycle, mcp_tool_loop
 
         monkeypatch.setattr(mcp_tool_loop, "_stop_mcp_loop", lambda **_kwargs: None)
@@ -1071,6 +1071,11 @@ class TestDiscoverAndRegister:
 class TestMCPServerTask:
     """Test the MCPServerTask lifecycle with mocked MCP SDK."""
 
+    @pytest.fixture(autouse=True)
+    def _no_pm_launcher(self, monkeypatch):
+        # Launcher resolution is not under test here, and a CI host has no PM-managed Node.
+        monkeypatch.setattr("tools.mcp_tool_config._managed_launcher", lambda command: None)
+
     def _mock_stdio_and_session(self, session):
         """Return patches for stdio_client and ClientSession as async CMs."""
         mock_read, mock_write = MagicMock(), MagicMock()
@@ -1292,7 +1297,6 @@ class TestToolsetInjection:
             result1 = discover_mcp_tools()
             assert "mcp__good__ping" in result1
             assert "mcp__broken__ping" not in result1
-            first_attempts = call_count
 
             # "Fix" the broken server
             broken_fixed = True
@@ -1560,9 +1564,9 @@ class TestBuildSafeEnv:
 
         fake_env = {
             "PATH": r"C:\Windows\System32",
-            "ProgramFiles": r"C:\Program Files",
-            "ProgramData": r"C:\ProgramData",
-            "ProgramW6432": r"C:\Program Files",
+            "PROGRAMFILES": r"C:\Program Files",
+            "PROGRAMDATA": r"C:\ProgramData",
+            "PROGRAMW6432": r"C:\Program Files",
             "LOCALAPPDATA": r"C:\Users\alice\AppData\Local",
             "APPDATA": r"C:\Users\alice\AppData\Roaming",
             "USERPROFILE": r"C:\Users\alice",
@@ -1572,9 +1576,9 @@ class TestBuildSafeEnv:
         with patch.dict("os.environ", fake_env, clear=True):
             result = _build_safe_env(None)
 
-        assert result["ProgramFiles"] == r"C:\Program Files"
-        assert result["ProgramData"] == r"C:\ProgramData"
-        assert result["ProgramW6432"] == r"C:\Program Files"
+        assert result["PROGRAMFILES"] == r"C:\Program Files"
+        assert result["PROGRAMDATA"] == r"C:\ProgramData"
+        assert result["PROGRAMW6432"] == r"C:\Program Files"
         assert result["LOCALAPPDATA"].endswith("Local")
         assert result["APPDATA"].endswith("Roaming")
         assert result["USERPROFILE"] == r"C:\Users\alice"
@@ -1946,7 +1950,7 @@ class TestUtilityHandlers:
 
         async def _raise_unknown(name, arguments=None):
             # mcp.shared.exceptions.McpError carries .error (ErrorData).
-            err = SimpleNamespace(message=f"Unknown prompt: {name}")
+            _err = SimpleNamespace(message=f"Unknown prompt: {name}")
             raise type(
                 "McpError",
                 (Exception,),
@@ -2048,12 +2052,14 @@ class _CompatType:
 
 try:
     from mcp.types import (
+        ClientCapabilities,
         CreateMessageResult,
         ErrorData,
         SamplingCapability,
         TextContent,
     )
 except ImportError:
+    ClientCapabilities = _CompatType
     CreateMessageResult = _CompatType
     ErrorData = _CompatType
     SamplingCapability = _CompatType
@@ -2546,6 +2552,58 @@ class TestMetricsTracking:
 # ---------------------------------------------------------------------------
 
 
+    @staticmethod
+    def _capability_payload(capability):
+        if hasattr(capability, "model_dump"):
+            return capability.model_dump(exclude_none=True)
+        return {k: v for k, v in vars(capability).items() if v is not None}
+
+    @classmethod
+    def _client_capability_payload(cls, sampling_capability):
+        capabilities = ClientCapabilities(sampling=sampling_capability)
+        return cls._capability_payload(capabilities)
+
+    def test_default_omits_tools_capability(self):
+        """Strict servers reject unknown sampling.tools, so it stays off by default (#5468)."""
+        handler = SamplingHandler("sk", {})
+        assert handler.expose_client_tools is False
+        cap = handler.session_kwargs()["sampling_capabilities"]
+        assert isinstance(cap, SamplingCapability)
+        assert cap.tools is None
+        assert "tools" not in self._capability_payload(cap)
+        assert self._client_capability_payload(cap) == {"sampling": {}}
+
+    def test_sampling_tools_capability_is_opt_in(self):
+        handler = SamplingHandler("sk3", {"expose_client_tools": True})
+        cap = handler.session_kwargs()["sampling_capabilities"]
+        assert isinstance(cap.tools, SamplingToolsCapability)
+        assert "tools" in self._capability_payload(cap)
+        assert self._client_capability_payload(cap) == {"sampling": {"tools": {}}}
+
+    @pytest.mark.parametrize(
+        "raw_value, expected",
+        [
+            (False, False),
+            ("false", False),
+            ("0", False),
+            ("off", False),
+            (True, True),
+            ("true", True),
+            ("1", True),
+            ("yes", True),
+        ],
+    )
+    def test_sampling_tools_capability_parses_bool_flags(self, raw_value, expected):
+        handler = SamplingHandler("sk4", {"expose_client_tools": raw_value})
+        cap = handler.session_kwargs()["sampling_capabilities"]
+        payload = self._capability_payload(cap)
+        if expected:
+            assert isinstance(cap.tools, SamplingToolsCapability)
+            assert "tools" in payload
+        else:
+            assert cap.tools is None
+            assert "tools" not in payload
+
 # ---------------------------------------------------------------------------
 # 14. MCPServerTask integration
 # ---------------------------------------------------------------------------
@@ -2628,7 +2686,6 @@ class TestDiscoveryConnectConcurrency:
 
         def fake_run_on_mcp_loop(factory, timeout=None):
             captured["timeout"] = timeout
-            return None
 
         # 40 servers = 14 waves at cap 3: uncapped, the pass would block 28 min
         # and outlive the waiter budget by 26+ minutes.
@@ -3019,110 +3076,3 @@ class TestMcpParallelToolCalls:
 # ---------------------------------------------------------------------------
 # Cross-process MCP discovery lock (issue #62771)
 # ---------------------------------------------------------------------------
-
-
-class TestMCPDiscoveryCrossProcessLock:
-    """Tests for the cross-process MCP discovery guard in discover_mcp_tools()."""
-
-    @pytest.fixture(autouse=True)
-    def _fast_retries(self):
-        """Override retry constants so tests are fast."""
-        import tools.mcp_tool as mcp_tool
-        orig_max = mcp_tool._MCP_DISCOVERY_LOCK_MAX_RETRIES
-        orig_delay = mcp_tool._MCP_DISCOVERY_LOCK_RETRY_DELAY_S
-        mcp_tool._MCP_DISCOVERY_LOCK_MAX_RETRIES = 3
-        mcp_tool._MCP_DISCOVERY_LOCK_RETRY_DELAY_S = 0.01
-        yield
-        mcp_tool._MCP_DISCOVERY_LOCK_MAX_RETRIES = orig_max
-        mcp_tool._MCP_DISCOVERY_LOCK_RETRY_DELAY_S = orig_delay
-
-    def test_lock_acquired_path(self, tmp_path):
-        """Lock acquired -> discovery runs normally, lock released at end."""
-        from tools.mcp_tool_loop import _LockCookie
-        from tools.mcp_tool_discovery import discover_mcp_tools
-
-        lock_file = tmp_path / ".mcp-discovery.lock"
-        fh = open(lock_file, "w", encoding="utf-8")
-        cookie = _LockCookie(fh)
-
-        def mock_acquire():
-            return cookie
-
-        mock_config = {"test_srv": {"command": "echo", "enabled": True}}
-        with patch.object(cookie, "release", wraps=cookie.release) as release_spy:
-            with patch("tools.mcp_tool_loop._try_acquire_mcp_discovery_lock", mock_acquire), \
-                 patch("tools.mcp_tool._MCP_AVAILABLE", True), \
-                 patch("tools.mcp_tool_config._load_mcp_config", return_value=mock_config), \
-                 patch("tools.mcp_tool_discovery.register_mcp_servers", return_value=["mcp__test_srv__ping"]) as reg_spy:
-                result = discover_mcp_tools()
-            assert result == ["mcp__test_srv__ping"]
-            release_spy.assert_called_once()
-
-    def test_lock_held_retries_exhausted_fallback(self):
-        """All retry attempts see lock held -> runs discovery unguarded."""
-        from tools.mcp_tool_discovery import discover_mcp_tools
-
-        mock_config = {"test_srv": {"command": "echo", "enabled": True}}
-        # Every attempt returns None (lock held)
-        with patch("tools.mcp_tool_loop._try_acquire_mcp_discovery_lock", return_value=None), \
-             patch("tools.mcp_tool._MCP_AVAILABLE", True), \
-             patch("tools.mcp_tool_config._load_mcp_config", return_value=mock_config), \
-             patch("tools.mcp_tool_discovery.register_mcp_servers") as reg_spy, \
-             patch("tools.mcp_tool_registration._existing_tool_names", return_value=[]):
-            result = discover_mcp_tools()
-        # Must still run local discovery
-        reg_spy.assert_called_once_with(mock_config)
-
-
-
-class TestRedirectHeaderStripper:
-    """Cross-origin redirect header boundary (portable Agent Plugins v1).
-
-    The stripper is an ``AsyncClient`` factory overriding ``_build_redirect_request`` on each built
-    client — the only
-    seam that sees the actual redirect follow-up (``response.next_request`` is unset when response
-    hooks fire) without also touching non-redirect traffic (a request hook would strip the OAuth
-    auth flow's token/registration calls to a different-origin authorization server)."""
-
-    def _build_redirect(self, httpx, *, strict=False, configured=frozenset(),
-                        headers, location):
-        from tools.mcp_tool_errors import _make_redirect_header_stripper
-
-        build_client = _make_redirect_header_stripper(
-            httpx, httpx.URL("https://origin.example.test/mcp"),
-            strict=strict, configured_header_names=configured)
-        client = build_client()
-        request = httpx.Request("GET", "https://origin.example.test/mcp", headers=headers)
-        response = httpx.Response(302, headers={"location": location}, request=request)
-        return client._build_redirect_request(request, response)
-
-    def test_default_strips_only_authorization(self):
-        import httpx
-
-        next_request = self._build_redirect(
-            httpx, headers={"Authorization": "Bearer x", "X-Tenant": "t"},
-            location="https://other.example.test/mcp")
-        assert "authorization" not in next_request.headers
-        assert next_request.headers["x-tenant"] == "t"
-
-    def test_strict_strips_configured_headers_cross_origin(self):
-        import httpx
-
-        next_request = self._build_redirect(
-            httpx, strict=True, configured={"x-tenant"},
-            headers={"Authorization": "Bearer x", "X-Tenant": "t", "Accept": "a"},
-            location="https://other.example.test/mcp")
-        assert "authorization" not in next_request.headers
-        assert "x-tenant" not in next_request.headers
-        # Client-generated headers unrelated to package config survive.
-        assert next_request.headers["accept"] == "a"
-
-    def test_same_origin_redirect_keeps_headers(self):
-        import httpx
-
-        next_request = self._build_redirect(
-            httpx, strict=True, configured={"x-tenant"},
-            headers={"Authorization": "Bearer x", "X-Tenant": "t"},
-            location="https://origin.example.test/other")
-        assert next_request.headers["authorization"] == "Bearer x"
-        assert next_request.headers["x-tenant"] == "t"

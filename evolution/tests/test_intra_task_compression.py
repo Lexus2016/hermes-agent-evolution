@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for intra_task_compression module (Issue #1033)."""
 
 import pytest
@@ -432,7 +431,7 @@ class TestIntraTaskCompressor:
             {"role": "assistant", "content": "recent1"},
             {"role": "assistant", "content": "recent2"},
         ]
-        new_msgs, result = comp.compress(msgs)
+        _new_msgs, result = comp.compress(msgs)
         # system message should have been compressed, not preserved
         assert result.messages_compressed == 3
 
@@ -446,7 +445,7 @@ class TestIntraTaskCompressor:
     def test_compress_reduces_tokens(self):
         comp = IntraTaskCompressor(CompressionConfig(preserve_recent_count=3))
         msgs = self._make_msgs(20, content_size=100)
-        new_msgs, result = comp.compress(msgs)
+        _new_msgs, result = comp.compress(msgs)
         assert result.compressed_token_count < result.original_token_count
 
     def test_compress_preserves_recent_content(self):
@@ -454,7 +453,7 @@ class TestIntraTaskCompressor:
         msgs = []
         for i in range(10):
             msgs.append({"role": "assistant", "content": f"unique_{i}"})
-        new_msgs, result = comp.compress(msgs)
+        new_msgs, _result = comp.compress(msgs)
         contents = [m["content"] for m in new_msgs]
         assert "unique_7" in contents
         assert "unique_8" in contents
@@ -486,7 +485,7 @@ class TestIntraTaskCompressor:
         comp = IntraTaskCompressor(CompressionConfig(preserve_recent_count=2))
         msgs = self._make_msgs(10)
         new_msgs, _ = comp.compress(msgs)
-        summary_msg = [m for m in new_msgs if m.get("_compressed")][0]
+        summary_msg = next(m for m in new_msgs if m.get("_compressed"))
         # 10 total - 2 recent = 8 compressed
         assert "8" in summary_msg["content"]
 
@@ -505,7 +504,7 @@ class TestIntraTaskCompressor:
             {"role": "system", "content": f"sys {i}"}
             for i in range(10)
         ]
-        new_msgs, result = comp.compress(msgs)
+        _new_msgs, result = comp.compress(msgs)
         # All preserved since they're system messages
         assert result.messages_compressed == 0
         assert result.messages_preserved == 10
@@ -513,7 +512,7 @@ class TestIntraTaskCompressor:
     def test_compress_preserve_recent_zero(self):
         comp = IntraTaskCompressor(CompressionConfig(preserve_recent_count=0))
         msgs = self._make_msgs(5)
-        new_msgs, result = comp.compress(msgs)
+        _new_msgs, result = comp.compress(msgs)
         assert result.messages_compressed == 5
         assert result.messages_preserved == 0
 
@@ -571,7 +570,7 @@ class TestIntegration:
 class TestEdgeCases:
     def test_none_messages_to_compressor(self):
         comp = IntraTaskCompressor(CompressionConfig())
-        new_msgs, result = comp.compress([])
+        new_msgs, _result = comp.compress([])
         assert new_msgs == []
 
     def test_very_large_message_content(self):
@@ -582,7 +581,7 @@ class TestEdgeCases:
             {"role": "assistant", "content": "recent1"},
             {"role": "assistant", "content": "recent2"},
         ]
-        new_msgs, result = comp.compress(msgs)
+        _new_msgs, result = comp.compress(msgs)
         assert result.compressed_token_count < result.original_token_count
 
     def test_unicode_content(self):
@@ -593,7 +592,7 @@ class TestEdgeCases:
             {"role": "assistant", "content": "recent1"},
             {"role": "assistant", "content": "recent2"},
         ]
-        new_msgs, result = comp.compress(msgs)
+        _new_msgs, result = comp.compress(msgs)
         assert result.messages_compressed >= 1
 
     def test_metadata_contains_knowledge_count(self):

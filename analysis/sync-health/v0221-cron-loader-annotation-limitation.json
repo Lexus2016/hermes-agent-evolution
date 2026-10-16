@@ -1,0 +1,116 @@
+{
+  "status": "preparation_only_requires_independent_review",
+  "candidate_head": "3bb6c968bd375a6143f84153cc81e589108bdb6e",
+  "source_commit": "297552a9d646119871391d202509822cd86330df",
+  "candidate_and_source_blob": "8651836d50688ade46a2da1582e628386075d63d",
+  "measurement": {
+    "ruff_version": "0.15.10",
+    "source_and_candidate_counts": [
+      1,
+      1
+    ]
+  },
+  "findings": [
+    {
+      "path": "plugins/cron_providers/__init__.py",
+      "scope": "load_cron_scheduler",
+      "rule": "F821",
+      "line": 64,
+      "code": "def load_cron_scheduler(name: str) -> Optional[CronScheduler]:",
+      "detail": "undefined name",
+      "count": 1,
+      "unit_body_hash": "5c8720fcf60fee0d"
+    },
+    {
+      "path": "plugins/cron_providers/__init__.py",
+      "scope": "_load_provider_from_dir",
+      "rule": "F821",
+      "line": 75,
+      "code": "def _load_provider_from_dir(provider_dir: Path) -> Optional[CronScheduler]:",
+      "detail": "undefined name",
+      "count": 1,
+      "unit_body_hash": "6b53e679215bdf48"
+    }
+  ],
+  "compatibility": "The names occur only in postponed return annotations. Current supported discovery and provider execution never evaluate these annotations: real named/directory loaders return canonical ABC instances, and resolver/fallback contracts pass. Importing discovery remains lazy with no cron package initialization. Retaining this metadata defect does not alter these demonstrated fork paths.",
+  "known_limitation": "Generic typing.get_type_hints on either function DOES raise NameError, even after provider execution. This is an unresolved introspection limitation, not corrected typing or a general F821 exemption. No supported in-repository consumer evaluates these two annotations; external reflection/documentation consumers are not proven safe. A new such consumer invalidates this rationale. Lazy metadata resolution was rejected because it initializes cron/profile scaffolding during introspection.",
+  "dependencies": [
+    {
+      "path": "cron/scheduler_provider.py",
+      "blob": "040909363a220d3adb40f4fb0ae2bcad20f6aa6a",
+      "outcome": "passed",
+      "claim": "resolve_cron_scheduler directly calls named loader, checks availability and returns canonical provider/builtin fallback; no loader-annotation evaluation."
+    },
+    {
+      "path": "plugins/plugin_loader.py",
+      "blob": "21ac41376f19cd34e66da15d84bde1f8c24ebda7",
+      "outcome": "passed",
+      "claim": "load_named directly invokes callback; instance_from_module uses canonical base class and subclass checks, not type hints."
+    },
+    {
+      "path": "cron/__init__.py",
+      "blob": "ad13295b2ca09dbfede004ac0fcc28b32c646b3a",
+      "outcome": "passed",
+      "claim": "Importing the canonical ABC requires package initialization, including bootstrap and scheduler imports; eager metadata resolution would change lazy discovery startup."
+    },
+    {
+      "path": "cron/worker_bootstrap.py",
+      "blob": "e95e2229389c3905a7f7104c3eb1ce7ee36fa9ee",
+      "outcome": "passed",
+      "claim": "Existing worker bootstrap is invoked by cron package initialization; no changes proposed."
+    },
+    {
+      "path": "hermes_cli/web_read_coalescing.py",
+      "blob": "3f5b5498a95b21022711da9e1a0152dd183b8e11",
+      "outcome": "passed",
+      "claim": "Runtime get_type_hints consumer wraps web route callables, not cron discovery functions."
+    },
+    {
+      "path": "scripts/gen_gateway_contracts.py",
+      "blob": "5c281a21a7716fb60ee13636a78b2d0c09407fa5",
+      "outcome": "passed",
+      "claim": "Build-time get_type_hints consumer evaluates gateway ToolsRead model fields, not cron discovery functions."
+    },
+    {
+      "path": "tests/cron/test_scheduler_provider.py",
+      "blob": "d0ebeed8c3d63dd428d5aff6e84444f3168449b5",
+      "outcome": "passed",
+      "claim": "Seven selected canonical tests passed: default/missing/unknown/unavailable/available resolver behavior, package shadowing and additive ABC contract."
+    }
+  ],
+  "receipts": [
+    {
+      "path": "/tmp/hermes-cron-annotation-existing-callers-20261016T002825.log",
+      "sha256": "7b6ad0e040fd90f74856c3b8874e5f4f51a802b88b60a0c904c8bd7fd6636a28",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~32 tests) under ['tests/cron/test_scheduler_provider.py']; running with -j 9\n[100.0% |    32/~32 | \u27137 | \u27170] \u2713 tests/cron/test_scheduler_provider.py (7\u2713, 0.6s)\n\n=== Summary: 1 files, 7 tests passed, 0 failed (100% complete) in 0.7s (9 workers) ===\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 0.6s  (runner wall: 0.7s, parallelism: 9x)\n  P50: 0.65s  P90: 0.65s  P95: 0.65s  P99: 0.65s  Max: 0.65s\n  <1s: 1 files (100%)  <2s: 1 files (100%)\n  Top 10 slowest:\n      0.65s  tests/cron/test_scheduler_provider.py\n"
+    },
+    {
+      "path": "/tmp/hermes-cron-lazy-annotation-probe.py",
+      "sha256": "474ef762f652db9543c6f2a823d922d0e9bdffa5ec46d0572b3745935036c7e6",
+      "text": "\"\"\"Read-only design probe; no checkout files are changed.\"\"\"\nimport os,sys,tempfile,types,typing,json\nfrom pathlib import Path\nfrom unittest.mock import patch\nsys.path.insert(0,os.getcwd())\nCONTRACT='''from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from cron.scheduler_provider import CronScheduler\n\ndef __getattr__(name: str):\n    if name == \"CronScheduler\":\n        from cron.scheduler_provider import CronScheduler\n        return CronScheduler\n    raise AttributeError(name)\n'''\nwith tempfile.TemporaryDirectory(prefix='hermes-cron-annotations-') as tmp:\n os.environ['HOME']=tmp;os.environ['HERMES_HOME']=tmp+'/.hermes'\n with patch.object(Path,'home',return_value=Path(tmp)):\n  import plugins.cron_providers as original\n  assert 'cron' not in sys.modules\n  snapshots={'after_original_discovery_import': sorted(str(p.relative_to(tmp)) for p in Path(tmp).rglob('*'))}\n  failures=[]\n  for name in ('load_cron_scheduler','_load_provider_from_dir'):\n   try:typing.get_type_hints(getattr(original,name))\n   except NameError:failures.append(name)\n  assert len(failures)==2\n  contract=types.ModuleType('plugins.cron_providers._contracts');exec(CONTRACT,contract.__dict__)\n  sys.modules[contract.__name__]=contract\n  candidate=types.ModuleType('synthetic_cron_loader');candidate.__file__=original.__file__\n  source=Path(original.__file__).read_text(encoding='utf-8-sig')\n  source=source.replace('from plugins import plugin_loader as _loader','from plugins import plugin_loader as _loader\\nfrom plugins.cron_providers import _contracts')\n  source=source.replace('Optional[CronScheduler]', 'Optional[_contracts.CronScheduler]')\n  exec(compile(source,original.__file__,'exec'),candidate.__dict__)\n  assert 'cron' not in sys.modules\n  assert candidate.load_cron_scheduler('synthetic-nonexistent-provider') is None\n  assert 'cron' not in sys.modules\n  snapshots['before_introspection']=sorted(str(p.relative_to(tmp)) for p in Path(tmp).rglob('*'))\n  hints={name:typing.get_type_hints(getattr(candidate,name)) for name in failures}\n  from cron.scheduler_provider import CronScheduler\n  for value in hints.values():assert value['return']==typing.Optional[CronScheduler]\n  assert contract.CronScheduler is CronScheduler\n  try:contract.unrecognized\n  except AttributeError:pass\n  else:raise AssertionError('unknown symbol accepted')\n  print(json.dumps({'baseline_name_errors':failures,'candidate_import_keeps_cron_unloaded':True,'missing_provider_lookup_keeps_cron_unloaded':True,'introspection_returns_canonical_ABC':True,'introspection_imports_cron_package': 'cron' in sys.modules,'unknown_contract_attribute':'AttributeError','filesystem_snapshots':dict(snapshots,after_introspection=sorted(str(p.relative_to(tmp)) for p in Path(tmp).rglob('*')))},indent=2))\n"
+    },
+    {
+      "path": "/tmp/hermes-cron-lazy-annotation-probe-20261016T002740.json",
+      "sha256": "3ed34d014e9aaf9d6f9995297fee1af7b0957ac9f4fef2f603958cd0f7d51b67",
+      "text": "{\n  \"baseline_name_errors\": [\n    \"load_cron_scheduler\",\n    \"_load_provider_from_dir\"\n  ],\n  \"candidate_import_keeps_cron_unloaded\": true,\n  \"missing_provider_lookup_keeps_cron_unloaded\": true,\n  \"introspection_returns_canonical_ABC\": true,\n  \"introspection_imports_cron_package\": true,\n  \"unknown_contract_attribute\": \"AttributeError\",\n  \"filesystem_snapshots\": {\n    \"after_original_discovery_import\": [],\n    \"before_introspection\": [],\n    \"after_introspection\": [\n      \".hermes\",\n      \".hermes/SOUL.md\",\n      \".hermes/audio_cache\",\n      \".hermes/cron\",\n      \".hermes/hooks\",\n      \".hermes/image_cache\",\n      \".hermes/logs\",\n      \".hermes/logs/curator\",\n      \".hermes/memories\",\n      \".hermes/pairing\",\n      \".hermes/sessions\",\n      \".hermes/skills\"\n    ]\n  }\n}\n"
+    },
+    {
+      "path": "/tmp/hermes-cron-loader-runtime-probe.py",
+      "sha256": "6d39c1ca5d8e2ce62fba89a5f38e3e47f022866d3034a28571cd80490016ee7c",
+      "text": "import os,sys,tempfile,typing,json\nfrom pathlib import Path\nfrom unittest.mock import patch\nsys.path.insert(0,os.getcwd())\nwith tempfile.TemporaryDirectory(prefix='hermes-cron-runtime-') as tmp:\n os.environ['HOME']=tmp;os.environ['HERMES_HOME']=tmp+'/.hermes'\n with patch.object(Path,'home',return_value=Path(tmp)):\n  import plugins.cron_providers as loaders\n  assert 'cron' not in sys.modules\n  root=Path(tmp)/'bundled';provider=root/'synthetic';provider.mkdir(parents=True)\n  (provider/'__init__.py').write_text('from cron.scheduler_provider import CronScheduler\\nclass Synthetic(CronScheduler):\\n    @property\\n    def name(self): return \"synthetic\"\\n    def start(self, stop_event, **kwargs): return None\\n',encoding='utf-8')\n  with patch.object(loaders,'_CRON_PLUGINS_DIR',root):\n   found=loaders.load_cron_scheduler('synthetic')\n   from cron.scheduler_provider import CronScheduler\n   assert isinstance(found,CronScheduler) and found.name=='synthetic'\n   found2=loaders._load_provider_from_dir(provider)\n   assert isinstance(found2,CronScheduler)\n  remaining=[]\n  for name in ('load_cron_scheduler','_load_provider_from_dir'):\n   try:typing.get_type_hints(getattr(loaders,name))\n   except NameError:remaining.append(name)\n  assert len(remaining)==2\n  print(json.dumps({'actual_named_loader':'canonical subclass returned','actual_directory_loader':'canonical subclass returned','remaining_get_type_hints_NameError':remaining},indent=2))\n"
+    },
+    {
+      "path": "/tmp/hermes-cron-loader-runtime-probe-20261016T002910.json",
+      "sha256": "0e6b1b0d673f17e9d2a9e56168ed6e2b0e8c592ff09e25bb86a5d2a3a9947ffd",
+      "text": "{\n  \"actual_named_loader\": \"canonical subclass returned\",\n  \"actual_directory_loader\": \"canonical subclass returned\",\n  \"remaining_get_type_hints_NameError\": [\n    \"load_cron_scheduler\",\n    \"_load_provider_from_dir\"\n  ]\n}\n"
+    },
+    {
+      "path": "/tmp/hermes-annotation-consumers-20261016.txt",
+      "sha256": "fe688ae53f11f2b05f3b1ef06befcf04f8d0a81ec32371f0c134f34f598957e2",
+      "text": "./agent/transports/hermes_tools_mcp_server.py:114:        _dispatch.__annotations__ = {**annots, \"return\": str}\n./scripts/gen_gateway_contracts.py:20:from typing import Any, get_args, get_type_hints\n./scripts/gen_gateway_contracts.py:50:    (\"ConnectorToolsSource\", ConnectorToolsSource, \"ToolsRead.source\", get_type_hints(ToolsRead)[\"source\"]),\n./hermes_cli/web_read_coalescing.py:6:from typing import get_type_hints\n./hermes_cli/web_read_coalescing.py:32:    hints = get_type_hints(func, include_extras=True)\n./hermes_cli/web_read_coalescing.py:65:    wrapped.__annotations__ = hints\n"
+    }
+  ],
+  "canonical_command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/cron/test_scheduler_provider.py -q -k \"resolve_ or package_does_not_shadow or abc_growth\"",
+  "probe_scope": "Isolated HOME/HERMES_HOME/Path.home; temporary synthetic provider only. Actual unchanged named and directory loader execution succeeds. Separate in-memory candidate demonstrates rejected lazy-introspection side effects. No production edits or provider calls.",
+  "proposed_evidence_repository_path": "analysis/sync-health/v0221-cron-loader-annotation-limitation.json"
+}

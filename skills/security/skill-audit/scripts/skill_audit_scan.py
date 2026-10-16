@@ -39,7 +39,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 
 BASELINE_VERSION = 1
@@ -89,7 +89,7 @@ _TEXT_EXTENSIONS = {
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _default_paths() -> dict[str, Path]:

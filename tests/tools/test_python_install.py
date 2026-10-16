@@ -26,9 +26,9 @@ class TestIsPep668Active:
         _real_join = os.path.join
         os.makedirs(fake_stdlib, exist_ok=True)
         open(marker, "w").close()
-        orig_dirname = pi.os.path.dirname
-        orig_join = pi.os.path.join
-        orig_exists = pi.os.path.exists
+        _orig_dirname = pi.os.path.dirname
+        _orig_join = pi.os.path.join
+        _orig_exists = pi.os.path.exists
 
         def _dirname(p):
             return fake_stdlib
@@ -47,7 +47,7 @@ class TestIsPep668Active:
     def test_false_when_marker_missing(self, monkeypatch, tmp_path):
         fake_stdlib = str(tmp_path / "stdlib")
         os.makedirs(fake_stdlib, exist_ok=True)
-        orig_dirname = pi.os.path.dirname
+        _orig_dirname = pi.os.path.dirname
 
         def _dirname(p):
             return fake_stdlib
@@ -79,7 +79,7 @@ class TestRewritePipCommand:
 
     def test_rewrites_with_uv(self, monkeypatch):
         monkeypatch.setattr(pi, "is_pep668_active", lambda: True)
-        monkeypatch.setattr(pi.shutil, "which", lambda name: "/usr/bin/uv" if name == "uv" else None)
+        monkeypatch.setattr(pi, "_resolve_uv", lambda: "/usr/bin/uv")
         monkeypatch.setattr(pi, "_uv_python_flag", lambda: "--python=/usr/bin/python3")
         rewritten = pi.rewrite_pip_command("pip install markdown")
         assert rewritten is not None
@@ -94,7 +94,7 @@ class TestRewritePipCommand:
         fake_pip.touch()
 
         monkeypatch.setattr(pi, "is_pep668_active", lambda: True)
-        monkeypatch.setattr(pi.shutil, "which", lambda name: None)
+        monkeypatch.setattr(pi, "_resolve_uv", lambda: None)
 
         # Stub venv creation so it "succeeds" instantly
         def _stub_ensure():
@@ -113,7 +113,7 @@ class TestRewritePipCommand:
 
     def test_preserves_compound_command(self, monkeypatch):
         monkeypatch.setattr(pi, "is_pep668_active", lambda: True)
-        monkeypatch.setattr(pi.shutil, "which", lambda name: "/usr/bin/uv" if name == "uv" else None)
+        monkeypatch.setattr(pi, "_resolve_uv", lambda: "/usr/bin/uv")
         monkeypatch.setattr(pi, "_uv_python_flag", lambda: "--python=/usr/bin/python3")
         cmd = "cd /tmp && pip install markdown"
         rewritten = pi.rewrite_pip_command(cmd)
@@ -151,7 +151,23 @@ class TestGetInstallHint:
 
     def test_hint_mentions_uv(self, monkeypatch):
         monkeypatch.setattr(pi, "is_pep668_active", lambda: True)
-        monkeypatch.setattr(pi.shutil, "which", lambda name: "/usr/bin/uv" if name == "uv" else None)
+        monkeypatch.setattr(pi, "_resolve_uv", lambda: "/usr/bin/uv")
         monkeypatch.setattr(pi, "_uv_python_flag", lambda: "--python=/usr/bin/python3")
         hint = pi.get_install_hint()
         assert "uv pip install" in hint
+
+
+def test_uv_lookup_uses_pm_composed_path_without_installing(monkeypatch):
+    """A model's pip rewrite resolves the installed manager, not a shadow uv."""
+    from types import SimpleNamespace
+    import pm
+    from hermes_platform import resolver
+    calls = []
+    monkeypatch.setattr(pm, "env_for", lambda name: {"PATH": "/managed/uv/bin:/usr/bin"})
+    monkeypatch.setattr(pm, "ensure", lambda *args, **kwargs: pytest.fail("Lookup must never install"))
+    def locate(name, context):
+        calls.append((name, context.path))
+        return SimpleNamespace(command=("/managed/uv/bin/uv",))
+    monkeypatch.setattr(resolver, "locate_command", locate)
+    assert pi._resolve_uv() == "/managed/uv/bin/uv"
+    assert calls == [("uv", "/managed/uv/bin:/usr/bin")]

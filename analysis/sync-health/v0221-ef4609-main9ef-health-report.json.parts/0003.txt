@@ -1,0 +1,237 @@
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "tui_gateway/transport.py",
+    "rule": "HX012",
+    "scope": "FanoutTransport.write",
+    "line": 291,
+    "detail": "raw threading.Thread",
+    "blocking": false,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "tui_gateway/turn_marker.py",
+    "rule": "S110",
+    "scope": "_writer_identity",
+    "line": 50,
+    "detail": "try/except/pass",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "tui_gateway/turn_marker.py",
+    "rule": "BLE001",
+    "scope": "_writer_identity",
+    "line": 50,
+    "detail": "blind `except Exception`",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "tui_gateway/turn_marker.py",
+    "rule": "BLE001",
+    "scope": "marker_writer_state",
+    "line": 72,
+    "detail": "blind `except Exception`",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "tui_gateway/ws.py",
+    "rule": "CC",
+    "scope": "handle_ws",
+    "line": 354,
+    "detail": "CC 21 > target 20 (was 19)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "tui_gateway/ws.py",
+    "rule": "BLE001",
+    "scope": "WSTransport._close_socket",
+    "line": 269,
+    "detail": "blind `except Exception`",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "tui_gateway/ws.py",
+    "rule": "BLE001",
+    "scope": "_start_backend_liveness",
+    "line": 346,
+    "detail": "blind `except Exception`",
+    "blocking": true,
+    "allowed_reason": "liveness boundary; logs the traceback (exc_info) via _log, a name ruff does not treat as a logger",
+    "inherited_debt": null
+  },
+  {
+    "path": "tui_gateway/ws.py",
+    "rule": "BLE001",
+    "scope": "handle_ws._dispatch_loop",
+    "line": 391,
+    "detail": "blind `except Exception`",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "ui-tui/packages/hermes-ink/src/ink/log-update.ts",
+    "rule": "CC",
+    "scope": "LogUpdate.render.<anon>#3",
+    "line": 315,
+    "detail": "CC 25 > target 20 (was 18)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+    "rule": "FILE_LINES",
+    "scope": "<module>",
+    "line": 1,
+    "detail": "lines 2421 > 2310, its value on main (over target 2000: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": {
+      "entry": "vitest-structural-size-07",
+      "manifest_sha256": "9cc8ae0890c9a2a9fb63ea50d04100fa906df0746140ce8653425146904dde71",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_path": "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+      "review_receipt": "Independent source organization review on 2026-10-15, exact unchanged upstream bytes and actual measured line count; no execution receipt or feature-compatibility claim."
+    }
+  },
+  {
+    "path": "ui-tui/src/app/turnController.ts",
+    "rule": "CC",
+    "scope": "TurnController.recordMessageComplete",
+    "line": 671,
+    "detail": "CC 25 > 21, its value on main (over target 20: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "ui-tui/src/app/useInputHandlers.ts",
+    "rule": "CC",
+    "scope": "useInputHandlers.<anon>#2",
+    "line": 450,
+    "detail": "CC 132 > 130, its value on main (over target 20: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "ui-tui/src/app/useInputHandlers.ts",
+    "rule": "FUNC_LINES",
+    "scope": "useInputHandlers.<anon>#2",
+    "line": 450,
+    "detail": "FUNC_LINES 363 > 336, its value on main (over target 300: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "ui-tui/src/app/useMainApp.ts",
+    "rule": "FUNC_LINES",
+    "scope": "useMainApp",
+    "line": 260,
+    "detail": "FUNC_LINES 441 > 439, its value on main (over target 300: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "ui-tui/src/components/appChrome.tsx",
+    "rule": "FUNC_LINES",
+    "scope": "StatusRule",
+    "line": 533,
+    "detail": "FUNC_LINES 346 > 341, its value on main (over target 300: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": {
+      "entry": "status-rule-structural-length-01",
+      "manifest_sha256": "9cc8ae0890c9a2a9fb63ea50d04100fa906df0746140ce8653425146904dde71",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_path": "ui-tui/src/components/appChrome.tsx",
+      "review_receipt": "Independent complete view-function structural review on 2026-10-15; no native rendering or timer correctness claim."
+    }
+  },
+  {
+    "path": "ui-tui/src/components/appLayout.tsx",
+    "rule": "CC",
+    "scope": "ComposerPane",
+    "line": 304,
+    "detail": "CC 22 > target 20 (was 15)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "ui-tui/src/components/journey.tsx",
+    "rule": "CC",
+    "scope": "Journey",
+    "line": 138,
+    "detail": "CC 27 > 26, its value on main (over target 20: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "ui-tui/src/components/thinking.tsx",
+    "rule": "FUNC_LINES",
+    "scope": "ToolTrail",
+    "line": 689,
+    "detail": "FUNC_LINES 377 > 372, its value on main (over target 300: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "ui-tui/src/hooks/useVirtualHistory.ts",
+    "rule": "CC",
+    "scope": "useVirtualHistory",
+    "line": 138,
+    "detail": "CC 64 > 57, its value on main (over target 20: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "ui-tui/src/hooks/useVirtualHistory.ts",
+    "rule": "FUNC_LINES",
+    "scope": "useVirtualHistory",
+    "line": 138,
+    "detail": "FUNC_LINES 334 > 313, its value on main (over target 300: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "ui-tui/src/hooks/useVirtualHistory.ts",
+    "rule": "CC",
+    "scope": "useVirtualHistory.<anon>#5",
+    "line": 558,
+    "detail": "CC 33 > 32, its value on main (over target 20: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  {
+    "path": "web/src/App.tsx",
+    "rule": "FUNC_LINES",
+    "scope": "App",
+    "line": 375,
+    "detail": "FUNC_LINES 365 > 364, its value on main (over target 300: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  }
+]

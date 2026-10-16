@@ -13,14 +13,14 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 
-def parse_refusal_telemetry_file(filepath: Path | str) -> List[Dict[str, Any]]:
+def parse_refusal_telemetry_file(filepath: Path | str) -> list[dict[str, Any]]:
     """Parse a refusal telemetry jsonl or json file."""
     path = Path(filepath)
     if not path.exists():
         return []
 
     records = []
-    with path.open("r", encoding="utf-8") as f:
+    with path.open("r", encoding="utf-8-sig") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -33,7 +33,7 @@ def parse_refusal_telemetry_file(filepath: Path | str) -> List[Dict[str, Any]]:
     return records
 
 
-def analyze_refusal_telemetry(records: List[Dict[str, Any]]) -> Dict[str, Any]:
+def analyze_refusal_telemetry(records: list[dict[str, Any]]) -> dict[str, Any]:
     """Analyze refusal telemetry records to compute per-category transition rates.
 
     Each record expects:
@@ -41,10 +41,10 @@ def analyze_refusal_telemetry(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     - nudge_tier: str (e.g., "gentle_substitute", "script_proposal")
     - shifted: bool (True if the agent proposed an alternative after nudge)
     """
-    category_counts: Dict[str, int] = defaultdict(int)
-    category_shifts: Dict[str, int] = defaultdict(int)
-    tier_counts: Dict[str, int] = defaultdict(int)
-    tier_shifts: Dict[str, int] = defaultdict(int)
+    category_counts: dict[str, int] = defaultdict(int)
+    category_shifts: dict[str, int] = defaultdict(int)
+    tier_counts: dict[str, int] = defaultdict(int)
+    tier_shifts: dict[str, int] = defaultdict(int)
 
     for rec in records:
         cat = str(rec.get("category", "unknown"))

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
-from sync_batch_probe import _bucket_for, _probe_tag, _markdown, TagProbe  # noqa: E402
+from sync_batch_probe import _bucket_for, _probe_tag, _markdown, TagProbe
 
 
 def test_decisions_fail_closed_for_core_size_and_errors():
@@ -101,6 +101,7 @@ def test_probe_tag_reports_known_conflicts(syn_repo, monkeypatch):
         capture_output=True,
         text=True,
         encoding="utf-8",
+        check=False,
     ).stdout
     # Already-contained and clean non-fast-forward candidates both abort cleanly.
     assert _probe_tag("main", "main").total == 0
@@ -129,6 +130,7 @@ def test_probe_tag_reports_known_conflicts(syn_repo, monkeypatch):
         capture_output=True,
         text=True,
         encoding="utf-8",
+        check=False,
     ).stdout
     assert before == after
     cli = subprocess.run(
@@ -147,6 +149,7 @@ def test_probe_tag_reports_known_conflicts(syn_repo, monkeypatch):
         text=True,
         encoding="utf-8",
         errors="replace",
+        check=False,
     )
     assert cli.returncode == 2, cli.stderr
     reports = json.loads(cli.stdout)
@@ -159,5 +162,6 @@ def test_probe_tag_reports_known_conflicts(syn_repo, monkeypatch):
         text=True,
         encoding="utf-8",
         errors="replace",
+        check=False,
     )
     assert status.stdout.strip() == "", f"repo left dirty: {status.stdout!r}"

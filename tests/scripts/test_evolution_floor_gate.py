@@ -10,7 +10,7 @@ SCRIPTS = REPO_ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from evolution_merge_gate import check_floor_gate, check_merge_policy_with_quality  # noqa: E402
+from evolution_merge_gate import check_floor_gate, check_merge_policy_with_quality
 
 _FILES = [{"path": "README.md", "additions": 3, "deletions": 2}]
 

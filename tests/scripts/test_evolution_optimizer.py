@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_optimizer import (  # noqa: E402
+from evolution_optimizer import (
     DEFAULT_MAX_PASSES,
     EXIT_BAD_INPUT,
     EXIT_CONVERGED,
@@ -22,7 +22,7 @@ from evolution_optimizer import (  # noqa: E402
     make_default_evaluate,
     run_optimizer_loop,
 )
-from evolution_evaluator import ACCEPT, OPTIMIZE, STOP_BUDGET  # noqa: E402
+from evolution_evaluator import ACCEPT, OPTIMIZE, STOP_BUDGET
 
 
 def _verdict(name, best_index=0, best_score=0.0):

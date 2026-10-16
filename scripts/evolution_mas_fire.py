@@ -38,16 +38,16 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 __all__ = [
-    "FaultType",
-    "FaultResult",
-    "FaultCase",
     "FAULT_SET",
+    "FaultCase",
+    "FaultResult",
+    "FaultType",
     "inject_corrupted_summary",
-    "inject_stale_file_race",
     "inject_instruction_misinterpretation",
     "inject_reasoning_drift",
-    "run_fault_suite",
+    "inject_stale_file_race",
     "main",
+    "run_fault_suite",
 ]
 
 
@@ -69,7 +69,7 @@ class FaultResult:
     detected: bool  # True if the validation layer caught the fault
     details: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "fault_type": self.fault_type,
             "description": self.description,
@@ -84,8 +84,8 @@ class FaultCase:
 
     fault_type: str
     description: str
-    inject_fn: Callable[[], Dict[str, Any]]  # produces the degraded output
-    validate_fn: Callable[[Dict[str, Any]], bool]  # returns True if fault detected
+    inject_fn: Callable[[], dict[str, Any]]  # produces the degraded output
+    validate_fn: Callable[[dict[str, Any]], bool]  # returns True if fault detected
 
 
 # --- Fault injectors ---
@@ -93,7 +93,7 @@ class FaultCase:
 
 def inject_corrupted_summary(
     original_summary: str = "Successfully analyzed the codebase and found 3 issues.",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Inject a corrupted/truncated summary.
 
     Simulates a subagent whose summary was garbled during transmission or
@@ -116,7 +116,7 @@ def inject_corrupted_summary(
 def inject_stale_file_race(
     file_content: str = "original content at delegation time",
     modified_content: str = "MODIFIED after delegation — subagent read stale version",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Inject a stale-file race condition.
 
     Simulates a subagent that read a file at delegation time, but the file was
@@ -138,7 +138,7 @@ def inject_stale_file_race(
 
 def inject_instruction_misinterpretation(
     requested_task: str = "Find and list all Python files with syntax errors",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Inject instruction misinterpretation.
 
     Simulates a subagent that performed a DIFFERENT task than what was
@@ -160,7 +160,7 @@ def inject_instruction_misinterpretation(
 def inject_reasoning_drift(
     reasoning: str = "I should check the database connection first, then verify the API endpoint.",
     conclusion: str = "The file system is corrupted and needs a full reformat.",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Inject reasoning drift.
 
     Simulates a subagent whose reasoning process leads to one conclusion but
@@ -180,7 +180,7 @@ def inject_reasoning_drift(
 # --- Validators (deterministic heuristic checks) ---
 
 
-def _validate_corrupted_summary(output: Dict[str, Any]) -> bool:
+def _validate_corrupted_summary(output: dict[str, Any]) -> bool:
     """Check if a subagent output shows signs of corruption."""
     summary = output.get("subagent_output", {}).get("summary", "")
     if not isinstance(summary, str):
@@ -190,7 +190,7 @@ def _validate_corrupted_summary(output: Dict[str, Any]) -> bool:
     return any(ind in summary for ind in indicators)
 
 
-def _validate_stale_file_race(output: Dict[str, Any]) -> bool:
+def _validate_stale_file_race(output: dict[str, Any]) -> bool:
     """Check if subagent read stale file content."""
     file_content_at_read = output.get("subagent_output", {}).get(
         "file_content_at_read", ""
@@ -201,7 +201,7 @@ def _validate_stale_file_race(output: Dict[str, Any]) -> bool:
     return file_content_at_read != current_content
 
 
-def _validate_instruction_misinterpretation(output: Dict[str, Any]) -> bool:
+def _validate_instruction_misinterpretation(output: dict[str, Any]) -> bool:
     """Check if subagent performed a different task than requested."""
     task_performed = output.get("subagent_output", {}).get("task_performed", "")
     requested_task = output.get("requested_task", "")
@@ -234,7 +234,7 @@ def _validate_instruction_misinterpretation(output: Dict[str, Any]) -> bool:
     return overlap_ratio < 0.2
 
 
-def _validate_reasoning_drift(output: Dict[str, Any]) -> bool:
+def _validate_reasoning_drift(output: dict[str, Any]) -> bool:
     """Check if conclusion diverges from reasoning."""
     reasoning = output.get("subagent_output", {}).get("reasoning", "")
     conclusion = output.get("subagent_output", {}).get("summary", "")
@@ -270,7 +270,7 @@ def _validate_reasoning_drift(output: Dict[str, Any]) -> bool:
 
 # --- Fault set definition ---
 
-FAULT_SET: List[FaultCase] = [
+FAULT_SET: list[FaultCase] = [
     FaultCase(
         fault_type=FaultType.CORRUPTED_SUMMARY,
         description="Subagent returns a summary with garbled/truncated text",
@@ -298,7 +298,7 @@ FAULT_SET: List[FaultCase] = [
 ]
 
 
-def run_fault_suite(cases: Optional[List[FaultCase]] = None) -> List[FaultResult]:
+def run_fault_suite(cases: Optional[list[FaultCase]] = None) -> list[FaultResult]:
     """Run the full fault injection suite.
 
     For each fault case: inject the fault, then check whether the validator
@@ -307,7 +307,7 @@ def run_fault_suite(cases: Optional[List[FaultCase]] = None) -> List[FaultResult
     """
     if cases is None:
         cases = FAULT_SET
-    results: List[FaultResult] = []
+    results: list[FaultResult] = []
     for case in cases:
         injected = case.inject_fn()
         detected = case.validate_fn(injected)
@@ -322,9 +322,9 @@ def run_fault_suite(cases: Optional[List[FaultCase]] = None) -> List[FaultResult
     return results
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     """CLI: run the fault injection suite and print results."""
-    args = argv[1:]
+    _args = argv[1:]
     results = run_fault_suite()
 
     summary = {

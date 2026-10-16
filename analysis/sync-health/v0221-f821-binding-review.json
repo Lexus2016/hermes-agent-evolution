@@ -1,0 +1,698 @@
+{
+  "review_scope": "Preparation-only evidence for 31 frozen updater occurrences and one dynamic Feishu SDK binding. No manifest activation; five unresolved deferred annotations excluded.",
+  "source_commit": "297552a9d646119871391d202509822cd86330df",
+  "candidate_head": "64e6cd9a94ec42a964583b442476405b3809e884",
+  "human_review": "Independent integration controller authorized bounded preparation after source/call-path review. Generated identities remain subject to controller verification; static identity is not behavioral proof.",
+  "execution": {
+    "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/hermes_cli/test_old_updater_shims.py tests/plugins/test_context_engine_user_dir.py tests/cron/test_scheduler_provider.py tests/gateway/test_feishu_lazy_import.py tests/gateway/test_feishu.py -q",
+    "summary": "5 files, 190 passed, 0 failed, 7 skipped",
+    "receipt_file": "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+    "receipt_sha256": "31dc6a04efdff81814973b2da504f39c01ca8a83b87d7c4eee61a7c647b93efe",
+    "receipt_text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 5 test files (~120 tests) under ['tests/hermes_cli/test_old_updater_shims.py', 'tests/plugins/test_context_engine_user_dir.py', 'tests/cron/test_scheduler_provider.py', 'tests/gateway/test_feishu_lazy_import.py', 'tests/gateway/test_feishu.py']; running with -j 9\n[  0.8% |     1/~120 | \u27131 | \u27170] \u2713 tests/plugins/test_context_engine_user_dir.py (1\u2713, 0.9s)\n[  2.5% |     3/~120 | \u27133 | \u27170] \u2713 tests/gateway/test_feishu_lazy_import.py (2\u2713, 1.0s)\n[ 66.7% |    80/~120 | \u271373 | \u2717 0] \u2713 tests/gateway/test_feishu.py (70\u2713 7s, 2.4s)\n[ 93.3% |   112/~120 | \u2713105 | \u2717  0] \u2713 tests/cron/test_scheduler_provider.py (32\u2713, 2.9s)\n[100.0% |   120/~120 | \u2713190 | \u2717  0] \u2713 tests/hermes_cli/test_old_updater_shims.py (85\u2713, 3.4s)\n\n=== Summary: 5 files, 190 tests passed, 0 failed, 7 skipped (100% complete) in 3.4s (9 workers) ===\n  Durations cached to test_durations.json (5 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   5\n  Total subprocess CPU-wall: 10.6s  (runner wall: 3.4s, parallelism: 9x)\n  P50: 2.37s  P90: 3.40s  P95: 3.40s  P99: 3.40s  Max: 3.40s\n  <1s: 1 files (20%)  <2s: 2 files (40%)\n  Top 10 slowest:\n      3.40s  tests/hermes_cli/test_old_updater_shims.py\n      2.92s  tests/cron/test_scheduler_provider.py\n      2.37s  tests/gateway/test_feishu.py\n      1.04s  tests/gateway/test_feishu_lazy_import.py\n      0.86s  tests/plugins/test_context_engine_user_dir.py\n",
+    "limitations": "Feishu uses synthetic SDK/client collaborators; no live service or install. Historical handoff tests prohibit external work and mock fresh child launch; they do not execute old post-handoff installer code."
+  },
+  "binding_sources": {
+    "hermes_cli/_old_updater.py": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+    "hermes_cli/managed_uv.py": "b3838c058c970a72335cf5420695acdc4703a0e1",
+    "hermes_cli/psutil_android.py": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+    "plugins/platforms/feishu/adapter.py": "950694c32df13751b5ad2cdef12f4a30742483d6",
+    "tests/compat/old_updater_support.py": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+    "tests/gateway/test_feishu.py": "e1fd2e14224ef20004c966848db96cea7cb07334",
+    "tests/gateway/test_feishu_lazy_import.py": "15df49c570f24bb4150bb44df9619addf0efee39",
+    "tests/hermes_cli/test_old_updater_shims.py": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3"
+  },
+  "findings": [
+    {
+      "path": "plugins/platforms/feishu/adapter.py",
+      "rule": "F821",
+      "scope": "FeishuAdapter._build_delete_message_request",
+      "line": 4019,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 27,
+      "name": "Undefined name `DeleteMessageRequest`",
+      "disposition": "dynamic binding verified",
+      "compatibility_rationale": "DeleteMessageRequest is inserted into module globals as None from _LARK_SDK_IMPORTS at import; _load_lark_oapi atomically replaces it with SDK class before FEISHU_AVAILABLE becomes True. _sdk_build handles None. Probe executes both None fallback and bound synthetic builder; TestDeleteMessage.test_delete_message_calls_im_message_delete exercises async public call.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_install_psutil_android_compat",
+      "line": 40,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 9,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical Android helper is stopped at its real hermes_cli.psutil_android import (line32) before download or _m dereference; dedicated old_android_updater_handoffs_before_download test passes.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 62,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 5,
+      "name": "Undefined name `_refuse_update_if_venv_foreign_owned`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Fixture caller injects this exact pre-handoff global via old module attributes before invocation; test_old_updater_retains_its_code_but_loads_new_managed_uv executes ownership/self-lock/marker then handoff and verifies order. This is a frozen fixture, not imported production code.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 62,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 42,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Fixture caller injects this exact pre-handoff global via old module attributes before invocation; test_old_updater_retains_its_code_but_loads_new_managed_uv executes ownership/self-lock/marker then handoff and verifies order. This is a frozen fixture, not imported production code.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 68,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 5,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Fixture caller injects this exact pre-handoff global via old module attributes before invocation; test_old_updater_retains_its_code_but_loads_new_managed_uv executes ownership/self-lock/marker then handoff and verifies order. This is a frozen fixture, not imported production code.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 75,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 5,
+      "name": "Undefined name `_write_update_incomplete_marker`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Fixture caller injects this exact pre-handoff global via old module attributes before invocation; test_old_updater_retains_its_code_but_loads_new_managed_uv executes ownership/self-lock/marker then handoff and verifies order. This is a frozen fixture, not imported production code.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 76,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 20,
+      "name": "Undefined name `_editable_install_is_current`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Fixture caller injects this exact pre-handoff global via old module attributes before invocation; test_old_updater_retains_its_code_but_loads_new_managed_uv executes ownership/self-lock/marker then handoff and verifies order. This is a frozen fixture, not imported production code.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 77,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 18,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Fixture caller injects this exact pre-handoff global via old module attributes before invocation; test_old_updater_retains_its_code_but_loads_new_managed_uv executes ownership/self-lock/marker then handoff and verifies order. This is a frozen fixture, not imported production code.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 92,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 18,
+      "name": "Undefined name `_ensure_uv_for_termux`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 102,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 37,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 103,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 12,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 109,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 16,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 109,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 48,
+      "name": "Undefined name `_is_android_python`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 112,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 13,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 118,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 9,
+      "name": "Undefined name `_ensure_venv_pip`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 119,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 12,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 123,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 16,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 123,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 42,
+      "name": "Undefined name `_is_android_python`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 126,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 13,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 136,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 9,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 139,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 9,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 145,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 5,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 153,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 5,
+      "name": "Undefined name `_sweep_bytecode_after_update`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 154,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 5,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 158,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 5,
+      "name": "Undefined name `_write_lazy_refresh_incomplete_marker`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 159,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 5,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 163,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 15,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 169,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 9,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 176,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 5,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 185,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 5,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 191,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 47,
+      "name": "Undefined name `_validate_critical_modules_import`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    },
+    {
+      "path": "tests/compat/old_updater_dependencies.py",
+      "rule": "F821",
+      "scope": "_sync_python_dependencies_after_pull",
+      "line": 192,
+      "detail": "undefined name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "column": 9,
+      "name": "Undefined name `_m`",
+      "disposition": "no current runtime defect in frozen-fixture contract",
+      "compatibility_rationale": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+      "evidence": [
+        "/tmp/hermes-f821-receipt-20261015T221258Z-31dc6a04.log",
+        "/tmp/hermes-f821-introspection-probe.log",
+        "/tmp/hermes-f821-review-ruff.json"
+      ]
+    }
+  ]
+}

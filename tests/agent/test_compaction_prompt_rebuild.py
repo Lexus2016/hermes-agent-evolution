@@ -79,7 +79,7 @@ def _init_repo(path, first_commit):
     (path / "main.py").write_text("print(1)\n")
     subprocess.run(["git", "add", "-A"], cwd=path, check=True)
     subprocess.run(["git", "commit", "-qm", first_commit], cwd=path, check=True)
-    return path
+    return path.resolve()
 
 
 
@@ -251,6 +251,30 @@ class TestWorkspaceSnapshotPinnedAcrossCompaction(unittest.TestCase):
         finally:
             os.chdir(old_cwd)
             shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_symlink_cwd_reuses_workspace_pin(self):
+        """Binding an alias of the same workspace must not refresh prompt bytes."""
+        import tempfile
+        from pathlib import Path
+        from agent.system_prompt import build_system_prompt, invalidate_system_prompt
+
+        with tempfile.TemporaryDirectory(prefix="test-pin-alias-") as tmp:
+            repo = _init_repo(Path(tmp) / "proj", "init commit")
+            alias = Path(tmp) / "alias"
+            try:
+                alias.symlink_to(repo, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"directory symlinks unavailable: {exc}")
+            agent = self._pin_agent()
+            with patch("agent.prompt_builder.load_soul_md", return_value=""), \
+                 patch("agent.prompt_builder.build_environment_hints", return_value="ENV HINTS"):
+                with patch("agent.system_prompt.resolve_context_cwd", return_value=repo):
+                    original = build_system_prompt(agent)
+                self.assertIn("Status: clean", original)
+                (repo / "untracked.txt").write_text("wip")
+                invalidate_system_prompt(agent)
+                with patch("agent.system_prompt.resolve_context_cwd", return_value=alias):
+                    self.assertEqual(build_system_prompt(agent), original)
 
     def test_agent_that_did_not_build_the_prompt_replays_the_persisted_snapshot(self):
         """Resume / gateway / TUI shape: a fresh agent rebuilds (compaction, a first /compress) after

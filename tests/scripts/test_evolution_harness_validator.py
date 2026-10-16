@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_harness_validator import score_candidate  # noqa: E402
+from evolution_harness_validator import score_candidate
 
 _SCRIPT = str(
     Path(__file__).resolve().parents[2] / "scripts" / "evolution_harness_validator.py"
@@ -57,6 +57,7 @@ class TestScoreCandidate:
             input=json.dumps(payload),
             capture_output=True,
             text=True,
+            check=False,
         )
         assert proc.returncode == 0
         out = json.loads(proc.stdout)
@@ -68,5 +69,6 @@ class TestScoreCandidate:
             input="not-json",
             capture_output=True,
             text=True,
+            check=False,
         )
         assert proc.returncode == 2

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for self-refining harness state with versioned rollback (Issue #2497, Slice B)."""
 
 from __future__ import annotations

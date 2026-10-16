@@ -12,6 +12,22 @@ def _flag(parser, *names, help, **kw):
     parser.add_argument(*names, action="store_true", help=help, **kw)
 
 
+def cmd_sessions_lazy(args, **kwargs):
+    """``hermes sessions`` handler; sessions_cmd imports only when the subcommand runs."""
+    from hermes_cli.sessions_cmd import cmd_sessions
+
+    return cmd_sessions(args, **kwargs)
+
+
+def _add_rename_and_discard(sessions_subparsers) -> None:
+    sessions_rename = sessions_subparsers.add_parser(
+        "rename", help="Set or change a session's title")
+    sessions_rename.add_argument("session_id", help="Session ID to rename")
+    sessions_rename.add_argument("title", nargs="+", help="New title for the session")
+    from hermes_cli.sessions_discard import add_discard_parser
+    add_discard_parser(sessions_subparsers)
+
+
 def build_sessions_parser(subparsers, *, cmd_sessions: Callable) -> None:
     """Attach the ``sessions`` subcommand to ``subparsers``."""
     sessions_parser = subparsers.add_parser(
@@ -89,7 +105,8 @@ def build_sessions_parser(subparsers, *, cmd_sessions: Callable) -> None:
     sessions_export.add_argument("--session-id", help="Session ID or unique prefix to export")
     _add_session_filter_args(
         sessions_export, "Only export sessions older than AGE (duration like '5h'/'2d', "
-        "bare number of days, or an ISO timestamp)")
+        "bare number of days, or an ISO timestamp). Filtered exports include pinned and archived "
+        "sessions, so they back up everything a matching prune could delete")
     _flag(sessions_export, "--redact",
         help="Redact secrets (API keys, tokens, credentials) from exported content")
     sessions_export.add_argument("--lineage", choices=["single", "logical"], default="single",
@@ -118,7 +135,7 @@ def build_sessions_parser(subparsers, *, cmd_sessions: Callable) -> None:
             "and are older than AGE (default 30 days). Ordinary prune can "
             "never reach these — it only ever selects ended sessions")
     _flag(sessions_prune, "--force",
-        help="Run even while another Hermes process (gateway, Desktop, dashboard, cron) holds state.db — rewriting the store under a live writer can leave every agent refusing turns until all writers are stopped")
+        help="With no gateway running: run even while another Hermes process (Desktop, dashboard, cron) holds state.db — rewriting the store under a live writer can leave every agent refusing turns until all writers are stopped. With the gateway running, prune always goes through it")
 
     sessions_archive = sessions_subparsers.add_parser(
         "archive", help="Bulk-archive (soft-hide) sessions matching filters — no deletion")
@@ -185,8 +202,8 @@ def build_sessions_parser(subparsers, *, cmd_sessions: Callable) -> None:
     sessions_set_journal_mode.add_argument("--db", default=None, metavar="PATH",
         help="Convert another Hermes SQLite store (e.g. kanban.db) instead of the profile's state.db")
     _flag(sessions_set_journal_mode, "--force",
-        help="Windows only: proceed without the holder scan (which does not exist there) after stopping "
-            "every Hermes process yourself")
+        help="Proceed when the holder scan itself fails (cannot prove the store is quiet) after stopping every "
+            "Hermes process yourself; a process the scan does find is still refused")
 
     sessions_repair_routing = sessions_subparsers.add_parser(
         "repair-routing", help="Re-stamp gateway sessions that lost their routing identity",
@@ -224,6 +241,20 @@ def build_sessions_parser(subparsers, *, cmd_sessions: Callable) -> None:
             "switched on), 'move' them to the default store (a default chat that leaked in), or "
             "'report' (default) — the rows themselves cannot tell the two cases apart")
 
+
+    sessions_repair_prompts = sessions_subparsers.add_parser(
+        "repair-prompts", help="Report or clear stored system prompts degraded to a reduced-toolset build",
+        description="Repair session rows degraded by the pre-#122822 gateway hygiene/compress bug. "
+            "Automatic repair requires positive tools[] evidence; rows without a readable pin are "
+            "reported as unverifiable and never changed by a scan. Clearing a prompt makes the next "
+            "turn rebuild and persist healthy bytes. Reports without touching anything unless --apply "
+            "is given; a session_id is an explicit destructive override and can clear even a healthy prompt.")
+    _flag(sessions_repair_prompts, "--apply", help="Clear the verified prompts (default: report only)")
+    _flag(sessions_repair_prompts, "--json",
+        help="Machine-readable output; with --apply, apply without an interactive confirmation")
+    sessions_repair_prompts.add_argument("session_id", nargs="?", default=None,
+        help="Destructive override: clear this session even when its stored prompt is healthy")
+
     sessions_recover = sessions_subparsers.add_parser(
         "recover", help="Rebuild canonical session data into a separate clean database",
         description="Offline, non-destructive recovery for a damaged state.db. The "
@@ -249,46 +280,9 @@ def build_sessions_parser(subparsers, *, cmd_sessions: Callable) -> None:
 
     sessions_subparsers.add_parser("stats", help="Show session store statistics")
 
-    # Fork: per-session spend with per-tool/per-subagent attribution.
-    sessions_cost = sessions_subparsers.add_parser(
-        "cost",
-        help="Show per-session spend plus per-tool and per-subagent cost breakdown",
-        description=(
-            "Per-session estimated spend with per-tool and per-subagent "
-            "(delegate) cost attribution. Reuses the same cost model as "
-            "'hermes insights' / /insights."
-        ),
-    )
-    sessions_cost.add_argument(
-        "--days", type=int, default=30, help="Number of days to analyze (default: 30)"
-    )
-    sessions_cost.add_argument(
-        "--source", help="Filter by platform (cli, telegram, subagent, etc.)"
-    )
-    sessions_cost.add_argument(
-        "--limit",
-        type=int,
-        default=20,
-        help="Max per-session rows to show (0 for all; default: 20)",
-    )
-    sessions_cost.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit the raw cost report as JSON instead of a table",
-    )
+    _add_cost_and_entropy(sessions_subparsers)
 
-    sessions_entropy = sessions_subparsers.add_parser(
-        "entropy",
-        help="Analyze dialogue entropy and degradation markers for a session",
-    )
-    sessions_entropy.add_argument(
-        "session_id", nargs="?", default=None, help="Session ID to analyze (defaults to latest)"
-    )
-
-    sessions_rename = sessions_subparsers.add_parser(
-        "rename", help="Set or change a session's title")
-    sessions_rename.add_argument("session_id", help="Session ID to rename")
-    sessions_rename.add_argument("title", nargs="+", help="New title for the session")
+    _add_rename_and_discard(sessions_subparsers)
 
     sessions_pin = sessions_subparsers.add_parser(
         "pin", help="Pin session(s) — durable keep flag, exempt from auto-archive",
@@ -344,3 +338,41 @@ def build_sessions_parser(subparsers, *, cmd_sessions: Callable) -> None:
         return cmd_sessions(_args, sessions_parser=sessions_parser)
 
     sessions_parser.set_defaults(func=_dispatch_sessions)
+
+
+def _add_cost_and_entropy(sessions_subparsers) -> None:
+    # Fork: per-session spend with per-tool/per-subagent attribution.
+    sessions_cost = sessions_subparsers.add_parser(
+        "cost",
+        help="Show per-session spend plus per-tool and per-subagent cost breakdown",
+        description=(
+            "Per-session estimated spend with per-tool and per-subagent "
+            "(delegate) cost attribution. Reuses the same cost model as "
+            "'hermes insights' / /insights."
+        ),
+    )
+    sessions_cost.add_argument(
+        "--days", type=int, default=30, help="Number of days to analyze (default: 30)"
+    )
+    sessions_cost.add_argument(
+        "--source", help="Filter by platform (cli, telegram, subagent, etc.)"
+    )
+    sessions_cost.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Max per-session rows to show (0 for all; default: 20)",
+    )
+    sessions_cost.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the raw cost report as JSON instead of a table",
+    )
+
+    sessions_entropy = sessions_subparsers.add_parser(
+        "entropy",
+        help="Analyze dialogue entropy and degradation markers for a session",
+    )
+    sessions_entropy.add_argument(
+        "session_id", nargs="?", default=None, help="Session ID to analyze (defaults to latest)"
+    )

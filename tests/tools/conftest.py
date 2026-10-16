@@ -15,10 +15,10 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _no_host_browser_use_cli():
-    """Keep the host's browser-use/uvx install out of tests.
+    """Keep the host's PM-managed browser-use install out of tests.
 
     Browser Use mode is default-on when the CLI is runnable, so a developer
-    machine with uvx on PATH would silently flip every built-in-browser test
+    machine with the CLI installed would silently flip every built-in-browser test
     into CLI mode. Pin discovery to "not installed"; tests that exercise the
     CLI path monkeypatch ``bu_cli._find_cli`` themselves.
     """
@@ -28,7 +28,7 @@ def _no_host_browser_use_cli():
         yield
         return
     # Keep a handle to the real discovery function so TestFindCli (and any
-    # test that wants genuine PATH probing) can restore it explicitly.
+    # test that wants genuine PM discovery) can restore it explicitly.
     if not hasattr(bu_cli, "_find_cli_unpatched"):
         bu_cli._find_cli_unpatched = bu_cli._find_cli
     with patch.object(bu_cli, "_find_cli", lambda: None):
@@ -192,3 +192,17 @@ def _reset_mcp_circuit_breaker():
     yield
     mcp_tool._server_error_counts.clear()
     mcp_tool._server_breaker_opened_at.clear()
+
+
+@pytest.fixture
+def tirith_binary_unavailable():
+    """Generic approval tests keep policy enabled but never install or run a scanner.
+
+    Opt in explicitly; dedicated scanner/resolver/install contracts must retain
+    their own mocks. Missing-binary behavior still exercises the real scan gate.
+    """
+    with (patch("tools.tirith_security._resolve_tirith_path", return_value=None),
+          patch("tools.tirith_security._install_tirith",
+                side_effect=AssertionError("generic approval tests must not install Tirith")) as install):
+        yield
+        install.assert_not_called()

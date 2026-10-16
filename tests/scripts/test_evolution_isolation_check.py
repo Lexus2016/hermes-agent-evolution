@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from evolution_isolation_check import (  # noqa: E402  # fmt: skip
+from evolution_isolation_check import (  # fmt: skip
     Finding,
     ScanResult,
     scan_file,

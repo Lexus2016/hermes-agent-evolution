@@ -7,7 +7,7 @@ freezing exact wording.
 
 from pathlib import Path
 
-import yaml
+import hermes_yaml as yaml
 
 HYDRA_YAML = Path(__file__).resolve().parents[2] / "cron" / "evolution" / "hydra.yaml"
 

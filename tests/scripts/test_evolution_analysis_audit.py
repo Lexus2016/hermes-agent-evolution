@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_analysis_audit import (  # noqa: E402
+from evolution_analysis_audit import (
     audit_analysis,
     audit_implemented_claims,
     audit_latest,

@@ -21,13 +21,13 @@ import scripts.evolution_ci_diagnosis as diag
 class FakeClient:
     """Injectable HTTP client that replays responses and records requests."""
 
-    def __init__(self, responses: List[Tuple[int, Any]]):
+    def __init__(self, responses: list[tuple[int, Any]]):
         self.responses = list(responses)
-        self.calls: List[Tuple[str, str, Optional[str]]] = []
+        self.calls: list[tuple[str, str, Optional[str]]] = []
 
     def __call__(
         self, method: str, url: str, body: Optional[str] = None
-    ) -> Tuple[int, str]:
+    ) -> tuple[int, str]:
         self.calls.append((method, url, body))
         if not self.responses:
             return 500, ""
@@ -46,7 +46,7 @@ def hermes_home(tmp_path, monkeypatch):
 
 def _pr_payload(
     number: int, title: str, head_sha: str, head_branch: str = "feature"
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return {
         "number": number,
         "title": title,
@@ -55,7 +55,7 @@ def _pr_payload(
     }
 
 
-def _check_runs_payload(checks: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _check_runs_payload(checks: list[dict[str, Any]]) -> dict[str, Any]:
     return {"check_runs": checks}
 
 

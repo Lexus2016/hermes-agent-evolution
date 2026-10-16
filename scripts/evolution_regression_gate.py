@@ -61,10 +61,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 # ``summary``). It is the ONLY place a network call may happen, and it is
 # injected so tests pass a stub. The default is ``None`` (offline): no seam ->
 # no LLM-authored prose, never a hidden call. Mirrors ``LLMFn`` in the proposer.
-LLMFn = Callable[[Dict[str, Any]], Dict[str, Any]]
+LLMFn = Callable[[dict[str, Any]], dict[str, Any]]
 
 
-def _occurrences_of(weakness: Dict[str, Any]) -> int:
+def _occurrences_of(weakness: dict[str, Any]) -> int:
     """The comparable cluster size for a weakness record.
 
     The trace miner emits ``occurrences`` for tool_failure / provider_error and
@@ -78,7 +78,7 @@ def _occurrences_of(weakness: Dict[str, Any]) -> int:
     return 0
 
 
-def cluster_signature(weakness: Dict[str, Any]) -> Optional[str]:
+def cluster_signature(weakness: dict[str, Any]) -> Optional[str]:
     """Stable identity string for a weakness cluster: ``"<kind>:<subject>"``.
 
     The subject is the tool name (tool_failure / retry_spiral) or the error-class
@@ -101,7 +101,7 @@ def cluster_signature(weakness: Dict[str, Any]) -> Optional[str]:
     return f"{kind}:{subject}"
 
 
-def target_signature(proposal: Dict[str, Any]) -> Optional[str]:
+def target_signature(proposal: dict[str, Any]) -> Optional[str]:
     """The cluster signature a shipped harness proposal targeted.
 
     A proposal carries its evidence under ``evidence`` (the proposer copies the
@@ -123,7 +123,7 @@ def target_signature(proposal: Dict[str, Any]) -> Optional[str]:
 
 def find_post_ship_occurrences(
     signature: str,
-    weaknesses: List[Dict[str, Any]],
+    weaknesses: list[dict[str, Any]],
 ) -> int:
     """Sum the post-ship occurrences for the cluster matching ``signature``.
 
@@ -142,12 +142,12 @@ def find_post_ship_occurrences(
 
 
 def evaluate_regression(
-    proposal: Dict[str, Any],
+    proposal: dict[str, Any],
     baseline_occurrences: int,
-    post_ship_weaknesses: List[Dict[str, Any]],
+    post_ship_weaknesses: list[dict[str, Any]],
     *,
     sessions: int = 0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Decide whether a shipped harness change REGRESSED its targeted cluster.
 
     The verdict is a pure function of three deterministic inputs:
@@ -201,20 +201,20 @@ def _coerce_str(value: Any) -> str:
     return str(value)
 
 
-def _proposal_ref(proposal: Dict[str, Any]) -> Dict[str, Any]:
+def _proposal_ref(proposal: dict[str, Any]) -> dict[str, Any]:
     """A small, anonymized back-reference to the shipped proposal for the issue.
 
     Carries only the fields a reviewer needs to find the original (its type,
     source, and accepted-issue number if known) — never the LLM-authored delta
     text, so the regression issue stays a pointer, not a copy."""
-    ref: Dict[str, Any] = {}
+    ref: dict[str, Any] = {}
     for key in ("type", "source", "issue", "accepted_issue", "title"):
         if key in proposal:
             ref[key] = proposal[key]
     return ref
 
 
-def _default_title(verdict: Dict[str, Any]) -> str:
+def _default_title(verdict: dict[str, Any]) -> str:
     """Deterministic ``[REGRESSION]`` title naming the cluster + growth.
 
     De-dup-friendly (the issues stage's exact-title idempotency guard keys on it)
@@ -224,7 +224,7 @@ def _default_title(verdict: Dict[str, Any]) -> str:
     return f"[REGRESSION] harness change for `{sig}` made the weakness worse"
 
 
-def _default_body(verdict: Dict[str, Any], proposal_ref: Dict[str, Any]) -> str:
+def _default_body(verdict: dict[str, Any], proposal_ref: dict[str, Any]) -> str:
     """Templated, evidence-carrying issue body used when no LLM seam authors one.
 
     Plain text, deterministic, and self-explanatory so a human (or the issues
@@ -256,11 +256,11 @@ def _default_body(verdict: Dict[str, Any], proposal_ref: Dict[str, Any]) -> str:
 
 
 def build_regression_issue(
-    verdict: Dict[str, Any],
-    proposal: Dict[str, Any],
+    verdict: dict[str, Any],
+    proposal: dict[str, Any],
     *,
     llm: Optional[LLMFn] = None,
-) -> Optional[Dict[str, Any]]:
+) -> Optional[dict[str, Any]]:
     """Turn a ``regressed=True`` verdict into ONE structured ``regression`` issue.
 
     Returns ``None`` when the verdict is NOT a regression — no issue is emitted
@@ -278,7 +278,7 @@ def build_regression_issue(
 
     proposal_ref = _proposal_ref(proposal if isinstance(proposal, dict) else {})
 
-    issue: Dict[str, Any] = {
+    issue: dict[str, Any] = {
         "kind": "regression",
         "source": "self-harness",  # distinguishes from research-generated issues
         "evidence": {
@@ -319,13 +319,13 @@ def build_regression_issue(
 
 
 def gate(
-    proposal: Dict[str, Any],
+    proposal: dict[str, Any],
     baseline_occurrences: int,
-    post_ship_weaknesses: List[Dict[str, Any]],
+    post_ship_weaknesses: list[dict[str, Any]],
     *,
     sessions: int = 0,
     llm: Optional[LLMFn] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """End-to-end gate: verdict + (conditional) ``regression`` issue.
 
     Returns ``{"regressed": bool, "verdict": {...}, "issue": {...}|None}``. The
@@ -342,7 +342,7 @@ def gate(
     }
 
 
-def load_gate_input(payload: Any) -> Tuple[Dict[str, Any], int, List[Dict[str, Any]], int]:
+def load_gate_input(payload: Any) -> tuple[dict[str, Any], int, list[dict[str, Any]], int]:
     """Extract ``(proposal, baseline_occurrences, weaknesses, sessions)`` from a
     gate-input payload.
 
@@ -381,7 +381,7 @@ def load_gate_input(payload: Any) -> Tuple[Dict[str, Any], int, List[Dict[str, A
     return proposal, baseline, weaknesses, sessions
 
 
-def _parse_args(argv: List[str]) -> Tuple[Optional[str], Optional[str]]:
+def _parse_args(argv: list[str]) -> tuple[Optional[str], Optional[str]]:
     """Tiny hand-rolled arg parse (matches the other evolution_* CLIs).
 
     Returns ``(path, error)``. ``path`` is the positional gate-input file (absent
@@ -396,13 +396,13 @@ def _parse_args(argv: List[str]) -> Tuple[Optional[str], Optional[str]]:
     return path, None
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     path, err = _parse_args(argv)
     if err:
         print(f"[evolution-regression-gate] {err}", file=sys.stderr)
         return 2
     try:
-        raw = Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+        raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
     except OSError as exc:
         print(f"[evolution-regression-gate] cannot read input: {exc}", file=sys.stderr)
         return 2

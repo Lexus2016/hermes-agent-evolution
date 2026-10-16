@@ -63,18 +63,18 @@ from typing import Any, Dict, List, Optional
 # storage format owned by one module instead of duplicating it.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from evolution_trajectory_logger import TrajectoryLog  # noqa: E402
+from evolution_trajectory_logger import TrajectoryLog
 
 __all__ = [
-    "capture_enabled",
-    "task_key",
-    "extract_tool_calls",
-    "extract_model_calls",
+    "branch_trajectory",
     "build_trajectory_log",
+    "capture_enabled",
     "capture_turn",
+    "extract_model_calls",
+    "extract_tool_calls",
     "replay_trajectory",
     "resume_index",
-    "branch_trajectory",
+    "task_key",
 ]
 
 #: Result summaries are already truncated by the logger; this bounds the
@@ -86,7 +86,7 @@ _MAX_RESULT_CHARS = 2000
 _MAX_REASONING_CHARS = 2000
 
 
-def _extract_reasoning(msg: Dict[str, Any]) -> str:
+def _extract_reasoning(msg: dict[str, Any]) -> str:
     """Pull a compact reasoning trace out of an assistant message dict (issue #112).
 
     Reasoning appears on the wire in three shapes, depending on provider:
@@ -111,7 +111,7 @@ def _extract_reasoning(msg: Dict[str, Any]) -> str:
             return raw.strip()[:_MAX_REASONING_CHARS]
     content = msg.get("content")
     if isinstance(content, list):
-        parts: List[str] = []
+        parts: list[str] = []
         for block in content:
             if not isinstance(block, dict) or block.get("type") != "reasoning":
                 continue
@@ -224,9 +224,9 @@ def _result_status(content: Any) -> str:
 
 
 def extract_tool_calls(
-    messages: List[Dict[str, Any]],
-    timings: Optional[Dict[str, int]] = None,
-) -> List[Dict[str, Any]]:
+    messages: list[dict[str, Any]],
+    timings: Optional[dict[str, int]] = None,
+) -> list[dict[str, Any]]:
     """Pull ``(tool, args, result)`` triples out of a finished turn's messages.
 
     Walks assistant turns for ``tool_calls`` and matches each to its ``tool``
@@ -242,14 +242,14 @@ def extract_tool_calls(
     if not isinstance(messages, list):
         return []
 
-    results: Dict[str, Any] = {}
+    results: dict[str, Any] = {}
     for msg in messages:
         if isinstance(msg, dict) and msg.get("role") == "tool":
             cid = msg.get("tool_call_id")
             if cid:
                 results[cid] = msg.get("content")
 
-    calls: List[Dict[str, Any]] = []
+    calls: list[dict[str, Any]] = []
     for msg in messages:
         if not isinstance(msg, dict) or msg.get("role") != "assistant":
             continue
@@ -289,7 +289,7 @@ def extract_tool_calls(
     return calls
 
 
-def _classify_model_decision(msg: Dict[str, Any]) -> str:
+def _classify_model_decision(msg: dict[str, Any]) -> str:
     """Classify an assistant message's decision: tool_call / refusal / content."""
     if msg.get("tool_calls"):
         return "tool_call"
@@ -302,8 +302,8 @@ def _classify_model_decision(msg: Dict[str, Any]) -> str:
 
 
 def extract_model_calls(
-    messages: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Pull decision-level model-call metadata out of a finished turn (#2877).
 
     Walks assistant messages — each is one model call — and records *what the
@@ -315,7 +315,7 @@ def extract_model_calls(
     """
     if not isinstance(messages, list):
         return []
-    calls: List[Dict[str, Any]] = []
+    calls: list[dict[str, Any]] = []
     for msg in messages:
         if not isinstance(msg, dict) or msg.get("role") != "assistant":
             continue
@@ -328,13 +328,13 @@ def extract_model_calls(
 
 
 def build_trajectory_log(
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
     *,
     session_id: str = "",
     task_descriptor: str = "",
     completed: bool = True,
     trajectory_dir: Optional[Path] = None,
-    timings: Optional[Dict[str, int]] = None,
+    timings: Optional[dict[str, int]] = None,
 ) -> Optional[TrajectoryLog]:
     """Build a :class:`TrajectoryLog` from a finished turn, or None if empty.
 
@@ -363,13 +363,13 @@ def build_trajectory_log(
 
 
 def capture_turn(
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
     *,
     session_id: str = "",
     task_descriptor: str = "",
     completed: bool = True,
     trajectory_dir: Optional[Path] = None,
-    timings: Optional[Dict[str, int]] = None,
+    timings: Optional[dict[str, int]] = None,
 ) -> Optional[Path]:
     """Build and persist a turn's trajectory. Returns the path, or None.
 
@@ -412,11 +412,11 @@ _INCOMPLETE_STATUSES = ("pending", "unknown")
 
 
 def _window_entries(
-    log: "TrajectoryLog",
+    log: TrajectoryLog,
     *,
     start_at: int = 0,
     stop_at: Optional[int] = None,
-) -> List[tuple[int, Any]]:
+) -> list[tuple[int, Any]]:
     """Return ``(absolute_index, entry)`` pairs for the replay window.
 
     Bounds are clamped to the entry list; negative or inverted windows yield
@@ -430,11 +430,11 @@ def _window_entries(
 
 
 def replay_trajectory(
-    log: "TrajectoryLog",
+    log: TrajectoryLog,
     *,
     start_at: int = 0,
     stop_at: Optional[int] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Deterministic replay summary of a recorded trajectory (#85).
 
     Walks the (clamped) entry window and produces the action sequence an
@@ -452,7 +452,7 @@ def replay_trajectory(
     index one past the last replayed step, i.e. where a resume would continue.
     """
     window = _window_entries(log, start_at=start_at, stop_at=stop_at)
-    steps: List[Dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
     failure_idx: Optional[int] = None
     for idx, entry in window:
         status = str(getattr(entry, "result_status", "unknown"))
@@ -483,7 +483,7 @@ def replay_trajectory(
     }
 
 
-def resume_index(log: "TrajectoryLog") -> Optional[int]:
+def resume_index(log: TrajectoryLog) -> Optional[int]:
     """First step worth resuming/branching from, or None for a clean run.
 
     The first entry whose status is not ``success`` is the point of interest:
@@ -500,9 +500,9 @@ def resume_index(log: "TrajectoryLog") -> Optional[int]:
 
 
 def branch_trajectory(
-    log: "TrajectoryLog",
+    log: TrajectoryLog,
     up_to_index: int,
-) -> "TrajectoryLog":
+) -> TrajectoryLog:
     """Copy the prefix of a trajectory up to (and including) a step.
 
     The branch is a fresh :class:`TrajectoryLog` sharing the source's session

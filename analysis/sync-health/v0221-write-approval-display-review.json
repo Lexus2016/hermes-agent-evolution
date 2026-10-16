@@ -1,0 +1,207 @@
+{
+  "status": "preparation_only_requires_independent_controller_identity_review",
+  "scope": "Exactly four source-reviewed write-approval display findings. No production or manifest edit and no remote probe or asynchronous I/O allowance.",
+  "candidate_head_at_measurement": "e1b1a5095d73ddd7babc94479bb43aeea118db10",
+  "upstream_commit": "297552a9d646119871391d202509822cd86330df",
+  "main_baseline": "3cd9963bcce9c0aba451dadeaff5c701bca102e4",
+  "source": {
+    "path": "tools/write_approval.py",
+    "blob": "9e285d26c1298aad901dbe5df89f82ea12489783",
+    "sha256": "8d8a15d29a73dceb2e8cf76f613d59d91115314c908a8086ffe1c72572382c7f",
+    "role": "Exact unchanged upstream candidate containing only these four proposed findings."
+  },
+  "dependencies": [
+    {
+      "path": "gateway/session_context.py",
+      "blob": "b55f7a7330973752617867418a8b46b6a1e05a14",
+      "sha256": "6201bb25a99bd45dfc783eff9a05e1529bfe698f3d4e0f4b798c6f948a09facd",
+      "role": "get_session_env reads an explicitly bound session ContextVar before process-environment fallback; this is only used to select review hint wording here."
+    },
+    {
+      "path": "utils.py",
+      "blob": "840def42736be2184b053236e1f64a3379fe22bb",
+      "sha256": "394b44230f13ba608c6ce9b2d143563b2554a73a219567b03884637776a4859a",
+      "role": "is_truthy_value normalizes the cron display marker; no authorization result is returned by this helper."
+    },
+    {
+      "path": "tools/memory_tool.py",
+      "blob": "3c10ad53140b56115436df21269335bf5cce969c",
+      "sha256": "3df32413b98c36ffa728924fa1fd1472a047f2421672f256a31f8fc813b49741",
+      "role": "_gate_or_stage permits mutation only on decision.allow; a staged decision is serialized as staged after pending-record creation."
+    },
+    {
+      "path": "tools/skill_manager_tool.py",
+      "blob": "7aca2bf300bf2f5af4cb4be5ccbf04d60eefd9c6",
+      "sha256": "b7cfddebd14efad11afb0d1e9666cd376771db7bc4bab6b9680b2025180af179",
+      "role": "_run_write_gate stages an unallowed/unblocked decision; apply_skill_pending is a separate replay path. _find_skill supplies the optional preview base lookup."
+    },
+    {
+      "path": "hermes_cli/write_approval_commands.py",
+      "blob": "a37e44be340de26e2cc0603109d678f2d494bcb1",
+      "sha256": "f861762fed993aedbdd3a1dc95862d6237e881b9e159fe205193925a7d32a3d4",
+      "role": "handle_pending_subcommand separates diff from approve; _diff calls only skill_pending_diff, whereas _approve/_apply_one dispatch actual writes."
+    },
+    {
+      "path": "tools/fuzzy_match.py",
+      "blob": "ea13d1985f284749c3266554f373e4c37328d6a6",
+      "sha256": "0e7453dbbfb75659a829506a4ce43b6dfaaa8a95d0c2ee67b68481c2c4143dab",
+      "role": "_fold_patch calls the same fuzzy_find_and_replace matcher as the apply path and retains the prior base on a failed/ambiguous patch."
+    },
+    {
+      "path": "tests/tools/test_write_approval.py",
+      "blob": "86a1adfafbbf72d39e61b806da618dca37825b03",
+      "sha256": "e3fb2defcdd7b22dc688c19d607decde6aa5af218c94d14d32753e416accc46c",
+      "role": "24 canonical tests covering ordinary approval gates, staged review hints and related approval behavior; no injected display-helper exception test."
+    },
+    {
+      "path": "tests/tools/test_skill_pending_diff_batch.py",
+      "blob": "717e6aeeabc1a756d1dfc59ec41a215276f3af7b",
+      "sha256": "8be8d60447dfbc1f6dd375ae5e12f1ade3f0f04055dba6135c99009b3fb2df94",
+      "role": "8 canonical tests covering batch/single preview, chained create/write_file/patch state, ambiguous/replace_all patch behavior, and the diff subcommand."
+    }
+  ],
+  "measurement": {
+    "ruff_version": "0.15.10",
+    "ruff_command": [
+      "/workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/ruff"
+    ],
+    "source_and_candidate_errors": null,
+    "four_distinct_rule_scope_code_fingerprints": true
+  },
+  "input_review": {
+    "path": "/tmp/hermes-tools-boundary-review.json",
+    "sha256": "09a7521d18121afb48f5dbdc36355ae954087596fa85f0395b30de04998f891d"
+  },
+  "input_raw_report": {
+    "path": "/tmp/hermes-reviewed-current-health.json",
+    "sha256": "1029b71a2bea931aa380915c1a5151bc50d71abc14ba1540a244c1034c6643c5"
+  },
+  "findings": [
+    {
+      "id": "write-approval-display-env-ble001",
+      "path": "tools/write_approval.py",
+      "scope": "_slash_review_surface._env",
+      "rule": "BLE001",
+      "line": 176,
+      "detail": "blind `except Exception`",
+      "code": "except Exception:",
+      "candidate_blob": "9e285d26c1298aad901dbe5df89f82ea12489783",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tools/write_approval.py",
+        "scope": "_slash_review_surface._env",
+        "blob": "9e285d26c1298aad901dbe5df89f82ea12489783"
+      },
+      "counts": {
+        "pinned_upstream": 1,
+        "candidate": 1,
+        "proposed_budget": 1
+      },
+      "source_review": "The broad catch is confined to obtaining display markers. A failure loading/calling get_session_env falls back to process environment and returns a string used only by _slash_review_surface. The caller _staged already commits to GateDecision(stage=True), with allow=False; fallback cannot authorize or persist the intended write.",
+      "caller_trace": "evaluate_gate selects staging -> _staged -> _slash_review_surface -> _env/get_session_env or process fallback and is_truthy_value -> hint text only. GateDecision(stage=True) retains allow=False. memory_tool._gate_or_stage and skill_manager_tool._run_write_gate inspect allow before mutation; display results do not enter that authorization check.",
+      "limits": "A caught failure may select an inconvenient slash-command hint for a headless context or hide a helper/import defect. It cannot make this staged decision allow a write. Existing tests exercise normal interactive, cron, kanban, API-server and chat-gateway hint selection; they do not inject these exceptions. Other import/configuration fail-open catches, approval policy, pending-record durability and global profile isolation are outside these four entries.",
+      "named_test_coverage": [
+        "test_staged_hint_names_the_review_command_on_slash_surfaces",
+        "test_staged_hint_names_the_pending_dir_on_headless_surfaces",
+        "test_staged_hint_keeps_command_for_chat_gateway_platform"
+      ]
+    },
+    {
+      "id": "write-approval-display-cron-s110",
+      "path": "tools/write_approval.py",
+      "scope": "_slash_review_surface",
+      "rule": "S110",
+      "line": 184,
+      "detail": "try/except/pass",
+      "code": "except Exception:",
+      "candidate_blob": "9e285d26c1298aad901dbe5df89f82ea12489783",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tools/write_approval.py",
+        "scope": "_slash_review_surface",
+        "blob": "9e285d26c1298aad901dbe5df89f82ea12489783"
+      },
+      "counts": {
+        "pinned_upstream": 1,
+        "candidate": 1,
+        "proposed_budget": 1
+      },
+      "source_review": "The silent catch skips only the optional cron truth-value check, then continues platform-based display selection. This is real observability debt: a failed helper can lose a diagnostic and select an unavailable review hint. It does not change the staging result or invoke the write/apply path; retaining the existing fallback is compatible with the reviewed ordinary surfaces.",
+      "caller_trace": "evaluate_gate selects staging -> _staged -> _slash_review_surface -> _env/get_session_env or process fallback and is_truthy_value -> hint text only. GateDecision(stage=True) retains allow=False. memory_tool._gate_or_stage and skill_manager_tool._run_write_gate inspect allow before mutation; display results do not enter that authorization check.",
+      "limits": "A caught failure may select an inconvenient slash-command hint for a headless context or hide a helper/import defect. It cannot make this staged decision allow a write. Existing tests exercise normal interactive, cron, kanban, API-server and chat-gateway hint selection; they do not inject these exceptions. Other import/configuration fail-open catches, approval policy, pending-record durability and global profile isolation are outside these four entries.",
+      "named_test_coverage": [
+        "test_staged_hint_names_the_pending_dir_on_headless_surfaces",
+        "test_headless_memory_write_stages_without_inline_prompt"
+      ]
+    },
+    {
+      "id": "write-approval-display-cron-ble001",
+      "path": "tools/write_approval.py",
+      "scope": "_slash_review_surface",
+      "rule": "BLE001",
+      "line": 184,
+      "detail": "blind `except Exception`",
+      "code": "except Exception:",
+      "candidate_blob": "9e285d26c1298aad901dbe5df89f82ea12489783",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tools/write_approval.py",
+        "scope": "_slash_review_surface",
+        "blob": "9e285d26c1298aad901dbe5df89f82ea12489783"
+      },
+      "counts": {
+        "pinned_upstream": 1,
+        "candidate": 1,
+        "proposed_budget": 1
+      },
+      "source_review": "The broad exception boundary encloses import of is_truthy_value and conversion of the cron display marker. Any failure bypasses only that display branch. The eventual bool changes command-versus-directory wording inside _staged, whose stage=True and allow=False flags are independent of the result. This entry covers the breadth of the same handler, separately from its S110 diagnostic-suppression debt.",
+      "caller_trace": "evaluate_gate selects staging -> _staged -> _slash_review_surface -> _env/get_session_env or process fallback and is_truthy_value -> hint text only. GateDecision(stage=True) retains allow=False. memory_tool._gate_or_stage and skill_manager_tool._run_write_gate inspect allow before mutation; display results do not enter that authorization check.",
+      "limits": "A caught failure may select an inconvenient slash-command hint for a headless context or hide a helper/import defect. It cannot make this staged decision allow a write. Existing tests exercise normal interactive, cron, kanban, API-server and chat-gateway hint selection; they do not inject these exceptions. Other import/configuration fail-open catches, approval policy, pending-record durability and global profile isolation are outside these four entries.",
+      "named_test_coverage": [
+        "test_staged_hint_names_the_pending_dir_on_headless_surfaces",
+        "test_staged_hint_keeps_command_for_chat_gateway_platform"
+      ]
+    },
+    {
+      "id": "write-approval-display-fold-hx011",
+      "path": "tools/write_approval.py",
+      "scope": "_fold_staged",
+      "rule": "HX011",
+      "line": 378,
+      "detail": "if/elif ladder on one name",
+      "code": "if action in {\"create\", \"edit\"}:",
+      "candidate_blob": "9e285d26c1298aad901dbe5df89f82ea12489783",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tools/write_approval.py",
+        "scope": "_fold_staged",
+        "blob": "9e285d26c1298aad901dbe5df89f82ea12489783"
+      },
+      "counts": {
+        "pinned_upstream": 1,
+        "candidate": 1,
+        "proposed_budget": 1
+      },
+      "source_review": "HX011 correctly identifies a multi-branch action dispatch ladder, not a filesystem-path or SKILL.md false positive. The unchanged ladder folds ordered create/edit/write_file/patch/remove_file preview operations into the caller-owned local dictionary; delete clears only that preview entry. A failed patch leaves its prior preview base intact. These branches neither authorize nor persist writes. Existing chained-preview and shared-matcher behavior supports retaining this bounded structural debt without an unrelated dispatcher refactor.",
+      "caller_trace": "handle_pending_subcommand(diff) -> _diff -> skill_pending_diff(batch) -> _batch_pending_diff with a fresh local staged dictionary -> _fold_staged. _staged_base may read a prior file; _fold_patch calls fuzzy_find_and_replace. No fold branch invokes a write, delete, stage_write, approve or apply helper. Actual replay is separately dispatched by _approve -> _apply_one -> apply_skill_pending.",
+      "limits": "The eight preview tests cover create, write_file, patch, ambiguous/replace_all matching, and end-to-end diff rendering. They do not comprehensively exercise edit/delete/remove_file branches or every malformed payload; those branches were source-reviewed. No filesystem-path safety, symlink safety, malicious pending-record handling, underlying read bound, write authorization, or whole-subsystem safety waiver is inferred from HX011. The supplied prior review misidentified the rule as a SKILL.md/path concern; that rationale is superseded here.",
+      "named_test_coverage": [
+        "TestSkillPendingDiffBatch.test_batch_op_diffs_against_earlier_ops_not_disk",
+        "TestSkillPendingDiffBatch.test_patch_preview_uses_the_approval_matcher",
+        "TestSkillPendingDiffBatch.test_patch_preview_replace_all_folds_every_match",
+        "TestSkillPendingDiffBatch.test_batch_preview_flags_failed_patch_without_folding",
+        "TestSkillPendingDiffBatch.test_diff_subcommand_end_to_end"
+      ]
+    }
+  ],
+  "receipt": {
+    "path": "/tmp/hermes-write-approval-display-tests.log",
+    "sha256": "87c541017e7934b0ce594259929fac36a08a7181422be6d5376b6c92ff127fe0",
+    "command": "HERMES_PYTHON=\"$PWD/.venv/bin/python\" scripts/run_tests.sh tests/tools/test_write_approval.py tests/tools/test_skill_pending_diff_batch.py -j2",
+    "result": "2 files, 32 passed, 0 failed; no provider/network calls",
+    "coverage_limits": "Normal bounded behavior and caller separation are supported. Exception handlers are source-reviewed, not fault-injection tested; no full integration or blanket security validation claim.",
+    "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 2 test files (~28 tests) under ['tests/tools/test_write_approval.py', 'tests/tools/test_skill_pending_diff_batch.py']; running with -j 2\n[ 28.6% |     8/~28 | \u27138 | \u27170] \u2713 tests/tools/test_skill_pending_diff_batch.py (8\u2713, 1.7s)\n[100.0% |    28/~28 | \u271332 | \u2717 0] \u2713 tests/tools/test_write_approval.py (24\u2713, 2.5s)\n\n=== Summary: 2 files, 32 tests passed, 0 failed (100% complete) in 2.5s (2 workers) ===\n  Durations cached to test_durations.json (2 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   2\n  Total subprocess CPU-wall: 4.3s  (runner wall: 2.5s, parallelism: 2x)\n  P50: 2.51s  P90: 2.51s  P95: 2.51s  P99: 2.51s  Max: 2.51s\n  <1s: 0 files (0%)  <2s: 1 files (50%)\n  Top 10 slowest:\n      2.51s  tests/tools/test_write_approval.py\n      1.75s  tests/tools/test_skill_pending_diff_batch.py\n"
+  },
+  "identity_review_requirement": "Independent controller must verify exact source/dependency/evidence blobs and all four single-occurrence fingerprints before any manifest inclusion. Persisted proposal entries remain status=proposed; only deep-copied entries are promoted in a temporary in-memory matcher simulation.",
+  "proposed_evidence_repository_path": "analysis/sync-health/v0221-write-approval-display-review.json"
+}

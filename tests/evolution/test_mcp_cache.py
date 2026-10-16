@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for MCP ttlMs / cacheScope result caching (Issue #2486, Slice B, SEP-2549)."""
 
 from __future__ import annotations

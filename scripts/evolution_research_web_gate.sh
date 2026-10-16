@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Evolution research web-health preflight gate (issue #108).
 #
 # WHY: the research stage's web path can be dead (firecrawl HTTP 402 / MCP

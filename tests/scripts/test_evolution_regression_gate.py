@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_regression_gate import (  # noqa: E402
+from evolution_regression_gate import (
     build_regression_issue,
     cluster_signature,
     evaluate_regression,

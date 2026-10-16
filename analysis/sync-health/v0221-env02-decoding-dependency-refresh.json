@@ -1,0 +1,16 @@
+{
+  "scope": "Existing environment-boundary-02 dependency-only refresh after explicit CLI child diagnostic decoding. No candidate, source, finding or budget change.",
+  "checkpoint": "db7b5acd281a6e2ed5f5079e8b7368209f49d4be",
+  "old_dependency_blob": "e151651aeb15579dcda01fc9228d3a766f18046f",
+  "new_dependency_blob": "664ed86e6293e185387c543eed0c3f1cd3a64cda",
+  "proof": "Python 3.14 full module AST equality after removing only encoding=utf-8 and errors=replace from the single subprocess.run in _reconcile_existing_evolution_cron_jobs. All GUI imports, registration and caller code therefore remain identical.",
+  "old_full_ast_sha256": "c68582d492285859b48387f1a98580b670a24cb22d18380e8479d9a3a0910b22",
+  "candidate_unchanged": "2326a395b901e8cea1391a71458105235ef69a46",
+  "limits": "Accessibility precedence only; no Electron launch, native GUI or unrelated Evolution behavior certification. Existing source review limitations remain.",
+  "receipt": {
+    "sha256": "bde856b4b048f8654501f28f5e583e0a152c15768f324c85fdfb55be9c8ee301",
+    "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~56 tests) under ['tests/hermes_cli/test_gui_command.py']; running with -j 9\n[100.0% |    56/~56 | \u27131 | \u27170] \u2713 tests/hermes_cli/test_gui_command.py (1\u2713, 1.1s)\n\n=== Summary: 1 files, 1 tests passed, 0 failed (100% complete) in 1.2s (9 workers) ===\n\n  note: platforms('macos') tests (in 1 file) were SKIPPED on this host (linux); they run on the macOS Python-tests lane.\n  note: platforms('windows') tests (in 1 file) were SKIPPED on this host (linux); they run on the Windows Python-tests lane.\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 1.1s  (runner wall: 1.2s, parallelism: 9x)\n  P50: 1.14s  P90: 1.14s  P95: 1.14s  P99: 1.14s  Max: 1.14s\n  <1s: 0 files (0%)  <2s: 1 files (100%)\n  Top 10 slowest:\n      1.14s  tests/hermes_cli/test_gui_command.py\n",
+    "name": "hermes-env02-decoding-refresh-tests.log",
+    "location": "temporary directory; complete original output is embedded below"
+  }
+}

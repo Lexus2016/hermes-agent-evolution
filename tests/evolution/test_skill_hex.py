@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for SkillHEX hypothesis→test self-verifier and tree search (Issue #2287)."""
 
 from __future__ import annotations
@@ -50,7 +49,7 @@ def test_verification_test_and_assertion_evaluation() -> None:
         assertion_type="exit_code",
         expected_value=0,
     )
-    passed, ev = HypothesisVerifier.evaluate_test_assertion(
+    passed, _ev = HypothesisVerifier.evaluate_test_assertion(
         test_exit, {"return_value": 0}
     )
     assert passed is True
@@ -68,7 +67,7 @@ def test_verification_test_and_assertion_evaluation() -> None:
         assertion_type="output_contains",
         expected_value="SUCCESS",
     )
-    passed, ev = HypothesisVerifier.evaluate_test_assertion(
+    passed, _ev = HypothesisVerifier.evaluate_test_assertion(
         test_contains, {"stdout": "All operations completed: SUCCESS"}
     )
     assert passed is True
@@ -232,7 +231,7 @@ def test_skill_hex_optimizer_end_to_end() -> None:
     initial_code = "def process(x): return x * 2"
     target_skill_name = "math_processor"
 
-    def hypothesis_gen(skill_name: str, info: dict) -> List[RevisionHypothesis]:
+    def hypothesis_gen(skill_name: str, info: dict) -> list[RevisionHypothesis]:
         return [
             RevisionHypothesis(
                 hypothesis_id="h_type_check",

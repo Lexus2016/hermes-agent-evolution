@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Automatic Skill Crystallization from successful execution traces (issue #2359).
 
 Adopts Live-SWE-agent (arXiv:2511.13646) and AgentFactory (arXiv:2603.18000):
@@ -46,17 +45,17 @@ class CrystallizedSkillCandidate:
     reusability_score: float = 0.0
     validation_status: str = "provisional"
     size_bytes: int = 0
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.size_bytes = len(self.skill_markdown.encode("utf-8"))
         self.reusability_score = max(0.0, min(1.0, float(self.reusability_score)))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> CrystallizedSkillCandidate:
+    def from_dict(cls, d: dict[str, Any]) -> CrystallizedSkillCandidate:
         return cls(
             name=str(d.get("name", "")),
             description=str(d.get("description", "")),
@@ -87,7 +86,7 @@ class SkillCrystallizer:
         distinct_tools: int = 0,
         action_count: int = 0,
         verified: bool = True,
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """Check a candidate against the memory->skill evidence bar (#2746).
 
         The explicit guardrail governing which memories/traces may be promoted
@@ -124,7 +123,7 @@ class SkillCrystallizer:
     @classmethod
     def reflect_on_trace(
         cls,
-        trace_data: Dict[str, Any],
+        trace_data: dict[str, Any],
         skill_name: Optional[str] = None,
         min_actions: int = 2,
     ) -> Optional[CrystallizedSkillCandidate]:
@@ -150,7 +149,7 @@ class SkillCrystallizer:
         reusability = min(1.0, 0.4 + (total_actions * 0.1))
 
         # Extract distinct tools used
-        tools_used: List[str] = []
+        tools_used: list[str] = []
         for tc in tool_calls:
             name = tc.get("name") or tc.get("tool") or ""
             if name and name not in tools_used:
@@ -217,7 +216,7 @@ tags:
     @classmethod
     def validate_candidate(
         cls, candidate: CrystallizedSkillCandidate
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         """Validate candidate against size and structural constraint gates."""
         if not candidate.name:
             return False, "Skill name cannot be empty"

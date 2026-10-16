@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for the tool-failure recovery strategy dispatcher (#1027)."""
 
 from __future__ import annotations

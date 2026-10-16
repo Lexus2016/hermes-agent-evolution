@@ -40,7 +40,7 @@ def test_distill_terminal_output_dedups_polling():
 def test_distill_terminal_output_preserves_head_and_tail():
     lines = [f"Setup step {i}: initial config" for i in range(10)]
     lines += [f"Intermediate compiler step {i} running" for i in range(100)]
-    lines += [f"Final error at line 42: Assertion failed", "Exit code: 1"]
+    lines += ["Final error at line 42: Assertion failed", "Exit code: 1"]
     raw = "\n".join(lines)
 
     distilled = distill_terminal_output(raw, max_head_lines=5, max_tail_lines=5)

@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-import evolution_funnel as ef  # noqa: E402
+import evolution_funnel as ef
 
 
 def _write(p: Path, obj) -> None:

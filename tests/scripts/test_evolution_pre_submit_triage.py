@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_pre_submit_triage import (  # noqa: E402
+from evolution_pre_submit_triage import (
     DEFAULT_THRESHOLD,
     GateDecision,
     decide,

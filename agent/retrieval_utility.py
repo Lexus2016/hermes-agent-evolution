@@ -31,7 +31,7 @@ import json
 import logging
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -64,7 +64,7 @@ def _utility_file() -> Path:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 import contextlib
@@ -95,18 +95,18 @@ def _lock():
         if fcntl:
             try:
                 fcntl.flock(fd, fcntl.LOCK_UN)
-            except (OSError, IOError):
+            except OSError:
                 pass
         elif msvcrt:
             try:
                 fd.seek(0)
                 msvcrt.locking(fd.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[union-attr]
-            except (OSError, IOError):
+            except OSError:
                 pass
         fd.close()
 
 
-def load_log() -> Dict[str, Any]:
+def load_log() -> dict[str, Any]:
     """Load the retrieval-utility sidecar.
 
     Returns ``{"retrievals": [...], "outcomes": {...}}``. On missing/corrupt
@@ -116,7 +116,7 @@ def load_log() -> Dict[str, Any]:
     if not path.exists():
         return {"retrievals": [], "outcomes": {}}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError) as e:
         logger.debug("retrieval_utility: could not read sidecar: %s", e)
         return {"retrievals": [], "outcomes": {}}
@@ -127,7 +127,7 @@ def load_log() -> Dict[str, Any]:
     return data
 
 
-def save_log(data: Dict[str, Any]) -> None:
+def save_log(data: dict[str, Any]) -> None:
     """Atomically write the retrieval-utility sidecar."""
     path = _utility_file()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -188,7 +188,7 @@ def record_outcome(
     record_id: str,
     *,
     outcome: str = "unknown",
-    friction_signals: Optional[Dict[str, int]] = None,
+    friction_signals: Optional[dict[str, int]] = None,
 ) -> None:
     """Record the downstream outcome for a retrieval of *record_id*.
 
@@ -224,7 +224,7 @@ def record_outcome(
         logger.debug("retrieval_utility.record_outcome(%s) failed: %s", record_id, e)
 
 
-def derive_outcome(friction_signals: Dict[str, int]) -> str:
+def derive_outcome(friction_signals: dict[str, int]) -> str:
     """Derive a coarse outcome label from friction signals.
 
     >>> derive_outcome({})
@@ -247,7 +247,7 @@ def derive_outcome(friction_signals: Dict[str, int]) -> str:
     return "helpful"
 
 
-def compute_utility(record_id: str) -> Optional[Dict[str, Any]]:
+def compute_utility(record_id: str) -> Optional[dict[str, Any]]:
     """Aggregate retrieval-utility stats for *record_id*.
 
     Returns ``None`` if no retrievals exist. Otherwise returns::
@@ -266,7 +266,7 @@ def compute_utility(record_id: str) -> Optional[Dict[str, Any]]:
     if not retrievals:
         return None
     outcome_scores = {"helpful": 1.0, "neutral": 0.5, "harmful": 0.0, "unknown": 0.5}
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     total = 0.0
     matched = 0
     for r in retrievals:
@@ -287,7 +287,7 @@ def compute_utility(record_id: str) -> Optional[Dict[str, Any]]:
 def delete_low_utility_records(
     min_retrievals: int = _DEFAULT_MIN_RETRIEVALS,
     utility_floor: float = _DEFAULT_UTILITY_FLOOR,
-) -> List[str]:
+) -> list[str]:
     """Identify records eligible for history-based deletion.
 
     A record is eligible if it was retrieved ≥ *min_retrievals* times and its
@@ -299,13 +299,13 @@ def delete_low_utility_records(
     """
     data = load_log()
     # Group by record_id.
-    by_record: Dict[str, List[Dict[str, Any]]] = {}
+    by_record: dict[str, list[dict[str, Any]]] = {}
     for r in data.get("retrievals", []):
         rid = r.get("record_id")
         if rid:
             by_record.setdefault(rid, []).append(r)
 
-    eligible: List[str] = []
+    eligible: list[str] = []
     outcome_scores = {"helpful": 1.0, "neutral": 0.5, "harmful": 0.0, "unknown": 0.5}
     for rid, retrievals in by_record.items():
         if len(retrievals) < min_retrievals:

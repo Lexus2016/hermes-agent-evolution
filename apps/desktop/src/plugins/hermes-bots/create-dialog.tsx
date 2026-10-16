@@ -33,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
   Textarea,
+  Tip,
   useI18n,
   useValue
 } from '@hermes/plugin-sdk'
@@ -43,7 +44,10 @@ import { isBackfilledFacePng } from './avatar-image'
 import { AvatarPicker } from './avatar-picker'
 import { $selectedBot } from './bot-state'
 import { createCanonicalChat } from './canonical-chat'
-import { $botMeta, botHandle, botRosterKey, filterBots, ROSTER_KEY, saveBotMeta } from './data'
+import { groupCreationSource, groupExecutionMode } from './canonical-group-capabilities'
+import { registerCanonicalGroup } from './canonical-group-registry'
+import { canonicalGroupRequest, captureCanonicalGroupRoute, createCanonicalGroup } from './canonical-groups'
+import { $botMeta, botHandle, botRosterKey, captureDraftBotMeta, filterBots, ROSTER_KEY, saveBotMeta } from './data'
 import { labeled, ResizableFrame } from './dialog-parts'
 import { GROUP_CHAT_MAX_MEMBERS, mintGroupRoomId, uniqueGroupChatName, updateGroupChat } from './group-chat'
 import type { GroupChatRoom } from './group-chat'
@@ -59,6 +63,7 @@ import {
 import { useBots } from './i18n'
 import { botProfileIdentity, displayName } from './labels'
 import { McpSetupButton } from './mcp-setup'
+import type { McpSetupTarget } from './mcp-setup'
 import { ModelPicker } from './model-picker'
 import type {
   CapabilityEntry,
@@ -67,13 +72,150 @@ import type {
   ProfileDescribeResponse
 } from './profile-config'
 import { CapabilitiesView, capabilitiesViewRoutesConnections, CheckList } from './profile-config'
-import { deleteBot } from './profile-ops'
 import { botRosterMeta } from './routing'
 import { HubSkillsSection } from './skills-hub'
 import { composeSoul } from './soul'
-import type { BotMeta, ConnectionRow, RosterRow } from './types'
+import type { BotMeta, ConnectionRow, ProfileRoute, RosterRow } from './types'
 
 const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
+
+/** A materialized draft's profile id cannot be renamed by later input. */
+function DraftNameInput({
+  name,
+  locked,
+  onChange
+}: {
+  name: string
+  locked: boolean
+  onChange: (name: string) => void
+}) {
+  return (
+    <Input
+      autoFocus
+      disabled={locked}
+      onChange={event => !locked && onChange(event.target.value)}
+      placeholder="inbox-triage"
+      value={name}
+    />
+  )
+}
+
+/** A materialized draft belongs to the route that created it, not a later
+ *  picker value or the window's current gateway. Capture the SDK doors too:
+ *  host.request resolves its socket at CALL time and is not an owner lease. */
+function captureDraftOwner(targetConnection: string, name: string, closing: () => boolean) {
+  const connectionId = targetConnection || String(host.state?.connectionId?.get?.() || '').trim()
+  const profile = targetConnection ? 'default' : String(host.state?.profile?.get?.() || 'default').trim()
+
+  const route: ProfileRoute | null = connectionId
+    ? Object.freeze({
+        connectionId,
+        mode: connectionId === 'local' ? 'local' : 'remote',
+        profile,
+        targetProfile: profile
+      })
+    : null
+
+  const requestProfile = host.requestProfile?.bind(host)
+  const gateway = route ? null : host.getGateway?.()
+  const requestGateway = gateway?.request.bind(gateway)
+  const deleteProfile = host.deleteProfile?.bind(host)
+  const completeMcpOAuth = host.completeMcpOAuth?.bind(host)
+  const setupRequests = new Set<Promise<unknown>>()
+  let removed = false
+
+  if (!(route && requestProfile) && !requestGateway) {
+    throw new Error('Cannot capture the draft gateway. Reconnect before creating a bot.')
+  }
+
+  const request = <T,>(method: string, params: Record<string, unknown> = {}): Promise<T> =>
+    route && requestProfile ? requestProfile<T>(route, method, params) : requestGateway!<T>(method, params)
+
+  const isCurrent = () =>
+    String(host.state?.connectionId?.get?.() || '').trim() === connectionId &&
+    String(host.state?.profile?.get?.() || 'default').trim() === profile &&
+    (route !== null || host.getGateway?.() === gateway)
+
+  const meta = captureDraftBotMeta(
+    route ? { name, sourceScoped: true, route: { ...route, profile: name, targetProfile: name } } : name,
+    request,
+    isCurrent
+  )
+
+  const setupOperation = async <T,>(start: () => Promise<T>): Promise<T> => {
+    if (closing() || removed) {
+      throw new Error('This draft is being discarded.')
+    }
+
+    const pending = start()
+    setupRequests.add(pending)
+
+    try {
+      return await pending
+    } finally {
+      setupRequests.delete(pending)
+    }
+  }
+
+  const setupTarget: McpSetupTarget = Object.freeze({
+    connectionId: connectionId || null,
+    profile: name,
+    request: <T,>(method: string, params: Record<string, unknown> = {}) =>
+      setupOperation(() => request<T>(method, params)),
+    completeMcpOAuth: (options: Parameters<typeof host.completeMcpOAuth>[0]) =>
+      setupOperation(() => {
+        if (!connectionId || !completeMcpOAuth) {
+          throw new Error('A registered draft gateway is required for MCP sign-in.')
+        }
+
+        return completeMcpOAuth({
+          ...options,
+          profile: { connectionId, profile: name },
+          cancelled: () => closing() || removed || Boolean(options.cancelled?.())
+        })
+      })
+  })
+
+  return Object.freeze({
+    connectionId,
+    createdRemotely: Boolean(targetConnection),
+    isCurrent,
+    meta,
+    request,
+    setupTarget,
+    capabilitiesProps: capabilitiesViewRoutesConnections && connectionId ? { fixedConnection: connectionId } : {},
+    remove: async (name: string) => {
+      await Promise.allSettled([...setupRequests])
+
+      if (route && deleteProfile) {
+        await deleteProfile({ ...route, profile: name, targetProfile: name })
+      } else if (deleteProfile) {
+        // Name-only deletion captures the ambient owner synchronously. It is
+        // safe only while the original legacy gateway is still current.
+        if (!isCurrent()) {
+          throw new Error('Return to the draft gateway before discarding this bot.')
+        }
+
+        await deleteProfile(name)
+      } else if (route) {
+        throw new Error('Source-scoped draft deletion requires host.deleteProfile.')
+      } else {
+        // Legacy SDKs have no owner-qualified delete door. Stay on the captured
+        // socket, and treat a failed CLI command as a failed cleanup.
+        const result = await request<{ blocked?: boolean; code?: number; hint?: string; output?: string }>('cli.exec', {
+          argv: ['profile', 'delete', name, '--yes']
+        })
+
+        if (result?.blocked || result?.code !== 0) {
+          throw new Error(result?.hint || result?.output || `Could not delete draft profile ${name}.`)
+        }
+      }
+
+      removed = true
+      await meta.discard()
+    }
+  })
+}
 
 /** Share one in-flight async operation across concurrent callers. Failures
  * clear the slot so a later attempt can retry. */
@@ -111,11 +253,13 @@ interface CapabilityCatalog {
 }
 interface CreateAgentDialogProps {
   onClose: () => void
+  /** Opens the editor for a just-created local bot whose model is not ready. */
+  onConfigureModel?: (bot: RosterRow) => void
   open: boolean
   roster: RosterRow[]
 }
 
-export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogProps) {
+export function CreateAgentDialog({ open, onClose, onConfigureModel, roster }: CreateAgentDialogProps) {
   const { t } = useI18n()
   const b = useBots()
   const [name, setName] = useState('')
@@ -128,6 +272,10 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
   // button + MCP setup buttons). Distinct from createdRef on purpose:
   // createdRef must stay a slug string for its sibling consumers.
   const flightRef = useRef<Promise<null | string> | null>(null)
+  const draftOwnerRef = useRef<ReturnType<typeof captureDraftOwner> | null>(null)
+  const discardFlightRef = useRef<Promise<void> | null>(null)
+  const closingRef = useRef(false)
+  const [draftLocked, setDraftLocked] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   // Default shapes mode: deterministic blob face drawn from the agent's name
@@ -211,6 +359,7 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<null | string>(null)
   const { slug, title: botTitle } = botProfileIdentity(name, title)
+  const descriptionText = [botTitle, description].filter(Boolean).join(' — ')
   const valid = slug.length > 0 && NAME_RE.test(slug)
 
   // Once the draft profile is materialized (Capabilities tab / MCP setup) it
@@ -227,36 +376,31 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
   // Draft semantics for the lazily-created profile: opening the Capabilities
   // tab (or running MCP setup) materializes the profile so the LIVE config
   // surfaces have a real backend to write to — but until the user hits
-  // Create Agent it is a DRAFT. Cancelling the dialog deletes it, so
-  // preconfigure-then-back-out leaves zero residue. Best-effort and
-  // fire-and-forget: a failed cleanup surfaces a toast, never blocks close.
-  const discardDraft = () => {
-    const draft = createdRef.current
+  // Create Agent it is a DRAFT. Cancel waits for materialization, then removes
+  // it from its original owner. A rejected cleanup keeps the draft retryable.
+  const discardDraft = () =>
+    singleFlight(discardFlightRef, async () => {
+      await flightRef.current
+      const draft = createdRef.current
+      const owner = draftOwnerRef.current
 
-    if (!draft) {
-      return
-    }
+      if (!draft) {
+        return
+      }
 
-    createdRef.current = null
-    flightRef.current = null
+      if (!owner) {
+        throw new Error('The draft owner is unavailable; the draft was not deleted.')
+      }
 
-    const discard = remoteTarget
-      ? requestForTarget('cli.exec', {
-          argv: ['profile', 'delete', draft, '--yes']
-        })
-      : deleteBot({
-          name: draft
-        })
-
-    void Promise.resolve(discard)
-      .then(() =>
-        host.notify({
-          kind: 'success',
-          message: `Draft agent "${draft}" discarded`
-        })
-      )
-      .catch(err => host.notifyError(err, `Could not clean up draft profile "${draft}"`))
-  }
+      await owner.remove(draft)
+      createdRef.current = null
+      draftOwnerRef.current = null
+      flightRef.current = null
+      setCreatedForCaps(null)
+      setDraftLocked(false)
+      void queryClient.invalidateQueries({ queryKey: ROSTER_KEY })
+      host.notify({ kind: 'success', message: `Draft agent "${draft}" discarded` })
+    })
 
   const reset = () => {
     setName('')
@@ -290,6 +434,30 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
     setError(null)
     createdRef.current = null
     flightRef.current = null
+    draftOwnerRef.current = null
+    discardFlightRef.current = null
+    setDraftLocked(false)
+  }
+
+  const cancel = async () => {
+    if (busy || closingRef.current) {
+      return
+    }
+
+    closingRef.current = true
+    setBusy(true)
+    setError(null)
+
+    try {
+      await discardDraft()
+      reset()
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setBusy(false)
+    } finally {
+      closingRef.current = false
+    }
   }
 
   // Capability catalog for the tabs: the profile doesn't exist yet, so show
@@ -366,11 +534,10 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
   // ONE profiles.create. A settled flight clears its slot: failures retry,
   // and a null result (form invalid at flight time) isn't sticky.
   const ensureAgentCreated = (): Promise<null | string> => {
-    // Renamed since the draft materialized? The old draft is orphaned —
-    // discard it and create fresh under the new slug.
+    // Identity controls lock when materialization starts. Never replace a
+    // draft implicitly: its original owner must confirm cleanup first.
     if (createdRef.current && createdRef.current !== slug) {
-      discardDraft()
-      setCreatedForCaps(null)
+      return Promise.reject(new Error('Cancel the existing draft before changing its name.'))
     }
 
     if (createdRef.current) {
@@ -382,34 +549,44 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
         return null
       }
 
-      const descriptionText = [botTitle, description].filter(Boolean).join(' — ')
-      await requestForTarget('profiles.create', {
-        name: slug,
-        description: descriptionText,
-        // Clone sources are profiles of the TARGET backend. The picker's
-        // roster is the local one, so a remote create always starts from the
-        // remote machine's default (or fresh) — never a local profile name
-        // the remote box doesn't have.
-        clone_from: cloneFrom === '__none__' ? null : remoteTarget ? 'default' : cloneFrom,
-        no_skills: noSkills,
-        // Shared (not copied) auth keeps ONE OAuth/token pool with the main
-        // profile, so refreshes can't invalidate each other. Older gateways
-        // ignore the param and copy — still functional, just forked.
-        share_auth: shareAuth,
-        soul: composeSoul({
+      const owner = captureDraftOwner(targetConnection, slug, () => closingRef.current)
+      draftOwnerRef.current = owner
+      setDraftLocked(true)
+
+      try {
+        await owner.request('profiles.create', {
           name: slug,
-          title: botTitle,
-          description,
-          roster,
-          customSoul: soul
-        }),
-        ...(model.trim() && provider.trim()
-          ? {
-              model: model.trim(),
-              provider: provider.trim()
-            }
-          : {})
-      })
+          description: descriptionText,
+          // Clone sources are profiles of the TARGET backend. The picker's
+          // roster is the local one, so a remote create always starts from the
+          // remote machine's default (or fresh) — never a local profile name
+          // the remote box doesn't have.
+          clone_from: cloneFrom === '__none__' ? null : remoteTarget ? 'default' : cloneFrom,
+          no_skills: noSkills,
+          // Shared (not copied) auth keeps ONE OAuth/token pool with the main
+          // profile, so refreshes can't invalidate each other. Older gateways
+          // ignore the param and copy — still functional, just forked.
+          share_auth: shareAuth,
+          soul: composeSoul({
+            name: slug,
+            title: botTitle,
+            description,
+            roster,
+            customSoul: soul
+          }),
+          ...(model.trim() && provider.trim()
+            ? {
+                model: model.trim(),
+                provider: provider.trim()
+              }
+            : {})
+        })
+      } catch (err) {
+        draftOwnerRef.current = null
+        setDraftLocked(false)
+        throw err
+      }
+
       createdRef.current = slug
 
       // Apply capability picks from the Advanced tabs (best-effort; the
@@ -434,7 +611,7 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
         }
 
         if (Object.keys(capPayload).length) {
-          await requestForTarget('profiles.configure', {
+          await owner.request('profiles.configure', {
             name: slug,
             ...capPayload
           })
@@ -443,48 +620,14 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
         /* capability application is best-effort */
       }
 
-      if (remoteTarget) {
-        // The bot lives on ANOTHER machine — local bot-meta is scoped to the
-        // active gateway, so write appearance/title into the remote
-        // profile's ui_meta (and asset store) directly. Best-effort: the
-        // profile exists either way.
-        const { image: avatarImage, ...look } = {
-          shape,
-          color,
-          image,
-          imageKind: image ? 'photo' : 'shape',
-          title: botTitle,
-          created: Date.now()
-        }
-
-        try {
-          void requestForTarget('profiles.configure', {
-            name: slug,
-            ui_meta: {
-              'hermes-bots': look
-            }
-          }).catch(() => undefined)
-
-          if (avatarImage) {
-            void requestForTarget('profiles.set_asset', {
-              name: slug,
-              asset: 'avatar',
-              data: avatarImage
-            }).catch(() => undefined)
-          }
-        } catch {
-          /* older remote gateway */
-        }
-      } else {
-        saveBotMeta(slug, {
-          shape,
-          color: color ?? undefined,
-          image,
-          imageKind: image ? 'photo' : 'shape',
-          title: botTitle,
-          created: Date.now()
-        })
-      }
+      await owner.meta.save({
+        shape,
+        color: color ?? undefined,
+        image,
+        imageKind: image ? 'photo' : 'shape',
+        title: botTitle,
+        created: Date.now()
+      })
 
       queryClient.invalidateQueries({
         queryKey: ROSTER_KEY
@@ -514,13 +657,47 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
         return
       }
 
-      host.notify({
-        kind: 'success',
-        message: remoteTarget
-          ? b.editor.createdOn(displayName({ name: slug, title: botTitle }), targetLabel)
-          : b.editor.created(displayName({ name: slug, title: botTitle }))
-      })
-      const wasRemote = remoteTarget
+      // The intro turn is a real model call. Probe the new profile's route
+      // first so a bot whose machine has no usable credential lands as
+      // "created, needs a model" instead of a doomed "No LLM provider" turn.
+      // Only an explicit `ok: false` counts; older gateways proceed as before.
+      const owner = draftOwnerRef.current!
+
+      const readiness = await owner
+        .request<{ error?: string; ok?: boolean }>('setup.runtime_check', {
+          profile: slugCreated
+        })
+        .catch(() => null)
+
+      const wasRemote = owner.createdRemotely || !owner.isCurrent()
+      const needsModel = readiness?.ok === false
+      const who = displayName({ name: slug, title: botTitle })
+
+      const ownerLabel =
+        (connections || []).find(connection => connection.id === owner.connectionId)?.label || owner.connectionId
+
+      const createdMessage = wasRemote ? b.editor.createdOn(who, ownerLabel) : b.editor.created(who)
+
+      const bot: RosterRow = {
+        name: slugCreated,
+        description: descriptionText,
+        title: botTitle,
+        ...(wasRemote ? { connectionId: owner.connectionId, remoteSource: true } : {})
+      }
+
+      host.notify(
+        needsModel
+          ? {
+              kind: 'warning',
+              title: createdMessage,
+              message: b.editor.needsModel,
+              detail: readiness?.error,
+              ...(!wasRemote && onConfigureModel
+                ? { action: { label: b.editor.configureModel, onClick: () => onConfigureModel(bot) } }
+                : {})
+            }
+          : { kind: 'success', message: createdMessage }
+      )
       reset()
       onClose()
 
@@ -545,7 +722,7 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
         // Agent creation. Click-path resolution (openBotCanonicalChat) mints
         // silently so a resolution miss never burns a turn (ScottFive).
         const sid = await createCanonicalChat(slug, {
-          kickoff: true
+          kickoff: !needsModel
         })
 
         if (!sid && typeof host.newChat === 'function') {
@@ -565,12 +742,8 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
   return (
     <Dialog
       onOpenChange={value => {
-        if (!value && !busy) {
-          // Cancel path (esc / overlay click): a materialized draft profile is
-          // discarded — preconfigure-then-back-out leaves nothing behind.
-          discardDraft()
-          reset()
-          onClose()
+        if (!value) {
+          void cancel()
         }
       }}
       open={open}
@@ -619,10 +792,7 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
             onShape={setShape}
             shape={shape}
           />
-          {labeled(
-            b.editor.name,
-            <Input autoFocus onChange={event => setName(event.target.value)} placeholder="inbox-triage" value={name} />
-          )}
+          {labeled(b.editor.name, <DraftNameInput locked={draftLocked} name={name} onChange={setName} />)}
           {taken ? (
             <div className="text-xs text-(--ui-accent)">
               {remoteTarget ? b.editor.nameTakenOn(slug, targetLabel) : b.editor.nameTaken(slug)}
@@ -635,7 +805,12 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
             ? labeled(
                 b.editor.createOn,
                 <Select
+                  disabled={draftLocked}
                   onValueChange={value => {
+                    if (draftLocked) {
+                      return
+                    }
+
                     setTargetConnection(value === (activeConnectionId || 'local') ? '' : value)
                     // The capability catalog and clone list belong to the
                     // target backend — refetch for the new home. The live
@@ -783,7 +958,7 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
                   )}
                   <label className="flex items-center gap-2 text-xs text-(--ui-text-secondary)">
                     <Checkbox checked={shareAuth} onCheckedChange={value => setShareAuth(Boolean(value))} />
-                    {b.editor.shareKeys}
+                    {remoteTarget ? b.editor.shareKeysOn(targetLabel) : b.editor.shareKeys}
                   </label>
                   <div className="pl-6 pt-0.5 text-[0.7rem] leading-5 text-(--ui-text-tertiary)">
                     {b.editor.shareKeysHint}
@@ -807,11 +982,7 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
                     <CapabilitiesView
                       embedded
                       fixedProfile={createdForCaps}
-                      {...(remoteTarget
-                        ? {
-                            fixedConnection: targetConnection
-                          }
-                        : {})}
+                      {...draftOwnerRef.current?.capabilitiesProps}
                     />
                   </ResizableFrame>
                 ) : (
@@ -930,7 +1101,11 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
                               ) : null}
                               {needsSetup ? (
                                 <McpSetupButton
-                                  ensureProfile={ensureAgentCreated}
+                                  ensureTarget={async () => {
+                                    const created = await ensureAgentCreated()
+
+                                    return created && !closingRef.current ? draftOwnerRef.current!.setupTarget : null
+                                  }}
                                   entry={m}
                                   onDone={() => {
                                     // Setup done: mark installed so the row's
@@ -982,15 +1157,7 @@ export function CreateAgentDialog({ open, onClose, roster }: CreateAgentDialogPr
           ) : null}
         </div>
         <DialogFooter>
-          <Button
-            disabled={busy}
-            onClick={() => {
-              discardDraft()
-              reset()
-              onClose()
-            }}
-            variant="ghost"
-          >
+          <Button disabled={busy} onClick={() => void cancel()} variant="ghost">
             {t.common.cancel}
           </Button>
           <Button disabled={busy || !valid || taken} onClick={submit}>
@@ -1145,10 +1312,38 @@ export function CreateGroupChatDialog({ open, roster, onClose, onCreated }: Crea
 
   const canCreate = selected.length >= 2 && Boolean(name.trim() || selected.length)
 
-  const create = () => {
+  const creating = useRef(false)
+
+  const create = async () => {
+    if (creating.current) {return}
+    creating.current = true
+
+    try {
     const base = (name.trim() || placeholder).slice(0, 64)
 
     if (selected.length < 2 || !base) {
+      return
+    }
+
+    const route = captureCanonicalGroupRoute()
+    const sourceCurrent = groupCreationSource(route)
+
+    const capabilities = await canonicalGroupRequest<unknown>(route, 'groups.capabilities')
+    const mode = groupExecutionMode(capabilities)
+
+    if (!sourceCurrent() || mode === 'unavailable') {
+      throw new Error(b.canonical.driverUnavailable)
+    }
+
+    if (mode === 'canonical') {
+      const created = await createCanonicalGroup(route, base, durableGroupChatMembers(selected))
+
+      // Creation already succeeded; leave it on its owner without adopting a stale result.
+      if (!sourceCurrent()) {return}
+      const key = registerCanonicalGroup(route, created.room)
+      onClose()
+      onCreated?.(key)
+
       return
     }
 
@@ -1195,6 +1390,9 @@ export function CreateGroupChatDialog({ open, roster, onClose, onCreated }: Crea
     })
     onClose()
     onCreated?.(groupName)
+    } catch (error) {
+      host.notify({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+    } finally { creating.current = false }
   }
 
   return (
@@ -1231,18 +1429,19 @@ export function CreateGroupChatDialog({ open, roster, onClose, onCreated }: Crea
                 key={botRosterKey(bot)}
                 variant="muted"
               >
-                <RowButton
-                  onClick={() =>
-                    setChecked(prev => ({
-                      ...prev,
-                      [botRosterKey(bot)]: false
-                    }))
-                  }
-                  title={b.group.removeFromSelection}
-                >
-                  {displayName(bot, botRosterMeta(bot, allMeta))}
-                  <Codicon className="text-[0.6rem]" name="close" />
-                </RowButton>
+                <Tip label={b.group.removeFromSelection}>
+                  <RowButton
+                    onClick={() =>
+                      setChecked(prev => ({
+                        ...prev,
+                        [botRosterKey(bot)]: false
+                      }))
+                    }
+                  >
+                    {displayName(bot, botRosterMeta(bot, allMeta))}
+                    <Codicon className="text-[0.6rem]" name="close" />
+                  </RowButton>
+                </Tip>
               </Badge>
             ))}
           </div>

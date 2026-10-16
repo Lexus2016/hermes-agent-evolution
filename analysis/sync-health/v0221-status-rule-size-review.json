@@ -1,0 +1,29 @@
+{
+  "head": "9ad6d6a828dab0f1345e2e528c6121e8cd430c8b",
+  "upstream": "297552a9d646119871391d202509822cd86330df",
+  "path": "ui-tui/src/components/appChrome.tsx",
+  "scope": "StatusRule",
+  "rule": "FUNC_LINES",
+  "finding": {
+    "path": "ui-tui/src/components/appChrome.tsx",
+    "rule": "FUNC_LINES",
+    "scope": "StatusRule",
+    "line": 533,
+    "detail": "FUNC_LINES 346 > 341, its value on main (over target 300: it may only go down)",
+    "blocking": true,
+    "allowed_reason": null,
+    "inherited_debt": null
+  },
+  "candidate_blob": "967f26906560303965fbf81cc038bc4557bcef49",
+  "source_blob": "967f26906560303965fbf81cc038bc4557bcef49",
+  "rationale": "The 346-line StatusRule is one cohesive status-bar view: prop destructuring, width-budget and optional-segment calculations followed by explicit JSX for each visible segment. The reviewed function has no filesystem/network calls, credential or persistence updates, effect hooks or command execution. Local tailBudget mutation only decides progressive display; its click closure delegates the supplied session-count UI callback. Keeping this exact upstream composition creates no additional branch or line growth. This disposition covers function organization/length only, not rendering, child timer correctness, terminal accessibility or whole-fork compatibility. Native and TUI runtime gates remain required.",
+  "inspection": {
+    "range": "StatusRule declaration through its closing brace, lines534-896; adjacent model-label/width helpers and JSX child boundaries inspected",
+    "metric_expected": 346,
+    "test_sources_located_not_executed": [
+      "ui-tui/src/__tests__/appChromeStatusRule.test.tsx",
+      "ui-tui/src/__tests__/appChromeBlockedTimers.test.tsx"
+    ]
+  },
+  "status": "proposed"
+}

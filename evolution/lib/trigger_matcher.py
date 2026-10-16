@@ -51,7 +51,7 @@ _STOP = frozenset({
 })
 
 
-def _tokens(text: str) -> List[str]:
+def _tokens(text: str) -> list[str]:
     return [w for w in re.split(r"[^a-zA-Z0-9]+", text.lower()) if w and w not in _STOP]
 
 

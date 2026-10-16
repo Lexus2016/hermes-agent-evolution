@@ -236,7 +236,7 @@ class WriteGuardPolicy:
         return self.mode in {"enforce", "audit"}
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "WriteGuardPolicy":
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> WriteGuardPolicy:
         if not isinstance(data, Mapping):
             return cls(mode="off")
 

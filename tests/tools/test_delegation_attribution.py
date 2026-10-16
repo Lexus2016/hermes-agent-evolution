@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for delegation attribution markers (issue #67, slice 1).
 
 Covers the canonical marker format (build / parse / embed) and the real

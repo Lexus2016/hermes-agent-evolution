@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for multi-agent cooperation/containment rules + escalation (#2527)."""
 
 from evolution.lib.agent_cooperation import (

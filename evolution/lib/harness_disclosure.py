@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Harness configuration disclosure for evaluations (#2481).
 
 Source: arXiv:2605.23950v1 ("Stop Comparing LLM Agents Without Disclosing
@@ -28,7 +27,7 @@ import logging
 import os
 import tempfile
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -42,7 +41,7 @@ __all__ = [
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass
@@ -50,22 +49,22 @@ class HarnessConfigSnapshot:
     """A structured snapshot of the harness configuration."""
 
     system_prompt_version: str = ""
-    skill_versions: Dict[str, str] = field(default_factory=dict)
-    tool_definitions: List[str] = field(default_factory=list)
+    skill_versions: dict[str, str] = field(default_factory=dict)
+    tool_definitions: list[str] = field(default_factory=list)
     model_provider: str = ""
     model: str = ""
-    context_management: Dict[str, Any] = field(default_factory=dict)
+    context_management: dict[str, Any] = field(default_factory=dict)
     captured_at: str = ""
 
     def __post_init__(self) -> None:
         if not self.captured_at:
             self.captured_at = _now_iso()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "HarnessConfigSnapshot":
+    def from_dict(cls, d: dict[str, Any]) -> HarnessConfigSnapshot:
         return cls(
             system_prompt_version=str(d.get("system_prompt_version", "")),
             skill_versions=dict(d.get("skill_versions", {}) or {}),
@@ -77,9 +76,9 @@ class HarnessConfigSnapshot:
         )
 
 
-def _read_skill_versions(skills_dir: Path) -> Dict[str, str]:
+def _read_skill_versions(skills_dir: Path) -> dict[str, str]:
     """Read skill versions from SKILL.md frontmatter (best-effort)."""
-    versions: Dict[str, str] = {}
+    versions: dict[str, str] = {}
     if not skills_dir.exists():
         return versions
     for skill_md in skills_dir.rglob("SKILL.md"):
@@ -113,8 +112,8 @@ def capture_harness_config(
     model_provider: str = "",
     model: str = "",
     skills_dir: Optional[Path | str] = None,
-    tool_names: Optional[List[str]] = None,
-    context_management: Optional[Dict[str, Any]] = None,
+    tool_names: Optional[list[str]] = None,
+    context_management: Optional[dict[str, Any]] = None,
 ) -> HarnessConfigSnapshot:
     """Capture a structured harness-configuration snapshot.
 
@@ -123,7 +122,7 @@ def capture_harness_config(
     snapshot honest: an undisclosed field is visibly absent, not silently
     filled in.
     """
-    skill_versions: Dict[str, str] = {}
+    skill_versions: dict[str, str] = {}
     if skills_dir is not None:
         skill_versions = _read_skill_versions(Path(skills_dir))
 

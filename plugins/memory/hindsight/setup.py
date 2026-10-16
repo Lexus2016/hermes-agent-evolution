@@ -105,18 +105,23 @@ def run_setup(provider, hermes_home: str, config: dict) -> None:
         provider_config["llm_provider"] = llm_provider
 
     print("\n  Checking dependencies...")
-    # Environment-aware install: sealed hosted venvs redirect to the durable data volume.
-    from tools.lazy_deps import install_specs
+    from pm import sync_venv
 
-    deps = ["hindsight-all"] if mode == "local_embedded" else [f"hindsight-client>={_MIN_CLIENT_VERSION}"]
-    outcome = install_specs(deps, timeout=120)
-    if outcome.ok:
-        print("  ✓ Dependencies up to date")
-    elif outcome.blocked:
-        print(f"  ⚠ Cannot install dependencies: {outcome.reason}")
-    else:
-        print(f"  ⚠ Install failed:\n{(outcome.stderr or '').strip()}")
-        print(f"  Run manually: uv pip install --python {sys.executable} {' '.join(deps)}")
+    extra = "hindsight"
+    try:
+        sync_venv([extra], explicit=True)
+        if mode == "local_embedded":
+            from .isolated_runtime import install_runtime
+
+            install_runtime(explicit=True)
+    except Exception as exc:
+        import logging
+        logging.exception("Memory dependency preparation failed",
+                          exc_info=(RuntimeError, RuntimeError(type(exc).__name__), None))
+        print(f"  ⚠ Cannot install dependencies: {exc}")
+        print("  Rerun hermes memory setup after resolving the dependency error.")
+        return
+    print("  ✓ Dependencies up to date; restart Hermes to use the selected generation.")
 
     if mode == "cloud":
         print("\n  Get your API key at https://ui.hindsight.vectorize.io\n")

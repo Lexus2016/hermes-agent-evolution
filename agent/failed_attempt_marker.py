@@ -87,7 +87,7 @@ def _is_failed_content(content: Any) -> bool:
     return any(p.search(text) for p in _COMPILED_PATTERNS)
 
 
-def failed_attempt_indices(messages: List[Dict[str, Any]]) -> List[int]:
+def failed_attempt_indices(messages: list[dict[str, Any]]) -> list[int]:
     """Return indices of tool-result messages that are failed attempts.
 
     Parameters
@@ -104,7 +104,7 @@ def failed_attempt_indices(messages: List[Dict[str, Any]]) -> List[int]:
     if not messages:
         return []
 
-    indices: List[int] = []
+    indices: list[int] = []
     for i, msg in enumerate(messages):
         if not isinstance(msg, dict):
             continue

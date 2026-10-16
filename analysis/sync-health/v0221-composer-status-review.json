@@ -1,0 +1,70 @@
+{
+  "scope": "Only independently second-reviewed UI metric index19; no other candidates or held findings accepted.",
+  "entries": [
+    {
+      "index": 19,
+      "path": "apps/desktop/src/app/chat/composer/status-stack/index.tsx",
+      "scope": "ComposerStatusStack",
+      "rule": "CC",
+      "detail": "CC 32 > 26, its value on main (over target 20: it may only go down)",
+      "current_blob": "754b1c9ec5e24d394531c83e7cb1070147cc579a",
+      "source_blob": "754b1c9ec5e24d394531c83e7cb1070147cc579a",
+      "current_unit": {
+        "q": "ComposerStatusStack",
+        "line": 112,
+        "end": 411,
+        "cc": 32,
+        "nesting": 2,
+        "hash": "8455246c167d27a6",
+        "lines": 231
+      },
+      "source_unit": {
+        "q": "ComposerStatusStack",
+        "line": 112,
+        "end": 411,
+        "cc": 32,
+        "nesting": 2,
+        "hash": "8455246c167d27a6",
+        "lines": 231
+      },
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "raw_detail": "CC 32 > 26, its value on main (over target 20: it may only go down)",
+      "exact_source_and_unit_equal": true,
+      "candidate_cap": 32,
+      "status": "candidate",
+      "exclusions": [
+        "Structural disposition only; not approval or activation.",
+        "No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior.",
+        "No desktop test pass claim; typecheck exit 137 remains unresolved.",
+        "Generated manifest identity/cap and controller verification required before any activation."
+      ],
+      "inspected_ranges": [
+        [
+          1,
+          411
+        ]
+      ],
+      "bindings": [
+        "Exported ComposerStatusStack props, session-view/store imports, group tier/icon/label helpers, owned free-tier/metrics notice claim, session-slice and pane-visible hooks"
+      ],
+      "structural_rationale": "Full component read: complexity comes from composing ordered status sections, goal/subagent/todo visibility, optional session/billing/preview/queue rows and display conditionals. Session identity remains an explicit prop/store read, notices retain one-owner ordering, and mutations stay in imported actions. Actual full source and unit/cap equal upstream; no structural compatibility conflict identified. Background polling and action failure contracts remain outside this disposition.",
+      "current_source_reverified": true,
+      "metric_disposition_scope": "Exact identified structural metric and cap only; all other findings and behavior remain independently actionable.",
+      "independent_review": {
+        "complete_source_read": "Entire 411-line module including both effects, callbacks and JSX; complete notice ownership and session slice hook modules.",
+        "rationale": "Complexity organizes ordered billing, notice, session control, group, history, queue and preview sections with explicit session callback arguments. Hydration and visibility-gated polling are real effects, not claimed absent. No identified structural integration conflict at the pinned cap.",
+        "limits": "No runtime receipt; polling, callback failure, consent and routing correctness are not waived. Desktop typecheck exit 137 remains unresolved.",
+        "context_blobs": [
+          {
+            "path": "apps/desktop/src/components/free-tier/notice-strip.tsx",
+            "blob": "c2e8ce2e5232d0349b13bd79a64c5a39c8bd6935"
+          },
+          {
+            "path": "apps/desktop/src/lib/use-session-slice.ts",
+            "blob": "a7399f588b358112973d056b16fbe5c8c55172a7"
+          }
+        ]
+      }
+    }
+  ]
+}

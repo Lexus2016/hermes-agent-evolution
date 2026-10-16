@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_trace_miner import format_weaknesses, mine_weaknesses  # noqa: E402
+from evolution_trace_miner import format_weaknesses, mine_weaknesses
 
 
 def _digest(*, tool_failures=None, provider_errors=None, repeated=None, window=7, scanned=10):

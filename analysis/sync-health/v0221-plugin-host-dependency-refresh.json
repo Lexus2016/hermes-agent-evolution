@@ -1,0 +1,23 @@
+{
+  "scope": "Refresh only environment-boundary-07 dependency after reviewed process ownership correction; no additional finding or changed environment policy.",
+  "old_dependency_blob": "acf6042a6ac13d90da1513c7e6914b1b2a77aa14",
+  "new_dependency_blob": "8d44e91f403397c2d052a2352ea496895b47c110",
+  "unchanged_environment_helper_ast_sha256": {
+    "served_profile_child_env": "7a3f0ff90c0b175d297c0f980b59a55802e7419c37a6eab119aef4e87ac6ffcc",
+    "hermes_subprocess_env": "c8b4accf10218627736ee1a01f5109cd154cf34cdb09f53b5149ac58b5c80700",
+    "_is_routed_home": "c7e0af631d691108f4825dfd21120a5a4c61fc9b51036f4af525e5ca54c267c4",
+    "strip_launch_profile_env": "3df9d2c61580b21e15598534e7af562c392213e2e698996a999a1ee8c72d823b"
+  },
+  "source_review": "Controller reviewed final per-handle ownership call graph and shared-group compatibility. The canonical profile child environment helpers are structurally identical; plugin-host child log-level interpretation is unchanged.",
+  "receipt": {
+    "path": "/tmp/hermes-ownership-parity-green-20261015T231530.log",
+    "sha256": "44ea3a908ac3b561c6a9bb5aa132024a07e34ca36547babd6d46fe165ad9d890",
+    "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 6 test files (~40 tests) under ['tests/tools/test_local_process_cleanup_ownership.py', 'tests/tools/test_pgid_starttime_drift.py', 'tests/tools/test_local_interrupt_cleanup.py', 'tests/tools/test_local_setsid_descendant_sweep.py', 'tests/tools/test_terminal_bounded_execute.py', 'tests/hermes_cli/test_plugin_host.py']; running with -j 9\n[ 15.0% |     6/~40 | \u27136 | \u27170] \u2713 tests/tools/test_pgid_starttime_drift.py (6\u2713, 2.0s)\n[ 47.5% |    19/~40 | \u271341 | \u2717 0] \u2713 tests/tools/test_local_process_cleanup_ownership.py (35\u2713 1s, 2.3s)\n[ 55.0% |    22/~40 | \u271344 | \u2717 0] \u2713 tests/tools/test_terminal_bounded_execute.py (3\u2713, 3.3s)\n[ 72.5% |    29/~40 | \u271351 | \u2717 0] \u2713 tests/hermes_cli/test_plugin_host.py (7\u2713, 6.1s)\n[ 87.5% |    35/~40 | \u271357 | \u2717 0] \u2713 tests/tools/test_local_setsid_descendant_sweep.py (6\u2713, 6.3s)\n[100.0% |    40/~40 | \u271363 | \u2717 0] \u2713 tests/tools/test_local_interrupt_cleanup.py (6\u2713, 7.2s)\n\n=== Summary: 6 files, 63 tests passed, 0 failed, 1 skipped (100% complete) in 7.2s (9 workers) ===\n\n  note: platforms('windows') tests (in 1 file) were SKIPPED on this host (linux); they run on the Windows Python-tests lane.\n  Durations cached to test_durations.json (6 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   6\n  Total subprocess CPU-wall: 27.2s  (runner wall: 7.2s, parallelism: 9x)\n  P50: 6.10s  P90: 7.17s  P95: 7.17s  P99: 7.17s  Max: 7.17s\n  <1s: 0 files (0%)  <2s: 0 files (0%)\n  Top 10 slowest:\n      7.17s  tests/tools/test_local_interrupt_cleanup.py\n      6.26s  tests/tools/test_local_setsid_descendant_sweep.py\n      6.10s  tests/hermes_cli/test_plugin_host.py\n      3.34s  tests/tools/test_terminal_bounded_execute.py\n      2.26s  tests/tools/test_local_process_cleanup_ownership.py\n      2.05s  tests/tools/test_pgid_starttime_drift.py\n",
+    "coverage": "63 passed,1 native Windows skip; includes all7 plugin-host tests on this exact stronger cleanup source. No native Windows claim."
+  },
+  "ast_hash_recipe": {
+    "python_version": "3.14.7",
+    "expression": "sha256(ast.dump(top_level_FunctionDef, include_attributes=False).encode()).hexdigest()",
+    "normalization": "Full node including docstring; no additional normalization. Runtime AST schema is version-specific; independent equivalence must use the same schema or directly compare old/new under its own schema."
+  }
+}

@@ -17,7 +17,7 @@ def _patch_daemon_pool(monkeypatch):
     tool-execution path runs unchanged."""
     import concurrent.futures
 
-    import tools.daemon_pool as daemon_pool
+    from tools import daemon_pool
 
     class _DaemonPool(concurrent.futures.ThreadPoolExecutor):
         def __init__(self, *args, **kwargs):

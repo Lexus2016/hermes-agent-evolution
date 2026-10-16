@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """StepGuard: Learned step-level guardrails with explicit safety-utility balancing (#3245).
 
 Reframes guardrailing as a step-level decision problem:
@@ -41,7 +40,7 @@ class StepGuardDecision:
     reason: str
 
 
-def compute_safety_risk(tool_name: str, tool_args: Dict[str, Any]) -> float:
+def compute_safety_risk(tool_name: str, tool_args: dict[str, Any]) -> float:
     """Predict safety risk score in [0.0, 1.0]."""
     t = str(tool_name or "").lower()
     if not isinstance(tool_args, dict):
@@ -66,7 +65,7 @@ def compute_safety_risk(tool_name: str, tool_args: Dict[str, Any]) -> float:
     return 0.0
 
 
-def compute_utility_cost(tool_name: str, tool_args: Dict[str, Any]) -> float:
+def compute_utility_cost(tool_name: str, tool_args: dict[str, Any]) -> float:
     """Estimate task completion cost (utility) if step is blocked [0.0, 1.0]."""
     t = str(tool_name or "").lower()
     if not isinstance(tool_args, dict):
@@ -92,7 +91,7 @@ def compute_utility_cost(tool_name: str, tool_args: Dict[str, Any]) -> float:
 
 def evaluate_step_guardrail(
     tool_name: str,
-    tool_args: Dict[str, Any],
+    tool_args: dict[str, Any],
     *,
     risk_threshold: float = 0.80,
     utility_threshold: float = 0.40,

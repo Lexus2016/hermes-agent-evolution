@@ -50,3 +50,16 @@ class TestMarkJobRunPersistsToolCalls:
         job = create_job(prompt="p", schedule="0 9 * * *", name="tc-default")
         mark_job_run(job["id"], success=True)
         assert get_job(job["id"])["last_tool_calls"] is None
+
+
+def test_completed_receipt_persists_tool_count_without_global_state(tmp_path, monkeypatch):
+    from cron import scheduler, scheduler_bookkeeping
+    from cron.jobs import create_job, get_job
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    job = create_job(prompt="count", schedule="every 1h", name="receipt-count")
+    job["_last_tool_calls"] = 3
+    monkeypatch.setattr(scheduler, "finish_execution", lambda *a, **kw: None)
+    delivery = scheduler._RunDelivery(job=job, success=True, error=None)
+    assert scheduler_bookkeeping.finish_completed_run(delivery, None, "receipt-count-execution")
+    assert get_job(job["id"])["last_tool_calls"] == 3

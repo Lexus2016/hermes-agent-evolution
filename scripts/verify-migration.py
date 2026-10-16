@@ -17,7 +17,7 @@ from typing import Dict, List, Tuple
 class MigrationVerifier:
     """Verify migration integrity."""
     
-    def __init__(self, backup_path: str, current_path: str = None):
+    def __init__(self, backup_path: str, current_path: str | None = None):
         """
         Initialize verifier.
         
@@ -318,7 +318,7 @@ def main():
         # Try to read from last backup file
         last_backup_file = Path(os.path.expanduser("~/.hermes.last_backup"))
         if last_backup_file.exists():
-            backup_path = last_backup_file.read_text(encoding="utf-8").strip()
+            backup_path = last_backup_file.read_text(encoding="utf-8-sig").strip()
         else:
             print("❌ No backup path provided and ~/.hermes.last_backup not found")
             print("Usage: python verify_migration.py <backup_path>")

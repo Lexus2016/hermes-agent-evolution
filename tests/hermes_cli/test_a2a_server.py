@@ -313,9 +313,9 @@ async def test_sse_stream_emits_submitted_working_completed():
 # --------------------------------------------------------------------------
 
 pytest.importorskip("starlette.testclient")
-from starlette.testclient import TestClient  # noqa: E402
+from starlette.testclient import TestClient
 
-from hermes_cli import web_server  # noqa: E402
+from hermes_cli import web_server
 
 
 @pytest.fixture

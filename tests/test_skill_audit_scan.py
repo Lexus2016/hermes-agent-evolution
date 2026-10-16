@@ -68,7 +68,7 @@ def _run(
     ]
     if allowlist is not None:
         cmd += ["--allowlist", str(allowlist)]
-    return subprocess.run(cmd, capture_output=True, text=True)
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
 
 def test_initial_scan_establishes_baseline_silently(tmp_path: Path) -> None:

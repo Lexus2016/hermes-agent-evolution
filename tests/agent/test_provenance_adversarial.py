@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Adversarial end-to-end suite for the pinned-constraint trust boundary.
 
 Every other suite exercises one seam. This one walks the whole path an attack

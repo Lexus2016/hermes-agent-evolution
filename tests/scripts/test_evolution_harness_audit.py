@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Harness-integrity audit gate tests (#2808) — the seven BenchJack classes."""
 
 import sys
@@ -6,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_harness_audit import audit_harness_files  # noqa: E402
+from evolution_harness_audit import audit_harness_files
 
 
 def _write(tmp_path, name, content):

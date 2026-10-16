@@ -29,7 +29,7 @@ import json
 import logging
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # Canonical tool names. The MCP prefix mirrors how tools are surfaced to the
 # agent (``mcp__<server>__<tool>``); bare names cover non-MCP built-ins.
-NON_ATOMIC_TOOLS: Dict[str, "NonAtomicToolSpec"] = {}
+NON_ATOMIC_TOOLS: dict[str, NonAtomicToolSpec] = {}
 
 
 @dataclass(frozen=True)
@@ -161,11 +161,11 @@ def _get_spec(tool_name: str) -> Optional[NonAtomicToolSpec]:
 class ClassifiedFields:
     """Result of splitting a tool call's arguments by intent class."""
 
-    semantic: Dict[str, Any] = field(default_factory=dict)
-    noise: Dict[str, Any] = field(default_factory=dict)
+    semantic: dict[str, Any] = field(default_factory=dict)
+    noise: dict[str, Any] = field(default_factory=dict)
 
 
-def classify_fields(tool_name: str, arguments: Dict[str, Any]) -> ClassifiedFields:
+def classify_fields(tool_name: str, arguments: dict[str, Any]) -> ClassifiedFields:
     """Split ``arguments`` into semantic-intent and syntactic-noise fields.
 
     A field is semantic if it is listed in the tool's ``semantic_fields``.
@@ -176,16 +176,14 @@ def classify_fields(tool_name: str, arguments: Dict[str, Any]) -> ClassifiedFiel
     """
     spec = _get_spec(tool_name)
     arguments = arguments or {}
-    semantic: Dict[str, Any] = {}
-    noise: Dict[str, Any] = {}
+    semantic: dict[str, Any] = {}
+    noise: dict[str, Any] = {}
 
     for raw_key, value in arguments.items():
         key = str(raw_key).lower()
         if spec and key in spec.semantic_fields:
             semantic[raw_key] = value
-        elif spec and key in spec.noise_fields:
-            noise[raw_key] = value
-        elif any(pat in key for pat in _NOISE_FIELD_PATTERNS):
+        elif spec and key in spec.noise_fields or any(pat in key for pat in _NOISE_FIELD_PATTERNS):
             noise[raw_key] = value
         else:
             # Unknown field → default to noise (safe direction).
@@ -197,7 +195,7 @@ def classify_fields(tool_name: str, arguments: Dict[str, Any]) -> ClassifiedFiel
 # ── Idempotency key inference ───────────────────────────────────────────
 
 
-def infer_idempotency_key(tool_name: str, arguments: Dict[str, Any]) -> str:
+def infer_idempotency_key(tool_name: str, arguments: dict[str, Any]) -> str:
     """Return a stable idempotency key derived from semantic-intent fields.
 
     Two calls produce the SAME key iff their semantic intent is identical,
@@ -219,7 +217,7 @@ class LoggedToolCall:
     """A recorded non-atomic tool call."""
 
     tool_name: str
-    arguments: Dict[str, Any]
+    arguments: dict[str, Any]
     idempotency_key: str
     classified: ClassifiedFields
     recorded_at: str
@@ -236,12 +234,12 @@ class ToolCallLog:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._entries: Dict[str, LoggedToolCall] = {}
+        self._entries: dict[str, LoggedToolCall] = {}
 
     def record(
         self,
         tool_name: str,
-        arguments: Dict[str, Any],
+        arguments: dict[str, Any],
         result: Any = None,
     ) -> LoggedToolCall:
         """Record a non-atomic tool call. No-op for atomic tools.
@@ -261,7 +259,7 @@ class ToolCallLog:
             arguments=dict(arguments or {}),
             idempotency_key=key,
             classified=classified,
-            recorded_at=datetime.now(timezone.utc).isoformat(),
+            recorded_at=datetime.now(UTC).isoformat(),
             result_digest=_digest_result(result),
         )
         with self._lock:
@@ -274,18 +272,18 @@ class ToolCallLog:
         return entry
 
     def lookup(
-        self, tool_name: str, arguments: Dict[str, Any]
+        self, tool_name: str, arguments: dict[str, Any]
     ) -> Optional[LoggedToolCall]:
         """Return the logged entry for this intent, or None if unseen."""
         key = infer_idempotency_key(tool_name, arguments)
         with self._lock:
             return self._entries.get(key)
 
-    def has_executed(self, tool_name: str, arguments: Dict[str, Any]) -> bool:
+    def has_executed(self, tool_name: str, arguments: dict[str, Any]) -> bool:
         """True if a call with identical semantic intent is logged."""
         return self.lookup(tool_name, arguments) is not None
 
-    def all_entries(self) -> List[LoggedToolCall]:
+    def all_entries(self) -> list[LoggedToolCall]:
         with self._lock:
             return list(self._entries.values())
 
@@ -307,7 +305,7 @@ def _digest_result(result: Any) -> Optional[str]:
 # ── Replay-or-fork decision (Slice B, #2237) ─────────────────────────────
 
 
-def replay_or_fork(tool_name: str, arguments: Dict[str, Any]) -> Optional[str]:
+def replay_or_fork(tool_name: str, arguments: dict[str, Any]) -> Optional[str]:
     """Decide replay vs fork for a non-atomic tool call.
 
     Returns a JSON string to **replay** (the call already executed with this

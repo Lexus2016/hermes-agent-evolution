@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger("tools.skill_manager_tool")
 
 
-def _refusal(message: str, **extra: Any) -> Dict[str, Any]:
+def _refusal(message: str, **extra: Any) -> dict[str, Any]:
     return {"success": False, "error": message, **extra}
 
 
@@ -48,7 +48,7 @@ class _BackgroundReviewReadMarks:
             return path in self._paths
 
 
-_background_review_read_paths: "_ctxvars.ContextVar[Optional[_BackgroundReviewReadMarks]]" = (
+_background_review_read_paths: _ctxvars.ContextVar[Optional[_BackgroundReviewReadMarks]] = (
     _ctxvars.ContextVar("background_review_read_paths", default=None))
 
 
@@ -161,8 +161,143 @@ def _pinned_guard(name: str) -> Optional[str]:
     return None
 
 
+def _background_review_delete_guard(name: str, skill_dir: Path) -> Optional[dict[str, Any]]:
+    """Refuse autonomous deletes of anything but curator-owned sediment. Content writes are not
+    gated by ownership: the review fork exists to improve every skill it learns from, and every
+    write is ledgered and reversible, while an archive removes a skill the user relies on."""
+    if not _is_background_review():
+        return None
+    refuse = "Refusing background curator delete for"
+    if _is_pinned(name, "pinned skill guard"):
+        return _refusal(
+            f"{refuse} pinned skill '{name}': pinned skills "
+            f"are off-limits to autonomous maintenance. Ask the user to run `hermes curator "
+            f"unpin {name}` if they want it changed.")
+    try:
+        from agent.skill_utils import is_external_skill_path
+        if is_external_skill_path(skill_dir):
+            return _refusal(
+                f"{refuse} skill '{name}': the skill lives in skills.external_dirs, which are "
+                f"externally owned and read-only to autonomous curation.")
+    except Exception:
+        logger.debug("external skill guard lookup failed for %s", name, exc_info=True)
+    try:
+        from tools import skill_usage
+        for predicate, label in (
+            (skill_usage.is_protected_builtin, "protected built-in"),
+            (skill_usage.is_hub_installed, "hub-installed"),
+            (skill_usage.is_bundled, "bundled")):
+            if predicate(name):
+                return _refusal(f"{refuse} {label} skill '{name}'.")
+        # Not curator-managed (no `created_by: "agent"`) => user-owned, never archived
+        # autonomously. A MISSING record and `created_by: null` must resolve identically:
+        # keying on presence let the guard's own bookkeeping flip the verdict (#67140).
+        usage_rec = skill_usage.load_usage().get(name)
+        if not skill_usage._is_curator_managed_record(usage_rec):
+            _detail = (f"created_by={usage_rec.get('created_by')!r}" if isinstance(usage_rec, dict)
+                       else "no usage record")
+            return _refusal(
+                f"{refuse} skill '{name}': the skill is not "
+                f"curator-managed ({_detail}). Only curator-managed skills may be archived "
+                f"autonomously. Run `hermes curator adopt {name}` to opt it in.")
+    except Exception:
+        logger.warning("owned skill guard lookup failed for %s", name, exc_info=True)
+        return _refusal(
+            f"{refuse} skill '{name}': agent ownership could not "
+            f"be verified because the provenance record is unavailable or unreadable.")
+    return None
+
+
+def _is_skill_md_target(name: str, target: Path) -> bool:
+    """True if ``target`` is the main SKILL.md of skill ``name``.
+
+    Used by the read-before-write guard to decide auto-preload eligibility:
+    only the skill's primary SKILL.md is auto-loaded (the write paths re-read
+    it from disk), never its supporting files.
+    """
+    if target.name != "SKILL.md":
+        return False
+    try:
+        resolved = str(target.resolve())
+    except Exception:
+        resolved = str(target)
+    from tools import skill_manager_tool as _smt
+    found = _smt._find_skill(name)
+    if not found:
+        return False
+    try:
+        skill_md = str((found["path"] / "SKILL.md").resolve())
+    except Exception:
+        skill_md = str(found["path"] / "SKILL.md")
+    return resolved == skill_md
+
+
+def _background_review_read_before_write_guard(
+    name: str, target: Path, action: str, file_label: str) -> Optional[dict[str, Any]]:
+    """Require review forks to load the exact target before mutating it.
+
+    SKILL.md auto-preload (#2375): the background skill-curation agent enters
+    an infinite oscillation when it attempts to edit/patch SKILL.md without
+    first calling skill_view — the guard refuses the write, the agent then
+    tries read_file (not whitelisted in background-review mode), that is
+    denied, and it loops back to the write. Auto-preloading SKILL.md breaks
+    the cycle while preserving the blind-overwrite protection for supporting files.
+    """
+    if not _is_background_review() or _background_review_has_read(target):
+        return None
+
+    # Auto-preload the skill's main SKILL.md (#2375)
+    if _is_skill_md_target(name, target):
+        try:
+            mark_background_review_skill_read(target)
+        except Exception:
+            logger.debug(
+                "auto-preload of SKILL.md for skill '%s' failed", name,
+                exc_info=True,
+            )
+        return None
+
+    return _refusal(
+        f"Refusing background curator {action} for skill '{name}': the current {file_label} "
+        f"content has not been loaded in this review turn. Call skill_view(name) for SKILL.md, or "
+        f"skill_view(name, file_path=...) for a supporting file, then retry the write using the "
+        f"content just returned.",
+        _read_before_write_required=True)
+
+
+def _background_review_preflight(action: str, name: str) -> Optional[dict[str, Any]]:
+    if action not in {"edit", "patch", "delete", "write_file", "remove_file"}:
+        return None
+    from tools import skill_manager_tool as _smt
+    existing = _smt._find_skill(name)
+    return _background_review_write_guard(name, existing["path"], action) if existing else None
+
+
+def _curator_consolidation_delete_guard(
+    name: str, absorbed_into: Optional[str]) -> Optional[dict[str, Any]]:
+    """Fail closed on unverified deletes during the curator consolidation pass. The fork's only
+    legitimate delete is a consolidation declared via ``absorbed_into=<umbrella>`` (existence
+    validated in ``_delete_skill``); the deterministic inactivity prune never calls skill_manage,
+    so a bare delete here can only be the LLM pass pruning without evidence.
+
+    A delete with no forwarding target — ``absorbed_into`` omitted (``None``) or empty (``""``) — is the
+    fail-open behavior reported in #29912: the consolidation pass archived whole clusters of active skills
+    with zero verified consolidations (``consolidated_this_run == 0``), leaving active automations pointing
+    at names that no longer resolve. Refuse it; keep the skill active.
+    """
+    if not _is_background_review() or (isinstance(absorbed_into, str) and absorbed_into.strip()):
+        return None
+    return _refusal(
+        f"Refusing background curator delete of skill '{name}': the consolidation pass may only "
+        f"archive a skill it has absorbed into an umbrella. Pass absorbed_into=<umbrella> (the "
+        f"umbrella must already exist) to record a verified consolidation. Pruning a skill with no "
+        f"forwarding target is not permitted here — the deterministic inactivity prune handles "
+        f"staleness archival separately. Keeping '{name}' active.",
+        _fail_closed=True)
+
+
 def _background_review_write_guard(
-    name: str, skill_dir: Path, action: str) -> Optional[Dict[str, Any]]:
+    name: str, skill_dir: Path, action: str) -> Optional[dict[str, Any]]:
     """Refuse autonomous curator writes to anything but curator-owned sediment. The review fork
     has no user in the loop, so it is also blocked on pinned/external/bundled/hub skills."""
     if not _is_background_review():
@@ -217,98 +352,12 @@ def _background_review_write_guard(
     return None
 
 
-def _is_skill_md_target(name: str, target: Path) -> bool:
-    """True if ``target`` is the main SKILL.md of skill ``name``.
-
-    Used by the read-before-write guard to decide auto-preload eligibility:
-    only the skill's primary SKILL.md is auto-loaded (the write paths re-read
-    it from disk), never its supporting files.
-    """
-    if target.name != "SKILL.md":
-        return False
-    try:
-        resolved = str(target.resolve())
-    except Exception:
-        resolved = str(target)
-    from tools import skill_manager_tool as _smt
-    found = _smt._find_skill(name)
-    if not found:
-        return False
-    try:
-        skill_md = str((found["path"] / "SKILL.md").resolve())
-    except Exception:
-        skill_md = str(found["path"] / "SKILL.md")
-    return resolved == skill_md
-
-
-def _background_review_read_before_write_guard(
-    name: str, target: Path, action: str, file_label: str) -> Optional[Dict[str, Any]]:
-    """Require review forks to load the exact target before mutating it.
-
-    SKILL.md auto-preload (#2375): the background skill-curation agent enters
-    an infinite oscillation when it attempts to edit/patch SKILL.md without
-    first calling skill_view — the guard refuses the write, the agent then
-    tries read_file (not whitelisted in background-review mode), that is
-    denied, and it loops back to the write. Auto-preloading SKILL.md breaks
-    the cycle while preserving the blind-overwrite protection for supporting files.
-    """
-    if not _is_background_review() or _background_review_has_read(target):
-        return None
-
-    # Auto-preload the skill's main SKILL.md (#2375)
-    if _is_skill_md_target(name, target):
-        try:
-            mark_background_review_skill_read(target)
-        except Exception:
-            logger.debug(
-                "auto-preload of SKILL.md for skill '%s' failed", name,
-                exc_info=True,
-            )
-        return None
-
-    return _refusal(
-        f"Refusing background curator {action} for skill '{name}': the current {file_label} "
-        f"content has not been loaded in this review turn. Call skill_view(name) for SKILL.md, or "
-        f"skill_view(name, file_path=...) for a supporting file, then retry the write using the "
-        f"content just returned.",
-        _read_before_write_required=True)
-
-
-def _background_review_preflight(action: str, name: str) -> Optional[Dict[str, Any]]:
-    if action not in {"edit", "patch", "delete", "write_file", "remove_file"}:
-        return None
-    from tools import skill_manager_tool as _smt
-    existing = _smt._find_skill(name)
-    return _background_review_write_guard(name, existing["path"], action) if existing else None
-
-
-def _curator_consolidation_delete_guard(
-    name: str, absorbed_into: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Fail closed on unverified deletes during the curator consolidation pass. The fork's only
-    legitimate delete is a consolidation declared via ``absorbed_into=<umbrella>`` (existence
-    validated in ``_delete_skill``); the deterministic inactivity prune never calls skill_manage,
-    so a bare delete here can only be the LLM pass pruning without evidence.
-
-    A delete with no forwarding target — ``absorbed_into`` omitted (``None``) or empty (``""``) — is the
-    fail-open behavior reported in #29912: the consolidation pass archived whole clusters of active skills
-    with zero verified consolidations (``consolidated_this_run == 0``), leaving active automations pointing
-    at names that no longer resolve. Refuse it; keep the skill active.
-    """
-    if not _is_background_review() or (isinstance(absorbed_into, str) and absorbed_into.strip()):
-        return None
-    return _refusal(
-        f"Refusing background curator delete of skill '{name}': the consolidation pass may only "
-        f"archive a skill it has absorbed into an umbrella. Pass absorbed_into=<umbrella> (the "
-        f"umbrella must already exist) to record a verified consolidation. Pruning a skill with no "
-        f"forwarding target is not permitted here — the deterministic inactivity prune handles "
-        f"staleness archival separately. Keeping '{name}' active.",
-        _fail_closed=True)
-
 
 def _is_org_mirror(skill_path: Path) -> bool:
     from agent.skill_utils import is_org_mirror_path
     from tools import skill_manager_tool as _smt
     return is_org_mirror_path(skill_path, _smt._skills_dir())
+
 
 
 def _maybe_auto_propose_org_edit(name: str, skill_path: Path) -> Optional[str]:
@@ -337,7 +386,8 @@ def _maybe_auto_propose_org_edit(name: str, skill_path: Path) -> Optional[str]:
             f"right now — run `hermes sync propose {name}` to retry.")
 
 
-def _org_mirror_write_guard(name: str, skill_path: Path, action: str) -> Optional[Dict[str, Any]]:
+
+def _org_mirror_write_guard(name: str, skill_path: Path, action: str) -> Optional[dict[str, Any]]:
     """Org-shared skills are EDITABLE IN PLACE — this only blocks deletion. Edits land in the
     mirror, survive the next org pull (baseline sidecar in skills_sync_client) and reach the org
     via `hermes sync propose`. Deletion stays refused: the mirror is a view of org HEAD, so a

@@ -1,0 +1,54 @@
+{
+  "source": "297552a9d646119871391d202509822cd86330df",
+  "entries": [
+    {
+      "path": "hermes_cli/cli_info_mixin.py",
+      "scope": "CLIInfoMixin.show_help",
+      "finding": {
+        "path": "hermes_cli/cli_info_mixin.py",
+        "rule": "CC",
+        "scope": "CLIInfoMixin.show_help",
+        "line": 269,
+        "detail": "CC 24 > 21, its value on main (over target 20: it may only go down)",
+        "blocking": true,
+        "allowed_reason": null,
+        "inherited_debt": null
+      },
+      "candidate_blob": "4e87791a14843b770a25d7cbbec004c589bda00e",
+      "source_blob": "4e87791a14843b770a25d7cbbec004c589bda00e",
+      "rationale": "Complete help-rendering method and adjacent availability helper reviewed. Complexity comes from skills/filter modes, category/subgroup enumeration, aliases, bundles, quick-command listings and platform-specific hint selection. It does not execute selected commands; registry/skill discovery and display callbacks remain actual dependencies. Existing skin fallback catch is separate and not accepted by this CC-only disposition.",
+      "binding_review_and_limits": "cli.py _ensure_skill_commands/get_skill_bundles and the mixin imports/availability method inspected; discovery may read/cache metadata and output uses console callbacks, so this is not claimed to be side-effect-free. No command authorization, filesystem discovery, skin failure or native rendering correctness claim."
+    },
+    {
+      "path": "scripts/generate_icons.py",
+      "scope": "target_bytes",
+      "finding": {
+        "path": "scripts/generate_icons.py",
+        "rule": "CC",
+        "scope": "target_bytes",
+        "line": 792,
+        "detail": "CC 22 > target 20 (new code must meet the target)",
+        "blocking": true,
+        "allowed_reason": null,
+        "inherited_debt": null
+      },
+      "candidate_blob": "0f47b48759905a464ecc7fe98216c2b9c7c34ef8",
+      "source_blob": "0f47b48759905a464ecc7fe98216c2b9c7c34ef8",
+      "rationale": "Complete target_bytes dispatch reviewed: each existing named format selects a renderer/container encoder or direct SVG/manifest bytes; the long shallow kind ladder, ICO/ICNS frame comprehensions and dark/light variants account for complexity. Unknown kind raises ValueError. It returns bytes into an in-memory buffer; writing final artifacts is owned by separate cmd_write.",
+      "binding_review_and_limits": "Module imports, target catalogue, rendering helpers and cmd_write caller inspected. One branch reads the declared source PNG; renderer/Pillow operations may fail and output fidelity is not established here. Only unchanged branch organization is eligible, not image correctness, resource lifecycle, package integrity or release publication."
+    }
+  ],
+  "receipt": {
+    "path": "/tmp/hermes-display-dispatch-structural-tests.log",
+    "sha256": "f10766541ea1eb390d3f6863ac7fade5624a3e222c8bb4b2d6ab1969d2515efb",
+    "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 3 test files (~11 tests) under ['tests/hermes_cli/test_cli_prefix_matching.py', 'tests/hermes_cli/test_skill_collision_visibility.py', 'tests/scripts/test_icon_generation_exit.py']; running with -j 9\n[ 36.4% |     4/~11 | \u271321 | \u2717 0] \u2713 tests/scripts/test_icon_generation_exit.py (21\u2713, 1.0s)\n[ 54.5% |     6/~11 | \u271323 | \u2717 0] \u2713 tests/hermes_cli/test_skill_collision_visibility.py (2\u2713, 3.5s)\n[100.0% |    11/~11 | \u271328 | \u2717 0] \u2713 tests/hermes_cli/test_cli_prefix_matching.py (5\u2713, 3.6s)\n\n=== Summary: 3 files, 28 tests passed, 0 failed (100% complete) in 3.6s (9 workers) ===\n  Durations cached to test_durations.json (3 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   3\n  Total subprocess CPU-wall: 8.1s  (runner wall: 3.6s, parallelism: 9x)\n  P50: 3.51s  P90: 3.63s  P95: 3.63s  P99: 3.63s  Max: 3.63s\n  <1s: 1 files (33%)  <2s: 1 files (33%)\n  Top 10 slowest:\n      3.63s  tests/hermes_cli/test_cli_prefix_matching.py\n      3.51s  tests/hermes_cli/test_skill_collision_visibility.py\n      0.96s  tests/scripts/test_icon_generation_exit.py\n",
+    "limits": "28 passing bounded help visibility/prefix and icon generator failure-reporting cases. This is not a full icon render/native test or complete help compatibility proof."
+  },
+  "status": "source-review-proposal",
+  "dependency_blobs": {
+    "cli.py": "989bbdc5b590fe9f03f72540227fa0ad29b7fbd7",
+    "tests/hermes_cli/test_cli_prefix_matching.py": "73063319e963fe156f3afe8ec5cde51782a5bfc3",
+    "tests/hermes_cli/test_skill_collision_visibility.py": "a429cfd79b7223d360163675d0a5df298fe098b3",
+    "tests/scripts/test_icon_generation_exit.py": "cf70e7a405e207a3f2def99e9608e73fbd22d91a"
+  }
+}

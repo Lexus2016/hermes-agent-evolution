@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_harness_sandbox import (  # noqa: E402
+from evolution_harness_sandbox import (
     GateResult,
     apply_diff,
     default_gate_runner,

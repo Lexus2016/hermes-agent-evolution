@@ -106,7 +106,7 @@ class FileDurabilityBackend:
         cp = self._checkpoint_path(checkpoint_id)
         if cp.exists():
             try:
-                return json.loads(cp.read_text(encoding="utf-8"))
+                return json.loads(cp.read_text(encoding="utf-8-sig"))
             except (OSError, ValueError):
                 pass  # corrupted — recompute below
         result = fn()
@@ -125,7 +125,7 @@ class FileDurabilityBackend:
         if not cp.exists():
             return None
         try:
-            return json.loads(cp.read_text(encoding="utf-8"))
+            return json.loads(cp.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             return None
 
@@ -151,7 +151,7 @@ class MemoryDurabilityRegistry:
     """
 
     def __init__(self) -> None:
-        self._backends: Dict[str, DurabilityBackend] = {}
+        self._backends: dict[str, DurabilityBackend] = {}
 
     def register(self, name: str, backend: DurabilityBackend) -> None:
         self._backends[name] = backend
@@ -166,7 +166,7 @@ class MemoryDurabilityRegistry:
         backend = self._backends.get(name)
         return backend if backend is not None else NoOpDurability()
 
-    def available(self) -> Dict[str, str]:
+    def available(self) -> dict[str, str]:
         return {name: backend.name for name, backend in self._backends.items()}
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_harness_code_diff import RETRY_SPIRAL_CAP, build_retry_policy_diff  # noqa: E402
+from evolution_harness_code_diff import RETRY_SPIRAL_CAP, build_retry_policy_diff
 
 SURFACE = {"retry_count": 10,
            "backoff": {"base_delay_sec": 1.0, "multiplier": 2.0, "max_delay_sec": 60.0},

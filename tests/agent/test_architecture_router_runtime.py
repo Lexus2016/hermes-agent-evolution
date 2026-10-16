@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Executable-seam runtime tests for #1139 architecture router.
 
 Drive the real ``run_conversation`` turn loop to prove the architecture-router
@@ -20,10 +19,10 @@ def _mock_response(content="done", finish_reason="stop"):
 
 def _make_agent(config: dict | None = None) -> AIAgent:
     with (
-        patch("run_agent.get_tool_definitions", return_value=[]),
-        patch("run_agent.check_toolset_requirements", return_value={}),
+        patch("model_tools.get_tool_definitions", return_value=[]),
+        patch("model_tools.check_toolset_requirements", return_value={}),
         patch("hermes_cli.config.load_config", return_value=config or {}),
-        patch("run_agent.OpenAI"),
+        patch("run_agent.AIAgent._create_openai_client"),
     ):
         agent = AIAgent(
             api_key="test-key-1234567890",

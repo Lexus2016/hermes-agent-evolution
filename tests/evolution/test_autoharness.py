@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for AUTOHARNESS harness synthesis prompt, schema, and generator (#2250, Slice A #2516)."""
 
 from __future__ import annotations

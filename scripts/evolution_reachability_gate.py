@@ -41,14 +41,14 @@ def _is_source_python_file(path: str) -> bool:
     return True
 
 
-def extract_top_level_symbols(code: str) -> List[str]:
+def extract_top_level_symbols(code: str) -> list[str]:
     """Extract public top-level class and function names from Python source code."""
     try:
         tree = ast.parse(code)
     except (SyntaxError, ValueError):
         return []
 
-    symbols: List[str] = []
+    symbols: list[str] = []
     ignored_names = {"main", "cli", "run", "app"}
     for node in tree.body:
         if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -61,19 +61,17 @@ def extract_top_level_symbols(code: str) -> List[str]:
 def find_symbol_references(
     symbol: str,
     defining_file: str,
-    all_files: Dict[str, str],
-) -> List[str]:
+    all_files: dict[str, str],
+) -> list[str]:
     """Find all non-test files in all_files that reference symbol outside defining_file."""
     pattern = re.compile(rf"\b{re.escape(symbol)}\b")
     norm_def = defining_file.replace("\\", "/").lower()
-    if norm_def.startswith("./"):
-        norm_def = norm_def[2:]
+    norm_def = norm_def.removeprefix("./")
 
-    referencing_files: List[str] = []
+    referencing_files: list[str] = []
     for file_path, content in all_files.items():
         norm_path = file_path.replace("\\", "/").lower()
-        if norm_path.startswith("./"):
-            norm_path = norm_path[2:]
+        norm_path = norm_path.removeprefix("./")
         if norm_path == norm_def:
             continue
         if _is_test_file(norm_path):
@@ -85,10 +83,10 @@ def find_symbol_references(
 
 
 def check_reachability(
-    files: Sequence[Dict[str, Any]],
+    files: Sequence[dict[str, Any]],
     repo_root: Optional[Path] = None,
-    source_contents: Optional[Dict[str, str]] = None,
-) -> List[str]:
+    source_contents: Optional[dict[str, str]] = None,
+) -> list[str]:
     """Check that all newly introduced public symbols have non-test call sites.
 
     Returns a list of violation strings (empty if all symbols are reachable).
@@ -96,11 +94,11 @@ def check_reachability(
     if not isinstance(files, (list, tuple)) or not files:
         return []
 
-    violations: List[str] = []
+    violations: list[str] = []
     root = repo_root or Path(__file__).resolve().parents[1]
 
     # Collect source files to check
-    changed_sources: List[Tuple[str, str]] = []
+    changed_sources: list[tuple[str, str]] = []
     for f in files:
         if not isinstance(f, dict):
             continue
@@ -114,7 +112,7 @@ def check_reachability(
             full_p = root / path
             if full_p.exists():
                 try:
-                    content = full_p.read_text(encoding="utf-8", errors="replace")
+                    content = full_p.read_text(encoding="utf-8-sig", errors="replace")
                 except OSError:
                     pass
         if content:
@@ -173,7 +171,7 @@ def check_reachability(
     return violations
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     if "--help" in argv or "-h" in argv:
         print("usage: evolution_reachability_gate.py [--pr N] [--files FILES_JSON]")
         return 2

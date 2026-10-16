@@ -21,7 +21,7 @@ class _MonitoringEvent:
     __slots__ = ()
     EVENT: ClassVar[str]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"event": self.EVENT, **asdict(self)}
 
 
@@ -97,13 +97,13 @@ class ExecuteToolEvent:
     error_class: Optional[str] = None
     ts_ns: int = field(default_factory=_now_ns)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"event": "execute_tool", **asdict(self)}
 
 
 __all__ = [
-    "GatewayHealthEvent",
-    "GatewayDiagnosticEvent",
     "CronExecutionEvent",
     "ExecuteToolEvent",
+    "GatewayDiagnosticEvent",
+    "GatewayHealthEvent",
 ]

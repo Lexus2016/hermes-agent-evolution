@@ -92,7 +92,7 @@ class Step:
         if not self.rationale or not self.rationale.strip():
             raise ValueError("Step.rationale must be a non-empty string")
 
-    def with_index(self, index: int) -> "Step":
+    def with_index(self, index: int) -> Step:
         """Return a copy of this step pinned to a 1-based ``index``.
 
         Frozen dataclasses can't be mutated, so plan assembly rebuilds each step
@@ -106,7 +106,7 @@ class Step:
             index=index,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict (session-state / transcript friendly)."""
         d = {
             "tool_call_intent": self.tool_call_intent,
@@ -119,7 +119,7 @@ class Step:
         return d
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Step":
+    def from_dict(cls, data: dict[str, Any]) -> Step:
         """Rebuild a :class:`Step` from :meth:`to_dict` output.
 
         Tolerant of a missing ``expected_observation`` / ``index`` (older or
@@ -161,7 +161,7 @@ class Plan:
     goal: str = ""
     # Free-form provenance/labels for downstream consumers (#292's harness).
     # Never read by this module; carried verbatim.
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -179,7 +179,7 @@ class Plan:
     def __len__(self) -> int:
         return len(self.steps)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict for session state or transcripts."""
         return {
             "goal": self.goal,
@@ -188,7 +188,7 @@ class Plan:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Plan":
+    def from_dict(cls, data: dict[str, Any]) -> Plan:
         """Rebuild a :class:`Plan` from :meth:`to_dict` output."""
         raw_steps = data.get("steps") or []
         steps = [Step.from_dict(item) for item in raw_steps]
@@ -205,7 +205,7 @@ class Plan:
         Stable, terminal-friendly output suitable for printing before tool
         calls or stashing in a transcript. No ANSI, no side effects.
         """
-        lines: List[str] = []
+        lines: list[str] = []
         header = "Plan"
         if self.goal and self.goal.strip():
             header = f"Plan — {self.goal.strip()}"

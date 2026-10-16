@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for the hard structural summary-volume constraint (Issue #2470)."""
 
 from __future__ import annotations

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 
 try:
@@ -65,13 +65,13 @@ def _read_sidecar(path: Path) -> dict:
     """Read a sidecar file (JSON or MD) and return a dict with metadata."""
     if path.suffix == ".json":
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
         except (json.JSONDecodeError, OSError):
             return {"path": str(path), "error": "unreadable"}
         return {"path": str(path), "data": data}
     # MD files — just note existence (research reports are free-form)
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8-sig")
     except OSError:
         return {"path": str(path), "error": "unreadable"}
     return {"path": str(path), "char_count": len(text)}
@@ -143,7 +143,7 @@ def _read_calibration(evolution_dir: Path) -> dict:
 
     health_file = evolution_dir / "evolution-health.txt"
     if health_file.exists():
-        text = health_file.read_text(encoding="utf-8")
+        text = health_file.read_text(encoding="utf-8-sig")
         # #2637: fail closed on tampered steering telemetry.
         if _HAS_TELEMETRY_GUARD and not validate_health_text(text).safe:
             text = ""
@@ -157,7 +157,7 @@ def _read_calibration(evolution_dir: Path) -> dict:
 
     realized_file = evolution_dir / "realized-impact.txt"
     if realized_file.exists():
-        text = realized_file.read_text(encoding="utf-8")
+        text = realized_file.read_text(encoding="utf-8-sig")
         if "REALIZED_IMPACT_LOW" in text:
             cal["consolidation_mode"] = True
 
@@ -180,7 +180,7 @@ def _resolve_repo_root(repo_dir: Optional[Path] = None) -> Optional[Path]:
 
 def run_local_triage(evolution_dir: Path, repo_root: Optional[Path] = None) -> dict:
     """Run the local triage pass and return the analysis JSON dict."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     resolved_repo = _resolve_repo_root(repo_root)
 
     # Read latest sidecars
@@ -260,7 +260,7 @@ def run_local_triage(evolution_dir: Path, repo_root: Optional[Path] = None) -> d
             evidence_pointers=[p for p in evidence if p],
             confidence=50,
             stage="local_triage",
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
         envelope = stage_result.to_dict()
         envelope.pop("result", None)
@@ -357,7 +357,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Don't overwrite if a full (non-local) analysis already exists for today
     if output_path.exists():
-        existing = json.loads(output_path.read_text(encoding="utf-8"))
+        existing = json.loads(output_path.read_text(encoding="utf-8-sig"))
         if not existing.get("local_triage", False):
             # A real analysis exists — don't clobber it with a local-only pass
             print(

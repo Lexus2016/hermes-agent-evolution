@@ -20,7 +20,7 @@ import pytest
 _SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(_SCRIPTS))
 
-import evolution_funnel as ef  # noqa: E402
+import evolution_funnel as ef
 
 
 def _write_stage_reports(evolution_dir: Path, date: str) -> None:

@@ -25,7 +25,7 @@ CRON_DIR = Path(__file__).resolve().parents[2] / "cron" / "evolution"
 
 
 def _schedule(path: Path) -> str | None:
-    match = re.search(r'^schedule:\s*"([^"]+)"', path.read_text(encoding="utf-8"), re.M)
+    match = re.search(r'^schedule:\s*"([^"]+)"', path.read_text(encoding="utf-8"), re.MULTILINE)
     return match.group(1) if match else None
 
 

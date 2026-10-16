@@ -1,0 +1,217 @@
+{
+  "scope": "Only independently second-reviewed UI metric indices69,72,100,102; no other candidates or held findings accepted.",
+  "entries": [
+    {
+      "index": 69,
+      "path": "apps/desktop/src/app/shell/model-catalog-menu.tsx",
+      "scope": "ModelFamilyRow",
+      "rule": "CC",
+      "detail": "CC 44 > target 20 (new code must meet the target)",
+      "current_blob": "7e344a747f94b1fd1221b035a346932de72ee76b",
+      "source_blob": "7e344a747f94b1fd1221b035a346932de72ee76b",
+      "current_unit": {
+        "q": "ModelFamilyRow",
+        "line": 989,
+        "end": 1184,
+        "cc": 44,
+        "nesting": 0,
+        "hash": "d02d28a3bfcfbeeb",
+        "lines": 152
+      },
+      "source_unit": {
+        "q": "ModelFamilyRow",
+        "line": 989,
+        "end": 1184,
+        "cc": 44,
+        "nesting": 0,
+        "hash": "d02d28a3bfcfbeeb",
+        "lines": 152
+      },
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "raw_detail": "CC 44 > target 20 (new code must meet the target)",
+      "exact_source_and_unit_equal": true,
+      "candidate_cap": 44,
+      "status": "candidate",
+      "exclusions": [
+        "Structural disposition only; not approval or activation.",
+        "No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior.",
+        "No desktop test pass claim; typecheck exit 137 remains unresolved.",
+        "Generated manifest identity/cap and controller verification required before any activation."
+      ],
+      "inspected_ranges": [
+        [
+          1,
+          180
+        ],
+        [
+          930,
+          1184
+        ],
+        [
+          1220,
+          1258
+        ]
+      ],
+      "bindings": [
+        "ModelFamilyRow local function + complete props, ModelMenuController contract/close context, familyLimit, model-family/preset/pricing and UI imports"
+      ],
+      "structural_rationale": "CC is the family row's active/base-fast matching, preset/capability/price/progress/settings display and submenu render branching. Selection and options remain supplied controller actions; star click stops propagation. Full function/binding read and exact upstream unit/cap identify no structural integration conflict. Async selection failure, provider limits and option semantics remain unverified runtime contracts.",
+      "current_source_reverified": true,
+      "metric_disposition_scope": "Exact identified structural metric and cap only; all other findings and behavior remain independently actionable."
+    },
+    {
+      "index": 72,
+      "path": "apps/desktop/src/components/assistant-ui/tool/fallback-model/index.ts",
+      "scope": "buildToolView",
+      "rule": "CC",
+      "detail": "CC 41 > 40, its value on main (over target 20: it may only go down)",
+      "current_blob": "91f86eefb7b2a67ad3ea50a6238b5f8e086719b1",
+      "source_blob": "91f86eefb7b2a67ad3ea50a6238b5f8e086719b1",
+      "current_unit": {
+        "q": "buildToolView",
+        "line": 1489,
+        "end": 1584,
+        "cc": 41,
+        "nesting": 0,
+        "hash": "27424418a400cd9f",
+        "lines": 95
+      },
+      "source_unit": {
+        "q": "buildToolView",
+        "line": 1489,
+        "end": 1584,
+        "cc": 41,
+        "nesting": 0,
+        "hash": "27424418a400cd9f",
+        "lines": 95
+      },
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "raw_detail": "CC 41 > 40, its value on main (over target 20: it may only go down)",
+      "exact_source_and_unit_equal": true,
+      "candidate_cap": 41,
+      "status": "candidate",
+      "exclusions": [
+        "Structural disposition only; not approval or activation.",
+        "No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior.",
+        "No desktop test pass claim; typecheck exit 137 remains unresolved.",
+        "Generated manifest identity/cap and controller verification required before any activation."
+      ],
+      "inspected_ranges": [
+        [
+          1,
+          100
+        ],
+        [
+          1460,
+          1584
+        ]
+      ],
+      "bindings": [
+        "Exported buildToolView(part,inlineDiff) with ToolPart/ToolView types and formatting imports; full neighboring toolPreviewOutcome, file-local helper declaration lookup for tool status/meta/title/subtitle/detail/count/preview/streams; bound by ToolEntry view memo"
+      ],
+      "structural_rationale": "Complete function is a pure presentation-object assembly: pending/success/error/unavailable titles, optional search/count/image/preview data and separate terminal streams. It retains the input inlineDiff and explicit statuses rather than executing tools. Actual upstream file/unit/cap match; no structural binding conflict identified. The correctness of heuristic tool result/status parsers and URL safety is not waived by this CC candidate.",
+      "current_source_reverified": true,
+      "metric_disposition_scope": "Exact identified structural metric and cap only; all other findings and behavior remain independently actionable."
+    },
+    {
+      "index": 100,
+      "path": "apps/desktop/src/plugins/hermes-bots/screen-hero.tsx",
+      "scope": "ScreenHeroContent",
+      "rule": "CC",
+      "detail": "CC 21 > target 20 (was 20)",
+      "current_blob": "74bfb538613c7a9351c765623cb98f73498b6a0a",
+      "source_blob": "74bfb538613c7a9351c765623cb98f73498b6a0a",
+      "current_unit": {
+        "q": "ScreenHeroContent",
+        "line": 113,
+        "end": 191,
+        "cc": 21,
+        "nesting": 1,
+        "hash": "dd4daae95e787e3c",
+        "lines": 78
+      },
+      "source_unit": {
+        "q": "ScreenHeroContent",
+        "line": 113,
+        "end": 191,
+        "cc": 21,
+        "nesting": 1,
+        "hash": "dd4daae95e787e3c",
+        "lines": 78
+      },
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "raw_detail": "CC 21 > target 20 (was 20)",
+      "exact_source_and_unit_equal": true,
+      "candidate_cap": 21,
+      "status": "candidate",
+      "exclusions": [
+        "Structural disposition only; not approval or activation.",
+        "No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior.",
+        "No desktop test pass claim; typecheck exit 137 remains unresolved.",
+        "Generated manifest identity/cap and controller verification required before any activation."
+      ],
+      "inspected_ranges": [
+        [
+          1,
+          191
+        ]
+      ],
+      "bindings": [
+        "ScreenHero wrapper keyed by botSelectionKey, ScreenHeroContent props, full useLiveThumbnail binding, useScreenPortalState/displayRequest/openBotScreen"
+      ],
+      "structural_rationale": "CC describes tone-to-caption/CTA/icon/ring and live/stale image presentation. The wrapper remounts by bot identity; unsupported/unavailable states are explicitly hidden and user click owns opening. Entire component and local hook context read; actual upstream source/unit unchanged. Timer, thumbnail failure/privacy, display control and polling contracts are not waived.",
+      "current_source_reverified": true,
+      "metric_disposition_scope": "Exact identified structural metric and cap only; all other findings and behavior remain independently actionable."
+    },
+    {
+      "index": 102,
+      "path": "apps/desktop/src/plugins/kanban/board.tsx",
+      "scope": "CardFooter",
+      "rule": "CC",
+      "detail": "CC 31 > 29, its value on main (over target 20: it may only go down)",
+      "current_blob": "8b05b1fbb2c2fab18da0576a1c51618481d3f4fa",
+      "source_blob": "8b05b1fbb2c2fab18da0576a1c51618481d3f4fa",
+      "current_unit": {
+        "q": "CardFooter",
+        "line": 152,
+        "end": 248,
+        "cc": 31,
+        "nesting": 0,
+        "hash": "4a188c908ef10f7d",
+        "lines": 97
+      },
+      "source_unit": {
+        "q": "CardFooter",
+        "line": 152,
+        "end": 248,
+        "cc": 31,
+        "nesting": 0,
+        "hash": "4a188c908ef10f7d",
+        "lines": 97
+      },
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "raw_detail": "CC 31 > 29, its value on main (over target 20: it may only go down)",
+      "exact_source_and_unit_equal": true,
+      "candidate_cap": 31,
+      "status": "candidate",
+      "exclusions": [
+        "Structural disposition only; not approval or activation.",
+        "No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior.",
+        "No desktop test pass claim; typecheck exit 137 remains unresolved.",
+        "Generated manifest identity/cap and controller verification required before any activation."
+      ],
+      "inspected_ranges": [
+        [
+          1,
+          248
+        ]
+      ],
+      "bindings": [
+        "Local CardFooter(arc,task), Meta, KanbanTask/ArcState, useKanban/useDefaultAssignee/useOrchestration, columnMeta and presentational child imports"
+      ],
+      "structural_rationale": "CC describes queued/running/stale/blocked indicators, explicit/default/orchestrator assignee display, timestamps and optional priority/progress/comments/links/warnings. Complete function with imports and helper binding context read; output is presentation, no task dispatch/write occurs here. Exact upstream source/cap with no identified structural conflict. Dispatcher assignment and heartbeat truth are not validated by this candidate.",
+      "current_source_reverified": true,
+      "metric_disposition_scope": "Exact identified structural metric and cap only; all other findings and behavior remain independently actionable."
+    }
+  ]
+}

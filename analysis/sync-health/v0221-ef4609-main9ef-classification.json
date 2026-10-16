@@ -1,0 +1,56 @@
+{
+  "comparison": "Historical d66b/main365 versus exact ef4609/main9ef; base and candidate both advanced, so this is not a single-change attribution.",
+  "added_unresolved_fingerprints": [],
+  "removed_unresolved_fingerprints": [
+    {
+      "identity": [
+        "apps/desktop/electron/main.ts",
+        "CC",
+        "broadcastBootstrapEvent",
+        "CC 25 > 24, its value on main (over target 20: it may only go down)"
+      ],
+      "count": 1
+    },
+    {
+      "identity": [
+        "apps/desktop/electron/main.ts",
+        "CC",
+        "sanitizeConnectionProfiles",
+        "CC 26 > 25, its value on main (over target 20: it may only go down)"
+      ],
+      "count": 1
+    },
+    {
+      "identity": [
+        "tests/agent/test_aux_progress_streaming.py",
+        "HX013",
+        "TestAggregateChatStream.test_watchdog_only_cuts_its_own_unfinished_stream",
+        "wall-clock sleep in a test"
+      ],
+      "count": 1
+    },
+    {
+      "identity": [
+        "tests/agent/test_codex_ttfb_watchdog.py",
+        "HX013",
+        "test_large_codex_lifecycle_only_stream_hits_attempt_progress_budget.stream_attempt",
+        "wall-clock sleep in a test"
+      ],
+      "count": 2
+    },
+    {
+      "identity": [
+        "tests/agent/test_credential_pool_refresh_sweep_spacing.py",
+        "HX013",
+        "test_pending_refresh_sweep_leaves_waiter_windows_between_holds.fake_refresh",
+        "wall-clock sleep in a test"
+      ],
+      "count": 1
+    }
+  ],
+  "whole_file_provenance": {
+    "exact_upstream_file": 656,
+    "modified_file_or_integration_only": 112
+  },
+  "limits": "Whole-file identity establishes provenance only, not correctness. Modified files are not necessarily regressions. No new source investigation or disposition is implied."
+}

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """RubricForge Slice 3 — held-out false-pass gate tests (#2782)."""
 
 import sys
@@ -7,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution.lib.rubric_heldout_gate import (  # noqa: E402
+from evolution.lib.rubric_heldout_gate import (
     held_out_false_pass_gate,
     split_labeled_set,
 )
@@ -25,7 +24,7 @@ def _kw_judge(rubric: str, example) -> bool:
 
 
 def test_split_is_deterministic_tail_and_parallel():
-    train_x, train_y, held_x, held_y = split_labeled_set(
+    train_x, _train_y, held_x, held_y = split_labeled_set(
         list(range(10)), [i % 2 == 0 for i in range(10)], holdout=3
     )
     assert train_x == list(range(7)) and held_x == [7, 8, 9]

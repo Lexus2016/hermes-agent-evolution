@@ -178,6 +178,22 @@ _DOWNLOAD_USER_AGENT = (
 )
 
 
+def _secure_cache_dir(new_subpath: str, old_name: str) -> Path:
+    """Resolve a cache directory and verify the shared media privacy policy."""
+    from hermes_platform.media_cache_privacy import secure_media_cache_dir
+
+    cache_dir = get_hermes_dir(new_subpath, old_name)
+    secure_media_cache_dir(cache_dir)
+    return cache_dir
+
+
+def _write_private_bytes(path: Path, data: bytes) -> None:
+    """Persist a new private media file without a permissive fallback."""
+    from hermes_platform.media_cache_privacy import write_cache_file
+
+    write_cache_file(path, data)
+
+
 async def _ssrf_redirect_guard(response):
     """Re-validate each redirect target (a public URL 302ing to 169.254.169.254 would otherwise
     bypass the pre-flight check). Async because httpx.AsyncClient awaits hooks."""
@@ -192,7 +208,6 @@ async def _download_media(
     media_label: str, accept: str, max_bytes: int, timeout: float, retry_all: bool) -> Path:
     """SSRF-safe streaming download with exponential backoff (2s/4s/8s). ``retry_all=False`` (images)
     retries only :func:`_is_retryable_download_error` errors — a 404/403 never succeeds on retry."""
-    from utils import atomic_replace
     from tools.url_safety import create_ssrf_safe_async_client
     destination.parent.mkdir(parents=True, exist_ok=True)
     last_error = None
@@ -227,24 +242,21 @@ async def _download_media(
                 # Stream to a temp file, atomically moved onto destination on success.
                 tmp_destination = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
                 bytes_written = 0
-                try:
-                    with tmp_destination.open("wb") as f:
-                        async for chunk in response.aiter_bytes():
-                            if not chunk:
-                                continue
-                            bytes_written += len(chunk)
-                            if bytes_written > max_bytes:
-                                raise ValueError(
-                                    f"{media_label} too large ({bytes_written} bytes, max {max_bytes})"
-                                )
-                            f.write(chunk)
-                    atomic_replace(tmp_destination, destination)
-                except Exception:
-                    try:
-                        tmp_destination.unlink(missing_ok=True)
-                    except OSError:
-                        logger.debug("Could not delete partial download: %s", tmp_destination, exc_info=True)
-                    raise
+                from hermes_platform.media_cache_privacy import (
+                    private_temporary_file, publish_private_temporary_file,
+                )
+
+                with private_temporary_file(tmp_destination) as f:
+                    async for chunk in response.aiter_bytes():
+                        if not chunk:
+                            continue
+                        bytes_written += len(chunk)
+                        if bytes_written > max_bytes:
+                            raise ValueError(
+                                f"{media_label} too large ({bytes_written} bytes, max {max_bytes})"
+                            )
+                        f.write(chunk)
+                    publish_private_temporary_file(f, tmp_destination, destination)
             return destination
         except Exception as e:
             last_error = e
@@ -338,11 +350,13 @@ def _import_pillow_for_resize():
         from PIL import Image
     except ImportError:
         try:
-            from tools.lazy_deps import ensure as _ensure_dep
-            # prompt=False: never raise a blocking input() prompt mid-session. Under the interactive CLI
-            # prompt_toolkit owns stdin, so a bare input() deadlocks the terminal (#40490). The install is
-            # already gated by security.allow_lazy_installs, so reaching here is opt-in.
-            _ensure_dep("tool.vision", prompt=False)
+            # pm-era wiring: never raise a blocking input() prompt mid-session. Under the
+            # interactive CLI prompt_toolkit owns stdin, so a bare input() deadlocks the
+            # terminal (#40490). The install is already gated by security.allow_lazy_installs,
+            # so reaching here is opt-in.
+            from pm import ensure_import
+
+            ensure_import("vision")
             from PIL import Image
         except Exception:
             return None
@@ -486,11 +500,11 @@ def _supports_media_in_tool_results(provider: str, model: str) -> bool:
         return False
 
 
-def _accepts_tool_result_images(provider: str, model: str, cfg: Optional[Dict[str, Any]]) -> bool:
+def _accepts_tool_result_images(provider: str, model: str, cfg: Optional[dict[str, Any]]) -> bool:
     """One gate for both native lanes — the ``vision_analyze`` fast path and the ``computer_use`` capture route
     (#115248): the profile's ``supports_vision_tool_messages=False`` veto first, then either the provider's tool
-    results are known to carry media or the capability lookup (config override → catalog → probes → profile)
-    attests the model as vision-capable."""
+    results are known to carry media or the per-model capability lookup (config override → catalog incl. the
+    profile's ``model_capabilities`` → local probes) attests the model as vision-capable."""
     if _profile_rejects_tool_media(provider, model):
         return False
     if _supports_media_in_tool_results(provider, model):
@@ -499,20 +513,22 @@ def _accepts_tool_result_images(provider: str, model: str, cfg: Optional[Dict[st
     return _lookup_supports_vision(provider, model, cfg) is True
 
 
+def _native_tool_result_images(provider: str, model: str, cfg: Optional[dict[str, Any]]) -> bool:
+    """THE gate for every tool that can hand the main model pixels (``vision_analyze``, browser and
+    ``computer_use`` screenshots, MCP ``ImageContent``): image routing resolves to ``native``
+    (``agent.image_input_mode``, an explicit ``auxiliary.vision`` backend, the catalog) AND the
+    route accepts images inside tool results. One predicate, so the lane never depends on which
+    tool produced the image."""
+    from agent.image_routing import decide_image_input_mode
+    return decide_image_input_mode(provider, model, cfg) == "native" and _accepts_tool_result_images(provider, model, cfg)
+
+
 def _should_use_native_vision_fast_path() -> bool:
-    """True when image routing resolves to ``native`` AND the provider accepts images in tool
-    results, or the user set the ``model.supports_vision`` override (escape hatch for
-    custom/local providers). Any failure → False."""
+    """:func:`_native_tool_result_images` for the active main model; any failure → False."""
     try:
         from agent.auxiliary_client import _read_main_provider, _read_main_model
-        from agent.image_routing import decide_image_input_mode
         from hermes_cli.config import load_config
-        provider = _read_main_provider()
-        model = _read_main_model()
-        cfg = load_config()
-        if decide_image_input_mode(provider, model, cfg) != "native":
-            return False
-        return _accepts_tool_result_images(provider, model, cfg)
+        return _native_tool_result_images(_read_main_provider(), _read_main_model(), load_config())
     except Exception as exc:
         logger.debug("Native vision fast-path check failed: %s", exc)
         return False
@@ -521,7 +537,7 @@ def _should_use_native_vision_fast_path() -> bool:
 def _build_native_vision_tool_result(
     image_url: str, question: str, image_data_url: str, image_size_bytes: int,
     scale_note: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Multimodal tool-result envelope. The text part is intentionally minimal (the model already
     has the question); ``text_summary`` is the fallback for providers without multimodal tool results."""
     text_part = (
@@ -574,10 +590,9 @@ async def _prepare_image(
         resolved = await resolve_image_source(image_url, ResolveContext(task_id=task_id))
     except ImageResolutionError as exc:
         raise _ImagePrepError(str(exc)) from exc
-    temp_dir = get_hermes_dir("cache/vision", "temp_vision_images")
-    temp_dir.mkdir(parents=True, exist_ok=True)
+    temp_dir = _secure_cache_dir("cache/vision", "temp_vision_images")
     path = temp_dir / f"temp_image_{uuid.uuid4()}.img"
-    await asyncio.to_thread(path.write_bytes, resolved.data)
+    await asyncio.to_thread(_write_private_bytes, path, resolved.data)
     mime, size_bytes, crop_offset = resolved.mime, len(resolved.data), {}
     try:
         normalized_path, mime, norm_err = await asyncio.to_thread(_normalize_to_supported_image, path, mime)
@@ -609,8 +624,8 @@ async def _prepare_image(
 def _too_large_message(image_data_url: str) -> str:
     return (
         f"Image too large for vision API: base64 payload is {len(image_data_url) / (1024 * 1024):.1f} MB "
-        f"(limit {_MAX_BASE64_BYTES / (1024 * 1024):.0f} MB) even after resizing. Install Pillow "
-        f"(`pip install Pillow`) for better auto-resize, or compress the image manually.")
+        f"(limit {_MAX_BASE64_BYTES / (1024 * 1024):.0f} MB) even after resizing. Run `hermes pm repair` "
+        f"to restore Pillow for auto-resize, or compress the image manually.")
 
 
 async def _resize_prepared(prepared: _PreparedImage, scale_info: dict, **kwargs) -> str:
@@ -794,7 +809,7 @@ async def _run_analysis(
         debug_call_data.update(success=True, analysis_length=analysis_length)
         return finish(result)
     except Exception as e:
-        error_msg = f"Error analyzing {kind}: {str(e)}"
+        error_msg = f"Error analyzing {kind}: {e!s}"
         logger.error("%s", error_msg, exc_info=True)
         err_str = str(e).lower()
         template = next(
@@ -857,7 +872,7 @@ async def _run_analysis(
 
 
 async def vision_analyze_tool(
-    image_url: str, user_prompt: str, model: str = None,
+    image_url: str, user_prompt: str, model: str | None = None,
     task_id: Optional[str] = None, region: Optional[list] = None) -> str:
     """Describe an image (URL, local path, data: URL) with the auxiliary vision LLM. ``user_prompt``
     is pre-formatted by the caller. Temp images live under $HERMES_HOME/cache/vision/."""
@@ -981,7 +996,7 @@ def _configured_aux_model(sections: tuple, env_vars: tuple) -> Optional[str]:
     return next((v for v in (os.getenv(e, "").strip() for e in env_vars) if v), None)
 
 
-async def _handle_vision_analyze(args: Dict[str, Any], **kw: Any) -> str:
+async def _handle_vision_analyze(args: dict[str, Any], **kw: Any) -> str:
     image_url, question, region = args.get("image_url", ""), args.get("question", ""), args.get("region")
     task_id = kw.get("task_id")
     # No concurrency gate around the whole analysis — the CPU burst is bounded inside the
@@ -1060,10 +1075,9 @@ async def _materialize_video(video_url: str, task_id: Optional[str], temp_paths:
                 video_url, ResolveContext(task_id=task_id), permitted=("video",))
         except ImageResolutionError as exc:
             raise ValueError(f"Could not read video from terminal backend: {exc}") from exc
-        temp_dir = get_hermes_dir("cache/video", "temp_video_files")
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_dir = _secure_cache_dir("cache/video", "temp_video_files")
         path = temp_dir / f"terminal_video_{uuid.uuid4()}{suffix}"
-        path.write_bytes(resolved.data)
+        _write_private_bytes(path, resolved.data)
         temp_paths.append(path)
         return path
     if local_path.is_file():
@@ -1075,7 +1089,13 @@ async def _materialize_video(video_url: str, task_id: Optional[str], temp_paths:
         blocked = check_website_access(video_url)
         if blocked:
             raise PermissionError(blocked["message"])
-        path = get_hermes_dir("cache/video", "temp_video_files") / f"temp_video_{uuid.uuid4()}.mp4"
+        # Hardened here rather than inside _download_media: that helper takes
+        # a caller-supplied destination (tools/image_source.py hands its
+        # sibling a /tmp NamedTemporaryFile it owns the mode of), and
+        # chmod-ing an arbitrary caller's parent to 0700 would be a
+        # destructive side effect on a path Hermes does not own.
+        temp_dir = _secure_cache_dir("cache/video", "temp_video_files")
+        path = temp_dir / f"temp_video_{uuid.uuid4()}.mp4"
         temp_paths.append(path)
         # Video downloads retry every failure class (legacy behavior).
         await _download_media(
@@ -1086,7 +1106,7 @@ async def _materialize_video(video_url: str, task_id: Optional[str], temp_paths:
 
 
 async def video_analyze_tool(
-    video_url: str, user_prompt: str, model: str = None, task_id: Optional[str] = None) -> str:
+    video_url: str, user_prompt: str, model: str | None = None, task_id: Optional[str] = None) -> str:
     """Analyze a video via multimodal LLM. Returns JSON {success, analysis}."""
     async def stage(prompt: str, debug_call_data: dict, temp_paths: list) -> tuple:
         temp_video_path = await _materialize_video(video_url, task_id, temp_paths)
@@ -1138,7 +1158,7 @@ VIDEO_ANALYZE_SCHEMA = {
 }
 
 
-def _handle_video_analyze(args: Dict[str, Any], **kw: Any) -> Awaitable[str]:
+def _handle_video_analyze(args: dict[str, Any], **kw: Any) -> Awaitable[str]:
     video_url, question = args.get("video_url", ""), args.get("question", "")
     full_prompt = (
         "Fully describe and explain everything happening in this video, "
@@ -1156,13 +1176,3 @@ registry.register(
     check_fn=check_video_requirements,
     is_async=True,
     emoji="🎬")
-
-
-# ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
-# Names external plugins imported from this module before the Sep 2026 decomposition.
-# Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
-# The whole block is removed by reverting the commit that added it.
-import contextlib  # noqa: F401,E402
-import sys  # noqa: F401,E402
-import threading  # noqa: F401,E402
-# ---- END PLUGIN-COMPAT ----

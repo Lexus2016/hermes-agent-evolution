@@ -15,7 +15,7 @@ from pathlib import Path
 def runs(directory, date=None):
     for path in sorted(Path(directory).glob("*.json")):
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
             if date and data.get("date") != date:
                 continue
             entries = data.get("entries", [])
@@ -106,13 +106,13 @@ def main():
     parser.add_argument("--price", type=float, default=0.5)
     args = parser.parse_args()
     if args.verified_outcomes and args.output:
-        result = fit(args.trajectories, json.loads(args.verified_outcomes.read_text(encoding="utf-8")), args.price)
+        result = fit(args.trajectories, json.loads(args.verified_outcomes.read_text(encoding="utf-8-sig")), args.price)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         temp = args.output.with_suffix(".tmp")
         temp.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         temp.replace(args.output)
     else:
-        outcomes = json.loads(args.verified_outcomes.read_text(encoding="utf-8")) if args.verified_outcomes else None
+        outcomes = json.loads(args.verified_outcomes.read_text(encoding="utf-8-sig")) if args.verified_outcomes else None
         print(json.dumps(summarize(args.trajectories, verified_outcomes=outcomes), indent=2))
 
 

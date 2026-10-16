@@ -64,7 +64,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # (via select_best_draft) — closing the dead-code gap flagged in #798.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent.verification_scope import get_stage_verification_scope
-from evolution_draft_selector import (  # noqa: E402  # fmt: skip
+from evolution_draft_selector import (  # fmt: skip
     build_draft_tasks,
     route_cost_tier,
     select_best_draft,
@@ -78,7 +78,7 @@ DEFAULT_MAX_WORKERS = 3
 
 # Leaf workers do focused research synthesis: web + file reading, no further
 # delegation. Matches the toolsets evolution-research grants its own subagents.
-DEFAULT_WORKER_TOOLSETS: Tuple[str, ...] = ("web", "file")
+DEFAULT_WORKER_TOOLSETS: tuple[str, ...] = ("web", "file")
 
 # delegate_task statuses that mean the worker produced a usable result. Anything
 # else (timeout, error, interrupted, max_iterations) is a failed candidate that
@@ -102,11 +102,11 @@ def build_worker_task(
     subtask: str,
     angle: str,
     *,
-    toolsets: Optional[List[str]] = None,
+    toolsets: Optional[list[str]] = None,
     complexity: Optional[str] = None,
     stage: str = "research",
     workspace_root: str = ".",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build ONE leaf-worker task dict for ``delegate_task``'s batch array.
 
     Each worker is a self-contained prompt: the shared research sub-task plus the
@@ -156,13 +156,13 @@ def build_worker_task(
 
 def build_worker_tasks(
     subtask: str,
-    angles: List[str],
+    angles: list[str],
     *,
     max_workers: int = DEFAULT_MAX_WORKERS,
-    toolsets: Optional[List[str]] = None,
+    toolsets: Optional[list[str]] = None,
     complexity: Optional[str] = None,
     memo_path: Optional[str] = None,
-) -> Tuple[List[Dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int]:
     """Decompose a sub-task into a capped batch of leaf-worker task dicts.
 
     Returns ``(tasks, dropped)`` where ``tasks`` is the ``delegate_task``
@@ -196,8 +196,8 @@ def build_worker_tasks(
 
 
 def _memo_hits_for(
-    subtask: str, angles: List[str], memo_path: Optional[str]
-) -> List[Tuple[str, str]]:
+    subtask: str, angles: list[str], memo_path: Optional[str]
+) -> list[tuple[str, str]]:
     """URLs in the sub-task/angles that the shared memo already summarizes.
 
     Consult-before-fetch (issue #65): an empty list means the memo has nothing
@@ -211,7 +211,7 @@ def _memo_hits_for(
     except ImportError:
         return []
     memo = load_memo(Path(memo_path))
-    hits: List[Tuple[str, str]] = []
+    hits: list[tuple[str, str]] = []
     seen: set = set()
     for text in (subtask, *angles):
         for url in _URL_PATTERN.findall(text or ""):
@@ -225,7 +225,7 @@ def _memo_hits_for(
 
 
 def _memo_context_block(
-    memo_hits: List[Tuple[str, str]], memo_path: Optional[str]
+    memo_hits: list[tuple[str, str]], memo_path: Optional[str]
 ) -> str:
     """Worker-facing memo instructions appended to every task's context."""
     if not memo_hits:
@@ -247,8 +247,8 @@ def _memo_context_block(
 
 def collect_candidates(
     delegate_output: Any,
-    angles: Optional[List[str]] = None,
-) -> Tuple[List[Dict[str, Any]], int, int]:
+    angles: Optional[list[str]] = None,
+) -> tuple[list[dict[str, Any]], int, int]:
     """Turn ``delegate_task``'s return value into evaluator-ready candidates.
 
     ``delegate_output`` is the JSON ``delegate_task`` returns — either the parsed
@@ -281,7 +281,7 @@ def collect_candidates(
     if not isinstance(results, list):
         results = []
 
-    candidates: List[Dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
     ok_count = 0
     failed_count = 0
     for position, entry in enumerate(results):
@@ -315,16 +315,16 @@ def collect_candidates(
 
 
 # ── IO boundary ────────────────────────────────────────────────────────────────
-def _read_text(path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+def _read_text(path: Optional[str]) -> tuple[Optional[str], Optional[str]]:
     try:
         return (
-            Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+            Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
         ), None
     except OSError as exc:
         return None, f"cannot read input: {exc}"
 
 
-def _load_json(path: Optional[str]) -> Tuple[Any, Optional[str]]:
+def _load_json(path: Optional[str]) -> tuple[Any, Optional[str]]:
     raw, err = _read_text(path)
     if err:
         return None, err
@@ -334,11 +334,11 @@ def _load_json(path: Optional[str]) -> Tuple[Any, Optional[str]]:
         return None, f"input is not valid JSON: {exc}"
 
 
-def _cmd_build(argv: List[str]) -> int:
+def _cmd_build(argv: list[str]) -> int:
     subtask = ""
-    angles: List[str] = []
+    angles: list[str] = []
     max_workers = DEFAULT_MAX_WORKERS
-    toolsets: Optional[List[str]] = None
+    toolsets: Optional[list[str]] = None
     complexity: Optional[str] = None
     memo_path: Optional[str] = None
     i = 0
@@ -416,7 +416,7 @@ def _cmd_build(argv: List[str]) -> int:
         complexity=complexity,
         memo_path=memo_path,
     )
-    payload: Dict[str, Any] = {"tasks": tasks, "dropped": dropped}
+    payload: dict[str, Any] = {"tasks": tasks, "dropped": dropped}
     if memo_path:
         try:
             from evolution_shared_memo import load_memo
@@ -428,7 +428,7 @@ def _cmd_build(argv: List[str]) -> int:
     return 0
 
 
-def _cmd_collect(argv: List[str]) -> int:
+def _cmd_collect(argv: list[str]) -> int:
     path: Optional[str] = None
     angles_path: Optional[str] = None
     i = 0
@@ -452,7 +452,7 @@ def _cmd_collect(argv: List[str]) -> int:
     if err:
         print(f"[evolution-orchestrator] {err}", file=sys.stderr)
         return 2
-    angles: Optional[List[str]] = None
+    angles: Optional[list[str]] = None
     if angles_path is not None:
         adata, aerr = _load_json(angles_path)
         if aerr:
@@ -475,7 +475,7 @@ def _cmd_collect(argv: List[str]) -> int:
     return 0
 
 
-def _cmd_draft(argv: List[str]) -> int:
+def _cmd_draft(argv: list[str]) -> int:
     """Build N identical draft tasks for parallel draft mode (#798).
 
     This is a REAL call site for ``build_draft_tasks`` — the draft selector's
@@ -491,7 +491,7 @@ def _cmd_draft(argv: List[str]) -> int:
     goal = ""
     n_drafters = 3  # DEFAULT_MAX_DRAFTERS from the draft selector
     context = ""
-    toolsets: Optional[List[str]] = None
+    toolsets: Optional[list[str]] = None
     memo_path: Optional[str] = None
     i = 0
     while i < len(argv):
@@ -552,14 +552,14 @@ def _cmd_draft(argv: List[str]) -> int:
         toolsets=toolsets,
         memo_path=memo_path,
     )
-    payload: Dict[str, Any] = {"tasks": tasks, "dropped": dropped}
+    payload: dict[str, Any] = {"tasks": tasks, "dropped": dropped}
     if memo_path:
         payload["memo_skip"] = not tasks and dropped == n_drafters
     print(json.dumps(payload, ensure_ascii=False))
     return 0
 
 
-def _cmd_draft_select(argv: List[str]) -> int:
+def _cmd_draft_select(argv: list[str]) -> int:
     """Select the best draft from parallel draft results (#798).
 
     Real call site for ``select_best_draft``.  Reads delegate_task's JSON
@@ -587,7 +587,7 @@ def _cmd_draft_select(argv: List[str]) -> int:
     return 0
 
 
-def _cmd_route(argv: List[str]) -> int:
+def _cmd_route(argv: list[str]) -> int:
     """Cost-aware model routing (#798 inc 2).
 
     Real call site for ``route_cost_tier``.  Maps a task complexity string to
@@ -621,7 +621,7 @@ def _cmd_route(argv: List[str]) -> int:
     return 0
 
 
-def _cmd_memo(argv: List[str]) -> int:
+def _cmd_memo(argv: list[str]) -> int:
     """Shared memo CLI (issue #65): lookup / record / failing / status.
 
     Real call site for ``evolution_shared_memo``: the research stage runs
@@ -642,7 +642,7 @@ def _cmd_memo(argv: List[str]) -> int:
     return memo_main(["evolution_shared_memo.py"] + argv)
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(
             "usage: evolution_orchestrator.py {build,collect,draft,draft-select,route,memo} ...\n"

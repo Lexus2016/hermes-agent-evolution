@@ -1122,7 +1122,7 @@ class TestFailureCooldown:
         monkeypatch.setattr(
             oauth, "_http_post_form_status", lambda *a, **k: (200, _rotated_body())
         )
-        token, refreshed = oauth.ensure_fresh_token(path, "hermes", now=1000)
+        _token, refreshed = oauth.ensure_fresh_token(path, "hermes", now=1000)
         assert refreshed is True
         assert key not in oauth._refresh_failure_at
 

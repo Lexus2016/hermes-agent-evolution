@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Confidence-gated Accept/Refine/Restart branch for stage boundaries (#1339).
 
 Slice B of the AREX loop (#1330).  Slice A (#1338) gave every stage a uniform
@@ -40,21 +39,22 @@ from pathlib import Path
 from typing import Any
 
 from evolution.lib.stage_result import StageResult
+from datetime import UTC
 
 __all__ = [
     "ACCEPT",
+    "DEFAULT_CONFIDENCE_THRESHOLD",
     "REFINE",
     "RESTART",
-    "DEFAULT_CONFIDENCE_THRESHOLD",
     "RESTART_RATE_ALERT_THRESHOLD",
     "GateDecision",
+    "compute_gate_rates",
     "decide",
+    "format_gate_rates",
+    "gate_flags",
+    "load_decisions",
     "record_decision",
     "record_review_critic_verdict",
-    "load_decisions",
-    "compute_gate_rates",
-    "gate_flags",
-    "format_gate_rates",
 ]
 
 ACCEPT = "accept"
@@ -248,7 +248,7 @@ def record_review_critic_verdict(
                         "grounded": bool(grounded),
                         "failure_mode": failure_mode,
                         "agreement_reason": agreement_reason,
-                        "recorded_at": datetime.now(timezone.utc).isoformat(),
+                        "recorded_at": datetime.now(UTC).isoformat(),
                     },
                     sort_keys=True,
                 )

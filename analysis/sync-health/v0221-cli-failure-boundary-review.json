@@ -1,0 +1,438 @@
+{
+  "scope": "Nine individually tested/reviewed CLI exception boundaries; preparation only, no activation.",
+  "recommendations": [
+    {
+      "path": "hermes_cli/config.py",
+      "scope": "_inject_platform_plugin_env_vars",
+      "line": 4027,
+      "rule": "S110",
+      "disposition": "failure_path_verified_candidate_pending_controller_review",
+      "exact_file_matches": [],
+      "exact_unit_matches": [
+        "upstream"
+      ],
+      "current_commit": "f3330de5d562d3618a2506c75178a430957cb303",
+      "current_blob": "a7c32358fb4a7ec38d374f9d3efb86f10114e534",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_path": "hermes_cli/config.py",
+      "source_blob": "9a13eb8332285d00cc96fe52d43d5578172763f0",
+      "source_scope": "_inject_platform_plugin_env_vars",
+      "reason": "Metadata-only discovery tolerates malformed plugin trees so importing CLI remains possible. Credential policy uses separate strict platform_manifest_secret_scan with completeness flag retaining known denials, rather than this best-effort registry. User/nested metadata regression passed1.",
+      "dependencies": [
+        "config.platform_manifest_secret_scan",
+        "config._platform_plugin_manifests(strict=True)",
+        "platform_manifest_secret_envs"
+      ],
+      "test_receipt": "/tmp/hermes-cli-debt-behavior.log",
+      "test_receipt_scope": "test_platform_plugin_env_injection:1 pass, successful user/nested metadata; now supplemented by named synthetic actual-entrypoint failure regression in failure_test.",
+      "failure_test": {
+        "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+        "scope": "test_metadata_discovery_failure_retains_profile_secret_denial",
+        "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+        "receipt": "/tmp/hermes-plugin-failure-boundaries.log",
+        "result": "9 passed across full new file; exact named branch executed"
+      },
+      "references": [
+        {
+          "path": "hermes_cli/config.py",
+          "blob": "a7c32358fb4a7ec38d374f9d3efb86f10114e534"
+        },
+        {
+          "path": "hermes_constants.py",
+          "blob": "84d3384d64e02c0c8252653625aa0e1975b1e307"
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f"
+        },
+        {
+          "path": "tools/environments/local_env_policy.py",
+          "blob": "1997c7e268f963dea41a2870f496d5a7f3d62e3e"
+        }
+      ],
+      "receipt": "/tmp/hermes-plugin-boundary-final.log",
+      "limits": "Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved."
+    },
+    {
+      "path": "hermes_cli/config.py",
+      "scope": "_inject_platform_plugin_env_vars",
+      "line": 4027,
+      "rule": "BLE001",
+      "disposition": "failure_path_verified_candidate_pending_controller_review",
+      "exact_file_matches": [],
+      "exact_unit_matches": [
+        "upstream"
+      ],
+      "current_commit": "f3330de5d562d3618a2506c75178a430957cb303",
+      "current_blob": "a7c32358fb4a7ec38d374f9d3efb86f10114e534",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_path": "hermes_cli/config.py",
+      "source_blob": "9a13eb8332285d00cc96fe52d43d5578172763f0",
+      "source_scope": "_inject_platform_plugin_env_vars",
+      "reason": "Metadata-only discovery tolerates malformed plugin trees so importing CLI remains possible. Credential policy uses separate strict platform_manifest_secret_scan with completeness flag retaining known denials, rather than this best-effort registry. User/nested metadata regression passed1.",
+      "dependencies": [
+        "config.platform_manifest_secret_scan",
+        "config._platform_plugin_manifests(strict=True)",
+        "platform_manifest_secret_envs"
+      ],
+      "test_receipt": "/tmp/hermes-cli-debt-behavior.log",
+      "test_receipt_scope": "test_platform_plugin_env_injection:1 pass, successful user/nested metadata; now supplemented by named synthetic actual-entrypoint failure regression in failure_test.",
+      "failure_test": {
+        "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+        "scope": "test_metadata_discovery_failure_retains_profile_secret_denial",
+        "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+        "receipt": "/tmp/hermes-plugin-failure-boundaries.log",
+        "result": "9 passed across full new file; exact named branch executed"
+      },
+      "references": [
+        {
+          "path": "hermes_cli/config.py",
+          "blob": "a7c32358fb4a7ec38d374f9d3efb86f10114e534"
+        },
+        {
+          "path": "hermes_constants.py",
+          "blob": "84d3384d64e02c0c8252653625aa0e1975b1e307"
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f"
+        },
+        {
+          "path": "tools/environments/local_env_policy.py",
+          "blob": "1997c7e268f963dea41a2870f496d5a7f3d62e3e"
+        }
+      ],
+      "receipt": "/tmp/hermes-plugin-boundary-final.log",
+      "limits": "Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved."
+    },
+    {
+      "path": "hermes_cli/doctor_config.py",
+      "scope": "_check_relay_plugins",
+      "line": 110,
+      "rule": "BLE001",
+      "disposition": "failure_path_verified_candidate_pending_controller_review",
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "exact_unit_matches": [],
+      "current_commit": "f3330de5d562d3618a2506c75178a430957cb303",
+      "current_blob": "cedcba501414fc0bb42ec04d3ab1bec3fa8b2d9e",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_path": "hermes_cli/doctor_config.py",
+      "source_blob": "cedcba501414fc0bb42ec04d3ab1bec3fa8b2d9e",
+      "source_scope": "_check_relay_plugins",
+      "reason": "Exception becomes visible check_warn, cause information and manual_issues entry; not a successful diagnostic. Relay diagnostic suite2passed.",
+      "dependencies": [
+        "doctor check_warn/manual_issues reporting"
+      ],
+      "test_receipt": "/tmp/hermes-cli-debt-behavior.log",
+      "test_receipt_scope": "test_doctor_relay_plugins:2 pass validates actual discovered/explicit Relay configuration paths against live runtime; now supplemented by named synthetic actual-entrypoint failure regression in failure_test.",
+      "failure_test": {
+        "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+        "scope": "test_relay_configuration_exception_reports_manual_issue",
+        "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+        "receipt": "/tmp/hermes-plugin-failure-boundaries.log",
+        "result": "9 passed across full new file; exact named branch executed"
+      },
+      "references": [
+        {
+          "path": "agent/relay_runtime.py",
+          "blob": "f1a841f1c9e014effb48ed92eb67c35389082de3"
+        },
+        {
+          "path": "hermes_cli/doctor_report.py",
+          "blob": "aa3c961dc9972f8f413335703df64012694ace88"
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f"
+        }
+      ],
+      "receipt": "/tmp/hermes-plugin-boundary-final.log",
+      "limits": "Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved."
+    },
+    {
+      "path": "hermes_cli/plugin_host.py",
+      "scope": "PluginHost.shutdown",
+      "line": 192,
+      "rule": "S110",
+      "disposition": "failure_path_verified_candidate_pending_controller_review",
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "exact_unit_matches": [],
+      "current_commit": "f3330de5d562d3618a2506c75178a430957cb303",
+      "current_blob": "b0cd37ee545e24e88af210996590960913b60938",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_path": "hermes_cli/plugin_host.py",
+      "source_blob": "b0cd37ee545e24e88af210996590960913b60938",
+      "source_scope": "PluginHost.shutdown",
+      "reason": "Failed shutdown RPC is followed by channel.close and bounded process wait, then kill and bounded wait. Does not abandon cleanup at the swallowed error. Host crash/restart/unload suite7passed.",
+      "dependencies": [
+        "Channel.call timeout",
+        "Channel.close",
+        "Popen.wait/kill"
+      ],
+      "test_receipt": "/tmp/hermes-cli-debt-behavior.log",
+      "test_receipt_scope": "test_plugin_host:7 pass, actual child host/crash/restart/session isolation/unload; now supplemented by named synthetic actual-entrypoint failure regression in failure_test.",
+      "failure_test": {
+        "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+        "scope": "test_failed_shutdown_rpc_still_closes_and_reaps",
+        "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+        "receipt": "/tmp/hermes-plugin-failure-boundaries.log",
+        "result": "9 passed across full new file; exact named branch executed"
+      },
+      "references": [
+        {
+          "path": "hermes_cli/plugin_host_wire.py",
+          "blob": "ff336a76e9ce58630e75605c382a4fc6f3660377"
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f"
+        }
+      ],
+      "receipt": "/tmp/hermes-plugin-boundary-final.log",
+      "limits": "Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved."
+    },
+    {
+      "path": "hermes_cli/plugin_host.py",
+      "scope": "PluginHost.shutdown",
+      "line": 192,
+      "rule": "BLE001",
+      "disposition": "failure_path_verified_candidate_pending_controller_review",
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "exact_unit_matches": [],
+      "current_commit": "f3330de5d562d3618a2506c75178a430957cb303",
+      "current_blob": "b0cd37ee545e24e88af210996590960913b60938",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_path": "hermes_cli/plugin_host.py",
+      "source_blob": "b0cd37ee545e24e88af210996590960913b60938",
+      "source_scope": "PluginHost.shutdown",
+      "reason": "Failed shutdown RPC is followed by channel.close and bounded process wait, then kill and bounded wait. Does not abandon cleanup at the swallowed error. Host crash/restart/unload suite7passed.",
+      "dependencies": [
+        "Channel.call timeout",
+        "Channel.close",
+        "Popen.wait/kill"
+      ],
+      "test_receipt": "/tmp/hermes-cli-debt-behavior.log",
+      "test_receipt_scope": "test_plugin_host:7 pass, actual child host/crash/restart/session isolation/unload; now supplemented by named synthetic actual-entrypoint failure regression in failure_test.",
+      "failure_test": {
+        "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+        "scope": "test_failed_shutdown_rpc_still_closes_and_reaps",
+        "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+        "receipt": "/tmp/hermes-plugin-failure-boundaries.log",
+        "result": "9 passed across full new file; exact named branch executed"
+      },
+      "references": [
+        {
+          "path": "hermes_cli/plugin_host_wire.py",
+          "blob": "ff336a76e9ce58630e75605c382a4fc6f3660377"
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f"
+        }
+      ],
+      "receipt": "/tmp/hermes-plugin-boundary-final.log",
+      "limits": "Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved."
+    },
+    {
+      "path": "hermes_cli/plugin_host_child.py",
+      "scope": "HostRuntime.op_unload",
+      "line": 391,
+      "rule": "BLE001",
+      "disposition": "failure_path_verified_candidate_pending_controller_review",
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "exact_unit_matches": [],
+      "current_commit": "f3330de5d562d3618a2506c75178a430957cb303",
+      "current_blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_path": "hermes_cli/plugin_host_child.py",
+      "source_blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d",
+      "source_scope": "HostRuntime.op_unload",
+      "reason": "Collects each callback error while continuing reverse callbacks, removes refs/owners/module tree, returns errors. Parent PluginHost._unload logs each returned error. Host7pass exercises unload but not every callback failure.",
+      "dependencies": [
+        "PluginHost._unload error logging",
+        "refs/owners/modules ownership stores"
+      ],
+      "test_receipt": "/tmp/hermes-cli-debt-behavior.log",
+      "test_receipt_scope": "test_plugin_host:7 pass, successful unload; now supplemented by named synthetic actual-entrypoint failure regression in failure_test.",
+      "failure_test": {
+        "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+        "scope": "test_unload_callback_failure_keeps_cleanup_and_visible_error",
+        "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+        "receipt": "/tmp/hermes-plugin-failure-boundaries.log",
+        "result": "9 passed across full new file; exact named branch executed"
+      },
+      "references": [
+        {
+          "path": "hermes_cli/plugin_host.py",
+          "blob": "b0cd37ee545e24e88af210996590960913b60938"
+        },
+        {
+          "path": "hermes_cli/plugin_host_wire.py",
+          "blob": "ff336a76e9ce58630e75605c382a4fc6f3660377"
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f"
+        }
+      ],
+      "receipt": "/tmp/hermes-plugin-boundary-final.log",
+      "limits": "Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved."
+    },
+    {
+      "path": "hermes_cli/plugin_host_child.py",
+      "scope": "extract_profiles_main",
+      "line": 560,
+      "rule": "BLE001",
+      "disposition": "failure_path_verified_candidate_pending_controller_review",
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "exact_unit_matches": [],
+      "current_commit": "f3330de5d562d3618a2506c75178a430957cb303",
+      "current_blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_path": "hermes_cli/plugin_host_child.py",
+      "source_blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d",
+      "source_scope": "extract_profiles_main",
+      "reason": "One-shot worker converts exception into structured error payload. load_hosted_profiles rejects error with PluginHostUnavailable; does not return successful empty profiles. Parent extraction has60-second timeout and credential-minimal env. Hosted model-profile test passed.",
+      "dependencies": [
+        "plugin_host_profiles._extract timeout and credential-minimal env",
+        "load_hosted_profiles error rejection"
+      ],
+      "test_receipt": "/tmp/hermes-cli-debt-behavior.log",
+      "test_receipt_scope": "test_plugin_host:7 pass includes actual provider profile extraction/proxy; now supplemented by named synthetic actual-entrypoint failure regression in failure_test.",
+      "failure_test": {
+        "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+        "scope": "test_profile_extraction_failure_is_rejected_by_parent",
+        "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+        "receipt": "/tmp/hermes-plugin-failure-boundaries.log",
+        "result": "9 passed across full new file; exact named branch executed"
+      },
+      "references": [
+        {
+          "path": "hermes_cli/plugin_host_profiles.py",
+          "blob": "16df810ec840f10d5071deedee2050913c04dccc"
+        },
+        {
+          "path": "hermes_cli/plugin_host_wire.py",
+          "blob": "ff336a76e9ce58630e75605c382a4fc6f3660377"
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f"
+        }
+      ],
+      "receipt": "/tmp/hermes-plugin-boundary-final.log",
+      "limits": "Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved."
+    },
+    {
+      "path": "hermes_cli/plugin_host_wire.py",
+      "scope": "Channel._serve.run",
+      "line": 289,
+      "rule": "BLE001",
+      "disposition": "failure_path_verified_candidate_pending_controller_review",
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "exact_unit_matches": [],
+      "current_commit": "f3330de5d562d3618a2506c75178a430957cb303",
+      "current_blob": "ff336a76e9ce58630e75605c382a4fc6f3660377",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_path": "hermes_cli/plugin_host_wire.py",
+      "source_blob": "ff336a76e9ce58630e75605c382a4fc6f3660377",
+      "source_scope": "Channel._serve.run",
+      "reason": "Converts arbitrary plugin exception into explicit remote type/message reply; _SERVING context always reset in finally. Parent result_of raises_remote. Preserves process and caller context rather than pretending success; host crash/session suites passed.",
+      "dependencies": [
+        "context_for_origin",
+        "_SERVING.reset finally",
+        "Channel.result_of/raise_remote"
+      ],
+      "test_receipt": "/tmp/hermes-cli-debt-behavior.log",
+      "test_receipt_scope": "test_plugin_host:7 pass includes live RPC round trips, error surface and host crash/session context; now supplemented by named synthetic actual-entrypoint failure regression in failure_test.",
+      "failure_test": {
+        "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+        "scope": "test_rpc_error_envelope_restores_caller_context",
+        "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+        "receipt": "/tmp/hermes-plugin-failure-boundaries.log",
+        "result": "9 passed across full new file; exact named branch executed"
+      },
+      "references": [
+        {
+          "path": "hermes_cli/plugin_host.py",
+          "blob": "b0cd37ee545e24e88af210996590960913b60938"
+        },
+        {
+          "path": "hermes_cli/plugin_host_child.py",
+          "blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d"
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f"
+        }
+      ],
+      "receipt": "/tmp/hermes-plugin-boundary-final.log",
+      "limits": "Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved."
+    },
+    {
+      "path": "hermes_cli/plugin_validate_locales.py",
+      "scope": "_check_locale_file",
+      "line": 88,
+      "rule": "BLE001",
+      "disposition": "failure_path_verified_candidate_pending_controller_review",
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "exact_unit_matches": [],
+      "current_commit": "f3330de5d562d3618a2506c75178a430957cb303",
+      "current_blob": "38584f77fc92f74c4fffb36cf9f6e9467f0ce1bd",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_path": "hermes_cli/plugin_validate_locales.py",
+      "source_blob": "38584f77fc92f74c4fffb36cf9f6e9467f0ce1bd",
+      "source_scope": "_check_locale_file",
+      "reason": "Parse exception becomes explicit failed report entry and returns; preserves validation failure instead of swallowing it. Locale validation5passed.",
+      "dependencies": [
+        "validation report.add false",
+        "locale parsing facade"
+      ],
+      "test_receipt": "/tmp/hermes-cli-debt-behavior.log",
+      "test_receipt_scope": "test_plugin_validate_locales:5 pass validates non-text leaf/missing file failures, successful packs and reference warnings; now supplemented by named synthetic actual-entrypoint failure regression in failure_test.",
+      "failure_test": {
+        "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+        "scope": "test_locale_parser_exception_fails_validation",
+        "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f",
+        "receipt": "/tmp/hermes-plugin-failure-boundaries.log",
+        "result": "9 passed across full new file; exact named branch executed"
+      },
+      "references": [
+        {
+          "path": "hermes_cli/plugin_validate.py",
+          "blob": "a7c689c97ceb20d3b315e8ab8d59859ab95f876e"
+        },
+        {
+          "path": "hermes_yaml.py",
+          "blob": "4cd43d3cbda1f22974c29fc59dbabef50455f892"
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_failure_boundaries.py",
+          "blob": "df5a864f53fefb64d53113f772dcd7a7ad8e426f"
+        }
+      ],
+      "receipt": "/tmp/hermes-plugin-boundary-final.log",
+      "limits": "Only the exact named catch occurrence is proposed. Partial-register/admission paths, native Windows process behavior and unrelated catches remain unresolved."
+    }
+  ],
+  "receipts": {
+    "/tmp/hermes-plugin-boundary-final.log": {
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 5 test files (~21 tests) under ['tests/hermes_cli/test_plugin_failure_boundaries.py', 'tests/hermes_cli/test_plugin_host.py', 'tests/hermes_cli/test_platform_plugin_env_injection.py', 'tests/hermes_cli/test_doctor_relay_plugins.py', 'tests/hermes_cli/test_plugin_validate_locales.py']; running with -j 9\n[  4.8% |     1/~21 | \u27132 | \u27170] \u2713 tests/hermes_cli/test_doctor_relay_plugins.py (2\u2713, 1.0s)\n[  9.5% |     2/~21 | \u27133 | \u27170] \u2713 tests/hermes_cli/test_platform_plugin_env_injection.py (1\u2713, 1.0s)\n[ 42.9% |     9/~21 | \u271312 | \u2717 0] \u2713 tests/hermes_cli/test_plugin_failure_boundaries.py (9\u2713, 1.1s)\n[ 66.7% |    14/~21 | \u271317 | \u2717 0] \u2713 tests/hermes_cli/test_plugin_validate_locales.py (5\u2713, 2.2s)\n[100.0% |    21/~21 | \u271324 | \u2717 0] \u2713 tests/hermes_cli/test_plugin_host.py (7\u2713, 5.9s)\n\n=== Summary: 5 files, 24 tests passed, 0 failed (100% complete) in 5.9s (9 workers) ===\n  Durations cached to test_durations.json (5 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   5\n  Total subprocess CPU-wall: 11.3s  (runner wall: 5.9s, parallelism: 9x)\n  P50: 1.07s  P90: 5.93s  P95: 5.93s  P99: 5.93s  Max: 5.93s\n  <1s: 0 files (0%)  <2s: 3 files (60%)\n  Top 10 slowest:\n      5.93s  tests/hermes_cli/test_plugin_host.py\n      2.20s  tests/hermes_cli/test_plugin_validate_locales.py\n      1.07s  tests/hermes_cli/test_plugin_failure_boundaries.py\n      1.04s  tests/hermes_cli/test_platform_plugin_env_injection.py\n      1.03s  tests/hermes_cli/test_doctor_relay_plugins.py\n",
+      "sha256": "0e31469ff8417d09ffd501da2a1bd699aff073588d12884c53863e49d9242cdd"
+    }
+  }
+}

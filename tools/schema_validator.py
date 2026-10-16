@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Type-safe tool schemas with Pydantic validation (issue #49).
 
 Tool schemas in Hermes are defined as raw Python dicts — there is no
@@ -100,17 +99,17 @@ class PropertySchema(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    type: Optional[Union[str, List[str]]] = None
-    properties: Optional[Dict[str, "PropertySchema"]] = None
-    required: Optional[List[str]] = None
-    items: Optional["PropertySchema"] = None
-    enum: Optional[List[Any]] = None
+    type: Optional[str | list[str]] = None
+    properties: Optional[dict[str, PropertySchema]] = None
+    required: Optional[list[str]] = None
+    items: Optional[PropertySchema] = None
+    enum: Optional[list[Any]] = None
 
     @field_validator("type")
     @classmethod
     def _check_type(
-        cls, value: Optional[Union[str, List[str]]]
-    ) -> Optional[Union[str, List[str]]]:
+        cls, value: Optional[str | list[str]]
+    ) -> Optional[str | list[str]]:
         if value is None:
             return value
         if not _is_valid_schema_type(value):
@@ -124,9 +123,9 @@ class PropertySchema(BaseModel):
     @classmethod
     def _check_required(
         cls,
-        value: Optional[List[str]],
+        value: Optional[list[str]],
         info: Any,
-    ) -> Optional[List[str]]:
+    ) -> Optional[list[str]]:
         if value is None:
             return value
         if not isinstance(value, list):
@@ -142,7 +141,7 @@ class PropertySchema(BaseModel):
 
     @field_validator("enum")
     @classmethod
-    def _check_enum(cls, value: Optional[List[Any]]) -> Optional[List[Any]]:
+    def _check_enum(cls, value: Optional[list[Any]]) -> Optional[list[Any]]:
         if value is None:
             return value
         if not isinstance(value, list) or not value:
@@ -160,14 +159,14 @@ class ToolSchema(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    type: Union[str, List[str]] = "object"
-    properties: Dict[str, PropertySchema] = Field(default_factory=dict)
-    required: Optional[List[str]] = None
+    type: str | list[str] = "object"
+    properties: dict[str, PropertySchema] = Field(default_factory=dict)
+    required: Optional[list[str]] = None
     additionalProperties: Optional[bool] = None
 
     @field_validator("type")
     @classmethod
-    def _check_root_type(cls, value: Union[str, List[str]]) -> Union[str, List[str]]:
+    def _check_root_type(cls, value: str | list[str]) -> str | list[str]:
         if not _is_valid_schema_type(value):
             raise ValueError(
                 f"type {value!r} is not a valid JSON Schema type "
@@ -190,9 +189,9 @@ class ToolSchema(BaseModel):
     @classmethod
     def _check_required(
         cls,
-        value: Optional[List[str]],
+        value: Optional[list[str]],
         info: Any,
-    ) -> Optional[List[str]]:
+    ) -> Optional[list[str]]:
         if value is None:
             return value
         if not isinstance(value, list):
@@ -221,13 +220,13 @@ class ToolSchemaValidationResult:
     """
 
     ok: bool
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
     #: The schema normalized to the bare parameter dict, or None when the
     #: input was not a dict-shaped tool schema at all.
-    normalized_parameters: Optional[Dict[str, Any]] = None
+    normalized_parameters: Optional[dict[str, Any]] = None
 
 
-def _extract_parameters(schema: Any) -> Optional[Dict[str, Any]]:
+def _extract_parameters(schema: Any) -> Optional[dict[str, Any]]:
     """Normalize any accepted tool-schema shape to the parameter dict.
 
     Accepts (mirroring :func:`agent.memory_manager.normalize_tool_schema`'s
@@ -285,7 +284,7 @@ def validate_tool_schema(schema: Any) -> ToolSchemaValidationResult:
         return ToolSchemaValidationResult(
             ok=False, errors=errors, normalized_parameters=params
         )
-    except Exception as exc:  # noqa: BLE001 — report, never crash the caller
+    except Exception as exc:
         return ToolSchemaValidationResult(
             ok=False,
             errors=[
@@ -296,7 +295,7 @@ def validate_tool_schema(schema: Any) -> ToolSchemaValidationResult:
     return ToolSchemaValidationResult(ok=True, errors=[], normalized_parameters=params)
 
 
-def validate_tool_schema_or_raise(schema: Any) -> Dict[str, Any]:
+def validate_tool_schema_or_raise(schema: Any) -> dict[str, Any]:
     """Validate *schema* and return the normalized parameter dict, or raise.
 
     Useful for registration-time call sites that want fail-fast semantics
@@ -310,14 +309,14 @@ def validate_tool_schema_or_raise(schema: Any) -> Dict[str, Any]:
     return result.normalized_parameters
 
 
-def _flatten_validation_errors(exc: ValidationError) -> List[str]:
+def _flatten_validation_errors(exc: ValidationError) -> list[str]:
     """Turn a Pydantic ``ValidationError`` into flat, actionable strings.
 
     Each error is rendered as ``<location>: <message>`` so a caller can point
     a developer at the exact property (``properties.foo.required``) that is
     broken, which is the actionable shape the issue asks for.
     """
-    flat: List[str] = []
+    flat: list[str] = []
     for err in exc.errors():
         loc = ".".join(str(part) for part in err.get("loc", ()))
         msg = str(err.get("msg", "invalid")).replace("\n", " ")

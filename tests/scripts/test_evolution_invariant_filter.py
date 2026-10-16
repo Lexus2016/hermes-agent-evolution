@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_invariant_filter import (  # noqa: E402
+from evolution_invariant_filter import (
     _rules_path,
     check_proposal,
     classify_stakes,
@@ -22,8 +22,8 @@ from evolution_invariant_filter import (  # noqa: E402
     load_safe_fallbacks,
     resolve_pinned_fallback,
 )
-from evolution_harness_gate import run_cron_pass, run_gate  # noqa: E402
-from evolution_harness_sandbox import INVALID, VALIDATED, GateResult  # noqa: E402
+from evolution_harness_gate import run_cron_pass, run_gate
+from evolution_harness_sandbox import INVALID, VALIDATED, GateResult
 
 SURFACE = {
     "retry_count": 10,

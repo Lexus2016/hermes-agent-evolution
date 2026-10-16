@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Wiring tests for the proceed-vs-hold calibration runner (#66).
 
 These prove the calibration module is no longer dead code: the runner builds a
@@ -19,14 +18,14 @@ from pathlib import Path
 # tests import evolution_* scripts (flat, after adding scripts/ to sys.path).
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_proceed_hold_calibrate import (  # noqa: E402
+from evolution_proceed_hold_calibrate import (
     REPORT_FILENAME,
     build_report,
     decider_from_decisions,
     persist_report,
     run_reference,
 )
-from evolution.lib.proceed_hold_calibration import (  # noqa: E402
+from evolution.lib.proceed_hold_calibration import (
     DEFAULT_SUITE,
     Decision,
     reference_decider,
@@ -115,6 +114,7 @@ def test_argless_invocation_is_scheduler_prerun_safe(tmp_path: Path):
         env=env,
         cwd=repo_root,
         timeout=60,
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr or proc.stdout
     combined = f"{proc.stdout}\n{proc.stderr}".lower()

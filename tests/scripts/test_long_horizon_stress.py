@@ -23,16 +23,16 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from eval_baseline import main as baseline_main  # noqa: E402
-from eval_baseline import run_long_horizon_stress, run_null_agent_baseline  # noqa: E402
-from eval_runner import (  # noqa: E402
+from eval_baseline import main as baseline_main
+from eval_baseline import run_long_horizon_stress, run_null_agent_baseline
+from eval_runner import (
     DEFAULT_MAX_ITERATIONS,
     LONG_HORIZON_BUCKET,
     horizon_bucket,
     run_eval_task,
     split_by_horizon,
 )
-from eval_tasks import (  # noqa: E402
+from eval_tasks import (
     LONG_HORIZON_MIN_TURNS,
     EvalTask,
     load_long_horizon_tasks,

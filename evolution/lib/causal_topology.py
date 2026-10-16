@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Causal discovery and topology optimization for Hydra orchestrator dispatch (issue #2438).
 
 Applies causal discovery over multi-agent dispatch communication topologies (arXiv cs.MA
@@ -21,10 +20,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 __all__ = [
-    "DispatchEvent",
     "DispatchEdge",
-    "TopologyAnalysisReport",
+    "DispatchEvent",
     "DispatchTopologyAnalyzer",
+    "TopologyAnalysisReport",
 ]
 
 
@@ -35,16 +34,16 @@ class DispatchEvent:
     tick: int
     trigger_signal: str
     stage: str
-    artifacts_read: List[str] = field(default_factory=list)
-    artifacts_written: List[str] = field(default_factory=list)
+    artifacts_read: list[str] = field(default_factory=list)
+    artifacts_written: list[str] = field(default_factory=list)
     outcome: str = "real"  # "noop", "real", "blocked"
     timestamp: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> DispatchEvent:
+    def from_dict(cls, d: dict[str, Any]) -> DispatchEvent:
         return cls(
             tick=int(d.get("tick", 0)),
             trigger_signal=str(d.get("trigger_signal", "")),
@@ -77,11 +76,11 @@ class DispatchEdge:
         self.causal_effect_score = round(self.real_outcomes / self.total_fires, 4)
         return self.causal_effect_score
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> DispatchEdge:
+    def from_dict(cls, d: dict[str, Any]) -> DispatchEdge:
         return cls(
             source_signal=str(d.get("source_signal", "")),
             target_stage=str(d.get("target_stage", "")),
@@ -100,11 +99,11 @@ class TopologyAnalysisReport:
     total_ticks: int
     total_events: int
     noop_rate: float
-    edges: List[DispatchEdge]
-    prune_candidates: List[DispatchEdge]
-    batch_candidates: List[List[str]]
+    edges: list[DispatchEdge]
+    prune_candidates: list[DispatchEdge]
+    batch_candidates: list[list[str]]
 
-    def summary_dict(self) -> Dict[str, Any]:
+    def summary_dict(self) -> dict[str, Any]:
         return {
             "total_ticks": self.total_ticks,
             "total_events": self.total_events,
@@ -119,7 +118,7 @@ class DispatchTopologyAnalyzer:
     """Analyzes dispatch history to discover causal structure, prune stale edges, and batch independent stages."""
 
     def __init__(self) -> None:
-        self.events: List[DispatchEvent] = []
+        self.events: list[DispatchEvent] = []
 
     def record_event(self, event: DispatchEvent) -> None:
         """Record a single dispatch event."""
@@ -161,9 +160,9 @@ class DispatchTopologyAnalyzer:
         co_occurrence_threshold: float = 0.75,
     ) -> TopologyAnalysisReport:
         """Discover edges, rank causal effects, and identify prune and batch recommendations."""
-        edge_map: Dict[Tuple[str, str], DispatchEdge] = {}
-        tick_to_stages: Dict[int, Set[str]] = defaultdict(set)
-        ticks_seen: Set[int] = set()
+        edge_map: dict[tuple[str, str], DispatchEdge] = {}
+        tick_to_stages: dict[int, set[str]] = defaultdict(set)
+        ticks_seen: set[int] = set()
 
         for ev in self.events:
             ticks_seen.add(ev.tick)
@@ -202,18 +201,18 @@ class DispatchTopologyAnalyzer:
         ]
 
         # 2. Batch candidates: pairs of stages that consistently co-occur across ticks and have disjoint written artifacts
-        stage_co_counts: Dict[Tuple[str, str], int] = defaultdict(int)
-        stage_total_ticks: Dict[str, int] = defaultdict(int)
+        stage_co_counts: dict[tuple[str, str], int] = defaultdict(int)
+        stage_total_ticks: dict[str, int] = defaultdict(int)
 
         for tick, stages in tick_to_stages.items():
             for s in stages:
                 stage_total_ticks[s] += 1
-            stages_list = sorted(list(stages))
+            stages_list = sorted(stages)
             for i in range(len(stages_list)):
                 for j in range(i + 1, len(stages_list)):
                     stage_co_counts[(stages_list[i], stages_list[j])] += 1
 
-        batch_candidates: List[List[str]] = []
+        batch_candidates: list[list[str]] = []
         for (s1, s2), co_count in stage_co_counts.items():
             total = min(stage_total_ticks[s1], stage_total_ticks[s2])
             if total >= min_sample_size:

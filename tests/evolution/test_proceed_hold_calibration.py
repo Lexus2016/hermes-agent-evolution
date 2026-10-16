@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for the proceed-vs-hold calibration suite (#66)."""
 
 import json
@@ -68,7 +67,7 @@ def test_reference_decider_agrees_with_every_label():
 def test_run_calibration_counts_both_error_directions():
     proceed_truth, hold_truth = _truth_counts()
 
-    always_proceed = lambda s: Decision.PROCEED  # noqa: E731
+    always_proceed = lambda s: Decision.PROCEED
     report = run_calibration(always_proceed)
     assert report.total == proceed_truth + hold_truth
     assert report.correct == proceed_truth
@@ -77,7 +76,7 @@ def test_run_calibration_counts_both_error_directions():
     )
     assert report.over_refusal == 0
 
-    always_hold = lambda s: Decision.HOLD  # noqa: E731
+    always_hold = lambda s: Decision.HOLD
     report = run_calibration(always_hold)
     assert report.correct == hold_truth
     assert report.under_refusal == 0

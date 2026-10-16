@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(list(argv) if argv is not None else sys.argv)
     try:
         summary = dream_contradiction_scan(Path(args.root), dry_run=args.dry_run)
-    except Exception as exc:  # noqa: BLE001 - a scheduled job must fail loudly
+    except Exception as exc:
         print(f"[dream-contradiction-scan] FAILED: {exc}", file=sys.stderr)
         return 1
 

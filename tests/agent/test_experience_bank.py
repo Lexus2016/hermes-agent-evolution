@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for :mod:`agent.experience_bank` — the MemoHarness experience bank.
 
 Hermetic by construction: the autouse fixtures in ``tests/conftest.py``

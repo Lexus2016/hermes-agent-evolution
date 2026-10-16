@@ -18,8 +18,21 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { $botMeta, botMetaWriteAt, saveBotMeta } from './data'
+import {
+  $botMeta,
+  $lastRoster,
+  botMentionTag,
+  botMetaWriteAt,
+  captureDraftBotMeta,
+  mergeMultiSourceRoster,
+  saveBotMeta
+} from './data'
+import { editedLook } from './edit-profile-look'
+import { groupSpeakerLabel } from './group-chat'
+import { buildGroupChatTurnPrompt } from './group-round-prompt'
+import { displayName } from './labels'
 import { mergeServerMeta } from './profile-ops'
+import { botRosterMeta } from './routing'
 import type { RosterRow } from './types'
 
 const { hostMock, storageMock } = vi.hoisted(() => ({
@@ -53,6 +66,12 @@ vi.mock('./shared', () => ({ getPluginCtx: () => ({ storage: storageMock }), ID:
 vi.mock('./avatar-image', () => ({ isBackfilledFacePng: () => false }))
 vi.mock('./canonical-chat', () => ({ ensureBotMetadata: vi.fn() }))
 
+/** The backend's profile listing: a save reads the bot's server namespace
+ *  before it writes, so every profile a case saves has to exist there. */
+const SERVED_PROFILES = {
+  profiles: ['beta', 'ops', 'researcher', 'source', 'source-2'].map(name => ({ name, ui_meta_revisions: {} }))
+}
+
 /** Every `host.request` recorded, with the params frozen at call time. */
 function recordRequests(reply: (method: string) => unknown = () => ({})) {
   const calls: Array<{ method: string; params: Record<string, unknown> }> = []
@@ -60,7 +79,7 @@ function recordRequests(reply: (method: string) => unknown = () => ({})) {
   hostMock.request.mockImplementation(async (method: string, params: Record<string, unknown>) => {
     calls.push({ method, params: structuredClone(params ?? {}) })
 
-    return reply(method)
+    return method === 'profiles.list' ? SERVED_PROFILES : reply(method)
   })
 
   return calls
@@ -132,7 +151,11 @@ describe('a save for a bot on the pooled local backend', () => {
           throw new Error('Local backend start for "beta" timed out while waiting for a free slot. (background)')
         }
 
-        return method === 'profiles.configure' ? { applied: { ui_meta: true } } : {}
+        return method === 'profiles.configure'
+          ? { applied: { ui_meta: true } }
+          : method === 'profiles.list'
+            ? SERVED_PROFILES
+            : {}
       }
     )
 
@@ -348,4 +371,298 @@ describe('server metadata reconciliation', () => {
       vi.useRealTimers()
     }
   })
+})
+
+// Two machines, both with a profile literally named `default`: the VPS bot is
+// "Agent A" on its own backend; this Desktop's local agent is "Agent B", whose
+// title still sits under the bare legacy key from its single-source days.
+describe("a bot is named by its own backend, never by another bot's cached record", () => {
+  const vps = {
+    connectionId: 'vps',
+    display_name: 'Agent A',
+    name: 'default',
+    remoteSource: true,
+    sourceScoped: true
+  } as RosterRow
+
+  it('a save writes its own patch onto the server namespace, and re-reads after losing a CAS race', async () => {
+    $botMeta.set({ 'vps::default': { color: '#ff0000', title: 'Agent B' } })
+    let revision = 3
+    const configures: Array<Record<string, unknown>> = []
+
+    hostMock.requestProfile.mockImplementation(
+      async (_route: unknown, method: string, params: Record<string, unknown>) => {
+        if (method === 'profiles.list') {
+          return {
+            profiles: [
+              {
+                name: 'default',
+                ui_meta: { 'hermes-bots': { color: '#0000ff', groups: [] } },
+                ui_meta_revisions: { 'hermes-bots': revision }
+              }
+            ]
+          }
+        }
+
+        if (method === 'profiles.configure') {
+          configures.push(structuredClone(params))
+
+          // Another writer lands between this save's read and its write, once.
+          if (configures.length === 1) {
+            revision = 4
+
+            return { applied: { ui_meta: false, ui_meta_conflicts: { 'hermes-bots': { actual: 4, expected: 3 } } } }
+          }
+
+          return { applied: { ui_meta: true } }
+        }
+
+        return {}
+      }
+    )
+
+    await expect(saveBotMeta(vps, { groups: ['room'] })).resolves.toMatchObject({ serverOutcome: 'persisted' })
+
+    expect(configures.map(params => params.ui_meta_expected_revisions)).toEqual([
+      { 'hermes-bots': 3 },
+      { 'hermes-bots': 4 }
+    ])
+    // The local cache's stale title and color never travel: only the patch rides the server's copy.
+    expect(configures.at(-1)?.ui_meta).toEqual({ 'hermes-bots': { color: '#0000ff', groups: ['room'] } })
+  })
+
+  it('names, tags, and prompts the bot with what its backend reports', () => {
+    $botMeta.set({ default: { title: 'Agent B' }, 'vps::default': { title: 'Agent B' } })
+    // `/api/profiles` reports no Bot Mode title for the VPS bot.
+    const thin = { ...vps, title: '' } as RosterRow
+
+    mergeServerMeta([thin])
+
+    expect(displayName(thin, botRosterMeta(thin, $botMeta.get()))).toBe('Agent A')
+    expect(botMentionTag(thin)).toBe('agent-a')
+
+    // Window switched to the VPS: its rows are the active source's (scoped, not remote).
+    const active = { ...vps, remoteSource: false, ui_meta_revisions: {} } as RosterRow
+
+    expect(buildGroupChatTurnPrompt({ deltaLines: [], groupName: 'g', members: [active], viewer: active })).toContain(
+      'You are @agent-a,'
+    )
+
+    // A keyed speaker with no live roster row (Bots pane not mounted).
+    $lastRoster.set([])
+    expect(groupSpeakerLabel('vps::default')).not.toBe('Agent B')
+  })
+
+  it('the row shows the name its @handle uses when the backend title and display_name differ', () => {
+    $botMeta.set({})
+
+    const thin = {
+      ...vps,
+      connectionLabel: 'VPS',
+      display_name: 'Remote Human Name',
+      title: 'Remote Bot Title'
+    } as RosterRow
+
+    mergeServerMeta([thin])
+
+    expect(displayName(thin, botRosterMeta(thin, $botMeta.get()))).toBe('Remote Bot Title')
+    expect(botMentionTag(thin)).toBe('remote-bot-title')
+
+    // No display_name: the backend's title, never the Desktop-side connection label.
+    const titleOnly = { ...thin, display_name: '' } as RosterRow
+
+    expect(displayName(titleOnly, botRosterMeta(titleOnly, $botMeta.get()))).toBe('Remote Bot Title')
+  })
+
+  it("only a fresh answer from the bot's backend corrects its record, and a title alone never mints one", () => {
+    $botMeta.set({ 'vps::default': { color: '#00ff00', title: 'New title' } })
+    // The VPS stops answering; the pane keeps its last-painted row, which predates the rename.
+    const painted = { ...vps, title: 'Old title' } as RosterRow
+
+    const kept = mergeMultiSourceRoster(
+      { profiles: [] },
+      { agents: [], sources: [{ connectionId: 'vps', reachable: false }] },
+      'local',
+      [painted]
+    )
+
+    mergeServerMeta(kept.profiles as RosterRow[], Date.now())
+    expect($botMeta.get()['vps::default']).toEqual({ color: '#00ff00', title: 'New title' })
+
+    // No record yet (a configured alias may own this bot's look): the backend's
+    // title rides the row, and no empty record appears to shadow the alias.
+    $botMeta.set({})
+    mergeServerMeta([{ ...vps, title: 'Agent A' } as RosterRow])
+    expect($botMeta.get()).toEqual({})
+  })
+
+  it('Edit Profile sends only what the user changed since it opened', () => {
+    const opened = { color: '#ff0000', image: null, shape: 'circle' as const, title: 'Old title' }
+
+    // Renamed elsewhere meanwhile; this dialog only changes the color.
+    expect(editedLook(opened, { ...opened, color: '#0000ff' })).toEqual({ color: '#0000ff', custom: true })
+    expect(editedLook(opened, { ...opened, title: ' Old title ' })).toBeNull()
+  })
+})
+
+function deferredMeta<T>() {
+  let resolve!: (value: T) => void
+
+  const promise = new Promise<T>(yes => {
+    resolve = yes
+  })
+
+  return { promise, resolve }
+}
+
+describe('draft metadata keeps its captured owner', () => {
+  const owner = (connectionId: string): RosterRow => ({
+    name: 'researcher',
+    sourceScoped: true,
+    route: { connectionId, mode: 'remote', profile: 'researcher', targetProfile: 'researcher' }
+  })
+
+  it.each(['unsupported', 'persisted', 'failed'] as const)(
+    'preserves local appearance when the server result is %s',
+    async outcome => {
+      const request = vi.fn(async (method: string) => {
+        if (method === 'profiles.list') {
+          return SERVED_PROFILES
+        }
+
+        if (outcome === 'unsupported') {
+          throw new Error('unknown method')
+        }
+
+        return { applied: { ui_meta: outcome === 'persisted' } }
+      })
+
+      const draft = captureDraftBotMeta(owner('studio'), request, () => false)
+      await expect(
+        draft.save({ title: 'Draft title', image: 'data:image/png;base64,cHJvYmU=' })
+      ).resolves.toMatchObject({ serverOutcome: outcome })
+      expect($botMeta.get()['studio::researcher']).toMatchObject({ title: 'Draft title' })
+      expect(storageMock.set).toHaveBeenCalledWith(
+        'bot-meta-v2',
+        expect.objectContaining({
+          'studio::researcher': expect.objectContaining({ title: 'Draft title' })
+        })
+      )
+      expect(request).toHaveBeenCalledWith(
+        'profiles.set_asset',
+        expect.objectContaining({ name: 'researcher', asset: 'avatar' })
+      )
+      expect(hostMock.request).not.toHaveBeenCalled()
+      expect(hostMock.requestProfile).not.toHaveBeenCalled()
+    }
+  )
+
+  it('keeps CAS reads, retries, avatar and cleanup on captured handles across a mid-save switch', async () => {
+    const firstRead = deferredMeta<typeof SERVED_PROFILES>()
+    let reads = 0
+    let writes = 0
+
+    const request = vi.fn(async (method: string) => {
+      if (method === 'profiles.list') {
+        return ++reads === 1 ? firstRead.promise : SERVED_PROFILES
+      }
+
+      if (method === 'profiles.configure') {
+        return ++writes === 1
+          ? { applied: { ui_meta_conflicts: { 'hermes-bots': 2 } } }
+          : { applied: { ui_meta: true } }
+      }
+
+      return {}
+    })
+
+    const originalSet = storageMock.set
+    const originalGet = storageMock.get
+    const originalRemove = storageMock.remove
+    const draft = captureDraftBotMeta(owner('studio'), request, () => false)
+    const saving = draft.save({ title: 'Studio draft', image: 'data:image/png;base64,cHJvYmU=' })
+    const replacementSet = vi.fn()
+    storageMock.set = replacementSet
+    storageMock.get = vi.fn()
+    storageMock.remove = vi.fn()
+
+    try {
+      $botMeta.set({ ...$botMeta.get(), 'other::researcher': { title: 'Other owner' } })
+      const cleanup = draft.discard()
+      expect($botMeta.get()['studio::researcher']).toBeDefined()
+      firstRead.resolve(SERVED_PROFILES)
+      await expect(saving).resolves.toMatchObject({ serverOutcome: 'persisted' })
+      await cleanup
+      expect(reads).toBe(2)
+      expect(writes).toBe(2)
+      expect($botMeta.get()).toEqual({ 'other::researcher': { title: 'Other owner' } })
+      expect(originalSet).toHaveBeenLastCalledWith('bot-meta-v2-migrated', true)
+      expect(originalSet).toHaveBeenCalledWith('bot-meta-v2', { 'other::researcher': { title: 'Other owner' } })
+      expect(replacementSet).not.toHaveBeenCalled()
+      expect(hostMock.request).not.toHaveBeenCalled()
+      expect(hostMock.requestProfile).not.toHaveBeenCalled()
+    } finally {
+      storageMock.set = originalSet
+      storageMock.get = originalGet
+      storageMock.remove = originalRemove
+    }
+  })
+
+  it('preserves a legacy fallback and avoids touching a new same-name owner on delayed discard', async () => {
+    const read = deferredMeta<typeof SERVED_PROFILES>()
+    let current = true
+
+    const request = vi.fn(async (method: string) => {
+      if (method === 'profiles.list') {
+        return read.promise
+      }
+
+      throw new Error('ui_meta unsupported')
+    })
+
+    const draft = captureDraftBotMeta('researcher', request, () => current)
+    const saving = draft.save({ title: 'Original legacy look' })
+    expect(storageMock.set).toHaveBeenCalledWith('bot-meta', { researcher: { title: 'Original legacy look' } })
+    current = false
+    $botMeta.set({ researcher: { title: 'Different owner' } })
+    const callsBeforeDiscard = storageMock.set.mock.calls.length
+    const cleanup = draft.discard()
+    read.resolve(SERVED_PROFILES)
+    await expect(saving).resolves.toMatchObject({ serverOutcome: 'unsupported' })
+    await cleanup
+    expect($botMeta.get()).toEqual({ researcher: { title: 'Different owner' } })
+    expect(storageMock.set).toHaveBeenCalledTimes(callsBeforeDiscard)
+    expect(hostMock.request).not.toHaveBeenCalled()
+  })
+
+  it('does not optimistically write a legacy cache after its gateway has changed', async () => {
+    let current = true
+
+    const draft = captureDraftBotMeta(
+      'researcher',
+      vi.fn(async () => SERVED_PROFILES),
+      () => current
+    )
+
+    current = false
+    $botMeta.set({ researcher: { title: 'Different owner' } })
+    await draft.save({ title: 'Old owner' })
+    await draft.discard()
+    expect($botMeta.get()).toEqual({ researcher: { title: 'Different owner' } })
+    expect(storageMock.set).not.toHaveBeenCalled()
+  })
+})
+
+it('never uses a new legacy owners same-name avatar to suppress the captured draft asset write', async () => {
+  let current = true
+  const request = vi.fn(async (method: string) => (method === 'profiles.list' ? SERVED_PROFILES : {}))
+  const draft = captureDraftBotMeta('researcher', request, () => current)
+  current = false
+  const image = 'data:image/png;base64,cHJvYmU='
+  const otherLook = { researcher: { title: 'Other owner', image } }
+  $botMeta.set(otherLook)
+  await draft.save({ title: 'Original owner', image })
+  expect(request).toHaveBeenCalledWith('profiles.set_asset', { name: 'researcher', asset: 'avatar', data: image })
+  expect($botMeta.get()).toEqual(otherLook)
+  expect(storageMock.set).not.toHaveBeenCalled()
 })

@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_autoformat import format_files, get_changed_files, main  # noqa: E402
+from evolution_autoformat import format_files, get_changed_files, main
 
 
 class _FakeProc:

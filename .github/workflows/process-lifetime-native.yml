@@ -23,9 +23,9 @@ jobs:
       matrix:
         include:
           - runner: macos-latest
-            marker: macos_only
+            platform: macos
           - runner: windows-latest
-            marker: windows_only
+            platform: windows
     steps:
       - name: Checkout exact candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -42,26 +42,19 @@ jobs:
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           git log -1 --format='candidate=%H tree=%T'
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with:
-          version: "0.9.28"
-          enable-cache: false
-
-      - name: Set up Python 3.11
-        uses: ./.github/actions/retry
-        with:
-          command: uv python install 3.11
-
       - name: Install locked native test dependencies
-        uses: ./.github/actions/retry
+        uses: ./.github/actions/setup-pm
         with:
-          command: uv sync --locked --python 3.11 --extra all --extra dev --extra anthropic --extra mistral --extra fal --extra modal --extra daytona --extra parallel-web
+          extras: '["all", "anthropic", "bedrock", "mistral", "fal", "modal", "daytona", "parallel-web"]'
+          test-environment: 'true'
+          cache: 'false'
+          cache-python: 'false'
+          cache-node: 'false'
 
       - name: Execute native ownership and lifetime contracts
         shell: bash
         env:
-          NATIVE_MARKER: ${{ matrix.marker }}
+          NATIVE_PLATFORM: ${{ matrix.platform }}
           HERMES_TEST_FILE_RETRIES: "0"
           OPENROUTER_API_KEY: ""
           OPENAI_API_KEY: ""
@@ -80,11 +73,16 @@ jobs:
               -- -o addopts= -v --tb=short --timeout=90 \
               --junitxml="$PROCESS_RESULTS/$label.xml" "$@"
           }
-          run_file ownership tests/tools/test_local_process_cleanup_ownership.py -m "$NATIVE_MARKER"
-          run_file lifetime tests/tools/test_local_process_lifetime.py -m "$NATIVE_MARKER"
-          if [ "$NATIVE_MARKER" = macos_only ]; then
-            run_file registry tests/tools/test_local_registry_lifetime.py -m "$NATIVE_MARKER"
-            run_file orphan-race tests/tools/test_local_wrapper_exit_ownership.py -m "$NATIVE_MARKER"
+          if [ "$NATIVE_PLATFORM" = macos ]; then
+            run_file ownership tests/tools/test_local_process_cleanup_ownership.py -k _macos
+            run_file lifetime tests/tools/test_local_process_lifetime.py -k _macos
+          else
+            run_file ownership tests/tools/test_local_process_cleanup_ownership.py -k test_windows_cleanup_preserves_existing_dispatch
+            run_file lifetime tests/tools/test_local_process_lifetime.py -k test_windows_retains_native_popen_stdio_and_status
+          fi
+          if [ "$NATIVE_PLATFORM" = macos ]; then
+            run_file registry tests/tools/test_local_registry_lifetime.py -k _macos
+            run_file orphan-race tests/tools/test_local_wrapper_exit_ownership.py -k _macos
             run_file interruption tests/tools/test_local_interrupt_cleanup.py \
               -k test_wait_for_process_kills_subprocess_on_keyboardinterrupt
             run_file descendants tests/tools/test_local_setsid_descendant_sweep.py \
@@ -92,14 +90,14 @@ jobs:
             run_file shutdown tests/tui_gateway/test_serve_exit_flush.py \
               -k test_shutdown_mid_tool_kills_the_command_and_keeps_its_result
           fi
-          uv run --no-sync python - <<'PY'
+          "$HERMES_PYTHON" - <<'PY'
           import os
           import xml.etree.ElementTree as ET
           from pathlib import Path
           folder = Path(os.environ["PROCESS_RESULTS"])
-          marker = os.environ["NATIVE_MARKER"]
+          marker = os.environ["NATIVE_PLATFORM"]
           required = {
-              "macos_only": {
+              "macos": {
                   "ownership": ["test_unverified_handle_never_discovers_or_signals_macos[",
                                 "test_native_owned_process_cleanup_macos[_kill_process-False]",
                                 "test_native_owned_process_cleanup_macos[_kill_process-True]",
@@ -122,7 +120,7 @@ jobs:
                   "descendants": ["test_timeout_kill_reaps_setsid_grandchild"],
                   "shutdown": ["test_shutdown_mid_tool_kills_the_command_and_keeps_its_result"],
               },
-              "windows_only": {
+              "windows": {
                   "ownership": ["test_windows_cleanup_preserves_existing_dispatch"],
                   "lifetime": ["test_windows_retains_native_popen_stdio_and_status"],
               },

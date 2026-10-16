@@ -137,7 +137,7 @@ class TestWriteEnv:
         """Existing non-ASCII .env content must survive the read-modify-write
         as UTF-8 (the locale codec would crash/mangle it on Windows)."""
         env_path = tmp_path / ".env"
-        env_path.write_bytes("PROXY_NOTE=café-zürich-完了\n".encode("utf-8"))
+        env_path.write_bytes("PROXY_NOTE=café-zürich-完了\n".encode())
         _write_env(env_path, {"OPENAI_API_KEY": "sk-test"})
         content = env_path.read_text(encoding="utf-8")
         assert "PROXY_NOTE=café-zürich-完了" in content
@@ -147,7 +147,7 @@ class TestWriteEnv:
         """A Notepad-edited .env carries a BOM; the first key must still be
         matched/updated in place, not duplicated."""
         env_path = tmp_path / ".env"
-        env_path.write_bytes("﻿OPENAI_API_KEY=old\n".encode("utf-8"))
+        env_path.write_bytes("﻿OPENAI_API_KEY=old\n".encode())
         _write_env(env_path, {"OPENAI_API_KEY": "new"})
         content = env_path.read_text(encoding="utf-8")
         assert content.count("OPENAI_API_KEY=") == 1
@@ -160,7 +160,7 @@ class TestPromptApiKey:
         """The masked-current-value lookup must see a key on the BOM'd first
         line of a Notepad-edited .env instead of prompting from scratch."""
         env_path = tmp_path / ".env"
-        env_path.write_bytes("﻿OPENAI_API_KEY=sk-existing\n".encode("utf-8"))
+        env_path.write_bytes("﻿OPENAI_API_KEY=sk-existing\n".encode())
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
         prompts: list[str] = []
@@ -214,7 +214,7 @@ class TestPostSetup:
 class TestConnectivityChecks:
 
     def test_qdrant_path_writable(self, tmp_path):
-        ok, msg = _check_qdrant_path(str(tmp_path / "qdrant"))
+        ok, _msg = _check_qdrant_path(str(tmp_path / "qdrant"))
         assert ok is True
 
 
@@ -236,3 +236,26 @@ def test_discovery_loaded_setup_module_exposes_post_setup(monkeypatch):
             if k.startswith("plugins.memory.mem0"):
                 del sys.modules[k]
         sys.modules.update(saved)
+
+
+def test_setup_version_check_does_not_import_sdk_or_write_outside_profile(tmp_path, monkeypatch):
+    import builtins
+
+    monkeypatch.setattr("sys.argv", ["hermes", "--mode", "platform", "--api-key", "synthetic-key"])
+    monkeypatch.setattr("plugins.memory.mem0._setup.get_hermes_home", lambda: tmp_path)
+    monkeypatch.setattr("importlib.metadata.version", lambda distribution: "2.0.7")
+    _inject_fake_hermes_cli(monkeypatch)
+    monkeypatch.setitem(post_setup.__globals__, "_prompt", lambda label, default=None, secret=False: default or "")
+    monkeypatch.setitem(post_setup.__globals__, "get_hermes_home", lambda: tmp_path)
+    monkeypatch.setitem(post_setup.__globals__, "_curses_select", lambda *args, **kwargs: 1)
+    original = builtins.__import__
+    def guarded(name, *args, **kwargs):
+        assert name != "mem0" and not name.startswith("mem0."), "version inspection imported stateful SDK"
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", guarded)
+    config = {"memory": {}}
+    post_setup(str(tmp_path), config)
+    assert config["memory"]["provider"] == "mem0"
+    assert json.loads((tmp_path / "mem0.json").read_text())["mode"] == "platform"
+    assert "MEM0_API_KEY=synthetic-key" in (tmp_path / ".env").read_text()
+    assert not (tmp_path / ".mem0").exists()

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for tools.mcp_discover (#3247)."""
 
 import time

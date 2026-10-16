@@ -39,11 +39,11 @@ from typing import Any, Dict, List, Optional
 def detect_and_record_correction(
     agent,
     *,
-    messages: List[Dict],
+    messages: list[dict],
     interrupted: bool,
     interrupt_message: Optional[str],
     turn_exit_reason: Optional[str],
-) -> Optional[Dict[str, Any]]:
+) -> Optional[dict[str, Any]]:
     """Deterministically detect a structured correction and record it.
 
     Returns the correction hint (with the recorder's promoted ``tier`` /
@@ -62,7 +62,7 @@ def detect_and_record_correction(
         )
         if correction is None:
             return None
-        hint: Dict[str, Any] = {
+        hint: dict[str, Any] = {
             "kind": correction.kind,
             "signature": correction.signature,
             "context": correction.context,
@@ -98,12 +98,12 @@ def decide_correction_review(
     *,
     final_text: Optional[str],
     interrupted: bool,
-    messages: List[Dict],
+    messages: list[dict],
     interrupt_message: Optional[str],
     turn_exit_reason: Optional[str],
     should_review_memory: bool,
     should_review_skills: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Detect+record a correction and decide the background review fork.
 
     Returns a decision dict::

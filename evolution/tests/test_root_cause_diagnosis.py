@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Comprehensive pytest suite for :mod:`root_cause_diagnosis`.
 
 Covers:

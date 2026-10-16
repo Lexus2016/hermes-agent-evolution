@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for ExRole role prototypes induction and suggestion (#2383)."""
 
 from pathlib import Path

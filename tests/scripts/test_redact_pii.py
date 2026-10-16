@@ -28,6 +28,7 @@ def _run(text: str, extra_args: list[str] | None = None) -> tuple[int, str, str]
         input=text,
         capture_output=True,
         text=True,
+        check=False,
     )
     return proc.returncode, proc.stdout, proc.stderr
 
@@ -67,13 +68,13 @@ class TestRedactPiiUnit:
 
     def test_github_token_detected(self):
         text = f"personal token {FAKE_GHP_TOKEN} here"
-        rc, out, err = _run(text)
+        rc, _out, err = _run(text)
         assert rc == 1
         assert "GitHub token" in err
 
     def test_multiple_hits_counted(self):
         text = f"Email bob@corp.io, IP 192.168.1.5, secret SECRET_KEY={FAKE_HEX_BLOB}"
-        rc, out, err = _run(text)
+        rc, _out, err = _run(text)
         assert rc == 1
         # All three pattern classes should be reported
         assert "Email" in err
@@ -82,7 +83,7 @@ class TestRedactPiiUnit:
 
     def test_redacted_output_does_not_leak(self):
         text = f"super_secret={FAKE_HEX_SHORT}"
-        rc, out, err = _run(text)
+        rc, out, _err = _run(text)
         assert rc == 1
         # The hex literal should not survive intact in stdout
         assert "deadbeef" not in out
@@ -91,12 +92,12 @@ class TestRedactPiiUnit:
 
 class TestRedactPiiViaStdin:
     def test_empty_is_clean(self):
-        rc, out, err = _run("")
+        rc, _out, _err = _run("")
         assert rc == 0
 
     def test_newlines_preserved(self):
         text = "line1\nline2 bob@corp.io\nline3"
-        rc, out, err = _run(text)
+        rc, out, _err = _run(text)
         assert rc == 1
         lines = out.splitlines()
         assert lines[0] == "line1"
@@ -140,7 +141,7 @@ class TestRedactPiiQuarantine:
 
     def test_clean_body_does_not_create_quarantine(self, tmp_path: Path):
         qdir = tmp_path / "quarantine"
-        rc, out, err = _run(
+        rc, _out, err = _run(
             "A plain description of a memory handling bug.",
             extra_args=["--quarantine-dir", str(qdir), "--slug", "clean"],
         )
@@ -152,7 +153,7 @@ class TestRedactPiiQuarantine:
 
     def test_missing_slug_uses_default(self, tmp_path: Path):
         qdir = tmp_path / "quarantine"
-        rc, out, err = _run(
+        rc, _out, _err = _run(
             "Internal IP 192.168.1.1",
             extra_args=["--quarantine-dir", str(qdir)],
         )
@@ -172,7 +173,7 @@ class TestRedactPiiQuarantine:
             ("secretKey=" + "a" * 48, "Generic secret"),
         ]
         for sample, expected_reason in samples:
-            rc, out, err = _run(
+            rc, _out, _err = _run(
                 sample,
                 extra_args=["--quarantine-dir", str(qdir), "--slug", "pattern"],
             )

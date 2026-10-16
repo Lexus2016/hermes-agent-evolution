@@ -55,7 +55,7 @@ def _refused(cleanup, monkeypatch, caplog, entrypoint, reason):
     assert "synthetic private detail" not in caplog.text
 
 
-@pytest.mark.linux_only
+@pytest.mark.platforms("linux")
 @pytest.mark.parametrize("entrypoint", ["_kill_process", "_force_kill_process", "_kill_spawned_tree"])
 @pytest.mark.parametrize("reason", ["reused", "missing", "invalid", "different_pid", "different_group",
                                     "inaccessible", "unreadable"])
@@ -63,7 +63,7 @@ def test_unverified_handle_never_discovers_or_signals(cleanup, monkeypatch, capl
     _refused(cleanup, monkeypatch, caplog, entrypoint, reason)
 
 
-@pytest.mark.macos_only
+@pytest.mark.platforms("macos")
 @pytest.mark.parametrize("entrypoint", ["_kill_process", "_force_kill_process", "_kill_spawned_tree"])
 @pytest.mark.parametrize("reason", ["reused", "missing", "invalid", "different_pid", "different_group",
                                     "inaccessible", "unreadable"])
@@ -71,7 +71,7 @@ def test_unverified_handle_never_discovers_or_signals_macos(cleanup, monkeypatch
     _refused(cleanup, monkeypatch, caplog, entrypoint, reason)
 
 
-@pytest.mark.linux_only
+@pytest.mark.platforms("linux")
 @pytest.mark.parametrize("entrypoint", ["_kill_process", "_force_kill_process", "_kill_spawned_tree"])
 @pytest.mark.parametrize("tick_delta", [1, 100, 200])
 def test_linux_near_tick_reuse_never_discovers_or_signals(cleanup, monkeypatch, caplog, entrypoint, tick_delta):
@@ -175,19 +175,19 @@ _OWNED_CASES = ["normal", "force", "shared_group", "force_shared_group", "grace_
                 "permission_reuse", "snapshot_reuse", "spawn_reuse", "drift", "oserror"]
 
 
-@pytest.mark.linux_only
+@pytest.mark.platforms("linux")
 @pytest.mark.parametrize("scenario", _OWNED_CASES)
 def test_owned_cleanup_preserves_identity_across_paths(cleanup, monkeypatch, caplog, scenario):
     _owned(cleanup, monkeypatch, caplog, scenario)
 
 
-@pytest.mark.macos_only
+@pytest.mark.platforms("macos")
 @pytest.mark.parametrize("scenario", _OWNED_CASES)
 def test_owned_cleanup_preserves_identity_across_paths_macos(cleanup, monkeypatch, caplog, scenario):
     _owned(cleanup, monkeypatch, caplog, scenario)
 
 
-@pytest.mark.windows_only
+@pytest.mark.platforms("windows")
 def test_windows_cleanup_preserves_existing_dispatch(monkeypatch):
     inherited, windows_kill = MagicMock(), MagicMock()
     monkeypatch.setattr(local.BaseEnvironment, "_kill_spawned_tree", inherited)
@@ -201,7 +201,7 @@ def test_windows_cleanup_preserves_existing_dispatch(monkeypatch):
     assert windows_kill.call_args_list == [((proc,),), ((proc,),)]
 
 
-@pytest.mark.macos_only
+@pytest.mark.platforms("macos")
 @pytest.mark.live_system_guard_bypass
 @pytest.mark.parametrize("shared_group", [False, True])
 @pytest.mark.parametrize("entrypoint", ["_kill_process", "_force_kill_process"])
@@ -237,3 +237,118 @@ def test_native_owned_process_cleanup_macos(tmp_path, monkeypatch, shared_group,
             proc.kill()
         proc.wait(timeout=10)
         proc.stdout.close()
+
+
+@pytest.mark.platforms("posix")
+@pytest.mark.parametrize("entrypoint", ["_kill_process", "_kill_spawned_tree", "_force_kill_process"])
+def test_shared_caller_group_uses_wrapper_identity(cleanup, monkeypatch, entrypoint):
+    proc, child, lookup, signals, _retry = cleanup
+    proc._hermes_pgid = 999
+    proc._hermes_process_identity = (proc.pid, 1000000)
+    proc.kill = MagicMock()
+    monkeypatch.setattr(local.os, "getpgid", lambda pid: 999)
+    monkeypatch.setattr("gateway.status.get_process_start_time",
+                        lambda pid: 1000000 if pid == proc.pid else 2000000)
+    env = object.__new__(local.LocalEnvironment)
+    getattr(env, entrypoint)(proc)
+    signals.assert_not_called()
+    lookup.assert_called_once_with(proc.pid)
+    lookup.return_value.kill.assert_not_called()
+    child.kill.assert_called_once_with()
+    proc.kill.assert_called_once_with()
+
+
+@pytest.mark.platforms("posix")
+@pytest.mark.parametrize("entrypoint", ["_kill_process", "_kill_spawned_tree", "_force_kill_process"])
+@pytest.mark.parametrize("current", [None, 9000000])
+def test_shared_group_unverified_wrapper_never_discovers_children(cleanup, monkeypatch, entrypoint, current):
+    proc, child, lookup, signals, _retry = cleanup
+    proc._hermes_pgid = 999
+    proc._hermes_process_identity = (proc.pid, 1000000)
+    proc.kill = MagicMock()
+    monkeypatch.setattr(local.os, "getpgid", lambda pid: 999)
+    monkeypatch.setattr("gateway.status.get_process_start_time", lambda pid: current)
+    env = object.__new__(local.LocalEnvironment)
+    getattr(env, entrypoint)(proc)
+    lookup.assert_not_called()
+    signals.assert_not_called()
+    proc.kill.assert_not_called()
+    child.kill.assert_not_called()
+
+
+@pytest.mark.platforms("posix")
+@pytest.mark.parametrize("change", ["missing_capture", "different_pid", "replacement_during_discovery"])
+def test_shared_wrapper_capture_cannot_authorize_another_identity(cleanup, monkeypatch, change):
+    proc, child, lookup, signals, _retry = cleanup
+    proc._hermes_pgid = 999
+    proc._hermes_process_identity = (proc.pid, 1000000)
+    proc.kill = MagicMock()
+    monkeypatch.setattr(local.os, "getpgid", lambda pid: 999)
+    starts = iter([1000000, 9000000] if change == "replacement_during_discovery" else [1000000])
+    monkeypatch.setattr("gateway.status.get_process_start_time", lambda pid: next(starts))
+    if change == "missing_capture":
+        del proc._hermes_process_identity
+    elif change == "different_pid":
+        proc._hermes_process_identity = (123, 1000000)
+    local._kill_process_group_posix(proc)
+    signals.assert_not_called()
+    proc.kill.assert_not_called()
+    lookup.return_value.kill.assert_not_called()
+    child.kill.assert_not_called()
+    if change != "replacement_during_discovery":
+        lookup.assert_not_called()
+
+
+@pytest.mark.platforms("posix")
+def test_spawn_captures_wrapper_identity_even_in_shared_group(monkeypatch):
+    proc = SimpleNamespace(pid=500, poll=lambda: None)
+    monkeypatch.setattr(local, "spawn_owned_process", lambda *args, **kwargs: proc)
+    monkeypatch.setattr(local, "_find_bash", lambda: "/synthetic/bash")
+    monkeypatch.setattr(local, "_make_run_env", lambda env: {})
+    monkeypatch.setattr(local.os, "getpgid", lambda pid: 999)
+    monkeypatch.setattr("gateway.status.get_process_start_time", lambda pid: 1000000 if pid == 500 else 2000000)
+    env = object.__new__(local.LocalEnvironment)
+    env.env, env.cwd = {}, "/synthetic"
+    env._recover_cwd = lambda: None
+    assert env._run_bash("true") is proc
+    assert proc._hermes_pgid == 999
+    assert proc._hermes_process_identity == (500, 1000000)
+
+
+@pytest.mark.platforms("posix")
+@pytest.mark.parametrize("exited", [False, True])
+def test_capture_reaped_or_reused_handle_never_borrows_new_ownership(cleanup, monkeypatch, exited):
+    proc, child, lookup, signals, _retry = cleanup
+    proc.poll = lambda: 0 if exited else None
+    current = [1000000]
+    monkeypatch.setattr("gateway.status.get_process_start_time", lambda pid: current[0])
+    local._capture_process_identity(proc)
+    newer = SimpleNamespace(pid=proc.pid, poll=lambda: None, kill=MagicMock())
+    current[0] = 9000000
+    local._capture_process_identity(newer)
+    assert proc._hermes_process_identity != newer._hermes_process_identity
+    if exited:
+        assert proc._hermes_process_identity is None
+    local._kill_process_group_posix(proc)
+    signals.assert_not_called()
+    lookup.assert_not_called()
+    proc.kill.assert_not_called()
+    local._kill_process_group_posix(newer)
+    signals.assert_called_once_with(500, signal.SIGTERM)
+    child.kill.assert_called_once_with()
+
+
+@pytest.mark.platforms("posix")
+def test_lost_leader_does_not_signal_reused_captured_descendant(cleanup, monkeypatch):
+    proc, child, lookup, signals, _retry = cleanup
+    monkeypatch.setattr("gateway.status.get_process_start_time", lambda pid: 1000000)
+    def lose_both_identities(*args):
+        monkeypatch.setattr("gateway.status.get_process_start_time", lambda pid: 9000000)
+        child.is_running.return_value = False
+        return False
+    monkeypatch.setattr(local, "_wait_for_group_exit", lose_both_identities)
+    local._kill_process_group_posix(proc)
+    signals.assert_called_once_with(500, signal.SIGTERM)
+    lookup.assert_called_once_with(proc.pid)
+    proc.kill.assert_not_called()
+    child.kill.assert_not_called()

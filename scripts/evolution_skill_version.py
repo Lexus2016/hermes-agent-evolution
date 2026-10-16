@@ -33,7 +33,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -60,13 +60,13 @@ class SkillVersion:
     version: int
     promoted_at: str = ""
     flip_verdict: str = ""
-    regressions: List[str] = field(default_factory=list)
-    fixes: List[str] = field(default_factory=list)
+    regressions: list[str] = field(default_factory=list)
+    fixes: list[str] = field(default_factory=list)
     diff_ref: str = ""
     critic_ref: str = ""
     note: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
             "skill": self.skill,
@@ -81,7 +81,7 @@ class SkillVersion:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SkillVersion":
+    def from_dict(cls, data: dict[str, Any]) -> SkillVersion:
         return cls(
             skill=str(data.get("skill", "")),
             version=int(data.get("version", 0) or 0),
@@ -101,7 +101,7 @@ def _path(skill: str, store_dir: Optional[Path] = None) -> Path:
     return base / f"{safe}.jsonl"
 
 
-def load_versions(skill: str, store_dir: Optional[Path] = None) -> List[SkillVersion]:
+def load_versions(skill: str, store_dir: Optional[Path] = None) -> list[SkillVersion]:
     """Every recorded promotion of ``skill``, oldest first.
 
     Malformed lines are skipped rather than raising: a corrupted entry must not
@@ -111,9 +111,9 @@ def load_versions(skill: str, store_dir: Optional[Path] = None) -> List[SkillVer
     path = _path(skill, store_dir)
     if not path.exists():
         return []
-    out: List[SkillVersion] = []
+    out: list[SkillVersion] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return []
     for line in lines:
@@ -146,8 +146,8 @@ def record_promotion(
     skill: str,
     *,
     flip_verdict: str = "",
-    regressions: Optional[List[str]] = None,
-    fixes: Optional[List[str]] = None,
+    regressions: Optional[list[str]] = None,
+    fixes: Optional[list[str]] = None,
     diff_ref: str = "",
     critic_ref: str = "",
     note: str = "",
@@ -164,7 +164,7 @@ def record_promotion(
     entry = SkillVersion(
         skill=skill,
         version=version,
-        promoted_at=promoted_at or datetime.now(timezone.utc).isoformat(),
+        promoted_at=promoted_at or datetime.now(UTC).isoformat(),
         flip_verdict=flip_verdict,
         regressions=list(regressions or []),
         fixes=list(fixes or []),
@@ -221,7 +221,7 @@ def _usage() -> str:
     )
 
 
-def _opt(args: List[str], name: str, default: str = "") -> str:
+def _opt(args: list[str], name: str, default: str = "") -> str:
     if name in args:
         i = args.index(name)
         if i + 1 < len(args):
@@ -229,7 +229,7 @@ def _opt(args: List[str], name: str, default: str = "") -> str:
     return default
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     if not args or "--help" in args or "-h" in args:
         print(_usage())

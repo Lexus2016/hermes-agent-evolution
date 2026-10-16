@@ -20,11 +20,11 @@ class _DelegateSessionStats:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._sessions: Dict[str, Dict[str, int]] = {}
+        self._sessions: dict[str, dict[str, int]] = {}
 
     def record(
-        self, session_id: Optional[str], results: List[Dict[str, Any]]
-    ) -> Optional[Dict[str, int]]:
+        self, session_id: Optional[str], results: list[dict[str, Any]]
+    ) -> Optional[dict[str, int]]:
         """Accumulate completed/failed counts for one dispatch batch.
 
         ``results`` is the per-task results array from a delegate_task return.
@@ -48,7 +48,7 @@ class _DelegateSessionStats:
             bucket["failed"] += failed
             return dict(bucket)
 
-    def get(self, session_id: Optional[str]) -> Optional[Dict[str, int]]:
+    def get(self, session_id: Optional[str]) -> Optional[dict[str, int]]:
         """Return a snapshot of the session's counters, or ``None`` if absent."""
         if not session_id:
             return None

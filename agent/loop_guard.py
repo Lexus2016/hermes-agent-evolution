@@ -442,7 +442,7 @@ def _is_test_command(command: Optional[str]) -> bool:
     return any(pat.search(command) for pat in _TEST_CMD_PATTERNS)
 
 
-def _is_human_user_turn(msg: Dict[str, Any]) -> bool:
+def _is_human_user_turn(msg: dict[str, Any]) -> bool:
     """A real user request, not a loop-guard nudge.
 
     Nudges are user-role rows the guard appends to itself. They stay inside
@@ -457,7 +457,7 @@ def _is_human_user_turn(msg: Dict[str, Any]) -> bool:
 
 
 def detect_test_iteration_loop(
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
 ) -> Optional[str]:
     """Detect a semantic test-iteration loop in terminal tool calls (#1328).
 
@@ -467,7 +467,7 @@ def detect_test_iteration_loop(
     with at least one failure among the results, returns a nudge string with
     test-scoping advice. Returns None when no test-iteration loop is found.
     """
-    test_runs: List[Tuple[str, bool]] = []
+    test_runs: list[tuple[str, bool]] = []
     i = len(messages) - 1
     while i >= 0:
         msg = messages[i]
@@ -542,7 +542,7 @@ _DEAD_END_REPEAT_THRESHOLD = 4
 _DEAD_END_WINDOW = 60
 
 
-def _last_call_signature(scan: List[Dict[str, Any]]) -> Optional[str]:
+def _last_call_signature(scan: list[dict[str, Any]]) -> Optional[str]:
     """Signature of the latest tool turn, or None when the pattern was broken.
 
     Returns None when the most recent assistant turn produced text instead of a
@@ -570,7 +570,7 @@ def _last_call_signature(scan: List[Dict[str, Any]]) -> Optional[str]:
 
 
 def detect_dead_end_loop(
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
 ) -> Optional[str]:
     """Detect an identical-argument dead-end loop across turns (#1312).
 
@@ -805,7 +805,7 @@ def _looks_like_failure(content: Any) -> bool:
     return bool(_EXIT_CODE_RE.search(content))
 
 
-def _tool_call_arg_hash(tool_calls: List[Dict[str, Any]]) -> Optional[str]:
+def _tool_call_arg_hash(tool_calls: list[dict[str, Any]]) -> Optional[str]:
     """Canonical key of the INPUT arguments of an assistant turn's tool call(s).
 
     Used to detect identical-query repetition for spiral-prone idempotent tools
@@ -825,7 +825,7 @@ def _tool_call_arg_hash(tool_calls: List[Dict[str, Any]]) -> Optional[str]:
     a turn with missing args never yields a false identity match (fail-safe: no
     spurious short-circuit).
     """
-    keys: List[str] = []
+    keys: list[str] = []
     for tc in tool_calls:
         if not isinstance(tc, dict):
             continue
@@ -861,8 +861,8 @@ def _tool_call_arg_hash(tool_calls: List[Dict[str, Any]]) -> Optional[str]:
 
 
 def _recent_tool_runs(
-    messages: List[Dict[str, Any]],
-) -> List[Tuple[str, bool, Optional[str], Optional[str]]]:
+    messages: list[dict[str, Any]],
+) -> list[tuple[str, bool, Optional[str], Optional[str]]]:
     """Most-recent-first list of
     (single_tool_name, result_failed, failure_class, arg_hash)
     for the trailing run of assistant turns that each called EXACTLY ONE tool.
@@ -875,7 +875,7 @@ def _recent_tool_runs(
     reply, or a multi-tool turn) — that breaks the "stuck on one tool" run.
     Multi-tool turns are normal varied work, not a single-tool spiral.
     """
-    runs: List[Tuple[str, bool, Optional[str], Optional[str]]] = []
+    runs: list[tuple[str, bool, Optional[str], Optional[str]]] = []
     i = len(messages) - 1
     # Collect tool results by id as we walk back so we can mark failures.
     while i >= 0:
@@ -939,7 +939,7 @@ def _tool_spiral_score(tool_name: str, count: int, base: int) -> Optional[str]:
     return None
 
 
-def _semantic_loop_nudge(messages: List[Dict[str, Any]]) -> Optional[str]:
+def _semantic_loop_nudge(messages: list[dict[str, Any]]) -> Optional[str]:
     """Cross-turn semantic loop checks, used as a LAST resort (#1312, #1328).
 
     These two detectors look *through* intervening calls, so they see patterns
@@ -969,7 +969,7 @@ def _semantic_loop_nudge(messages: List[Dict[str, Any]]) -> Optional[str]:
 
 
 def maybe_nudge(
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
     *,
     repeat_threshold: Optional[int] = None,
     fail_threshold: Optional[int] = None,
@@ -1092,7 +1092,7 @@ def maybe_nudge(
         ]
         dominant = None
         if _fail_classes:
-            _counts: Dict[str, int] = {}
+            _counts: dict[str, int] = {}
             for c in _fail_classes:
                 _counts[c] = _counts.get(c, 0) + 1
             dominant = max(_counts, key=lambda k: (_counts[k], -_fail_classes.index(k)))
@@ -1216,7 +1216,7 @@ def maybe_nudge(
     return _semantic_loop_nudge(messages)
 
 
-def current_run_signature(messages: List[Dict[str, Any]]) -> Optional[Tuple[str, int]]:
+def current_run_signature(messages: list[dict[str, Any]]) -> Optional[tuple[str, int]]:
     """(tool, count) of the trailing single-tool run, or None. Callers use this
     to nudge once per escalating run instead of every iteration."""
     runs = _recent_tool_runs(messages)
@@ -1225,7 +1225,7 @@ def current_run_signature(messages: List[Dict[str, Any]]) -> Optional[Tuple[str,
     return (runs[0][0], len(runs))
 
 
-def run_warrants_cron_hard_stop(messages: List[Dict[str, Any]]) -> bool:
+def run_warrants_cron_hard_stop(messages: list[dict[str, Any]]) -> bool:
     """Second gate on the #624 cron hard stop: end the turn as a failure ONLY
     when the trailing single-tool run is genuinely FLAILING (no progress), never
     when it is doing legitimate mono-tool work that merely LOOKS repetitive.
@@ -1333,7 +1333,7 @@ def run_warrants_cron_hard_stop(messages: List[Dict[str, Any]]) -> bool:
 # returns a recovery directive the caller injects as a user-role nudge.
 
 _REFUSAL_PAT = re.compile(
-    "|".join([  # fmt: skip
+    "|".join([
         r"i can'?t\b",
         r"i can not\b",
         r"i cannot\b",
@@ -1440,7 +1440,7 @@ def detect_refusal_category(text: str) -> str:
 
 
 def maybe_refusal_nudge(
-    messages: List[Dict[str, Any]],
+    messages: list[dict[str, Any]],
     *,
     already_nudged: bool = False,
     nudge_count: int = 1,

@@ -445,8 +445,8 @@ class TestSchedulerIntegration:
             },
         )
 
-    def test_evolution_bypasses_scheduler_provider_preflight(self, tmp_path):
-        from cron.scheduler import _run_job_impl
+    def test_evolution_bypasses_scheduler_provider_preflight(self, tmp_path, cron_owner):
+        _run_job_impl = cron_owner
 
         (tmp_path / "config.yaml").write_text(
             "model:\n  default: cfg-model\n  provider: anthropic\n",
@@ -482,12 +482,12 @@ class TestSchedulerIntegration:
         assert kwargs["api_key"] is None
         assert kwargs["base_url"] is None
 
-    def test_non_evolution_job_balance_preflight_fails_open(self, tmp_path):
+    def test_non_evolution_job_balance_preflight_fails_open(self, tmp_path, cron_owner):
         # A non-evolution job DOES get the provider-balance preflight (#2872:
         # any LLM cron must not wake into an exhausted account), but a
         # NON-402 ping failure is fail-open — the job proceeds as before and
         # the old preflight digest-fallback behavior stays evolution-only.
-        from cron.scheduler import _run_job_impl
+        _run_job_impl = cron_owner
 
         job = {"id": "morning-digest", "name": "morning-digest", "prompt": "hi"}
         with (
@@ -541,8 +541,8 @@ class TestSchedulerHaltGate:
         evo_dir.mkdir(parents=True, exist_ok=True)
         (evo_dir / "halt-state.txt").write_text("halted")
 
-    def test_halted_gated_stage_skips_without_agent_or_preflight(self, tmp_path):
-        from cron.scheduler import _run_job_impl
+    def test_halted_gated_stage_skips_without_agent_or_preflight(self, tmp_path, cron_owner):
+        _run_job_impl = cron_owner
 
         self._write_halt_file(tmp_path)
         job = self._make_job("analysis")
@@ -573,8 +573,8 @@ class TestSchedulerHaltGate:
         mock_preflight.assert_not_called()
         mock_agent_cls.assert_not_called()
 
-    def test_halted_all_four_gated_stages_skip(self, tmp_path):
-        from cron.scheduler import _run_job_impl
+    def test_halted_all_four_gated_stages_skip(self, tmp_path, cron_owner):
+        _run_job_impl = cron_owner
 
         self._write_halt_file(tmp_path)
         for stage in ("research", "analysis", "implementation", "introspection"):
@@ -601,12 +601,12 @@ class TestSchedulerHaltGate:
             assert final_response == "[SILENT]"
             mock_agent_cls.assert_not_called()
 
-    def test_halted_integration_stage_not_gated(self, tmp_path):
+    def test_halted_integration_stage_not_gated(self, tmp_path, cron_owner):
         """Integration is intentionally left ungated: gating it too would
         deadlock the halt (merged=0 triggers halt; integration is what
         performs merges, so it must keep running to let the pipeline
         recover on its own)."""
-        from cron.scheduler import _run_job_impl
+        _run_job_impl = cron_owner
 
         self._write_halt_file(tmp_path)
         (tmp_path / "config.yaml").write_text(
@@ -641,12 +641,12 @@ class TestSchedulerHaltGate:
         assert final_response == "ok"
         mock_agent_cls.assert_called_once()
 
-    def test_gate_classification_error_proceeds_normally_not_skipped(self, tmp_path):
+    def test_gate_classification_error_proceeds_normally_not_skipped(self, tmp_path, cron_owner):
         """Fail-safe (#913 follow-up): if stage classification or the halt
         check itself raises for any reason, the job must proceed through the
         normal LLM path — never silently skipped and never crashed. A broken
         gate must fail OPEN (run the job), not closed (skip it)."""
-        from cron.scheduler import _run_job_impl
+        _run_job_impl = cron_owner
 
         self._write_halt_file(tmp_path)  # even with halt active...
         job = self._make_job("research")
@@ -683,8 +683,8 @@ class TestSchedulerHaltGate:
         assert final_response == "ok"
         mock_agent_cls.assert_called_once()
 
-    def test_no_halt_file_gated_stage_proceeds_normally(self, tmp_path):
-        from cron.scheduler import _run_job_impl
+    def test_no_halt_file_gated_stage_proceeds_normally(self, tmp_path, cron_owner):
+        _run_job_impl = cron_owner
 
         (tmp_path / "evolution").mkdir(parents=True, exist_ok=True)
         (tmp_path / "config.yaml").write_text(

@@ -22,9 +22,7 @@ import json
 
 from tools.memory_tool import MEMORY_SCHEMA
 
-
 _FORBIDDEN_TOP_LEVEL_KEYS = ("allOf", "anyOf", "oneOf", "enum", "not")
-
 
 def test_memory_schema_has_no_forbidden_top_level_combinators():
     """OpenAI's Codex backend rejects these at the top level of parameters."""
@@ -47,7 +45,7 @@ def test_memory_schema_is_well_formed():
     # 'search' was added by #316 (provenance retrieval filter).
     assert params["properties"]["action"]["enum"] == [
         "add",
-        "replace",
+        "patch",
         "remove",
         "search",
         "compact",
@@ -58,7 +56,7 @@ def test_memory_schema_is_well_formed():
     assert params["properties"]["operations"]["type"] == "array"
     assert params["properties"]["operations"]["items"]["properties"]["action"][
         "enum"
-    ] == ["add", "replace", "remove"]
+    ] == ["add", "patch", "remove"]
 
 
 def test_memory_schema_is_json_serializable():

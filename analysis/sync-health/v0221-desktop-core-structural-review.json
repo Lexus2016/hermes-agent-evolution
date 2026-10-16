@@ -1,0 +1,695 @@
+{
+  "schema": "desktop-structural-candidates-v1",
+  "source_commit": "297552a9d646119871391d202509822cd86330df",
+  "health_snapshot": "/tmp/hermes-main365-final-health-classification.json",
+  "identity_artifact": "/tmp/hermes-desktop-structural-identities.json",
+  "entries": [
+    {
+      "input_index": 1,
+      "path": "apps/desktop/electron/linux-gpu-fallback.ts",
+      "scope": "decideLinuxGpuLaunch",
+      "rule": "CC",
+      "detail": "CC 23 > target 20 (new code must meet the target)",
+      "raw_detail": "CC 23 > target 20 (new code must meet the target)",
+      "status": "candidate",
+      "group": "linux-launch-decision",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/electron/linux-gpu-fallback.ts",
+        "scope": "decideLinuxGpuLaunch",
+        "blob": "101c66bccdf231050d2fb4ffc391f8e1fc58d0b3",
+        "unit_body_hash": "e5743104008af0df",
+        "metric_value": 23
+      },
+      "candidate_blob": "101c66bccdf231050d2fb4ffc391f8e1fc58d0b3",
+      "current_blob": "101c66bccdf231050d2fb4ffc391f8e1fc58d0b3",
+      "current_unit": {
+        "q": "decideLinuxGpuLaunch",
+        "line": 180,
+        "end": 269,
+        "cc": 23,
+        "nesting": 2,
+        "hash": "e5743104008af0df",
+        "lines": 90
+      },
+      "source_unit": {
+        "q": "decideLinuxGpuLaunch",
+        "line": 180,
+        "end": 269,
+        "cc": 23,
+        "nesting": 2,
+        "hash": "e5743104008af0df",
+        "lines": 90
+      },
+      "exact_file_equal": true,
+      "exact_unit_equal": true,
+      "source_cap_equals_current": true,
+      "review": {
+        "complete_function_ranges": [
+          [
+            180,
+            269
+          ]
+        ],
+        "inspected_context": [
+          [
+            "apps/desktop/electron/linux-gpu-fallback.ts",
+            1,
+            397
+          ],
+          [
+            "apps/desktop/electron/windows-stack-cookie-fallback.ts",
+            1,
+            135
+          ]
+        ],
+        "structural_rationale": "CC 23 is concentrated in an ordered, shallow launch decision: host gate, explicit override, existing software mode, competing fallback, per-version marker, and two-strike/reprobe transition. The complete function retains one result shape and performs no marker I/O itself. Splitting branches merely to meet CC20 is an organization change, not needed to reconcile this unchanged upstream unit.",
+        "module_bindings": "Options and LinuxGpuMarker interfaces, BOOT_ABORTS_BEFORE_LINUX_GPU_FALLBACK, local fallback-marker constructor, and imported override/argv helpers were read. windows-stack-cookie-fallback helpers normalize override sets and exact argv switches; process defaults remain explicit.",
+        "compatibility": "No compatibility conflict identified in this complete static function/binding review.",
+        "reviewer": "desktop structural review worker",
+        "reviewed_at": "2026-10-16T00:02:46.503325+00:00"
+      },
+      "exclusions": [
+        "Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval.",
+        "No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived.",
+        "No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved.",
+        "Candidate only: root approval for preparation and controller verification of generated identities are required before activation."
+      ],
+      "issues": []
+    },
+    {
+      "input_index": 2,
+      "path": "apps/desktop/electron/linux-nvidia-egl-fallback.ts",
+      "scope": "decideNvidiaEglFallback",
+      "rule": "CC",
+      "detail": "CC 26 > target 20 (new code must meet the target)",
+      "raw_detail": "CC 26 > target 20 (new code must meet the target)",
+      "status": "candidate",
+      "group": "linux-launch-decision",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/electron/linux-nvidia-egl-fallback.ts",
+        "scope": "decideNvidiaEglFallback",
+        "blob": "527d3482aa986c5d9dc8c62b2491f08fbf1e79de",
+        "unit_body_hash": "fa8eaf1e61c97740",
+        "metric_value": 26
+      },
+      "candidate_blob": "527d3482aa986c5d9dc8c62b2491f08fbf1e79de",
+      "current_blob": "527d3482aa986c5d9dc8c62b2491f08fbf1e79de",
+      "current_unit": {
+        "q": "decideNvidiaEglFallback",
+        "line": 183,
+        "end": 269,
+        "cc": 26,
+        "nesting": 1,
+        "hash": "fa8eaf1e61c97740",
+        "lines": 87
+      },
+      "source_unit": {
+        "q": "decideNvidiaEglFallback",
+        "line": 183,
+        "end": 269,
+        "cc": 26,
+        "nesting": 1,
+        "hash": "fa8eaf1e61c97740",
+        "lines": 87
+      },
+      "exact_file_equal": true,
+      "exact_unit_equal": true,
+      "source_cap_equals_current": true,
+      "review": {
+        "complete_function_ranges": [
+          [
+            183,
+            269
+          ]
+        ],
+        "inspected_context": [
+          [
+            "apps/desktop/electron/linux-nvidia-egl-fallback.ts",
+            1,
+            269
+          ]
+        ],
+        "structural_rationale": "CC 26 is a single shallow priority ladder for NVIDIA launch decisions. Early returns preserve opt-out, platform/driver gating, GPU override, remote/WSL exclusion, forced fallback, same-version marker and aborted-boot cases; all paths return enable/reason/nextMarker. Exact upstream source is retained without adding another fallback branch.",
+        "module_bindings": "Read marker/state/decision interfaces, OVERRIDE_ON/OFF sets, and nvidiaEglFallbackMarker constructor. Native filesystem imports belong to sibling read/write helpers and are not invoked by this decision unit. Hardware, relaunch, and marker persistence behavior is excluded.",
+        "compatibility": "No compatibility conflict identified in this complete static function/binding review.",
+        "reviewer": "desktop structural review worker",
+        "reviewed_at": "2026-10-16T00:02:46.503535+00:00"
+      },
+      "exclusions": [
+        "Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval.",
+        "No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived.",
+        "No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved.",
+        "Candidate only: root approval for preparation and controller verification of generated identities are required before activation."
+      ],
+      "issues": []
+    },
+    {
+      "input_index": 32,
+      "path": "apps/desktop/src/app/contrib/hooks/desktop-onboarding-metrics.ts",
+      "scope": "onboardingTransition",
+      "rule": "CC",
+      "detail": "CC 26 > target 20 (new code must meet the target)",
+      "raw_detail": "CC 26 > target 20 (new code must meet the target)",
+      "status": "candidate",
+      "group": "onboarding-observation",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/contrib/hooks/desktop-onboarding-metrics.ts",
+        "scope": "onboardingTransition",
+        "blob": "8fbbe568cd8a414ee887ee3a85b2cfa71b880fc6",
+        "unit_body_hash": "bf6ea74d5148b3c8",
+        "metric_value": 26
+      },
+      "candidate_blob": "8fbbe568cd8a414ee887ee3a85b2cfa71b880fc6",
+      "current_blob": "8fbbe568cd8a414ee887ee3a85b2cfa71b880fc6",
+      "current_unit": {
+        "q": "onboardingTransition",
+        "line": 20,
+        "end": 86,
+        "cc": 26,
+        "nesting": 2,
+        "hash": "bf6ea74d5148b3c8",
+        "lines": 67
+      },
+      "source_unit": {
+        "q": "onboardingTransition",
+        "line": 20,
+        "end": 86,
+        "cc": 26,
+        "nesting": 2,
+        "hash": "bf6ea74d5148b3c8",
+        "lines": 67
+      },
+      "exact_file_equal": true,
+      "exact_unit_equal": true,
+      "source_cap_equals_current": true,
+      "review": {
+        "complete_function_ranges": [
+          [
+            20,
+            86
+          ]
+        ],
+        "inspected_context": [
+          [
+            "apps/desktop/src/app/contrib/hooks/desktop-onboarding-metrics.ts",
+            1,
+            174
+          ]
+        ],
+        "structural_rationale": "CC 26 represents adjacent transition observations for a closed onboarding event set, with manual flows excluded before any emission, previous/next comparisons, and final skip/free-tier edges. The complete function is one observer rather than multiple independent ownership paths; the metric is inherited organization debt.",
+        "module_bindings": "Read providerStepFor, OAUTH_PENDING, all observer subscriptions and teardown, and named imports from desktop-metrics/onboarding/free-tier state. This is not a pure computation: it emits metrics, so telemetry consent/delivery remains explicitly outside this metric disposition.",
+        "compatibility": "No compatibility conflict identified in this complete static function/binding review.",
+        "reviewer": "desktop structural review worker",
+        "reviewed_at": "2026-10-16T00:02:46.503701+00:00"
+      },
+      "exclusions": [
+        "Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval.",
+        "No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived.",
+        "No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved.",
+        "Candidate only: root approval for preparation and controller verification of generated identities are required before activation."
+      ],
+      "issues": []
+    },
+    {
+      "input_index": 82,
+      "path": "apps/desktop/src/components/sync-status.ts",
+      "scope": "deriveSyncStatusSummary",
+      "rule": "CC",
+      "detail": "CC 21 > target 20 (new code must meet the target)",
+      "raw_detail": "CC 21 > target 20 (new code must meet the target)",
+      "status": "candidate",
+      "group": "presentation-projection",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/components/sync-status.ts",
+        "scope": "deriveSyncStatusSummary",
+        "blob": "5c403683e39bf2d99ab178e6806b0ce72a1eba8e",
+        "unit_body_hash": "ad97b5ed49c911fe",
+        "metric_value": 21
+      },
+      "candidate_blob": "5c403683e39bf2d99ab178e6806b0ce72a1eba8e",
+      "current_blob": "5c403683e39bf2d99ab178e6806b0ce72a1eba8e",
+      "current_unit": {
+        "q": "deriveSyncStatusSummary",
+        "line": 23,
+        "end": 82,
+        "cc": 21,
+        "nesting": 1,
+        "hash": "ad97b5ed49c911fe",
+        "lines": 53
+      },
+      "source_unit": {
+        "q": "deriveSyncStatusSummary",
+        "line": 23,
+        "end": 82,
+        "cc": 21,
+        "nesting": 1,
+        "hash": "ad97b5ed49c911fe",
+        "lines": 53
+      },
+      "exact_file_equal": true,
+      "exact_unit_equal": true,
+      "source_cap_equals_current": true,
+      "review": {
+        "complete_function_ranges": [
+          [
+            23,
+            82
+          ]
+        ],
+        "inspected_context": [
+          [
+            "apps/desktop/src/components/sync-status.ts",
+            1,
+            88
+          ]
+        ],
+        "structural_rationale": "CC 21 is the receipt normalization and ordered display-priority ladder in one 66-line function. Legacy/current aliases converge before error, needs-fixing, disabled-plugin, and available-update display selection; collection transforms construct fresh output arrays. No behavior or call-site change is introduced.",
+        "module_bindings": "Only DesktopSyncReceipt is imported as a type; SyncStatusSummary and the local empty/result values are read in full. Optional section defaults and final return match the presentation contract.",
+        "compatibility": "No compatibility conflict identified in this complete static function/binding review.",
+        "reviewer": "desktop structural review worker",
+        "reviewed_at": "2026-10-16T00:02:46.503953+00:00"
+      },
+      "exclusions": [
+        "Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval.",
+        "No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived.",
+        "No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved.",
+        "Candidate only: root approval for preparation and controller verification of generated identities are required before activation."
+      ],
+      "issues": []
+    },
+    {
+      "input_index": 88,
+      "path": "apps/desktop/src/lib/deeplink-routes.ts",
+      "scope": "resolveDeepLinkAction",
+      "rule": "CC",
+      "detail": "CC 28 > 23, its value on main (over target 20: it may only go down)",
+      "raw_detail": "CC 28 > 23, its value on main (over target 20: it may only go down)",
+      "status": "candidate",
+      "group": "presentation-projection",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/lib/deeplink-routes.ts",
+        "scope": "resolveDeepLinkAction",
+        "blob": "158254050ea47c95513ff57d10c2d8cc1ff093bb",
+        "unit_body_hash": "3d4062f1f268d69b",
+        "metric_value": 28
+      },
+      "candidate_blob": "158254050ea47c95513ff57d10c2d8cc1ff093bb",
+      "current_blob": "158254050ea47c95513ff57d10c2d8cc1ff093bb",
+      "current_unit": {
+        "q": "resolveDeepLinkAction",
+        "line": 29,
+        "end": 100,
+        "cc": 28,
+        "nesting": 1,
+        "hash": "3d4062f1f268d69b",
+        "lines": 72
+      },
+      "source_unit": {
+        "q": "resolveDeepLinkAction",
+        "line": 29,
+        "end": 100,
+        "cc": 28,
+        "nesting": 1,
+        "hash": "3d4062f1f268d69b",
+        "lines": 72
+      },
+      "exact_file_equal": true,
+      "exact_unit_equal": true,
+      "source_cap_equals_current": true,
+      "review": {
+        "complete_function_ranges": [
+          [
+            29,
+            100
+          ]
+        ],
+        "inspected_context": [
+          [
+            "apps/desktop/src/lib/deeplink-routes.ts",
+            1,
+            110
+          ]
+        ],
+        "structural_rationale": "CC 28 is a single discriminated action decoder with deliberate precedence: blueprint, connection completion, catalog claiming, skill, then legacy plugin forms. It returns action descriptions and performs no installation. Complete branch review found no added fallthrough or missing final ignore relative to the exact upstream function.",
+        "module_bindings": "DeepLinkPayload/DeepLinkAction unions and truthyParam were read in full. PluginInstallLegacyHint is type-only. Catalog claiming precedes repo parsing; connection status is payload data, not an authoritative mutation. Installation authorization, URL trust, and execution remain excluded.",
+        "compatibility": "No compatibility conflict identified in this complete static function/binding review.",
+        "reviewer": "desktop structural review worker",
+        "reviewed_at": "2026-10-16T00:02:46.504240+00:00"
+      },
+      "exclusions": [
+        "Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval.",
+        "No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived.",
+        "No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved.",
+        "Candidate only: root approval for preparation and controller verification of generated identities are required before activation."
+      ],
+      "issues": []
+    },
+    {
+      "input_index": 98,
+      "path": "apps/desktop/src/plugins/hermes-bots/labels.ts",
+      "scope": "displayName",
+      "rule": "CC",
+      "detail": "CC 22 > target 20 (was 16)",
+      "raw_detail": "CC 22 > target 20 (was 16)",
+      "status": "candidate",
+      "group": "presentation-projection",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/plugins/hermes-bots/labels.ts",
+        "scope": "displayName",
+        "blob": "b8aab26119cb51dfe63daeba64b589e3b5fa24f7",
+        "unit_body_hash": "88597ca8d6a924aa",
+        "metric_value": 22
+      },
+      "candidate_blob": "b8aab26119cb51dfe63daeba64b589e3b5fa24f7",
+      "current_blob": "b8aab26119cb51dfe63daeba64b589e3b5fa24f7",
+      "current_unit": {
+        "q": "displayName",
+        "line": 14,
+        "end": 78,
+        "cc": 22,
+        "nesting": 1,
+        "hash": "88597ca8d6a924aa",
+        "lines": 63
+      },
+      "source_unit": {
+        "q": "displayName",
+        "line": 14,
+        "end": 78,
+        "cc": 22,
+        "nesting": 1,
+        "hash": "88597ca8d6a924aa",
+        "lines": 63
+      },
+      "exact_file_equal": true,
+      "exact_unit_equal": true,
+      "source_cap_equals_current": true,
+      "review": {
+        "complete_function_ranges": [
+          [
+            14,
+            78
+          ]
+        ],
+        "inspected_context": [
+          [
+            "apps/desktop/src/plugins/hermes-bots/labels.ts",
+            1,
+            155
+          ],
+          [
+            "apps/desktop/src/plugins/hermes-bots/routing.ts",
+            360,
+            405
+          ]
+        ],
+        "structural_rationale": "CC 22 is a cohesive display-name precedence ladder: alias-aware backend title, thin remote default label, explicit metadata title, backend/core display names, alias, default Hermes label, normalized raw name. The named function retains a single string output and no mutation.",
+        "module_bindings": "Read complete labels module and aliasIdentityFor in routing.ts lines382-405. That helper is a connection-exact alias map lookup with active connection fallback only for unannotated local-rich rows; current imported binding was checked rather than assumed pure. BotMeta/RosterRow are type-only.",
+        "compatibility": "No compatibility conflict identified in this complete static function/binding review.",
+        "reviewer": "desktop structural review worker",
+        "reviewed_at": "2026-10-16T00:02:46.504550+00:00"
+      },
+      "exclusions": [
+        "Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval.",
+        "No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived.",
+        "No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved.",
+        "Candidate only: root approval for preparation and controller verification of generated identities are required before activation."
+      ],
+      "issues": []
+    },
+    {
+      "input_index": 110,
+      "path": "apps/desktop/src/store/profile-dot-state.ts",
+      "scope": "$profileDotStateByScope",
+      "rule": "CC",
+      "detail": "CC 36 > target 20 (new code must meet the target)",
+      "raw_detail": "CC 36 > target 20 (new code must meet the target)",
+      "status": "candidate",
+      "group": "profile-display-projection",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/store/profile-dot-state.ts",
+        "scope": "$profileDotStateByScope",
+        "blob": "37c0a47a54287715f9f4974d35daafb7ece1ae12",
+        "unit_body_hash": "8c010865aa952509",
+        "metric_value": 36
+      },
+      "candidate_blob": "37c0a47a54287715f9f4974d35daafb7ece1ae12",
+      "current_blob": "37c0a47a54287715f9f4974d35daafb7ece1ae12",
+      "current_unit": {
+        "q": "$profileDotStateByScope",
+        "line": 123,
+        "end": 264,
+        "cc": 36,
+        "nesting": 3,
+        "hash": "8c010865aa952509",
+        "lines": 118
+      },
+      "source_unit": {
+        "q": "$profileDotStateByScope",
+        "line": 123,
+        "end": 264,
+        "cc": 36,
+        "nesting": 3,
+        "hash": "8c010865aa952509",
+        "lines": 118
+      },
+      "exact_file_equal": true,
+      "exact_unit_equal": true,
+      "source_cap_equals_current": true,
+      "review": {
+        "complete_function_ranges": [
+          [
+            123,
+            264
+          ]
+        ],
+        "inspected_context": [
+          [
+            "apps/desktop/src/store/profile-dot-state.ts",
+            1,
+            310
+          ],
+          [
+            "apps/shared/src/backend-scope.ts",
+            1,
+            46
+          ],
+          [
+            "apps/desktop/src/store/session-states.ts",
+            135,
+            182
+          ],
+          [
+            "apps/desktop/src/lib/stable-array.ts",
+            1,
+            22
+          ]
+        ],
+        "structural_rationale": "CC 36 is the outer computed projection across three explicit passes: loaded rows, unlisted active runtime owners, and unambiguous persisted unread scopes, followed by stable summary publication. Complete callback including nested tally helpers was read. Structural organization preserves source/profile boundaries and priority; no new coupling identified.",
+        "module_bindings": "Read full module including computed dependency array, profileDotScopeKey, rowScopeOf, internSummary cache and prev, plus backendScopeKey, runtimeSessionOwner and stableRecord implementations. Session identity and store imports remain the same surrounding bindings as upstream. Runtime freshness, profile ambiguity cases, cache bounds and integration are not certified.",
+        "compatibility": "No compatibility conflict identified in this complete static function/binding review.",
+        "reviewer": "desktop structural review worker",
+        "reviewed_at": "2026-10-16T00:02:46.504826+00:00"
+      },
+      "exclusions": [
+        "Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval.",
+        "No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived.",
+        "No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved.",
+        "Candidate only: root approval for preparation and controller verification of generated identities are required before activation."
+      ],
+      "issues": []
+    },
+    {
+      "input_index": 112,
+      "path": "apps/desktop/src/store/quick-entry.ts",
+      "scope": "quickComposerReducer",
+      "rule": "CC",
+      "detail": "CC 42 > target 20 (was 15)",
+      "raw_detail": "CC 42 > target 20 (was 15)",
+      "status": "unresolved",
+      "group": "quick-entry-reducer",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/store/quick-entry.ts",
+        "scope": "quickComposerReducer",
+        "blob": "03838a9c25364e6bd67a20efd0c58728614b45db",
+        "unit_body_hash": "27dc183d8f4334a0",
+        "metric_value": 42
+      },
+      "candidate_blob": "03838a9c25364e6bd67a20efd0c58728614b45db",
+      "current_blob": "03838a9c25364e6bd67a20efd0c58728614b45db",
+      "current_unit": {
+        "q": "quickComposerReducer",
+        "line": 235,
+        "end": 469,
+        "cc": 42,
+        "nesting": 2,
+        "hash": "27dc183d8f4334a0",
+        "lines": 234
+      },
+      "source_unit": {
+        "q": "quickComposerReducer",
+        "line": 235,
+        "end": 469,
+        "cc": 42,
+        "nesting": 2,
+        "hash": "27dc183d8f4334a0",
+        "lines": 234
+      },
+      "exact_file_equal": true,
+      "exact_unit_equal": true,
+      "source_cap_equals_current": true,
+      "review": {
+        "complete_function_ranges": [
+          [
+            235,
+            469
+          ]
+        ],
+        "inspected_context": [
+          [
+            "apps/desktop/src/store/quick-entry.ts",
+            1,
+            538
+          ],
+          [
+            "apps/desktop/src/app/quick-entry/quick-entry-app.tsx",
+            28,
+            180
+          ],
+          [
+            "apps/desktop/src/store/quick-entry.test.ts",
+            435,
+            459
+          ]
+        ],
+        "structural_rationale": "Complete reducer and caller read exposed an order-dependent draft-loss defect, so no candidate disposition is made despite exact upstream identity and cap.",
+        "module_bindings": "QuickComposerState/Event/Transition unions, initial state, result mapper and QuickEntryApp dispatch/submit bridge were read. Existing upstream test only covers older failure before newer success.",
+        "compatibility": "Unresolved behavioral concern; do not classify this metric as reviewed inherited debt.",
+        "reviewer": "desktop structural review worker",
+        "reviewed_at": "2026-10-16T00:02:46.505523+00:00"
+      },
+      "exclusions": [
+        "Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval.",
+        "No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived.",
+        "No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved.",
+        "Candidate only: root approval for preparation and controller verification of generated identities are required before activation."
+      ],
+      "issues": [
+        {
+          "kind": "behavioral_bug_reproduced",
+          "summary": "Newer submit success before older submit failure clears the only retained old text, so next summon loses the older failed prompt.",
+          "responsible_lines": [
+            337,
+            357,
+            453
+          ],
+          "source_intent_commit": "0fc30d63ab11dd5fcfafe4756609b7a1e1b11a48",
+          "reproduction": "/tmp/hermes-desktop-quick-entry-ordering-repro.json",
+          "limits": "Executed actual source via TypeScript transpileModule in Node; this is a bounded diagnostic, not a canonical suite/typecheck pass."
+        }
+      ]
+    },
+    {
+      "input_index": 115,
+      "path": "apps/desktop/src/themes/skin.ts",
+      "scope": "skinToDesktopTheme",
+      "rule": "CC",
+      "detail": "CC 26 > 25, its value on main (over target 20: it may only go down)",
+      "raw_detail": "CC 26 > 25, its value on main (over target 20: it may only go down)",
+      "status": "candidate",
+      "group": "presentation-projection",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/themes/skin.ts",
+        "scope": "skinToDesktopTheme",
+        "blob": "618942a2d65f10eb445739033a0e100ed497cc5e",
+        "unit_body_hash": "f4994f1e0a1f45da",
+        "metric_value": 26
+      },
+      "candidate_blob": "618942a2d65f10eb445739033a0e100ed497cc5e",
+      "current_blob": "618942a2d65f10eb445739033a0e100ed497cc5e",
+      "current_unit": {
+        "q": "skinToDesktopTheme",
+        "line": 47,
+        "end": 121,
+        "cc": 26,
+        "nesting": 1,
+        "hash": "f4994f1e0a1f45da",
+        "lines": 75
+      },
+      "source_unit": {
+        "q": "skinToDesktopTheme",
+        "line": 47,
+        "end": 121,
+        "cc": 26,
+        "nesting": 1,
+        "hash": "f4994f1e0a1f45da",
+        "lines": 75
+      },
+      "exact_file_equal": true,
+      "exact_unit_equal": true,
+      "source_cap_equals_current": true,
+      "review": {
+        "complete_function_ranges": [
+          [
+            47,
+            121
+          ]
+        ],
+        "inspected_context": [
+          [
+            "apps/desktop/src/themes/skin.ts",
+            1,
+            121
+          ],
+          [
+            "apps/desktop/src/themes/color.ts",
+            1,
+            79
+          ],
+          [
+            "apps/shared/src/color.ts",
+            1,
+            185
+          ]
+        ],
+        "structural_rationale": "CC 26 comes mostly from explicit palette fallbacks and dark/light ternaries in a single palette converter. Full source read confirms early invalid-input return, normalized color selection, contrast-aware accent, and a complete DesktopTheme result with the same palette in both mode slots.",
+        "module_bindings": "Read complete skin converter, local pick/titleCase helpers, themes/color normalization/luminance/readableInk, and shared parse/mix/readableOn/ensureContrast implementations. Type-only skin/theme imports and ACCENT_MIN_CONTRAST are unchanged. Custom CSS trust/rendering and visual accessibility are excluded.",
+        "compatibility": "No compatibility conflict identified in this complete static function/binding review.",
+        "reviewer": "desktop structural review worker",
+        "reviewed_at": "2026-10-16T00:02:46.505136+00:00"
+      },
+      "exclusions": [
+        "Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval.",
+        "No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived.",
+        "No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved.",
+        "Candidate only: root approval for preparation and controller verification of generated identities are required before activation."
+      ],
+      "issues": []
+    }
+  ],
+  "reviewed_dependency_blobs": {
+    "apps/desktop/electron/linux-gpu-fallback.ts": "101c66bccdf231050d2fb4ffc391f8e1fc58d0b3",
+    "apps/desktop/electron/windows-stack-cookie-fallback.ts": "7df2ab0c177a8e6cb0551a858de6ecb791087a90",
+    "apps/desktop/electron/linux-nvidia-egl-fallback.ts": "527d3482aa986c5d9dc8c62b2491f08fbf1e79de",
+    "apps/desktop/src/app/contrib/hooks/desktop-onboarding-metrics.ts": "8fbbe568cd8a414ee887ee3a85b2cfa71b880fc6",
+    "apps/desktop/src/components/sync-status.ts": "5c403683e39bf2d99ab178e6806b0ce72a1eba8e",
+    "apps/desktop/src/lib/deeplink-routes.ts": "158254050ea47c95513ff57d10c2d8cc1ff093bb",
+    "apps/desktop/src/plugins/hermes-bots/labels.ts": "b8aab26119cb51dfe63daeba64b589e3b5fa24f7",
+    "apps/desktop/src/plugins/hermes-bots/routing.ts": "ef4053f65cb523536d80294c232a23a5303933f9",
+    "apps/desktop/src/store/profile-dot-state.ts": "37c0a47a54287715f9f4974d35daafb7ece1ae12",
+    "apps/shared/src/backend-scope.ts": "5a2be28974c99360ac5f8041ff1926c50b72fc21",
+    "apps/desktop/src/store/session-states.ts": "95c9201a98221158c943a06c3ee04cf7cad72714",
+    "apps/desktop/src/lib/stable-array.ts": "05ae6a2b911465856adf367909207ae0b8ab9c06",
+    "apps/desktop/src/themes/skin.ts": "618942a2d65f10eb445739033a0e100ed497cc5e",
+    "apps/desktop/src/themes/color.ts": "60019414580db48f1d47ee7b79c783cb6b7fd321",
+    "apps/shared/src/color.ts": "e4c9f4e6abbabfc2b41ac0e1077bde44aecc2fd0"
+  }
+}

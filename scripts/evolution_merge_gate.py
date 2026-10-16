@@ -44,7 +44,7 @@ DEFAULT_MAX_LINES = 200
 # Globs (matched against the repo-relative path, case-insensitive) the agent must
 # not modify in a self-merged PR. Kept conservative and specific so a normal
 # code/test/docs PR never trips it.
-HIGH_RISK_GLOBS: Tuple[str, ...] = (
+HIGH_RISK_GLOBS: tuple[str, ...] = (
     # CI/CD — never let the agent rewrite the runners that gate it.
     ".github/workflows/*",
     ".github/actions/*",
@@ -75,6 +75,12 @@ HIGH_RISK_GLOBS: Tuple[str, ...] = (
     "tools/approval.py",
     "scripts/evolution_merge_gate.py",
     "scripts/evolution_admission.py",
+    "scripts/code_health/*",
+    "analysis/sync-health/*",
+    "scripts/check",
+    "scripts/ci/profile_scope_patterns.json",
+    "ruff.toml",
+    ".npmrc",
     "scripts/register_evolution_cron.py",
     # The rest of the autonomous self-modification machinery: the per-stage job
     # definitions (their prompts CARRY the safety instructions — incl. this
@@ -98,14 +104,13 @@ HIGH_RISK_GLOBS: Tuple[str, ...] = (
 
 def _norm(path: Any) -> str:
     p = str(path or "").strip()
-    if p.startswith("./"):  # only the relative-path marker — keep .github/.env dots
-        p = p[2:]
+    p = p.removeprefix("./")  # Keep .github/.env dots.
     return p.lower()
 
 
 def check_merge_method_policy(
     head_branch: Optional[str], method: str
-) -> List[str]:
+) -> list[str]:
     """Enforce the merge METHOD per PR class (#2783).
 
     Upstream release-sync PRs (``sync/*`` branches) must land as TRUE MERGE
@@ -128,10 +133,10 @@ def check_merge_method_policy(
 
 
 def check_merge_policy(
-    files: Sequence[Dict[str, Any]],
+    files: Sequence[dict[str, Any]],
     max_lines: int = DEFAULT_MAX_LINES,
     high_risk_globs: Sequence[str] = HIGH_RISK_GLOBS,
-) -> List[str]:
+) -> list[str]:
     """Return blocking-violation strings (empty == may self-merge).
 
     ``files`` is the ``gh pr view --json files`` shape:
@@ -139,10 +144,10 @@ def check_merge_policy(
     """
     if not isinstance(files, (list, tuple)):
         return []
-    out: List[str] = []
+    out: list[str] = []
 
     total = 0
-    risky: List[str] = []
+    risky: list[str] = []
     globs = [g.lower() for g in high_risk_globs]
     for f in files:
         if not isinstance(f, dict):
@@ -178,12 +183,12 @@ def check_merge_policy(
 
 
 def check_flip_gate(
-    before: Optional[Dict[str, Any]] = None,
-    after: Optional[Dict[str, Any]] = None,
+    before: Optional[dict[str, Any]] = None,
+    after: Optional[dict[str, Any]] = None,
     *,
     max_regressions: Optional[int] = None,
     override_reason: Optional[str] = None,
-) -> List[str]:
+) -> list[str]:
     """Run the example-level flip gate (#1447, Child C of #1308).
 
     Calls :mod:`evolution_flip_gate` to classify per-probe P→F / F→P deltas
@@ -204,7 +209,7 @@ def check_flip_gate(
 
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from evolution_flip_gate import (  # noqa: E402
+        from evolution_flip_gate import (
             compare_runs,
             flip_verdict,
             format_table,
@@ -219,7 +224,7 @@ def check_flip_gate(
     before = before or {}
     after = after or {}
     table = compare_runs(before, after)
-    kwargs: Dict[str, Any] = {}
+    kwargs: dict[str, Any] = {}
     if max_regressions is not None:
         kwargs["max_regressions"] = max_regressions
     verdict = flip_verdict(table, **kwargs)
@@ -237,9 +242,9 @@ def check_flip_gate(
 
 
 def check_floor_gate(
-    floor_scores: Optional[Dict[str, Any]] = None,
-    pr_metrics: Optional[Dict[str, Any]] = None,
-) -> List[str]:
+    floor_scores: Optional[dict[str, Any]] = None,
+    pr_metrics: Optional[dict[str, Any]] = None,
+) -> list[str]:
     """Run the null-agent floor-test gate (#1809).
 
     Compares the PR's aggregate metrics (``pr_metrics``, the same shape as
@@ -266,7 +271,7 @@ def check_floor_gate(
             "floor; refusing unattended self-merge"
         ]
 
-    violations: List[str] = []
+    violations: list[str] = []
     for metric, floor in floor_scores.items():
         try:
             floor_val = float(floor)
@@ -300,17 +305,17 @@ def check_floor_gate(
 
 
 def check_merge_policy_with_quality(
-    files: Sequence[Dict[str, Any]],
+    files: Sequence[dict[str, Any]],
     max_lines: int = DEFAULT_MAX_LINES,
     high_risk_globs: Sequence[str] = HIGH_RISK_GLOBS,
     mock_ratio_threshold: float = 0.30,
-    test_contents: Optional[Dict[str, str]] = None,
-    flip_gate_results: Optional[Dict[str, Any]] = None,
+    test_contents: Optional[dict[str, str]] = None,
+    flip_gate_results: Optional[dict[str, Any]] = None,
     flip_gate_override: Optional[str] = None,
-    floor_scores: Optional[Dict[str, Any]] = None,
-    pr_metrics: Optional[Dict[str, Any]] = None,
-    source_contents: Optional[Dict[str, str]] = None,
-) -> List[str]:
+    floor_scores: Optional[dict[str, Any]] = None,
+    pr_metrics: Optional[dict[str, Any]] = None,
+    source_contents: Optional[dict[str, str]] = None,
+) -> list[str]:
     """Extended merge policy: diff-size + high-risk + test-quality + reachability + flip + floor gates.
 
     Runs the original :func:`check_merge_policy` (diff-size cap + high-risk
@@ -353,7 +358,7 @@ def check_merge_policy_with_quality(
     )
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from evolution_test_quality_gate import check_test_quality  # noqa: E402
+        from evolution_test_quality_gate import check_test_quality
     except ImportError:
         # Fail CLOSED (#1246): the test-quality gate is a self-merge SAFETY
         # control. If its module can't be imported we cannot verify test
@@ -378,7 +383,7 @@ def check_merge_policy_with_quality(
     if source_contents is not None:
         try:
             sys.path.insert(0, str(Path(__file__).resolve().parent))
-            from evolution_reachability_gate import check_reachability  # noqa: E402
+            from evolution_reachability_gate import check_reachability
 
             violations.extend(
                 check_reachability(files, source_contents=source_contents)
@@ -391,7 +396,7 @@ def check_merge_policy_with_quality(
     if source_contents is not None:
         try:
             sys.path.insert(0, str(Path(__file__).resolve().parent))
-            from evolution.lib.safety_review_gate import check_safety_gate  # noqa: E402
+            from evolution.lib.safety_review_gate import check_safety_gate
 
             violations.extend(check_safety_gate(files, source_contents=source_contents))
         except ImportError:
@@ -424,18 +429,18 @@ def check_merge_policy_with_quality(
     return violations
 
 
-def _run(cmd: List[str]) -> Tuple[int, str, str]:
+def _run(cmd: list[str]) -> tuple[int, str, str]:
     p = subprocess.run(
         cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
-    )
+    , check=False)
     return p.returncode, p.stdout, p.stderr
 
 
 def _pr_snapshot(
     pr: int,
     repo: Optional[str],
-    runner: Callable[[List[str]], Tuple[int, str, str]],
-) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    runner: Callable[[list[str]], tuple[int, str, str]],
+) -> tuple[Optional[list[dict[str, Any]]], Optional[str]]:
     """Fetch the PR's changed files AND head SHA in ONE ``gh`` call.
 
     Returning both from a single snapshot is what makes the merge atomic: the
@@ -485,11 +490,11 @@ def _looks_like_test(path: str) -> bool:
 
 
 def _fetch_test_contents(
-    files: Sequence[Dict[str, Any]],
+    files: Sequence[dict[str, Any]],
     head: Optional[str],
     slug: str,
-    runner: Callable[[List[str]], Tuple[int, str, str]],
-) -> Dict[str, str]:
+    runner: Callable[[list[str]], tuple[int, str, str]],
+) -> dict[str, str]:
     """Fetch the FULL content of each changed test file at the reviewed head SHA
     so the fabricated-reproduction check runs on the LIVE merge path (#1246).
 
@@ -500,7 +505,7 @@ def _fetch_test_contents(
     fabrication check degrades to what it could read; the mock-ratio gate needs
     no content and is unaffected).
     """
-    contents: Dict[str, str] = {}
+    contents: dict[str, str] = {}
     if not head or not slug:
         return contents
     for f in files:
@@ -523,23 +528,23 @@ def _fetch_test_contents(
     return contents
 
 
-def _load_json_file(path: str) -> Optional[Dict[str, Any]]:
+def _load_json_file(path: str) -> Optional[dict[str, Any]]:
     """Load a JSON object from ``path``; return ``None`` on any error."""
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
         return data if isinstance(data, dict) else None
     except (OSError, ValueError):
         return None
 
 
-def _arg_or_env(args: List[str], flag: str, env: str) -> Optional[str]:
+def _arg_or_env(args: list[str], flag: str, env: str) -> Optional[str]:
     """Read a CLI flag value, falling back to an env var."""
     if flag in args:
         return args[args.index(flag) + 1]
     return os.environ.get(env)
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     args = argv[1:]
     if "--pr" not in args:
         print(
@@ -567,7 +572,7 @@ def main(argv: List[str]) -> int:
     flip_override = _arg_or_env(
         args, "--flip-gate-override", "EVOLUTION_FLIP_GATE_OVERRIDE"
     )
-    flip_gate_results: Optional[Dict[str, Any]] = None
+    flip_gate_results: Optional[dict[str, Any]] = None
     if before_path or after_path:
         flip_gate_results = {
             "before": _load_json_file(before_path) if before_path else None,
@@ -610,7 +615,7 @@ def main(argv: List[str]) -> int:
     admission = None
     if head_branch.startswith("evolution/issue-"):
         from evolution_admission import verify_receipt
-        admission, admission_errors = verify_receipt(files, head, slug, runner)
+        admission, admission_errors = verify_receipt(files, head, slug, runner, pr=pr)
         violations.extend(admission_errors)
     if violations:
         print(f"[merge-gate] PR #{pr} BLOCKED from autonomous self-merge:")
@@ -626,6 +631,11 @@ def main(argv: List[str]) -> int:
         print(f"[merge-gate] could not resolve PR #{pr} head SHA — refusing to merge")
         return 1
     if admission is not None:
+        from evolution_admission import recheck_pr_binding
+        if binding_errors := recheck_pr_binding(admission, slug, runner):
+            print("[merge-gate] " + "; ".join(binding_errors))
+            return 1
+    if admission is not None:
         from evolution_admission import record_admission
         try:
             accounting = record_admission(admission, repository=slug, cycle=head_branch)
@@ -637,8 +647,10 @@ def main(argv: List[str]) -> int:
     # files, so passing it to the merge API means a concurrent push landed since
     # the read → 409 abort, instead of merging a diff the policy never saw.
     slug = repo or os.environ.get("EVOLUTION_REPO_SLUG", "")
+    # HEAD is atomically fenced below. Base changes after this recheck are not:
+    # GitHub exposes no base-SHA compare-and-swap on the pull-request merge API.
     api = f"repos/{slug}/pulls/{pr}/merge"
-    code, out, err = runner([
+    code, _out, err = runner([
         "gh",
         "api",
         "--method",

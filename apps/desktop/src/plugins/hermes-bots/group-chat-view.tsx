@@ -24,39 +24,37 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  gatewayActivationEpoch,
   host,
   Input,
   queryClient,
   relativeTime,
-  RowButton,
   Tip,
   ToggleRow,
   useI18n,
   useValue
 } from '@hermes/plugin-sdk'
 import type { ClipboardEvent, DragEvent, ReactNode } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { avatarColor, botAppearance, BotFace } from './avatar'
 import { isBackfilledFacePng } from './avatar-image'
+import { groupCreationSource, groupExecutionMode } from './canonical-group-capabilities'
+import type { GroupExecutionMode } from './canonical-group-capabilities'
+import { $canonicalGroupBindings, registerCanonicalGroup } from './canonical-group-registry'
+import { CanonicalGroupWorkspace } from './canonical-group-workspace'
+import { canonicalGroupRequest, createCanonicalGroup } from './canonical-groups'
 import {
   $botMeta,
   $lastRoster,
   botHandle,
   botMetaV2Active,
-  botSourceStatus,
   noteBotMetaWrite,
   persistBotMetaSnapshot,
   ROSTER_KEY,
   saveBotMeta
 } from './data'
-import {
-  $groupActivity,
-  currentGroupActivity,
-  GROUP_ACTIVITY_GLYPHS,
-  groupActivityLabel,
-  groupActivityTone
-} from './group-activity'
+import { $groupActivity, currentGroupActivity } from './group-activity'
 import type { GroupActivityEntry } from './group-activity'
 import { filesToGroupAttachments, pickGroupAttachments } from './group-attachments'
 import {
@@ -75,6 +73,7 @@ import type { GroupChatRoom } from './group-chat'
 import { GroupClarifyCard, GroupImageControls, GroupMentionInput } from './group-chat-parts'
 import type { GroupRoomPrompt } from './group-chat-parts'
 import { GroupMemberPicker } from './group-chat-view-members'
+import { LegacyGroupActivityPanel, LegacyGroupChatHeader } from './group-chat-workspace-chrome'
 import { compressGroupMemberHistory } from './group-compress'
 import { sweepExternalGroupWrites } from './group-external-writes'
 import { GroupHoldStatus } from './group-hold-status'
@@ -567,7 +566,77 @@ interface GroupChatWorkspaceProps {
   visible?: boolean
 }
 
-export function GroupChatWorkspace({ group, members, onBack, visible = true }: GroupChatWorkspaceProps) {
+export function GroupChatWorkspace(props: GroupChatWorkspaceProps) {
+  const bindings = useValue($canonicalGroupBindings)
+  const binding = bindings[props.group]
+
+  if (binding) {return <CanonicalGroupWorkspace binding={binding} onBack={props.onBack} visible={props.visible} />}
+
+  return <GroupExecutionGate {...props} />
+}
+
+function GroupExecutionGate(props: GroupChatWorkspaceProps) {
+  const b = useBots()
+  const connectionId = useValue(host.state.connectionId)
+  const profile = useValue(host.state.profile)
+  const gateway = useValue(host.state.gateway)
+  const activationEpoch = gatewayActivationEpoch()
+  const source = JSON.stringify([connectionId, profile, gateway, activationEpoch])
+  const [capability, setCapability] = useState<{ source: string; mode: GroupExecutionMode } | null>(null)
+  const mode = capability?.source === source ? capability.mode : 'checking'
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    setCapability(null)
+    setError('')
+
+    if (gateway !== 'open') {
+      setCapability({ source, mode: 'unavailable' })
+
+      return
+    }
+
+    void canonicalGroupRequest<unknown>({ connectionId: connectionId ?? '', profile }, 'groups.capabilities')
+      .then(result => { if (!cancelled) {setCapability({ source, mode: groupExecutionMode(result) })} })
+      .catch(e => {
+        if (!cancelled) {
+          setCapability({ source, mode: 'unavailable' })
+          setError(String(e))
+        }
+      })
+
+    return () => { cancelled = true }
+  }, [connectionId, profile, gateway, source])
+
+  if (mode === 'legacy') {return <LegacyGroupChatWorkspace {...props} />}
+
+  return <div className="grid gap-3 p-3">
+    <h2>{props.group}</h2>
+    <p>{mode === 'canonical' ? 'This is a legacy Desktop room. Start a gateway-owned group with these members; the old history stays here and is not replayed.' : mode === 'unavailable' ? b.canonical.driverUnavailable : 'Checking group driver…'}</p>
+    {error && <p role="alert">{error}</p>}
+    <Button disabled={mode !== 'canonical' || busy} onClick={() => {
+      const route = { connectionId: connectionId ?? '', profile }
+
+      const sourceCurrent = groupCreationSource(route, activationEpoch)
+
+      if (mode !== 'canonical' || !sourceCurrent()) {
+        setError(b.canonical.driverUnavailable)
+
+        return
+      }
+
+      setBusy(true)
+      void createCanonicalGroup(route, props.group, props.members)
+        .then(({ room }) => {
+          if (sourceCurrent()) {openGroupChat(registerCanonicalGroup(route, room))}
+        })
+        .catch(e => { if (sourceCurrent()) {setError(String(e))} }).finally(() => setBusy(false))
+    }}>Start gateway group</Button>
+  </div>
+}
+
+function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: GroupChatWorkspaceProps) {
   const b = useBots()
   const rooms: Record<string, GroupChatRoom> = useValue($groupChats)
   const allMeta: Record<string, BotMeta> = useValue($botMeta)
@@ -622,6 +691,124 @@ export function GroupChatWorkspace({ group, members, onBack, visible = true }: G
       pendingAttachments: typeof value === 'function' ? value(current.pendingAttachments || {}) : value
     }))
 
+  // Browser Comment Mode can live in its own Electron pop-out on another
+  // monitor. The ordinary composer bus is window-local and this room uses its
+  // own New Thread composer anyway, so accept only batches explicitly pinned to
+  // THIS room + THIS renderer. Packaged Electron windows use the preload IPC
+  // relay; BroadcastChannel stays only as a browser/dev fallback. The protocol
+  // strings remain literal here to preserve the plugin fence (Bot Mode imports
+  // only the SDK + its own files). A stale route gets no ACK, leaving the
+  // annotations intact.
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const desktopBridge = window.hermesDesktop?.windowRelay
+
+    const channel =
+      !desktopBridge && typeof BroadcastChannel !== 'undefined'
+        ? new BroadcastChannel('hermes.desktop.preview-annotate-handoff.v1')
+        : null
+
+    if (!desktopBridge && !channel) {
+      return
+    }
+
+    const send = (payload: unknown) => {
+      if (desktopBridge) {
+        desktopBridge.send(payload)
+      } else {
+        channel?.postMessage(payload)
+      }
+    }
+
+    const onMessage = (data: unknown) => {
+      if (!data || typeof data !== 'object') {
+        return
+      }
+
+      const request = data as {
+        count?: unknown
+        destination?: { composerKey?: unknown; group?: unknown; kind?: unknown; windowId?: unknown }
+        images?: unknown
+        prompt?: unknown
+        requestId?: unknown
+        type?: unknown
+      }
+
+      const destination = request.destination
+      const sourceWindowId = window.sessionStorage.getItem('hermes.desktop.previewAnnotate.windowId')?.trim()
+
+      if (
+        !sourceWindowId ||
+        request.type !== 'preview-annotate-handoff' ||
+        typeof request.requestId !== 'string' ||
+        typeof request.prompt !== 'string' ||
+        !Array.isArray(request.images) ||
+        destination?.kind !== 'group' ||
+        destination.windowId !== sourceWindowId ||
+        destination.group !== group ||
+        destination.composerKey !== composerKeyRef.current
+      ) {
+        return
+      }
+
+      try {
+        const prompt = request.prompt
+
+        const attachments: Attachment[] = request.images
+          .filter((image): image is { dataUrl: string; name: string; number?: number } =>
+            Boolean(
+              image &&
+              typeof image === 'object' &&
+              typeof (image as { dataUrl?: unknown }).dataUrl === 'string' &&
+              typeof (image as { name?: unknown }).name === 'string'
+            )
+          )
+          .map(image => ({ data: image.dataUrl, kind: 'image' as const, name: image.name }))
+
+        const next = updateGroupComposerDraft(composerKeyRef.current, current => ({
+          ...current,
+          activeReplyThread: null,
+          main: current.main.trim() ? `${current.main.trimEnd()}\n\n${prompt}` : prompt,
+          pendingAttachments: {
+            ...(current.pendingAttachments || {}),
+            main: [...(current.pendingAttachments?.main || []), ...attachments]
+          }
+        }))
+
+        setComposerDraft(next)
+        host.notify({
+          kind: 'success',
+          message: `${Number(request.count) || attachments.length} Browser comment${Number(request.count) === 1 ? '' : 's'} added to ${group}. Review the New Thread draft before sending.`
+        })
+        send({
+          ok: true,
+          requestId: request.requestId,
+          type: 'preview-annotate-handoff-ack'
+        })
+      } catch (error) {
+        send({
+          error: error instanceof Error ? error.message : String(error),
+          ok: false,
+          requestId: request.requestId,
+          type: 'preview-annotate-handoff-ack'
+        })
+      }
+    }
+
+    const stopDesktop = desktopBridge?.onMessage(onMessage)
+    const onBroadcast = (event: MessageEvent<unknown>) => onMessage(event.data)
+    channel?.addEventListener('message', onBroadcast)
+
+    return () => {
+      stopDesktop?.()
+      channel?.removeEventListener('message', onBroadcast)
+      channel?.close()
+    }
+  }, [composerKey, group])
+
   const [confirmDisband, setConfirmDisband] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [memberPickerOpen, setMemberPickerOpen] = useState(false)
@@ -640,28 +827,23 @@ export function GroupChatWorkspace({ group, members, onBack, visible = true }: G
   // already near the bottom, so reading history is never yanked away.
   const bottomSentinelRef = useRef<HTMLDivElement | null>(null)
   const stickToBottomRef = useRef(true)
-  // eslint-disable-next-line no-restricted-syntax -- tracks live scroll position from a DOM listener, not an atom
-  useEffect(() => {
-    const sentinel = bottomSentinelRef.current
 
-    if (!sentinel) {
+  // Bind the owned overflow container, not a shell ancestor. Ref cleanup
+  // detaches this exact node when it is replaced or the workspace unmounts.
+  const logViewportRef = useCallback((viewport: HTMLDivElement | null) => {
+    if (!viewport) {
       return
     }
 
-    const viewport = sentinel.closest('[data-slot="scroll-area-viewport"]')
-
-    if (viewport) {
-      const onScroll = () => {
-        stickToBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80
-      }
-
-      viewport.addEventListener('scroll', onScroll, {
-        passive: true
-      })
-
-      return () => viewport.removeEventListener('scroll', onScroll)
+    const onScroll = () => {
+      stickToBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80
     }
+
+    viewport.addEventListener('scroll', onScroll, { passive: true })
+
+    return () => viewport.removeEventListener('scroll', onScroll)
   }, [])
+
   useEffect(() => {
     if (stickToBottomRef.current) {
       bottomSentinelRef.current?.scrollIntoView({
@@ -750,79 +932,6 @@ export function GroupChatWorkspace({ group, members, onBack, visible = true }: G
     .filter(entry => entry?.group === group)
     .sort((a, b) => (a.at || 0) - (b.at || 0))
 
-  const availableMembers = members.filter(member => botSourceStatus(member).available).length
-  const availabilityLabel = `${availableMembers} of ${members.length} available`
-
-  const memberNames =
-    members.map(b => displayName(b, botRosterMeta(b, allMeta))).join(', ') || 'No bots in this group chat'
-
-  const header = (
-    <div className="flex items-center gap-2 px-2.5 pt-2.5 pb-2">
-      <Button onClick={() => (onBack ? onBack() : $groupChatWorkspace.set(null))} size="sm" variant="ghost">
-        Back
-      </Button>
-      {/* Room picture (set via Group settings) leads the title when present. */}
-      {room.image ? (
-        <img
-          alt=""
-          className="size-6 shrink-0 rounded-md object-cover ring-1 ring-(--ui-stroke-secondary)"
-          src={room.image}
-        />
-      ) : (
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-(--chrome-action-hover) text-(--ui-text-tertiary)">
-          <Codicon name="organization" />
-        </span>
-      )}
-      <div className="min-w-0 flex-1 truncate text-sm font-semibold">{group}</div>
-      <Tip label={memberNames}>
-        <span
-          aria-label={availabilityLabel}
-          className={cn(
-            'shrink-0 text-[0.65rem] text-(--ui-text-quaternary)',
-            members.length > 0 && availableMembers < members.length && 'text-amber-600 dark:text-amber-300'
-          )}
-        >
-          {members.length > 0 && availableMembers < members.length
-            ? availabilityLabel
-            : b.group.memberCount(members.length)}
-        </span>
-      </Tip>
-      <Tip label={b.group.settingsHint(group)}>
-        <Button
-          aria-label={b.group.settingsLabel(group)}
-          className="shrink-0 text-(--ui-text-tertiary) hover:text-foreground"
-          onClick={() => setSettingsOpen(true)}
-          size="sm"
-          variant="ghost"
-        >
-          <Codicon name="gear" />
-        </Button>
-      </Tip>
-      <Tip label="Manage members">
-        <Button
-          aria-label="Manage group members"
-          className="shrink-0 text-(--ui-text-tertiary) hover:text-foreground"
-          onClick={() => setMemberPickerOpen(true)}
-          size="sm"
-          variant="ghost"
-        >
-          <Codicon name="organization" />
-        </Button>
-      </Tip>
-      <Tip label={b.group.disbandHint(group)}>
-        <Button
-          aria-label={b.group.disbandLabel(group)}
-          className="shrink-0 text-(--ui-text-tertiary) hover:text-destructive"
-          onClick={() => setConfirmDisband(true)}
-          size="sm"
-          variant="ghost"
-        >
-          <Codicon name="trash" />
-        </Button>
-      </Tip>
-    </div>
-  )
-
   // Seat from the live sources at send time, not from the painted `members`
   // prop: a roster save that lands between the last paint and Enter was seen
   // (live) to send with the removed Bot still seated. Same derivation the
@@ -842,23 +951,6 @@ export function GroupChatWorkspace({ group, members, onBack, visible = true }: G
   // Events are epoch-tagged, so a superseded run's history drops out of view.
   const activityEvents: GroupActivityEntry[] = currentGroupActivity(group)
   const latestActivity = activityEvents.length ? activityEvents[activityEvents.length - 1] : null
-  // A later "settled" event must not hide a member that failed to answer.
-  // Successful completion for that member clears its unresolved warning.
-  const unresolvedFailures = new Map<string, GroupActivityEntry>()
-
-  for (const event of activityEvents) {
-    const key = event.member || ''
-
-    if (event.kind === 'failed' || event.kind === 'timed-out') {
-      unresolvedFailures.delete(key)
-      unresolvedFailures.set(key, event)
-    } else if (event.kind === 'replied' || event.kind === 'passed' || event.kind === 'delivered') {
-      unresolvedFailures.delete(key)
-    }
-  }
-
-  const summaryActivity =
-    !room.running && unresolvedFailures.size ? [...unresolvedFailures.values()].at(-1)! : latestActivity
 
   // #94570 shell rewired onto the real primitive (#91868/#94569): the button
   // must stop the ROUND, not just spray per-member interrupts — without the
@@ -871,74 +963,6 @@ export function GroupChatWorkspace({ group, members, onBack, visible = true }: G
       message: b.group.stopped(group)
     })
   }
-
-  const activityPanel = (
-    <div className="border-b border-(--ui-stroke-secondary)">
-      <div className="flex items-center gap-1">
-        <RowButton
-          aria-controls={`group-activity:${group}`}
-          aria-expanded={activityOpen}
-          className="flex min-w-0 flex-1 items-center gap-1.5 px-2.5 py-1 text-left text-[0.7rem] text-(--ui-text-quaternary) transition-colors hover:text-foreground"
-          onClick={() => setActivityOpen(prev => !prev)}
-          title={activityOpen ? b.group.hideActivity : b.group.showActivity}
-        >
-          <Codicon className="shrink-0 text-[0.65rem]" name={activityOpen ? 'chevron-down' : 'chevron-right'} />
-          <span className="shrink-0 font-medium">{b.group.activity}</span>
-          {summaryActivity ? (
-            <span
-              className={cn('min-w-0 flex-1 truncate', groupActivityTone(summaryActivity.kind))}
-            >{`${groupActivityLabel(summaryActivity, group)} · ${relativeTime(summaryActivity.at)}`}</span>
-          ) : null}
-        </RowButton>
-        {room.running ? (
-          <Tip label={b.group.stopHint}>
-            <Button
-              className="shrink-0 text-(--ui-accent)"
-              onClick={() => void stopRoomRun()}
-              size="xs"
-              variant="ghost"
-            >
-              <Codicon name="debug-stop" />
-              {b.group.stop}
-            </Button>
-          </Tip>
-        ) : null}
-      </div>
-      {activityOpen ? (
-        <div className="grid gap-0.5 px-2.5 pb-1.5" id={`group-activity:${group}`}>
-          {activityEvents.length ? (
-            [...activityEvents].reverse().map((event, i) => (
-              <div className="flex items-center gap-1.5 text-[0.7rem]" key={`${event.at}:${i}`}>
-                <Codicon
-                  className={cn('shrink-0 text-[0.65rem]', groupActivityTone(event.kind))}
-                  name={GROUP_ACTIVITY_GLYPHS[event.kind] || 'circle-outline'}
-                />
-                <span className={cn('min-w-0 flex-1 truncate', groupActivityTone(event.kind))}>
-                  {groupActivityLabel(event, group)}
-                </span>
-                <span className="shrink-0 text-[0.625rem] text-(--ui-text-quaternary)">{relativeTime(event.at)}</span>
-                {room.running && event.kind === 'working' ? (
-                  <Tip label={b.group.stopHint}>
-                    <Button
-                      className="shrink-0 text-(--ui-accent)"
-                      onClick={() => void stopRoomRun()}
-                      size="micro"
-                      variant="ghost"
-                    >
-                      <Codicon name="debug-stop" />
-                      {b.group.stop}
-                    </Button>
-                  </Tip>
-                ) : null}
-              </div>
-            ))
-          ) : (
-            <div className="px-0.5 pb-0.5 text-[0.625rem] text-(--ui-text-quaternary)">{b.group.noActivityYet}</div>
-          )}
-        </div>
-      ) : null}
-    </div>
-  )
 
   const submit = () => {
     const text = draft.trim()
@@ -1203,7 +1227,7 @@ export function GroupChatWorkspace({ group, members, onBack, visible = true }: G
             ) : null}
           </div>
           <div
-            className="min-w-0 text-xs text-(--ui-text-secondary) [&_p]:mb-1 [&_p:last-child]:mb-0 [&_ul]:mb-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:mb-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_pre]:overflow-x-auto" // The app shell sets user-select: none globally; message bodies opt
+            className="min-w-0 text-xs text-(--ui-text-secondary) [&_p]:mb-1 [&_p:last-child]:mb-0 [&_ul]:mb-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:mb-1 [&_ol]:list-decimal [&_ol]:pl-4 [&_pre]:whitespace-pre-wrap [&_pre]:wrap-anywhere" // The app shell sets user-select: none globally; message bodies opt
             // back in so drag-select and ⌘C work in group chat logs.
             data-selectable-text="true"
             data-slot="group-chat-message-content"
@@ -1314,6 +1338,10 @@ export function GroupChatWorkspace({ group, members, onBack, visible = true }: G
   return (
     <div
       className="relative flex h-full flex-col"
+      data-preview-annotate-composer-key={composerKey}
+      data-preview-annotate-destination="group"
+      data-preview-annotate-group={group}
+      data-preview-annotate-owner-key={groupWorkspaceOwnerKey(group)}
       onDragLeave={event => {
         // Only clear when leaving the room container itself, not when the
         // cursor moves between its children. React types relatedTarget as a
@@ -1338,14 +1366,30 @@ export function GroupChatWorkspace({ group, members, onBack, visible = true }: G
           {replyThread ? b.group.dropToThread : b.group.dropToRoom}
         </div>
       ) : null}
-      {header}
+      <LegacyGroupChatHeader
+        allMeta={allMeta}
+        group={group}
+        image={room.image}
+        members={members}
+        onBack={onBack}
+        onDisband={() => setConfirmDisband(true)}
+        onManageMembers={() => setMemberPickerOpen(true)}
+        onSettings={() => setSettingsOpen(true)}
+      />
       <GroupHoldStatus
         holds={room.holds}
         memberLabel={member => displayName(member, botRosterMeta(member, allMeta))}
         members={members}
       />
-      {activityPanel}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <LegacyGroupActivityPanel
+        activityEvents={activityEvents}
+        activityOpen={activityOpen}
+        group={group}
+        onToggle={() => setActivityOpen(prev => !prev)}
+        running={room.running}
+        stopRoomRun={stopRoomRun}
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={logViewportRef}>
         {/* minmax(0,1fr): an implicit grid track is min-content sized, so one */}
         {/* unbreakable code line widened every entry to its own width and the */}
         {/* log scrolled sideways as a whole instead of the code block (#91878). */}

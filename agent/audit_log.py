@@ -72,7 +72,7 @@ def log_audit_event(
     import datetime as _dt
 
     entry = {
-        "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "ts": _dt.datetime.now(_dt.UTC).isoformat(),
         "event": event,
         "session_id": session_id,
         "turn_id": turn_id,
@@ -100,4 +100,4 @@ def export_audit_jsonl(output_path: Optional[str] = None) -> str:
 
         shutil.copy2(str(src), output_path)
         return output_path
-    return src.read_text(encoding="utf-8") if src.exists() else ""
+    return src.read_text(encoding="utf-8-sig") if src.exists() else ""

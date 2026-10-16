@@ -18,6 +18,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Literal
 
 from hermes_cli.config_defaults import DEFAULT_CONFIG
 from tools.registry import tool_error
+from toolsets import CLIENT_SURFACE_TOOLSETS, TOOLSET_SESSION_PLATFORMS
 from tools.tool_search_catalog import (
     BRIDGE_TOOL_NAMES, CHARS_PER_TOKEN, TOOL_CALL_NAME, TOOL_DESCRIBE_NAME, TOOL_SEARCH_NAME,
     CatalogEntry, _fn, _listing_group_label, _registry_entry, _registry_toolset,
@@ -38,8 +39,8 @@ _MAX_QUERIES_PER_CALL = 7
 _MAX_DESCRIBE_NAMES_PER_CALL = 10
 
 # ── Consecutive-search streak tracking (#1144 / #1373) ───────────────────
-_SEARCH_STREAK: Dict[str, int] = {}
-_SEARCH_QUERIES: Dict[str, List[str]] = {}
+_SEARCH_STREAK: dict[str, int] = {}
+_SEARCH_QUERIES: dict[str, list[str]] = {}
 
 #: Cap on how many previous queries we surface / retain per session.
 _PREVIOUS_QUERIES_MAX = 8
@@ -85,7 +86,7 @@ def reset_search_streak(session_id: Optional[str]) -> None:
         _SEARCH_QUERIES.pop(key, None)
 
 
-def get_previous_queries(session_id: Optional[str]) -> List[str]:
+def get_previous_queries(session_id: Optional[str]) -> list[str]:
     """Return the rolling recent-query history for ``session_id`` (copy)."""
     key = _streak_key(session_id)
     if key is None:
@@ -123,7 +124,7 @@ class ToolSearchConfig:
         return _DEFAULT_DEFERRED_TOOLS if self.defer_tools is None else self.defer_tools
 
     @classmethod
-    def from_raw(cls, raw: Any) -> "ToolSearchConfig":
+    def from_raw(cls, raw: Any) -> ToolSearchConfig:
         """Build from a raw dict / legacy bool / None; every field is clamped and unknown
         values fall back to safe defaults — a config typo must not break the agent."""
         if not isinstance(raw, dict):  # legacy bool / None
@@ -239,10 +240,8 @@ def _hermes_core_tools() -> frozenset[str]:
 _core_tool_names = _hermes_core_tools
 
 # Session-gated GUI toolsets: off ``_HERMES_CORE_TOOLS`` so non-GUI clients never pay
-# their schema; once enabled they stay direct unless the deferral list names them. ``setup``
-# is the setup profile's whole job: a guide that has to search for its one tool first
-# answers the user's install request with a tool_search round trip.
-_DIRECT_SURFACE_TOOLSETS = frozenset({"desktop_ui", "project", "setup"})
+# their schema; once enabled they stay direct unless the deferral list names them.
+_DIRECT_SURFACE_TOOLSETS = CLIENT_SURFACE_TOOLSETS | TOOLSET_SESSION_PLATFORMS.keys()
 
 # Event-triggered tools deferred BY DEFAULT (a catalog stub suffices). Keep the curated
 # list in DEFAULT_CONFIG so config discovery and runtime behavior cannot drift. An explicit
@@ -333,19 +332,19 @@ def is_deferrable_tool_name(
     )
 
 
-def _tool_def_names(tool_defs: Iterable[Dict[str, Any]]) -> Iterable[str]:
+def _tool_def_names(tool_defs: Iterable[dict[str, Any]]) -> Iterable[str]:
     for td in tool_defs:
         yield _fn(td).get("name", "")
 
 
 def classify_tools(
-    tool_defs: List[Dict[str, Any]],
+    tool_defs: list[dict[str, Any]],
     defer_tools: Optional[Any] = None,
     config: Optional[Any] = None,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Split a tool-defs list into (visible, deferrable)."""
-    visible: List[Dict[str, Any]] = []
-    deferrable: List[Dict[str, Any]] = []
+    visible: list[dict[str, Any]] = []
+    deferrable: list[dict[str, Any]] = []
     for td in tool_defs:
         fn = _fn(td)
         name = fn.get("name", "")
@@ -358,18 +357,18 @@ def classify_tools(
     return visible, deferrable
 
 
-def _deferrable_in(tool_defs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _deferrable_in(tool_defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return classify_tools(tool_defs, load_config_readonly().effective_defer_tools)[1]
 
 
-def estimate_tokens_from_schemas(tool_defs: Iterable[Dict[str, Any]]) -> int:
+def estimate_tokens_from_schemas(tool_defs: Iterable[dict[str, Any]]) -> int:
     """Estimate token cost via chars/4."""
-    def _chars(td: Dict[str, Any]) -> int:
+    def _chars(td: dict[str, Any]) -> int:
         try:
             return len(json.dumps(td, ensure_ascii=False, separators=(",", ":")))
         except (TypeError, ValueError):
             return len(str(td))
-    return int(math.ceil(sum(map(_chars, tool_defs)) / CHARS_PER_TOKEN))
+    return math.ceil(sum(map(_chars, tool_defs)) / CHARS_PER_TOKEN)
 
 
 def should_activate(
@@ -399,9 +398,9 @@ def listing_token_budget(config: ToolSearchConfig, context_length: Optional[int]
 def _bridge_schema(
     name: str,
     description: str,
-    properties: Dict[str, Any],
-    required: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    properties: dict[str, Any],
+    required: Optional[list[str]] = None,
+) -> dict[str, Any]:
     return {
         "type": "function",
         "function": {
@@ -417,9 +416,8 @@ def _bridge_schema(
 
 
 _CONNECTIONS_HINT = (
-    " Names starting with `connectors__` are tools of remote connector accounts "
-    "(Gmail, Linear, Notion, ...); `manage_connections` checks whether an account "
-    "is connected and gets the authorization link when it is not.")
+    " `connectors__` names are tools of the user's app accounts (Gmail, Linear, ...); "
+    "`manage_connections` checks or authorizes an account.")
 
 
 def _search_description(deferred_count: int, listing: Optional[str], listing_form: str,
@@ -431,17 +429,9 @@ def _search_description(deferred_count: int, listing: Optional[str], listing_for
     desc = (
         (f"Search {deferred_count} additional tools that are loaded on demand. "
          if deferred_count else "Search remote connector tools (email, calendars, issue trackers, and more). ")
-        + "Takes a list of queries searched in parallel against the same "
-        "catalog; send one query per distinct capability you need. Queries are "
-        "keyword searches, not questions: the app or service name plus an action "
-        "and object, no filler words (`gmail send email`, `nvidia driver status`, "
-        "not `what's my GPU driver version?`); a word no tool contains makes the "
-        "query return nothing. Returns "
-        "matching tool names grouped per query plus a shared map with each "
-        "tool's description. Follow with "
-        f"`{TOOL_DESCRIBE_NAME}` to load full parameter schemas, "
-        f"then `{TOOL_CALL_NAME}` to invoke. Tools listed at the top of this "
-        "system prompt are already available and do not need to be searched."
+        + "Send one keyword query per capability you need; returns matching tool names "
+        f"and descriptions. Then `{TOOL_DESCRIBE_NAME}` loads schemas and `{TOOL_CALL_NAME}` "
+        "invokes. Tools already in your tool list need no search."
         + (_CONNECTIONS_HINT if connections_granted else ""))
     if not listing:
         return desc
@@ -453,10 +443,8 @@ def _search_description(deferred_count: int, listing: Optional[str], listing_for
             "not substitute a generic tool (terminal/browser) without "
             "searching.\n\n" + listing)
     desc += (
-        "\n\nEvery deferred capability is listed below. If a tool name "
-        "appears here, do NOT claim it is unavailable — load it with "
-        f"`{TOOL_DESCRIBE_NAME}` (skip `{TOOL_SEARCH_NAME}` when you "
-        "already see the exact name).")
+        "\n\nEvery tool listed below exists: never call it unavailable, and go straight to "
+        f"`{TOOL_DESCRIBE_NAME}` when you see the exact name.")
     if listing_form == "mixed":
         desc += (
             " For servers marked 'names not listed', the tools exist "
@@ -465,13 +453,11 @@ def _search_description(deferred_count: int, listing: Optional[str], listing_for
     return desc + "\n\n" + listing
 
 
-def bridge_tool_schemas(
-    deferred_count: int,
-    listing: Optional[str] = None,
-    listing_form: str = "none",
-    connections_granted: bool = False,
-) -> List[Dict[str, Any]]:
-    """Return the three bridge tools: tool_search / tool_describe / tool_call."""
+def bridge_tool_schemas(deferred_count: int, listing: Optional[str] = None,
+                        listing_form: str = "", connections_granted: bool = False) -> list[dict[str, Any]]:
+    """Bridge tool schemas injected in place of deferred tools; kept short — every byte is paid
+    every turn. ``listing`` is embedded in the tool_search description; per-tool forms say
+    "skip search when you see the exact name", "groups" says search is mandatory."""
     return [
         _bridge_schema(
             TOOL_SEARCH_NAME,
@@ -480,11 +466,11 @@ def bridge_tool_schemas(
                 "queries": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Keyword queries, one per capability: app or service name + action + object (e.g. ['github create issue', 'slack send message', 'gmail fetch emails']). Not questions or sentences: every word must appear in tool text, or the query returns nothing. Searched in parallel; results come back grouped per query. A single string is accepted and treated as one query.",
+                    "description": "One query per capability: service + action + object keywords (e.g. ['gmail send email', 'github create issue']), never a question; every word must match tool text. Searched in parallel.",
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Maximum number of matches per query. Defaults to 5 and is clamped to the configured maximum (25 by default).",
+                    "description": "Max matches per query (default 5).",
                 },
             },
             ["queries"],
@@ -505,13 +491,9 @@ def bridge_tool_schemas(
         ),
         _bridge_schema(
             TOOL_CALL_NAME,
-            "Invoke deferred tools. Takes `calls`, an array of {name, arguments} "
-            "— one entry per invocation; a single call is an array of one. "
-            "Local tools require one entry per tool_call. Only connectors__ names "
-            "may be batched together; mixed and multi-local batches are rejected. "
-            "Connector entries execute individually with results in input order. "
-            f"Argument shapes match each tool's schema (see `{TOOL_DESCRIBE_NAME}`). "
-            "Policy, hooks, and approvals run as for directly-listed tools.",
+            "Invoke deferred tools: `calls` is an array of {name, arguments}, one entry per "
+            "invocation (batch independent calls; results come back in order). Arguments match "
+            f"the schema from `{TOOL_DESCRIBE_NAME}`; approvals and hooks apply as usual.",
             {
                 "calls": {
                     "type": "array",
@@ -523,7 +505,7 @@ def bridge_tool_schemas(
                         },
                         "required": ["name", "arguments"],
                     },
-                    "description": "One local invocation, or one or more connector invocations. Never mix local and connector tools.",
+                    "description": "One or more independent deferred tool invocations.",
                 },
             },
             ["calls"],
@@ -533,7 +515,8 @@ def bridge_tool_schemas(
 
 @dataclass
 class AssemblyResult:
-    tool_defs: List[Dict[str, Any]]
+    """Outcome of one assembly (tests and observability)."""
+    tool_defs: list[dict[str, Any]]
     activated: bool
     deferred_count: int = 0
     deferred_tokens: int = 0
@@ -542,13 +525,10 @@ class AssemblyResult:
     listing_form: str = "none"
 
 
-def assemble_tool_defs(
-    tool_defs: List[Dict[str, Any]],
-    *,
-    context_length: Optional[int] = None,
-    config: Optional[ToolSearchConfig] = None,
-) -> AssemblyResult:
-    """Tool-defs the model should see."""
+def assemble_tool_defs(tool_defs: list[dict[str, Any]], *, context_length: Optional[int] = None,
+                       config: Optional[ToolSearchConfig] = None) -> AssemblyResult:
+    """Tool-defs the model should see: passthrough when inactive, else deferrable tools
+    replaced by the three bridge tools. Idempotent — existing bridge tools are stripped first."""
     config = config or load_config()
     incoming = [
         td for td, name in zip(tool_defs, _tool_def_names(tool_defs))
@@ -612,7 +592,9 @@ def _clip_description(text: str, cap: int = 500) -> str:
     return (cleaned[: cap - 3] + "...") if len(cleaned) > cap else cleaned
 
 
-def _shared_tool_record(entry: CatalogEntry) -> Dict[str, Any]:
+def _shared_tool_record(entry: CatalogEntry) -> dict[str, Any]:
+    """One record for the shared ``tools`` map (per-query groups carry names only);
+    ``required`` lets the model attempt a trivial call without a ``tool_describe`` round-trip."""
     try:
         fn = (entry.schema.get("function") or {}) if isinstance(entry.schema, dict) else {}
         params = fn.get("parameters") or {}
@@ -631,7 +613,7 @@ def _shared_tool_record(entry: CatalogEntry) -> Dict[str, Any]:
     }
 
 
-def _available_source_summary(catalog: List[CatalogEntry]) -> List[Dict[str, Any]]:
+def _available_source_summary(catalog: list[CatalogEntry]) -> list[dict[str, Any]]:
     """Deterministic summaries of connected and declared unavailable sources."""
     from tools.tool_search_catalog import hidden_declared_sources
 
@@ -640,19 +622,15 @@ def _available_source_summary(catalog: List[CatalogEntry]) -> List[Dict[str, Any
     return sorted(rows + hidden_declared_sources(), key=lambda row: row["name"])
 
 
-def _string_list_arg(
-    args: Dict[str, Any],
-    key: str,
-    *,
-    dedupe: bool,
-    max_items: int,
-    retry_hint: str,
-) -> Tuple[Optional[List[str]], Optional[str]]:
+def _string_list_arg(args: dict[str, Any], key: str, *, dedupe: bool, max_items: int,
+                     retry_hint: str) -> tuple[Optional[list[str]], Optional[str]]:
+    """Read a list-of-strings bridge argument -> ``(items, error_json)``. A bare string (a
+    common model slip) is a one-item list; rejects non-lists, all-blank lists, > ``max_items``."""
     raw = args.get(key)
     raw = [raw] if isinstance(raw, str) else raw
     if not isinstance(raw, list):
         return None, tool_error(f"{key} is required and must be an array of strings")
-    out: List[str] = []
+    out: list[str] = []
     for item in raw:
         text = str(item or "").strip()
         if text and (not dedupe or text not in out):
@@ -665,33 +643,34 @@ def _string_list_arg(
 
 
 # ── Search catalog cache (#140) ──────────────────────────────────────────
-_search_catalog_cache: dict[tuple[str, str], tuple[List[Dict[str, Any]], List[CatalogEntry]]] = {}
+_search_catalog_cache: dict[tuple[str, str], tuple[list[dict[str, Any]], list[CatalogEntry]]] = {}
 _SEARCH_CATALOG_CACHE_MAX = 16
 
 
-def _toolset_signature(tool_defs: List[Dict[str, Any]]) -> str:
-    names = sorted(
-        (td.get("function") or {}).get("name", "")
-        for td in tool_defs
-        if (td.get("function") or {}).get("name")
-    )
-    return "|".join(names)
+def _toolset_signature(tool_defs: list[dict[str, Any]]) -> str:
+    # Definitions can share names across profiles or change schemas during discovery.
+    # Cache only byte-identical catalogs in the same profile.
+    import hashlib
+    from hermes_constants import hermes_home_key
+    payload = json.dumps(tool_defs, sort_keys=True, ensure_ascii=False, default=str)
+    return hermes_home_key() + ":" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
 
 
 def _search_catalog_key(
-    tool_defs: List[Dict[str, Any]], config: ToolSearchConfig
+    tool_defs: list[dict[str, Any]], config: ToolSearchConfig
 ) -> tuple[str, str]:
     sig = _toolset_signature(tool_defs)
     cfg = "|".join(
         str(getattr(config, f, ""))
-        for f in ("enabled", "threshold_pct", "defer_core_toolsets")
+        for f in ("enabled", "threshold_pct", "defer_core_toolsets", "effective_defer_tools")
     )
     return (sig, cfg)
 
 
 def _build_search_catalog(
-    tool_defs: List[Dict[str, Any]], config: ToolSearchConfig
-) -> tuple[List[Dict[str, Any]], List[CatalogEntry]]:
+    tool_defs: list[dict[str, Any]], config: ToolSearchConfig
+) -> tuple[list[dict[str, Any]], list[CatalogEntry]]:
     key = _search_catalog_key(tool_defs, config)
     cached = _search_catalog_cache.get(key)
     if cached is not None:
@@ -711,8 +690,8 @@ def clear_search_catalog_cache() -> None:
 
 
 def _degraded_search_response(
-    queries: List[str],
-    tool_defs: List[Dict[str, Any]],
+    queries: list[str],
+    tool_defs: list[dict[str, Any]],
     limit: int,
     exc: BaseException,
 ) -> str:
@@ -741,12 +720,13 @@ def _degraded_search_response(
 
 
 def dispatch_tool_search(
-    args: Dict[str, Any],
+    args: dict[str, Any],
     *,
-    current_tool_defs: List[Dict[str, Any]],
+    current_tool_defs: list[dict[str, Any]],
     config: Optional[ToolSearchConfig] = None,
     connector_search: Optional[Any] = None,
     session_id: Optional[str] = None,
+    call: Optional[Any] = None,
 ) -> str:
     """Execute the ``tool_search`` bridge tool."""
     config = config or load_config()
@@ -765,6 +745,7 @@ def dispatch_tool_search(
         retry_hint="Retry with fewer, more targeted queries.",
     )
     if err:
+        _record_search_metric(current_tool_defs, hits=0, outcome="error")
         return err
     raw_limit = args.get("limit")
     limit = (
@@ -778,18 +759,18 @@ def dispatch_tool_search(
     except Exception as exc:
         return _degraded_search_response(queries, current_tool_defs, limit, exc)
 
-    remote_entries: List[List[CatalogEntry]] = [[] for _ in queries]
+    remote_entries: list[list[CatalogEntry]] = [[] for _ in queries]
     hosted_failure: Optional[str] = None
     if connections_in_scope(current_tool_defs):
         remote_entries, hosted_failure = connector_entries_by_group(
-            queries, connector_search=connector_search)
-    results: List[Dict[str, Any]] = []
-    tools_map: Dict[str, Dict[str, Any]] = {}
+            queries, connector_search=connector_search, call=call)
+    results: list[dict[str, Any]] = []
+    tools_map: dict[str, dict[str, Any]] = {}
     # An empty lexical catalog still has declared-but-hidden MCP sources.
     # Gating the summary on ``catalog`` dropped those rows and the empty-match
     # hint never named the server the user had declared.
     available_sources = _available_source_summary(catalog)
-    all_hits: List[CatalogEntry] = []
+    all_hits: list[CatalogEntry] = []
     for position, query in enumerate(queries):
         corpus = catalog + remote_entries[position]
         hits = search_catalog(corpus, query, limit=limit)
@@ -804,7 +785,7 @@ def dispatch_tool_search(
         for h in hits:
             tools_map.setdefault(h.name, _shared_tool_record(h))
         matches = [h.name for h in hits]
-        group: Dict[str, Any] = {"query": query, "matches": matches}
+        group: dict[str, Any] = {"query": query, "matches": matches}
         if not matches and available_sources:
             group["available_sources"] = available_sources
             group["hint"] = (
@@ -815,7 +796,7 @@ def dispatch_tool_search(
             )
         results.append(group)
     remote_count = sum(1 for name in tools_map if is_connector_name(name))
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "queries": queries,
         "total_available": len(catalog) + remote_count,
         "results": results,
@@ -864,11 +845,25 @@ def dispatch_tool_search(
 
     if hosted_failure:
         result["connectors"] = connectors_unavailable(hosted_failure, verb="searched")
+    _record_search_metric(current_tool_defs, catalog=catalog, hits=len(tools_map),
+                          outcome="connector_unavailable" if hosted_failure else "hits" if tools_map else "no_hits")
     return json.dumps(result, ensure_ascii=False)
 
 
+def _record_search_metric(current_tool_defs: list[dict[str, Any]], *, hits: int, outcome: str,
+                          catalog: Optional[list[CatalogEntry]] = None) -> None:
+    """One ``hermes.tool_search.count`` row: which corpora the search read, never the query."""
+    from hermes_cli.observability.shared_metrics_events import record_tool_search
+
+    local = bool(catalog if catalog is not None else _deferrable_in(current_tool_defs))
+    hosted = connections_in_scope(current_tool_defs)
+    scope = "both" if local and hosted else "connector" if hosted else "local"
+    record_tool_search(scope=scope, hits=hits, outcome=outcome)
+
+
+
 # ── tool_describe caching & fuzzy matching (#978, #107, #1015, #2309) ────
-_describe_cache: Dict[Tuple[str, str], str] = {}
+_describe_cache: dict[tuple[str, str], str] = {}
 _DESCRIBE_CACHE_MAX = 64
 
 
@@ -877,7 +872,7 @@ def clear_describe_cache() -> None:
     _describe_cache.clear()
 
 
-def _fuzzy_tool_names(query: str, available: List[str], limit: int = 3) -> List[str]:
+def _fuzzy_tool_names(query: str, available: list[str], limit: int = 3) -> list[str]:
     """Return up to ``limit`` tool names closest to ``query`` by substring / edit-distance (#978)."""
     q = query.lower()
     if not q or not available:
@@ -905,8 +900,8 @@ def _fuzzy_tool_names(query: str, available: List[str], limit: int = 3) -> List[
 
 
 def _tool_schema_payload(
-    tool_defs: List[Dict[str, Any]], name: str
-) -> Optional[Dict[str, Any]]:
+    tool_defs: list[dict[str, Any]], name: str
+) -> Optional[dict[str, Any]]:
     """Return describe payload if name is in tool_defs (#107)."""
     for td in tool_defs:
         fn = _fn(td)
@@ -920,10 +915,10 @@ def _tool_schema_payload(
 
 
 def _dispatch_tool_describe_inner(
-    args: Dict[str, Any],
+    args: dict[str, Any],
     name: str,
-    current_tool_defs: List[Dict[str, Any]],
-    config: "ToolSearchConfig",
+    current_tool_defs: list[dict[str, Any]],
+    config: ToolSearchConfig,
 ) -> str:
     """Inner logic for dispatch_tool_describe, separated for caching."""
     if not is_deferrable_tool_name(name, config=config):
@@ -1017,11 +1012,12 @@ def _dispatch_tool_describe_inner(
 
 
 def _dispatch_tool_describe_batched(
-    args: Dict[str, Any],
+    args: dict[str, Any],
     *,
-    current_tool_defs: List[Dict[str, Any]],
+    current_tool_defs: list[dict[str, Any]],
     config: Optional[ToolSearchConfig] = None,
     connector_describe: Optional[Any] = None,
+    call: Optional[Any] = None,
 ) -> str:
     config = config or load_config_readonly()
     names, err = _string_list_arg(
@@ -1035,12 +1031,12 @@ def _dispatch_tool_describe_batched(
         return err
     deferrable = _deferrable_in(current_tool_defs)
     by_name = {name: _fn(td) for td, name in zip(deferrable, _tool_def_names(deferrable)) if name}
-    remote_schemas, hosted_failure = remote_schemas_for(names, current_tool_defs, connector_describe)
+    remote_schemas, hosted_failure = remote_schemas_for(names, current_tool_defs, connector_describe, call=call)
 
-    tools: Dict[str, Dict[str, Any]] = {}
-    not_found: List[str] = []
-    undescribed: List[str] = []
-    errors: Dict[str, str] = {}
+    tools: dict[str, dict[str, Any]] = {}
+    not_found: list[str] = []
+    undescribed: list[str] = []
+    errors: dict[str, str] = {}
     for name in names:
         fn = by_name.get(name)
         remote_fn = remote_schemas.get(name)
@@ -1063,7 +1059,7 @@ def _dispatch_tool_describe_batched(
             errors[name] = not_deferrable_error(name)
         else:
             not_found.append(name)
-    result: Dict[str, Any] = {"tools": tools}
+    result: dict[str, Any] = {"tools": tools}
     if not_found:
         result["not_found"] = not_found
         result["hint"] = "Names in not_found are not currently available. Re-run tool_search to refresh."
@@ -1075,11 +1071,12 @@ def _dispatch_tool_describe_batched(
 
 
 def dispatch_tool_describe(
-    args: Dict[str, Any],
+    args: dict[str, Any],
     *,
-    current_tool_defs: List[Dict[str, Any]],
+    current_tool_defs: list[dict[str, Any]],
     config: Optional[ToolSearchConfig] = None,
     connector_describe: Optional[Any] = None,
+    call: Optional[Any] = None,
 ) -> str:
     """Execute the ``tool_describe`` bridge tool. Returns a JSON string."""
     if args.get("names") is not None:
@@ -1088,6 +1085,7 @@ def dispatch_tool_describe(
             current_tool_defs=current_tool_defs,
             config=config,
             connector_describe=connector_describe,
+            call=call,
         )
     if config is None:
         config = load_config()
@@ -1110,7 +1108,7 @@ def dispatch_tool_describe(
     return result
 
 
-def scoped_deferrable_names(tool_defs: List[Dict[str, Any]]) -> frozenset[str]:
+def scoped_deferrable_names(tool_defs: list[dict[str, Any]]) -> frozenset[str]:
     defer_tools = load_config_readonly().effective_defer_tools
     return frozenset(
         name for td, name in zip(tool_defs, _tool_def_names(tool_defs))
@@ -1123,7 +1121,7 @@ def scoped_deferrable_names(tool_defs: List[Dict[str, Any]]) -> frozenset[str]:
 # unavailable per #1307) tries to invoke a core tool via tool_call, the
 # generic "is not a deferrable tool" message gave no recovery guidance and
 # the agent retried the same pattern in a loop.
-_CORE_TOOL_ALTERNATIVES: Dict[str, str] = {
+_CORE_TOOL_ALTERNATIVES: dict[str, str] = {
     "terminal": (
         "terminal is not available in this environment. "
         "Use search_files for finding files, read_file for reading file contents, "
@@ -1141,6 +1139,19 @@ _CORE_TOOL_ALTERNATIVES: Dict[str, str] = {
         "or delegate_task to spawn a subagent that has browser access."
     ),
 }
+def out_of_scope_reason(name: str) -> Optional[str]:
+    """Fail-fast reason for a registered session-gated GUI tool outside this session's
+    scope (#120413). The generic scope block ("not available ... Use tool_search") sends
+    the model on a round-trip tool_search can never satisfy — the tool is not in this
+    session's catalog at all. Name the missing surface instead. None for anything else
+    (the generic message still applies). Fail-open: never raises."""
+    try:
+        if _registry_toolset(name) in _DIRECT_SURFACE_TOOLSETS:
+            return (f"'{name}' needs a desktop-app session with a GUI surface (preview/terminal panes). "
+                    "This session has none: use it only from the Hermes desktop app, not via tool_search.")
+    except Exception:
+        pass
+    return None
 
 
 def _non_deferrable_error(name: str, config: Optional[ToolSearchConfig] = None) -> str:
@@ -1176,8 +1187,8 @@ def _non_deferrable_error(name: str, config: Optional[ToolSearchConfig] = None) 
 
 
 def resolve_underlying_call(
-    args: Dict[str, Any], config: Optional[ToolSearchConfig] = None
-) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:
+    args: dict[str, Any], config: Optional[ToolSearchConfig] = None
+) -> tuple[Optional[str], dict[str, Any], Optional[str]]:
     """Parse a ``tool_call`` invocation into (underlying_name, args, error_msg)."""
     entries, err = normalize_tool_call_entries(args)
     if err:
@@ -1226,9 +1237,9 @@ def _check_type(value: Any, type_str: str) -> bool:
 
 def validate_tool_args(
     name: str,
-    args: Dict[str, Any],
+    args: dict[str, Any],
     schema: Optional[dict] = None,
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, Optional[str]]:
     """Validate *args* against a tool's OpenAI-format parameter *schema*."""
     if not schema:
         return True, None
@@ -1275,43 +1286,44 @@ def validate_tool_args(
 
 
 __all__ = [
-    "TOOL_SEARCH_NAME",
-    "TOOL_DESCRIBE_NAME",
-    "TOOL_CALL_NAME",
     "BRIDGE_TOOL_NAMES",
-    "ToolSearchConfig",
-    "CatalogEntry",
+    "CONNECTOR_BATCH_SENTINEL",
+    "TOOL_CALL_NAME",
+    "TOOL_DESCRIBE_NAME",
+    "TOOL_SEARCH_NAME",
+    "_CORE_TOOL_ALTERNATIVES",
     "AssemblyResult",
-    "load_config",
-    "load_config_readonly",
-    "is_deferrable_tool_name",
-    "classify_tools",
-    "estimate_tokens_from_schemas",
-    "should_activate",
+    "CatalogEntry",
+    "ToolSearchConfig",
+    "_non_deferrable_error",
+    "assemble_tool_defs",
+    "bridge_tool_schemas",
     "build_catalog",
     "build_catalog_listing",
     "build_catalog_listing_with_form",
-    "listing_token_budget",
-    "search_catalog",
-    "bridge_tool_schemas",
-    "assemble_tool_defs",
-    "is_bridge_tool",
-    "dispatch_tool_search",
-    "dispatch_tool_describe",
-    "resolve_underlying_call",
-    "scoped_deferrable_names",
-    "validate_deferred_call_args",
-    "normalize_tool_call_entries",
-    "CONNECTOR_BATCH_SENTINEL",
-    "is_connector_name",
-    "effective_core_tool_names",
-    "get_previous_queries",
-    "note_tool_search",
-    "reset_search_streak",
-    "_non_deferrable_error",
-    "_CORE_TOOL_ALTERNATIVES",
+    "classify_tools",
     "clear_describe_cache",
     "clear_search_catalog_cache",
+    "dispatch_tool_describe",
+    "dispatch_tool_search",
+    "effective_core_tool_names",
+    "estimate_tokens_from_schemas",
+    "get_previous_queries",
+    "is_bridge_tool",
+    "is_connector_name",
+    "is_deferrable_tool_name",
+    "listing_token_budget",
+    "load_config",
+    "load_config_readonly",
+    "normalize_tool_call_entries",
+    "note_tool_search",
+    "out_of_scope_reason",
+    "reset_search_streak",
+    "resolve_underlying_call",
+    "scoped_deferrable_names",
+    "search_catalog",
+    "should_activate",
+    "validate_deferred_call_args",
     "validate_tool_args",
 ]
 
@@ -1320,18 +1332,18 @@ __all__ = [
 # Names external plugins imported from this module before the Sep 2026 decomposition.
 # Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
 # The whole block is removed by reverting the commit that added it.
-from typing import Literal  # noqa: F401,E402
-import copy  # noqa: F401,E402
-from dataclasses import field  # noqa: F401,E402
-import re  # noqa: F401,E402
-import snowballstemmer  # noqa: F401,E402
-import threading  # noqa: F401,E402
+from typing import Literal
+import copy
+from dataclasses import field
+import re
+import snowballstemmer
+import threading
 
 
 def build_catalog_listing(
-    deferrable: List[Dict[str, Any]],
+    deferrable: list[dict[str, Any]],
     *,
     max_tokens: int = 4000,
-) -> Tuple[Optional[str], str]:
+) -> tuple[Optional[str], str]:
     return build_catalog_listing_with_form(deferrable, max_tokens=max_tokens)
 # ---- END PLUGIN-COMPAT ----

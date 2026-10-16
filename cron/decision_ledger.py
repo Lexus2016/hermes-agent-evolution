@@ -11,7 +11,7 @@ import math
 import os
 from pathlib import Path
 import stat
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 import uuid
 
 from utils import atomic_json_write
@@ -21,7 +21,7 @@ MAX_EVIDENCE_BYTES = 1024 * 1024
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _evidence_path(path: str, workdir=None) -> Path:
@@ -45,7 +45,7 @@ def _evidence_path(path: str, workdir=None) -> Path:
 def _digest(path: str, workdir=None) -> str:
     # No commands, network probes, devices or unbounded file reads.
     path = _evidence_path(path, workdir)
-    if os.open not in os.supports_dir_fd or not hasattr(os, "O_NOFOLLOW"):
+    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
         raise ValueError("descriptor-scoped watch files are unsupported on this platform")
     # Open EVERY component relative to an already-open directory. A concurrent
     # parent swap cannot turn the validated path into an out-of-scope symlink.
@@ -162,3 +162,39 @@ def preflight(job: dict) -> str | None:
         import logging
         logging.getLogger(__name__).exception("Could not persist reopened decision for %s", job["id"])
     return f"Decision reopened: {reason}. Review the premises, update decision, then resume."
+
+
+def preflight_current(job: dict, *, persist: bool = True) -> str | None:
+    """Fence a submitted snapshot against its owning store before any side effects.
+
+    Never adopt a newer decision for an old request. Admission uses ``persist=False``
+    inside its SQLite write transaction: this mode only reads, without taking a
+    jobs write lock or emitting reopening events. Execution persists refusals.
+    """
+    from cron import jobs
+
+    # Writers atomically replace jobs.json. Read that snapshot without load_jobs(),
+    # whose legacy repair path can write and acquire the jobs lock under admission's
+    # SQLite transaction.
+    records = jobs._peek_jobs_unlocked()
+    if records is None or any(not isinstance(row, dict) for row in records):
+        return "Decision refused: the owning job store is unreadable or malformed."
+    current = next((row for row in records if row.get("id") == job["id"]), None)
+    if current is None:
+        if "decision_ledger" not in job:
+            return None  # Compatibility for legacy, unpersisted callers.
+        return "Decision refused: the owning job no longer exists."
+    if (("decision_ledger" in current) != ("decision_ledger" in job)
+            or current.get("decision_ledger") != job.get("decision_ledger")):
+        return "Decision refused: the job was replanned after submission; submit the current plan."
+    if "decision_ledger" not in current:
+        return None
+    # Workdir scopes evidence and is part of the plan even when its ledger is unchanged.
+    if current.get("workdir") != job.get("workdir"):
+        return "Decision refused: the job workdir changed after submission."
+    if persist:
+        return preflight(current)
+    reason = check(current["decision_ledger"], workdir=current.get("workdir"))
+    if reason is not None:
+        return f"Decision reopened: {reason}. Review the premises, update decision, then resume."
+    return None

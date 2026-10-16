@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for the canonical skill version line (issue #1448, Child D of #1308)."""
 
 import json
@@ -7,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_skill_version import (  # noqa: E402
+from evolution_skill_version import (
     SkillVersion,
     current_version,
     format_current,
@@ -71,8 +70,7 @@ class TestCurrentVersion:
         p = tmp_path / "s.jsonl"
         p.parent.mkdir(parents=True, exist_ok=True)
         with open(p, "w", encoding="utf-8") as fh:
-            for n in (1, 3, 2):
-                fh.write(json.dumps({"skill": "s", "version": n}) + "\n")
+            fh.writelines(json.dumps({"skill": "s", "version": n}) + "\n" for n in (1, 3, 2))
         assert current_version("s", store_dir=tmp_path).version == 3
 
 

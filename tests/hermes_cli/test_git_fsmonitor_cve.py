@@ -42,7 +42,7 @@ def _setup_malicious_repo(tmp_path: Path, payload_marker: Path) -> Path:
     script_body = (
         "import sys\n"
         "from pathlib import Path\n"
-        f"Path({repr(str(payload_marker))}).write_text('PWNED')\n"
+        f"Path({str(payload_marker)!r}).write_text('PWNED')\n"
         "sys.exit(0)\n"
     )
     exploit_script.write_text(script_body, encoding="utf-8")
@@ -74,7 +74,7 @@ def test_bounded_git_probe_neutralizes_fsmonitor(tmp_path):
     assert not marker.exists()
 
     # Probe status
-    output = bounded_git_probe(["git", "-C", str(repo), "status", "--porcelain"], timeout=5.0)
+    _output = bounded_git_probe(["git", "-C", str(repo), "status", "--porcelain"], timeout=5.0)
     assert marker.exists() is False, "Exploit payload executed via bounded_git_probe!"
 
 
@@ -98,7 +98,7 @@ def test_cli_worktree_probes_neutralize_fsmonitor(tmp_path, monkeypatch):
     assert not marker.exists()
 
     # Test _worktree_is_dirty
-    dirty = _worktree_is_dirty(str(repo), timeout=5)
+    _dirty = _worktree_is_dirty(str(repo), timeout=5)
     assert marker.exists() is False, "Exploit payload executed via _worktree_is_dirty!"
 
     # Test _git_repo_root inside untrusted repo

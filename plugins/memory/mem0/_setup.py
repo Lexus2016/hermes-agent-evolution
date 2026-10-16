@@ -16,7 +16,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from hermes_constants import get_hermes_home  # noqa: F401 — patched by tests
+from hermes_constants import get_hermes_home
 
 from ._oss_providers import EMBEDDER_PROVIDERS, KNOWN_DIMS, LLM_PROVIDERS, SECTION_REGISTRIES, VECTOR_PROVIDERS, validate_oss_config, vector_default_config
 
@@ -269,7 +269,7 @@ def _setup_oss(hermes_home: str, config: dict, flags: dict[str, str]) -> None:
 
 
 def _docker(*args: str, timeout: int, **kwargs) -> subprocess.CompletedProcess:
-    return subprocess.run(["docker", *args], capture_output=True, timeout=timeout, stdin=subprocess.DEVNULL, **kwargs)
+    return subprocess.run(["docker", *args], capture_output=True, timeout=timeout, stdin=subprocess.DEVNULL, **kwargs, check=False)
 
 
 def _pg_ready(host: str, port: int, wait: int) -> bool:
@@ -344,7 +344,7 @@ def _ensure_ollama(models: list[str]) -> bool:
             continue
         print(f"  Pulling '{model}'... (this may take a few minutes)")
         try:
-            subprocess.run([ollama_bin or "ollama", "pull", model], timeout=600, stdin=subprocess.DEVNULL)
+            subprocess.run([ollama_bin or "ollama", "pull", model], timeout=600, stdin=subprocess.DEVNULL, check=False)
             print(f"  ✓ Model '{model}' pulled")
         except Exception as e:
             print(f"  Warning: Could not pull '{model}': {e}\n  Run manually: ollama pull {model}")
@@ -430,19 +430,20 @@ def _setup_oss_interactive(hermes_home: str, config: dict) -> None:
 
 def _install_provider_deps(llm_id: str, embedder_id: str, vector_id: str) -> None:
     deps = {registry[pid]["pip_dep"] for (_, registry), pid in zip(SECTION_REGISTRIES, (llm_id, embedder_id, vector_id)) if registry.get(pid, {}).get("pip_dep")}
-    for dep in sorted(deps):
-        print(f"  Installing {dep}...")
-        try:
-            # Environment-aware install: sealed hosted venvs redirect to the durable data-volume target instead of /opt/hermes.
-            from tools.lazy_deps import install_specs
-            outcome = install_specs([dep], timeout=60)
-        except Exception:
-            outcome = None
-        print(f"  ✓ Installed {dep}" if outcome is not None and outcome.ok else f"  Warning: cannot install {dep}: {outcome.reason}" if outcome is not None and outcome.blocked
-              else f"  Warning: Could not install {dep}. Install manually: uv pip install {dep}")
-    if deps:
-        import importlib
-        importlib.invalidate_caches()
+    if not deps:
+        return
+    print("  Preparing Mem0 OSS backend dependencies through PM...")
+    try:
+        from pm import sync_venv
+        sync_venv(["mem0-oss"], explicit=True)
+    except Exception as exc:
+        import logging
+        logging.exception("Memory dependency preparation failed",
+                          exc_info=(RuntimeError, RuntimeError(type(exc).__name__), None))
+        print(f"  Warning: Could not prepare Mem0 OSS dependencies: {exc}. "
+              "Run: hermes pm install --extra mem0-oss")
+    else:
+        print("  Mem0 OSS dependencies prepared; restart Hermes to use the selected environment.")
 
 
 def _probe(fn, ok: str, fail: str, exc=Exception) -> tuple[bool, str]:
@@ -499,9 +500,10 @@ _MODE_PICKER = (_setup_platform, _setup_selfhosted, _setup_oss)
 def post_setup(hermes_home: str, config: dict) -> None:
     """Entry point for `hermes memory setup`: routes on --mode (platform / selfhosted / oss), else shows a picker.
     OSS is non-interactive only when the mode came from the flag."""
-    with suppress(ImportError):  # mem0ai must meet the minimum version from plugin.yaml
-        import mem0
-        installed_ver = getattr(mem0, "__version__", None)
+    from importlib.metadata import PackageNotFoundError, version
+    # Version inspection must not import the SDK: its import creates ~/.mem0 state.
+    with suppress(PackageNotFoundError):  # mem0ai must meet plugin.yaml's minimum version
+        installed_ver = version("mem0ai")
         if installed_ver and tuple(int(x) for x in installed_ver.split(".")[:3]) < (2, 0, 7):
             print(f"\n  ⚠ mem0ai {installed_ver} installed but >=2.0.7 required.\n  Run: uv pip install --python {sys.executable} 'mem0ai>=2.0.7'")
     flags = parse_flags(sys.argv[1:])

@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # Maps a side-effecting MCP tool name to metadata about how to verify whether
 # the effect landed.  These are the canonical tool names for the connected MCP
 # servers in this Hermes environment.
-_SIDE_EFFECT_REGISTRY: Dict[str, Dict[str, Any]] = {
+_SIDE_EFFECT_REGISTRY: dict[str, dict[str, Any]] = {
     "mcp__murable__agentmail__send_message": {
         "verify_tool": "mcp__murable__agentmail__list_messages",
         "effect_type": "email_send",
@@ -116,7 +116,7 @@ def _looks_like_post_dispatch_error(result: Any) -> bool:
 
 def check_before_retry(
     tool_name: str,
-    args: Dict[str, Any],
+    args: dict[str, Any],
     result: Any,
     session_nonce: str = "",
 ) -> Optional[RetryVerdict]:
@@ -162,7 +162,7 @@ def check_before_retry(
 
 
 def idempotency_key(
-    tool_name: str, args: Dict[str, Any], session_nonce: str = ""
+    tool_name: str, args: dict[str, Any], session_nonce: str = ""
 ) -> str:
     """Generate a deterministic key from tool + args + session.
 

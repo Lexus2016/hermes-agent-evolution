@@ -106,9 +106,9 @@ def _make_agent(max_iterations: int = 10) -> AIAgent:
 def _fast_backoff_patches():
     """Make backoff instant so the tests don't sleep on the retry path."""
     return (
-        patch("agent.conversation_loop.jittered_backoff", return_value=0.01),
+        patch("agent.retry_utils.jittered_backoff", return_value=0.01),
         patch(
-            "agent.conversation_loop.adaptive_rate_limit_backoff",
+            "agent.retry_utils.adaptive_rate_limit_backoff",
             side_effect=lambda retry_count, **kw: (0.01, None),
         ),
     )

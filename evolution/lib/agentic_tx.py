@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Agentic Transaction Slice 1 — transaction envelope primitive (#2762).
 
 Child of #2759 (Agentic Transaction, from arXiv 2608.13900).  Evolution
@@ -47,7 +46,7 @@ Compensation = Callable[[], None]
 class CompensationRegistry:
     """Maps a mutation key to the compensation that undoes it."""
 
-    _compensations: Dict[str, Compensation] = field(default_factory=dict)
+    _compensations: dict[str, Compensation] = field(default_factory=dict)
 
     def register(self, key: str, compensation: Compensation) -> None:
         """Register a compensation for a non-rollbackable mutation."""
@@ -62,7 +61,7 @@ class CompensationRegistry:
         for key in reversed(list(self._compensations)):
             try:
                 self._compensations[key]()
-            except Exception as exc:  # noqa: BLE001 - one bad compensation must not block the rest
+            except Exception as exc:
                 logger.warning("compensation for %r failed: %s", key, exc)
         self._compensations.clear()
 
@@ -84,7 +83,7 @@ class TransactionEnvelope:
     enabled: bool = False
 
     @contextmanager
-    def begin(self) -> Iterator["TransactionEnvelope"]:
+    def begin(self) -> Iterator[TransactionEnvelope]:
         """Context manager: on exception, roll back; on success, commit."""
         if not self.enabled:
             yield self

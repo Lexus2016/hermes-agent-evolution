@@ -18,7 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from introspection_extract import build_digest, scan_session  # noqa: E402
+from introspection_extract import build_digest, scan_session
 
 
 def _session(tmp_path, name, lines, *, age_days=0):

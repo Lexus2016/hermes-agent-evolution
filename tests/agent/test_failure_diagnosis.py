@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for multi-hypothesis failure diagnosis (#1029)."""
 
 from __future__ import annotations

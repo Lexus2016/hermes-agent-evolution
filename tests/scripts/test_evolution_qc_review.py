@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from evolution_qc_review import build_qc_review_task, parse_qc_report, main  # noqa: E402  # fmt: skip
+from evolution_qc_review import build_qc_review_task, parse_qc_report, main  # fmt: skip
 
 _j = json.dumps
 

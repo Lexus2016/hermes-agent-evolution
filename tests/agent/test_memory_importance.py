@@ -10,12 +10,12 @@ Only stdlib + pytest + unittest.mock. No live network calls.
 import json
 import os
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from unittest import mock
 
 import pytest
 
-from agent.memory_importance import (  # noqa: E402
+from agent.memory_importance import (
     DEFAULT_HALF_LIFE_DAYS,
     DEFAULT_SIGNAL_WEIGHTS,
     EpisodicMemoryStore,
@@ -25,7 +25,7 @@ from agent.memory_importance import (  # noqa: E402
     score_importance,
     tokenize,
 )
-from agent.memory_manager import MemoryManager  # noqa: E402
+from agent.memory_manager import MemoryManager
 
 
 # ── tokenize ──────────────────────────────────────────────────────────────────
@@ -110,19 +110,19 @@ def test_score_weights_sum_to_one():
 
 
 def test_decay_no_time_passed():
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     assert apply_temporal_decay(0.8, now, reference_time=now) == pytest.approx(0.8)
 
 
 def test_decay_one_half_life():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old = now - timedelta(days=DEFAULT_HALF_LIFE_DAYS)
     result = apply_temporal_decay(0.8, old, reference_time=now)
     assert result == pytest.approx(0.4, rel=1e-2)
 
 
 def test_decay_future_event_no_boost():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     future = now + timedelta(days=10)
     assert apply_temporal_decay(0.5, future, reference_time=now) == pytest.approx(0.5)
 
@@ -191,7 +191,7 @@ def test_event_raw_importance():
 
 
 def test_event_decayed_importance():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old = (now - timedelta(days=60)).isoformat()
     ev = MemoryEvent(what="x", when=old, friction_signals={"retries": 5})
     raw = ev.raw_importance()

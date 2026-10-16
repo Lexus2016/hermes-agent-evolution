@@ -134,7 +134,7 @@ def _gh_has_stored_auth() -> bool:
     """
     hosts = Path.home() / ".config" / "gh" / "hosts.yml"
     try:
-        text = hosts.read_text(encoding="utf-8")
+        text = hosts.read_text(encoding="utf-8-sig")
     except OSError:
         return False
     return "oauth_token" in text or "token:" in text

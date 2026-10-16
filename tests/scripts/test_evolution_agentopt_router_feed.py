@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """AgentOpt Slice 3 — measured-combo router feed tests (#2743)."""
 
 import json
@@ -8,13 +7,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from evolution_agentopt_report import build_report  # noqa: E402
-from evolution_agentopt_router_feed import (  # noqa: E402
+from evolution_agentopt_report import build_report
+from evolution_agentopt_router_feed import (
     default_table_path,
     feed_routing_table,
     run_feed,
 )
-from tools.model_routing_table import RoutingTable  # noqa: E402
+from tools.model_routing_table import RoutingTable
 
 
 def _report():

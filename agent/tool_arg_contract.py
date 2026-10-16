@@ -50,7 +50,7 @@ class ArgContractViolation:
     detail: str
 
     @classmethod
-    def missing_required(cls, param: str) -> "ArgContractViolation":
+    def missing_required(cls, param: str) -> ArgContractViolation:
         return cls(
             kind="missing_required",
             param=param,
@@ -59,8 +59,8 @@ class ArgContractViolation:
 
     @classmethod
     def invalid_enum(
-        cls, param: str, value: Any, allowed: Tuple[Any, ...]
-    ) -> "ArgContractViolation":
+        cls, param: str, value: Any, allowed: tuple[Any, ...]
+    ) -> ArgContractViolation:
         allowed_repr = ", ".join(repr(v) for v in allowed)
         return cls(
             kind="invalid_enum",
@@ -71,7 +71,7 @@ class ArgContractViolation:
     @classmethod
     def type_mismatch(
         cls, param: str, value: Any, expected: str, got: str
-    ) -> "ArgContractViolation":
+    ) -> ArgContractViolation:
         return cls(
             kind="type_mismatch",
             param=param,
@@ -84,7 +84,7 @@ class ArgContractOutcome:
     """Result of checking one tool call's arguments against its schema."""
 
     tool_name: str
-    violations: Tuple[ArgContractViolation, ...] = ()
+    violations: tuple[ArgContractViolation, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -281,8 +281,8 @@ def tool_arg_contract_enabled() -> bool:
 
 
 __all__ = [
-    "ArgContractViolation",
     "ArgContractOutcome",
+    "ArgContractViolation",
     "check_tool_args_contract",
     "tool_arg_contract_enabled",
 ]

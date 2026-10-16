@@ -8,10 +8,11 @@ messages — observed in production as 'рядкам' + 'и (мій попере
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from gateway.stream_consumer import GatewayStreamConsumer
+from gateway.stream_consumer import GatewayStreamConsumer, StreamConsumerConfig
 
 _TEXT = "Правлю точними живими рядками (мій попередній EN-паттерн не збігався):"
 
@@ -78,6 +79,47 @@ async def test_a_flood_driven_continuation_does_not_start_mid_word():
         f"continuation starts mid-word: {continuation[:30]!r}")
     assert " ".join(_TEXT.split()).endswith(" ".join(continuation.split())), (
         "the continuation must be a suffix of the message, whole words included")
+
+def _make_consumer() -> GatewayStreamConsumer:
+    """Minimal consumer whose send/edit surface is only exercised if a bug
+    sends on the wrong field."""
+    adapter = MagicMock()
+    adapter.REQUIRES_EDIT_FINALIZE = False
+    adapter.MAX_MESSAGE_LENGTH = 4096
+    adapter.send = AsyncMock(return_value=SimpleNamespace(success=True, message_id="m"))
+    adapter.edit_message = AsyncMock(return_value=SimpleNamespace(success=True, message_id="m"))
+    return GatewayStreamConsumer(
+        adapter=adapter,
+        chat_id="chat",
+        config=StreamConsumerConfig(cursor=" ▉"),
+    )
+
+
+class TestContinuationWordBoundary:
+    """#116312 — back the fallback cut up to the last space/newline."""
+
+    def test_mid_word_prefix_backs_up_to_last_space(self):
+        # Issue reproduction: the visible preview ends mid-word ("рядкам" of
+        # "рядками"); the continuation must start at the word boundary.
+        consumer = _make_consumer()
+        consumer._last_sent_text = "Правлю точними живими рядкам ▉"
+        final_text = "Правлю точними живими рядками (мій попередній EN-паттерн…"
+        assert consumer._continuation_text(final_text) == (
+            "рядками (мій попередній EN-паттерн…")
+
+    def test_one_long_token_keeps_original_cut(self):
+        # No boundary to back up to: the original cut stands rather than
+        # re-sending the whole message.
+        consumer = _make_consumer()
+        consumer._last_sent_text = "у" * 100
+        final_text = ("у" * 100) + ("д" * 20)
+        assert consumer._continuation_text(final_text) == "д" * 20
+
+    def test_whole_word_prefix_is_not_resent(self):
+        # The preview ends exactly on a word; the continuation must not repeat it.
+        consumer = _make_consumer()
+        consumer._last_sent_text = "Here is the answer ▉"
+        assert consumer._continuation_text("Here is the answer to your question.") == "to your question."
 
 
 @pytest.mark.parametrize(

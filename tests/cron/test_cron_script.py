@@ -13,7 +13,7 @@ import re
 import subprocess
 import sys
 import textwrap
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -60,17 +60,6 @@ class TestJobScriptField:
         loaded = get_job(job["id"])
         assert loaded["script"] == "/path/to/monitor.py"
 
-    def test_create_job_without_script(self, cron_env):
-        from cron.jobs import create_job
-
-        job = create_job(prompt="Hello", schedule="every 1h")
-        assert job.get("script") is None
-
-    def test_create_job_empty_script_normalized_to_none(self, cron_env):
-        from cron.jobs import create_job
-
-        job = create_job(prompt="Hello", schedule="every 1h", script="  ")
-        assert job.get("script") is None
 
     def test_update_job_add_script(self, cron_env):
         from cron.jobs import create_job, update_job
@@ -81,20 +70,11 @@ class TestJobScriptField:
         updated = update_job(job["id"], {"script": "/new/script.py"})
         assert updated["script"] == "/new/script.py"
 
-    def test_update_job_clear_script(self, cron_env):
-        from cron.jobs import create_job, update_job
-
-        job = create_job(prompt="Hello", schedule="every 1h", script="/some/script.py")
-        assert job["script"] == "/some/script.py"
-
-        updated = update_job(job["id"], {"script": None})
-        assert updated.get("script") is None
-
 
 def test_cronjob_tool_rejects_stale_past_one_shot(cron_env, monkeypatch):
     from tools.cronjob_tools import cronjob
 
-    now = datetime(2026, 3, 18, 4, 30, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 3, 18, 4, 30, 0, tzinfo=UTC)
     monkeypatch.setattr("cron.jobs._hermes_now", lambda: now)
     stale = (now - timedelta(minutes=5)).isoformat()
 
@@ -116,6 +96,34 @@ class TestRunJobScript:
         success, output = _run_job_script(str(script))
         assert success is True
         assert output == "hello from script"
+
+    @pytest.mark.platforms("posix")
+    @pytest.mark.parametrize("make_interpreter, expected", [
+        (lambda d: "python3", "absolute or ~-prefixed"),
+        (lambda d: str(d / "missing" / "python3"), "not found"),
+        (lambda d: str(d), "not a file"),
+        (lambda d: (d / "python3").write_text("") or str(d / "python3"), "not executable"),
+        (lambda d: "/bin/bash", "must be a Python executable"),
+        (lambda d: (d / "python").symlink_to("/bin/bash") or str(d / "python"),
+         "must be a Python executable"),
+        (lambda d: (d / "pythonw").symlink_to(sys.executable) or str(d / "pythonw"),
+         "must be a Python executable"),
+    ], ids=["bare-name", "missing", "directory", "not-executable", "bash",
+            "python-symlink-to-bash", "pythonw"])
+    def test_configured_interpreter_is_refused_unless_a_python_path(
+        self, cron_env, tmp_path, make_interpreter, expected
+    ):
+        """#70500: a bad job ``interpreter`` fails the run with a clear message instead of
+        raising — and never runs a ``.py`` body under a non-Python image, which would let an
+        unscanned script execute as shell."""
+        from cron.scheduler_script import _run_job_script
+
+        script = cron_env / "scripts" / "job.py"
+        script.write_text('print("ran")\n')
+
+        success, output = _run_job_script(str(script), interpreter=make_interpreter(tmp_path))
+        assert success is False
+        assert expected in output
 
     def test_script_stdout_non_utf8_decoded_lossily(self, cron_env):
         """A stray non-UTF-8 byte in script stdout must not fail the run (#105582).
@@ -148,29 +156,6 @@ class TestRunJobScript:
         assert success is True
         assert output == "relative works"
 
-    def test_script_not_found(self, cron_env):
-        from cron.scheduler import _run_job_script
-
-        success, output = _run_job_script("nonexistent_script.py")
-        assert success is False
-        assert "not found" in output.lower()
-
-    def test_script_nonzero_exit(self, cron_env):
-        from cron.scheduler import _run_job_script
-
-        script = cron_env / "scripts" / "fail.py"
-        script.write_text(textwrap.dedent("""\
-            import sys
-            print("partial output")
-            print("error info", file=sys.stderr)
-            sys.exit(1)
-        """))
-
-        success, output = _run_job_script(str(script))
-        assert success is False
-        assert "exited with code 1" in output
-        assert "error info" in output
-
     def test_missing_script_names_the_profile_folder(self, cron_env):
         """Scripts resolve per profile (#4707); the runtime error must say so (#94821)."""
         from cron.scheduler_script import _run_job_script
@@ -188,7 +173,7 @@ class TestRunJobScript:
 
         # sorted() so the probed var is deterministic across runs
         # (frozenset iteration order varies with PYTHONHASHSEED).
-        blocked_var = sorted(_HERMES_PROVIDER_ENV_BLOCKLIST)[0]
+        blocked_var = min(_HERMES_PROVIDER_ENV_BLOCKLIST)
         monkeypatch.setenv(blocked_var, "must_not_leak")
 
         script = cron_env / "scripts" / "env_probe.py"
@@ -206,7 +191,7 @@ class TestRunJobScript:
         assert success is True
         assert output == "ABSENT"
 
-    @pytest.mark.windows_only
+    @pytest.mark.platforms("windows")
     def test_windows_uv_venv_python_script_bypasses_launcher(self, cron_env, tmp_path, monkeypatch):
         # Windows-only: the fake ``sys.platform`` could not reproduce the
         # ``Scripts/python.exe`` launcher layout or the CREATE_NO_WINDOW
@@ -278,58 +263,11 @@ class TestRunJobScript:
         assert env["VIRTUAL_ENV"] == str(venv)
         assert str(site_packages) in env["PYTHONPATH"]
 
-    def test_windows_pythonw_script_uses_sibling_python_for_captured_output(self, cron_env, tmp_path, monkeypatch):
-        from cron import scheduler as sched_mod
-        from cron.scheduler import _run_job_script
-
-        script = cron_env / "scripts" / "probe.py"
-        script.write_text('print("ok")\n')
-
-        venv = tmp_path / "venv"
-        venv_scripts = venv / "Scripts"
-        venv_scripts.mkdir(parents=True)
-        pythonw = venv_scripts / "pythonw.exe"
-        python = venv_scripts / "python.exe"
-        pythonw.write_text("", encoding="utf-8")
-        python.write_text("", encoding="utf-8")
-
-        captured = {}
-
-        class FakeProc:
-            def __init__(self, argv, **kwargs):
-                captured["argv"] = argv
-                captured["kwargs"] = kwargs
-                self.returncode = 0
-
-            def poll(self):
-                return self.returncode
-
-            def communicate(self, timeout=None):
-                return ("ok\n", "")
-
-            def wait(self, timeout=None):
-                return self.returncode
-
-        fake_popen = FakeProc
-
-        monkeypatch.setattr(sched_mod.sys, "platform", "win32")
-        monkeypatch.setattr(sched_mod.sys, "executable", str(pythonw))
-        monkeypatch.setattr(sched_mod, "windows_hide_flags", lambda: 0x08000000)
-        monkeypatch.setattr(sched_mod.subprocess, "Popen", fake_popen)
-
-        success, output = _run_job_script("probe.py")
-
-        assert success is True
-        assert output == "ok"
-        assert captured["argv"] == [str(python), str(script.resolve())]
-        assert captured["kwargs"]["encoding"] == "utf-8"
-        assert captured["kwargs"]["errors"] == "replace"
-
     def test_bootstrap_argv_makes_pth_editable_installs_importable(self, cron_env, tmp_path):
         """The bootstrap must process .pth files — the whole reason the
         overlay mode exists is that PYTHONPATH alone cannot (editable
         installs would raise ModuleNotFoundError in cron scripts)."""
-        import subprocess
+
         from cron.scheduler_script import _windows_cron_bootstrap_argv
 
         venv = tmp_path / "venv"
@@ -351,7 +289,7 @@ class TestRunJobScript:
         )
         # Run the bootstrap with the current interpreter (stands in for the
         # base python.exe on Windows; the semantics are interpreter-agnostic).
-        result = subprocess.run(argv, capture_output=True, text=True)
+        result = subprocess.run(argv, capture_output=True, text=True, check=False)
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "42"
 
@@ -378,7 +316,7 @@ class TestRunJobScript:
         argv = _windows_cron_bootstrap_argv(
             sys.executable, {"VIRTUAL_ENV": str(venv)}, str(script)
         )
-        result = subprocess.run(argv, capture_output=True, text=True)
+        result = subprocess.run(argv, capture_output=True, text=True, check=False)
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "sibling ok"
 
@@ -395,150 +333,85 @@ class TestRunJobScript:
         )
         assert argv == [sys.executable, str(script)]
 
+    @pytest.mark.platforms("posix")
+    def test_posix_managed_store_script_runs_on_venv_with_live_checkout(
+        self, cron_env, tmp_path, monkeypatch
+    ):
+        """#123044/#123440: on a POSIX managed-store install a cron ``.py`` script imports the
+        selected venv's packages, resolves Hermes from the LIVE checkout ahead of the venv's
+        workspace snapshot, keeps ``python script.py`` path and ``__main__`` semantics, and
+        leaves no ``PYTHONPATH`` for its own children to inherit."""
+        from cron import scheduler_script
+        from pm.environments import site_packages
 
-
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason="Windows always takes the overlay/creationflags branch",
-    )
-    def test_non_windows_script_preserves_default_text_decoding(self, cron_env, monkeypatch):
-        # No platform patching: the Linux CI host already takes this branch.
-        from cron import scheduler as sched_mod
-        from cron import scheduler_script as sched_script
-        from cron.scheduler_script import _run_job_script
-
-        script = cron_env / "scripts" / "probe.py"
-        script.write_text('print("ok")\n')
-
-        captured = {}
-
-        class FakeProc:
-            def __init__(self, argv, **kwargs):
-                captured["argv"] = argv
-                captured["kwargs"] = kwargs
-                self.returncode = 0
-
-            def poll(self):
-                return self.returncode
-
-            def communicate(self, timeout=None):
-                return ("ok\n", "")
-
-            def wait(self, timeout=None):
-                return self.returncode
-
-        fake_run = FakeProc
-
-        monkeypatch.setattr(sched_mod.sys, "platform", "linux")
-        monkeypatch.setattr(sched_mod.subprocess, "Popen", fake_run)
-
-        success, output = _run_job_script("probe.py")
-
-        assert success is True
-        assert output == "ok"
-        assert captured["argv"] == [sys.executable, str(script.resolve())]
-        assert captured["kwargs"]["text"] is True
-        assert "creationflags" not in captured["kwargs"]
-        assert "encoding" not in captured["kwargs"]
-        # Lossy decode on every platform: one non-UTF-8 byte must not fail the run.
-        assert captured["kwargs"]["errors"] == "replace"
-
-    def test_script_empty_output(self, cron_env):
-        from cron.scheduler import _run_job_script
-
-        script = cron_env / "scripts" / "empty.py"
-        script.write_text("# no output\n")
-
-        success, output = _run_job_script(str(script))
-        assert success is True
-        assert output == ""
-
-    def test_script_timeout(self, cron_env, monkeypatch):
-        from cron import scheduler as sched_mod
-        from cron.scheduler import _run_job_script
-
-        # Use a very short timeout
-        monkeypatch.setattr(sched_mod, "_SCRIPT_TIMEOUT", 1)
-
-        script = cron_env / "scripts" / "slow.py"
-        script.write_text("import time; time.sleep(30)\n")
-
-        success, output = _run_job_script(str(script))
-        assert success is False
-        assert "timed out" in output.lower()
-
-    def test_script_json_output(self, cron_env):
-        """Scripts can output structured JSON for the LLM to parse."""
-        from cron.scheduler import _run_job_script
-
-        script = cron_env / "scripts" / "json_out.py"
-        script.write_text(textwrap.dedent("""\
-            import json
-            data = {"new_prs": [{"number": 42, "title": "Fix bug"}]}
-            print(json.dumps(data, indent=2))
-        """))
-
-        success, output = _run_job_script(str(script))
-        assert success is True
-        parsed = json.loads(output)
-        assert parsed["new_prs"][0]["number"] == 42
-
-    def test_script_reads_env_from_hermes_dotenv(self, cron_env):
-        """no_agent scripts inherit NON-provider config from HERMES_HOME/.env.
-
-        Provider secrets (OPENROUTER_API_KEY, etc.) are stripped per upstream
-        SECURITY.md §2.3 — see test_script_subprocess_env_sanitized. Non-secret
-        config from .env still reaches the script.
-        """
-        from cron.scheduler import _run_job_script
-
-        env_file = cron_env / ".env"
-        env_file.write_text("EVOLUTION_PIPELINE_REGION=eu-west\n")
-
-        script = cron_env / "scripts" / "read_env.py"
-        script.write_text(textwrap.dedent("""\
-            import os
-            print(os.getenv("EVOLUTION_PIPELINE_REGION", "MISSING"))
-        """))
-
-        success, output = _run_job_script("read_env.py")
-        assert success is True
-        assert output == "eu-west"
-    def test_non_overlay_branch_keeps_plain_argv(self, cron_env, monkeypatch):
-        """When the Windows uv-venv overlay is NOT active, the invocation must
-        stay a plain `python script.py` — the bootstrap is overlay-only.
-        Cross-platform: forces the non-overlay branch explicitly."""
-        from cron import scheduler as sched_mod
-        from cron import scheduler_script as sched_script
-        from cron.scheduler_script import _run_job_script
-
-        script = cron_env / "scripts" / "probe.py"
-        script.write_text('print("ok")\n', encoding="utf-8")
-
-        captured = {}
-
-        class FakeProc:
-            def __init__(self, argv, **kwargs):
-                captured["argv"] = argv
-                self.returncode = 0
-
-            def poll(self):
-                return self.returncode
-
-            def communicate(self, timeout=None):
-                return ("ok\n", "")
-
-        monkeypatch.setattr(sched_script, "_windows_cron_python_invocation",
-            lambda python_exe: (python_exe, {}),
+        venv = tmp_path / "selected-venv"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin" / "python").symlink_to(sys.executable)
+        (venv / "pyvenv.cfg").write_text(
+            f"home = {Path(sys.base_prefix) / 'bin'}\ninclude-system-site-packages = false\n",
+            encoding="utf-8",
         )
-        monkeypatch.setattr(sched_mod.subprocess, "Popen", FakeProc)
+        deps = site_packages(venv)
+        deps.mkdir(parents=True)
+        (deps / "probe_pkg.py").write_text("VALUE = 42\n", encoding="utf-8")
+        snapshot = tmp_path / "workspace-snapshot"
+        snapshot.mkdir()
+        (snapshot / "hermes_constants.py").write_text("STALE = True\n", encoding="utf-8")
+        (deps / "snapshot.pth").write_text(f"{snapshot}\n", encoding="utf-8")
+
+        monkeypatch.setattr(
+            "hermes_cli._launchers.resolve_store_python", lambda repo: Path(sys.executable)
+        )
+        monkeypatch.setattr("pm.environments.selected_venv", lambda repo: venv)
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+
+        script = cron_env / "scripts" / "probe.py"
+        script.write_text(
+            "import atexit, os, pickle, sys, probe_pkg, hermes_constants\n"
+            "class Probe: pass\n"
+            "atexit.register(lambda: print('pickled', bool(pickle.dumps(Probe()))))\n"
+            "print(probe_pkg.VALUE)\n"
+            "print(hermes_constants.__file__)\n"
+            "print(sys.path[0])\n"
+            "print('PYTHONPATH=' + (os.environ.get('PYTHONPATH') or ''))\n",
+            encoding="utf-8",
+        )
+
+        success, output = scheduler_script._run_job_script("probe.py")
+        assert success is True, output
+        value, constants_file, path0, pythonpath, pickled = output.splitlines()
+        assert value == "42"
+        repo = Path(scheduler_script.__file__).resolve().parents[1]
+        assert Path(constants_file).resolve() == repo / "hermes_constants.py"
+        assert Path(path0).resolve() == script.parent.resolve()
+        assert pythonpath == "PYTHONPATH="
+        assert pickled == "pickled True"  # __main__ outlives the body, as in a plain run
+
+    @pytest.mark.platforms("posix")
+    @pytest.mark.parametrize("broken", ["selection_raises", "interpreter_missing"])
+    def test_posix_unusable_store_selection_fails_the_run_not_the_tick(
+        self, cron_env, tmp_path, monkeypatch, broken
+    ):
+        """An unusable PM selection (broken record, or a venv whose interpreter is gone) is
+        reported as a failed run naming the cause: never a silent run on the bare store Python,
+        and never an exception escaping ``_run_job_script`` to strand the execution row."""
+        from cron.scheduler_script import _run_job_script
+
+        def _broken(repo):
+            raise RuntimeError("dependency environment is missing or outside this install")
+
+        monkeypatch.setattr(
+            "hermes_cli._launchers.resolve_store_python", lambda repo: Path(sys.executable)
+        )
+        monkeypatch.setattr(
+            "pm.environments.selected_venv",
+            _broken if broken == "selection_raises" else (lambda repo: tmp_path / "gone-venv"),
+        )
+        (cron_env / "scripts" / "probe.py").write_text('print("ok")\n', encoding="utf-8")
 
         success, output = _run_job_script("probe.py")
-
-        assert success is True
-        assert output == "ok"
-        assert captured["argv"] == [sys.executable, str(script.resolve())]
-
+        assert success is False
+        assert "dependency environment" in output
 
     def test_emoji_stdout_round_trips_through_script_capture(self, cron_env):
         """Emoji in script stdout must reach the caller intact (#42384).
@@ -603,43 +476,9 @@ class TestBuildJobPromptWithScript:
         assert "Simple job." in prompt
 
 
-
 class TestCronjobToolScript:
     """Test the cronjob tool's script parameter."""
 
-    def test_create_with_script(self, cron_env, monkeypatch):
-        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
-        from tools.cronjob_tools import cronjob
-        (cron_env / "scripts" / "monitor.py").write_text("print('ok')\n")
-
-        result = json.loads(cronjob(
-            action="create",
-            schedule="every 1h",
-            prompt="Monitor things",
-            script="monitor.py",
-        ))
-        assert result["success"] is True
-        assert result["job"]["script"] == "monitor.py"
-
-    def test_update_script(self, cron_env, monkeypatch):
-        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
-        from tools.cronjob_tools import cronjob
-
-        create_result = json.loads(cronjob(
-            action="create",
-            schedule="every 1h",
-            prompt="Monitor things",
-        ))
-        job_id = create_result["job_id"]
-
-        (cron_env / "scripts" / "new_script.py").write_text("print('ok')\n")
-        update_result = json.loads(cronjob(
-            action="update",
-            job_id=job_id,
-            script="new_script.py",
-        ))
-        assert update_result["success"] is True
-        assert update_result["job"]["script"] == "new_script.py"
 
     def test_clear_script(self, cron_env, monkeypatch):
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
@@ -700,13 +539,6 @@ class TestScriptPathContainment:
         assert success is False
         assert "blocked" in output.lower() or "outside" in output.lower()
 
-    def test_absolute_path_tmp_blocked(self, cron_env):
-        """Absolute paths to /tmp must be rejected."""
-        from cron.scheduler import _run_job_script
-
-        success, output = _run_job_script("/tmp/evil.py")
-        assert success is False
-        assert "blocked" in output.lower() or "outside" in output.lower()
 
     def test_tilde_path_blocked(self, cron_env):
         """~ prefixed paths must be rejected (expanduser bypasses check)."""
@@ -756,16 +588,6 @@ class TestScriptPathContainment:
         assert success is True
         assert output == "sub ok"
 
-    def test_absolute_path_inside_scripts_dir_allowed(self, cron_env):
-        """Absolute paths that resolve WITHIN scripts/ should work."""
-        from cron.scheduler import _run_job_script
-
-        script = cron_env / "scripts" / "abs_ok.py"
-        script.write_text('print("abs ok")\n')
-
-        success, output = _run_job_script(str(script))
-        assert success is True
-        assert output == "abs ok"
 
     @pytest.mark.skipif(
         sys.platform == "win32",
@@ -791,31 +613,6 @@ class TestScriptPathContainment:
 class TestCronjobToolScriptValidation:
     """Test API-boundary validation of cron script paths in cronjob_tools."""
 
-    def test_create_with_absolute_script_rejected(self, cron_env, monkeypatch):
-        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
-        from tools.cronjob_tools import cronjob
-
-        result = json.loads(cronjob(
-            action="create",
-            schedule="every 1h",
-            prompt="Monitor things",
-            script="/home/user/evil.py",
-        ))
-        assert result["success"] is False
-        assert "relative" in result["error"].lower() or "absolute" in result["error"].lower()
-
-    def test_create_with_tilde_script_rejected(self, cron_env, monkeypatch):
-        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
-        from tools.cronjob_tools import cronjob
-
-        result = json.loads(cronjob(
-            action="create",
-            schedule="every 1h",
-            prompt="Monitor things",
-            script="~/monitor.py",
-        ))
-        assert result["success"] is False
-        assert "relative" in result["error"].lower() or "absolute" in result["error"].lower()
 
     def test_create_with_traversal_script_rejected(self, cron_env, monkeypatch):
         monkeypatch.setenv("HERMES_INTERACTIVE", "1")
@@ -829,73 +626,6 @@ class TestCronjobToolScriptValidation:
         ))
         assert result["success"] is False
         assert "escapes" in result["error"].lower() or "traversal" in result["error"].lower()
-
-    def test_create_with_relative_script_allowed(self, cron_env, monkeypatch):
-        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
-        from tools.cronjob_tools import cronjob
-        (cron_env / "scripts" / "monitor.py").write_text("print('ok')\n")
-
-        result = json.loads(cronjob(
-            action="create",
-            schedule="every 1h",
-            prompt="Monitor things",
-            script="monitor.py",
-        ))
-        assert result["success"] is True
-        assert result["job"]["script"] == "monitor.py"
-
-    def test_update_with_absolute_script_rejected(self, cron_env, monkeypatch):
-        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
-        from tools.cronjob_tools import cronjob
-
-        create_result = json.loads(cronjob(
-            action="create",
-            schedule="every 1h",
-            prompt="Monitor things",
-        ))
-        job_id = create_result["job_id"]
-
-        update_result = json.loads(cronjob(
-            action="update",
-            job_id=job_id,
-            script="/tmp/evil.py",
-        ))
-        assert update_result["success"] is False
-        assert "relative" in update_result["error"].lower() or "absolute" in update_result["error"].lower()
-
-    def test_update_clear_script_allowed(self, cron_env, monkeypatch):
-        """Clearing a script (empty string) should always be permitted."""
-        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
-        from tools.cronjob_tools import cronjob
-
-        (cron_env / "scripts" / "monitor.py").write_text("print('ok')\n")
-        create_result = json.loads(cronjob(
-            action="create",
-            schedule="every 1h",
-            prompt="Monitor things",
-            script="monitor.py",
-        ))
-        job_id = create_result["job_id"]
-
-        update_result = json.loads(cronjob(
-            action="update",
-            job_id=job_id,
-            script="",
-        ))
-        assert update_result["success"] is True
-        assert "script" not in update_result["job"]
-
-    def test_windows_absolute_path_rejected(self, cron_env, monkeypatch):
-        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
-        from tools.cronjob_tools import cronjob
-
-        result = json.loads(cronjob(
-            action="create",
-            schedule="every 1h",
-            prompt="Monitor things",
-            script="C:\\Users\\evil\\script.py",
-        ))
-        assert result["success"] is False
 
 
 class TestRunJobEnvVarCleanup:
@@ -1048,7 +778,9 @@ class TestScriptTimeoutTreeKill:
         def is_live(pid):
             try:
                 process = psutil.Process(pid)
-                return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
+                # 'dead' = mid-reap (exited); see test_script_termination_reaps_descendants.
+                return process.is_running() and process.status() not in (
+                    psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD)
             except (psutil.NoSuchProcess, psutil.ZombieProcess):
                 return False
 
@@ -1100,3 +832,292 @@ class TestScriptTimeoutTreeKill:
                     psutil.Process(gpid).kill()
                 except psutil.NoSuchProcess:
                     pass
+
+
+class TestForkScriptContracts:
+    def test_create_job_without_script(self, cron_env):
+        from cron.jobs import create_job
+
+        job = create_job(prompt="Hello", schedule="every 1h")
+        assert job.get("script") is None
+
+    def test_create_job_empty_script_normalized_to_none(self, cron_env):
+        from cron.jobs import create_job
+
+        job = create_job(prompt="Hello", schedule="every 1h", script="  ")
+        assert job.get("script") is None
+
+    def test_update_job_clear_script(self, cron_env):
+        from cron.jobs import create_job, update_job
+
+        job = create_job(prompt="Hello", schedule="every 1h", script="/some/script.py")
+        assert job["script"] == "/some/script.py"
+
+        updated = update_job(job["id"], {"script": None})
+        assert updated.get("script") is None
+
+    def test_script_not_found(self, cron_env):
+        from cron.scheduler import _run_job_script
+
+        success, output = _run_job_script("nonexistent_script.py")
+        assert success is False
+        assert "not found" in output.lower()
+
+    def test_script_nonzero_exit(self, cron_env):
+        from cron.scheduler import _run_job_script
+
+        script = cron_env / "scripts" / "fail.py"
+        script.write_text(textwrap.dedent("""\
+            import sys
+            print("partial output")
+            print("error info", file=sys.stderr)
+            sys.exit(1)
+        """))
+
+        success, output = _run_job_script(str(script))
+        assert success is False
+        assert "exited with code 1" in output
+        assert "error info" in output
+
+    def test_script_empty_output(self, cron_env):
+        from cron.scheduler import _run_job_script
+
+        script = cron_env / "scripts" / "empty.py"
+        script.write_text("# no output\n")
+
+        success, output = _run_job_script(str(script))
+        assert success is True
+        assert output == ""
+
+    def test_script_timeout(self, cron_env, monkeypatch):
+        from cron import scheduler as sched_mod
+        from cron.scheduler import _run_job_script
+
+        # Use a very short timeout
+        monkeypatch.setattr(sched_mod, "_SCRIPT_TIMEOUT", 1)
+
+        script = cron_env / "scripts" / "slow.py"
+        script.write_text("import time; time.sleep(30)\n")
+
+        success, output = _run_job_script(str(script))
+        assert success is False
+        assert "timed out" in output.lower()
+
+    def test_script_json_output(self, cron_env):
+        """Scripts can output structured JSON for the LLM to parse."""
+        from cron.scheduler import _run_job_script
+
+        script = cron_env / "scripts" / "json_out.py"
+        script.write_text(textwrap.dedent("""\
+            import json
+            data = {"new_prs": [{"number": 42, "title": "Fix bug"}]}
+            print(json.dumps(data, indent=2))
+        """))
+
+        success, output = _run_job_script(str(script))
+        assert success is True
+        parsed = json.loads(output)
+        assert parsed["new_prs"][0]["number"] == 42
+
+    def test_script_reads_env_from_hermes_dotenv(self, cron_env):
+        """no_agent scripts inherit NON-provider config from HERMES_HOME/.env.
+
+        Provider secrets (OPENROUTER_API_KEY, etc.) are stripped per upstream
+        SECURITY.md §2.3 — see test_script_subprocess_env_sanitized. Non-secret
+        config from .env still reaches the script.
+        """
+        from cron.scheduler import _run_job_script
+
+        env_file = cron_env / ".env"
+        env_file.write_text("EVOLUTION_PIPELINE_REGION=eu-west\n")
+
+        script = cron_env / "scripts" / "read_env.py"
+        script.write_text(textwrap.dedent("""\
+            import os
+            print(os.getenv("EVOLUTION_PIPELINE_REGION", "MISSING"))
+        """))
+
+        success, output = _run_job_script("read_env.py")
+        assert success is True
+        assert output == "eu-west"
+
+    def test_non_overlay_branch_keeps_plain_argv(self, cron_env, monkeypatch):
+        """When the Windows uv-venv overlay is NOT active, the invocation must
+        stay a plain `python script.py` — the bootstrap is overlay-only.
+        Cross-platform: forces the non-overlay branch explicitly."""
+        from cron import scheduler as sched_mod
+        from cron import scheduler_script as sched_script
+        from cron.scheduler_script import _run_job_script
+
+        script = cron_env / "scripts" / "probe.py"
+        script.write_text('print("ok")\n', encoding="utf-8")
+
+        captured = {}
+
+        class FakeProc:
+            def __init__(self, argv, **kwargs):
+                captured["argv"] = argv
+                self.returncode = 0
+
+            def poll(self):
+                return self.returncode
+
+            def communicate(self, timeout=None):
+                return ("ok\n", "")
+
+        monkeypatch.setattr(sched_script, "_windows_cron_python_invocation",
+            lambda python_exe: (python_exe, {}),
+        )
+        monkeypatch.setattr(sched_mod.subprocess, "Popen", FakeProc)
+
+        success, output = _run_job_script("probe.py")
+
+        assert success is True
+        assert output == "ok"
+        assert captured["argv"] == [sys.executable, str(script.resolve())]
+
+    def test_create_with_script(self, cron_env, monkeypatch):
+        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
+        from tools.cronjob_tools import cronjob
+        (cron_env / "scripts" / "monitor.py").write_text("print('ok')\n")
+
+        result = json.loads(cronjob(
+            action="create",
+            schedule="every 1h",
+            prompt="Monitor things",
+            script="monitor.py",
+        ))
+        assert result["success"] is True
+        assert result["job"]["script"] == "monitor.py"
+
+    def test_update_script(self, cron_env, monkeypatch):
+        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
+        from tools.cronjob_tools import cronjob
+
+        create_result = json.loads(cronjob(
+            action="create",
+            schedule="every 1h",
+            prompt="Monitor things",
+        ))
+        job_id = create_result["job_id"]
+
+        (cron_env / "scripts" / "new_script.py").write_text("print('ok')\n")
+        update_result = json.loads(cronjob(
+            action="update",
+            job_id=job_id,
+            script="new_script.py",
+        ))
+        assert update_result["success"] is True
+        assert update_result["job"]["script"] == "new_script.py"
+
+    def test_absolute_path_tmp_blocked(self, cron_env):
+        """Absolute paths to /tmp must be rejected."""
+        from cron.scheduler import _run_job_script
+
+        success, output = _run_job_script("/tmp/evil.py")
+        assert success is False
+        assert "blocked" in output.lower() or "outside" in output.lower()
+
+    def test_absolute_path_inside_scripts_dir_allowed(self, cron_env):
+        """Absolute paths that resolve WITHIN scripts/ should work."""
+        from cron.scheduler import _run_job_script
+
+        script = cron_env / "scripts" / "abs_ok.py"
+        script.write_text('print("abs ok")\n')
+
+        success, output = _run_job_script(str(script))
+        assert success is True
+        assert output == "abs ok"
+
+    def test_create_with_absolute_script_rejected(self, cron_env, monkeypatch):
+        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
+        from tools.cronjob_tools import cronjob
+
+        result = json.loads(cronjob(
+            action="create",
+            schedule="every 1h",
+            prompt="Monitor things",
+            script="/home/user/evil.py",
+        ))
+        assert result["success"] is False
+        assert "relative" in result["error"].lower() or "absolute" in result["error"].lower()
+
+    def test_create_with_tilde_script_rejected(self, cron_env, monkeypatch):
+        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
+        from tools.cronjob_tools import cronjob
+
+        result = json.loads(cronjob(
+            action="create",
+            schedule="every 1h",
+            prompt="Monitor things",
+            script="~/monitor.py",
+        ))
+        assert result["success"] is False
+        assert "relative" in result["error"].lower() or "absolute" in result["error"].lower()
+
+    def test_create_with_relative_script_allowed(self, cron_env, monkeypatch):
+        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
+        from tools.cronjob_tools import cronjob
+        (cron_env / "scripts" / "monitor.py").write_text("print('ok')\n")
+
+        result = json.loads(cronjob(
+            action="create",
+            schedule="every 1h",
+            prompt="Monitor things",
+            script="monitor.py",
+        ))
+        assert result["success"] is True
+        assert result["job"]["script"] == "monitor.py"
+
+    def test_update_with_absolute_script_rejected(self, cron_env, monkeypatch):
+        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
+        from tools.cronjob_tools import cronjob
+
+        create_result = json.loads(cronjob(
+            action="create",
+            schedule="every 1h",
+            prompt="Monitor things",
+        ))
+        job_id = create_result["job_id"]
+
+        update_result = json.loads(cronjob(
+            action="update",
+            job_id=job_id,
+            script="/tmp/evil.py",
+        ))
+        assert update_result["success"] is False
+        assert "relative" in update_result["error"].lower() or "absolute" in update_result["error"].lower()
+
+    def test_update_clear_script_allowed(self, cron_env, monkeypatch):
+        """Clearing a script (empty string) should always be permitted."""
+        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
+        from tools.cronjob_tools import cronjob
+
+        (cron_env / "scripts" / "monitor.py").write_text("print('ok')\n")
+        create_result = json.loads(cronjob(
+            action="create",
+            schedule="every 1h",
+            prompt="Monitor things",
+            script="monitor.py",
+        ))
+        job_id = create_result["job_id"]
+
+        update_result = json.loads(cronjob(
+            action="update",
+            job_id=job_id,
+            script="",
+        ))
+        assert update_result["success"] is True
+        assert "script" not in update_result["job"]
+
+    def test_windows_absolute_path_rejected(self, cron_env, monkeypatch):
+        monkeypatch.setenv("HERMES_INTERACTIVE", "1")
+        from tools.cronjob_tools import cronjob
+
+        result = json.loads(cronjob(
+            action="create",
+            schedule="every 1h",
+            prompt="Monitor things",
+            script="C:\\Users\\evil\\script.py",
+        ))
+        assert result["success"] is False

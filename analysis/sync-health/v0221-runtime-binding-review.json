@@ -1,0 +1,481 @@
+{
+  "scope": "Exactly17 owner/controller-reviewed runtime recommendations; runtime13 and media-cache fixes excluded. Same path/scope and exact pinned unit bodies required.",
+  "source_commit": "297552a9d646119871391d202509822cd86330df",
+  "baseline": "3cd9963bcce9c0aba451dadeaff5c701bca102e4",
+  "proof": [
+    {
+      "entry_id": "runtime-01",
+      "path": "agent/auxiliary_client.py",
+      "scope": "_read_codex_singleton_token",
+      "rule": "S110",
+      "current_blob": "98ef753aea40a6eb040aeeac0a74876466f21f9d",
+      "source_blob": "d438b306fa53a764734f5f122d977d55bd43b737",
+      "body_hash": "96fb98caa0679198",
+      "source_body_hash": "96fb98caa0679198",
+      "code": "except Exception:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 22,
+        "NESTING": 3,
+        "CC": 5
+      },
+      "current_metrics": {
+        "FUNC_LINES": 22,
+        "NESTING": 3,
+        "CC": 5
+      },
+      "compatibility": "JWT decoding is an expiry optimization, not a local authentication decision. Opaque tokens remain valid provider inputs; malformed/expired credentials cannot confer local permissions. Expired parseable JWTs return None so fallback proceeds. Outer read errors also return None. Canonical hermes_cli.auth is imported at call time under the active profile, and pool route/key selection stays paired before this fallback. Debug exception logging remains existing diagnostic debt, not proof of sanitization.",
+      "test_receipt": "tests/agent/test_auxiliary_client.py: test_expired_jwt_returns_none, test_valid_jwt_returns_token, opaque token case; 224 passed in /tmp/hermes-runtime-decomposition-validation.log",
+      "module_bindings": "The reviewed functions retain their original auxiliary_client globals; credential and provider catalogs are imported from canonical hermes_cli owners at call time. Extracted auxiliary_error_policy and vision payload helpers do not own auth caches or profile routing state. Active profile auth resolution, pool key/URL pairing and independent named-provider fallback were reviewed and exercised."
+    },
+    {
+      "entry_id": "runtime-02",
+      "path": "agent/auxiliary_client.py",
+      "scope": "_read_codex_singleton_token",
+      "rule": "BLE001",
+      "current_blob": "98ef753aea40a6eb040aeeac0a74876466f21f9d",
+      "source_blob": "d438b306fa53a764734f5f122d977d55bd43b737",
+      "body_hash": "96fb98caa0679198",
+      "source_body_hash": "96fb98caa0679198",
+      "code": "except Exception:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 22,
+        "NESTING": 3,
+        "CC": 5
+      },
+      "current_metrics": {
+        "FUNC_LINES": 22,
+        "NESTING": 3,
+        "CC": 5
+      },
+      "compatibility": "JWT decoding is an expiry optimization, not a local authentication decision. Opaque tokens remain valid provider inputs; malformed/expired credentials cannot confer local permissions. Expired parseable JWTs return None so fallback proceeds. Outer read errors also return None. Canonical hermes_cli.auth is imported at call time under the active profile, and pool route/key selection stays paired before this fallback. Debug exception logging remains existing diagnostic debt, not proof of sanitization.",
+      "test_receipt": "tests/agent/test_auxiliary_client.py: test_expired_jwt_returns_none, test_valid_jwt_returns_token, opaque token case; 224 passed in /tmp/hermes-runtime-decomposition-validation.log",
+      "module_bindings": "The reviewed functions retain their original auxiliary_client globals; credential and provider catalogs are imported from canonical hermes_cli owners at call time. Extracted auxiliary_error_policy and vision payload helpers do not own auth caches or profile routing state. Active profile auth resolution, pool key/URL pairing and independent named-provider fallback were reviewed and exercised."
+    },
+    {
+      "entry_id": "runtime-03",
+      "path": "agent/auxiliary_client.py",
+      "scope": "_read_codex_singleton_token",
+      "rule": "BLE001",
+      "current_blob": "98ef753aea40a6eb040aeeac0a74876466f21f9d",
+      "source_blob": "d438b306fa53a764734f5f122d977d55bd43b737",
+      "body_hash": "96fb98caa0679198",
+      "source_body_hash": "96fb98caa0679198",
+      "code": "except Exception as exc:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 22,
+        "NESTING": 3,
+        "CC": 5
+      },
+      "current_metrics": {
+        "FUNC_LINES": 22,
+        "NESTING": 3,
+        "CC": 5
+      },
+      "compatibility": "JWT decoding is an expiry optimization, not a local authentication decision. Opaque tokens remain valid provider inputs; malformed/expired credentials cannot confer local permissions. Expired parseable JWTs return None so fallback proceeds. Outer read errors also return None. Canonical hermes_cli.auth is imported at call time under the active profile, and pool route/key selection stays paired before this fallback. Debug exception logging remains existing diagnostic debt, not proof of sanitization.",
+      "test_receipt": "tests/agent/test_auxiliary_client.py: test_expired_jwt_returns_none, test_valid_jwt_returns_token, opaque token case; 224 passed in /tmp/hermes-runtime-decomposition-validation.log",
+      "module_bindings": "The reviewed functions retain their original auxiliary_client globals; credential and provider catalogs are imported from canonical hermes_cli owners at call time. Extracted auxiliary_error_policy and vision payload helpers do not own auth caches or profile routing state. Active profile auth resolution, pool key/URL pairing and independent named-provider fallback were reviewed and exercised."
+    },
+    {
+      "entry_id": "runtime-04",
+      "path": "agent/auxiliary_client.py",
+      "scope": "_builtin_provider_present",
+      "rule": "BLE001",
+      "current_blob": "98ef753aea40a6eb040aeeac0a74876466f21f9d",
+      "source_blob": "d438b306fa53a764734f5f122d977d55bd43b737",
+      "body_hash": "a7c879491435bb4c",
+      "source_body_hash": "a7c879491435bb4c",
+      "code": "except Exception:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 25,
+        "NESTING": 1,
+        "CC": 2
+      },
+      "current_metrics": {
+        "FUNC_LINES": 25,
+        "NESTING": 1,
+        "CC": 2
+      },
+      "compatibility": "Catalog failure retains the explicit high-risk OAuth/provider names rather than anonymously re-routing them. Named-provider lookup is attempted independently, so catalog import failure cannot suppress a configured custom route. Both dependencies are resolved dynamically at their canonical module owners.",
+      "test_receipt": "tests/agent/test_auxiliary_provider_fallbacks.py: test_builtin_registry_raises_does_not_suppress_named_custom_lookup and named provider real-config integration; 19 passed in /tmp/hermes-runtime-inherited-review-tests.log",
+      "module_bindings": "The reviewed functions retain their original auxiliary_client globals; credential and provider catalogs are imported from canonical hermes_cli owners at call time. Extracted auxiliary_error_policy and vision payload helpers do not own auth caches or profile routing state. Active profile auth resolution, pool key/URL pairing and independent named-provider fallback were reviewed and exercised."
+    },
+    {
+      "entry_id": "runtime-05",
+      "path": "agent/auxiliary_client.py",
+      "scope": "_named_custom_provider_present",
+      "rule": "BLE001",
+      "current_blob": "98ef753aea40a6eb040aeeac0a74876466f21f9d",
+      "source_blob": "d438b306fa53a764734f5f122d977d55bd43b737",
+      "body_hash": "f5d5f75b68b768bc",
+      "source_body_hash": "f5d5f75b68b768bc",
+      "code": "except Exception:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 17,
+        "NESTING": 1,
+        "CC": 2
+      },
+      "current_metrics": {
+        "FUNC_LINES": 17,
+        "NESTING": 1,
+        "CC": 2
+      },
+      "compatibility": "Unreadable configuration returns False instead of inventing a configured provider or credential. This can make unavailable configuration produce an unavailable/anonymous route; it does not grant authority. Built-in preservation remains independent and explicit task URL/key are not replaced by a fabricated named entry. Acceptance covers graceful handling of unavailable configuration, not a claim that a broken configuration can authenticate successfully.",
+      "test_receipt": "tests/agent/test_auxiliary_provider_fallbacks.py 19 passed, including independent catalog failure and real-config route preservation; /tmp/hermes-runtime-inherited-review-tests.log; direct failure evidence /tmp/hermes-runtime-failure-contracts.log:4 passed, tests/agent/test_inherited_failure_contracts.py. Final direct regression receipt /tmp/hermes-runtime-failure-contracts.log:5 passed. Runtime14 includes profile lookup exception, distinct alpha/beta/unprefixed IDs and deterministic repeated alpha.",
+      "module_bindings": "The reviewed functions retain their original auxiliary_client globals; credential and provider catalogs are imported from canonical hermes_cli owners at call time. Extracted auxiliary_error_policy and vision payload helpers do not own auth caches or profile routing state. Active profile auth resolution, pool key/URL pairing and independent named-provider fallback were reviewed and exercised."
+    },
+    {
+      "entry_id": "runtime-06",
+      "path": "agent/chat_completion_helpers.py",
+      "scope": "_StreamingCall._call_chat_completions",
+      "rule": "CC",
+      "current_blob": "9e30057b37025fdc89757f1f181085ee56c98adb",
+      "source_blob": "01c26afe7a56aeca6a1960e76bc5908189425d6c",
+      "body_hash": "fd6e75e325a4af28",
+      "source_body_hash": "fd6e75e325a4af28",
+      "code": null,
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 182,
+        "NESTING": 4,
+        "CC": 31
+      },
+      "current_metrics": {
+        "FUNC_LINES": 182,
+        "NESTING": 4,
+        "CC": 31
+      },
+      "compatibility": "Complexity represents real event/reasoning/tool/usage/refusal branches. Actual owner remains chat_completion_helpers; relay accumulator, stream writer and request-client lifecycle are canonical imports. Every chunk checks interrupt and attempt ownership before display, tool fragments are accumulated rather than executed, reasoning carriers retain replay fields, and partial/empty/runaway handling remains explicit. No duplicated mutable globals were introduced by pure helper extraction.",
+      "test_receipt": "tests/agent/test_streaming.py, test_stream_single_writer.py, test_stream_interrupt_retry.py, test_request_client_reuse_abort_races.py all passed; eight-file receipt 84 passed/4 existing skips in /tmp/hermes-runtime-inherited-review-tests.log",
+      "module_bindings": "StreamingCall remains the canonical runtime owner. Provider stream parsing and context estimates were extracted as pure reexports; relay_llm, anthropic_adapter and reasoning_carriers stay canonical lazy imports. Request-client state, writer tokens, result dictionary, interrupt flag and stream accumulators remain on the same call/agent objects. Failure-path tests exercise actual closures, request-client poisoning, stale writer rejection and Anthropic parsing."
+    },
+    {
+      "entry_id": "runtime-07",
+      "path": "agent/chat_completion_helpers.py",
+      "scope": "_StreamingCall._call_anthropic",
+      "rule": "CC",
+      "current_blob": "9e30057b37025fdc89757f1f181085ee56c98adb",
+      "source_blob": "01c26afe7a56aeca6a1960e76bc5908189425d6c",
+      "body_hash": "d47196f8dfa2ca68",
+      "source_body_hash": "d47196f8dfa2ca68",
+      "code": null,
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 99,
+        "NESTING": 5,
+        "CC": 22
+      },
+      "current_metrics": {
+        "FUNC_LINES": 99,
+        "NESTING": 5,
+        "CC": 22
+      },
+      "compatibility": "The event-type ladder distinguishes message_stop, stop-reason usage, tool-start and text/thinking deltas. Tool-start suppresses ordinary text display; runaway monitors cover both channels. Missing message_stop raises EmptyStreamError; final response is not manufactured as success. Managed stream and SDK context are closed in nested finally blocks. Canonical relay and anthropic adapter remain the live owners; request-local client limits cancellation to the active attempt.",
+      "test_receipt": "tests/agent/test_streaming.py: Anthropic activity, parser retry, ordinary ValueError propagation, eventless stream and tool cases; passed in /tmp/hermes-runtime-inherited-review-tests.log",
+      "module_bindings": "StreamingCall remains the canonical runtime owner. Provider stream parsing and context estimates were extracted as pure reexports; relay_llm, anthropic_adapter and reasoning_carriers stay canonical lazy imports. Request-client state, writer tokens, result dictionary, interrupt flag and stream accumulators remain on the same call/agent objects. Failure-path tests exercise actual closures, request-client poisoning, stale writer rejection and Anthropic parsing."
+    },
+    {
+      "entry_id": "runtime-08",
+      "path": "agent/chat_completion_helpers.py",
+      "scope": "_StreamingCall._call_chat_completions._close_half_read_stream",
+      "rule": "BLE001",
+      "current_blob": "9e30057b37025fdc89757f1f181085ee56c98adb",
+      "source_blob": "01c26afe7a56aeca6a1960e76bc5908189425d6c",
+      "body_hash": "bb29e0ce5f705de9",
+      "source_body_hash": "bb29e0ce5f705de9",
+      "code": "except Exception:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 9,
+        "NESTING": 2,
+        "CC": 3
+      },
+      "current_metrics": {
+        "FUNC_LINES": 9,
+        "NESTING": 2,
+        "CC": 3
+      },
+      "compatibility": "A failed close is handled by poisoning/aborting this attempt client; it is not returned to the reusable pool. Abort failures propagate rather than being silently treated as successful close. The captured stream and _attempt_request_client belong to this invocation; no facade state alias is involved.",
+      "test_receipt": "tests/agent/test_request_client_reuse_abort_races.py::test_relay_managed_close_failure_poisons_request_client and test_worker_interrupt_break_closes_stream; file 6 passed in /tmp/hermes-runtime-inherited-review-tests.log",
+      "module_bindings": "StreamingCall remains the canonical runtime owner. Provider stream parsing and context estimates were extracted as pure reexports; relay_llm, anthropic_adapter and reasoning_carriers stay canonical lazy imports. Request-client state, writer tokens, result dictionary, interrupt flag and stream accumulators remain on the same call/agent objects. Failure-path tests exercise actual closures, request-client poisoning, stale writer rejection and Anthropic parsing."
+    },
+    {
+      "entry_id": "runtime-09",
+      "path": "agent/chat_completion_helpers.py",
+      "scope": "_StreamingCall._call_anthropic",
+      "rule": "HX011",
+      "current_blob": "9e30057b37025fdc89757f1f181085ee56c98adb",
+      "source_blob": "01c26afe7a56aeca6a1960e76bc5908189425d6c",
+      "body_hash": "d47196f8dfa2ca68",
+      "source_body_hash": "d47196f8dfa2ca68",
+      "code": "if event_type == \"message_stop\":",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 99,
+        "NESTING": 5,
+        "CC": 22
+      },
+      "current_metrics": {
+        "FUNC_LINES": 99,
+        "NESTING": 5,
+        "CC": 22
+      },
+      "compatibility": "The event-type ladder distinguishes message_stop, stop-reason usage, tool-start and text/thinking deltas. Tool-start suppresses ordinary text display; runaway monitors cover both channels. Missing message_stop raises EmptyStreamError; final response is not manufactured as success. Managed stream and SDK context are closed in nested finally blocks. Canonical relay and anthropic adapter remain the live owners; request-local client limits cancellation to the active attempt.",
+      "test_receipt": "tests/agent/test_streaming.py: Anthropic activity, parser retry, ordinary ValueError propagation, eventless stream and tool cases; passed in /tmp/hermes-runtime-inherited-review-tests.log",
+      "module_bindings": "StreamingCall remains the canonical runtime owner. Provider stream parsing and context estimates were extracted as pure reexports; relay_llm, anthropic_adapter and reasoning_carriers stay canonical lazy imports. Request-client state, writer tokens, result dictionary, interrupt flag and stream accumulators remain on the same call/agent objects. Failure-path tests exercise actual closures, request-client poisoning, stale writer rejection and Anthropic parsing."
+    },
+    {
+      "entry_id": "runtime-10",
+      "path": "agent/chat_completion_helpers.py",
+      "scope": "_StreamingCall._unmask_server_error_with_nonstreaming",
+      "rule": "BLE001",
+      "current_blob": "9e30057b37025fdc89757f1f181085ee56c98adb",
+      "source_blob": "01c26afe7a56aeca6a1960e76bc5908189425d6c",
+      "body_hash": "12226b4ae92015be",
+      "source_body_hash": "12226b4ae92015be",
+      "code": "except Exception as probe_err:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 66,
+        "NESTING": 2,
+        "CC": 9
+      },
+      "current_metrics": {
+        "FUNC_LINES": 66,
+        "NESTING": 2,
+        "CC": 9
+      },
+      "compatibility": "Probe is bounded to eligible pre-delivery 5xx chat-completion failures and a 60-second rate window. Pending interruption suppresses it; KeyboardInterrupt/InterruptedError propagate. Probe 4xx replaces the opaque error; probe 5xx/unknown keeps the original failure. Stale timeout is restored in finally. This catch does not convert failed validation into a successful completion.",
+      "test_receipt": "tests/agent/test_stream_unmask_5xx.py: test_stream_5xx_probe_success_delivers_response_without_latch, test_stream_5xx_unmasked_by_probe_4xx; 2 passed plus interrupt suites in /tmp/hermes-runtime-inherited-review-tests.log",
+      "module_bindings": "StreamingCall remains the canonical runtime owner. Provider stream parsing and context estimates were extracted as pure reexports; relay_llm, anthropic_adapter and reasoning_carriers stay canonical lazy imports. Request-client state, writer tokens, result dictionary, interrupt flag and stream accumulators remain on the same call/agent objects. Failure-path tests exercise actual closures, request-client poisoning, stale writer rejection and Anthropic parsing."
+    },
+    {
+      "entry_id": "runtime-11",
+      "path": "agent/conversation_loop.py",
+      "scope": "_refresh_bot_chat_tools",
+      "rule": "BLE001",
+      "current_blob": "39e8e9535e0e239b4ca6415858fcc0828468b355",
+      "source_blob": "60666cd156446128ac3626f4299ec5837b7c1995",
+      "body_hash": "6f83131a73e7d7c7",
+      "source_body_hash": "6f83131a73e7d7c7",
+      "code": "except Exception as exc:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 29,
+        "NESTING": 2,
+        "CC": 4
+      },
+      "current_metrics": {
+        "FUNC_LINES": 29,
+        "NESTING": 2,
+        "CC": 4
+      },
+      "compatibility": "Active gateway session policy overrides live config; only unowned desktop/TUI uses live surface builders. Canonical tools.mcp_tool_agent computes new definitions on locals and publishes tools/names together; broad catch retains the prior authorized snapshot and warns. A refresh error can delay a configuration change, so this is availability/observability debt, not an authorization mechanism. Invocation-side policy remains the authority.",
+      "test_receipt": "tests/agent/test_bot_chat_toolset_refresh.py all 3 passed: surface rebuild, per-process exclusion, frozen policy wins; /tmp/hermes-runtime-inherited-review-tests.log; direct failure evidence /tmp/hermes-runtime-failure-contracts.log:4 passed, tests/agent/test_inherited_failure_contracts.py. Final direct regression receipt /tmp/hermes-runtime-failure-contracts.log:5 passed. Runtime14 includes profile lookup exception, distinct alpha/beta/unprefixed IDs and deterministic repeated alpha.",
+      "module_bindings": "Tool refresh retains canonical active_policy context lookup and imports tools.mcp_tool_agent at call time. Billing-guidance extraction does not alter these dependencies. The actual refresh builder computes tools/names before publication; direct builder-exception evidence retains both old objects by identity. Frozen gateway policy is used instead of live desktop configuration."
+    },
+    {
+      "entry_id": "runtime-12",
+      "path": "agent/prompt_builder.py",
+      "scope": "_bot_screen_hint",
+      "rule": "BLE001",
+      "current_blob": "a46eddedfd22f3bc043a657010529f1319c942f2",
+      "source_blob": "a2baa531d40fa4485ce1c1a902274ef6bc6e3d5d",
+      "body_hash": "3b78e39e3ba24c33",
+      "source_body_hash": "3b78e39e3ba24c33",
+      "code": "except Exception:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 11,
+        "NESTING": 1,
+        "CC": 2
+      },
+      "current_metrics": {
+        "FUNC_LINES": 11,
+        "NESTING": 1,
+        "CC": 2
+      },
+      "compatibility": "This is optional descriptive prompt text. Failed screen/lease reads omit the hint; they do not acquire a lease or authorize GUI control. Canonical tools.bot_desktop lease/runtime owners are imported at call time; remote backend deliberately excludes host-screen hints. Screen ownership must continue to be enforced by the tool, not this prompt.",
+      "test_receipt": "tests/agent/test_prompt_builder.py -k bot_screen: 4 passed in /tmp/hermes-runtime-screen-review.log (running, human-held, stopped and remote backend cases)",
+      "module_bindings": "Bot Screen hint still resolves tools.bot_desktop lease and runtime dynamically; extracted platform prompt constants do not substitute these globals. It is optional descriptive text; it does not acquire a lease. Remote backend excludes host-screen hints, and missing screen state omits the hint. Tool enforcement is separate from the prompt."
+    },
+    {
+      "entry_id": "runtime-14",
+      "path": "gateway/platforms/api_server.py",
+      "scope": "_names_launch_profile",
+      "rule": "BLE001",
+      "current_blob": "d1ef91b7fb86c133c774acfac80746a9b8c846b1",
+      "source_blob": "7ff23f7cd4c824f0731f0fd2a3ffa18fc425b631",
+      "body_hash": "41948c643b2df9d2",
+      "source_body_hash": "41948c643b2df9d2",
+      "code": "except Exception:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 9,
+        "NESTING": 1,
+        "CC": 2
+      },
+      "current_metrics": {
+        "FUNC_LINES": 9,
+        "NESTING": 1,
+        "CC": 2
+      },
+      "compatibility": "On failed profile resolution returns False, causing a routed profile to retain its namespace rather than collapse into the launch profile. Failure may split continuity but cannot intentionally coalesce identities. Canonical routing-process home is used, not ambient mutable request home.",
+      "test_receipt": "tests/gateway/test_api_server.py::test_launch_profile_prefix_keeps_the_unprefixed_id plus profile namespace cases; full file 109 passed in /tmp/hermes-runtime-decomposition-transport-final.log Final direct regression receipt /tmp/hermes-runtime-failure-contracts.log:5 passed. Runtime14 includes profile lookup exception, distinct alpha/beta/unprefixed IDs and deterministic repeated alpha.",
+      "module_bindings": "The session namespace helper retains lazy canonical profile_matches_home and get_routing_process_hermes_home imports. Pure request projection extraction does not replace either owner or the ID seed derivation. Direct exception-path test verifies distinct profile and unprefixed namespaces plus deterministic repeat IDs; resolution failure does not collapse profiles."
+    },
+    {
+      "entry_id": "runtime-19",
+      "path": "hermes_state_messages.py",
+      "scope": "SessionMessagesMixin._carry_parent_timestamps",
+      "rule": "BLE001",
+      "current_blob": "c0d3bd7c9194900bd85cd13d95f3bc091d87aaf5",
+      "source_blob": "639dc3e19afa0897a3c5f6ae876eb32dffc02b49",
+      "body_hash": "547ed4a2d107fdca",
+      "source_body_hash": "547ed4a2d107fdca",
+      "code": "except Exception:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 32,
+        "NESTING": 3,
+        "CC": 6
+      },
+      "current_metrics": {
+        "FUNC_LINES": 32,
+        "NESTING": 3,
+        "CC": 6
+      },
+      "compatibility": "Only optional timestamp fields of copied handoff messages are carried. Donors are active rows of the specified parent, matched by full message/tool identity and consumed once; explicit child timestamp is retained. Errors leave publish-time fallback timestamps without changing message origin, UID allocation, ownership or transaction fences. Partial carries can degrade display ordering but cannot adopt trusted provenance.",
+      "test_receipt": "tests/hermes_state/test_hermes_state.py -k \"carry_parent or TestHandoffTimestamp\": 5 passed in /tmp/hermes-runtime-timestamp-review.log; state origin 30 and UID29 passed in earlier focused receipts",
+      "module_bindings": "Timestamp carry remains a SessionMessagesMixin method using the caller transaction and parent session ID. JSON/tool normalization and timestamp coercion remain canonical dependencies. Replay projection extraction does not change timestamp donor matching, origin trust or UID allocation. Direct lineage timestamp tests plus origin/UID suites preserve these separate contracts."
+    },
+    {
+      "entry_id": "runtime-27",
+      "path": "tui_gateway/methods_session.py",
+      "scope": "_#14",
+      "rule": "BLE001",
+      "current_blob": "7594b237df70b373fdc2506b727b5e3451671879",
+      "source_blob": "f642cd9782bfceef1fb8d0c7b1990b2a48973a95",
+      "body_hash": "f852dd6851f34039",
+      "source_body_hash": "f852dd6851f34039",
+      "code": "except Exception as e:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 28,
+        "NESTING": 4,
+        "CC": 7
+      },
+      "current_metrics": {
+        "FUNC_LINES": 28,
+        "NESTING": 4,
+        "CC": 7
+      },
+      "compatibility": "Actual registered session.archive callback scopes the DB to owning session/profile and returns RPC error5007 on DB exception, with no success result. pending_archived is only set after a false no-row return, not on an exception. Global server binding is installed by registration and exercised through _methods.",
+      "test_receipt": "tests/tui_gateway/test_session_failure_contracts.py: archive failing DB callback; file3 passed in /tmp/hermes-runtime-inherited-review-tests.log",
+      "module_bindings": "All three registered handler scopes remain unchanged at their original path and ordinal. Server bind_module wiring remains the actual global owner; extracted session-row summary is separately registered before requests. Real _methods callbacks exercise archive failure, unavailable billing state and failed session save. Session/profile DB context helpers and profile_home ownership remain live canonical globals, not copied mutable aliases."
+    },
+    {
+      "entry_id": "runtime-28",
+      "path": "tui_gateway/methods_session.py",
+      "scope": "_#38",
+      "rule": "BLE001",
+      "current_blob": "7594b237df70b373fdc2506b727b5e3451671879",
+      "source_blob": "f642cd9782bfceef1fb8d0c7b1990b2a48973a95",
+      "body_hash": "e75444fc1be458af",
+      "source_body_hash": "e75444fc1be458af",
+      "code": "except Exception:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 13,
+        "NESTING": 2,
+        "CC": 3
+      },
+      "current_metrics": {
+        "FUNC_LINES": 13,
+        "NESTING": 2,
+        "CC": 3
+      },
+      "compatibility": "billing.state is a read-only presentation RPC. Exception returns logged_in=False/free_tier_account=False and an explicit error. It cannot grant an account, debit credit, or authorize billing; profile-scoped canonical billing imports remain dynamic.",
+      "test_receipt": "tests/tui_gateway/test_session_failure_contracts.py: billing builder exception registered callback; file3 passed in /tmp/hermes-runtime-inherited-review-tests.log",
+      "module_bindings": "All three registered handler scopes remain unchanged at their original path and ordinal. Server bind_module wiring remains the actual global owner; extracted session-row summary is separately registered before requests. Real _methods callbacks exercise archive failure, unavailable billing state and failed session save. Session/profile DB context helpers and profile_home ownership remain live canonical globals, not copied mutable aliases."
+    },
+    {
+      "entry_id": "runtime-29",
+      "path": "tui_gateway/methods_session.py",
+      "scope": "_#45",
+      "rule": "BLE001",
+      "current_blob": "7594b237df70b373fdc2506b727b5e3451671879",
+      "source_blob": "f642cd9782bfceef1fb8d0c7b1990b2a48973a95",
+      "body_hash": "89d9b7b42cf723bd",
+      "source_body_hash": "89d9b7b42cf723bd",
+      "code": "except Exception as e:",
+      "source_count": 1,
+      "current_count": 1,
+      "source_metrics": {
+        "FUNC_LINES": 30,
+        "NESTING": 2,
+        "CC": 6
+      },
+      "current_metrics": {
+        "FUNC_LINES": 30,
+        "NESTING": 2,
+        "CC": 6
+      },
+      "compatibility": "session.save persistence failure returns error5011, never a file-success receipt. Destination derives from the session profile home, and DB snapshot read is also scoped. Existing error text includes local destination/path, so this approval is limited to the authorized local RPC surface and is not a claim of redacted diagnostics.",
+      "test_receipt": "tests/tui_gateway/test_session_failure_contracts.py: occupied destination file causes mkdir failure, bytes unchanged and error only; file3 passed in /tmp/hermes-runtime-inherited-review-tests.log",
+      "module_bindings": "All three registered handler scopes remain unchanged at their original path and ordinal. Server bind_module wiring remains the actual global owner; extracted session-row summary is separately registered before requests. Real _methods callbacks exercise archive failure, unavailable billing state and failed session save. Session/profile DB context helpers and profile_home ownership remain live canonical globals, not copied mutable aliases."
+    }
+  ],
+  "bounded_receipts": [
+    {
+      "label": "hermes-runtime-decomposition-validation.log",
+      "sha256": "1526f3d36dfd45f2f116c7c5dc9175858f5eedbeb859e6e123ae9261c9f0f21b",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 41 test files (~834 tests) under ['tests/agent/test_auxiliary_client.py', 'tests/agent/test_auxiliary_provider_fallbacks.py', 'tests/agent/test_error_classifier.py', 'tests/agent/test_error_classifier_parameter_recovery.py', 'tests/agent/test_prompt_execution_guidance.py', 'tests/agent/test_credential_pool.py', 'tests/agent/test_credential_pool_anthropic_refresh_race.py', 'tests/agent/test_credential_pool_auto_detect.py', 'tests/agent/test_credential_pool_codex_singleton_isolation.py', 'tests/agent/test_credential_pool_connectors_guest.py', 'tests/agent/test_credential_pool_deferred_refresh.py', 'tests/agent/test_credential_pool_demotion_2194.py', 'tests/agent/test_credential_pool_interrupt.py', 'tests/agent/test_credential_pool_key_rotation.py', 'tests/agent/test_credential_pool_lease_refresh_reselect.py', 'tests/agent/test_credential_pool_no_entries_log_throttle.py', 'tests/agent/test_credential_pool_nous_refresh_stampede.py', 'tests/agent/test_credential_pool_oat_authtype.py', 'tests/agent/test_credential_pool_oauth_writethrough.py', 'tests/agent/test_credential_pool_operations.py', 'tests/agent/test_credential_pool_plugin_seam.py', 'tests/agent/test_credential_pool_profile_oauth_fork.py', 'tests/agent/test_credential_pool_provider_boundary.py', 'tests/agent/test_credential_pool_refresh_sweep_spacing.py', 'tests/agent/test_credential_pool_routing.py', 'tests/agent/test_credential_pool_seed_existing_env_sources.py', 'tests/agent/test_credential_pool_sole_cooldown.py', 'tests/agent/test_credential_pool_sole_rotate_recovery.py', 'tests/agent/test_credential_pool_terminal_refresh_visibility.py', 'tests/agent/test_credential_pool_unmatched_rotation_bound.py', 'tests/agent/test_message_sequence_repair.py', 'tests/agent/test_repair_reanchors_current_turn_user_idx.py', 'tests/agent/test_turn_finalizer_cleanup_guard.py', 'tests/agent/test_turn_finalizer_correction_review.py', 'tests/agent/test_turn_finalizer_final_response_persistence.py', 'tests/agent/test_turn_finalizer_interrupt_alternation.py', 'tests/agent/test_turn_finalizer_iteration_limit_exit.py', 'tests/agent/test_advisor_result_envelope.py', 'tests/agent/test_verification_scope_fail_closed.py', 'tests/gateway/test_api_server_model_recovery.py', 'tests/hermes_state/test_message_origin.py']; running with -j 4\n[  5.8% |    48/~834 | \u271354 | \u2717 0] \u2713 tests/agent/test_credential_pool.py (54\u2713, 1.5s)\n[  6.0% |    50/~834 | \u271356 | \u2717 0] \u2713 tests/agent/test_credential_pool_anthropic_refresh_race.py (2\u2713, 1.1s)\n[  6.2% |    52/~834 | \u271364 | \u2717 0] \u2713 tests/agent/test_advisor_result_envelope.py (8\u2713, 3.8s)\n[  8.5% |    71/~834 | \u271383 | \u2717 0] \u2713 tests/agent/test_auxiliary_provider_fallbacks.py (19\u2713, 4.1s)\n[  8.8% |    73/~834 | \u271385 | \u2717 0] \u2713 tests/agent/test_credential_pool_codex_singleton_isolation.py (2\u2713, 0.9s)\n[  8.9% |    74/~834 | \u271386 | \u2717 0] \u2713 tests/agent/test_credential_pool_auto_detect.py (1\u2713, 2.5s)\n[  9.0% |    75/~834 | \u271387 | \u2717 0] \u2713 tests/agent/test_credential_pool_connectors_guest.py (1\u2713, 1.0s)\n[  9.1% |    76/~834 | \u271388 | \u2717 0] \u2713 tests/agent/test_credential_pool_deferred_refresh.py (1\u2713, 0.9s)\n[ 10.8% |    90/~834 | \u2713102 | \u2717  0] \u2713 tests/agent/test_credential_pool_demotion_2194.py (14\u2713, 0.9s)\n[ 11.0% |    92/~834 | \u2713104 | \u2717  0] \u2713 tests/agent/test_credential_pool_key_rotation.py (2\u2713, 0.9s)\n[ 11.3% |    94/~834 | \u2713106 | \u2717  0] \u2713 tests/agent/test_credential_pool_lease_refresh_reselect.py (2\u2713, 0.9s)\n[ 11.4% |    95/~834 | \u2713107 | \u2717  0] \u2713 tests/agent/test_credential_pool_interrupt.py (1\u2713, 2.2s)\n[ 11.8% |    98/~834 | \u2713110 | \u2717  0] \u2713 tests/agent/test_credential_pool_no_entries_log_throttle.py (3\u2713, 0.9s)\n[ 12.0% |   100/~834 | \u2713112 | \u2717  0] \u2713 tests/agent/test_credential_pool_oat_authtype.py (2\u2713, 0.7s)\n[ 12.6% |   105/~834 | \u2713117 | \u2717  0] \u2713 tests/agent/test_credential_pool_oauth_writethrough.py (5\u2713, 1.0s)\n[ 13.1% |   109/~834 | \u2713124 | \u2717  0] \u2713 tests/agent/test_credential_pool_operations.py (7\u2713, 0.9s)\n[ 13.4% |   112/~834 | \u2713127 | \u2717  0] \u2713 tests/agent/test_credential_pool_nous_refresh_stampede.py (3\u2713, 2.2s)\n[ 13.9% |   116/~834 | \u2713133 | \u2717  0] \u2713 tests/agent/test_credential_pool_plugin_seam.py (6\u2713, 0.8s)\n[ 15.0% |   125/~834 | \u2713142 | \u2717  0] \u2713 tests/agent/test_credential_pool_provider_boundary.py (9\u2713, 0.8s)\n[ 15.1% |   126/~834 | \u2713143 | \u2717  0] \u2713 tests/agent/test_credential_pool_refresh_sweep_spacing.py (1\u2713, 2.0s)\n[ 15.5% |   129/~834 | \u2713148 | \u2717  0] \u2713 tests/agent/test_credential_pool_seed_existing_env_sources.py (5\u2713, 0.8s)\n[ 16.5% |   138/~834 | \u2713157 | \u2717  0] \u2713 tests/agent/test_credential_pool_sole_cooldown.py (9\u2713, 0.8s)\n[ 18.2% |   152/~834 | \u2713171 | \u2717  0] \u2713 tests/agent/test_credential_pool_routing.py (14\u2713, 3.2s)\n[ 21.9% |   183/~834 | \u2713213 | \u2717  0] \u2713 tests/agent/test_credential_pool_profile_oauth_fork.py (42\u2713, 4.2s)\n[ 22.2% |   185/~834 | \u2713215 | \u2717  0] \u2713 tests/agent/test_credential_pool_sole_rotate_recovery.py (2\u2713, 1.0s)\n[ 22.3% |   186/~834 | \u2713216 | \u2717  0] \u2713 tests/agent/test_credential_pool_unmatched_rotation_bound.py (1\u2713, 0.9s)\n[ 23.0% |   192/~834 | \u2713224 | \u2717  0] \u2713 tests/agent/test_credential_pool_terminal_refresh_visibility.py (8\u2713, 1.1s)\n[ 30.7% |   256/~834 | \u2713291 | \u2717  0] \u2713 tests/agent/test_message_sequence_repair.py (67\u2713, 4.4s)\n[ 33.1% |   276/~834 | \u2713311 | \u2717  0] \u2713 tests/agent/test_prompt_execution_guidance.py (20\u2713, 1.2s)\n[ 55.8% |   465/~834 | \u2713535 | \u2717  0] \u2713 tests/agent/test_auxiliary_client.py (224\u2713, 20.7s)\n[ 56.1% |   468/~834 | \u2713541 | \u2717  0] \u2713 tests/agent/test_turn_finalizer_cleanup_guard.py (6\u2713, 2.3s)\n[ 56.2% |   469/~834 | \u2713542 | \u2717  0] \u2713 tests/agent/test_repair_reanchors_current_turn_user_idx.py (1\u2713, 3.5s)\n[ 57.4% |   479/~834 | \u2713552 | \u2717  0] \u2713 tests/agent/test_turn_finalizer_final_response_persistence.py (10\u2713, 2.0s)\n[ 60.8% |   507/~834 | \u2713596 | \u2717  0] \u2713 tests/agent/test_error_classifier_parameter_recovery.py (44\u2713, 14.4s)\n[ 62.5% |   521/~834 | \u2713610 | \u2717  0] \u2713 tests/agent/test_turn_finalizer_correction_review.py (14\u2713, 6.4s)\n[ 63.2% |   527/~834 | \u2713616 | \u2717  0] \u2713 tests/agent/test_turn_finalizer_interrupt_alternation.py (6\u2713, 4.3s)\n[ 64.3% |   536/~834 | \u2713628 | \u2717  0] \u2713 tests/agent/test_turn_finalizer_iteration_limit_exit.py (12\u2713, 2.5s)\n[ 65.2% |   544/~834 | \u2713638 | \u2717  0] \u2713 tests/agent/test_verification_scope_fail_closed.py (10\u2713, 6.8s)\n[ 67.4% |   562/~834 | \u2713668 | \u2717  0] \u2713 tests/hermes_state/test_message_origin.py (30\u2713, 5.9s)\n[ 68.0% |   567/~834 | \u2713673 | \u2717  0] \u2713 tests/gateway/test_api_server_model_recovery.py (5\u2713, 8.4s)\n[100.0% |   834/~834 | \u2713980 | \u2717  0] \u2713 tests/agent/test_error_classifier.py (307\u2713, 101.0s)\n\n=== Summary: 41 files, 980 tests passed, 0 failed (100% complete) in 114.9s (4 workers) ===\n  Durations cached to test_durations.json (41 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   41\n  Total subprocess CPU-wall: 225.8s  (runner wall: 114.9s, parallelism: 4x)\n  P50: 1.96s  P90: 6.81s  P95: 14.38s  P99: 100.95s  Max: 100.95s\n  <1s: 15 files (37%)  <2s: 22 files (54%)\n  Top 10 slowest:\n    100.95s  tests/agent/test_error_classifier.py\n     20.65s  tests/agent/test_auxiliary_client.py\n     14.38s  tests/agent/test_error_classifier_parameter_recovery.py\n      8.43s  tests/gateway/test_api_server_model_recovery.py\n      6.81s  tests/agent/test_verification_scope_fail_closed.py\n      6.37s  tests/agent/test_turn_finalizer_correction_review.py\n      5.94s  tests/hermes_state/test_message_origin.py\n      4.42s  tests/agent/test_message_sequence_repair.py\n      4.29s  tests/agent/test_turn_finalizer_interrupt_alternation.py\n      4.23s  tests/agent/test_credential_pool_profile_oauth_fork.py\n"
+    },
+    {
+      "label": "hermes-runtime-inherited-review-tests.log",
+      "sha256": "a18258ad4b2735046ca628ebc3126c25db2115699802c2c730038fcb7c7143fb",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 8 test files (~84 tests) under ['tests/agent/test_streaming.py', 'tests/agent/test_stream_unmask_5xx.py', 'tests/agent/test_stream_single_writer.py', 'tests/agent/test_stream_interrupt_retry.py', 'tests/agent/test_request_client_reuse_abort_races.py', 'tests/agent/test_bot_chat_toolset_refresh.py', 'tests/agent/test_auxiliary_provider_fallbacks.py', 'tests/tui_gateway/test_session_failure_contracts.py']; running with -j 4\n[  3.6% |     3/~84 | \u27133 | \u27170] \u2713 tests/agent/test_bot_chat_toolset_refresh.py (3\u2713, 1.9s)\n[ 26.2% |    22/~84 | \u271322 | \u2717 0] \u2713 tests/agent/test_auxiliary_provider_fallbacks.py (19\u2713, 3.9s)\n[ 31.0% |    26/~84 | \u271326 | \u2717 0] \u2713 tests/agent/test_stream_interrupt_retry.py (4\u2713, 4.8s)\n[ 33.3% |    28/~84 | \u271328 | \u2717 0] \u2713 tests/agent/test_stream_unmask_5xx.py (2\u2713, 1.7s)\n[ 40.5% |    34/~84 | \u271334 | \u2717 0] \u2713 tests/agent/test_request_client_reuse_abort_races.py (6\u2713, 6.7s)\n[ 48.8% |    41/~84 | \u271341 | \u2717 0] \u2713 tests/agent/test_stream_single_writer.py (7\u2713, 5.4s)\n[ 52.4% |    44/~84 | \u271344 | \u2717 0] \u2713 tests/tui_gateway/test_session_failure_contracts.py (3\u2713, 2.0s)\n[100.0% |    84/~84 | \u271384 | \u2717 0] \u2713 tests/agent/test_streaming.py (40\u2713 4s, 14.3s)\n\n=== Summary: 8 files, 84 tests passed, 0 failed, 4 skipped (100% complete) in 19.1s (4 workers) ===\n  Durations cached to test_durations.json (8 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   8\n  Total subprocess CPU-wall: 40.7s  (runner wall: 19.1s, parallelism: 4x)\n  P50: 4.82s  P90: 14.31s  P95: 14.31s  P99: 14.31s  Max: 14.31s\n  <1s: 0 files (0%)  <2s: 3 files (38%)\n  Top 10 slowest:\n     14.31s  tests/agent/test_streaming.py\n      6.69s  tests/agent/test_request_client_reuse_abort_races.py\n      5.36s  tests/agent/test_stream_single_writer.py\n      4.82s  tests/agent/test_stream_interrupt_retry.py\n      3.87s  tests/agent/test_auxiliary_provider_fallbacks.py\n      1.98s  tests/tui_gateway/test_session_failure_contracts.py\n      1.90s  tests/agent/test_bot_chat_toolset_refresh.py\n      1.75s  tests/agent/test_stream_unmask_5xx.py\n"
+    },
+    {
+      "label": "hermes-runtime-timestamp-review.log",
+      "sha256": "29bd896fbd97254b92f7096806ea910c09778cc310dac08379288b27700ac2b9",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~245 tests) under ['tests/hermes_state/test_hermes_state.py']; running with -j 1\n[100.0% |   245/~245 | \u27135 | \u27170] \u2713 tests/hermes_state/test_hermes_state.py (5\u2713, 1.7s)\n\n=== Summary: 1 files, 5 tests passed, 0 failed (100% complete) in 1.7s (1 workers) ===\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 1.7s  (runner wall: 1.7s, parallelism: 1x)\n  P50: 1.71s  P90: 1.71s  P95: 1.71s  P99: 1.71s  Max: 1.71s\n  <1s: 0 files (0%)  <2s: 1 files (100%)\n  Top 10 slowest:\n      1.71s  tests/hermes_state/test_hermes_state.py\n"
+    },
+    {
+      "label": "hermes-runtime-screen-review.log",
+      "sha256": "0b4015174b53c700d2203d2a12549c8b45871868d0349deee3c50154ee5a5314",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~181 tests) under ['tests/agent/test_prompt_builder.py']; running with -j 1\n[100.0% |   181/~181 | \u27134 | \u27170] \u2713 tests/agent/test_prompt_builder.py (4\u2713, 0.8s)\n\n=== Summary: 1 files, 4 tests passed, 0 failed (100% complete) in 0.9s (1 workers) ===\n\n  note: platforms('macos') tests (in 1 file) were SKIPPED on this host (linux); they run on the macOS Python-tests lane.\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 0.8s  (runner wall: 0.9s, parallelism: 1x)\n  P50: 0.85s  P90: 0.85s  P95: 0.85s  P99: 0.85s  Max: 0.85s\n  <1s: 1 files (100%)  <2s: 1 files (100%)\n  Top 10 slowest:\n      0.85s  tests/agent/test_prompt_builder.py\n"
+    },
+    {
+      "label": "hermes-runtime-decomposition-transport-final.log",
+      "sha256": "6b37d69cf0840b64d94392b3d2180e6ae087607035c5cde40f6449893d31d77a",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 15 test files (~354 tests) under ['tests/agent/test_image_shrink_recovery.py', 'tests/agent/test_compressor_stale_tool_images.py', 'tests/agent/test_compressor_image_tokens.py', 'tests/agent/test_anthropic_billing_guidance.py', 'tests/agent/test_billing_unverified_carrythrough.py', 'tests/agent/test_288_billing_guidance.py', 'tests/agent/test_context_compressor.py', 'tests/agent/test_streaming_tool_call_repair.py', 'tests/gateway/test_send_error_classification.py', 'tests/gateway/test_silent_partial_delivery.py', 'tests/gateway/test_media_metadata_contract.py', 'tests/gateway/test_api_server.py', 'tests/gateway/test_api_server_media_data_urls.py', 'tests/hermes_state/test_message_uid.py', 'tests/tui_gateway/test_tui_session_rewind_profiles.py']; running with -j 4\n[  1.1% |     4/~354 | \u27134 | \u27170] \u2713 tests/agent/test_compressor_image_tokens.py (4\u2713, 1.1s)\n[  2.5% |     9/~354 | \u27139 | \u27170] \u2713 tests/agent/test_anthropic_billing_guidance.py (5\u2713, 1.1s)\n[  4.2% |    15/~354 | \u271315 | \u2717 0] \u2713 tests/agent/test_288_billing_guidance.py (6\u2713, 1.9s)\n[  5.9% |    21/~354 | \u271321 | \u2717 0] \u2713 tests/agent/test_compressor_stale_tool_images.py (6\u2713, 0.9s)\n[  7.1% |    25/~354 | \u271325 | \u2717 0] \u2713 tests/agent/test_streaming_tool_call_repair.py (4\u2713, 1.0s)\n[  8.5% |    30/~354 | \u271330 | \u2717 0] \u2713 tests/agent/test_billing_unverified_carrythrough.py (5\u2713, 3.2s)\n[  9.9% |    35/~354 | \u271335 | \u2717 0] \u2713 tests/gateway/test_api_server_media_data_urls.py (5\u2713, 1.5s)\n[ 10.2% |    36/~354 | \u271337 | \u2717 0] \u2713 tests/gateway/test_media_metadata_contract.py (2\u2713, 0.8s)\n[ 11.0% |    39/~354 | \u271354 | \u2717 0] \u2713 tests/gateway/test_send_error_classification.py (17\u2713, 1.2s)\n[ 15.3% |    54/~354 | \u271369 | \u2717 0] \u2713 tests/gateway/test_silent_partial_delivery.py (15\u2713, 2.7s)\n[ 20.6% |    73/~354 | \u271388 | \u2717 0] \u2713 tests/agent/test_image_shrink_recovery.py (19\u2713, 7.6s)\n[ 48.6% |   172/~354 | \u2713197 | \u2717  0] \u2713 tests/gateway/test_api_server.py (109\u2713, 6.7s)\n[ 56.8% |   201/~354 | \u2713226 | \u2717  0] \u2713 tests/hermes_state/test_message_uid.py (29\u2713, 3.0s)\n[ 61.6% |   218/~354 | \u2713245 | \u2717  0] \u2713 tests/tui_gateway/test_tui_session_rewind_profiles.py (19\u2713, 4.8s)\n[100.0% |   354/~354 | \u2713547 | \u2717  0] \u2713 tests/agent/test_context_compressor.py (302\u2713, 15.4s)\n\n=== Summary: 15 files, 547 tests passed, 0 failed (100% complete) in 16.7s (4 workers) ===\n  Durations cached to test_durations.json (15 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   15\n  Total subprocess CPU-wall: 53.1s  (runner wall: 16.7s, parallelism: 4x)\n  P50: 1.93s  P90: 7.62s  P95: 15.41s  P99: 15.41s  Max: 15.41s\n  <1s: 2 files (13%)  <2s: 8 files (53%)\n  Top 10 slowest:\n     15.41s  tests/agent/test_context_compressor.py\n      7.62s  tests/agent/test_image_shrink_recovery.py\n      6.71s  tests/gateway/test_api_server.py\n      4.82s  tests/tui_gateway/test_tui_session_rewind_profiles.py\n      3.20s  tests/agent/test_billing_unverified_carrythrough.py\n      3.01s  tests/hermes_state/test_message_uid.py\n      2.70s  tests/gateway/test_silent_partial_delivery.py\n      1.93s  tests/agent/test_288_billing_guidance.py\n      1.53s  tests/gateway/test_api_server_media_data_urls.py\n      1.19s  tests/gateway/test_send_error_classification.py\n"
+    },
+    {
+      "label": "hermes-runtime-failure-contracts.log",
+      "sha256": "349f01a6a461182778ee26432a0060605535b2247731d78d4fd3b96e200dbe0d",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~4 tests) under ['tests/agent/test_inherited_failure_contracts.py']; running with -j 1\n[100.0% |     4/~4 | \u27135 | \u27170] \u2713 tests/agent/test_inherited_failure_contracts.py (5\u2713, 2.4s)\n\n=== Summary: 1 files, 5 tests passed, 0 failed (100% complete) in 2.4s (1 workers) ===\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 2.4s  (runner wall: 2.4s, parallelism: 1x)\n  P50: 2.39s  P90: 2.39s  P95: 2.39s  P99: 2.39s  Max: 2.39s\n  <1s: 0 files (0%)  <2s: 0 files (0%)\n  Top 10 slowest:\n      2.39s  tests/agent/test_inherited_failure_contracts.py\n"
+    }
+  ]
+}

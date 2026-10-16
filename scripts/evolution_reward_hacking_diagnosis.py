@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Reward-hacking trajectory diagnosis for the evolution eval pipeline (issue #1165).
 
 The genuinely-new element of the decoupled Benchmark/Harness/Environment proposal
@@ -31,9 +30,9 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
 __all__ = [
-    "RewardHackSignal",
     "RewardHackFinding",
     "RewardHackReport",
+    "RewardHackSignal",
     "diagnose_trajectory",
     "evaluate",
     "main",
@@ -43,7 +42,7 @@ __all__ = [
 @dataclass(frozen=True)
 class RewardHackSignal:
     key: str
-    pattern: "re.Pattern[str]"
+    pattern: re.Pattern[str]
     weight: float
     description: str
 
@@ -182,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--trajectory", required=True, help="path to a JSON list of trajectory steps")
     parser.add_argument("--verification-passed", action="store_true")
     args = parser.parse_args(argv)
-    with open(args.trajectory, encoding="utf-8") as fh:
+    with open(args.trajectory, encoding="utf-8-sig") as fh:
         traj = json.load(fh)
     report = evaluate(traj, verification_passed=args.verification_passed)
     print(json.dumps(report, ensure_ascii=False, indent=2))

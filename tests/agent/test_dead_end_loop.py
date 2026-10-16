@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for dead-end loop detection (issue #1312)."""
 
 from __future__ import annotations

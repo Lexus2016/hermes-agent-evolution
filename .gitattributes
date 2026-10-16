@@ -1,5 +1,6 @@
 # Auto-generated files — collapse diffs and exclude from language stats
 web/package-lock.json linguist-generated=true
+uv.lock text eol=lf
 
 # Published model catalog — an upstream-maintained artifact (a model list we no
 # longer customize + an `updated_at` timestamp). Its timestamp collides on EVERY
@@ -31,6 +32,8 @@ docker/entrypoint.sh text eol=lf
 *.js    text eol=lf
 *.mjs   text eol=lf
 *.cjs   text eol=lf
+*.cts   text eol=lf
+*.mts   text eol=lf
 *.jsx   text eol=lf
 *.json  text eol=lf
 *.yaml  text eol=lf
@@ -41,3 +44,20 @@ docker/entrypoint.sh text eol=lf
 *.html  text eol=lf
 *.svg   text eol=lf
 *.ps1   text eol=crlf
+
+# Preserve exact bytes of reviewed historical JSON parts on every checkout.
+analysis/sync-health/v0221-9ad6-main365-health-report.json.parts/0001.txt text eol=lf
+analysis/sync-health/v0221-9ad6-main365-health-report.json.parts/0002.txt text eol=lf
+analysis/sync-health/v0221-9ff0-main365-health-report.json.parts/0001.txt text eol=lf
+analysis/sync-health/v0221-9ff0-main365-health-report.json.parts/0002.txt text eol=lf
+analysis/sync-health/v0221-9ff0-main365-health-report.json.parts/0003.txt text eol=lf
+analysis/sync-health/v0221-d66b-main365-health-report.json.parts/0001.txt text eol=lf
+analysis/sync-health/v0221-d66b-main365-health-report.json.parts/0002.txt text eol=lf
+analysis/sync-health/v0221-d66b-main365-health-report.json.parts/0003.txt text eol=lf
+analysis/sync-health/v0221-ef4609-main9ef-health-report.json.parts/0001.txt text eol=lf
+analysis/sync-health/v0221-ef4609-main9ef-health-report.json.parts/0002.txt text eol=lf
+analysis/sync-health/v0221-ef4609-main9ef-health-report.json.parts/0003.txt text eol=lf
+analysis/sync-health/v0221-manifest.json.parts/0001.txt text eol=lf
+analysis/sync-health/v0221-manifest.json.parts/0002.txt text eol=lf
+analysis/sync-health/v0221-manifest.json.parts/0003.txt text eol=lf
+analysis/sync-health/v0221-manifest.json.parts/0004.txt text eol=lf

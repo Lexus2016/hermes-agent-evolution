@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # check-conflict-markers.sh
 # Fails if any tracked file contains an unresolved git merge conflict marker
 # (^<<<<<<< X or ^>>>>>>> X).

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """MCP ttlMs / cacheScope result caching (Issue #2486, Slice B, SEP-2549).
 
 Provides deterministic TTL and scope-aware caching for MCP tool and list results.
@@ -37,7 +36,7 @@ class CachedResult:
     ttl_ms: Optional[int] = None
     cache_scope: str = CacheScope.SESSION.value
     session_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def is_expired(self, current_time_ms: Optional[float] = None) -> bool:
         """Check if cached entry has exceeded its ttlMs."""
@@ -48,7 +47,7 @@ class CachedResult:
         )
         return (now_ms - self.created_at_ms) > self.ttl_ms
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -56,10 +55,10 @@ class MCPResultCache:
     """In-memory TTL and scope-aware result cache for MCP tool calls."""
 
     def __init__(self) -> None:
-        self._entries: Dict[str, CachedResult] = {}
+        self._entries: dict[str, CachedResult] = {}
 
     @staticmethod
-    def hash_params(params: Union[Dict[str, Any], Any]) -> str:
+    def hash_params(params: dict[str, Any] | Any) -> str:
         """Generate deterministic hash for tool parameter payload."""
         try:
             serialized = json.dumps(params, sort_keys=True, default=str)
@@ -82,7 +81,7 @@ class MCPResultCache:
         return f"{scope_str}:{sess_part}:{tool_name}:{params_hash}"
 
     @staticmethod
-    def extract_cache_control(result: Any) -> Tuple[Optional[int], str]:
+    def extract_cache_control(result: Any) -> tuple[Optional[int], str]:
         """Extract ttlMs and cacheScope annotations from MCP result metadata (SEP-2549)."""
         ttl_ms: Optional[int] = None
         scope: str = CacheScope.SESSION.value
@@ -153,7 +152,7 @@ class MCPResultCache:
         ttl_ms: Optional[int] = None,
         cache_scope: str = CacheScope.SESSION.value,
         session_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> CachedResult:
         """Store result with specified ttlMs and cacheScope."""
         # Check if result itself contains cache control directives
@@ -207,13 +206,13 @@ class MCPResultCache:
 
     def wrap_with_cache(
         self,
-        handler_fn: Callable[[str, Dict[str, Any]], Any],
+        handler_fn: Callable[[str, dict[str, Any]], Any],
         session_id: Optional[str] = None,
         default_ttl_ms: Optional[int] = None,
-    ) -> Callable[[str, Dict[str, Any]], Any]:
+    ) -> Callable[[str, dict[str, Any]], Any]:
         """Wrap a tool execution handler function with automatic result caching."""
 
-        def _cached_handler(name: str, args: Dict[str, Any]) -> Any:
+        def _cached_handler(name: str, args: dict[str, Any]) -> Any:
             cached = self.get(name, args, session_id=session_id)
             if cached is not None:
                 logger.debug("MCP cache hit for tool '%s'", name)

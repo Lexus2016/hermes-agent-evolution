@@ -138,10 +138,10 @@ class RankedSkill:
     description: str
     category: Optional[str]
     score: float
-    matched_terms: List[str]
+    matched_terms: list[str]
 
 
-def _tokenize(text: str) -> List[str]:
+def _tokenize(text: str) -> list[str]:
     """Lowercase, split on non-alphanumerics, drop stop words and tiny tokens."""
     if not text:
         return []
@@ -168,7 +168,7 @@ def _field_overlap(
     return len(matched) * weight, matched
 
 
-def _usage_boost(name: str, usage: Dict[str, Dict[str, Any]]) -> float:
+def _usage_boost(name: str, usage: dict[str, dict[str, Any]]) -> float:
     """Small additive boost in ``[0, _USAGE_BOOST_MAX]`` from prior usage.
 
     Uses the combined use+view+patch activity count, squashed through a
@@ -190,7 +190,7 @@ def _usage_boost(name: str, usage: Dict[str, Dict[str, Any]]) -> float:
     return _USAGE_BOOST_MAX * (count / (count + 1.0))
 
 
-def _candidate_text_fields(candidate: Dict[str, Any]) -> Dict[str, str]:
+def _candidate_text_fields(candidate: dict[str, Any]) -> dict[str, str]:
     """Pull the scorable text out of a candidate dict, tolerant of shape.
 
     Tags may arrive as a list (from frontmatter) or be absent; everything else
@@ -215,9 +215,9 @@ def rank_skills(
     query: str,
     *,
     limit: int = 5,
-    candidates: Optional[Sequence[Dict[str, Any]]] = None,
+    candidates: Optional[Sequence[dict[str, Any]]] = None,
     use_usage_signal: bool = True,
-) -> List[RankedSkill]:
+) -> list[RankedSkill]:
     """Rank registry skills by relevance to the current task / state *query*.
 
     This is the state-grounded retrieval seam from #247: the caller passes the
@@ -249,7 +249,7 @@ def rank_skills(
     if candidates is None:
         candidates = _load_candidates_from_registry()
 
-    usage: Dict[str, Dict[str, Any]] = {}
+    usage: dict[str, dict[str, Any]] = {}
     if use_usage_signal:
         try:
             from tools.skill_usage import load_usage
@@ -259,7 +259,7 @@ def rank_skills(
             logger.debug("Could not load skill usage for ranking", exc_info=True)
             usage = {}
 
-    ranked: List[RankedSkill] = []
+    ranked: list[RankedSkill] = []
     from tools.skill_contracts import applicability
     for candidate in candidates:
         if applicability(candidate.get("contract"), query) is False:
@@ -307,7 +307,7 @@ def rank_skills(
     return ranked
 
 
-def _load_candidates_from_registry() -> List[Dict[str, Any]]:
+def _load_candidates_from_registry() -> list[dict[str, Any]]:
     """Enumerate live skills and enrich each with frontmatter tags.
 
     ``skills_tool._find_all_skills`` already does the platform/environment/
@@ -322,7 +322,7 @@ def _load_candidates_from_registry() -> List[Dict[str, Any]]:
     skills = skills_tool._find_all_skills()
 
     # Build a name -> tags map by scanning the same dirs _find_all_skills uses.
-    tags_by_name: Dict[str, List[str]] = {}
+    tags_by_name: dict[str, list[str]] = {}
     try:
         from agent.skill_utils import get_external_skills_dirs
 
@@ -334,7 +334,7 @@ def _load_candidates_from_registry() -> List[Dict[str, Any]]:
         for scan_dir in scan_dirs:
             for skill_md in iter_skill_index_files(scan_dir, "SKILL.md"):
                 try:
-                    content = skill_md.read_text(encoding="utf-8")[:4000]
+                    content = skill_md.read_text(encoding="utf-8-sig")[:4000]
                     frontmatter, _ = parse_frontmatter(content)
                 except Exception:
                     continue
@@ -352,14 +352,14 @@ def _load_candidates_from_registry() -> List[Dict[str, Any]]:
     return skills
 
 
-def _extract_tags(frontmatter: Dict[str, Any]) -> List[str]:
+def _extract_tags(frontmatter: dict[str, Any]) -> list[str]:
     """Read tags from frontmatter, honouring the metadata.hermes.* convention.
 
     Mirrors the lookup ``skills_tool.skill_view`` does: ``metadata.hermes.tags``
     first (agentskills.io convention), then a top-level ``tags`` fallback.
     """
     metadata = frontmatter.get("metadata")
-    hermes_meta: Dict[str, Any] = {}
+    hermes_meta: dict[str, Any] = {}
     if isinstance(metadata, dict):
         candidate = metadata.get("hermes")
         if isinstance(candidate, dict):

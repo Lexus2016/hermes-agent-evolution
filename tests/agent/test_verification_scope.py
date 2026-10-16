@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for verification scope boundary enforcement (#2436)."""
 
 from pathlib import Path

@@ -24,14 +24,14 @@ from tools.tool_failure_classifier import SAFETY_GATE_RECOVERY_HINT
 _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     # The explicit gate refusal outranks incidental error words in its reason.
     (
-        re.compile(r"tool execution blocked by safety gate:", re.I),
+        re.compile(r"tool execution blocked by safety gate:", re.IGNORECASE),
         "safety_gate_blocked",
         SAFETY_GATE_RECOVERY_HINT,
     ),
     (
         re.compile(
             r"command not found|not recognized as|: No such file or directory.*\b(sh|bash|exec)\b|executable file not found",
-            re.I,
+            re.IGNORECASE,
         ),
         "missing_command",
         "A required binary/command is missing. Check prerequisites first "
@@ -45,7 +45,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     (
         re.compile(
             r"\b(found \d+ matches|multiple matches found)\b",
-            re.I,
+            re.IGNORECASE,
         ),
         "ambiguous",
         "old_string matched multiple locations. Add more surrounding context to make it "
@@ -62,7 +62,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         re.compile(
             r"\b(jsondecodeerror|yamlerror|tomldecodeerror|parseerror|syntaxerror|"
             r"invalid (json|yaml|toml)|syntax validation|fails? \.(json|yaml|yml|toml) syntax)\b",
-            re.I,
+            re.IGNORECASE,
         ),
         "parse_error",
         "Content failed syntax validation. The malformed content will fail identically on "
@@ -81,7 +81,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
             r"\b(regex parse error|invalid regular expression|"
             r"unrecognized repeat|unbalanced|unclosed|invalid repetition|"
             r"rg:.*error|grep:.*error)\b",
-            re.I,
+            re.IGNORECASE,
         ),
         "parse_error",
         "Invalid regex/glob pattern — the same pattern will fail identically on retry. "
@@ -101,7 +101,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         # runtime_error catch-all.
         re.compile(
             r"\bretry spiral detected\b",
-            re.I,
+            re.IGNORECASE,
         ),
         "retry_spiral",
         "This command has failed identically multiple times in a row — it is "
@@ -123,7 +123,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
             r"\b(http 403|403 forbidden|access blocked|access refused|"
             r"request refused|request rejected|blocked by|"
             r"not allowed|operation refused)\b",
-            re.I,
+            re.IGNORECASE,
         ),
         "refusal",
         "The request was refused by the backend. The same request with the same "
@@ -133,7 +133,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     (
         re.compile(
             r"permission denied|access denied|not permitted|forbidden|refusing to write|operation not permitted|EACCES",
-            re.I,
+            re.IGNORECASE,
         ),
         "permission",
         # #2168 — permission/refusal recovery: steer toward alternatives and
@@ -148,7 +148,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     (
         re.compile(
             r"timed out|timeout|deadline exceeded|ClosedResourceError|unreachable|connection refused|ETIMEDOUT",
-            re.I,
+            re.IGNORECASE,
         ),
         "timeout",
         "The operation timed out / the resource is unreachable. Set it aside, route to a "
@@ -157,7 +157,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     (
         re.compile(
             r"\b(char(acter)?s?|byte)s?\b.*\b(limit|exceed|too (long|large|big)|maximum)\b|exceeds the maximum|max(imum)? (length|size)|too many tokens|context length",
-            re.I,
+            re.IGNORECASE,
         ),
         "limit",
         "A size/length limit was hit. Don't resend as-is — chunk the work, summarize, "
@@ -172,7 +172,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         # Bare "no results" now falls through to the not_found rule below.
         re.compile(
             r"duckduckgo search failed|brave search returned http|could not reach .* search|searxng returned http",
-            re.I,
+            re.IGNORECASE,
         ),
         "provider_dead",
         "The active search provider is not returning results. Switch to a different "
@@ -184,7 +184,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         re.compile(
             r"no such file or directory|not found|does not exist|cannot find|"
             r"could not find|no matches found|0 matches|0 results|no results",
-            re.I,
+            re.IGNORECASE,
         ),
         "not_found",
         "The target wasn't found. Re-check the path/name (it may be dynamic), broaden the "
@@ -200,7 +200,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     (
         re.compile(
             r"\bexit code[:\s]+137\b",
-            re.I,
+            re.IGNORECASE,
         ),
         "oom_killed",
         "The process was killed by the OOM killer (exit 137 = SIGKILL). The command "
@@ -210,7 +210,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     (
         re.compile(
             r"\bexit code[:\s]+139\b",
-            re.I,
+            re.IGNORECASE,
         ),
         "segfault",
         "The process segfaulted (exit 139 = SIGSEGV). This is a native crash, often in "
@@ -220,7 +220,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     (
         re.compile(
             r"\bexit code[:\s]+143\b",
-            re.I,
+            re.IGNORECASE,
         ),
         "terminated",
         "The process was terminated (exit 143 = SIGTERM). It was killed by a signal, "
@@ -230,7 +230,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     (
         re.compile(
             r"\bexit code[:\s]+2[0-9]?\b",
-            re.I,
+            re.IGNORECASE,
         ),
         "command_misuse",
         "The command exited with a 2.x code — shell builtin misuse or a bad argument "
@@ -254,7 +254,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
         re.compile(
             r"no process with id|no processes are currently registered|"
             r"session_id is required",
-            re.I,
+            re.IGNORECASE,
         ),
         "session_not_found",
         "The background-process session no longer exists (never spawned, already "
@@ -265,7 +265,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     (
         re.compile(
             r"unknown process action",
-            re.I,
+            re.IGNORECASE,
         ),
         "invalid_action",
         "That action name is not a valid process action. Use one of: list / poll / "
@@ -275,7 +275,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     (
         re.compile(
             r"process has already finished|already_exited",
-            re.I,
+            re.IGNORECASE,
         ),
         "process_exited",
         "The process has already finished — you cannot write/submit/close to a "
@@ -285,7 +285,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     (
         re.compile(
             r"traceback \(most recent call|exit code[:\s]+[1-9]|exit status [1-9]|non-zero exit|error:|exception|failed",
-            re.I,
+            re.IGNORECASE,
         ),
         "runtime_error",
         "The call errored. Read the message, fix the root cause, and CHANGE the call — "
@@ -294,7 +294,7 @@ _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
 )
 
 
-def classify(content: Any) -> Optional[Tuple[str, str]]:
+def classify(content: Any) -> Optional[tuple[str, str]]:
     """Return (category, recovery_hint) if the content looks like a failure, else None."""
     if not isinstance(content, str) or not content.strip():
         return None
@@ -335,7 +335,7 @@ _USR_HINT_MALFORMED = (
 )
 
 
-def payload_anomaly(content: Any) -> Optional[Tuple[str, str]]:
+def payload_anomaly(content: Any) -> Optional[tuple[str, str]]:
     """Classify a structurally broken tool payload (#1495).
 
     Returns ``(anomaly_type, recovery_hint)`` or ``None`` if structurally valid.

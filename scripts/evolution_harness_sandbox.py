@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 VALIDATED, REJECTED, INVALID = "validated", "rejected", "invalid"
 REGRESSION_GATE = ("scripts", "run_tests.sh")
-GateRunner = Callable[[Dict[str, Any]], "GateResult"]
+GateRunner = Callable[[dict[str, Any]], "GateResult"]
 
 
 @dataclass
@@ -27,7 +27,7 @@ class GateResult:
     output: str
 
 
-def apply_diff(code_diff: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def apply_diff(code_diff: dict[str, Any]) -> Optional[dict[str, Any]]:
     """Apply a code diff's ``changes`` to a COPY of its ``surface`` (sandbox copy).
 
     Returns ``{"before", "after", "changes"}`` or ``None`` for a malformed/empty
@@ -39,7 +39,7 @@ def apply_diff(code_diff: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not isinstance(surface, dict) or not isinstance(changes, list):
         return None
     before, after = copy.deepcopy(surface), copy.deepcopy(surface)
-    applied: List[Dict[str, Any]] = []
+    applied: list[dict[str, Any]] = []
     for change in changes:
         if isinstance(change, dict) and "field" in change and "after" in change:
             after[change["field"]] = copy.deepcopy(change["after"])
@@ -48,10 +48,10 @@ def apply_diff(code_diff: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def default_gate_runner(
-    applied: Dict[str, Any],
+    applied: dict[str, Any],
     *,
     repo_root: Optional[Path] = None,
-    command: Optional[Tuple[str, ...]] = None,
+    command: Optional[tuple[str, ...]] = None,
     timeout: int = 300,
 ) -> GateResult:
     """Run the canonical regression gate (binary feedback) against *applied*."""
@@ -66,6 +66,7 @@ def default_gate_runner(
             errors="replace",
             cwd=str(root),
             timeout=timeout,
+            check=False,
         )
         return GateResult(
             proc.returncode == 0,
@@ -77,8 +78,8 @@ def default_gate_runner(
 
 
 def validate_code_diff(
-    code_diff: Dict[str, Any], *, gate_runner: Optional[GateRunner] = None
-) -> Dict[str, Any]:
+    code_diff: dict[str, Any], *, gate_runner: Optional[GateRunner] = None
+) -> dict[str, Any]:
     """Apply a diff to a sandboxed copy and validate it against the gate.
 
     ``status`` is ``validated`` (applied + gate green), ``rejected`` (gate failed /

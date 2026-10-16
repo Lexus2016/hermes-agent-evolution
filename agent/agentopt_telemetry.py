@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """AgentOpt Slice 1 — opt-in LLM-call telemetry (#2741).
 
 Child of #2695. Opt-in via ``config.yaml -> agentopt.telemetry.enabled`` ONLY
@@ -33,7 +32,7 @@ def _store_path() -> Path:
     )
 
 
-def agentopt_enabled(config: Optional[Dict[str, Any]] = None) -> bool:
+def agentopt_enabled(config: Optional[dict[str, Any]] = None) -> bool:
     """Opt-in flag from config.yaml; default False; fail-closed. Injectable."""
     if config is not None:
         section = config.get("agentopt")
@@ -60,7 +59,7 @@ def estimate_cost(usage: Any) -> Optional[float]:
     return round((prompt + completion) * 0.002 / 1000.0, 6)
 
 
-def append_record(record: Dict[str, Any], store: Optional[Path] = None) -> bool:
+def append_record(record: dict[str, Any], store: Optional[Path] = None) -> bool:
     """Append one JSONL line. Best-effort; never raises."""
     if not isinstance(record.get("model"), str) or not record.get("model"):
         return False
@@ -86,12 +85,12 @@ def record_llm_call(
     outcome: str,
     usage: Any = None,
     store: Optional[Path] = None,
-    config: Optional[Dict[str, Any]] = None,
+    config: Optional[dict[str, Any]] = None,
 ) -> bool:
     """Record one LLM call when telemetry is enabled; no-op otherwise."""
     if not agentopt_enabled(config):
         return False
-    rec: Dict[str, Any] = {
+    rec: dict[str, Any] = {
         "model": model,
         "tool": tool,
         "step": step,
