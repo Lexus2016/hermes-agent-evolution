@@ -12740,6 +12740,209 @@
           "claim": "8 canonical tests covering batch/single preview, chained create/write_file/patch state, ambiguous/replace_all patch behavior, and the diff subcommand."
         }
       ]
+    },
+    {
+      "id": "vitest-structural-size-01",
+      "status": "reviewed",
+      "path": "apps/desktop/electron/connection-registry.test.ts",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2311 > 2165, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "a3095aa474beee804b1a3366c3f2a57ffed2aed8",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/electron/connection-registry.test.ts",
+        "scope": "<module>",
+        "blob": "a3095aa474beee804b1a3366c3f2a57ffed2aed8"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact structural metric preparation",
+        "compatibility": "Vitest cases assert registry normalization, labels, migration, and pure connection operations; node assert is test-only scaffolding. Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required.",
+        "receipt": "Independent source organization review on 2026-10-15, exact unchanged upstream bytes and actual measured line count; no execution receipt or feature-compatibility claim."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-vitest-size-structural-review.json",
+          "blob": "abac7909acebe5cc26853ac4a230af33c9054822",
+          "outcome": "passed",
+          "claim": "Independent structural inspection passed for this exact test-only module organization and unchanged size. No runtime, catch, timeout, security or feature acceptance is implied."
+        }
+      ]
+    },
+    {
+      "id": "vitest-structural-size-02",
+      "status": "reviewed",
+      "path": "apps/desktop/electron/remote-lifecycle.test.ts",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2246 > 2012, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "bdd76274b0e89b3a527c55781dfb4c81738bdd26",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/electron/remote-lifecycle.test.ts",
+        "scope": "<module>",
+        "blob": "bdd76274b0e89b3a527c55781dfb4c81738bdd26"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact structural metric preparation",
+        "compatibility": "Vitest cases cover remote lifecycle command construction, reuse proofs, and ready timeout configuration using temporary filesystem/process fixtures. Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required.",
+        "receipt": "Independent source organization review on 2026-10-15, exact unchanged upstream bytes and actual measured line count; no execution receipt or feature-compatibility claim."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-vitest-size-structural-review.json",
+          "blob": "abac7909acebe5cc26853ac4a230af33c9054822",
+          "outcome": "passed",
+          "claim": "Independent structural inspection passed for this exact test-only module organization and unchanged size. No runtime, catch, timeout, security or feature acceptance is implied."
+        }
+      ]
+    },
+    {
+      "id": "vitest-structural-size-03",
+      "status": "reviewed",
+      "path": "apps/desktop/src/app/gateway/hooks/use-gateway-boot.test.tsx",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2865 > 2682, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "c700f88a49a1afe5dedf379418ac6b181815d97e",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/gateway/hooks/use-gateway-boot.test.tsx",
+        "scope": "<module>",
+        "blob": "c700f88a49a1afe5dedf379418ac6b181815d97e"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact structural metric preparation",
+        "compatibility": "React Testing Library and Vitest fixtures exercise gateway boot state and connection selection; setup/cleanup and mocked timers belong to tests. Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required.",
+        "receipt": "Independent source organization review on 2026-10-15, exact unchanged upstream bytes and actual measured line count; no execution receipt or feature-compatibility claim."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-vitest-size-structural-review.json",
+          "blob": "abac7909acebe5cc26853ac4a230af33c9054822",
+          "outcome": "passed",
+          "claim": "Independent structural inspection passed for this exact test-only module organization and unchanged size. No runtime, catch, timeout, security or feature acceptance is implied."
+        }
+      ]
+    },
+    {
+      "id": "vitest-structural-size-04",
+      "status": "reviewed",
+      "path": "apps/desktop/src/app/session/hooks/use-prompt-actions/index.test.tsx",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 5938 > 5854, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "45d7dc93fe6b12e19ba5752e28cc5a8ed494705a",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/session/hooks/use-prompt-actions/index.test.tsx",
+        "scope": "<module>",
+        "blob": "45d7dc93fe6b12e19ba5752e28cc5a8ed494705a"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact structural metric preparation",
+        "compatibility": "React Testing Library hook tests cover prompt submission, run state, and composer interactions; repeated fixture/assertion scenarios account for module size. Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required.",
+        "receipt": "Independent source organization review on 2026-10-15, exact unchanged upstream bytes and actual measured line count; no execution receipt or feature-compatibility claim."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-vitest-size-structural-review.json",
+          "blob": "abac7909acebe5cc26853ac4a230af33c9054822",
+          "outcome": "passed",
+          "claim": "Independent structural inspection passed for this exact test-only module organization and unchanged size. No runtime, catch, timeout, security or feature acceptance is implied."
+        }
+      ]
+    },
+    {
+      "id": "vitest-structural-size-05",
+      "status": "reviewed",
+      "path": "apps/desktop/src/app/session/hooks/use-session-actions.test.tsx",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 7246 > 5227, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "c680caa29188fef832912e202eceb2f84d6d972e",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/session/hooks/use-session-actions.test.tsx",
+        "scope": "<module>",
+        "blob": "c680caa29188fef832912e202eceb2f84d6d972e"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact structural metric preparation",
+        "compatibility": "Vitest hook scenarios exercise session actions, ownership routing, and notification state with store fixtures; module has no exported production API. Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required.",
+        "receipt": "Independent source organization review on 2026-10-15, exact unchanged upstream bytes and actual measured line count; no execution receipt or feature-compatibility claim."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-vitest-size-structural-review.json",
+          "blob": "abac7909acebe5cc26853ac4a230af33c9054822",
+          "outcome": "passed",
+          "claim": "Independent structural inspection passed for this exact test-only module organization and unchanged size. No runtime, catch, timeout, security or feature acceptance is implied."
+        }
+      ]
+    },
+    {
+      "id": "vitest-structural-size-06",
+      "status": "reviewed",
+      "path": "apps/desktop/src/app/session/hooks/use-session-actions/utils.test.ts",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2493 > 2042, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "eff319eb6a41dc4dbbae8276f2efc09fbc45bbd2",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/session/hooks/use-session-actions/utils.test.ts",
+        "scope": "<module>",
+        "blob": "eff319eb6a41dc4dbbae8276f2efc09fbc45bbd2"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact structural metric preparation",
+        "compatibility": "Vitest scenarios cover session utility state, model selection, approvals, and composer persistence using fixture state and assertions. Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required.",
+        "receipt": "Independent source organization review on 2026-10-15, exact unchanged upstream bytes and actual measured line count; no execution receipt or feature-compatibility claim."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-vitest-size-structural-review.json",
+          "blob": "abac7909acebe5cc26853ac4a230af33c9054822",
+          "outcome": "passed",
+          "claim": "Independent structural inspection passed for this exact test-only module organization and unchanged size. No runtime, catch, timeout, security or feature acceptance is implied."
+        }
+      ]
+    },
+    {
+      "id": "vitest-structural-size-07",
+      "status": "reviewed",
+      "path": "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2421 > 2310, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "0f48af0132ab682c54cc84c4b75edd8be3e0b0d8",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "scope": "<module>",
+        "blob": "0f48af0132ab682c54cc84c4b75edd8be3e0b0d8"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact structural metric preparation",
+        "compatibility": "Vitest event-handler scenarios verify turn, UI, overlay and request state; test setup resets stores and injected events drive assertions. Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required.",
+        "receipt": "Independent source organization review on 2026-10-15, exact unchanged upstream bytes and actual measured line count; no execution receipt or feature-compatibility claim."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-vitest-size-structural-review.json",
+          "blob": "abac7909acebe5cc26853ac4a230af33c9054822",
+          "outcome": "passed",
+          "claim": "Independent structural inspection passed for this exact test-only module organization and unchanged size. No runtime, catch, timeout, security or feature acceptance is implied."
+        }
+      ]
     }
   ]
 }

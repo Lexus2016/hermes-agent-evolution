@@ -1,0 +1,125 @@
+{
+  "scope": "Seven independently inspected exact-upstream Vitest module FILE_LINES findings only",
+  "candidate_head_at_review": "e4b6cbf18c882194c4126be8f61907437dffd1a5",
+  "findings": [
+    {
+      "path": "apps/desktop/electron/connection-registry.test.ts",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "candidate_blob": "a3095aa474beee804b1a3366c3f2a57ffed2aed8",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_blob": "a3095aa474beee804b1a3366c3f2a57ffed2aed8",
+      "line_count": 2311,
+      "structural_rationale": "Vitest cases assert registry normalization, labels, migration, and pure connection operations; node assert is test-only scaffolding.",
+      "inspection_evidence": {
+        "same_source_bytes": true,
+        "vitest_import_present": true,
+        "top_level_export_declarations": false,
+        "review": "Read module imports, test declarations, assertion/fixture organization and final cases; confirmed exact whole-file source identity. This is a structural size review, not complete semantic review of every test."
+      },
+      "limits": "Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required."
+    },
+    {
+      "path": "apps/desktop/electron/remote-lifecycle.test.ts",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "candidate_blob": "bdd76274b0e89b3a527c55781dfb4c81738bdd26",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_blob": "bdd76274b0e89b3a527c55781dfb4c81738bdd26",
+      "line_count": 2246,
+      "structural_rationale": "Vitest cases cover remote lifecycle command construction, reuse proofs, and ready timeout configuration using temporary filesystem/process fixtures.",
+      "inspection_evidence": {
+        "same_source_bytes": true,
+        "vitest_import_present": true,
+        "top_level_export_declarations": false,
+        "review": "Read module imports, test declarations, assertion/fixture organization and final cases; confirmed exact whole-file source identity. This is a structural size review, not complete semantic review of every test."
+      },
+      "limits": "Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required."
+    },
+    {
+      "path": "apps/desktop/src/app/gateway/hooks/use-gateway-boot.test.tsx",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "candidate_blob": "c700f88a49a1afe5dedf379418ac6b181815d97e",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_blob": "c700f88a49a1afe5dedf379418ac6b181815d97e",
+      "line_count": 2865,
+      "structural_rationale": "React Testing Library and Vitest fixtures exercise gateway boot state and connection selection; setup/cleanup and mocked timers belong to tests.",
+      "inspection_evidence": {
+        "same_source_bytes": true,
+        "vitest_import_present": true,
+        "top_level_export_declarations": false,
+        "review": "Read module imports, test declarations, assertion/fixture organization and final cases; confirmed exact whole-file source identity. This is a structural size review, not complete semantic review of every test."
+      },
+      "limits": "Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required."
+    },
+    {
+      "path": "apps/desktop/src/app/session/hooks/use-prompt-actions/index.test.tsx",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "candidate_blob": "45d7dc93fe6b12e19ba5752e28cc5a8ed494705a",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_blob": "45d7dc93fe6b12e19ba5752e28cc5a8ed494705a",
+      "line_count": 5938,
+      "structural_rationale": "React Testing Library hook tests cover prompt submission, run state, and composer interactions; repeated fixture/assertion scenarios account for module size.",
+      "inspection_evidence": {
+        "same_source_bytes": true,
+        "vitest_import_present": true,
+        "top_level_export_declarations": false,
+        "review": "Read module imports, test declarations, assertion/fixture organization and final cases; confirmed exact whole-file source identity. This is a structural size review, not complete semantic review of every test."
+      },
+      "limits": "Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required."
+    },
+    {
+      "path": "apps/desktop/src/app/session/hooks/use-session-actions.test.tsx",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "candidate_blob": "c680caa29188fef832912e202eceb2f84d6d972e",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_blob": "c680caa29188fef832912e202eceb2f84d6d972e",
+      "line_count": 7246,
+      "structural_rationale": "Vitest hook scenarios exercise session actions, ownership routing, and notification state with store fixtures; module has no exported production API.",
+      "inspection_evidence": {
+        "same_source_bytes": true,
+        "vitest_import_present": true,
+        "top_level_export_declarations": false,
+        "review": "Read module imports, test declarations, assertion/fixture organization and final cases; confirmed exact whole-file source identity. This is a structural size review, not complete semantic review of every test."
+      },
+      "limits": "Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required."
+    },
+    {
+      "path": "apps/desktop/src/app/session/hooks/use-session-actions/utils.test.ts",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "candidate_blob": "eff319eb6a41dc4dbbae8276f2efc09fbc45bbd2",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_blob": "eff319eb6a41dc4dbbae8276f2efc09fbc45bbd2",
+      "line_count": 2493,
+      "structural_rationale": "Vitest scenarios cover session utility state, model selection, approvals, and composer persistence using fixture state and assertions.",
+      "inspection_evidence": {
+        "same_source_bytes": true,
+        "vitest_import_present": true,
+        "top_level_export_declarations": false,
+        "review": "Read module imports, test declarations, assertion/fixture organization and final cases; confirmed exact whole-file source identity. This is a structural size review, not complete semantic review of every test."
+      },
+      "limits": "Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required."
+    },
+    {
+      "path": "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "candidate_blob": "0f48af0132ab682c54cc84c4b75edd8be3e0b0d8",
+      "source_commit": "297552a9d646119871391d202509822cd86330df",
+      "source_blob": "0f48af0132ab682c54cc84c4b75edd8be3e0b0d8",
+      "line_count": 2421,
+      "structural_rationale": "Vitest event-handler scenarios verify turn, UI, overlay and request state; test setup resets stores and injected events drive assertions.",
+      "inspection_evidence": {
+        "same_source_bytes": true,
+        "vitest_import_present": true,
+        "top_level_export_declarations": false,
+        "review": "Read module imports, test declarations, assertion/fixture organization and final cases; confirmed exact whole-file source identity. This is a structural size review, not complete semantic review of every test."
+      },
+      "limits": "Only unchanged module line-count excess is proposed. No runtime pass claim, no desktop/TUI feature compatibility waiver, no behavior/catch/timeout/security finding accepted. Native/hosted gates remain required."
+    }
+  ]
+}
