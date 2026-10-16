@@ -1,0 +1,36 @@
+{
+  "scope": "_owning_distribution",
+  "path": "hermes_cli/plugins_updates.py",
+  "candidate_blob": "5e301bb8c841e616cb66a2dcca6fdbd7baf90ff5",
+  "source": {
+    "commit": "297552a9d646119871391d202509822cd86330df",
+    "blob": "01fe0512c7907daeb58b65dcbda84502ff89f5a0"
+  },
+  "dependencies": [
+    {
+      "path": "tests/hermes_cli/test_plugin_update_failure_boundaries.py",
+      "blob": "9cac1d346019bab439ece27cdbbfc2f2320b4407"
+    },
+    {
+      "path": "hermes_cli/plugins_provenance.py",
+      "blob": "c753fe00b0eb94228406f32acb62fb0da9310d2a"
+    },
+    {
+      "path": "hermes_cli/plugins_cadence.py",
+      "blob": "cbbc0462681bfd599f265a73ef4be44ea9a1ccf9"
+    },
+    {
+      "path": "pm/receipt.py",
+      "blob": "95df41457ac3f249f39936bc0ce4535391d78c97"
+    }
+  ],
+  "reason": "Unreadable owning-distribution metadata yields None without retaining the exception. The real caller emits a fixed unknown reason and performs neither package-name guessing nor installed-version/PyPI lookup. Actual scheduled check preserves healthy-neighbor apply, suppresses the unknown plugin, and persists its fixed reason.",
+  "limits": "Only _owning_distribution metadata access catch. No claim about distribution attribute getters outside its try, successful network access, parse/mismatch/PyPI branches, or the separately corrected lookup catches. Completed scan remains rate-limited.",
+  "test_case": "tests/hermes_cli/test_plugin_update_failure_boundaries.py::test_unknown_update_is_visible_and_never_applied[metadata]",
+  "receipt": {
+    "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/hermes_cli/test_plugin_update_reason_confidentiality.py tests/hermes_cli/test_plugin_update_failure_boundaries.py tests/hermes_cli/test_plugins_check_updates.py tests/hermes_cli/test_plugins_cadence.py -q",
+    "path": "/tmp/hermes-plugin-update-confidentiality-final.log",
+    "sha256": "4199579c3d5d859fa6209856baa646e252c4cc075a59164396238621782a2300",
+    "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 4 test files (~35 tests) under ['tests/hermes_cli/test_plugin_update_reason_confidentiality.py', 'tests/hermes_cli/test_plugin_update_failure_boundaries.py', 'tests/hermes_cli/test_plugins_check_updates.py', 'tests/hermes_cli/test_plugins_cadence.py']; running with -j 9\n[  2.9% |     1/~35 | \u27133 | \u27170] \u2713 tests/hermes_cli/test_plugin_update_failure_boundaries.py (3\u2713, 1.1s)\n[  5.7% |     2/~35 | \u27135 | \u27170] \u2713 tests/hermes_cli/test_plugin_update_reason_confidentiality.py (2\u2713, 1.1s)\n[ 25.7% |     9/~35 | \u271314 | \u2717 0] \u2713 tests/hermes_cli/test_plugins_cadence.py (9\u2713, 1.6s)\n[100.0% |    35/~35 | \u271343 | \u2717 0] \u2713 tests/hermes_cli/test_plugins_check_updates.py (29\u2713, 2.0s)\n\n=== Summary: 4 files, 43 tests passed, 0 failed (100% complete) in 2.1s (9 workers) ===\n  Durations cached to test_durations.json (4 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   4\n  Total subprocess CPU-wall: 5.8s  (runner wall: 2.1s, parallelism: 9x)\n  P50: 1.57s  P90: 2.05s  P95: 2.05s  P99: 2.05s  Max: 2.05s\n  <1s: 0 files (0%)  <2s: 3 files (75%)\n  Top 10 slowest:\n      2.05s  tests/hermes_cli/test_plugins_check_updates.py\n      1.57s  tests/hermes_cli/test_plugins_cadence.py\n      1.14s  tests/hermes_cli/test_plugin_update_reason_confidentiality.py\n      1.09s  tests/hermes_cli/test_plugin_update_failure_boundaries.py\n"
+  }
+}

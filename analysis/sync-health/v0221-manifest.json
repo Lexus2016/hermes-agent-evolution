@@ -14341,6 +14341,62 @@
           "claim": "Seven selected canonical tests passed: default/missing/unknown/unavailable/available resolver behavior, package shadowing and additive ABC contract."
         }
       ]
+    },
+    {
+      "id": "plugin-metadata-boundary-01",
+      "status": "reviewed",
+      "path": "hermes_cli/plugins_updates.py",
+      "scope": "_owning_distribution",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception:",
+      "candidate_blob": "5e301bb8c841e616cb66a2dcca6fdbd7baf90ff5",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugins_updates.py",
+        "scope": "_owning_distribution",
+        "blob": "01fe0512c7907daeb58b65dcbda84502ff89f5a0",
+        "unit_body_hash": "70cd360fbb2d3b42"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; root approved preparation only",
+        "compatibility": "Unreadable owning-distribution metadata yields None without retaining the exception. The real caller emits a fixed unknown reason and performs neither package-name guessing nor installed-version/PyPI lookup. Actual scheduled check preserves healthy-neighbor apply, suppresses the unknown plugin, and persists its fixed reason. Only _owning_distribution metadata access catch. No claim about distribution attribute getters outside its try, successful network access, parse/mismatch/PyPI branches, or the separately corrected lookup catches. Completed scan remains rate-limited.",
+        "module_bindings": "Actual run_checks/check_pip_plugins and scheduled cadence/receipt; metadata access raises locally and package/version/PyPI callbacks must remain uncalled.",
+        "receipt": "/tmp/hermes-plugin-update-confidentiality-final.log:43passed; exact metadata parameter case plus neighbors"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-plugin-metadata-boundary-review.json",
+          "blob": "a1509427b2fd28fc5eab91493b404017d41ba4c1",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical receipt, exact source/dependency identities and bounded failure review."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_update_failure_boundaries.py",
+          "blob": "9cac1d346019bab439ece27cdbbfc2f2320b4407",
+          "outcome": "passed",
+          "claim": "Exact caller dependency or retained failure test."
+        },
+        {
+          "path": "hermes_cli/plugins_provenance.py",
+          "blob": "c753fe00b0eb94228406f32acb62fb0da9310d2a",
+          "outcome": "passed",
+          "claim": "Exact caller dependency or retained failure test."
+        },
+        {
+          "path": "hermes_cli/plugins_cadence.py",
+          "blob": "cbbc0462681bfd599f265a73ef4be44ea9a1ccf9",
+          "outcome": "passed",
+          "claim": "Exact caller dependency or retained failure test."
+        },
+        {
+          "path": "pm/receipt.py",
+          "blob": "95df41457ac3f249f39936bc0ce4535391d78c97",
+          "outcome": "passed",
+          "claim": "Exact caller dependency or retained failure test."
+        }
+      ]
     }
   ]
 }
