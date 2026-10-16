@@ -132,7 +132,6 @@ def test_read_only_lookup_never_resolves_or_installs(selected_python, monkeypatc
 @pytest.mark.parametrize("realize", [False, True])
 def test_managed_transport_is_private_and_never_downloads_on_probe(tmp_path, monkeypatch, realize):
     import os
-    import subprocess
     from pm import _uv
 
     root = tmp_path / "managed"
@@ -182,7 +181,6 @@ def test_managed_transport_is_private_and_never_downloads_on_probe(tmp_path, mon
 
 
 def test_unverified_or_unsupported_catalog_fails_closed(tmp_path, monkeypatch):
-    import subprocess
     from pm import _uv
     monkeypatch.setattr(_uv, "_toolchain", lambda **kwargs: (tmp_path / "uv", tmp_path / "python"))
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="[]"))

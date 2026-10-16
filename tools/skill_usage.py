@@ -1064,9 +1064,6 @@ def skill_state_at(skill_name: str, at_iso: str) -> str:
 # Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
 # The whole block is removed by reverting the commit that added it.
 import tempfile
-import os
-import os
-import tempfile
 
 def _suppressed_file() -> Path:
     return _skills_dir() / ".curator_suppressed"

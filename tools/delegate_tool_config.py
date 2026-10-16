@@ -340,7 +340,6 @@ _EXPLICIT_API_MODES = frozenset({"chat_completions", "codex_responses", "anthrop
 def _require_pinned_command(command: Optional[str], message: str) -> None:
     """A pinned ACP transport command must exist on PATH — refuse loudly rather
     than let the child silently fall back to another transport."""
-    from hermes_platform.resolver import locate_command
     if command and not locate_command(command).found:
         raise ValueError(message)
 
@@ -558,7 +557,6 @@ def _resolve_child_runtime(
     # absent (schema prune is the first defense). Drop it so the child keeps
     # the default transport. Config-pinned ``delegation.command`` still fails
     # loudly in ``_resolve_delegation_credentials``.
-    from hermes_platform.resolver import locate_command
     if override_acp_command and not locate_command(override_acp_command).found:
         logger.warning(
             "acp_command %r is not on PATH; ignoring it so the child uses the default transport",
