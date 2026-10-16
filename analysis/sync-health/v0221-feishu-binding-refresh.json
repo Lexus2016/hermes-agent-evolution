@@ -1,0 +1,37 @@
+{
+  "scope": "Refresh only existing Feishu dynamic SDK binding after separately reviewed bounded document-read correction. Original 31 frozen fixture occurrences and evidence remain unchanged.",
+  "source_commit": "297552a9d646119871391d202509822cd86330df",
+  "path": "plugins/platforms/feishu/adapter.py",
+  "scope_name": "FeishuAdapter._build_delete_message_request",
+  "candidate_blob": "34b25e6cff752d7a32fc8d7372d3302cb2fde367",
+  "source_blob": "950694c32df13751b5ad2cdef12f4a30742483d6",
+  "unit_body_hash": "a58098fd079efce9",
+  "review": "Independent controller verified adapter diff confined to document read, unchanged SDK table/global initialization and _load_lark_oapi atomic binding. The bounded binary read is off-loop, limit+1, BOM/newline preserving and cancellation-safe.",
+  "receipt": {
+    "path": "/tmp/hermes-feishu-bounded-text-final.log",
+    "sha256": "1796e38527b4dc02dafc817dc3f15c6ea98343a17a7fb9e787bb98f39925a44a",
+    "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 2 test files (~84 tests) under ['tests/plugins/platforms/test_feishu_text_documents.py', 'tests/gateway/test_feishu.py']; running with -j 2\n[  8.3% |     7/~84 | \u271314 | \u2717 0] \u2713 tests/plugins/platforms/test_feishu_text_documents.py (14\u2713, 0.9s)\n[100.0% |    84/~84 | \u271384 | \u2717 0] \u2713 tests/gateway/test_feishu.py (70\u2713 7s, 1.8s)\n\n=== Summary: 2 files, 84 tests passed, 0 failed, 7 skipped (100% complete) in 1.8s (2 workers) ===\n  Durations cached to test_durations.json (2 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   2\n  Total subprocess CPU-wall: 2.6s  (runner wall: 1.8s, parallelism: 2x)\n  P50: 1.76s  P90: 1.76s  P95: 1.76s  P99: 1.76s  Max: 1.76s\n  <1s: 1 files (50%)  <2s: 2 files (100%)\n  Top 10 slowest:\n      1.76s  tests/gateway/test_feishu.py\n      0.89s  tests/plugins/platforms/test_feishu_text_documents.py\n"
+  },
+  "dependencies": [
+    {
+      "path": "plugins/platforms/feishu/adapter.py",
+      "blob": "34b25e6cff752d7a32fc8d7372d3302cb2fde367"
+    },
+    {
+      "path": "plugins/platforms/feishu/feishu_text_documents.py",
+      "blob": "3f7871827e8d54e4dc948b830dbcac632aa1d9ca"
+    },
+    {
+      "path": "tests/plugins/platforms/test_feishu_text_documents.py",
+      "blob": "b3bb0896dedeba3a1bb64c21e1ac7a3c859b59b9"
+    },
+    {
+      "path": "tests/gateway/test_feishu_lazy_import.py",
+      "blob": "15df49c570f24bb4150bb44df9619addf0efee39"
+    },
+    {
+      "path": "tests/gateway/test_feishu.py",
+      "blob": "e1fd2e14224ef20004c966848db96cea7cb07334"
+    }
+  ]
+}
