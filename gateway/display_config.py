@@ -95,9 +95,24 @@ _PLATFORM_DEFAULTS: dict[str, dict[str, Any]] = {
     "email": _TIER_MINIMAL,
     "sms": _TIER_MINIMAL,
     "webhook": _TIER_MINIMAL,
-    "homeassistant": _TIER_MINIMAL,
     "api_server": {**_TIER_HIGH, "tool_preview_length": 0},
 }
+
+_TIERS = {"high": _TIER_HIGH, "medium": _TIER_MEDIUM, "low": _TIER_LOW, "minimal": _TIER_MINIMAL}
+
+
+def _platform_defaults(platform_key: str) -> dict[str, Any]:
+    """Built-in defaults for *platform_key*: the table above, else the ``display_tier`` a plugin
+    platform registered (``PlatformEntry.display_tier``)."""
+    if platform_key in _PLATFORM_DEFAULTS:
+        return _PLATFORM_DEFAULTS[platform_key]
+    try:
+        from gateway.platform_registry import platform_registry
+        entry = platform_registry.get(platform_key)
+    except Exception:
+        return {}
+    return _TIERS.get(str(getattr(entry, "display_tier", "") or "").lower(), {})
+
 
 # Canonical set of per-platform overrideable keys (for validation).
 OVERRIDEABLE_KEYS = frozenset(_GLOBAL_DEFAULTS.keys())
@@ -256,7 +271,7 @@ def resolve_display_setting(
     configured = _configured_display_value(user_config, platform_key, setting)
     if configured is not None:
         return _normalise(setting, configured)
-    val = _PLATFORM_DEFAULTS.get(platform_key, {}).get(setting)
+    val = _platform_defaults(platform_key).get(setting)
     if val is None:
         val = _GLOBAL_DEFAULTS.get(setting)
     return fallback if val is None else val

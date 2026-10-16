@@ -107,7 +107,7 @@ def run_gate(evolution_dir: Path | None = None) -> Dict[str, Any]:
     )
     if not reports:
         return {"total": 0, "skipped": "no research report found"}
-    result = evaluate_findings(parse_findings(reports[-1].read_text(encoding="utf-8")))
+    result = evaluate_findings(parse_findings(reports[-1].read_text(encoding="utf-8-sig")))
     result["report_file"] = reports[-1].name
     out = evolution_dir / "evidence_spans.json"
     out.parent.mkdir(parents=True, exist_ok=True)

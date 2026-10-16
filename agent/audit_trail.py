@@ -345,7 +345,7 @@ def query_trail(
         return []
 
     results: List[Dict[str, Any]] = []
-    lines = path.read_text(encoding="utf-8").splitlines()
+    lines = path.read_text(encoding="utf-8-sig").splitlines()
     iterable = reversed(lines) if newest_first else lines
 
     for line in iterable:
@@ -450,7 +450,7 @@ def verify(path: Path | None = None) -> tuple[bool, int]:
     if not path.exists():
         return True, 0
     prev, count = _GENESIS, 0
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         if not line.strip():
             continue
         try:

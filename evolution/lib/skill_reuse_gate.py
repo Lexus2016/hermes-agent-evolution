@@ -35,8 +35,6 @@ __all__ = [
     "ReuseGateVerdict",
     "SkillReuseGate",
     "scan_skill_for_misevolution",
-    "quarantine_skill",
-    "version_skill",
 ]
 
 # Instruction-following / self-propagation markers (arXiv:2608.12851). These

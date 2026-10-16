@@ -243,7 +243,7 @@ def format_table(table: FlipTable, verdict: FlipVerdict) -> str:
 
 
 def _load(path: Path) -> Dict[str, Any]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         raise ValueError(f"{path}: expected an object mapping probe id -> result")
     return data

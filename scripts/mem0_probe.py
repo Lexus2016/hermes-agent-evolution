@@ -135,7 +135,7 @@ def _load_oss_config(path: str) -> Dict[str, Any]:
     """Load the OSS block of a mem0.json config file."""
     import json as _json
 
-    with open(path, encoding="utf-8") as fh:
+    with open(path, encoding="utf-8-sig") as fh:
         cfg = _json.load(fh)
     oss = cfg.get("oss") if isinstance(cfg, dict) else None
     if not isinstance(oss, dict):

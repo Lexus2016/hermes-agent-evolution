@@ -1,0 +1,28 @@
+{
+  "description": "Message your teammates directly. Unlike reporting back to the lead, this reaches a peer teammate's inbox during execution — use it to request a clarification, hand off a sub-problem, or share a finding.\n\nActions:\n- 'send': deliver a message. Set 'to' to a teammate's name for a direct message, or omit 'to' to broadcast to every teammate.\n- 'inbox': read (and mark read) messages addressed to you. Poll this when you're waiting on a peer.",
+  "name": "team_message",
+  "parameters": {
+    "properties": {
+      "action": {
+        "description": "Send a message or read your inbox.",
+        "enum": [
+          "send",
+          "inbox"
+        ],
+        "type": "string"
+      },
+      "body": {
+        "description": "Message text (required for 'send').",
+        "type": "string"
+      },
+      "to": {
+        "description": "Recipient teammate name for a direct message. Omit to broadcast to all teammates.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "action"
+    ],
+    "type": "object"
+  }
+}

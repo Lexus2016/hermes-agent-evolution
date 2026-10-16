@@ -145,7 +145,7 @@ def load_pins(server_name: str) -> Optional[Dict[str, str]]:
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         if isinstance(data, dict) and "tools" in data:
             return data["tools"]
         return None

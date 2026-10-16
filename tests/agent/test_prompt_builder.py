@@ -7,6 +7,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -249,7 +250,8 @@ class TestDynamicContextFileCap:
     @pytest.fixture(autouse=True)
     def _no_explicit_config(self, monkeypatch):
         # No explicit context_file_max_chars → dynamic path is eligible.
-        monkeypatch.setattr("hermes_cli.config.load_config", lambda: {})
+        monkeypatch.setattr("hermes_cli.config.load_config", dict)
+        monkeypatch.setattr("hermes_cli.config.load_config_readonly", dict)
 
     def test_dynamic_floor_for_small_window(self):
         # A small context window never drops below the historical 20K floor.
@@ -508,7 +510,7 @@ class TestBuildSkillsSystemPrompt:
         assert "web-search" in result
         assert "imessage" not in result
 
-    @pytest.mark.macos_only
+    @pytest.mark.platforms("macos")
     def test_includes_matching_platform_skills(self, monkeypatch, tmp_path):
         """Skills with platforms: [macos] should appear on macOS."""
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -1134,10 +1136,7 @@ class TestBuildContextFilesPrompt:
         result = build_context_files_prompt(cwd=str(tmp_path))
         assert "Lowercase claude rules" in result
 
-    @pytest.mark.skipif(
-        sys.platform == "darwin",
-        reason="APFS default volume is case-insensitive; CLAUDE.md and claude.md alias the same path",
-    )
+    @pytest.mark.platforms("not macos")  # APFS default volume is case-insensitive; CLAUDE.md and claude.md alias the same path
     def test_claude_md_uppercase_takes_priority(self, tmp_path):
         uppercase = tmp_path / "CLAUDE.md"
         lowercase = tmp_path / "claude.md"
@@ -1260,7 +1259,11 @@ class TestFindHermesMd:
         # Simulate cwd being inside a repo rooted at tmp_path.
         with patch("agent.prompt_builder._find_git_root", return_value=tmp_path):
             assert _find_hermes_md(sub) == tmp_path / ".hermes.md"
-    @pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses directory permissions")
+    @pytest.mark.platforms("posix")
+    @pytest.mark.skipif(
+        getattr(os, "geteuid", lambda: -1)() == 0,
+        reason="root bypasses directory permissions",
+    )
     def test_unreadable_cwd_is_treated_as_not_found(self, tmp_path):
         """A cwd the process cannot stat yields "no context file" instead of a PermissionError
         escaping prompt construction and taking down every surface sharing the gateway (#112430:
@@ -1289,7 +1292,11 @@ class TestFindGitRoot:
 
 
 class TestCursorrulesCandidates:
-    @pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses directory permissions")
+    @pytest.mark.platforms("posix")
+    @pytest.mark.skipif(
+        getattr(os, "geteuid", lambda: -1)() == 0,
+        reason="root bypasses directory permissions",
+    )
     def test_unreadable_cwd_is_treated_as_absent(self, tmp_path):
         """Same crash shape as ``_find_hermes_md``: ``.is_dir()`` on ``<cwd>/.cursor/rules`` inside an
         unreadable cwd must not raise; a readable sibling project still yields its rules."""
@@ -1471,7 +1478,7 @@ class TestEnvironmentHints:
         assert "bash" in result
         assert "PowerShell" in result
 
-    @pytest.mark.macos_only
+    @pytest.mark.platforms("macos")
     def test_build_environment_hints_on_macos_local(self, monkeypatch):
         import agent.prompt_builder as _pb
         import sys
@@ -1544,6 +1551,48 @@ class TestEnvironmentHints:
         assert "Terminal backend: modal" in result
         assert "Linux 6.8.0" in result
         assert "/workspace" in result
+    def test_running_bot_screen_rides_the_environment_hints(self, monkeypatch):
+        """#125830: with this profile's Bot Screen up, the local-backend hints must NAME it —
+        display number and lease holder — so 'open chrome in screen 20' resolves to the bot's own
+        screen instead of launching on the user's display via a confused terminal call."""
+        import agent.prompt_builder as _pb
+        monkeypatch.setattr(_pb, "is_wsl", lambda: False)
+        monkeypatch.delenv("TERMINAL_ENV", raising=False)
+        monkeypatch.setattr("tools.bot_desktop.runtime.published_env",
+                            lambda: {"DISPLAY": ":20", "XAUTHORITY": "/run/x"})
+        monkeypatch.setattr("tools.bot_desktop.lease.get", lambda: SimpleNamespace(holder="agent"))
+        hints = _pb.build_environment_hints()
+        assert "Bot Screen" in hints and "display :20" in hints and "you hold it" in hints
+
+    def test_human_held_bot_screen_says_so(self, monkeypatch):
+        import agent.prompt_builder as _pb
+        monkeypatch.setattr(_pb, "is_wsl", lambda: False)
+        monkeypatch.delenv("TERMINAL_ENV", raising=False)
+        monkeypatch.setattr("tools.bot_desktop.runtime.published_env", lambda: {"DISPLAY": ":20"})
+        monkeypatch.setattr("tools.bot_desktop.lease.get", lambda: SimpleNamespace(holder="human"))
+        hints = _pb.build_environment_hints()
+        assert "a human holds it" in hints and "do not drive the screen" in hints
+
+    def test_stopped_bot_screen_leaves_no_hint(self, monkeypatch):
+        """No screen running → nothing added; the block must drop out entirely, not say 'None'."""
+        import agent.prompt_builder as _pb
+        monkeypatch.setattr(_pb, "is_wsl", lambda: False)
+        monkeypatch.delenv("TERMINAL_ENV", raising=False)
+        monkeypatch.setattr("tools.bot_desktop.runtime.published_env", dict)
+        _pb._BACKEND_PROBE_CACHE.clear()
+        assert "Bot Screen" not in _pb.build_environment_hints()
+
+    def test_remote_backend_never_sees_a_host_bot_screen(self, monkeypatch):
+        """A sandboxed terminal cannot open windows on the gateway host, so the hint is local-only."""
+        import agent.prompt_builder as _pb
+        monkeypatch.setattr(_pb, "is_wsl", lambda: False)
+        monkeypatch.setenv("TERMINAL_ENV", "docker")
+        monkeypatch.setattr(_pb, "_probe_remote_backend", lambda _t: None)
+        monkeypatch.setattr("tools.bot_desktop.runtime.published_env",
+                            lambda: {"DISPLAY": ":20"})
+        _pb._BACKEND_PROBE_CACHE.clear()
+        assert "Bot Screen" not in _pb.build_environment_hints()
+
 
 
     def test_remote_backend_probe_carries_no_user_home_cwd(self, monkeypatch):

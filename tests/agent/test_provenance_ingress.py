@@ -83,14 +83,12 @@ class TestGatewayClassification:
 
     @staticmethod
     def _classify(*, internal=False, raw_message="payload", platform="telegram"):
-        return (
-            "human"
-            if (
-                not internal
-                and raw_message is not None
-                and platform not in TestGatewayClassification.SERVICE
-            )
-            else None
+        from types import SimpleNamespace
+        from gateway.run_turn import _persist_user_origin_for_event
+
+        return _persist_user_origin_for_event(
+            SimpleNamespace(internal=internal, raw_message=raw_message),
+            SimpleNamespace(platform=platform),
         )
 
     def test_a_real_inbound_chat_message_is_human(self):
@@ -118,10 +116,11 @@ class TestGatewayClassification:
         assert self._classify(platform=platform) == "human"
 
     def test_the_gateway_implements_all_three_conditions(self):
-        source = (REPO / "gateway" / "run_turn.py").read_text(encoding="utf-8")
-        assert 'not getattr(event, "internal", False)' in source
-        assert 'getattr(event, "raw_message", None) is not None' in source
-        assert "_platform_value not in _SERVICE_PLATFORMS" in source
+        assert self._classify() == "human"
+        assert self._classify(internal=True) is None
+        assert self._classify(raw_message=None) is None
+        for platform in self.SERVICE:
+            assert self._classify(platform=platform) is None
 
     def test_the_negative_case_asserts_nothing_rather_than_runtime(self):
         """The parameter exists to ASSERT trust; absence is already the

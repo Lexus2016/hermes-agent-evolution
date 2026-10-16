@@ -399,7 +399,7 @@ def _classify_failure_reason(content: Any) -> Optional[str]:
 
 def _iter_lines(path: Path):
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -694,7 +694,7 @@ def build_digest(
             if not _fresh(path, cutoff):
                 continue
             try:
-                with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                with open(path, "r", encoding="utf-8-sig", errors="replace") as fh:
                     obj = json.load(fh)
             except (OSError, ValueError):
                 continue

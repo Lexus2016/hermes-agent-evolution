@@ -2,7 +2,7 @@
 
 Each test seeds a hand-commented config.yaml, runs one production write path against it and
 asserts that every comment survives, top-level key order is unchanged, and the written value
-landed. A new writer that reaches for PyYAML instead of ``atomic_config_write`` fails here or in
+landed. A new writer that reaches for PyYAML instead of the config writer seam fails here or in
 ``scripts/check_config_yaml_writers.py`` (also exercised below).
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-import yaml
+import hermes_yaml as yaml
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -105,7 +105,7 @@ class TestEveryWriterPreservesComments:
         assert data["_config_version"] == latest
 
     def test_atomic_config_write_direct(self, home):
-        """Direct callers (auth provider reset, gateway slash commands, telegram, doctor)."""
+        """Non-deleting direct callers keep using the guarded writer."""
         from hermes_cli.config import atomic_config_write, read_user_config_raw
 
         raw = read_user_config_raw(home / "config.yaml")
@@ -136,7 +136,7 @@ class TestStaticGuard:
         bad = tmp_path / "hermes_cli" / "bad_writer.py"
         bad.parent.mkdir()
         bad.write_text(
-            "import yaml\nfrom utils import atomic_yaml_write\n"
+            "import hermes_yaml as yaml\nfrom utils import atomic_yaml_write\n"
             "def a(config_path, cfg):\n    atomic_yaml_write(config_path, cfg)\n"
             "def b(cfg_path, cfg):\n    cfg_path.write_text(yaml.safe_dump(cfg))\n"
             "def c(other_path, cfg):\n    atomic_yaml_write(other_path, cfg)\n",

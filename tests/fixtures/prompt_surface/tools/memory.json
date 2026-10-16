@@ -1,0 +1,144 @@
+{
+  "description": "Save durable facts to persistent memory that survive across sessions. Memory is injected into every future turn, so keep entries compact and high-signal.\n\nHOW: make ALL your changes to one target in ONE call via an 'operations' array (each item: {action, content?, old_text?}). The batch applies atomically and the char limit is checked only on the FINAL result — so a single call can remove/patch stale entries to free room AND add new ones, even when an add alone would overflow. The response reports current/limit chars and confirms completion; one batch call finishes the update, so don't repeat it. Use the bare action/content/old_text fields only for a single lone change. Use action='search' to read entries back (optionally filtered by provenance via source_filter / min_trust).\n\nWHEN: save proactively when the user states a preference, correction, or personal detail, or you learn a stable fact about their environment, conventions, or workflow. Priority: user preferences & corrections > environment facts > procedures. The best memory stops the user repeating themselves.\n\nIF FULL: an add is auto-accepted by evicting the OLDEST entry to make room (the evicted text is listed under `evicted` in the response, so nothing is lost silently). Only if the new entry alone exceeds the whole budget, or the safety floor is reached, is the add rejected with the current entries shown — then reissue as ONE batch that removes or shortens enough stale entries and adds the new one together. Or call action='compact' first to shorten entries so the batch fits.\n\nTARGETS: 'user' = who the user is (name, role, preferences, style). 'memory' = your notes (environment, conventions, tool quirks, lessons).\n\nPROVENANCE (optional, on add/replace): tag where a fact came from. source_class = user_input (the user told you), external_tool (a tool/API returned it), agent_authored (YOUR own inference — treat as a guess), or system. trust_tier rates reliability. Tagging agent_authored guesses keeps them distinguishable from facts the user actually stated.\n\nSKIP: trivial/obvious info, easily re-discovered facts, raw data dumps, task progress, completed-work logs, temporary TODO state (use session_search for those). Reusable procedures belong in a skill, not memory.",
+  "name": "memory",
+  "parameters": {
+    "properties": {
+      "action": {
+        "description": "The action to perform (single op, 'search' to read entries, 'compact' to shorten entries to fit, or 'supersede' to retire a stale entry — hidden from recall, kept on disk). Omit when using the 'operations' batch array.",
+        "enum": [
+          "add",
+          "patch",
+          "remove",
+          "search",
+          "compact",
+          "supersede"
+        ],
+        "type": "string"
+      },
+      "content": {
+        "description": "Required for 'add' and 'patch'. For 'add', the new entry. For 'patch', the text that replaces old_text; the rest of the entry is kept. Alias: 'new_text'.",
+        "type": "string"
+      },
+      "include_superseded": {
+        "description": "Optional for 'search': also return superseded (retired) entries, each with a superseded_at timestamp. Default false.",
+        "type": "boolean"
+      },
+      "memory_char_limit": {
+        "description": "Optional per-batch override for the 'memory' target char limit, only honoured when config 'memory.allow_batch_memory_char_limit_override' is True. Ignored for 'user' target. The system-prompt snapshot always uses the configured limit (issue #517).",
+        "type": "integer"
+      },
+      "min_trust": {
+        "description": "Optional for 'search': keep only entries at or above this trust tier.",
+        "enum": [
+          "unknown",
+          "untrusted",
+          "low",
+          "medium",
+          "trusted"
+        ],
+        "type": "string"
+      },
+      "new_text": {
+        "description": "Alias for 'content'. If both are set, 'content' wins.",
+        "type": "string"
+      },
+      "old_text": {
+        "description": "REQUIRED for 'patch' and 'remove': text from one entry. 'patch' replaces exactly this span (it must occur once in the entry); 'remove' deletes the whole entry. Omit for 'add'.",
+        "type": "string"
+      },
+      "operations": {
+        "description": "Batch shape: a list of operations applied atomically in one call against the final char budget. Preferred when making multiple changes or consolidating to make room. Each item is {action, content?, old_text?}.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "enum": [
+                "add",
+                "patch",
+                "remove"
+              ],
+              "type": "string"
+            },
+            "content": {
+              "description": "Required for add and patch, as 'content' above.",
+              "type": "string"
+            },
+            "new_text": {
+              "description": "Alias for 'content' in a batch op.",
+              "type": "string"
+            },
+            "old_text": {
+              "description": "As 'old_text' above.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "prefer": {
+        "description": "Optional for 'compact': which entries to trim first (default: longest).",
+        "enum": [
+          "longest",
+          "oldest"
+        ],
+        "type": "string"
+      },
+      "source_class": {
+        "description": "Optional provenance for 'add'/'replace': who produced this fact. Defaults to 'unknown'. Use 'agent_authored' for your own guesses.",
+        "enum": [
+          "user_input",
+          "external_tool",
+          "agent_authored",
+          "system",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "source_filter": {
+        "description": "Optional for 'search': keep only entries with these source classes.",
+        "items": {
+          "enum": [
+            "user_input",
+            "external_tool",
+            "agent_authored",
+            "system",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "target": {
+        "description": "Which memory store: 'memory' for personal notes, 'user' for user profile.",
+        "enum": [
+          "memory",
+          "user"
+        ],
+        "type": "string"
+      },
+      "target_size": {
+        "description": "Optional for 'compact': target character count (defaults to the store limit).",
+        "type": "integer"
+      },
+      "trust_tier": {
+        "description": "Optional provenance for 'add'/'replace': how reliable this fact is. Defaults to 'unknown'.",
+        "enum": [
+          "unknown",
+          "untrusted",
+          "low",
+          "medium",
+          "trusted"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "target"
+    ],
+    "type": "object"
+  }
+}

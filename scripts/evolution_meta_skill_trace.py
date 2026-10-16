@@ -75,7 +75,7 @@ def load_traces(evolution_dir: Optional[Path] = None) -> List[MetaSkillTrace]:
     if not p.exists():
         return []
     traces: List[MetaSkillTrace] = []
-    for line in p.read_text(encoding="utf-8").splitlines():
+    for line in p.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line:
             continue

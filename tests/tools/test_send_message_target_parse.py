@@ -582,3 +582,25 @@ def test_plugin_parser_stays_authoritative_despite_fallback() -> None:
 
     assert chat_id is None
     assert error is not None
+
+
+def test_unknown_platform_that_left_core_names_its_install_command(tmp_path, monkeypatch):
+    """A platform that moved out of core into a catalog plugin, sent to while the plugin is absent."""
+    from gateway.config import GatewayConfig
+    from tools.send_message_targets import resolve_send_target
+    from tools.send_message_tool import _resolve_platform_config
+
+    # Home Assistant intentionally remains bundled in this fork. Exercise the
+    # migration contract with an explicit synthetic catalog-only platform row.
+    from hermes_cli import left_core_migration as migration
+    feature = migration.LeftCoreFeature(
+        plugin="catalog_test_platform", label="Catalog test platform",
+        in_use=lambda home: False, unchanged="", platform="catalog_test_platform")
+    monkeypatch.setattr(migration, "LEFT_CORE", (*migration.LEFT_CORE, feature))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    _, _, _, err = _resolve_platform_config("catalog_test_platform", GatewayConfig())
+    assert "unregistered plugin platform: catalog_test_platform" in err and "`hermes plugins install catalog_test_platform`" in err
+    _, _, err = resolve_send_target("catalog_test_platform", "living room")
+    assert "`hermes plugins install catalog_test_platform`" in err
+    _, _, _, err = _resolve_platform_config("nosuchplatform", GatewayConfig())
+    assert err == "Unknown or unregistered plugin platform: nosuchplatform"

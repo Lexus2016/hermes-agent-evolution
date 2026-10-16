@@ -223,7 +223,7 @@ class TrajectoryStore:
         if not p.exists():
             return store
         try:
-            text = p.read_text(encoding="utf-8")
+            text = p.read_text(encoding="utf-8-sig")
         except OSError:
             return store
         for line in text.splitlines():
@@ -261,7 +261,7 @@ class TrajectoryStore:
             return store
         for path in sorted(d.glob("*.jsonl")):
             try:
-                lines = path.read_text(encoding="utf-8").splitlines()
+                lines = path.read_text(encoding="utf-8-sig").splitlines()
             except OSError:
                 continue
             for line in lines:

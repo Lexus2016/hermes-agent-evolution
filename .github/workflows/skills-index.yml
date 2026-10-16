@@ -37,14 +37,14 @@ jobs:
           client-id: ${{ vars.APP_CLIENT_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: ./.github/actions/setup-pm
         with:
-          python-version: "3.11"
+          cache-python: true
 
       - name: Install dependencies
         uses: ./.github/actions/retry
         with:
-          command: pip install httpx==0.28.1 pyyaml==6.0.2
+          command: python -m scripts.ci.python_packages httpx==0.28.1 ruamel.yaml==0.18.17
 
       - name: Build skills index
         env:
@@ -71,7 +71,7 @@ jobs:
         run: python website/scripts/fetch-plugin-stars.py --probe
 
       - name: Upload index artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: skills-index
           path: |

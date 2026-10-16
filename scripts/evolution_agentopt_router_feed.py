@@ -81,7 +81,7 @@ def run_feed(
 
     table_path = table_path or default_table_path()
     try:
-        table = RoutingTable.from_dict(json.loads(table_path.read_text(encoding="utf-8")))
+        table = RoutingTable.from_dict(json.loads(table_path.read_text(encoding="utf-8-sig")))
     except (OSError, ValueError, KeyError, TypeError):
         table = RoutingTable(models=[])
     added = feed_routing_table(build_report(load_records(store or _store())), table)

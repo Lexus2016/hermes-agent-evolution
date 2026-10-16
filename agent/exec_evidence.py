@@ -46,7 +46,7 @@ def _summarize(args: dict, max_chars: int = 200) -> str:
 def _iter_entries(path: Path):
     if not path.exists():
         return
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line:
             continue

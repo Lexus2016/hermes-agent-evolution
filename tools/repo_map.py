@@ -86,7 +86,7 @@ def extract_symbols(file_path: Path) -> list[dict]:
     build robust against a single broken file.
     """
     try:
-        source = file_path.read_text(encoding="utf-8")
+        source = file_path.read_text(encoding="utf-8-sig")
         tree = ast.parse(source, filename=str(file_path))
     except (OSError, SyntaxError, ValueError):
         # SyntaxError: malformed Python.  ValueError: e.g. null bytes.
@@ -127,7 +127,7 @@ def _count_references(file_path: Path) -> dict[str, int]:
     A broken / unreadable file contributes nothing (skipped, not fatal).
     """
     try:
-        source = file_path.read_text(encoding="utf-8")
+        source = file_path.read_text(encoding="utf-8-sig")
         tree = ast.parse(source, filename=str(file_path))
     except (OSError, SyntaxError, ValueError):
         return {}

@@ -136,7 +136,7 @@ def test_cron_mode_silent_without_sidecar(tmp_path, monkeypatch, capsys):
 
 def test_cron_yaml_registers_the_gate():
     """The YAML must declare the no_agent job register_evolution_cron.py picks up."""
-    import yaml
+    import hermes_yaml as yaml
 
     repo = Path(__file__).resolve().parents[2]
     spec = yaml.safe_load((repo / "cron/evolution/harness-gate.yaml").read_text())

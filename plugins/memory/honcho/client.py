@@ -630,8 +630,8 @@ def get_honcho_client(config: HonchoClientConfig | None = None) -> Honcho:
 def _build_client(config: HonchoClientConfig) -> "Honcho":
     """Construct the SDK client (runs inside the slot factory so racing callers share one)."""
     with contextlib.suppress(Exception):  # lazy-dep failures fall through to the canonical import error below
-        from tools.lazy_deps import ensure as _lazy_ensure
-        _lazy_ensure("memory.honcho", prompt=False)
+        from pm.extras import ensure_import
+        ensure_import("honcho")
     try:
         from honcho import Honcho
     except ImportError:
@@ -698,7 +698,5 @@ def __getattr__(name):  # PEP 562 — lazy so no import cycles
     if target is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     import importlib
-    from hermes_cli.plugin_compat import warn_once
-    warn_once(__name__, name, *target)
     return getattr(importlib.import_module(target[0]), target[1])
 # ---- END PLUGIN-COMPAT ----

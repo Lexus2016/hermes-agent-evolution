@@ -313,7 +313,7 @@ def load_existing_rules(filepath: Path) -> Dict[str, Any]:
     if not filepath.is_file():
         return {"rules": [], "last_scanned_pr": 0, "stats": {}}
     try:
-        with open(filepath, "r", encoding="utf-8") as fh:
+        with open(filepath, "r", encoding="utf-8-sig") as fh:
             return json.load(fh)
     except (json.JSONDecodeError, OSError):
         return {"rules": [], "last_scanned_pr": 0, "stats": {}}

@@ -71,7 +71,7 @@ def load_contracts(d: Path | None = None) -> List[Dict[str, Any]]:
     if not p.exists():
         return []
     out: List[Dict[str, Any]] = []
-    for ln in p.read_text(encoding="utf-8").splitlines():
+    for ln in p.read_text(encoding="utf-8-sig").splitlines():
         ln = ln.strip()
         if not ln:
             continue

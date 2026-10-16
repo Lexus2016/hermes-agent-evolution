@@ -111,7 +111,7 @@ def load_invariant_rules(path: Optional[Path] = None) -> Dict[str, Any]:
     """
     p = path or _rules_path()
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8-sig"))
     except OSError as exc:
         raise ValueError(f"cannot read invariant rules {p}: {exc}") from exc
     except ValueError as exc:
@@ -433,7 +433,7 @@ def filter_proposals(
 
 def _load_proposal(path: Optional[str]) -> Tuple[Optional[Any], Optional[str]]:
     try:
-        raw = Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+        raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
     except OSError as exc:
         return None, f"cannot read input: {exc}"
     try:

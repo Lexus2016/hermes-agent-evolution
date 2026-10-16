@@ -20,7 +20,7 @@ def parse_refusal_telemetry_file(filepath: Path | str) -> List[Dict[str, Any]]:
         return []
 
     records = []
-    with path.open("r", encoding="utf-8") as f:
+    with path.open("r", encoding="utf-8-sig") as f:
         for line in f:
             line = line.strip()
             if not line:

@@ -251,11 +251,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--threshold", type=float, default=0.1)
     args = parser.parse_args(argv)
 
-    with open(args.after, encoding="utf-8") as fh:
+    with open(args.after, encoding="utf-8-sig") as fh:
         after = json.load(fh)
     before = None
     if args.before:
-        with open(args.before, encoding="utf-8") as fh:
+        with open(args.before, encoding="utf-8-sig") as fh:
             before = json.load(fh)
 
     result = evaluate(before, after, threshold=args.threshold)

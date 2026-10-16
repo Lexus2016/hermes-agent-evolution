@@ -127,7 +127,7 @@ def _load_jobs(jobs_file: Path | None) -> List[dict]:
     if jobs_file is None:
         return []
     try:
-        data = json.loads(jobs_file.read_text(encoding="utf-8"))
+        data = json.loads(jobs_file.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return []
     return data.get("jobs", data if isinstance(data, list) else [])
@@ -301,7 +301,7 @@ def check_jobs(jobs_file: Path, now: datetime) -> List[str]:
     """Alert on unhealthy evolution job records in the cron registry."""
     alerts: List[str] = []
     try:
-        data = json.loads(jobs_file.read_text(encoding="utf-8"))
+        data = json.loads(jobs_file.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
         return [f"cron registry {jobs_file} unreadable: {exc}"]
 
@@ -858,7 +858,7 @@ def check_health(evolution_dir: Path) -> List[str]:
     run')."""
     try:
         line = (
-            (evolution_dir / "evolution-health.txt").read_text(encoding="utf-8").strip()
+            (evolution_dir / "evolution-health.txt").read_text(encoding="utf-8-sig").strip()
         )
     except OSError:
         return []
@@ -878,7 +878,7 @@ def check_realized_impact(evolution_dir: Path) -> List[str]:
     impact it never checks against reality. Silent when healthy or absent."""
     try:
         line = (
-            (evolution_dir / "realized-impact.txt").read_text(encoding="utf-8").strip()
+            (evolution_dir / "realized-impact.txt").read_text(encoding="utf-8-sig").strip()
         )
     except OSError:
         return []
@@ -1136,7 +1136,7 @@ def load_alert_state(state_path: Path) -> dict | None:
     """Read the persisted alert state. FAIL-OPEN: any miss/IO/parse error or a
     structurally invalid payload returns None (== unknown previous state)."""
     try:
-        data = json.loads(state_path.read_text(encoding="utf-8"))
+        data = json.loads(state_path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return None
     if not isinstance(data, dict) or "signature" not in data:

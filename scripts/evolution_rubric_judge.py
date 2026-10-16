@@ -49,6 +49,9 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
+
+# Standalone source invocations must resolve the canonical repository YAML policy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
@@ -321,14 +324,14 @@ def _hot_path(evolution_dir: Path) -> Path:
 
 def _load_json(path: Path) -> Any | None:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return None
 
 
 def _load_md(path: Path) -> str | None:
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8-sig")
     except OSError:
         return None
 
@@ -1346,7 +1349,7 @@ def load_scorecards(scorecard_file: Path) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     if not scorecard_file.exists():
         return out
-    for ln in scorecard_file.read_text(encoding="utf-8").splitlines():
+    for ln in scorecard_file.read_text(encoding="utf-8-sig").splitlines():
         ln = ln.strip()
         if not ln:
             continue
@@ -1368,7 +1371,7 @@ def append_scorecard(
     lines: List[str] = []
     key = (record["cycle_date"], record.get("grader", "strict"))
     if scorecard_file.exists():
-        for ln in scorecard_file.read_text(encoding="utf-8").splitlines():
+        for ln in scorecard_file.read_text(encoding="utf-8-sig").splitlines():
             ln = ln.strip()
             if not ln:
                 continue
@@ -1521,11 +1524,11 @@ def load_rubric_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
     if path is None or not Path(path).is_file():
         return config
     try:
-        import yaml
+        import hermes_yaml as yaml
     except ImportError:
         return config  # standalone deployment without pyyaml — defaults
     try:
-        data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8-sig")) or {}
     except (OSError, ValueError):
         return config
     rel = data.get("reliability") if isinstance(data, dict) else None

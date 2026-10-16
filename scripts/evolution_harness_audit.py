@@ -137,7 +137,7 @@ def audit_harness_files(paths: Sequence[Path]) -> HarnessAuditReport:
     report = HarnessAuditReport()
     for p in paths:
         try:
-            text = Path(p).read_text(encoding="utf-8", errors="replace")
+            text = Path(p).read_text(encoding="utf-8-sig", errors="replace")
         except OSError:
             continue
         report.findings.extend(_findings_for(Path(p), text))

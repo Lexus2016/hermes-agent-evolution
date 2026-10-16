@@ -40,7 +40,7 @@ def load_index(d: Path | None = None) -> Dict[str, str]:
     if not p.exists():
         return {}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8-sig"))
         return (
             {k: v for k, v in data.items() if v in _LEVELS}
             if isinstance(data, dict)

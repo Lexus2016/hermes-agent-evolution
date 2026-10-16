@@ -1,0 +1,43 @@
+{
+  "description": "Coordinate on your agent team's SHARED task list. You are one teammate in a lead-spawned team; this list is visible to every teammate.\n\nActions:\n- 'list': see all shared tasks (optionally filter by status: open / claimed / done). Do this first to find unclaimed work.\n- 'add': append a new shared task (title required) for any teammate to claim — use this to hand a sub-problem to the team.\n- 'claim': atomically take an open task (task_id required). If another teammate already claimed it you'll be told — pick a different one.\n- 'complete': mark your claimed task done with a result summary (task_id required; put your findings in 'result' so the lead can merge them without re-running your work).",
+  "name": "team_task",
+  "parameters": {
+    "properties": {
+      "action": {
+        "description": "What to do with the shared task list.",
+        "enum": [
+          "list",
+          "add",
+          "claim",
+          "complete"
+        ],
+        "type": "string"
+      },
+      "result": {
+        "description": "Result summary when completing a task.",
+        "type": "string"
+      },
+      "status": {
+        "description": "Optional status filter for 'list'.",
+        "enum": [
+          "open",
+          "claimed",
+          "done"
+        ],
+        "type": "string"
+      },
+      "task_id": {
+        "description": "Task id (required for 'claim' and 'complete').",
+        "type": "string"
+      },
+      "title": {
+        "description": "Task title (required for 'add').",
+        "type": "string"
+      }
+    },
+    "required": [
+      "action"
+    ],
+    "type": "object"
+  }
+}

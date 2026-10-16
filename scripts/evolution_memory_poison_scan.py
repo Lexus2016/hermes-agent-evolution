@@ -120,7 +120,7 @@ def scan_file(path: Path) -> list[dict[str, Any]]:
     """
     findings: list[dict[str, Any]] = []
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
     except OSError:
         return findings  # unreadable store file is not an injection finding
     for idx, line in enumerate(text.splitlines(), start=1):

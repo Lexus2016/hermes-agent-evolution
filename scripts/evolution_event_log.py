@@ -88,7 +88,7 @@ def load_events(evolution_dir: Path | None = None) -> List[Dict[str, Any]]:
     if not log_path.exists():
         return []
     events: List[Dict[str, Any]] = []
-    for ln in log_path.read_text(encoding="utf-8").splitlines():
+    for ln in log_path.read_text(encoding="utf-8-sig").splitlines():
         ln = ln.strip()
         if not ln:
             continue

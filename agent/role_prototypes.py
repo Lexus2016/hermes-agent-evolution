@@ -75,7 +75,7 @@ def load_role_prototypes() -> List[RolePrototype]:
     try:
         if not path.is_file():
             return []
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         if isinstance(data, list):
             return [
                 RolePrototype.from_dict(item) for item in data if isinstance(item, dict)

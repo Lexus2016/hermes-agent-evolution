@@ -114,7 +114,7 @@ def check_reachability(
             full_p = root / path
             if full_p.exists():
                 try:
-                    content = full_p.read_text(encoding="utf-8", errors="replace")
+                    content = full_p.read_text(encoding="utf-8-sig", errors="replace")
                 except OSError:
                     pass
         if content:

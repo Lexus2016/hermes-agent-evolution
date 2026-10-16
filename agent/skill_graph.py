@@ -277,7 +277,7 @@ class SkillGraph:
                 continue
             for skill_md in iter_skill_index_files(skills_dir, "SKILL.md"):
                 try:
-                    content = skill_md.read_text(encoding="utf-8")
+                    content = skill_md.read_text(encoding="utf-8-sig")
                     frontmatter, _ = parse_frontmatter(content)
                 except Exception as exc:  # noqa: BLE001 - one bad skill is non-fatal
                     logger.debug("skill_graph: skipping %s: %s", skill_md, exc)

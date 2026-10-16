@@ -67,6 +67,9 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+# Standalone source invocations must resolve the canonical repository YAML policy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from typing import Any, Dict, List, Optional
 
 # A script invocation the stage is told to RUN — `python/python3/bash/sh scripts/X`
@@ -258,7 +261,7 @@ def extract_declared_inputs(skill_text: str) -> List[Dict[str, Any]]:
     crash the gate, and an absent one is simply no declaration.
     """
     try:
-        import yaml
+        import hermes_yaml as yaml
     except Exception:
         return []
     text = skill_text or ""
@@ -337,12 +340,12 @@ def find_cap_violations(
 
 # ── IO boundary ────────────────────────────────────────────────────────────────
 def _load_stages(cron_dir: Path) -> List[Dict[str, Any]]:
-    import yaml
+    import hermes_yaml as yaml
 
     stages: List[Dict[str, Any]] = []
     for y in sorted(cron_dir.glob("*.yaml")):
         try:
-            d = yaml.safe_load(y.read_text(encoding="utf-8")) or {}
+            d = yaml.safe_load(y.read_text(encoding="utf-8-sig")) or {}
         except Exception:
             continue
         if d.get("no_agent"):  # script-only stages own no skills
@@ -360,7 +363,7 @@ def _load_stages(cron_dir: Path) -> List[Dict[str, Any]]:
 def _load_skill_texts(skills_dir: Path) -> Dict[str, str]:
     texts: Dict[str, str] = {}
     for md in skills_dir.glob("**/SKILL.md"):
-        text = md.read_text(encoding="utf-8")
+        text = md.read_text(encoding="utf-8-sig")
         m = _NAME_RE.search(text)
         name = m.group(1) if m else md.parent.name
         texts[name] = text

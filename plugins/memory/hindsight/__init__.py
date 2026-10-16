@@ -20,7 +20,7 @@ import queue
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -31,36 +31,13 @@ from hermes_constants import get_hermes_home
 from hermes_time import now as _hermes_now
 
 
-def _local_runtime_hint(reason: str | None) -> str:
-    """Actionable install guidance when the local_embedded runtime is missing.
-
-    ``local_embedded`` imports ``from hindsight import HindsightEmbedded``, which
-    is provided only by the ``hindsight-all`` package (its wheel ships the
-    top-level ``hindsight`` module). ``plugin.yaml`` declares only
-    ``hindsight-client`` (enough for cloud / local_external), so a user who
-    selected local_embedded without going through ``hermes memory setup`` — a
-    hand-written config, the legacy ``"mode": "local"`` alias, or a restored
-    backup — hits ``ModuleNotFoundError: No module named 'hindsight'``.
-    NousResearch/hermes-agent#7718.
-    """
-    text = (reason or "").lower()
-    if "no module named" in text and ("hindsight'" in text or 'hindsight"' in text
-                                      or "hindsight_embed" in text):
-        return (
-            f" Install the embedded runtime with: uv pip install --python "
-            f"{sys.executable} hindsight-all — or run 'hermes memory setup'. "
-            "(local_embedded needs the 'hindsight-all' package, which provides the "
-            "top-level 'hindsight' module; 'hindsight-client' alone only covers "
-            "cloud / local_external.)"
-        )
-    return ""
 from tools.registry import tool_error
 from utils import read_json_or_empty
 
 from .embedded import (
     _RETRIABLE_CONNECTION_MARKERS, _build_embedded_profile_env,
     _check_local_runtime, _embedded_llm_api_key, _embedded_profile_env_path,
-    _export_port_health_grace_timeout, _load_simple_env, _local_runtime_hint, _materialize_embedded_profile_env,
+    _load_simple_env, _local_runtime_hint, _materialize_embedded_profile_env,
     _may_rewrite_profile_env,
 )
 from .settings import (
@@ -87,7 +64,7 @@ _RETAIN_CONTEXT_DEFAULT = "conversation between Hermes Agent and the User"
 
 
 def _ensure_client_dependency() -> None:
-    """Lazily install the Hindsight client (``tools.lazy_deps``) before importing it.
+    """Resolve the declared Hindsight PM extra before importing the client.
 
     A caller that already injected ``hindsight`` (embedded runtime) or the
     client API does not need a pip install. Tests do this; production reaches
@@ -96,8 +73,8 @@ def _ensure_client_dependency() -> None:
     if "hindsight" in sys.modules or "hindsight_client_api" in sys.modules:
         return
     try:
-        from tools.lazy_deps import ensure as _lazy_ensure
-        _lazy_ensure("memory.hindsight", prompt=False)
+        from pm.extras import ensure_import
+        ensure_import("hindsight")
     except ImportError:
         pass
     except Exception as exc:
@@ -133,34 +110,24 @@ def _cloud_api_key(config: dict) -> str:
 
 
 def _maybe_upgrade_client() -> None:
-    """Auto-upgrade an outdated hindsight-client via the environment-aware lazy_deps
-    installer (sealed hosted venvs redirect to the durable target)."""
+    """Refresh an outdated client through the declared PM extra, without unbounded pip installs."""
     try:
         from importlib.metadata import version as pkg_version
         from packaging.version import Version
         installed = pkg_version("hindsight-client")
         if Version(installed) < Version(_MIN_CLIENT_VERSION):
-            logger.warning("hindsight-client %s is outdated (need >=%s), attempting upgrade...",
-                           installed, _MIN_CLIENT_VERSION)
-            from tools.lazy_deps import install_specs
-            outcome = install_specs([f"hindsight-client>={_MIN_CLIENT_VERSION}"], timeout=120)
-            if outcome.ok:
-                logger.info("hindsight-client upgraded to >=%s", _MIN_CLIENT_VERSION)
-            elif outcome.blocked:
-                logger.warning("Auto-upgrade unavailable: %s. Run: uv pip install 'hindsight-client>=%s'",
-                               outcome.reason, _MIN_CLIENT_VERSION)
-            else:
-                logger.warning("Auto-upgrade failed: %s. Run: uv pip install 'hindsight-client>=%s'",
-                               (outcome.stderr or "").strip() or "install error", _MIN_CLIENT_VERSION)
-    except Exception:
-        pass  # packaging not available or other issue — proceed anyway
+            from pm import sync_venv
+            sync_venv(["hindsight"])
+            logger.info("Hindsight client refreshed; restart Hermes to use the selected generation.")
+    except Exception as exc:
+        logger.warning("Hindsight client refresh unavailable: %s. Run: hermes pm install --extra hindsight", exc)
 
 
 # update_mode='append' capability (Hindsight >= 0.5.0), cached per (API URL, key fingerprint)
 # per process so every provider on the same API+key shares one /version round trip. A failed probe
 # caches False, so the key must include the credential or one profile's 401 would silently downgrade
 # a sibling profile that shares the URL with a valid key.
-_append_capability_cache: Dict[tuple[str, str | None], bool] = {}
+_append_capability_cache: dict[tuple[str, str | None], bool] = {}
 _append_capability_lock = threading.Lock()
 
 
@@ -173,7 +140,7 @@ def _fetch_hindsight_api_version(api_url: str, api_key: str | None = None,
     url = api_url.rstrip("/") + "/version"
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {api_key}"} if api_key else {})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="replace"))
     except Exception as exc:
         logger.debug("Hindsight /version probe failed for %s: %s", url, exc)
@@ -362,7 +329,7 @@ class HindsightMemoryProvider(MemoryProvider):
     # Each server-side op status poll is a round trip — coarser than the 0.05s queue poll.
     _RETAIN_OP_POLL_INTERVAL_S = 0.5
 
-    def backup_paths(self) -> List[str]:
+    def backup_paths(self) -> list[str]:
         """Legacy shared config + embedded-mode profile env files live under ~/.hindsight."""
         with contextlib.suppress(Exception):
             return [str(Path.home() / ".hindsight")]
@@ -389,7 +356,7 @@ class HindsightMemoryProvider(MemoryProvider):
         self._sync_thread = None  # legacy alias external callers may join; points at the writer
         self._shutting_down = threading.Event()
         self._atexit_registered = False
-        self._retain_tags: List[str] = []
+        self._retain_tags: list[str] = []
         self._tags: list[str] | None = None
         self._retain_source = _DEFAULT_RETAIN_SOURCE
         self._retain_user_prefix, self._retain_assistant_prefix = "User", "Assistant"
@@ -512,8 +479,7 @@ class HindsightMemoryProvider(MemoryProvider):
         if not available:
             raise RuntimeError("Hindsight local runtime is unavailable" + (f": {reason}" if reason else ""))
         _ensure_client_dependency()
-        from hindsight import HindsightEmbedded
-        HindsightEmbedded.__del__ = lambda self: None
+        from .daemon_bridge import ManagedEmbeddedClient
         cfg = self._config
         llm_provider = _daemon_llm_provider(cfg.get("llm_provider", ""))
         logger.debug("Creating HindsightEmbedded client (profile=%s, provider=%s)",
@@ -526,7 +492,7 @@ class HindsightMemoryProvider(MemoryProvider):
                       idle_timeout=self._idle_timeout)
         if self._llm_base_url:
             kwargs["llm_base_url"] = self._llm_base_url
-        return HindsightEmbedded(**kwargs)
+        return ManagedEmbeddedClient(**kwargs, config=cfg)
 
     def _new_cloud_client(self):
         _ensure_client_dependency()
@@ -558,6 +524,7 @@ class HindsightMemoryProvider(MemoryProvider):
             if self._mode != "local_embedded" or not any(m in text for m in _RETRIABLE_CONNECTION_MARKERS):
                 raise
             logger.info("Hindsight embedded daemon appears unreachable; recreating client and retrying once: %s", exc)
+            self._close_client()
             self._client = None
             self._client = client = self._get_client()
             return self._run_sync(operation(client))
@@ -607,7 +574,6 @@ class HindsightMemoryProvider(MemoryProvider):
         return False so the caller keeps waiting until its deadline.
         """
         # NotFoundException is defined at module level above (or imported from hindsight_client_api)
-        pass
 
         try:
             resp = self._run_hindsight_operation(
@@ -810,7 +776,7 @@ class HindsightMemoryProvider(MemoryProvider):
         server-side async ops complete (async retain returns on acceptance, not
         durability). False on timeout/shutdown."""
         deadline = None if timeout <= 0 else time.monotonic() + timeout
-        expired = lambda: deadline is not None and time.monotonic() >= deadline  # noqa: E731
+        expired = lambda: deadline is not None and time.monotonic() >= deadline
         while self._retain_queue.unfinished_tasks > 0:
             if self._shutting_down.is_set():
                 return False
@@ -901,8 +867,7 @@ class HindsightMemoryProvider(MemoryProvider):
         if self._mode == "local":  # legacy alias
             self._mode = "local_embedded"
         if self._mode == "local_embedded":
-            # Must precede the daemon_embed_manager import, which reads it at import time.
-            _export_port_health_grace_timeout(cfg)
+            # Availability only probes the selected isolated runtime.
             available, reason = _check_local_runtime()
             if not available:
                 logger.warning("Hindsight local mode disabled because its runtime could not be imported: %s.%s",
@@ -1039,32 +1004,12 @@ class HindsightMemoryProvider(MemoryProvider):
                 f.write(text)
 
         try:
-            # Rich console -> our log file (redirecting global fds would capture other threads).
-            import hindsight_embed.daemon_embed_manager as dem
-            from rich.console import Console
-            dem.console = Console(file=open(log_path, "a", encoding="utf-8"), force_terminal=False)
-
-            client = self._get_client()
-            profile = self._config.get("profile", "hermes")
-            # Profile .env out of sync with config -> rewrite and restart a running daemon.
-            # Fail-closed on key material: when this process holds no key (no secret
-            # scope on this thread) but the file does, a rewrite would destroy the
-            # only key copy the daemon subprocess can read. Skip the write AND the
-            # stop: restarting the daemon now would boot it keyless, which is the
-            # exact outage this guards against. _get_client() above already passed
-            # whatever key WAS available into the in-process client kwargs.
             if _load_simple_env(_embedded_profile_env_path(self._config)) != _build_embedded_profile_env(self._config):
                 if _may_rewrite_profile_env(self._config):
                     _materialize_embedded_profile_env(self._config)
-                    if client._manager.is_running(profile):
-                        _log("\n=== Config changed, restarting daemon ===\n")
-                        client._manager.stop(profile)
                 else:
-                    logger.warning(
-                        "Hindsight profile env for %r holds an LLM API key this process cannot see "
-                        "(no secret scope); leaving the file untouched so the daemon keeps its key.",
-                        profile)
-                    _log("\n=== Profile env has a key this process cannot see; left untouched ===\n")
+                    logger.warning("Hindsight profile env retains a key unavailable in this scope; leaving it untouched")
+            client = self._get_client()
             client._ensure_started()
             _log("\n=== Daemon started successfully ===\n")
         except Exception as e:
@@ -1178,15 +1123,15 @@ class HindsightMemoryProvider(MemoryProvider):
 
     # -- retain ------------------------------------------------------------------
 
-    def _build_turn_messages(self, user_content: str, assistant_content: str) -> List[Dict[str, str]]:
+    def _build_turn_messages(self, user_content: str, assistant_content: str) -> list[dict[str, str]]:
         now = _event_timestamp()  # one turn -> both messages share the event timestamp
         return [{"role": role, "content": f"{prefix}: {content}", "timestamp": now} for role, prefix, content in
                 (("user", self._retain_user_prefix, user_content), ("assistant", self._retain_assistant_prefix, assistant_content))]
 
-    def _build_metadata(self, *, message_count: int, turn_index: int) -> Dict[str, str]:
-        metadata: Dict[str, str] = {
+    def _build_metadata(self, *, message_count: int, turn_index: int) -> dict[str, str]:
+        metadata: dict[str, str] = {
             # UTC write/audit time (event time lives on the item timestamp).
-            "retained_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "retained_at": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
             "message_count": str(message_count),
             "turn_index": str(turn_index),
         }
@@ -1196,12 +1141,12 @@ class HindsightMemoryProvider(MemoryProvider):
         return metadata
 
     def _build_retain_kwargs(self, content: str, *, context: str | None = None,
-                             metadata: Dict[str, str] | None = None, tags: List[str] | None = None,
-                             occurred_at: str | None = None, update_mode: str | None = None) -> Dict[str, Any]:
+                             metadata: dict[str, str] | None = None, tags: list[str] | None = None,
+                             occurred_at: str | None = None, update_mode: str | None = None) -> dict[str, Any]:
         """Build one aretain_batch item. The server resolves occurred_start/end (incl.
         relative phrases in content) from the item timestamp: explicit occurred_at
         wins, else the configured event clock."""
-        item: Dict[str, Any] = {
+        item: dict[str, Any] = {
             # See #93568.
             "content": content,
             "metadata": metadata or self._build_metadata(message_count=1, turn_index=self._turn_index),
@@ -1216,7 +1161,7 @@ class HindsightMemoryProvider(MemoryProvider):
                       retain_async: bool | None = None):
         """Dispatch one item via aretain_batch (bank_id/document_id/retain_async are
         call-level args, never item keys)."""
-        kwargs: Dict[str, Any] = {"bank_id": bank_id, "items": [item], "document_id": document_id, "retain_async": retain_async}
+        kwargs: dict[str, Any] = {"bank_id": bank_id, "items": [item], "document_id": document_id, "retain_async": retain_async}
         kwargs = {k: v for k, v in kwargs.items() if v is not None}
         return self._run_hindsight_operation(lambda client: client.aretain_batch(**kwargs))
 
@@ -1295,7 +1240,7 @@ class HindsightMemoryProvider(MemoryProvider):
 
     # -- tools -------------------------------------------------------------------
 
-    def get_tool_schemas(self) -> List[Dict[str, Any]]:
+    def get_tool_schemas(self) -> list[dict[str, Any]]:
         return [] if self._memory_mode == "context" else [RETAIN_SCHEMA, RECALL_SCHEMA, REFLECT_SCHEMA]
 
     def _tool_retain(self, args: dict) -> str:
@@ -1400,19 +1345,7 @@ class HindsightMemoryProvider(MemoryProvider):
                      self._session_id, self._parent_session_id, reset, self._document_id)
 
     def _close_client(self) -> None:
-        if self._mode != "local_embedded":
-            self._run_sync(self._client.aclose())
-            return
-        # HindsightEmbedded.close() closes its sync client from this thread ("attached
-        # to a different loop" before aiohttp releases the session): aclose the inner
-        # client on the shared loop first, then let the wrapper clean up bookkeeping.
-        inner_client = getattr(self._client, "_client", None)
-        if inner_client is not None and hasattr(inner_client, "aclose"):
-            _run_sync(inner_client.aclose())
-            with contextlib.suppress(Exception):
-                self._client._client = None
-        with contextlib.suppress(RuntimeError):
-            self._client.close()
+        self._run_sync(self._client.aclose())
 
     def shutdown(self) -> None:
         logger.debug("Hindsight shutdown: stopping writer + waiting for background threads")
@@ -1453,6 +1386,6 @@ def register(ctx) -> None:
 # Names external plugins imported from this module before the Sep 2026 decomposition.
 # Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
 # The whole block is removed by reverting the commit that added it.
-from dataclasses import dataclass  # noqa: F401,E402
-import importlib  # noqa: F401,E402
+from dataclasses import dataclass
+import importlib
 # ---- END PLUGIN-COMPAT ----

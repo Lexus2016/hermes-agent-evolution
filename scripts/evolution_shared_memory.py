@@ -111,7 +111,7 @@ def _query_global_scope(
     notes = []
     for note_file in global_notes_dir.glob("*.json"):
         try:
-            data = json.loads(note_file.read_text(encoding="utf-8"))
+            data = json.loads(note_file.read_text(encoding="utf-8-sig"))
             tags = data.get("tags", [])
             # Only include evolution-tagged notes for cross-instance sharing
             if any("evolution" in str(t).lower() for t in tags):
@@ -151,7 +151,7 @@ def _read_cache() -> List[Dict[str, Any]]:
     if not cache.exists():
         return []
     try:
-        data = json.loads(cache.read_text(encoding="utf-8"))
+        data = json.loads(cache.read_text(encoding="utf-8-sig"))
         if isinstance(data, dict):
             return data.get("notes", [])
         if isinstance(data, list):

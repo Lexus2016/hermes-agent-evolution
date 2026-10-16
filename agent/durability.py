@@ -106,7 +106,7 @@ class FileDurabilityBackend:
         cp = self._checkpoint_path(checkpoint_id)
         if cp.exists():
             try:
-                return json.loads(cp.read_text(encoding="utf-8"))
+                return json.loads(cp.read_text(encoding="utf-8-sig"))
             except (OSError, ValueError):
                 pass  # corrupted — recompute below
         result = fn()
@@ -125,7 +125,7 @@ class FileDurabilityBackend:
         if not cp.exists():
             return None
         try:
-            return json.loads(cp.read_text(encoding="utf-8"))
+            return json.loads(cp.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             return None
 

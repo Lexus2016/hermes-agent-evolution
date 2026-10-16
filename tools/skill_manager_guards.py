@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger("tools.skill_manager_tool")
 
 
-def _refusal(message: str, **extra: Any) -> Dict[str, Any]:
+def _refusal(message: str, **extra: Any) -> dict[str, Any]:
     return {"success": False, "error": message, **extra}
 
 
@@ -48,7 +48,7 @@ class _BackgroundReviewReadMarks:
             return path in self._paths
 
 
-_background_review_read_paths: "_ctxvars.ContextVar[Optional[_BackgroundReviewReadMarks]]" = (
+_background_review_read_paths: _ctxvars.ContextVar[Optional[_BackgroundReviewReadMarks]] = (
     _ctxvars.ContextVar("background_review_read_paths", default=None))
 
 
@@ -161,13 +161,13 @@ def _pinned_guard(name: str) -> Optional[str]:
     return None
 
 
-def _background_review_write_guard(
-    name: str, skill_dir: Path, action: str) -> Optional[Dict[str, Any]]:
-    """Refuse autonomous curator writes to anything but curator-owned sediment. The review fork
-    has no user in the loop, so it is also blocked on pinned/external/bundled/hub skills."""
+def _background_review_delete_guard(name: str, skill_dir: Path) -> Optional[dict[str, Any]]:
+    """Refuse autonomous deletes of anything but curator-owned sediment. Content writes are not
+    gated by ownership: the review fork exists to improve every skill it learns from, and every
+    write is ledgered and reversible, while an archive removes a skill the user relies on."""
     if not _is_background_review():
         return None
-    refuse = f"Refusing background curator {action} for"
+    refuse = "Refusing background curator delete for"
     if _is_pinned(name, "pinned skill guard"):
         return _refusal(
             f"{refuse} pinned skill '{name}': pinned skills "
@@ -189,26 +189,17 @@ def _background_review_write_guard(
             (skill_usage.is_bundled, "bundled")):
             if predicate(name):
                 return _refusal(f"{refuse} {label} skill '{name}'.")
-        # Not curator-managed (no `created_by: "agent"`) => user-owned. A MISSING
-        # record and an explicit `created_by: null` must resolve IDENTICALLY (keying
-        # on presence made the policy depend on the guard's own side effect: the
-        # first write created a null record, the next identical write was refused).
+        # Not curator-managed (no `created_by: "agent"`) => user-owned, never archived
+        # autonomously. A MISSING record and `created_by: null` must resolve identically:
+        # keying on presence let the guard's own bookkeeping flip the verdict (#67140).
         usage_rec = skill_usage.load_usage().get(name)
-        # Skills that are not curator-managed are off-limits to autonomous curation. This prevents the LLM
-        # consolidation pass from mutating skills the user owns (manually authored, URL-installed, or
-        # created by a foreground `skill_manage(create)` at the user's request), which lack the `created_by:
-        # "agent"` marker. Keying on `isinstance(usage_rec, dict)` made the policy depend on the guard's own
-        # side effect: a local skill with no telemetry record passed, the successful write called
-        # bump_patch() which created a `created_by: null` record, and the very same write was refused from
-        # then on. "Allowed exactly once" is not a policy — it is a race with our own bookkeeping. Fail
-        # closed for both shapes; `hermes curator adopt <name>` is the supported way in. See #67140.
         if not skill_usage._is_curator_managed_record(usage_rec):
             _detail = (f"created_by={usage_rec.get('created_by')!r}" if isinstance(usage_rec, dict)
                        else "no usage record")
             return _refusal(
                 f"{refuse} skill '{name}': the skill is not "
-                f"curator-managed ({_detail}). User-owned skills are off-limits to autonomous "
-                f"curation. Run `hermes curator adopt {name}` to opt it in.")
+                f"curator-managed ({_detail}). Only curator-managed skills may be archived "
+                f"autonomously. Run `hermes curator adopt {name}` to opt it in.")
     except Exception:
         logger.warning("owned skill guard lookup failed for %s", name, exc_info=True)
         return _refusal(
@@ -283,7 +274,7 @@ def _background_review_preflight(action: str, name: str) -> Optional[Dict[str, A
 
 
 def _curator_consolidation_delete_guard(
-    name: str, absorbed_into: Optional[str]) -> Optional[Dict[str, Any]]:
+    name: str, absorbed_into: Optional[str]) -> Optional[dict[str, Any]]:
     """Fail closed on unverified deletes during the curator consolidation pass. The fork's only
     legitimate delete is a consolidation declared via ``absorbed_into=<umbrella>`` (existence
     validated in ``_delete_skill``); the deterministic inactivity prune never calls skill_manage,
@@ -305,10 +296,68 @@ def _curator_consolidation_delete_guard(
         _fail_closed=True)
 
 
+def _background_review_write_guard(
+    name: str, skill_dir: Path, action: str) -> Optional[Dict[str, Any]]:
+    """Refuse autonomous curator writes to anything but curator-owned sediment. The review fork
+    has no user in the loop, so it is also blocked on pinned/external/bundled/hub skills."""
+    if not _is_background_review():
+        return None
+    refuse = f"Refusing background curator {action} for"
+    if _is_pinned(name, "pinned skill guard"):
+        return _refusal(
+            f"{refuse} pinned skill '{name}': pinned skills "
+            f"are off-limits to autonomous maintenance. Ask the user to run `hermes curator "
+            f"unpin {name}` if they want it changed.")
+    try:
+        from agent.skill_utils import is_external_skill_path
+        if is_external_skill_path(skill_dir):
+            return _refusal(
+                f"{refuse} skill '{name}': the skill lives in skills.external_dirs, which are "
+                f"externally owned and read-only to autonomous curation.")
+    except Exception:
+        logger.debug("external skill guard lookup failed for %s", name, exc_info=True)
+    try:
+        from tools import skill_usage
+        for predicate, label in (
+            (skill_usage.is_protected_builtin, "protected built-in"),
+            (skill_usage.is_hub_installed, "hub-installed"),
+            (skill_usage.is_bundled, "bundled")):
+            if predicate(name):
+                return _refusal(f"{refuse} {label} skill '{name}'.")
+        # Not curator-managed (no `created_by: "agent"`) => user-owned. A MISSING
+        # record and an explicit `created_by: null` must resolve IDENTICALLY (keying
+        # on presence made the policy depend on the guard's own side effect: the
+        # first write created a null record, the next identical write was refused).
+        usage_rec = skill_usage.load_usage().get(name)
+        # Skills that are not curator-managed are off-limits to autonomous curation. This prevents the LLM
+        # consolidation pass from mutating skills the user owns (manually authored, URL-installed, or
+        # created by a foreground `skill_manage(create)` at the user's request), which lack the `created_by:
+        # "agent"` marker. Keying on `isinstance(usage_rec, dict)` made the policy depend on the guard's own
+        # side effect: a local skill with no telemetry record passed, the successful write called
+        # bump_patch() which created a `created_by: null` record, and the very same write was refused from
+        # then on. "Allowed exactly once" is not a policy — it is a race with our own bookkeeping. Fail
+        # closed for both shapes; `hermes curator adopt <name>` is the supported way in. See #67140.
+        if not skill_usage._is_curator_managed_record(usage_rec):
+            _detail = (f"created_by={usage_rec.get('created_by')!r}" if isinstance(usage_rec, dict)
+                       else "no usage record")
+            return _refusal(
+                f"{refuse} skill '{name}': the skill is not "
+                f"curator-managed ({_detail}). User-owned skills are off-limits to autonomous "
+                f"curation. Run `hermes curator adopt {name}` to opt it in.")
+    except Exception:
+        logger.warning("owned skill guard lookup failed for %s", name, exc_info=True)
+        return _refusal(
+            f"{refuse} skill '{name}': agent ownership could not "
+            f"be verified because the provenance record is unavailable or unreadable.")
+    return None
+
+
+
 def _is_org_mirror(skill_path: Path) -> bool:
     from agent.skill_utils import is_org_mirror_path
     from tools import skill_manager_tool as _smt
     return is_org_mirror_path(skill_path, _smt._skills_dir())
+
 
 
 def _maybe_auto_propose_org_edit(name: str, skill_path: Path) -> Optional[str]:
@@ -335,6 +384,7 @@ def _maybe_auto_propose_org_edit(name: str, skill_path: Path) -> Optional[str]:
         return (
             f"Edit saved locally. Could not submit it to your organisation "
             f"right now — run `hermes sync propose {name}` to retry.")
+
 
 
 def _org_mirror_write_guard(name: str, skill_path: Path, action: str) -> Optional[Dict[str, Any]]:

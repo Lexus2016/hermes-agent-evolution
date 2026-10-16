@@ -57,3 +57,13 @@ def test_replayed_history_ends_at_current_schema(table: str) -> None:
         f"{next(i for i, (a, b) in enumerate(zip(replayed, declared)) if a != b)}: "
         f"replayed {replayed} vs SCHEMA_SQL {declared} — record the move as ('-', c) + ('+', c, after) in {hint}"
     )
+
+
+def test_message_salvage_retains_fork_and_upstream_uid_lineages():
+    current = history.current_declared_columns("messages")
+    fork = history.declared_snapshots("messages")[-2]
+    upstream = tuple(column for column in current if column != "origin")
+    fork_upgraded = fork + tuple(column for column in current if column not in fork)
+    upstream_upgraded = upstream + ("origin",)
+    layouts = set(history.reachable_physical_layouts("messages"))
+    assert {current, fork, upstream, fork_upgraded, upstream_upgraded} <= layouts

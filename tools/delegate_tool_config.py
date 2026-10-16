@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from hermes_platform.resolver import LookupContext, locate_command
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -288,7 +289,12 @@ def _resolve_child_credential_pool(
             if parent_pool is not None and parent_provider == "custom" and parent_key is not None and parent_key == child_key:
                 return parent_pool
             return _loaded_pool(child_key)
-        if parent_pool is not None and effective_provider == parent_provider:
+        if effective_provider == parent_provider:
+            # A same-provider parent with no pool is using a fixed credential.
+            # Loading a separate provider pool here can replace the inherited
+            # endpoint and key when the child acquires its startup lease (#71424).
+            if parent_pool is None:
+                return None
             if not effective_base_url or _pool_serves_endpoint(parent_pool, effective_provider, effective_base_url):
                 return parent_pool
             logger.debug("Parent %s pool has no entry for child endpoint %s; not sharing it",
@@ -334,8 +340,8 @@ _EXPLICIT_API_MODES = frozenset({"chat_completions", "codex_responses", "anthrop
 def _require_pinned_command(command: Optional[str], message: str) -> None:
     """A pinned ACP transport command must exist on PATH — refuse loudly rather
     than let the child silently fall back to another transport."""
-    import shutil as _shutil
-    if command and not _shutil.which(command):
+    from hermes_platform.resolver import locate_command
+    if command and not locate_command(command).found:
         raise ValueError(message)
 
 def _credential_bundle(model, provider, base_url, api_key, api_mode, request_overrides, **extra) -> dict:
@@ -489,7 +495,7 @@ _ROUTING_FILTER_DEFAULTS = (
 _NOUS_PROVIDERS = frozenset({"nous", "nous-portal", "nousresearch"})
 
 
-def _resolve_child_fallback_chain(parent_agent, routing_cfg: Any, pinned: bool) -> Optional[List[Dict[str, Any]]]:
+def _resolve_child_fallback_chain(parent_agent, routing_cfg: Any, pinned: bool) -> Optional[list[dict[str, Any]]]:
     """Fallback chain for a child, owned by the same config block as its route.
 
     Pinned children (provider, endpoint or model override) never borrow the parent chain;
@@ -506,9 +512,9 @@ def _resolve_child_fallback_chain(parent_agent, routing_cfg: Any, pinned: bool) 
 def _resolve_child_runtime(
     parent_agent, delegation_cfg: dict, parent_api_key: Any, *, model: Optional[str], override_provider: Optional[str],
     override_base_url: Optional[str], override_api_key: Optional[str], override_api_mode: Optional[str],
-    override_acp_command: Optional[str], override_acp_args: Optional[List[str]],
-    routing_cfg: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    override_acp_command: Optional[str], override_acp_args: Optional[list[str]],
+    routing_cfg: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     """Child credentials, transport and routing (config override > parent inherit) as ``AIAgent`` kwargs. Rules that
     are easy to break: api_mode is re-derived (not inherited) when the child's provider differs from the parent's
     or is Nous Portal (dual-wire); a pinned ``delegation.command`` must exist on PATH or the spawn fails loudly;
@@ -552,8 +558,8 @@ def _resolve_child_runtime(
     # absent (schema prune is the first defense). Drop it so the child keeps
     # the default transport. Config-pinned ``delegation.command`` still fails
     # loudly in ``_resolve_delegation_credentials``.
-    import shutil as _shutil
-    if override_acp_command and not _shutil.which(override_acp_command):
+    from hermes_platform.resolver import locate_command
+    if override_acp_command and not locate_command(override_acp_command).found:
         logger.warning(
             "acp_command %r is not on PATH; ignoring it so the child uses the default transport",
             override_acp_command,
@@ -603,7 +609,7 @@ def _resolve_child_runtime(
     except Exception as exc:
         logger.debug("Could not load delegation reasoning_effort: %s", exc)
 
-    kwargs: Dict[str, Any] = {
+    kwargs: dict[str, Any] = {
         "base_url": effective_base_url, "api_key": override_api_key or parent_api_key, "model": effective_model,
         "provider": effective_provider, "requested_provider": effective_requested_provider,
         "capabilities": _inherit_parent_capabilities(parent_agent, override_provider, override_base_url),

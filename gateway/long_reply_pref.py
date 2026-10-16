@@ -45,7 +45,7 @@ def _key(platform: str, chat_id: str) -> str:
 
 def _load() -> dict:
     try:
-        with open(_store_path(), encoding="utf-8") as fh:
+        with open(_store_path(), encoding="utf-8-sig") as fh:
             data = json.load(fh)
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):

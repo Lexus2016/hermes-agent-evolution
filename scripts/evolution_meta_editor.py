@@ -55,6 +55,9 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Standalone source invocations must resolve the canonical repository YAML policy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -192,9 +195,9 @@ def read_current_value(
         return None
     path = repo_root / "cron" / "evolution" / param.yaml_file
     try:
-        import yaml
+        import hermes_yaml as yaml
 
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(path.read_text(encoding="utf-8-sig")) or {}
     except (OSError, ValueError):
         return None
     except Exception:

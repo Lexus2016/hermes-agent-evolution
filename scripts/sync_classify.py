@@ -88,7 +88,7 @@ def main() -> int:
         base = _at(args.base, path)
         fork = _at(args.fork, path)
         try:
-            current = set(_tests(Path(path).read_text(encoding="utf-8")))
+            current = set(_tests(Path(path).read_text(encoding="utf-8-sig")))
         except OSError:
             current = set()
 

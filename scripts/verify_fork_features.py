@@ -137,7 +137,7 @@ def _symbols_in(ref: str | None) -> dict[str, str]:
             source = blob.stdout.decode("utf-8", "replace")
         else:
             try:
-                source = Path(path).read_text(encoding="utf-8", errors="replace")
+                source = Path(path).read_text(encoding="utf-8-sig", errors="replace")
             except OSError:
                 continue
         try:
@@ -212,7 +212,7 @@ def cmd_snapshot(args: argparse.Namespace) -> int:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
-    baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
+    baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8-sig"))
     expected_markers = set(baseline["owned_markers"])
     expected_files = set(baseline["owned_files"])
     expected_symbols = set(baseline.get("owned_symbols", ()))

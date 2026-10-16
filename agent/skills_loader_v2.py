@@ -150,7 +150,7 @@ def _name_for_skill_file(skill_file: Path, skills_dir: Path) -> str:
     :func:`ordered_skill_files`, just ordered as an un-graphed leaf.
     """
     try:
-        frontmatter, _ = parse_frontmatter(skill_file.read_text(encoding="utf-8"))
+        frontmatter, _ = parse_frontmatter(skill_file.read_text(encoding="utf-8-sig"))
         name = str(frontmatter.get("name") or skill_file.parent.name).strip()
         return name or skill_file.parent.name
     except Exception:  # noqa: BLE001 - one bad file is non-fatal

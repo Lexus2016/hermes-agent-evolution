@@ -1,0 +1,21 @@
+{
+  "description": "Get a structured bird's-eye overview of a Python codebase: the functions, classes, and methods in a directory tree, each with its file:line location and a reference-count rank (most-used symbols first). Use this at the START of a coding task to understand code structure before editing — it is far cheaper than repeatedly calling search_files / read_file to discover where things live. Output is ranked and truncated to a symbol budget so it fits the context window. Python files only (.py); non-Python and broken-syntax files are skipped. .git, venvs, node_modules and __pycache__ are excluded.",
+  "name": "repo_map",
+  "parameters": {
+    "properties": {
+      "max_symbols": {
+        "default": 200,
+        "description": "Maximum number of ranked symbols to return (context budget). Default 200.",
+        "minimum": 1,
+        "type": "integer"
+      },
+      "path": {
+        "default": ".",
+        "description": "Directory to map (absolute, relative, or ~/path). Defaults to the current working directory.",
+        "type": "string"
+      }
+    },
+    "required": [],
+    "type": "object"
+  }
+}

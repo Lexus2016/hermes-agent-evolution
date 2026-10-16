@@ -524,7 +524,7 @@ def _fetch_test_contents(
 def _load_json_file(path: str) -> Optional[Dict[str, Any]]:
     """Load a JSON object from ``path``; return ``None`` on any error."""
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
         return data if isinstance(data, dict) else None
     except (OSError, ValueError):
         return None

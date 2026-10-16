@@ -54,7 +54,7 @@ def task_class(record: Dict[str, Any]) -> str:
 def load_records(store: Path) -> List[Dict[str, Any]]:
     """Parse the Slice-1 JSONL; malformed lines are skipped, never fatal."""
     try:
-        lines = store.read_text(encoding="utf-8").splitlines()
+        lines = store.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return []
     out: List[Dict[str, Any]] = []

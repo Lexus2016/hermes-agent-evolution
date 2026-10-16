@@ -33,13 +33,13 @@ def test_memory_alias_persists_with_content_precedence(tmp_path, monkeypatch):
         return json.loads(INLINE_TOOL_EXECUTORS["memory"](agent, args, ctx))
 
     assert call(action="add", target="user", content="Household owns an estate.")["success"]
-    result = call(action="replace", target="user", old_text="Household owns an estate.",
+    result = call(action="patch", target="user", old_text="Household owns an estate.",
                   new_text="Household owns a saloon.")
     assert result["success"], result
     path = tmp_path / "memories" / "USER.md"
     assert "Household owns a saloon." in path.read_text(encoding="utf-8")
     assert sink.writes[-1] == ("replace", "user", "Household owns a saloon.")
-    result = call(action="replace", target="user", old_text="Household owns a saloon.",
+    result = call(action="patch", target="user", old_text="Household owns a saloon.",
                   content="Household owns a hatchback.", new_text="Household owns a van.")
     assert result["success"], result
     persisted = path.read_text(encoding="utf-8")
@@ -47,7 +47,41 @@ def test_memory_alias_persists_with_content_precedence(tmp_path, monkeypatch):
     assert "van" not in persisted
     assert "saloon" not in persisted
     assert sink.writes[-1] == ("replace", "user", "Household owns a hatchback.")
-    result = call(target="user", operations=[{"action": "replace", "old_text": "Household owns a hatchback.",
+    result = call(target="user", operations=[{"action": "patch", "old_text": "Household owns a hatchback.",
                                              "new_text": "Household owns a coupe."}])
     assert result["success"], result
     assert sink.writes[-1] == ("replace", "user", "Household owns a coupe.")
+
+
+def test_invalid_targets_do_not_trip_storage_breaker(tmp_path, monkeypatch):
+    from agent import tool_error_recovery
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(tool_error_recovery, "_breakers", {})
+    store = MemoryStore(memory_char_limit=500, user_char_limit=300)
+    agent = SimpleNamespace(_memory_store=store, _memory_manager=None)
+    for _ in range(4):
+        result = json.loads(INLINE_TOOL_EXECUTORS["memory"](
+            agent, {"action": "add", "content": "Correctable fact"}, None,
+        ))
+        assert result["success"] is False
+        assert "target" in result["error"]
+        assert "retry" in result["error"].lower()
+    result = json.loads(INLINE_TOOL_EXECUTORS["memory"](
+        agent, {"action": "add", "target": "user", "content": "Correctable fact"}, None,
+    ))
+    assert result["success"] is True
+    assert "Correctable fact" in (tmp_path / "memories" / "USER.md").read_text()
+    assert not tool_error_recovery.get_breaker("memory").should_trip()
+
+
+def test_disabled_memory_returns_structured_refusal(monkeypatch):
+    from agent import tool_error_recovery
+
+    monkeypatch.setattr(tool_error_recovery, "_breakers", {})
+    agent = SimpleNamespace(_memory_store=None, _memory_manager=None)
+    result = json.loads(INLINE_TOOL_EXECUTORS["memory"](
+        agent, {"action": "add", "target": "user", "content": "fact"}, None,
+    ))
+    assert result["success"] is False
+    assert "not available" in result["error"]

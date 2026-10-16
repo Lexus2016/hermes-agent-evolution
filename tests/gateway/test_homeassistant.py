@@ -179,7 +179,7 @@ class TestEventFilteringPipeline:
         msg_event = adapter.handle_message.call_args[0][0]
         assert "Thermostat" in msg_event.text
         assert "heat" in msg_event.text
-        assert msg_event.source.platform == Platform.HOMEASSISTANT
+        assert msg_event.source.platform == Platform("homeassistant")
         assert msg_event.source.chat_id == "ha_events"
 
 
@@ -461,10 +461,10 @@ class TestConfigIntegration:
         from gateway.config import load_gateway_config
         config = load_gateway_config()
 
-        assert Platform.HOMEASSISTANT in config.platforms
-        ha = config.platforms[Platform.HOMEASSISTANT]
+        assert Platform("homeassistant") in config.platforms
+        ha = config.platforms[Platform("homeassistant")]
         assert ha.enabled is True
-        assert ha.token == "env-token"
+        assert HomeAssistantAdapter(ha)._hass_token == "env-token"
         assert ha.extra["url"] == "http://10.0.0.5:8123"
 
 
@@ -541,7 +541,7 @@ class TestLocalNetworkConnectHint:
         assert _connect_error_detail(err) == str(err)
         assert _connect_error_detail(RuntimeError("auth failed")) == "auth failed"
 
-    @pytest.mark.macos_only
+    @pytest.mark.platforms("macos")
     def test_ehostunreach_under_launchd_names_the_remedy(self, monkeypatch):
         """Only the launchd-supervised gateway can be denied by Local Network Privacy (#71206)."""
         from plugins.platforms.homeassistant.adapter import _connect_error_detail
@@ -551,3 +551,19 @@ class TestLocalNetworkConnectHint:
         detail = _connect_error_detail(err)
         assert detail.startswith(str(err))
         assert len(detail) > len(str(err))  # a remedy hint is appended
+
+
+def test_registration_preserves_event_bus_policy_and_profile_seams(monkeypatch):
+    from plugins.platforms.homeassistant.adapter import register
+    from types import SimpleNamespace
+
+    captured = {}
+    register(SimpleNamespace(register_platform=lambda **kwargs: captured.update(kwargs)))
+    assert captured["trusted_inbound"] is True
+    assert captured["display_tier"] == "minimal"
+    assert captured["shared_env_prefixes"] == ("HASS_",)
+    monkeypatch.setattr(
+        "plugins.platforms.homeassistant.adapter._get_scoped_secret",
+        lambda key, default="": {"HASS_TOKEN": "scoped-token", "HASS_URL": "http://scoped-ha"}.get(key, default),
+    )
+    assert captured["env_enablement_fn"]() == {"url": "http://scoped-ha"}

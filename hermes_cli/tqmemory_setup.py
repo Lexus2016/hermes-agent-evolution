@@ -219,14 +219,14 @@ def _register_in_config_file(config_path: Path, tqm_path: str) -> bool:
     Round-trip through ``atomic_config_write`` so comments and ``${ENV}``
     templates survive. Idempotent: skips when an entry already exists.
     """
-    import yaml
+    import hermes_yaml as yaml
     from hermes_cli.config import atomic_config_write
 
     existed = config_path.exists()
     data: dict = {}
     if existed:
         try:
-            loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+            loaded = yaml.safe_load(config_path.read_text(encoding="utf-8-sig"))
         except Exception as exc:
             logger.warning("tqmemory: cannot parse %s (%s) — skipping", config_path, exc)
             return False

@@ -134,7 +134,7 @@ def load_thoughts(store_dir: Optional[Path] = None) -> List[Thought]:
         return []
     out: List[Thought] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return []
     for line in lines:

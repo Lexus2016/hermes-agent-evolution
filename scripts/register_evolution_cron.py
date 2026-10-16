@@ -34,6 +34,9 @@ import shutil
 import sys
 from pathlib import Path
 
+# Standalone source invocations must resolve the canonical repository YAML policy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 
 def _find_venv_python(repo_root: Path) -> str | None:
     """Locate the install's venv interpreter (has the full Hermes deps)."""
@@ -80,9 +83,9 @@ def _ensure_venv_python(repo_root: Path, argv: list[str]) -> None:
 
 
 def _load_yaml(path: Path) -> dict:
-    import yaml  # PyYAML ships with Hermes (used for cli-config.yaml etc.)
+    import hermes_yaml as yaml   # Use the canonical Hermes YAML policy.
 
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, "r", encoding="utf-8-sig") as fh:
         return yaml.safe_load(fh) or {}
 
 

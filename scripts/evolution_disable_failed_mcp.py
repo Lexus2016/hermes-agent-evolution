@@ -20,6 +20,9 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+
+# Standalone source invocations must resolve the canonical repository YAML policy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from typing import List, Optional, Tuple
 
 
@@ -55,7 +58,7 @@ def check_tqmemory_health() -> Tuple[bool, str]:
 
 def disable_in_profiles(dry_run: bool = False) -> List[str]:
     """Set ``mcp_servers.tqmemory.enabled: false`` in all profile configs."""
-    import yaml
+    import hermes_yaml as yaml
 
     mod = _import_tqmemory()
     if mod is None:
@@ -65,7 +68,7 @@ def disable_in_profiles(dry_run: bool = False) -> List[str]:
         if not cfg_path.exists():
             continue
         try:
-            data = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+            data = yaml.safe_load(cfg_path.read_text(encoding="utf-8-sig"))
         except Exception:
             continue
         if not isinstance(data, dict):

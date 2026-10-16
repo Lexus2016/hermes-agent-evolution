@@ -183,7 +183,7 @@ class HomeAssistantAdapter(BasePlatformAdapter):
     _BACKOFF_STEPS = [5, 10, 30, 60]  # reconnect backoff (seconds)
 
     def __init__(self, config: PlatformConfig):
-        super().__init__(config, Platform.HOMEASSISTANT)
+        super().__init__(config, Platform("homeassistant"))
         self._session: Optional["aiohttp.ClientSession"] = None
         self._ws: Optional["aiohttp.ClientWebSocketResponse"] = None
         self._rest_session: Optional["aiohttp.ClientSession"] = None
@@ -435,13 +435,7 @@ class HomeAssistantAdapter(BasePlatformAdapter):
 # -- Standalone (out-of-process) sender — cron deliver=homeassistant ---------
 
 
-# ────────────────────────────────────────────────────────────────────────── Plugin migration glue (#41112 /
-# #3823) Added when the Email adapter moved from gateway/platforms/email.py into this bundled plugin.
-# register() exposes the platform via the registry, replacing the Platform.EMAIL elif in gateway/run.py, the
-# _PLATFORM_CONNECTED_CHECKERS entry in gateway/config.py, the _PLATFORMS["email"] static dict in
-# hermes_cli/gateway.py, and the _send_email dispatch in tools/send_message_tool.py. EMAIL_*
-# env→PlatformConfig seeding stays in core.
-# ──────────────────────────────────────────────────────────────────────────
+# Platform registration and environment seeding live in this plugin.
 async def _standalone_send(
     pconfig, chat_id: str, message: str, *,
     thread_id: Optional[str] = None, media_files: Optional[list] = None, force_document: bool = False,
@@ -475,6 +469,11 @@ async def _standalone_send(
 _is_connected = _env_is_connected("HASS_TOKEN")
 
 
+def _env_enablement():
+    if not _get_scoped_secret("HASS_TOKEN", "").strip():
+        return None
+    return {"url": _get_scoped_secret("HASS_URL", "http://homeassistant.local:8123")}
+
 
 def register(ctx) -> None:
     """Plugin entry point — called by the Hermes plugin system."""
@@ -482,5 +481,7 @@ def register(ctx) -> None:
         name="homeassistant", label="Home Assistant", adapter_factory=HomeAssistantAdapter,
         check_fn=check_ha_requirements, validate_config=validate_ha_config, is_connected=_is_connected,
         required_env=["HASS_TOKEN"], install_hint="pip install aiohttp",
+        env_enablement_fn=_env_enablement, shared_env_prefixes=("HASS_",),
+        trusted_inbound=True, display_tier="minimal",
         standalone_sender_fn=_standalone_send,  # out-of-process cron delivery via notify.notify
         max_message_length=HomeAssistantAdapter.MAX_MESSAGE_LENGTH, emoji="🏠", allow_update_command=True)

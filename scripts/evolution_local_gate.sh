@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Local-signal wake-gate for class-B evolution jobs (introspection).
 #
 # Council 2026-08-31: local introspection must NOT require GitHub write.

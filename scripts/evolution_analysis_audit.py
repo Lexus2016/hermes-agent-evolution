@@ -362,7 +362,7 @@ def reconcile_latest(evolution_dir: Path, repo_root: Optional[Path]) -> List[str
         return []
     latest = dated[-1]
     try:
-        report = json.loads(latest.read_text(encoding="utf-8"))
+        report = json.loads(latest.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return []
     report, notes = reconcile_report(report, repo_root)
@@ -466,7 +466,7 @@ def audit_latest(evolution_dir: Path, repo_root: Optional[Path] = None) -> List[
         return []
     latest = dated[-1]
     try:
-        report = json.loads(latest.read_text(encoding="utf-8"))
+        report = json.loads(latest.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return []
     violations = (

@@ -39,16 +39,19 @@ class TestCronPoolShutdownGuard:
         (~line 4322).  We return a normal pool for the first and the
         configured ``cron_pool`` (whose submit may raise) for the second.
         """
-        normal_pool = MagicMock()
-        call_state = {"count": 0}
+        from concurrent.futures import ThreadPoolExecutor
+        real_pool = ThreadPoolExecutor
+        scheduler_pools = 0
 
         def counting_factory(*args, **kwargs):
-            call_state["count"] += 1
-            # First call: session DB pool — return a normal pool.
-            # Second call: cron pool — return the test-configured pool.
-            if call_state["count"] == 1:
-                return normal_pool
-            return cron_pool
+            # Keep the owner's asyncio executor real; only the scheduler's
+            # single-worker agent pool simulates interpreter shutdown.
+            nonlocal scheduler_pools
+            if kwargs.get("max_workers") == 1:
+                scheduler_pools += 1
+                if scheduler_pools == 2:
+                    return cron_pool
+            return real_pool(*args, **kwargs)
 
         tpe_patch = patch(
             "concurrent.futures.ThreadPoolExecutor",
@@ -69,7 +72,7 @@ class TestCronPoolShutdownGuard:
         mcp_patch = patch("tools.mcp_tool.discover_mcp_tools", return_value=[])
         return [tpe_patch, cfg_patch, runtime_patch, aiaagent_patch, mcp_patch]
 
-    def test_shutdown_runtimeerror_returns_clean_failure(self):
+    def test_shutdown_runtimeerror_returns_clean_failure(self, cron_owner):
         """When _cron_pool.submit() raises the interpreter-shutdown
         RuntimeError, run_job returns (False, "", "", <error>) where the
         error message identifies the shutdown race — not a generic failure.
@@ -83,7 +86,7 @@ class TestCronPoolShutdownGuard:
         for p in patches:
             p.start()
         try:
-            success, output, final_response, error = sched.run_job(
+            success, output, final_response, error = cron_owner(
                 self._make_agent_path_job()
             )
         finally:
@@ -102,7 +105,7 @@ class TestCronPoolShutdownGuard:
             for call in shutdown_calls
         ), f"Expected shutdown(wait=False, cancel_futures=True); got {shutdown_calls}"
 
-    def test_other_runtimeerror_does_not_match_shutdown(self):
+    def test_other_runtimeerror_does_not_match_shutdown(self, cron_owner):
         """When _cron_pool.submit() raises a *different* RuntimeError,
         the guard re-raises it (does not swallow it as a shutdown race).
         The outer except Exception in _run_job_impl catches it and returns
@@ -116,7 +119,7 @@ class TestCronPoolShutdownGuard:
         for p in patches:
             p.start()
         try:
-            success, output, final_response, error = sched.run_job(
+            success, output, final_response, error = cron_owner(
                 self._make_agent_path_job()
             )
         finally:

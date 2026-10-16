@@ -38,11 +38,11 @@ def _mock_tool_call(name, arguments="{}", call_id=None):
 
 def _make_agent(*tool_names: str, config: dict | None = None) -> AIAgent:
     with (
-        patch("run_agent.get_tool_definitions", return_value=_make_tool_defs(*tool_names)),
-        patch("run_agent.check_toolset_requirements", return_value={}),
+        patch("model_tools.get_tool_definitions", return_value=_make_tool_defs(*tool_names)),
+        patch("model_tools.check_toolset_requirements", return_value={}),
         patch("hermes_cli.config.load_config", return_value=config or {}),
         patch("hermes_cli.config.load_config_readonly", return_value=config or {}),
-        patch("run_agent.OpenAI"),
+        patch("run_agent.AIAgent._create_openai_client"),
     ):
         agent = AIAgent(
             api_key="test-key-1234567890",

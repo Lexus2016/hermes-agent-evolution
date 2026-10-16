@@ -89,7 +89,7 @@ class SharedMemo:
         if not self.path.exists():
             return
         try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
+            data = json.loads(self.path.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             return  # missing/corrupt memo = empty memo, never a crash
         if not isinstance(data, dict):

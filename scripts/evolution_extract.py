@@ -179,7 +179,7 @@ EXIT_BAD_INPUT = 2
 def _load_draft(path: Optional[str]) -> Tuple[Optional[Any], Optional[str]]:
     """Read the draft JSON from a positional path or stdin."""
     try:
-        raw = Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+        raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
     except OSError as exc:
         return None, f"cannot read input: {exc}"
     try:

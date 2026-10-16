@@ -93,7 +93,7 @@ def _load_events() -> List[Dict[str, Any]]:
     if not path.exists():
         return []
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         if isinstance(data, dict) and isinstance(data.get("events"), list):
             return data["events"]
         if isinstance(data, list):  # legacy flat-list format

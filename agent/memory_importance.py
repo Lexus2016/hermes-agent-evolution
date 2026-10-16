@@ -783,7 +783,7 @@ class EpisodicMemoryStore:
         """Load a store from a JSON file written by :meth:`save`."""
         p = Path(path)
         # ruff: PLW1514 — explicit encoding required by repo lint policy.
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8-sig"))
         return cls.from_dict(data)
 
     # -- convenience ------------------------------------------------------

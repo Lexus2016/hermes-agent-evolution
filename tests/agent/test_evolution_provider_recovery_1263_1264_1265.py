@@ -26,11 +26,11 @@ class _OverErr(Exception):
         self.status_code = 503
 
 def _agent(mx=10):
-    with (patch("run_agent.get_tool_definitions", return_value=_td("terminal")),
-          patch("run_agent.check_toolset_requirements", return_value={}),
+    with (patch("model_tools.get_tool_definitions", return_value=_td("terminal")),
+          patch("model_tools.check_toolset_requirements", return_value={}),
           patch("hermes_cli.config.load_config", return_value={}),
           patch("hermes_cli.config.load_config_readonly", return_value={}),
-          patch("run_agent.OpenAI")):
+          patch("run_agent.AIAgent._create_openai_client")):
         a = AIAgent(api_key="test-key-1234567890", base_url="https://openrouter.ai/api/v1",
                    max_iterations=mx, quiet_mode=True, skip_context_files=True, skip_memory=True)
     a.client = MagicMock()
@@ -42,8 +42,8 @@ def _agent(mx=10):
     return a
 
 def _fb():
-    return (patch("agent.conversation_loop.jittered_backoff", return_value=0.01),
-            patch("agent.conversation_loop.adaptive_rate_limit_backoff", side_effect=lambda r, **k: (0.01, None)))
+    return (patch("agent.retry_utils.jittered_backoff", return_value=0.01),
+            patch("agent.retry_utils.adaptive_rate_limit_backoff", side_effect=lambda r, **k: (0.01, None)))
 
 
 # #1264 — billing error with no fallback fails fast with billing guidance

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # setup_evolution_bot.sh — make THIS machine act as the evolution BOT account.
 #
 # Why: branch protection on main forbids a PR author from approving their own PR

@@ -331,7 +331,7 @@ def _load_candidates_from_registry() -> List[Dict[str, Any]]:
         for scan_dir in scan_dirs:
             for skill_md in iter_skill_index_files(scan_dir, "SKILL.md"):
                 try:
-                    content = skill_md.read_text(encoding="utf-8")[:4000]
+                    content = skill_md.read_text(encoding="utf-8-sig")[:4000]
                     frontmatter, _ = parse_frontmatter(content)
                 except Exception:
                     continue

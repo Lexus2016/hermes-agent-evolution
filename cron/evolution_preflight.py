@@ -207,7 +207,7 @@ def load_digest_as_fallback(
     if path is None:
         return None
     try:
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
     except Exception as exc:
         logger.warning("Could not read cached digest %s: %s", path, exc)
         return None
@@ -300,7 +300,7 @@ def _balance_state(hermes_home: Optional[Path] = None) -> Dict[str, Any]:
     try:
         path = _balance_cache_path(hermes_home)
         if path.is_file():
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
             if isinstance(data, dict):
                 return data
     except Exception as exc:

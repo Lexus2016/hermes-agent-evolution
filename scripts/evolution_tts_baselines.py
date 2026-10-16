@@ -267,7 +267,7 @@ def _load_samples(opts: Dict[str, Any]) -> tuple[List[float], Optional[str]]:
         from pathlib import Path
 
         try:
-            raw = Path(path).read_text(encoding="utf-8")
+            raw = Path(path).read_text(encoding="utf-8-sig")
         except OSError as exc:
             return [], f"cannot read input: {exc}"
     try:

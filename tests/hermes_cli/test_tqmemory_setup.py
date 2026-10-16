@@ -6,7 +6,7 @@ channels, and the reconcile gating — without ever touching the network or uv.
 """
 
 import pytest
-import yaml
+import hermes_yaml as yaml
 
 import hermes_cli.tqmemory_setup as tqm
 

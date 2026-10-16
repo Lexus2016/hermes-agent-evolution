@@ -43,7 +43,7 @@ def _load_contract(path: str) -> Optional[Dict[str, Any]]:
     """Load and minimally validate an assertion contract. Returns None on any
     malformed input — a bad contract must never crash the turn finalizer."""
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             data = json.load(fh)
     except (OSError, ValueError):
         return None

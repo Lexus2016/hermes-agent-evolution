@@ -59,7 +59,7 @@ def load_ledger(ledger_file: Path) -> List[Dict[str, Any]]:
         return []
     folded: Dict[Any, Dict[str, Any]] = {}
     order: List[Any] = []
-    for ln in ledger_file.read_text(encoding="utf-8").splitlines():
+    for ln in ledger_file.read_text(encoding="utf-8-sig").splitlines():
         ln = ln.strip()
         if not ln:
             continue

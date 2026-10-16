@@ -365,7 +365,7 @@ def _default_trajectory_dir() -> Path:
 
 def load_trajectory(path: Path) -> Optional[TrajectoryLog]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return None
     if not isinstance(data, dict):
@@ -382,7 +382,7 @@ def iter_trajectories(path: Path) -> List[TrajectoryLog]:
     (covers the .json format), then line-by-line (covers .jsonl). Malformed
     lines are skipped — a torn write must never take a replay down (#85)."""
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8-sig")
     except OSError:
         return []
     stripped = raw.strip()

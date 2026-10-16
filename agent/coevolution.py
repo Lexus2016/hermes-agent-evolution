@@ -65,7 +65,7 @@ def _tool_names(tool_calls: Sequence[Any]) -> List[str]:
 def _load_tags(path: Path) -> Dict[str, Any]:
     """Load the tag store; corrupt or missing files degrade to empty."""
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             data = json.load(fh)
         if isinstance(data, dict):
             return data

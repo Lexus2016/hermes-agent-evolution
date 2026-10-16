@@ -100,7 +100,7 @@ def load_trajectories(trajectory_dir: Path) -> List[Dict[str, Any]]:
         return out
     for path in sorted(trajectory_dir.glob("*.jsonl")):
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
+            lines = path.read_text(encoding="utf-8-sig").splitlines()
         except OSError:
             continue
         for idx, line in enumerate(lines):

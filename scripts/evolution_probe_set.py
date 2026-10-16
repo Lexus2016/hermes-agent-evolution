@@ -158,7 +158,7 @@ def load_probe_set(
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (ValueError, OSError):
         return None
     return ProbeSet.from_dict(data)

@@ -15,6 +15,7 @@ Contract:
 """
 
 import sys
+import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -22,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import cron.jobs as cron_jobs
 import cron.scheduler as sched
+
+pytestmark = pytest.mark.usefixtures("cron_owner")
 
 
 def _job(**overrides):
@@ -32,7 +35,7 @@ def _job(**overrides):
         "enabled": True,
         "state": "scheduled",
         "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
-        "deliver": "local",
+        "deliver": "telegram:123",
         "model": None,
         "provider": None,
         "provider_snapshot": "openrouter",
@@ -54,8 +57,9 @@ def _tick(job, tmp_path, current_provider, deliveries):
     """Run one run_one_job tick with the provider resolution pinned."""
     fake_db = MagicMock()
 
-    def fake_deliver(job, content, adapters=None, loop=None, **kwargs):
+    def fake_deliver(execution_id, job, content, **kwargs):
         deliveries.append(content)
+        return {"status": "pending"}
         return None
 
     with patch("cron.scheduler._hermes_home", tmp_path), \
@@ -74,7 +78,9 @@ def _tick(job, tmp_path, current_provider, deliveries):
                }), \
          patch("cron.jobs._compute_provider_model_snapshots",
                return_value=(current_provider, "test-model")), \
-         patch.object(sched, "_deliver_result", side_effect=fake_deliver), \
+         patch("cron.delivery_queue.enqueue", side_effect=fake_deliver), \
+         patch("gateway.config.load_gateway_config", return_value=MagicMock(
+             get_connected_platforms=lambda: [MagicMock(value="telegram")])), \
          patch("run_agent.AIAgent") as mock_agent_cls:
         mock_agent = MagicMock()
         mock_agent.run_conversation.return_value = {"final_response": "ok"}

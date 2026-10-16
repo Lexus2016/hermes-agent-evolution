@@ -129,7 +129,7 @@ def _read_ledger(evo_dir: Path) -> Dict[str, dict]:
     """
     path = _ledger_path(evo_dir)
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = path.read_text(encoding="utf-8-sig")
         data = json.loads(raw)
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):

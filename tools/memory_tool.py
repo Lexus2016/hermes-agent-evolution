@@ -2,7 +2,7 @@
 """Memory Tool - persistent curated memory (MEMORY.md = agent notes, USER.md = user
 profile). Both enter the system prompt as a FROZEN snapshot at session start;
 mid-session writes hit disk but never change the prompt (prefix cache intact).
-Single `memory` tool: add/replace/remove or a batch `operations` list."""
+Single `memory` tool: add/patch/remove or a batch `operations` list."""
 
 import copy
 import json
@@ -28,16 +28,18 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-_memory_surface_flags: ContextVar[Optional[Tuple[bool, bool]]] = ContextVar(
-    "memory_surface_flags", default=None
-)
+# One tool-definition pass must use ONE config decision for availability and the
+# dynamic target schema: the check_fn result flows to the immediately following
+# dynamic_schema_overrides call; ContextVar isolates concurrent profile builds.
+_memory_surface_flags: ContextVar[Optional[tuple[bool, bool]]] = ContextVar("memory_surface_flags", default=None)
+
 
 def get_memory_dir() -> Path:
     """Return the profile-scoped memories directory."""
     return get_hermes_home() / "memories"
 
 from tools.memory_tool_store import (
-    ENTRY_DELIMITER,
+    ENTRY_DELIMITER, FAILURE_CLASS, PATCH_DROP_HINT,
     MEMORY_BLOCK_HEADERS,
     BLOCKED_WARNINGS_FILE,
     BLOCKED_WARNINGS_MAX,
@@ -61,7 +63,7 @@ from tools.memory_tool_store import (
     MemoryStore,
 )
 
-def load_on_disk_store() -> "MemoryStore":
+def load_on_disk_store() -> MemoryStore:
     """Fresh on-disk MemoryStore with configured limits/flags for contexts with no live
     agent (gateway, Desktop, ``/memory``) so approvals enforce the SAME caps as
     ``agent_init``. Falls back to defaults if config can't load; never raises."""
@@ -91,7 +93,7 @@ def load_on_disk_store() -> "MemoryStore":
     return store
 
 
-def _pin_matched_entries(store: "MemoryStore", payload: Dict[str, Any]) -> Optional[str]:
+def _pin_matched_entries(store: MemoryStore, payload: dict[str, Any]) -> Optional[str]:
     """Record on each staged replace/remove the FULL entry its old_text selects now. Approval
     then applies to exactly the entry the approver reviewed and refuses if it changed:
     re-running the old_text search at approve time could hit a newer entry that still
@@ -111,7 +113,7 @@ def _pin_matched_entries(store: "MemoryStore", payload: Dict[str, Any]) -> Optio
     return None if result.get("success") else json.dumps(result, ensure_ascii=False)
 
 
-def _gate_or_stage(store: "MemoryStore", summary: str, detail: str, payload: Dict[str, Any]) -> Optional[str]:
+def _gate_or_stage(store: MemoryStore, summary: str, detail: str, payload: dict[str, Any]) -> Optional[str]:
     """JSON tool-result string when the write must NOT proceed (blocked or staged
     for approval), None to proceed. Fails open if the gate module can't load."""
     try:
@@ -122,9 +124,11 @@ def _gate_or_stage(store: "MemoryStore", summary: str, detail: str, payload: Dic
     if decision.allow:
         return None
     if decision.blocked:
+        FAILURE_CLASS.set("gate_refused")
         return tool_error(decision.message, success=False)
     if (unmatched := _pin_matched_entries(store, payload)) is not None:
         return unmatched
+    FAILURE_CLASS.set("staged")
     record = wa.stage_write(wa.MEMORY, payload, summary=f"{summary}: {detail[:120]}", origin=wa.current_origin())
     return json.dumps({"success": True, "staged": True, "pending_id": record["id"], "message": decision.message},
                       ensure_ascii=False)
@@ -132,6 +136,8 @@ def _gate_or_stage(store: "MemoryStore", summary: str, detail: str, payload: Dic
 
 # action -> (store call, gate (summary, detail) text) for the live tool path and staged replay.
 # Provenance (#316) rides on add/replace; ``entry`` is the pinned matched_entry for replay.
+# action -> (store call, gate (summary, detail) text) for the live tool path and staged replay
+# ('replace' only replays writes staged before it was removed from the tool).
 _STORE_ACTIONS = {
     "add": (lambda store, target, content, old_text, entry=None, source_class=DEFAULT_SOURCE_CLASS, trust_tier=DEFAULT_TRUST_TIER:
             store.add(target, content, source_class=source_class, trust_tier=trust_tier),
@@ -140,19 +146,22 @@ _STORE_ACTIONS = {
                 store.replace(target, old_text, content, source_class=source_class, trust_tier=trust_tier, matched_entry=entry),
                 lambda label, content, old_text: (f"replace in {label}",
                                                   f"entry matching: {old_text}\nwhole entry becomes: {content}")),
-    "remove": (lambda store, target, content, old_text, entry=None, source_class=DEFAULT_SOURCE_CLASS, trust_tier=DEFAULT_TRUST_TIER:
-               store.remove(target, old_text, matched_entry=entry),
-               lambda label, content, old_text: (f"remove from {label}", old_text or ""))}
+    "remove": (lambda store, target, content, old_text, entry=None, source_class=DEFAULT_SOURCE_CLASS, trust_tier=DEFAULT_TRUST_TIER: store.remove(target, old_text, entry),
+               lambda label, content, old_text: (f"remove from {label}", old_text or "")),
+    "patch": (lambda store, target, content, old_text, entry=None, source_class=DEFAULT_SOURCE_CLASS, trust_tier=DEFAULT_TRUST_TIER: store.patch(target, old_text, content, entry),
+              lambda label, content, old_text: (f"patch in {label}",
+                                                f"entry matching: {old_text}\nspan '{old_text}' becomes: {content} "
+                                                "(rest of the entry is kept)"))}
 
 
-def _batch_op_line(op: Dict[str, Any]) -> str:
+def _batch_op_line(op: dict[str, Any]) -> str:
     op = op or {}
     act, content, old = op.get("action", "?"), op.get("content") or op.get("new_text") or "", op.get("old_text", "")
     if act == "remove":
         return f"- remove: {old}"
-    # Whole-entry contract (#117952): the approver must not read this as a span patch.
-    return (f"- replace entry matching '{old}' -> whole entry becomes: {content}" if act == "replace"
-            else f"- {act}: {content}")
+    if act == "patch":
+        return f"- patch span '{old}' -> '{content}' (rest of the entry is kept)"
+    return f"- {act}: {content}"
 
 
 def _apply_write_gate(store: "MemoryStore", action: str, target: str, content: Optional[str],
@@ -179,26 +188,32 @@ def _validate_single_op(store, action, target, content, old_text) -> Optional[st
     Missing ``old_text`` is recoverable (it can't be schema-required — needs a combinator
     the Codex backend rejects): return the inventory plus a retry instruction."""
     if action == "add" and not content:
+        FAILURE_CLASS.set("missing_content")
         return tool_error("Content is required for 'add' action.", success=False)
-    if action in ("replace", "remove") and not old_text:
-        replace_hint = (" For 'replace', content is the COMPLETE new entry -- the whole "
-                        "matched entry is overwritten, not just the old_text span."
-                        if action == "replace" else "")
+    if action in ("remove", "patch") and not old_text:
+        FAILURE_CLASS.set("missing_old_text")
         return json.dumps({
             "success": False,
             "error": (f"'{action}' needs old_text -- a short unique substring of the entry "
                       f"to {action}. None was provided. Reissue the {action} with old_text "
-                      f"set to part of one of the current_entries below.{replace_hint}"),
+                      f"set to part of one of the current_entries below."),
             "current_entries": store._entries_for(target), "usage": store._usage(target)}, ensure_ascii=False)
-    if action == "replace" and not content:
-        return tool_error("content is required for 'replace' action.", success=False)
+    if action == "patch" and not content:
+        FAILURE_CLASS.set("missing_content")
+        return tool_error(f"content (the new text for the old_text span) is required for 'patch' action. "
+                          f"{PATCH_DROP_HINT}", success=False)
     return None
 
 
-_BG_DELETE_ACTIONS = ("replace", "remove")
+# 'replace' is no longer offered to the model; it stays here so writes staged before its
+# removal still pin, display and replay.
+_BG_DELETE_ACTIONS = ("replace", "remove", "patch")
+_REPLACE_REMOVED = ("'replace' is not available; use 'patch'. old_text is the exact span to change and "
+                    "content is its new text; the rest of the entry is kept. To rewrite a whole entry, "
+                    "set old_text to the whole entry. Nothing was written.")
 
 
-def destructive_ops(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+def destructive_ops(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """The replace/remove ops of a staged memory payload, single-op or batch shape."""
     ops = (payload.get("operations") or []) if payload.get("action") == "batch" else [payload]
     return [op for op in ops if (op or {}).get("action") in _BG_DELETE_ACTIONS]
@@ -207,7 +222,7 @@ def destructive_ops(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _background_delete_gate(store, action, operations, target="memory", content=None,
                             old_text=None) -> Optional[str]:
     """Fail-closed operation gate for unattended background-review forks (#105921): ``add``
-    stays available (it is all any review prompt asks for), while ``replace``/``remove`` —
+    stays available (it is all any review prompt asks for), while ``patch``/``remove`` —
     single or inside a batch — are never applied unattended. The op is staged in the pending
     store instead of merely denied: the fork's own review summary is never published back, so
     a plain denial would drop the consolidation request with no surfacing path at all. A
@@ -227,6 +242,7 @@ def _background_delete_gate(store, action, operations, target="memory", content=
         if (unmatched := _pin_matched_entries(store, payload)) is not None:
             return unmatched
         from tools import write_approval as wa
+        FAILURE_CLASS.set("staged")
         record = wa.stage_write(
             wa.MEMORY, payload,
             summary=(f"background review consolidation ({'batch' if operations is not None else action} "
@@ -240,8 +256,9 @@ def _background_delete_gate(store, action, operations, target="memory", content=
         }, ensure_ascii=False)
     except Exception:
         logger.warning("Failed to stage background-review consolidation; denying", exc_info=True)
+        FAILURE_CLASS.set("gate_refused")
         return tool_error(
-            "Background review may not delete memory entries ('replace'/'remove', including in a "
+            "Background review may not delete memory entries ('patch'/'remove', including in a "
             "batch); 'add' is still available.", success=False)
 
 
@@ -330,6 +347,28 @@ def _memory_enriched_error(exc: Exception, action: str) -> str:
     )
 
 
+def _record_memory_call(fn):
+    from functools import wraps
+
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        action = kwargs.get("action", args[0] if args else None)
+        operations = kwargs.get("operations")
+        token = FAILURE_CLASS.set("other")
+        try:
+            result = fn(*args, **kwargs)
+            payload = json.loads(result)
+            outcome = "rejected" if payload.get("staged") else "success" if payload.get("success") else "failed"
+            failure_class = "none" if outcome == "success" else FAILURE_CLASS.get()
+            from hermes_cli.observability.shared_metrics_loop import record_builtin_memory_call
+            record_builtin_memory_call(action, operations, outcome=outcome, failure_class=failure_class)
+            return result
+        finally:
+            FAILURE_CLASS.reset(token)
+    return wrapped
+
+
+@_record_memory_call
 def memory_tool(
     action: str = None,
     target: str = "memory",
@@ -382,25 +421,27 @@ def memory_tool(
         )
 
     # Accept new_text as an alias for content (single-op path). See docstring.
-    if content is None and new_text is not None:
+    if not content and new_text:
         content = new_text
 
     # Accept new_text as an alias for content (single-op path). See docstring.
-    if content is None and new_text is not None:
+    if not content and new_text:
         content = new_text
 
     # Some strict providers fill optional schema fields with JSON null rather
     # than omitting them.  Treat ``target: null`` as omitted so memory writes
     # still use the documented default store instead of failing validation.
-    if target is None:
-        target = "memory"
 
-    target_error = _memory_target_error(store, target)
+    target_error = _memory_target_error(store, target, operations)
     if target_error is not None:
         return json.dumps(target_error)
     bg_gate = _background_delete_gate(store, action, operations, target=target, content=content, old_text=old_text)
     if bg_gate is not None:
         return bg_gate
+
+    if not action and not operations:
+        FAILURE_CLASS.set("invalid_args")
+        return tool_error("Missing required parameter: provide action or operations (batch list).", success=False)
 
     # search is a read-only retrieval path — no gate, no required content.
     if action == "search":
@@ -431,6 +472,10 @@ def memory_tool(
         result = store.compact(target, target_size=target_size_int, prefer=prefer_param)
         return json.dumps(result, ensure_ascii=False)
 
+    if action == "replace" or (isinstance(operations, list) and any(isinstance(op, dict) and op.get("action") == "replace" for op in operations)):
+        FAILURE_CLASS.set("invalid_args")
+        return tool_error(_REPLACE_REMOVED, success=False)
+
     # --- Batch path -------------------------------------------------------
     if operations:
         if not isinstance(operations, list):
@@ -450,7 +495,7 @@ def memory_tool(
             return _memory_enriched_error(exc, "batch")
         return json.dumps(result, ensure_ascii=False)
 
-    if action in ("add", "replace", "remove"):
+    if action in ("add", "patch", "remove"):
         invalid = _validate_single_op(store, action, target, content, old_text)
         if invalid is not None:
             return invalid
@@ -477,7 +522,7 @@ def memory_tool(
         return json.dumps(result, ensure_ascii=False)
 
     return tool_error(
-        f"Unknown action '{action}'. Use: add, replace, remove, search, compact, supersede",
+        f"Unknown action '{action}'. Use: add, patch, remove, search, compact, supersede",
         success=False,
     )
 
@@ -503,7 +548,7 @@ def get_builtin_memory_config(config: Optional[Dict[str, Any]] = None) -> Dict[s
     return section if isinstance(section, dict) else {}
 
 
-def get_builtin_memory_store_flags(config: Optional[Dict[str, Any]] = None) -> Tuple[bool, bool]:
+def get_builtin_memory_store_flags(config: Optional[dict[str, Any]] = None) -> tuple[bool, bool]:
     """Return ``(memory_enabled, user_profile_enabled)`` from resolved config."""
     section = get_builtin_memory_config(config)
     return (
@@ -521,38 +566,45 @@ def check_memory_requirements() -> bool:
     return flags[0] or flags[1]
 
 
-def _memory_target_error(store: "MemoryStore", target: str) -> Optional[Dict[str, Any]]:
-    """Return a shared validation error for an invalid or disabled target."""
-    if target not in {"memory", "user"}:
+def _memory_target_error(
+    store: MemoryStore, target: str | None, operations: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Validate one explicit store before writing, staging, or replaying a batch."""
+    if target is None:
+        FAILURE_CLASS.set("invalid_args")
+        return {"success": False, "error": (
+            "Missing required target. Retry with target='memory' or target='user' at the top level. "
+            "For a batch, remove target from every operation; use separate calls for different stores. "
+            "Nothing was written or staged.")}
+    if not isinstance(target, str) or target not in {"memory", "user"}:
         from tools.registry import _bound_error_text
-
-        return {
-            "success": False,
-            "error": _bound_error_text(
-                f"Invalid memory target '{target}'. Use 'memory' or 'user'."
-            ),
-        }
+        FAILURE_CLASS.set("invalid_args")
+        return {"success": False,
+                "error": _bound_error_text(f"Invalid memory target '{target}'. Use 'memory' or 'user'.")}
+    if isinstance(operations, list):
+        for index, op in enumerate(operations, 1):
+            # A nested target equal to the call's (or null) is redundant, not wrong; only a
+            # different one asks for two stores in one call, which a batch cannot do.
+            if isinstance(op, dict) and op.get("target") not in (None, target):
+                FAILURE_CLASS.set("invalid_args")
+                return {"success": False, "error": (
+                    f"Operation {index} names a different target than the one at the top level. "
+                    "One call writes one store: retry with separate calls for different stores. "
+                    "Nothing was written or staged.")}
     if store.target_enabled(target):
         return None
     label = "USER.md" if target == "user" else "MEMORY.md"
-    return {
-        "success": False,
-        "error": f"Built-in {label} writes are disabled in memory config.",
-        "target": target,
-    }
+    FAILURE_CLASS.set("disabled")
+    return {"success": False, "error": f"Built-in {label} writes are disabled in memory config.", "target": target}
 
 
-
-def apply_memory_pending(payload: Dict[str, Any], store: "MemoryStore") -> Dict[str, Any]:
-    """Replay a staged write against the store, bypassing the gate (/memory approve).
-
-    A replace/remove applies to exactly its pinned ``matched_entry`` or is refused; a record
+def apply_memory_pending(payload: dict[str, Any], store: MemoryStore) -> dict[str, Any]:
+    """Replay a staged write against the store, bypassing the gate (/memory approve). A
+    replace/remove applies to exactly its pinned ``matched_entry`` or is refused; a record
     staged before pinning has no verifiable target, so it is refused rather than replayed by
-    old_text (which could hit a newer entry the approver never saw). Provenance tags from the
-    staged payload are preserved (#316).
-    """
-    action, target = payload.get("action"), payload.get("target", "memory")
-    target_error = _memory_target_error(store, target)
+    old_text (which could hit a newer entry the approver never saw)."""
+    action, target = payload.get("action"), payload.get("target")
+    target_error = _memory_target_error(store, target, payload.get("operations"))
     if target_error is not None:
         return target_error
     if any(not op.get("matched_entry") for op in destructive_ops(payload)):
@@ -582,9 +634,9 @@ MEMORY_SCHEMA = {
     "description": (
         "Save durable facts to persistent memory that survive across sessions. Memory is "
         "injected into every future turn, so keep entries compact and high-signal.\n\n"
-        "HOW: make ALL your changes in ONE call via an 'operations' array (each item: "
-        "{action, content?, old_text?}). The batch applies atomically and the char limit is "
-        "checked only on the FINAL result — so a single call can remove/replace stale entries "
+        "HOW: make ALL your changes to one target in ONE call via an 'operations' array (each "
+        "item: {action, content?, old_text?}). The batch applies atomically and the char limit is "
+        "checked only on the FINAL result — so a single call can remove/patch stale entries "
         "to free room AND add new ones, even when an add alone would overflow. The response "
         "reports current/limit chars and confirms completion; one batch call finishes the "
         "update, so don't repeat it. Use the bare action/content/old_text fields only for a "
@@ -613,7 +665,7 @@ MEMORY_SCHEMA = {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "replace", "remove", "search", "compact", "supersede"],
+                "enum": ["add", "patch", "remove", "search", "compact", "supersede"],
                 "description": "The action to perform (single op, 'search' to read entries, 'compact' to shorten entries to fit, or 'supersede' to retire a stale entry — hidden from recall, kept on disk). Omit when using the 'operations' batch array.",
             },
             "target": {
@@ -623,15 +675,15 @@ MEMORY_SCHEMA = {
             },
             "content": {
                 "type": "string",
-                "description": "The entry content. Required for 'add' and 'replace'. For 'replace' it is the COMPLETE new entry text: the whole matched entry is overwritten, so include everything you want to keep. Alias: 'new_text' is also accepted (same full-entry meaning)."
+                "description": "Required for 'add' and 'patch'. For 'add', the new entry. For 'patch', the text that replaces old_text; the rest of the entry is kept. Alias: 'new_text'."
             },
             "old_text": {
                 "type": "string",
-                "description": "REQUIRED for 'replace' and 'remove' (single-op shape): a short unique substring IDENTIFYING the existing entry to modify -- it locates the entry, it is not spliced out. Omit only for 'add'."
+                "description": "REQUIRED for 'patch' and 'remove': text from one entry. 'patch' replaces exactly this span (it must occur once in the entry); 'remove' deletes the whole entry. Omit for 'add'."
             },
             "new_text": {
                 "type": "string",
-                "description": "Alias for 'content' (single-op shape): the COMPLETE new entry for 'replace', not a patch of old_text. If both are set, 'content' wins."
+                "description": "Alias for 'content'. If both are set, 'content' wins."
             },
             "operations": {
                 "type": "array",
@@ -643,12 +695,13 @@ MEMORY_SCHEMA = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "action": {"type": "string", "enum": ["add", "replace", "remove"]},
-                        "content": {"type": "string", "description": "Entry content for add/replace. For replace, the COMPLETE new entry (whole entry is overwritten). Alias: 'new_text'."},
+                        "action": {"type": "string", "enum": ["add", "patch", "remove"]},
+                        "content": {"type": "string", "description": "Required for add and patch, as 'content' above."},
                         "new_text": {"type": "string", "description": "Alias for 'content' in a batch op."},
-                        "old_text": {"type": "string", "description": "Substring identifying the entry for replace/remove."},
+                        "old_text": {"type": "string", "description": "As 'old_text' above."},
                     },
                     "required": ["action"],
+                    "additionalProperties": False,
                 },
             },
             "target_size": {
@@ -705,7 +758,16 @@ MEMORY_SCHEMA = {
 }
 
 
-def _build_memory_schema_overrides() -> Dict[str, Any]:
+# Schema text when only one built-in store is enabled: (target description, TARGETS replacement).
+_SINGLE_TARGET_TEXT = {
+    ("memory",): ("The enabled built-in store: 'memory' for personal notes.",
+                  "TARGET: only 'memory' is enabled for personal notes (environment, conventions, "
+                  "tool quirks, lessons)."),
+    ("user",): ("The enabled built-in store: 'user' for user profile.",
+                "TARGET: only 'user' is enabled for user profile facts (name, role, preferences, style).")}
+
+
+def _build_memory_schema_overrides() -> dict[str, Any]:
     """Narrow the advertised target surface using the availability snapshot."""
     flags = _memory_surface_flags.get()
     _memory_surface_flags.set(None)
@@ -751,7 +813,7 @@ registry.register(
     schema=MEMORY_SCHEMA,
     handler=lambda args, **kw: memory_tool(
         action=args.get("action", ""),
-        target=args.get("target", "memory"),
+        target=args.get("target"),
         content=args.get("content"),
         old_text=args.get("old_text"),
         new_text=args.get("new_text"),
@@ -784,7 +846,5 @@ def __getattr__(name):  # PEP 562 — lazy so no import cycles
     if target is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     import importlib
-    from hermes_cli.plugin_compat import warn_once
-    warn_once(__name__, name, *target)
     return getattr(importlib.import_module(target[0]), target[1])
 # ---- END PLUGIN-COMPAT ----

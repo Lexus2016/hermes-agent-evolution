@@ -686,7 +686,7 @@ def iter_entries(since_ts: Optional[float] = None) -> Iterator[ExperienceEntry]:
     """
     path = entries_path()
     try:
-        fh = open(path, "r", encoding="utf-8")
+        fh = open(path, "r", encoding="utf-8-sig")
     except OSError:
         return
 
@@ -735,7 +735,7 @@ def load_patterns(
     """
     path = patterns_path()
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             raw = json.load(fh)
     except OSError:
         return []  # missing/unreadable — nothing to warn about
@@ -880,7 +880,7 @@ def get_harvest_state() -> Dict[str, Any]:
     """Read the harvest dedup cursor.  Returns ``{}`` on missing/corrupt."""
     path = harvest_state_path()
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             data = json.load(fh)
     except (OSError, ValueError):
         return {}
@@ -954,7 +954,7 @@ def load_delegation_patterns() -> List[DelegationPattern]:
     """Load all tracked delegation patterns from disk."""
     path = delegation_patterns_path()
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             data = json.load(fh)
         if isinstance(data, list):
             return [

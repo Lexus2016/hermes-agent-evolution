@@ -88,7 +88,7 @@ def scan_trajectories(trajectory_dir: Path) -> List[Dict[str, Any]]:
         return results
     for path in sorted(trajectory_dir.glob("*.jsonl")):
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
+            lines = path.read_text(encoding="utf-8-sig").splitlines()
         except OSError:
             continue
         for line in lines:

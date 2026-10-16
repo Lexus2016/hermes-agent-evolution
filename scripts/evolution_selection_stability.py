@@ -185,7 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--output", help="Optional path for the JSON report.")
     args = parser.parse_args(argv)
 
-    with open(args.backlog, encoding="utf-8") as fh:
+    with open(args.backlog, encoding="utf-8-sig") as fh:
         backlog = json.load(fh)
     if not isinstance(backlog, list):
         print("backlog file must contain a JSON array", file=sys.stderr)

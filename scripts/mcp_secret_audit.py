@@ -30,7 +30,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
+
+# Standalone source invocations must resolve the canonical repository YAML policy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from typing import Any, Iterable
 
 # Key names that denote a credential. A non-empty plaintext value under one of
@@ -172,13 +176,13 @@ def audit_mcp_servers(servers: Any) -> list[dict[str, str]]:
 def _read_yaml(path: Path) -> Any:
     """Best-effort YAML read; returns ``{}`` on any failure so the audit can't crash."""
     try:
-        import yaml  # noqa: PLC0415
+        import hermes_yaml as yaml  # noqa: PLC0415
     except Exception:  # pragma: no cover - yaml ships with hermes
         return {}
     if not path.exists():
         return {}
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}

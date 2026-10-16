@@ -44,7 +44,7 @@ def read_contacts(log_path: Path) -> list[dict[str, Any]]:
     if not log_path.exists():
         return []
     latest: dict[tuple[str, str], dict[str, Any]] = {}
-    for line in log_path.read_text(encoding="utf-8").splitlines():
+    for line in log_path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line:
             continue

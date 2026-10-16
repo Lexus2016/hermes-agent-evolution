@@ -265,7 +265,7 @@ def check_shuffle_order_stability(
 
 def _load_json(path: Optional[str]) -> Tuple[Any, Optional[str]]:
     try:
-        raw = Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+        raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
         return json.loads(raw), None
     except (OSError, ValueError) as exc:
         return None, str(exc)

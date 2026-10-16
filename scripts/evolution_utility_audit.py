@@ -194,7 +194,7 @@ def _load_usage() -> Dict[str, Dict[str, Any]]:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return {}
     return {k: v for k, v in data.items() if isinstance(v, dict)}
@@ -269,7 +269,7 @@ def _load_retrieval_events() -> List[Dict[str, Any]]:
         return []
     events: List[Dict[str, Any]] = []
     try:
-        with path.open("r", encoding="utf-8") as fh:
+        with path.open("r", encoding="utf-8-sig") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:

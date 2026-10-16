@@ -211,4 +211,11 @@ async def test_send_does_not_report_a_resumable_tail_for_a_timeout(telegram_adap
 
     assert result.success is False
     raw = result.raw_response or {}
-    assert not raw.get("partial_overflow"), "an ambiguous failure must not advertise a tail"
+    # Upstream tracks the delivered head even on ambiguity, preventing whole-message
+    # replay. It must never advertise or resume the maybe-landed remainder.
+    assert raw["partial_overflow"] is True
+    assert raw["last_message_id"] == "1001"
+    assert "undelivered_chunks" not in raw
+    assert "undelivered_tail" not in raw
+    assert await telegram_adapter._resume_partial_send("12345", result, reply_to=None, metadata=None) is None
+    assert state["calls"] == 2

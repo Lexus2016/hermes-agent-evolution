@@ -61,7 +61,7 @@ def _load_records(metrics_file: Path) -> list[Dict[str, Any]]:
     out: list[Dict[str, Any]] = []
     if not metrics_file.exists():
         return out
-    for ln in metrics_file.read_text(encoding="utf-8").splitlines():
+    for ln in metrics_file.read_text(encoding="utf-8-sig").splitlines():
         ln = ln.strip()
         if not ln:
             continue

@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -50,15 +51,21 @@ def is_pep668_active() -> bool:
     return os.path.exists(marker)
 
 
+def _resolve_uv() -> Optional[str]:
+    """Read-only lookup in PM's composed environment for a model shell command."""
+    import pm
+    from hermes_platform.resolver import LookupContext, locate_command
+    env = pm.env_for("uv")
+    return next(iter(locate_command("uv", LookupContext(path=env.get("PATH", ""))).command), None)
+
+
 def has_uv() -> bool:
-    from hermes_cli.managed_uv import resolve_uv
-    return (resolve_uv() or shutil.which("uv")) is not None
+    return _resolve_uv() is not None
 
 
 def _uv_python_flag() -> Optional[str]:
     """Return a ``--python=...`` flag targeting the current interpreter, or None."""
-    from hermes_cli.managed_uv import resolve_uv
-    uv = resolve_uv() or shutil.which("uv")
+    uv = _resolve_uv()
     if not uv:
         return None
     rc, _, _ = _run([uv, "python", "find", sys.executable])
@@ -104,7 +111,8 @@ def _rewrite_to_uv(cmd: str) -> Optional[str]:
 
     Returns None when uv is not available or the command doesn't match.
     """
-    if not has_uv():
+    uv = _resolve_uv()
+    if not uv:
         return None
     flag = _uv_python_flag()
     if not flag:
@@ -115,7 +123,7 @@ def _rewrite_to_uv(cmd: str) -> Optional[str]:
     if not m:
         return None
     args = m.group(1).strip()
-    replacement = f"uv pip install {flag} {args}"
+    replacement = f"{shlex.quote(uv)} pip install {flag} {args}"
     return cmd[:m.start()] + replacement + cmd[m.end():]
 
 

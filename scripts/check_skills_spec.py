@@ -30,11 +30,14 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Standalone source invocations must resolve the canonical repository YAML policy.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
-    import yaml
-except ImportError:  # pragma: no cover — CI installs pyyaml; unit tests too
+    import hermes_yaml as yaml
+except ImportError:  # pragma: no cover — an incomplete installation may lack YAML support
     yaml = None  # type: ignore[assignment]
 
 SKILLS_DIR_NAME = "skills"
@@ -130,7 +133,7 @@ def check_skill_file(
     warnings: List[SkillViolation] = []
     rel = str(skill_path.relative_to(repo_root))
 
-    text = skill_path.read_text(encoding="utf-8")
+    text = skill_path.read_text(encoding="utf-8-sig")
     raw, meta = extract_frontmatter(text)
 
     if raw is None:

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Wake-gate for evolution-issues: GitHub write AND a fresh research batch.
 #
 # Council 2026-08-31: issues must consume a research batch, not fire on

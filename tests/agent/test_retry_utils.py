@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+
 from types import SimpleNamespace
 
 import agent.retry_utils as retry_utils
@@ -51,7 +52,7 @@ def test_jittered_backoff_increases_with_attempt():
 
 def test_jittered_backoff_respects_max_delay():
     assert jittered_backoff(100, base_delay=1.0, max_delay=30.0) <= 45.0
-from agent.retry_utils import adaptive_rate_limit_backoff, jittered_backoff
+from datetime import UTC
 
 
 def test_backoff_is_exponential():
@@ -256,11 +257,11 @@ class TestParseRetryAfterSeconds:
         from email.utils import format_datetime
         from agent.retry_utils import parse_retry_after_seconds
 
-        future = datetime.now(timezone.utc) + timedelta(seconds=90)
+        future = datetime.now(UTC) + timedelta(seconds=90)
         seconds = parse_retry_after_seconds(format_datetime(future, usegmt=True))
         assert seconds is not None and 80 <= seconds <= 91
 
-        past = datetime.now(timezone.utc) - timedelta(seconds=90)
+        past = datetime.now(UTC) - timedelta(seconds=90)
         assert parse_retry_after_seconds(format_datetime(past, usegmt=True)) == 0.0
 
     def test_headers_get_raises(self):

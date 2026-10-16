@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Evolution-analysis wake-gate (#910).
 #
 # WHY: evolution-analysis has two independent halves — a LOCAL, file-based

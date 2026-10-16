@@ -113,7 +113,7 @@ def load_versions(skill: str, store_dir: Optional[Path] = None) -> List[SkillVer
         return []
     out: List[SkillVersion] = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return []
     for line in lines:

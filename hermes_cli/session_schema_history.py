@@ -87,6 +87,23 @@ def reachable_physical_layouts(
     """
 
     snapshots = declared_snapshots(table)
+    lineages = [snapshots]
+    if table == "messages":
+        # Upstream eed37d63ce shipped UIDs without the fork's origin column.
+        # Replay that actual branch separately: never pretend an upstream-created
+        # database originally had origin, nor reorder the fork's shipped event 16.
+        upstream = [column for column in snapshots[-1] if column != "origin"]
+        lineages.append(snapshots[:-2] + [tuple(upstream), snapshots[-1]])
+    yielded = set()
+    for lineage in lineages:
+        for layout in _reachable_lineage(lineage, accept):
+            if layout not in yielded:
+                yielded.add(layout)
+                yield layout
+
+
+def _reachable_lineage(snapshots, accept):
+    """Enumerate append-only upgrades within one shipped schema lineage."""
     seen: dict[tuple[str, ...], int] = {}
     frontier: list[tuple[tuple[str, ...], int]] = []
     for index, snapshot in enumerate(snapshots):
@@ -204,6 +221,15 @@ SCHEMA_HISTORY: dict[str, _TableHistory] = {
         )),
         ('26 2026-09-02T14:22Z 8e4366d358', (('+', 'tool_names', 'last_read_at'),)),
         ('27 2026-09-19T00:10Z 922a0c3c87', (('+', 'transport_profile', 'profile_name'),)),
+        ('28 2026-09-25T23:25Z 2941aadffa', (('+', 'compression_overload_streak', 'compression_recovery_deadline'),)),
+        ('29 2026-09-27T00:29Z d75f29934b', (('+', 'created_source', 'source'),)),
+        ('30 2026-09-28T00:00Z #117713', (('+', 'auto_archived', 'archived'),)),
+        # Runtime-authority columns (unified gateway runtime, PR #106742): appended after main's
+        # 27-30 because they ship after them on main.
+        ('31 2026-09-08T18:45Z 0695b12b4c', (
+            ('+', 'runtime_revision', 'id'),
+            ('+', 'runtime_generation', 'runtime_revision'),
+        )),
         ),
     ),
     "messages": _TableHistory(
@@ -238,6 +264,12 @@ SCHEMA_HISTORY: dict[str, _TableHistory] = {
             ('+', 'display_order', 'display_identity'),
         )),
         ('16 2026-09-11T12:00Z 8e4366d359', (('+', 'origin', 'display_order'),)),
+        ('17 2026-10-15T00:00Z upstream-v0.22.1-integration', (
+            ('+', 'message_uid', 'origin'),
+            ('+', 'absorbed_message_uids', 'message_uid'),
+            ('+', 'tool_call_uids', 'absorbed_message_uids'),
+            ('+', 'tool_call_uid', 'tool_call_uids'),
+        )),
         ),
     ),
     "session_model_usage": _TableHistory(

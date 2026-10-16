@@ -229,7 +229,7 @@ def extract_graph(paths: Sequence[Union[str, Path]]) -> Dict[str, Any]:
             errors.append(str(path))
             continue
         try:
-            src = path.read_text(encoding="utf-8")
+            src = path.read_text(encoding="utf-8-sig")
         except OSError:
             errors.append(str(path))
             continue

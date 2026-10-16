@@ -7,15 +7,12 @@ so each gateway user gets their own memory bucket instead of sharing a static on
 import json
 from unittest.mock import MagicMock, patch
 
-
 from agent.memory_provider import MemoryProvider
 from agent.memory_manager import MemoryManager
-
 
 # ---------------------------------------------------------------------------
 # Concrete test provider that records init kwargs
 # ---------------------------------------------------------------------------
-
 
 class RecordingProvider(MemoryProvider):
     """Minimal provider that records what initialize() receives."""
@@ -54,16 +51,12 @@ class RecordingProvider(MemoryProvider):
     def shutdown(self):
         pass
 
-
 # ---------------------------------------------------------------------------
 # MemoryManager user_id threading tests
 # ---------------------------------------------------------------------------
 
-
 class TestMemoryManagerUserIdThreading:
     """Verify user_id reaches providers via initialize_all."""
-
-
 
     def test_no_user_id_when_cli(self):
         """CLI sessions should not have user_id in kwargs."""
@@ -78,7 +71,6 @@ class TestMemoryManagerUserIdThreading:
 
         assert "user_id" not in p._init_kwargs
         assert p._init_kwargs.get("platform") == "cli"
-
 
     def test_multiple_providers_all_receive_user_id(self):
         mgr = MemoryManager()
@@ -143,9 +135,6 @@ class TestMemoryManagerUserIdThreading:
         assert provider._init_kwargs["cwd"] == str(tmp_path)
         agent.close()
 
-# ---------------------------------------------------------------------------
-# Mem0 provider user_id tests
-# ---------------------------------------------------------------------------
 
 
 class TestMem0UserIdScoping:
@@ -188,10 +177,6 @@ class TestMem0UserIdScoping:
         assert p2._user_id == "bob_456"
         assert p1._user_id != p2._user_id
 
-
-# ---------------------------------------------------------------------------
-# Honcho provider user_id tests
-# ---------------------------------------------------------------------------
 
 
 class TestHonchoUserIdScoping:
@@ -295,11 +280,3 @@ class TestHonchoUserIdScoping:
 
         # peer_name should not have been overridden
         assert mock_cfg.peer_name == "my-custom-peer"
-
-
-# ---------------------------------------------------------------------------
-# AIAgent user_id propagation test
-# ---------------------------------------------------------------------------
-
-
-

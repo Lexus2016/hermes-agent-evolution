@@ -58,7 +58,7 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     if not path.exists():
         return out
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    for raw in path.read_text(encoding="utf-8-sig").splitlines():
         s = raw.strip()
         try:
             obj = json.loads(s)
@@ -163,7 +163,7 @@ def load_tqmemory_notes(
         return notes
     for note_file in sorted(notes_dir.glob("*/notes/*.json")):
         try:
-            obj = json.loads(note_file.read_text(encoding="utf-8"))
+            obj = json.loads(note_file.read_text(encoding="utf-8-sig"))
         except (ValueError, OSError):
             continue
         if isinstance(obj, dict) and obj.get("note_id"):

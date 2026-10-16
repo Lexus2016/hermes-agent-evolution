@@ -112,10 +112,10 @@ def load_config(path: Optional[Path] = None) -> Dict[str, Any]:
     cfg: Dict[str, Any] = {**_DEFAULT_CONFIG}
     cfg_path = path or _CONFIG_PATH
     try:
-        import yaml
+        import hermes_yaml as yaml
 
         if cfg_path.is_file():
-            loaded = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+            loaded = yaml.safe_load(cfg_path.read_text(encoding="utf-8-sig")) or {}
             if isinstance(loaded, dict):
                 cfg.update(loaded)
     except Exception:  # pragma: no cover - config read is best-effort
@@ -292,7 +292,7 @@ def _iter_skill_docs() -> Iterator[Tuple[str, str, str]]:
     if not _SKILLS_ROOT.is_dir():
         return
     try:
-        import yaml
+        import hermes_yaml as yaml
     except Exception:  # pragma: no cover - yaml is a hard dep in practice
         return
     for skill_md in sorted(_SKILLS_ROOT.rglob("SKILL.md")):
@@ -309,7 +309,7 @@ def _iter_skill_docs() -> Iterator[Tuple[str, str, str]]:
 def _read_frontmatter(path: Path, yaml_mod: Any) -> Dict[str, Any]:
     """Parse a ``SKILL.md`` YAML frontmatter block into a dict (or ``{}``)."""
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8-sig")
     except Exception:  # pragma: no cover - unreadable file, skip
         return {}
     if not text.startswith("---"):

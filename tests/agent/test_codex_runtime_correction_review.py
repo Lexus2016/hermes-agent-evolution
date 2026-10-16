@@ -44,7 +44,7 @@ class _FakeSession:
         # the correction review.
         return self._turn.thread_id
 
-    def run_turn(self, *, user_input):
+    def run_turn(self, *, user_input, model=None, reasoning_effort=None, service_tier=None):
         return self._turn
 
     def close(self):

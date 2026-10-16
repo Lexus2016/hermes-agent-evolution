@@ -58,7 +58,7 @@ def _read_forbidden_tools(name: str) -> Set[str]:
         skill_md = Path(found["path"]) / "SKILL.md"
         if not skill_md.exists():
             return set()
-        content = skill_md.read_text(encoding="utf-8", errors="replace")
+        content = skill_md.read_text(encoding="utf-8-sig", errors="replace")
     except Exception:
         return set()
 
@@ -68,7 +68,7 @@ def _read_forbidden_tools(name: str) -> Set[str]:
     if not end:
         return set()
     try:
-        import yaml
+        import hermes_yaml as yaml
         parsed = yaml.safe_load(content[3:end.start() + 3])
     except Exception:
         return set()

@@ -9,8 +9,11 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
+from agent.compression_marker import elide
+
 
 _MAX_CHANGED_PATHS_IN_NUDGE = 8
+_MAX_STATUS_SUMMARY_CHARS = 1200
 
 # Prose/data extensions and extension-less prose filenames (case-insensitive) with
 # no verifiable runtime behavior: a turn touching ONLY these suppresses the nudge
@@ -137,30 +140,6 @@ def _candidate_cwds(paths: Iterable[str]) -> list[Path]:
     return [Path(p) for p in seen]
 
 
-def _workspace_has_runnable_recipe(root: Any) -> bool:
-    """Whether the workspace has a runtime verify recipe ``hermes verify`` can run.
-
-    True when a saved ``.hermes/environment.json`` manifest exists, or when
-    cheap static detection (:func:`agent.verify.recipes.detect_recipe`) finds a
-    recipe with a start command. Deliberately fail-silent and cheap — this only
-    decorates the nudge text; it must never break or slow the nudge path.
-    """
-    if not root:
-        return False
-    try:
-        root_path = Path(str(root))
-        from agent.verify.environment import manifest_path
-
-        if manifest_path(root_path).is_file():
-            return True
-        from agent.verify.recipes import detect_recipe
-
-        recipe = detect_recipe(root_path)
-        return bool(recipe is not None and recipe.start)
-    except Exception:
-        return False
-
-
 def _verification_snapshot(
     *, session_id: str | None, changed_paths: list[str]
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
@@ -222,8 +201,7 @@ def _status_detail(status: dict[str, Any]) -> str:
     if command:
         parts.append(f"last command `{command}`")
     if summary:
-        if len(summary) > 1200:
-            summary = summary[:1200].rstrip() + "\n... [truncated]"
+        summary = elide(summary, _MAX_STATUS_SUMMARY_CHARS)
         parts.append(f"last output:\n{summary}")
     return "\n".join(parts)
 

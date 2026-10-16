@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # enable_branch_protection.sh — turn ON the branch protection that makes the
 # evolution self-merge safety REAL. Without it, BOTH machine controls are inert:
 # the deterministic merge-gate (scripts/evolution_merge_gate.py) is only advisory

@@ -95,7 +95,7 @@ def _load_records(metrics_file: Path) -> list[dict]:
     if not metrics_file.exists():
         return out
     try:
-        lines = metrics_file.read_text(encoding="utf-8").splitlines()
+        lines = metrics_file.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return out
     for raw in lines:
@@ -273,7 +273,7 @@ def run_local_research(evolution_dir: Path) -> dict:
     funnel_file = evolution_dir / "funnel-summary.txt"
     if funnel_file.exists():
         try:
-            funnel_summary = funnel_file.read_text(encoding="utf-8")
+            funnel_summary = funnel_file.read_text(encoding="utf-8-sig")
         except OSError:
             funnel_summary = ""
 
@@ -406,7 +406,7 @@ def main(argv: list[str] | None = None) -> int:
     # Don't clobber a live (non-local) report already written today.
     if out_path.exists():
         try:
-            existing = out_path.read_text(encoding="utf-8")
+            existing = out_path.read_text(encoding="utf-8-sig")
         except OSError:
             existing = ""
         if _LOCAL_MARKER not in existing:

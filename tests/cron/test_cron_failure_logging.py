@@ -207,3 +207,15 @@ def test_run_one_job_failure_record_logs_warning(caplog, monkeypatch):
         scheduler.run_one_job({"id": "j8", "name": "warn job"})
 
     assert any("failure record saved" in rec.message for rec in caplog.records)
+
+
+def test_failure_records_follow_bound_profile_store(tmp_path):
+    first, second = tmp_path / "first", tmp_path / "second"
+    with jobs.use_cron_store(first):
+        saved = jobs.save_job_failure({"id": "same"}, success=False, error="first profile")
+        assert first in saved.parents
+    with jobs.use_cron_store(second):
+        assert jobs.get_latest_failure("same") is None
+        jobs.save_job_failure({"id": "same"}, success=False, error="second profile")
+    with jobs.use_cron_store(first):
+        assert jobs.get_latest_failure("same")["error"] == "first profile"

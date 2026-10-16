@@ -318,7 +318,7 @@ def collect_candidates(
 def _read_text(path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     try:
         return (
-            Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+            Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
         ), None
     except OSError as exc:
         return None, f"cannot read input: {exc}"

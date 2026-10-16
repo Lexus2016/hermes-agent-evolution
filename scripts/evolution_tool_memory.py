@@ -103,7 +103,7 @@ class ToolMemoryStore:
             return store
         for p in sorted(d.glob("*.json")):
             try:
-                data = json.loads(p.read_text(encoding="utf-8"))
+                data = json.loads(p.read_text(encoding="utf-8-sig"))
             except (OSError, ValueError):
                 continue
             if isinstance(data, dict):

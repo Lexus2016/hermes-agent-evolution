@@ -39,7 +39,7 @@ except ImportError:  # pragma: no cover - standalone copy without the guard
 
 def _load_json(path: Path) -> Any | None:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return None
 
@@ -190,7 +190,7 @@ def append_funnel(metrics_file: Path, record: Dict[str, Any]) -> None:
     same date so re-runs don't duplicate a day."""
     lines = []
     if metrics_file.exists():
-        for ln in metrics_file.read_text(encoding="utf-8").splitlines():
+        for ln in metrics_file.read_text(encoding="utf-8-sig").splitlines():
             ln = ln.strip()
             if not ln:
                 continue
@@ -213,7 +213,7 @@ def load_records(metrics_file: Path) -> list[Dict[str, Any]]:
     out: list[Dict[str, Any]] = []
     if not metrics_file.exists():
         return out
-    for ln in metrics_file.read_text(encoding="utf-8").splitlines():
+    for ln in metrics_file.read_text(encoding="utf-8-sig").splitlines():
         ln = ln.strip()
         if not ln:
             continue
@@ -605,7 +605,7 @@ def main(argv: list[str]) -> int:
 
                 _deadline = None
                 try:
-                    _deadline = float(_rearm_marker.read_text(encoding="utf-8").strip())
+                    _deadline = float(_rearm_marker.read_text(encoding="utf-8-sig").strip())
                 except (OSError, ValueError):
                     _deadline = None
                 if _deadline is None:

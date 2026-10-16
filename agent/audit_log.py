@@ -100,4 +100,4 @@ def export_audit_jsonl(output_path: Optional[str] = None) -> str:
 
         shutil.copy2(str(src), output_path)
         return output_path
-    return src.read_text(encoding="utf-8") if src.exists() else ""
+    return src.read_text(encoding="utf-8-sig") if src.exists() else ""

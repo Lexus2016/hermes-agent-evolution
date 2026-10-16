@@ -345,7 +345,7 @@ def _load_recorded() -> Dict[str, str]:
     if not path.is_file():
         return {}
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             data = json.load(fh)
         if isinstance(data, dict):
             return {str(k): str(v) for k, v in data.items()}
@@ -360,7 +360,7 @@ def _record_issue(key: str, issue_url: str, state_path: Optional[Path] = None) -
     recorded = {}
     if path.is_file():
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, "r", encoding="utf-8-sig") as fh:
                 data = json.load(fh)
             if isinstance(data, dict):
                 recorded = {str(k): str(v) for k, v in data.items()}

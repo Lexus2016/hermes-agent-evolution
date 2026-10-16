@@ -22,7 +22,7 @@ from evolution.lib.skill_prox import _default_store_path, _load_verdicts
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ShrinkResult", "shrink_negative_sections", "SHRINK_MARKER"]
+__all__ = ["ShrinkResult", "shrink_negative_sections"]
 
 
 @dataclass

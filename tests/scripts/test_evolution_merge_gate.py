@@ -238,7 +238,7 @@ class TestMainWiring:
     function.
     """
 
-    def test_main_calls_quality_gate(self, monkeypatch):
+    def test_main_calls_quality_gate(self, monkeypatch, tmp_path):
         """Verify main() routes through check_merge_policy_with_quality.
 
         The closed PR #1212 was rejected because main() called
@@ -249,6 +249,8 @@ class TestMainWiring:
         """
         import evolution_merge_gate as emg
 
+        monkeypatch.setattr(emg.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
         called = {"quality": False}
         orig_quality = emg.check_merge_policy_with_quality
 

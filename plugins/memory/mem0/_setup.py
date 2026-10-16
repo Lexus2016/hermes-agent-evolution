@@ -430,19 +430,17 @@ def _setup_oss_interactive(hermes_home: str, config: dict) -> None:
 
 def _install_provider_deps(llm_id: str, embedder_id: str, vector_id: str) -> None:
     deps = {registry[pid]["pip_dep"] for (_, registry), pid in zip(SECTION_REGISTRIES, (llm_id, embedder_id, vector_id)) if registry.get(pid, {}).get("pip_dep")}
-    for dep in sorted(deps):
-        print(f"  Installing {dep}...")
-        try:
-            # Environment-aware install: sealed hosted venvs redirect to the durable data-volume target instead of /opt/hermes.
-            from tools.lazy_deps import install_specs
-            outcome = install_specs([dep], timeout=60)
-        except Exception:
-            outcome = None
-        print(f"  ✓ Installed {dep}" if outcome is not None and outcome.ok else f"  Warning: cannot install {dep}: {outcome.reason}" if outcome is not None and outcome.blocked
-              else f"  Warning: Could not install {dep}. Install manually: uv pip install {dep}")
-    if deps:
-        import importlib
-        importlib.invalidate_caches()
+    if not deps:
+        return
+    print("  Preparing Mem0 OSS backend dependencies through PM...")
+    try:
+        from pm import sync_venv
+        sync_venv(["mem0-oss"], explicit=True)
+    except Exception as exc:
+        print(f"  Warning: Could not prepare Mem0 OSS dependencies: {exc}. "
+              "Run: hermes pm install --extra mem0-oss")
+    else:
+        print("  Mem0 OSS dependencies prepared; restart Hermes to use the selected environment.")
 
 
 def _probe(fn, ok: str, fail: str, exc=Exception) -> tuple[bool, str]:

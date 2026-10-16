@@ -321,7 +321,7 @@ def _load_candidates(
     list or an object with a ``"candidates"`` key (the orchestrator's payload)."""
     path = opts.get("path")
     try:
-        raw = Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+        raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
     except OSError as exc:
         return None, f"cannot read input: {exc}"
     try:

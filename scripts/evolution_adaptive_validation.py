@@ -193,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Adaptive validation spec inspector (#1164)")
     parser.add_argument("--spec", required=True, help="path to a validation_spec JSON")
     args = parser.parse_args(argv)
-    with open(args.spec, encoding="utf-8") as fh:
+    with open(args.spec, encoding="utf-8-sig") as fh:
         spec = ValidationSpec.from_dict(json.load(fh))
     print(json.dumps(spec.to_dict(), ensure_ascii=False, indent=2))
     return 0 if spec.behavior.strip() else 2

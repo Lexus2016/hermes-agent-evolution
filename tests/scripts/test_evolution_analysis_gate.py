@@ -43,7 +43,7 @@ def _write_fake_gh(bin_dir: Path, *, perms: str | None, authed: bool = True) -> 
     if perms is None:
         perms = "{}"
     user_branch = 'echo "tester"\n  exit 0' if authed else "exit 1"
-    script = f"""#!/bin/bash
+    script = f"""#!/usr/bin/env bash
 if [ "$1" = "api" ] && [ "$2" = "user" ]; then
   {user_branch}
 fi

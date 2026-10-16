@@ -70,7 +70,7 @@ def get_eval_summary() -> Dict[str, Any]:
         return {"total_events": 0, "avg_ratio": 0.0, "success_rate": None, "total_tokens_saved": 0}
     events: List[Dict[str, Any]] = []
     try:
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
             line = line.strip()
             if line:
                 events.append(json.loads(line))

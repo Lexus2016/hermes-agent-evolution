@@ -230,7 +230,7 @@ def record_critic_verdict(
 
 def _load_text(path: Optional[str]) -> Tuple[str, Optional[str]]:
     try:
-        raw = Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+        raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
         return raw, None
     except OSError as exc:
         return "", str(exc)

@@ -90,7 +90,7 @@ def load_heuristics(evolution_dir: Optional[Path] = None) -> List[Dict[str, Any]
     if not files:
         return []
     try:
-        data = json.loads(files[-1].read_text(encoding="utf-8"))
+        data = json.loads(files[-1].read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return []
     heuristics = data.get("heuristics") if isinstance(data, dict) else None

@@ -362,7 +362,7 @@ def main(argv: list[str] | None = None) -> int:
         "--payload", required=True, help="path to the eval payload JSON"
     )
     args = parser.parse_args(argv)
-    with open(args.payload, encoding="utf-8") as fh:
+    with open(args.payload, encoding="utf-8-sig") as fh:
         payload = json.load(fh)
     result = evaluate(payload)
     print(json.dumps(result, ensure_ascii=False, indent=2))

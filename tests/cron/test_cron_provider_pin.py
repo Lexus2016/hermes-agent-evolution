@@ -12,8 +12,11 @@ resolve_runtime_provider against a temp HERMES_HOME), create_job snapshot
 capture, resnapshot, and the pinned-lock helpers.
 """
 
+import asyncio
+import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,6 +25,49 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from cron.scheduler import _summarize_cron_failure_for_delivery, run_job
+
+def _run_owned_job(job, tmp_path):
+    """Exercise the production owner bridge with an isolated canonical store."""
+    from gateway.session_contract import SessionRef
+    from gateway.session_cron import current_execution, execute
+    from hermes_state_registry import acquire, release
+
+    ref = SessionRef("test-profile", "cron-owner-session")
+    admission_id = "cron-owner-admission"
+    request_id = "cron-owner-request"
+    db = acquire(tmp_path / "state.db")
+    db.create_session(ref.session_id, source="cron")
+    authority = SimpleNamespace(
+        db=db,
+        sessions={ref.session_id: SimpleNamespace(source=SimpleNamespace(user_id="cron-owner"))},
+        pending_results={},
+    )
+    row = {
+        "admission_id": admission_id, "request_id": request_id,
+        "principal_id": "cron-owner", "payload": {"text": ""},
+    }
+    policy = SimpleNamespace(request_json=json.dumps({
+        "cron_job": job, "extra_prompt": None, "request_id": request_id,
+    }))
+
+    async def run():
+        previous = current_execution()
+        try:
+            await execute(authority, ref, row, policy)
+        except RuntimeError as exc:
+            # Failed scheduler tuples are published before execute raises.
+            saved = authority.pending_results.get(admission_id)
+            if saved is None:
+                raise
+            assert str(exc) == saved["result"]["cron_result"][3]
+        assert current_execution() is previous
+        assert authority._cron_cancellations == {}
+        return tuple(authority.pending_results[admission_id]["result"]["cron_result"])
+
+    try:
+        return asyncio.run(run())
+    finally:
+        release(db)
 
 
 def _base_job(**overrides):
@@ -47,7 +93,6 @@ def _run_with_current_provider(job, current_provider, tmp_path):
          patch("cron.scheduler._resolve_origin", return_value=None), \
          patch("hermes_cli.env_loader.load_hermes_dotenv"), \
          patch("hermes_cli.env_loader.reset_secret_source_cache"), \
-         patch("hermes_state_registry.acquire", return_value=fake_db), \
          patch(
              "hermes_cli.runtime_provider.resolve_runtime_provider",
              return_value={
@@ -62,7 +107,7 @@ def _run_with_current_provider(job, current_provider, tmp_path):
         mock_agent.run_conversation.return_value = {"final_response": "ok"}
         mock_agent_cls.return_value = mock_agent
 
-        success, output, final_response, error = run_job(job)
+        success, output, final_response, error = _run_owned_job(job, tmp_path)
         agent_constructed = mock_agent_cls.called
 
     return success, output, final_response, error, agent_constructed
@@ -229,7 +274,7 @@ class TestPinnedLocksTheMainModel:
 
     @staticmethod
     def _store(monkeypatch, tmp_path, main_model="main-model", main_provider="openrouter"):
-        import cron.jobs as jobs
+        from cron import jobs
         (tmp_path / "config.yaml").write_text(f"model:\n  default: {main_model}\n")
         monkeypatch.setattr(jobs, "get_hermes_home", lambda: tmp_path, raising=True)
         state = {"jobs": []}
@@ -303,7 +348,6 @@ def _run_with_current_provider_and_model(
          patch("cron.scheduler._resolve_origin", return_value=None), \
          patch("hermes_cli.env_loader.load_hermes_dotenv"), \
          patch("hermes_cli.env_loader.reset_secret_source_cache"), \
-         patch("hermes_state_registry.acquire", return_value=fake_db), \
          patch(
              "hermes_cli.runtime_provider.resolve_runtime_provider",
              return_value={
@@ -317,7 +361,7 @@ def _run_with_current_provider_and_model(
         mock_agent = MagicMock()
         mock_agent.run_conversation.return_value = {"final_response": "ok"}
         mock_agent_cls.return_value = mock_agent
-        success, output, final_response, error = run_job(job)
+        success, output, final_response, error = _run_owned_job(job, tmp_path)
         agent_constructed = mock_agent_cls.called
     return success, output, final_response, error, agent_constructed
 
@@ -467,8 +511,7 @@ class TestRuntimeResolutionTargetModel:
              patch("cron.scheduler._resolve_origin", return_value=None), \
              patch("hermes_cli.env_loader.load_hermes_dotenv"), \
              patch("hermes_cli.env_loader.reset_secret_source_cache"), \
-             patch("hermes_state_registry.acquire", return_value=fake_db), \
-             patch(
+                 patch(
                  "hermes_cli.runtime_provider.resolve_runtime_provider",
                  side_effect=_capture,
              ), \
@@ -476,7 +519,7 @@ class TestRuntimeResolutionTargetModel:
             mock_agent = MagicMock()
             mock_agent.run_conversation.return_value = {"final_response": "ok"}
             mock_agent_cls.return_value = mock_agent
-            run_job(job)
+            _run_owned_job(job, tmp_path)
 
         assert captured.get("target_model") == "my-pinned-model"
         assert captured.get("requested") == "openrouter"

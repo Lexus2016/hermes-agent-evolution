@@ -208,7 +208,7 @@ def main(argv: list[str]) -> int:
     src = sys.stdin.read()
     if args.path:
         try:
-            with open(args.path, "r", encoding="utf-8") as fh:
+            with open(args.path, "r", encoding="utf-8-sig") as fh:
                 src = fh.read()
         except OSError as exc:
             print(f"[redact-pii] error reading {args.path}: {exc}", file=sys.stderr)

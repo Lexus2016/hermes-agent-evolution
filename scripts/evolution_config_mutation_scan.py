@@ -250,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        baseline_data = json.loads(baseline_path.read_text(encoding="utf-8"))
+        baseline_data = json.loads(baseline_path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError) as exc:
         print(f"[config-mutation-scan] cannot read baseline: {exc}", file=sys.stderr)
         return 1

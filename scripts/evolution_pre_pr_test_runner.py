@@ -683,7 +683,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.changed_files_file:
         p = Path(args.changed_files_file)
         if p.exists():
-            file_content = p.read_text(encoding="utf-8").strip()
+            file_content = p.read_text(encoding="utf-8-sig").strip()
             for line in file_content.splitlines():
                 stripped = line.strip()
                 if stripped and not stripped.startswith("#"):

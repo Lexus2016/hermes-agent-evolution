@@ -205,3 +205,18 @@ class TestDegradedDiscovery:
         by_query = {r["query"]: r["matches"] for r in resp["results"]}
         assert "create_issue" in by_query["issue"]
         assert "send_slack" in by_query["slack"]
+
+
+def test_same_name_changed_schema_is_not_cached(monkeypatch):
+    import json
+    from tools import tool_search as ts
+    ts.clear_describe_cache()
+    first = [{"type": "function", "function": {"name": "mcp_demo_lookup", "description": "original", "parameters": {"type": "object"}}}]
+    second = [{"type": "function", "function": {"name": "mcp_demo_lookup", "description": "updated", "parameters": {"type": "object"}}}]
+    monkeypatch.setattr(ts, "is_deferrable_tool_name", lambda *args, **kw: True)
+    config = ts.ToolSearchConfig.from_raw({})
+    a = json.loads(ts.dispatch_tool_describe({"name": "mcp_demo_lookup"}, current_tool_defs=first, config=config))
+    b = json.loads(ts.dispatch_tool_describe({"name": "mcp_demo_lookup"}, current_tool_defs=second, config=config))
+    assert a["description"] == "original"
+    assert b["description"] == "updated"
+    ts.clear_describe_cache()

@@ -106,7 +106,7 @@ def lint_paths(roots: Sequence[Path], *, scope: str = "context") -> List[Finding
     findings: List[Finding] = []
     for path in collect_target_files(roots):
         try:
-            content = path.read_text(encoding="utf-8", errors="replace")
+            content = path.read_text(encoding="utf-8-sig", errors="replace")
         except OSError:
             continue
         findings.extend(_lint_content(content, path, scope=scope))

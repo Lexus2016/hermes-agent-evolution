@@ -239,7 +239,7 @@ def load_notes(store_path: Any) -> List[QcrNote]:
     if not path.is_file():
         return []
     notes: List[QcrNote] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         try:
             notes.append(QcrNote.from_dict(json.loads(line)))
         except (ValueError, TypeError):

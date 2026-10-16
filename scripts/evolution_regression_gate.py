@@ -402,7 +402,7 @@ def main(argv: List[str]) -> int:
         print(f"[evolution-regression-gate] {err}", file=sys.stderr)
         return 2
     try:
-        raw = Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+        raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
     except OSError as exc:
         print(f"[evolution-regression-gate] cannot read input: {exc}", file=sys.stderr)
         return 2

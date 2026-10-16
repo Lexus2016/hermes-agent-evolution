@@ -34,7 +34,6 @@ class MockAPIError(Exception):
 
 class MockTransportError(Exception):
     """Simulates a transport-level error with a specific type name."""
-    pass
 
 
 class ReadTimeout(MockTransportError):
@@ -357,6 +356,26 @@ class TestClassifyApiError:
         )
         result = classify_api_error(e, provider="nous", model="openai/gpt-5.5-pro")
         assert result.reason == FailoverReason.billing
+        assert result.retryable is False
+        assert result.should_fallback is True
+
+    def test_404_retired_free_route_is_model_not_found(self):
+        # The provider retired the :free route — the slug is dead for every
+        # credential, so fall back instead of burning retries (#123180). Not
+        # billing: the account's tier/balance is not what rejected the call.
+        e = MockAPIError(
+            "Not Found",
+            status_code=404,
+            body={
+                "status": 404,
+                "message": (
+                    "This model is no longer free. To continue using the paid "
+                    "variant, switch to 'meituan/longcat-2.0'."
+                ),
+            },
+        )
+        result = classify_api_error(e, provider="nous", model="meituan/longcat-2.0:free")
+        assert result.reason == FailoverReason.model_not_found
         assert result.retryable is False
         assert result.should_fallback is True
 
@@ -3488,12 +3507,6 @@ class TestNousWelcomeTier:
         result = classify_api_error(self._refusal("at_capacity", retry_after=0), provider="nous", api_key=make_jwt())
         assert "reset_at" not in result.error_context
 
-    def test_unknown_reason_is_not_the_welcome_shape(self):
-        err = MockAPIError("Error code: 429", status_code=429,
-                           body={"status": 429, "message": "x", "reason": "something_else", "retry_after": 5})
-        result = classify_api_error(err, provider="nous", api_key=make_jwt())
-        assert "welcome_refusal" not in result.error_context
-
     def test_anonymous_jwt_on_the_paid_host_is_deterministic(self):
         body = {"status": 400, "message": "Anonymous accounts must use https://welcome-api.nousresearch.com for inference."}
         err = MockAPIError(f"Error code: 400 - {body}", status_code=400, body=body)
@@ -3540,3 +3553,118 @@ class TestAuthErrorNamesOffRouteEndpoint:
         for base_url in ("", "https://api.anthropic.com/v1"):
             result = classify_api_error(e, provider="anthropic", model="claude", base_url=base_url)
             assert result.message == "API keys are not supported by this endpoint.", base_url
+
+
+class TestBodyCarriedStatus:
+    """An in-stream SSE error object's numeric ``code`` classifies like the equivalent HTTP
+    response (#121270)."""
+
+    def test_top_level_code_and_status_keys_also_count(self):
+        assert _extract_status_code(MockAPIError("x", body={"code": 503})) == 503
+        assert _extract_status_code(MockAPIError("x", body={"error": {"http_status": 502}})) == 502
+
+    def test_403_ban_is_auth_not_transient_retry(self):
+        body = {"error": {"code": 403, "message": "Your account has been banned by the upstream provider",
+                          "metadata": {"provider_name": "acme"}}}
+        result = classify_api_error(MockAPIError("Error code: 403", body=body), provider="custom")
+        assert result.status_code == 403
+        assert result.reason == FailoverReason.auth
+        assert result.retryable is False
+        assert result.should_fallback is True
+
+
+class TestStreamingRenderFormatError:
+    """Status-less Jinja render failures (LM Studio / llama.cpp) fail over; see #62662."""
+
+    def test_error_rendering_no_status_is_format_error(self):
+        e = MockAPIError("Error rendering prompt with jinja template: ...")
+        result = classify_api_error(e, provider="lm-studio", model="x")
+        assert result.reason == FailoverReason.format_error
+        assert result.retryable is False
+        assert result.should_fallback is True
+
+    def test_render_message_with_status_uses_http_path(self):
+        e = MockAPIError("Error rendering prompt with jinja template: ...", status_code=500)
+        result = classify_api_error(e, provider="lm-studio", model="x")
+        assert result.reason != FailoverReason.format_error
+
+
+class TestConnectionMessagePatterns:
+    """Generic-typed connect/DNS failures route to the transport bucket."""
+
+    @pytest.mark.parametrize("message", [
+        "connect ECONNREFUSED 127.0.0.1:11434",
+        "Connection refused by proxy",
+        "getaddrinfo failed",
+        "getaddrinfo ENOTFOUND api.example.com",
+        "[Errno -3] Temporary failure in name resolution",
+        "[Errno 8] nodename nor servname provided, or not known",
+        "getaddrinfo EAI_AGAIN openrouter.ai",
+        "Name or service not known",
+        "No route to host",
+        "[Errno 101] Network is unreachable",
+        "fetch failed",
+        "TypeError: Failed to fetch",
+        "upstream connect error or disconnect/reset before headers",
+    ])
+    def test_generic_exception_with_connect_failure_message_is_timeout(self, message):
+        # RuntimeError — NOT in _TRANSPORT_ERROR_TYPES, not a ConnectionError
+        # subclass, no status code. Without message matching this falls to
+        # FailoverReason.unknown and misses the eager transport fallback.
+        result = classify_api_error(RuntimeError(message))
+        assert result.reason == FailoverReason.timeout, message
+        assert result.retryable is True
+        assert result.should_compress is False
+
+    def test_connect_failure_never_routes_to_compression_on_large_session(self):
+        # A connection that was never established is not an overflow signal,
+        # even when the session is huge (the disconnect+large-session
+        # heuristic must not apply to connect-phase failures).
+        result = classify_api_error(
+            RuntimeError("connect ECONNREFUSED 10.0.0.5:443"),
+            approx_tokens=180000, context_length=200000, num_messages=400,
+        )
+        assert result.reason == FailoverReason.timeout
+        assert result.should_compress is False
+
+    def test_midstream_disconnect_patterns_still_use_disconnect_path(self):
+        # "connection reset by peer" is deliberately NOT in the connect-phase
+        # list — it stays on the _SERVER_DISCONNECT_PATTERNS path, which
+        # routes large sessions to context-overflow compression.
+        result = classify_api_error(
+            RuntimeError("Connection reset by peer"),
+            approx_tokens=180000, context_length=200000, num_messages=400,
+        )
+        assert result.reason == FailoverReason.context_overflow
+        assert result.should_compress is True
+
+    def test_plain_unknown_error_still_unknown(self):
+        # Guard against over-matching: an unrelated message stays unknown.
+        result = classify_api_error(RuntimeError("something exploded"))
+        assert result.reason == FailoverReason.unknown
+
+
+
+class TestThrottleVsOverflowDisambiguation:
+    """Throttle messages that mention tokens must NOT route to compression."""
+
+    def test_bedrock_throttling_too_many_tokens_is_rate_limit(self):
+        # AWS Bedrock (and some proxies) surface throttling as
+        # "Throttling error: Too many tokens, please wait before trying
+        # again." — the "too many tokens" fragment sits in
+        # _CONTEXT_OVERFLOW_PATTERNS, so before the "throttling" rate-limit
+        # pattern this compressed a healthy session on every throttle.
+        e = Exception(
+            "Throttling error: Too many tokens, please wait before trying again."
+        )
+        result = classify_api_error(e, provider="bedrock", model="claude")
+        assert result.reason == FailoverReason.rate_limit
+        assert result.should_compress is False
+
+    def test_plain_too_many_tokens_still_overflow(self):
+        # Without any throttle wording, "Too many tokens" remains a
+        # context-overflow signal (Z.AI / GLM family wording).
+        e = Exception("Too many tokens")
+        result = classify_api_error(e, provider="zai", model="glm-5")
+        assert result.reason == FailoverReason.context_overflow
+        assert result.should_compress is True

@@ -73,7 +73,7 @@ def load_caps(path: Optional[str] = None) -> Dict[str, Dict[str, int]]:
         if not cand:
             continue
         try:
-            data = json.loads(Path(cand).read_text(encoding="utf-8"))
+            data = json.loads(Path(cand).read_text(encoding="utf-8-sig"))
             if isinstance(data, dict) and data:
                 return {str(k): dict(v) for k, v in data.items()}
         except (OSError, ValueError, TypeError):

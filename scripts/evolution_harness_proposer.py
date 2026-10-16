@@ -286,7 +286,7 @@ def main(argv: List[str]) -> int:
         print(f"[evolution-harness-proposer] {err}", file=sys.stderr)
         return 2
     try:
-        raw = Path(path).read_text(encoding="utf-8") if path else sys.stdin.read()
+        raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
     except OSError as exc:
         print(f"[evolution-harness-proposer] cannot read input: {exc}", file=sys.stderr)
         return 2

@@ -116,7 +116,7 @@ def load_log() -> Dict[str, Any]:
     if not path.exists():
         return {"retrievals": [], "outcomes": {}}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError) as e:
         logger.debug("retrieval_utility: could not read sidecar: %s", e)
         return {"retrievals": [], "outcomes": {}}

@@ -92,3 +92,16 @@ class TestEnabled:
         attrs = dict(exp.spans[0].attributes)
         assert attrs.get("hermes.tokens") == 123
         assert attrs.get("hermes.provider") == "anthropic"
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_pm_dependency_activation_requires_telemetry_opt_in(monkeypatch, enabled):
+    from pm import extras
+
+    requested = []
+    monkeypatch.setattr(extras, "ensure_import", requested.append)
+    monkeypatch.setattr(tel, "_otel_config", lambda: {"enabled": enabled})
+    monkeypatch.setattr(tel, "_build_exporter", lambda cfg: _Collect())
+    tel._ensure_init()
+    assert requested == (["otel"] if enabled else [])
+    assert tel.is_enabled() is enabled

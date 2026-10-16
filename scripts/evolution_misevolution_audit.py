@@ -107,7 +107,7 @@ def run_audit(repo: Path, metrics_path: Optional[Path] = None) -> Dict[str, Any]
 
     if metrics_path is not None and metrics_path.exists():
         try:
-            data = json.loads(metrics_path.read_text(encoding="utf-8"))
+            data = json.loads(metrics_path.read_text(encoding="utf-8-sig"))
             windows = data.get("windows", [])
             if len(windows) >= 2:
                 prev, curr = windows[-2], windows[-1]

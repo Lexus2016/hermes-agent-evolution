@@ -187,7 +187,7 @@ def _cron_main() -> int:
     if not src.is_file():
         return EXIT_VALIDATED  # miner has not run yet — nothing to gate
     try:
-        payload = json.loads(src.read_text(encoding="utf-8"))
+        payload = json.loads(src.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError):
         return EXIT_INVALID  # unreadable sidecar — surface as a cron error
     report = run_cron_pass(payload, surface={})  # {} = proposer default surface
@@ -217,7 +217,7 @@ def main(argv: List[str]) -> int:
             out = argv[i + 1]
 
     try:
-        proposal = json.loads(Path(proposal_path).read_text(encoding="utf-8"))
+        proposal = json.loads(Path(proposal_path).read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
         print(json.dumps({"status": INVALID, "reason": f"cannot read proposal: {exc}"}))
         return EXIT_INVALID

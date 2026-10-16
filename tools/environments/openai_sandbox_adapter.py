@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 try:
-    import yaml
+    import hermes_yaml as yaml
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
@@ -27,7 +27,7 @@ def parse_openai_manifest(manifest_input: Union[str, Dict[str, Any], Path]) -> D
     """Parse an OpenAI Agents SDK manifest YAML/JSON string, dict, or file path."""
     if isinstance(manifest_input, Path):
         p = manifest_input
-        raw_text = p.read_text(encoding="utf-8")
+        raw_text = p.read_text(encoding="utf-8-sig")
         if p.suffix in (".yaml", ".yml") and yaml is not None:
             data = yaml.safe_load(raw_text)
         else:
@@ -40,7 +40,7 @@ def parse_openai_manifest(manifest_input: Union[str, Dict[str, Any], Path]) -> D
                     data = {}
     elif isinstance(manifest_input, str) and "\n" not in manifest_input and Path(manifest_input).is_file():
         p = Path(manifest_input)
-        raw_text = p.read_text(encoding="utf-8")
+        raw_text = p.read_text(encoding="utf-8-sig")
         if p.suffix in (".yaml", ".yml") and yaml is not None:
             data = yaml.safe_load(raw_text)
         else:
