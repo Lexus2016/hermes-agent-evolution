@@ -47,8 +47,9 @@ describe('quickComposerReducer', () => {
       draft: '',
       error: null,
       lastSubmitText: '',
-      orphanedFailure: null,
+      orphanedFailures: [],
       pendingSubmitId: null,
+      pendingSubmitTexts: {},
       sessions: [],
       submitting: false,
       target: QUICK_TARGET_CURRENT,
@@ -88,20 +89,11 @@ describe('quickComposerReducer', () => {
     })
   })
 
-  it('keeps the current owner for stale acknowledgements and records an unmatched late failure', () => {
+  it('ignores replies whose request never owned a submitted draft', () => {
     const { state } = run([connect, { draft: 'keep', type: 'edit' }, { submitId: 7, type: 'submit' }])
 
     expect(quickComposerReducer(state, { submitId: 8, type: 'submit-ok' }).state).toEqual(state)
-    const failed = quickComposerReducer(state, { message: 'stale', submitId: 8, type: 'submit-error' }).state
-
-    expect(failed).toMatchObject({
-      draft: 'keep',
-      error: 'stale',
-      lastSubmitText: '',
-      orphanedFailure: { message: 'stale', text: 'keep' },
-      pendingSubmitId: 7,
-      submitting: true
-    })
+    expect(quickComposerReducer(state, { message: 'stale', submitId: 8, type: 'submit-error' }).state).toBe(state)
   })
 
   it('keeps resume and current-target submits on their existing routes', () => {
@@ -452,5 +444,193 @@ describe('quickComposerReducer', () => {
     ])
     expect(state.draft).toBe('first prompt')
     expect(state.error).toBe('first failed')
+  })
+
+  it('hands back an older failure even when the newer success arrived first', () => {
+    const { state } = run([
+      connect,
+      { draft: 'first prompt', type: 'edit' },
+      { submitId: 7, type: 'submit' },
+      { type: 'dismiss' },
+      { type: 'shown' },
+      { draft: 'second prompt', type: 'edit' },
+      { submitId: 8, type: 'submit' },
+      { submitId: 8, type: 'submit-ok' },
+      { type: 'blur' },
+      { message: 'first failed', submitId: 7, type: 'submit-error' },
+      { type: 'shown' }
+    ])
+
+    expect(state.draft).toBe('first prompt')
+    expect(state.error).toBe('first failed')
+    expect(state.pendingSubmitTexts).toEqual({})
+    expect(state.orphanedFailures).toEqual([])
+
+    const cancelled = run([{ type: 'dismiss' }, { type: 'shown' }], state).state
+    expect(cancelled.draft).toBe('')
+    expect(cancelled.error).toBeNull()
+  })
+
+  it('does not let an older reply replace edits or hide the newer draft', () => {
+    const { state } = run([
+      connect,
+      { draft: 'first prompt', type: 'edit' },
+      { submitId: 7, type: 'submit' },
+      { draft: 'second prompt', type: 'edit' },
+      { submitId: 8, type: 'submit' },
+      { draft: 'new unsent edit', type: 'edit' },
+      { message: 'first failed', submitId: 7, type: 'submit-error' }
+    ])
+
+    expect(state.draft).toBe('new unsent edit')
+    expect(state.visible).toBe(true)
+    expect(state.pendingSubmitId).toBe(8)
+    expect(state.lastSubmitText).toBe('second prompt')
+    expect(state.pendingSubmitTexts).toEqual({ 8: 'second prompt' })
+
+    const accepted = quickComposerReducer(state, { submitId: 8, type: 'submit-ok' }).state
+    expect(accepted.draft).toBe('new unsent edit')
+    expect(accepted.visible).toBe(true)
+    expect(accepted.pendingSubmitTexts).toEqual({})
+    expect(accepted.orphanedFailures).toEqual([{ message: 'first failed', submitId: 7, text: 'first prompt' }])
+  })
+
+  it('consumes a superseded success without changing the owning submit', () => {
+    const { state } = run([
+      connect,
+      { draft: 'first prompt', type: 'edit' },
+      { submitId: 7, type: 'submit' },
+      { draft: 'second prompt', type: 'edit' },
+      { submitId: 8, type: 'submit' },
+      { submitId: 7, type: 'submit-ok' }
+    ])
+
+    expect(state).toMatchObject({
+      draft: 'second prompt',
+      lastSubmitText: 'second prompt',
+      pendingSubmitId: 8,
+      pendingSubmitTexts: { 8: 'second prompt' },
+      submitting: true,
+      visible: true
+    })
+    expect(quickComposerReducer(state, { message: 'duplicate', submitId: 7, type: 'submit-error' }).state).toBe(state)
+    expect(quickComposerReducer(state, { submitId: 7, type: 'submit-ok' }).state).toBe(state)
+  })
+
+  it('blocks repeat Enter for the latest text after an older submit was superseded', () => {
+    const { sent } = run([
+      connect,
+      { draft: 'first prompt', type: 'edit' },
+      { submitId: 7, type: 'submit' },
+      { draft: 'second prompt', type: 'edit' },
+      { submitId: 8, type: 'submit' },
+      { submitId: 9, type: 'submit' }
+    ])
+
+    expect(sent.map(payload => payload.text)).toEqual(['first prompt', 'second prompt'])
+  })
+
+  it('keeps each failed superseded draft until its one-time handback without evicting another', () => {
+    const { state } = run([
+      connect,
+      { draft: 'first prompt', type: 'edit' },
+      { submitId: 7, type: 'submit' },
+      { draft: 'second prompt', type: 'edit' },
+      { submitId: 8, type: 'submit' },
+      { draft: 'third prompt', type: 'edit' },
+      { submitId: 9, type: 'submit' },
+      { submitId: 9, type: 'submit-ok' },
+      { message: 'second failed', submitId: 8, type: 'submit-error' },
+      { message: 'first failed', submitId: 7, type: 'submit-error' },
+      { message: 'duplicate second failure', submitId: 8, type: 'submit-error' }
+    ])
+
+    expect(state.pendingSubmitTexts).toEqual({})
+    expect(state.orphanedFailures).toEqual([
+      { message: 'second failed', submitId: 8, text: 'second prompt' },
+      { message: 'first failed', submitId: 7, text: 'first prompt' }
+    ])
+
+    const firstHandback = run([{ type: 'shown' }], state).state
+    expect(firstHandback.draft).toBe('second prompt')
+    expect(firstHandback.error).toBe('second failed')
+    expect(firstHandback.orphanedFailures).toHaveLength(1)
+
+    const secondHandback = run([{ type: 'dismiss' }, { type: 'shown' }], firstHandback).state
+    expect(secondHandback.draft).toBe('first prompt')
+    expect(secondHandback.error).toBe('first failed')
+    expect(secondHandback.orphanedFailures).toEqual([])
+
+    const finished = run([{ type: 'dismiss' }, { type: 'shown' }], secondHandback).state
+    expect(finished.draft).toBe('')
+    expect(finished.error).toBeNull()
+    expect(finished.pendingSubmitTexts).toEqual({})
+  })
+
+  it('preserves an older request through a newer failure, cancel, and re-show', () => {
+    const { state } = run([
+      connect,
+      { draft: 'first prompt', type: 'edit' },
+      { submitId: 7, type: 'submit' },
+      { draft: 'second prompt', type: 'edit' },
+      { submitId: 8, type: 'submit' },
+      { message: 'second failed', submitId: 8, type: 'submit-error' },
+      { type: 'dismiss' },
+      { type: 'shown' },
+      { draft: 'fresh draft', type: 'edit' },
+      { message: 'first failed', submitId: 7, type: 'submit-error' }
+    ])
+
+    expect(state.draft).toBe('fresh draft')
+    expect(state.pendingSubmitTexts).toEqual({})
+    expect(state.orphanedFailures).toEqual([{ message: 'first failed', submitId: 7, text: 'first prompt' }])
+    expect(quickComposerReducer(state, { message: 'duplicate', submitId: 8, type: 'submit-error' }).state).toBe(state)
+  })
+
+  it('preserves the owning failed submission separately from newer unsent edits', () => {
+    const { state } = run([
+      connect,
+      { draft: 'submitted A', type: 'edit' },
+      { submitId: 7, type: 'submit' },
+      { draft: 'unsent B', type: 'edit' },
+      { message: 'A failed', submitId: 7, type: 'submit-error' }
+    ])
+
+    expect(state.draft).toBe('unsent B')
+    expect(state.pendingSubmitTexts).toEqual({})
+    expect(state.orphanedFailures).toEqual([{ message: 'A failed', submitId: 7, text: 'submitted A' }])
+    expect(quickComposerReducer(state, { message: 'duplicate', submitId: 7, type: 'submit-error' }).state).toBe(state)
+
+    const restored = run([{ type: 'dismiss' }, { type: 'shown' }], state).state
+    expect(restored.draft).toBe('submitted A')
+    expect(restored.error).toBe('A failed')
+    expect(restored.orphanedFailures).toEqual([])
+  })
+
+  it('hands back multiple owning failures in arrival order after preserving the latest edit', () => {
+    const { state } = run([
+      connect,
+      { draft: 'submitted A', type: 'edit' },
+      { submitId: 7, type: 'submit' },
+      { draft: 'submitted B', type: 'edit' },
+      { message: 'A failed', submitId: 7, type: 'submit-error' },
+      { submitId: 8, type: 'submit' },
+      { draft: 'unsent C', type: 'edit' },
+      { message: 'B failed', submitId: 8, type: 'submit-error' }
+    ])
+
+    expect(state.draft).toBe('unsent C')
+    expect(state.pendingSubmitTexts).toEqual({})
+    expect(state.orphanedFailures.map(failure => failure.text)).toEqual(['submitted A', 'submitted B'])
+
+    const restoredA = run([{ type: 'dismiss' }, { type: 'shown' }], state).state
+    expect(restoredA.draft).toBe('submitted A')
+    const restoredB = run([{ type: 'dismiss' }, { type: 'shown' }], restoredA).state
+    expect(restoredB.draft).toBe('submitted B')
+    expect(restoredB.error).toBe('B failed')
+    expect(restoredB.orphanedFailures).toEqual([])
+    const finished = run([{ type: 'dismiss' }, { type: 'shown' }], restoredB).state
+    expect(finished.draft).toBe('')
+    expect(finished.pendingSubmitTexts).toEqual({})
   })
 })
