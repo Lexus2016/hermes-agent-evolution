@@ -210,3 +210,38 @@ and has no accepted debt disposition. No production or acceptance policy changed
 The full d66b health result remains historical and failed, not a report for this
 later test-only checkpoint. Exact receipts are in
 `v0221-dfbf-test-timing-validation.json`.
+
+## Lossless evidence packaging (2026-10-16)
+
+The five paths below are now small storage indexes, with ordered UTF-8 text parts
+under `<path>.parts/`. Historical receipt content and published history are unchanged.
+Digest claims for these artifacts refer to the **reconstructed original bytes**,
+not the storage index. No policy thresholds or accepted entries were changed.
+
+| Original artifact | Reconstructed bytes | Original SHA256 |
+| --- | ---: | --- |
+| `v0221-manifest.json` | 867025 | `9cc8ae0890c9a2a9fb63ea50d04100fa906df0746140ce8653425146904dde71` |
+| `v0221-9ff0-main365-health-report.json` | 533663 | `3e6ec0448f68ba5e9860cc253024bcb0e21eb5359491c0c1bad518f301788276` |
+| `v0221-d66b-main365-health-report.json` | 531603 | `f29657a0a665dfbc0c737139001066874bcddb5cd9f368f5f0e34b8e99c4b6ea` |
+| `v0221-9ad6-main365-health-report.json` | 519685 | `1b511fdd12f0539d9fd7c5a61520dcb398bba9f5521bcc4ff76ca7005b2a8c46` |
+| `v0221-ef4609-main9ef-health-report.json` | 531370 | `f8f7c2dfb93aee0ca46a5b1c309256bce2b7c3665ac42f79bed65bbef0e20182` |
+
+From the repository root, reconstruct and independently compare an artifact with
+the published pre-packaging checkpoint (substitute any filename from the table):
+
+```bash
+python -m scripts.code_health.evidence_parts analysis/sync-health/v0221-manifest.json > /tmp/v0221-manifest.json
+git show 7daf390b3fb41c2ed97de13367d05def561620b7:analysis/sync-health/v0221-manifest.json > /tmp/v0221-manifest-original.json
+cmp /tmp/v0221-manifest-original.json /tmp/v0221-manifest.json
+sha256sum /tmp/v0221-manifest.json
+```
+
+The independent local review used `23551df05bf722d1cda34b0c9fd33518c31ee2f1`
+as its byte-identical pre-packaging comparison; that locator is local-only.
+
+Use `--revision <commit-or-tree>` to reconstruct from Git rather than the worktree.
+The reconstructed manifest retains 338 entries and 354 occurrence budgets and its
+existing pinned digest. The loader accepts old direct-file evidence too. Packaging
+is bounded to eight parts of at most 256 KiB each (2 MiB total), uses exact sequential
+paths, rejects unexpected/missing entries and symlinks, and verifies sizes and hashes
+before the unchanged policy digest validation. It introduces no trust authority.

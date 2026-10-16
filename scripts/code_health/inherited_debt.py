@@ -17,6 +17,7 @@ from collections import Counter
 from pathlib import Path
 
 from scripts.code_health import gitio
+from scripts.code_health.evidence_parts import MAX_BYTES, read_evidence
 from scripts.code_health.inherited_evidence import assign_entries
 
 BASE = "9efba6dcfa78013a3763778aaca4fe37921c495e"
@@ -25,7 +26,7 @@ MANIFEST = "analysis/sync-health/v0221-manifest.json"
 MANIFEST_SHA256 = "9cc8ae0890c9a2a9fb63ea50d04100fa906df0746140ce8653425146904dde71"
 
 
-def blob(repo: Path, revision: str | None, path: str) -> tuple[str, bytes] | None:
+def blob(repo: Path, revision: str | None, path: str, *, max_bytes: int | None = None) -> tuple[str, bytes] | None:
     """Read regular repository data only; never follow a manifest/source symlink."""
     if not path or path.startswith("/") or ".." in Path(path).parts:
         raise RuntimeError("Invalid inherited-debt evidence path")
@@ -35,7 +36,10 @@ def blob(repo: Path, revision: str | None, path: str) -> tuple[str, bytes] | Non
             raise RuntimeError("Inherited-debt evidence must be a regular repository file")
         if not target.is_file():
             return None
-        data = target.read_bytes()
+        with target.open("rb") as stream:
+            data = stream.read() if max_bytes is None else stream.read(max_bytes + 1)
+        if max_bytes is not None and len(data) > max_bytes:
+            raise RuntimeError("Inherited-debt evidence exceeds storage byte limit")
         sha = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
         return sha, data
     row = gitio.git(repo, "ls-tree", revision, "--", path).strip()
@@ -47,6 +51,8 @@ def blob(repo: Path, revision: str | None, path: str) -> tuple[str, bytes] | Non
     sha = fields[2]
     if not re.fullmatch(r"[a-f0-9]{40}", sha):
         raise RuntimeError("Invalid inherited-debt Git object")
+    if max_bytes is not None and int(gitio.git(repo, "cat-file", "-s", sha)) > max_bytes:
+        raise RuntimeError("Inherited-debt evidence exceeds storage byte limit")
     result = subprocess.run(["git", "cat-file", "blob", sha], cwd=repo, capture_output=True,
                             timeout=120, check=True)
     return sha, result.stdout
@@ -61,7 +67,7 @@ def _ancestor(repo: Path, old: str, new: str) -> bool:
 
 
 def _policy(repo: Path, base: str, head: str | None):
-    stored = blob(repo, head, MANIFEST)
+    stored = blob(repo, head, MANIFEST, max_bytes=MAX_BYTES)
     if stored is None:
         return None  # Ordinary repositories/PRs are unaffected.
     upstream = gitio.commit_or_none(repo, UPSTREAM)
@@ -74,14 +80,14 @@ def _policy(repo: Path, base: str, head: str | None):
     candidate = gitio.commit_or_none(repo, head or "HEAD")
     if candidate is None or not _ancestor(repo, UPSTREAM, candidate) or not _ancestor(repo, base, candidate):
         raise RuntimeError("Inherited-debt transition requires true pinned upstream and base ancestry")
-    data = stored[1]
+    data = read_evidence(repo, head, MANIFEST, blob)[1]
     if hashlib.sha256(data).hexdigest() != MANIFEST_SHA256:
         raise RuntimeError("Inherited-debt manifest drift: independent review is required")
     policy = json.loads(data)
     if policy.get("schema_version") != 1 or policy.get("base") != BASE or policy.get("upstream") != UPSTREAM:
         raise RuntimeError("Invalid pinned inherited-debt policy identity")
     report = policy.get("report", {})
-    raw = blob(repo, head, report.get("path", ""))
+    raw = read_evidence(repo, head, report.get("path", ""), blob)
     if raw is None or hashlib.sha256(raw[1]).hexdigest() != report.get("sha256"):
         raise RuntimeError("Original full code-health report missing or changed")
     return policy
