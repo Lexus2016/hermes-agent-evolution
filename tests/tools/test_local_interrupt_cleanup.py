@@ -66,13 +66,8 @@ def _wait_for_pgid_exit(pgid: int, timeout: float = 60.0) -> bool:
     return not _pgid_still_alive(pgid)
 
 
-def test_kill_process_uses_cached_pgid_if_wrapper_already_exited(monkeypatch):
-    """If the shell wrapper exits before cleanup, still kill its process group.
-
-    Without the cached pgid fallback, ``os.getpgid(proc.pid)`` raises for the
-    dead wrapper and cleanup falls back to ``proc.kill()``, which cannot reach
-    orphaned grandchildren still running in the original process group.
-    """
+def test_kill_process_refuses_cached_pgid_without_live_ownership(monkeypatch, caplog):
+    """A cached numeric group cannot authorize signals after its owner disappears."""
     env = object.__new__(LocalEnvironment)
     proc = SimpleNamespace(
         pid=12345,
@@ -95,7 +90,8 @@ def test_kill_process_uses_cached_pgid_if_wrapper_already_exited(monkeypatch):
 
     env._kill_process(proc)
 
-    assert killpg_calls == [(67890, signal.SIGTERM), (67890, 0)]
+    assert killpg_calls == []
+    assert "cleanup incomplete" in caplog.text
 
 
 def test_wait_for_process_kills_subprocess_on_keyboardinterrupt():

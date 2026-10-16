@@ -9,6 +9,7 @@ survives a wedged wait, and ``on_timeout`` kills the process tree.
 from __future__ import annotations
 
 import time
+import os
 from types import SimpleNamespace
 
 from tools.environments.local import LocalEnvironment
@@ -44,7 +45,9 @@ def test_execute_returns_when_wait_loop_never_returns(monkeypatch):
     assert result["returncode"] == 124
     assert "timed out" in result["output"].lower()
     assert ("kill", fake_proc) in killed
-    assert ("tree", 424242) in killed
+    # POSIX local cleanup must stay inside the per-handle ownership guard.
+    # The native Windows backstop retains its existing dispatch.
+    assert (("tree", 424242) in killed) == (os.name == "nt")
 
 
 def test_execute_parent_interrupt_still_kills_wait_on_deadline_worker(monkeypatch):

@@ -586,7 +586,8 @@ def _cache_dir_accessors(kind: str, constant_name: str, new_subpath: str, old_na
         default = _CACHE_DIR_IMPORT_DEFAULTS.get(constant_name)
         if current is not None and default is not None and current != default:
             d = Path(current)
-        d.mkdir(parents=True, exist_ok=True)
+        from gateway.platforms.media_cache_privacy import secure_media_cache_dir
+        secure_media_cache_dir(d)
         return d
 
     def cleanup(max_age_hours: int = 24) -> int:
@@ -610,7 +611,8 @@ def _looks_like_image(data: bytes) -> bool:
 def _write_cache_file(cache_dir: Path, prefix: str, ext: str, data: bytes) -> str:
     """Write ``data`` to ``<cache_dir>/<prefix>_<uuid12><ext>``; return the path string."""
     filepath = cache_dir / f"{prefix}_{uuid.uuid4().hex[:12]}{ext}"
-    filepath.write_bytes(data)
+    from gateway.platforms.media_cache_privacy import write_cache_file
+    write_cache_file(filepath, data)
     return str(filepath)
 
 
@@ -1476,7 +1478,8 @@ def cache_document_from_bytes(data: bytes, filename: str) -> str:
     # Final safety check: ensure path stays inside cache dir
     if not filepath.resolve().is_relative_to(cache_dir.resolve()):
         raise ValueError(f"Path traversal rejected: {filename!r}")
-    filepath.write_bytes(data)
+    from gateway.platforms.media_cache_privacy import write_cache_file
+    write_cache_file(filepath, data)
     return str(filepath)
 
 

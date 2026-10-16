@@ -765,6 +765,48 @@ def _prepend_shell_init(cmd_string: str, files: list[str]) -> str:
 
 
 # --- Process-group teardown (POSIX) ---
+def _capture_process_identity(proc) -> None:
+    """Keep spawn ownership on this handle, never in a PID-keyed shared registry."""
+    proc._hermes_process_identity = None
+    proc._hermes_pgid = None
+    try:
+        from gateway.status import get_process_start_time
+        start = get_process_start_time(proc.pid)
+        proc._hermes_pgid = os.getpgid(proc.pid)
+        if start is not None and proc.poll() is None:
+            proc._hermes_process_identity = (proc.pid, start)
+    except Exception:
+        # A fast-exiting or unreadable child is not authority to signal a later PID.
+        pass
+
+
+def _owned_process_group(proc) -> int | None:
+    """Return the still-owned group only while the captured wrapper identity matches."""
+    identity = getattr(proc, "_hermes_process_identity", None)
+    if identity is None:
+        return None
+    try:
+        from gateway.status import get_process_start_time, start_time_fingerprints_match
+        pid, expected_start = identity
+        if pid != proc.pid or expected_start is None:
+            return None
+        current = get_process_start_time(pid)
+        if current is None or not start_time_fingerprints_match(expected_start, current):
+            return None
+        pgid = os.getpgid(pid)
+        # New-session children lead their group. A spawner that skipped setsid may
+        # leave them in ours; only the verified wrapper and snapshot can be killed then.
+        if pgid == getattr(proc, "_hermes_pgid", None) and pgid in (pid, os.getpgrp()):
+            return pgid
+    except Exception:
+        pass
+    return None
+
+
+def _cleanup_incomplete() -> None:
+    logger.warning("Local process cleanup incomplete: process ownership could not be verified")
+
+
 def _wait_for_group_exit(proc, pgid: int, timeout: float) -> bool:
     """Wait until the process group is gone, reaping the wrapper as we go (a dead
     but unreaped group leader still makes ``killpg(pgid, 0)`` succeed).
@@ -809,24 +851,34 @@ def _kill_process_group_posix(proc) -> None:
     snapshotted BEFORE the first signal — once the wrapper dies they reparent to
     init — and we wait on the group, not the wrapper, which can exit before
     grandchildren under load. POSIX-only (_IS_WINDOWS handled by the caller)."""
-    try:
-        pgid = os.getpgid(proc.pid)
-    except ProcessLookupError:
-        if (pgid := getattr(proc, "_hermes_pgid", None)) is None:
-            raise
+    pgid = _owned_process_group(proc)
+    if pgid is None:
+        _cleanup_incomplete()
+        return
     try:  # psutil children snapshot; empty on any failure (must never break the kill)
         import psutil
         descendants = psutil.Process(proc.pid).children(recursive=True)
     except Exception:
         descendants = []
+    if _owned_process_group(proc) != pgid:
+        # The lookup above may have raced PID recycling. Do not adopt its children.
+        _cleanup_incomplete()
+        return
     if pgid == os.getpgrp():
         # The child shares OUR group (a spawner that skipped setsid — the Darwin gateway's
         # posix_spawn shim, #107029): killpg would signal the caller itself. Tear down by PID.
         _kill_known_pids(proc, descendants)
+        return
     else:
         try:
             os.killpg(pgid, signal.SIGTERM)  # windows-footgun: ok — POSIX only (see _IS_WINDOWS gate in caller)
             if not _wait_for_group_exit(proc, pgid, 1.0):
+                if _owned_process_group(proc) != pgid:
+                    # Never signal a reused group after the grace period. Only the
+                    # earlier, identity-aware snapshot remains safe to clean up.
+                    _cleanup_incomplete()
+                    _kill_known_pids(proc, descendants)
+                    return
                 os.killpg(pgid, signal.SIGKILL)  # windows-footgun: ok — POSIX only (see _IS_WINDOWS gate in caller)
                 _wait_for_group_exit(proc, pgid, 2.0)
                 with contextlib.suppress(subprocess.TimeoutExpired, OSError):
@@ -840,14 +892,21 @@ def _kill_process_group_posix(proc) -> None:
             # must not escape: the caller still owns the output it drained. Signal the known
             # PIDs instead so a live child (a group we may not signal) cannot outlive us.
             _kill_known_pids(proc, descendants)
+            return
     _sweep_escaped_descendants(descendants, pgid)
 
 
 def _kill_known_pids(proc, descendants) -> None:
-    """KILL the wrapper and its snapshotted descendants by PID (idempotent on zombies)."""
-    for target in (proc, *descendants):
+    """KILL only the verified wrapper and identity-aware snapshotted descendants."""
+    if _owned_process_group(proc) is not None:
         with contextlib.suppress(Exception):
-            target.kill()
+            proc.kill()
+    else:
+        _cleanup_incomplete()
+    for target in descendants:
+        with contextlib.suppress(Exception):
+            if target.is_running():
+                target.kill()
 
 
 def _kill_process_windows(proc) -> None:
@@ -965,8 +1024,7 @@ class LocalEnvironment(BaseEnvironment):
             start_new_session=True, cwd=self.cwd,
             **({"creationflags": windows_hide_flags()} if _IS_WINDOWS else {}))
         if not _IS_WINDOWS:
-            with contextlib.suppress(ProcessLookupError):
-                proc._hermes_pgid = os.getpgid(proc.pid)
+            _capture_process_identity(proc)
         if stdin_data is not None:
             _pipe_stdin(proc, stdin_data)
         return proc
@@ -976,19 +1034,34 @@ class LocalEnvironment(BaseEnvironment):
         try:
             (_kill_process_windows if _IS_WINDOWS else _kill_process_group_posix)(proc)
         except OSError:  # ProcessLookupError / PermissionError included
-            with contextlib.suppress(Exception):
-                proc.kill()
+            if _IS_WINDOWS:
+                with contextlib.suppress(Exception):
+                    proc.kill()
+            else:
+                _cleanup_incomplete()
+
+    def _kill_spawned_tree(self, spawned) -> None:
+        """The local timeout backstop must not retry cleanup using a bare, recycled PID."""
+        if _IS_WINDOWS:
+            return super()._kill_spawned_tree(spawned)
+        self._kill_process(spawned)
 
     def _force_kill_process(self, proc):
         """SIGKILL the whole group with no TERM grace or wait: the caller os._exit()s next."""
         if _IS_WINDOWS:  # already a forced tree kill
             return self._kill_process(proc)
-        with contextlib.suppress(OSError):
-            pgid = getattr(proc, "_hermes_pgid", None) or os.getpgid(proc.pid)
+        pgid = _owned_process_group(proc)
+        if pgid is None:
+            _cleanup_incomplete()
+            return
+        try:
             if pgid != os.getpgrp():  # never our own group (see _kill_process_group_posix)
                 os.killpg(pgid, signal.SIGKILL)  # windows-footgun: ok — POSIX only (_IS_WINDOWS returned above)
-        with contextlib.suppress(OSError):
-            proc.kill()
+            else:
+                # The shared-group path snapshots and kills verified PIDs without a grace wait.
+                _kill_process_group_posix(proc)
+        except OSError:
+            logger.warning("Local process cleanup incomplete: owned process could not be signalled")
 
     def _extract_cwd_from_output(self, result: dict):
         """Base semantics plus: Git Bash ``pwd -P`` emits MSYS form on Windows —
