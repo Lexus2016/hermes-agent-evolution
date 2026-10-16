@@ -26,7 +26,7 @@ def check_repository_edits(root, base="origin/main"):
             if target.is_symlink():
                 errors.append(f"{path}: symbolic-link skills require manual review")
                 continue
-            new = target.read_text(encoding="utf-8") if target.exists() else ""
+            new = target.read_text(encoding="utf-8-sig") if target.exists() else ""
             if error := check_contract_edit(new, old):
                 errors.append(f"{path}: {error}")
         return errors

@@ -642,8 +642,9 @@ class TestInstallEvolutionHelpers:
 
         assert mod._install_evolution_helpers(repo) == []
 
+    @pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
     def test_installs_only_imported_siblings_despite_unparseable_family_file(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, encoding
     ):
         """Missing/non-local imports and one broken file cannot stop the install."""
         mod = _import_module()
@@ -660,7 +661,7 @@ class TestInstallEvolutionHelpers:
             "    from scripts.delegation_escalation_report import summarize\n"
             "except ModuleNotFoundError:\n"
             "    from delegation_escalation_report import summarize\n",
-            encoding="utf-8",
+            encoding=encoding,
         )
         (scripts / "evolution_broken.py").write_text("def (:\n", encoding="utf-8")
         home = tmp_path / "hermes-home"

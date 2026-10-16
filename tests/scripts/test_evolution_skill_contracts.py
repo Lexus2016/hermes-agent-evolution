@@ -61,8 +61,9 @@ def test_pre_pr_rejects_skill_only_regression_without_mutation(repo, change):
     assert before == {p.relative_to(root): p.read_bytes() for p in root.glob("skills/**/*") if p.is_file()}
 
 
-def test_valid_versioned_edit_and_missing_baseline(repo):
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+def test_valid_versioned_edit_and_missing_baseline(repo, encoding):
     root, target, base = repo
-    target.write_text(BASE.replace("version: 1", "version: 2") + "More detail.\n", encoding="utf-8")
+    target.write_text(BASE.replace("version: 1", "version: 2") + "More detail.\n", encoding=encoding)
     assert check_repository_edits(root, base) == []
     assert check_repository_edits(root, "missing-ref")

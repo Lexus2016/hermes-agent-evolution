@@ -364,7 +364,7 @@ def _evolution_sibling_modules(repo_root: Path, family: list[Path]) -> list[str]
     candidates: set[str] = set()
     for path in family:
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"))
         except (OSError, SyntaxError, ValueError):
             continue  # fail-open: an unparseable file must not block the deploy
         for node in ast.walk(tree):
