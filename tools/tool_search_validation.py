@@ -240,4 +240,4 @@ def not_deferrable_error(name: str) -> str:
             else " Use tool_search to find the exact name.")
     return (f"'{name}' is not a deferrable tool and is not a known tool name. "
             f"Deferred tools must be invoked through tool_call "
-            f"by the exact name tool_search returns (e.g. mcp__<server>__<tool>).{hint}")
+            f"by the exact name tool_search returns (e.g. mcp__{{server}}__{{tool}}).{hint}")

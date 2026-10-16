@@ -54,3 +54,4 @@ def test_tool_error_strings_have_no_role_tag():
         partition_calls([{"name": "connectors__bad", "arguments": {}}]).errors[0]["error"]["message"],
     ]
     assert [m for m in messages if ROLE_TAG.search(m)] == []
+    assert "mcp__{server}__{tool}" in messages[0]
