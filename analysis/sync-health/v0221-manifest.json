@@ -12290,6 +12290,140 @@
           "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
         }
       ]
+    },
+    {
+      "id": "qq-metadata-01",
+      "status": "reviewed",
+      "path": "tools/send_message_senders.py",
+      "scope": "_qqbot_upload_local_file",
+      "rule": "ASYNC240",
+      "detail": "blocking path call in async def",
+      "code": "local_path = _Path(media_path).expanduser()",
+      "candidate_blob": "0e60ba0139eba24cbf52e4cf141fdb3b1c691b2d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tools/send_message_senders.py",
+        "scope": "_qqbot_upload_local_file",
+        "blob": "0e60ba0139eba24cbf52e4cf141fdb3b1c691b2d"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent controller source review; owner-approved exact preparation only",
+        "compatibility": "The flagged operations expand/resolve a local path and test existence/file type. They do not read media contents or scale their byte work with media size. ChunkedUploader.upload offloads whole-file hashing with run_in_executor; _upload_one_part offloads chunk reading the same way. The potentially large media I/O is already outside the event loop. The standard synchronous send_message tool dispatches _send_to_platform through model_tools._run_async; these direct REST helper probes are separate from the QQ websocket adapter sender. _run_async uses the tool/worker loop and creates a fresh worker when called under an existing running loop. The uploader flow tests cover a real temporary 8 MB file split across two parts with fake HTTP, plus group endpoint behavior. Direct-send routing/fallback tests also pass. Direct-send media tests substitute the upload helper at their transport seam; actual file hashing/part reads are covered separately by ChunkedUploader tests. No slow-mount latency guarantee was measured. Path resolution, existence/type checks, and the uploader preflight stat can block on unhealthy or network-mounted filesystems despite not reading file contents. Any acceptance must be limited to this existing metadata-preflight scope.",
+        "module_bindings": "Direct send dispatch and executor-backed chunked uploader remain canonical; dependency blobs bind reviewed call flow and tests.",
+        "receipt": "78 passing canonical QQ routing/upload/fallback tests; fake transport and normal temporary filesystem only, no live provider or timing guarantee."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-qq-metadata-review.json",
+          "blob": "2bb2140df0cdbd9542b8999681fdc261bc075b69",
+          "outcome": "passed",
+          "claim": "Exact per-scope source review and embedded78-pass receipt with explicit filesystem latency limits."
+        },
+        {
+          "path": "gateway/platforms/qqbot/chunked_upload.py",
+          "blob": "f74ef1ae6559b263115a7942fdf74de7561b529d",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dispatch/uploader or exact bounded regression source dependency."
+        },
+        {
+          "path": "tools/send_message_tool.py",
+          "blob": "28815e637e9d50363356e6f44c1bd89ae34607a8",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dispatch/uploader or exact bounded regression source dependency."
+        },
+        {
+          "path": "model_tools.py",
+          "blob": "b7c7cffa23a2b484f8e048371e6055d05e14ba67",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dispatch/uploader or exact bounded regression source dependency."
+        },
+        {
+          "path": "tests/gateway/test_qqbot.py",
+          "blob": "df6b436fd8a2da2ef97da056875c30cc10d1dd2f",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dispatch/uploader or exact bounded regression source dependency."
+        },
+        {
+          "path": "tests/gateway/test_qqbot_scope_paths.py",
+          "blob": "30890e41d42cbf0ca46cea8a3d5ecdd5a0787011",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dispatch/uploader or exact bounded regression source dependency."
+        },
+        {
+          "path": "tests/tools/test_qqbot_send_message_media.py",
+          "blob": "2760f65e706a7853b4c342090c288120ae634f7c",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dispatch/uploader or exact bounded regression source dependency."
+        }
+      ]
+    },
+    {
+      "id": "qq-metadata-02",
+      "status": "reviewed",
+      "path": "tools/send_message_senders.py",
+      "scope": "_send_qqbot",
+      "rule": "ASYNC240",
+      "detail": "blocking path call in async def",
+      "code": "if not os.path.exists(media_path):",
+      "candidate_blob": "0e60ba0139eba24cbf52e4cf141fdb3b1c691b2d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tools/send_message_senders.py",
+        "scope": "_send_qqbot",
+        "blob": "0e60ba0139eba24cbf52e4cf141fdb3b1c691b2d"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent controller source review; owner-approved exact preparation only",
+        "compatibility": "The flagged operation is one os.path.exists metadata probe per nonempty media item. It performs no bulk file read. URL media is subsequently recognized and passed to the URL-upload path. A missing local file produces an omission warning and continues delivery; when all media fail, the caption/message is delivered as text. Existing tests explicitly verify those preservation contracts. The downstream local upload path already offloads content hashing and chunk reads. Profile-scoped direct-send credential tests pass alongside media delivery tests. As with _qqbot_upload_local_file, the production direct-send entry is routed through model_tools._run_async rather than being the QQ websocket adapter sender. The number of metadata probes scales with the requested attachment list; there is no claimed strict wall-clock bound. Tests use fake provider transport and do not exercise live QQ service or pathological storage. A single exists probe can still stall on unhealthy or network-backed storage. This is bounded metadata work per attachment, not a proof of nonblocking operation and not a general async-I/O allowance.",
+        "module_bindings": "Direct send dispatch and executor-backed chunked uploader remain canonical; dependency blobs bind reviewed call flow and tests.",
+        "receipt": "78 passing canonical QQ routing/upload/fallback tests; fake transport and normal temporary filesystem only, no live provider or timing guarantee."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-qq-metadata-review.json",
+          "blob": "2bb2140df0cdbd9542b8999681fdc261bc075b69",
+          "outcome": "passed",
+          "claim": "Exact per-scope source review and embedded78-pass receipt with explicit filesystem latency limits."
+        },
+        {
+          "path": "gateway/platforms/qqbot/chunked_upload.py",
+          "blob": "f74ef1ae6559b263115a7942fdf74de7561b529d",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dispatch/uploader or exact bounded regression source dependency."
+        },
+        {
+          "path": "tools/send_message_tool.py",
+          "blob": "28815e637e9d50363356e6f44c1bd89ae34607a8",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dispatch/uploader or exact bounded regression source dependency."
+        },
+        {
+          "path": "model_tools.py",
+          "blob": "b7c7cffa23a2b484f8e048371e6055d05e14ba67",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dispatch/uploader or exact bounded regression source dependency."
+        },
+        {
+          "path": "tests/gateway/test_qqbot.py",
+          "blob": "df6b436fd8a2da2ef97da056875c30cc10d1dd2f",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dispatch/uploader or exact bounded regression source dependency."
+        },
+        {
+          "path": "tests/gateway/test_qqbot_scope_paths.py",
+          "blob": "30890e41d42cbf0ca46cea8a3d5ecdd5a0787011",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dispatch/uploader or exact bounded regression source dependency."
+        },
+        {
+          "path": "tests/tools/test_qqbot_send_message_media.py",
+          "blob": "2760f65e706a7853b4c342090c288120ae634f7c",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dispatch/uploader or exact bounded regression source dependency."
+        }
+      ]
     }
   ]
 }
