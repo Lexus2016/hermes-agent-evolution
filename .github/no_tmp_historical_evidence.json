@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "purpose": "Reviewed inert sync evidence at the pinned source checkpoint; historical paths are data, not executable code, prompts, or runnable documentation.",
-  "source_commit": "189a83df0813e28f3bfc250b67a869e7771e4419",
+  "source_commit": "de4f4465b638430ce3506c21fbe0dd879fcb3f46",
   "files": [
     {
       "path": "analysis/sync-health/v0221-9ad6-main365-health-report.json.parts/0001.txt",
@@ -117,11 +117,11 @@
     },
     {
       "path": "analysis/sync-health/v0221-manifest.json.parts/0003.txt",
-      "sha256": "8177f9efe3355cfdf33a6cdb7ca540d8279475433489b7f9f90f34c4cb968d20"
+      "sha256": "540ddc61b08d1b617f12d5c2b64a66db50c0a8d2c6cac4eb5057ce4662224a21"
     },
     {
       "path": "analysis/sync-health/v0221-manifest.json.parts/0004.txt",
-      "sha256": "4b75f44513e3aad1d78b481f83302ebe6a23defd39f0ecc3ea0d92916a58a915"
+      "sha256": "b6a7afca6bd7338a33be3d5d503bc330d48b51364334cb15bbf25197f2290bb1"
     },
     {
       "path": "analysis/sync-health/v0221-plugin-declaration-boundary-review.json",
