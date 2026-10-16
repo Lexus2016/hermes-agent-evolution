@@ -1,0 +1,256 @@
+{
+  "scope": "Six exact individually reviewed findings. Preparation only; no activation. Optional truststore coverage is missing-import-only; enterprise CA reachability remains unvalidated. Unknown agent findings excluded.",
+  "recommendations": [
+    {
+      "path": "agent/anthropic_adapter.py",
+      "rule": "BLE001",
+      "scope": "_get_anthropic_sdk",
+      "line": 49,
+      "detail": "blind `except Exception`",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [],
+      "exact_unit_matches": [
+        "upstream"
+      ],
+      "status": "supported",
+      "rationale": "Lazy PM setup failure is saved; real SDK import is still attempted. Missing SDK raises feature-specific ImportError retaining restart reason, not alternate credentials.",
+      "test": "tests/agent/test_anthropic_adapter.py",
+      "receipt": "/tmp/hermes-agent-sdk-risk-tests.log",
+      "candidate_blob": "1656471433815df8c963b1e518a47f31225e4097",
+      "test_blob": "7324fbc555c41402ddd9ea6c44161a4a098e2d74",
+      "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_anthropic_adapter.py -q -k missing_sdk_error_reports",
+      "receipt_sha256": "5353866e42fc56855c2de45120ee0e9f33f3c6735023aaf963ad6157393c40e2",
+      "limits": "Receipt injects PM InstallError/restart and missing actual SDK through build_anthropic_client; no live installation or provider call. This does not validate all PM failures or raw exception-message sanitation.",
+      "references": [
+        {
+          "path": "tests/agent/test_anthropic_adapter.py",
+          "blob": "7324fbc555c41402ddd9ea6c44161a4a098e2d74"
+        },
+        {
+          "path": "pm/__init__.py",
+          "blob": "b738469c81615aa214f9f5eba2a409629e4ad734"
+        },
+        {
+          "path": "pm/extras.py",
+          "blob": "213d39026f49b658502b328df6dee2d93cafd8d0"
+        },
+        {
+          "path": "pm/package.py",
+          "blob": "e0a3073d39e635a85393b0fb9a916d3007e665b4"
+        }
+      ]
+    },
+    {
+      "path": "agent/bedrock_adapter.py",
+      "rule": "BLE001",
+      "scope": "_require_boto3",
+      "line": 106,
+      "detail": "blind `except Exception`",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "status": "supported",
+      "rationale": "Lazy setup failure falls through to real import; missing SDK raises explicit ImportError preserving install/restart reason. Version checks remain.",
+      "test": "tests/agent/test_bedrock_adapter.py",
+      "receipt": "/tmp/hermes-agent-boundary-risk-tests.log",
+      "candidate_blob": "6e92773da0cb7959ee2efbd2419d3891935db355",
+      "test_blob": "67d7aac959fe249a464174f1368e13519238e54d",
+      "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_ssl_verify.py tests/agent/test_bedrock_adapter.py tests/agent/test_relay_runtime_plugins.py -q -k 'truststore_failure or activation_report_controls or lazy_install or restart'",
+      "receipt_sha256": "d94ccf2370f400b565db487ba569d72a52f8508a5c89468975896d069959e913",
+      "limits": "Receipt injects PM InstallError/restart and missing boto3; no AWS calls or live dependency install. No claim covering every installation exception.",
+      "references": [
+        {
+          "path": "tests/agent/test_bedrock_adapter.py",
+          "blob": "67d7aac959fe249a464174f1368e13519238e54d"
+        },
+        {
+          "path": "pm/__init__.py",
+          "blob": "b738469c81615aa214f9f5eba2a409629e4ad734"
+        },
+        {
+          "path": "pm/extras.py",
+          "blob": "213d39026f49b658502b328df6dee2d93cafd8d0"
+        },
+        {
+          "path": "pm/package.py",
+          "blob": "e0a3073d39e635a85393b0fb9a916d3007e665b4"
+        }
+      ]
+    },
+    {
+      "path": "agent/micro_compaction.py",
+      "rule": "BLE001",
+      "scope": "MicroCompactionMixin._micro_start_watermark",
+      "line": 403,
+      "detail": "blind `except Exception`",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "status": "supported",
+      "rationale": "Watermark read error returns explicit watermark_unavailable, skipping pass; never interpreted as None/archive-all. Race tests preserve live messages.",
+      "test": "tests/agent/test_micro_compaction.py",
+      "receipt": "/tmp/hermes-agent-watermark-risk-tests.log",
+      "candidate_blob": "42cad0c2d826e968841a0a89e50038ed619e18e9",
+      "test_blob": "a62d3a05e6cbf4c7755b84f015327f789a8d184f",
+      "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_micro_compaction.py -q -k watermark_read_fails",
+      "receipt_sha256": "e9ec4dfc38ad17d1d4d509940b688d92dd00b8371056e77f8a038131d96232b5",
+      "limits": "Injected real DB watermark read failure covers prune/micro pass no-op, held list identity, rolling summary and retained live rows; no arbitrary DB failure or remote-store guarantees.",
+      "references": [
+        {
+          "path": "tests/agent/test_micro_compaction.py",
+          "blob": "a62d3a05e6cbf4c7755b84f015327f789a8d184f"
+        },
+        {
+          "path": "agent/context_compressor.py",
+          "blob": "ab0c152ea66d4c1321738335bfbe0fa3efb1ffd0"
+        },
+        {
+          "path": "hermes_state_messages.py",
+          "blob": "c0d3bd7c9194900bd85cd13d95f3bc091d87aaf5"
+        }
+      ]
+    },
+    {
+      "path": "agent/model_metadata_http.py",
+      "rule": "S110",
+      "scope": "resolve_verify",
+      "line": 16,
+      "detail": "try/except/pass",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "status": "supported",
+      "rationale": "Custom-provider discovery failure retains verified default TLS; existing config-error cases assert CERT_REQUIRED/check_hostname or True, with and without ambient CA. This does not prove arbitrary enterprise CA availability. Redirect credential scoping remains separate.",
+      "test": "tests/agent/test_custom_provider_ca_probes.py",
+      "receipt": "/tmp/hermes-agent-metadata-risk-tests.log",
+      "candidate_blob": "b408724c63207b386972d902d304cc2e0c75676e",
+      "test_blob": "e56254a463a861bc4d3f16590bb827d0930d7aa0",
+      "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_custom_provider_ca_probes.py -q",
+      "receipt_sha256": "1d5e1111b93c9e9835df5c85b183e84f58140bca69b06e6629738c3c4044dd12",
+      "limits": "Receipt covers config discovery error and verified-default construction with/without ambient CA settings. Enterprise/private CA reachability and intentional CA restriction availability are not established; fallback does not disable TLS verification.",
+      "references": [
+        {
+          "path": "tests/agent/test_custom_provider_ca_probes.py",
+          "blob": "e56254a463a861bc4d3f16590bb827d0930d7aa0"
+        },
+        {
+          "path": "agent/ssl_verify.py",
+          "blob": "2cd20238b442b7a317979fee41ae28a172e72f2f"
+        },
+        {
+          "path": "hermes_cli/config.py",
+          "blob": "a7c32358fb4a7ec38d374f9d3efb86f10114e534"
+        },
+        {
+          "path": "hermes_cli/urllib_security.py",
+          "blob": "00ee6ce165e816c7cabb3c086aaaa97c5d0853a5"
+        }
+      ]
+    },
+    {
+      "path": "agent/model_metadata_http.py",
+      "rule": "BLE001",
+      "scope": "resolve_verify",
+      "line": 16,
+      "detail": "blind `except Exception`",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "status": "supported",
+      "rationale": "Custom-provider discovery failure retains verified default TLS; existing config-error cases assert CERT_REQUIRED/check_hostname or True, with and without ambient CA. This does not prove arbitrary enterprise CA availability. Redirect credential scoping remains separate.",
+      "test": "tests/agent/test_custom_provider_ca_probes.py",
+      "receipt": "/tmp/hermes-agent-metadata-risk-tests.log",
+      "candidate_blob": "b408724c63207b386972d902d304cc2e0c75676e",
+      "test_blob": "e56254a463a861bc4d3f16590bb827d0930d7aa0",
+      "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_custom_provider_ca_probes.py -q",
+      "receipt_sha256": "1d5e1111b93c9e9835df5c85b183e84f58140bca69b06e6629738c3c4044dd12",
+      "limits": "Receipt covers config discovery error and verified-default construction with/without ambient CA settings. Enterprise/private CA reachability and intentional CA restriction availability are not established; fallback does not disable TLS verification.",
+      "references": [
+        {
+          "path": "tests/agent/test_custom_provider_ca_probes.py",
+          "blob": "e56254a463a861bc4d3f16590bb827d0930d7aa0"
+        },
+        {
+          "path": "agent/ssl_verify.py",
+          "blob": "2cd20238b442b7a317979fee41ae28a172e72f2f"
+        },
+        {
+          "path": "hermes_cli/config.py",
+          "blob": "a7c32358fb4a7ec38d374f9d3efb86f10114e534"
+        },
+        {
+          "path": "hermes_cli/urllib_security.py",
+          "blob": "00ee6ce165e816c7cabb3c086aaaa97c5d0853a5"
+        }
+      ]
+    },
+    {
+      "path": "agent/ssl_verify.py",
+      "rule": "BLE001",
+      "scope": "install_truststore",
+      "line": 55,
+      "detail": "blind `except Exception`",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "status": "supported",
+      "rationale": "Optional OS truststore failure warns and uses OpenSSL verified defaults, never CERT_NONE. Child-process missing-import regression checks repeat calls and hostname verification.",
+      "test": "tests/agent/test_ssl_verify.py",
+      "receipt": "/tmp/hermes-agent-boundary-risk-tests.log",
+      "candidate_blob": "2cd20238b442b7a317979fee41ae28a172e72f2f",
+      "test_blob": "07b571346f32ee0744cd931617af4df27cc3a3af",
+      "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_ssl_verify.py tests/agent/test_bedrock_adapter.py tests/agent/test_relay_runtime_plugins.py -q -k 'truststore_failure or activation_report_controls or lazy_install or restart'",
+      "receipt_sha256": "d94ccf2370f400b565db487ba569d72a52f8508a5c89468975896d069959e913",
+      "limits": "Only missing truststore import is failure-tested. No coverage claim for partial inject_into_ssl failure, every truststore version, enterprise CA reachability, or a live TLS handshake.",
+      "references": [
+        {
+          "path": "tests/agent/test_ssl_verify.py",
+          "blob": "07b571346f32ee0744cd931617af4df27cc3a3af"
+        },
+        {
+          "path": "agent/model_metadata_http.py",
+          "blob": "b408724c63207b386972d902d304cc2e0c75676e"
+        }
+      ]
+    }
+  ],
+  "receipts": {
+    "/tmp/hermes-agent-sdk-risk-tests.log": {
+      "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_anthropic_adapter.py -q -k missing_sdk_error_reports",
+      "sha256": "5353866e42fc56855c2de45120ee0e9f33f3c6735023aaf963ad6157393c40e2",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~102 tests) under ['tests/agent/test_anthropic_adapter.py']; running with -j 9\n[100.0% |   102/~102 | \u27131 | \u27170] \u2713 tests/agent/test_anthropic_adapter.py (1\u2713, 0.8s)\n\n=== Summary: 1 files, 1 tests passed, 0 failed (100% complete) in 0.8s (9 workers) ===\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 0.8s  (runner wall: 0.8s, parallelism: 9x)\n  P50: 0.75s  P90: 0.75s  P95: 0.75s  P99: 0.75s  Max: 0.75s\n  <1s: 1 files (100%)  <2s: 1 files (100%)\n  Top 10 slowest:\n      0.75s  tests/agent/test_anthropic_adapter.py\n"
+    },
+    "/tmp/hermes-agent-boundary-risk-tests.log": {
+      "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_ssl_verify.py tests/agent/test_bedrock_adapter.py tests/agent/test_relay_runtime_plugins.py -q -k 'truststore_failure or activation_report_controls or lazy_install or restart'",
+      "sha256": "d94ccf2370f400b565db487ba569d72a52f8508a5c89468975896d069959e913",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 3 test files (~130 tests) under ['tests/agent/test_ssl_verify.py', 'tests/agent/test_bedrock_adapter.py', 'tests/agent/test_relay_runtime_plugins.py']; running with -j 9\n[ 23.8% |    31/~130 | \u27137 | \u27170] \u2713 tests/agent/test_relay_runtime_plugins.py (7\u2713, 0.8s)\n[ 29.2% |    38/~130 | \u27138 | \u27170] \u2713 tests/agent/test_ssl_verify.py (1\u2713, 0.8s)\n[100.0% |   130/~130 | \u27139 | \u27170] \u2713 tests/agent/test_bedrock_adapter.py (1\u2713, 0.9s)\n\n=== Summary: 3 files, 9 tests passed, 0 failed (100% complete) in 0.9s (9 workers) ===\n  Durations cached to test_durations.json (3 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   3\n  Total subprocess CPU-wall: 2.5s  (runner wall: 0.9s, parallelism: 9x)\n  P50: 0.84s  P90: 0.86s  P95: 0.86s  P99: 0.86s  Max: 0.86s\n  <1s: 3 files (100%)  <2s: 3 files (100%)\n  Top 10 slowest:\n      0.86s  tests/agent/test_bedrock_adapter.py\n      0.84s  tests/agent/test_ssl_verify.py\n      0.76s  tests/agent/test_relay_runtime_plugins.py\n"
+    },
+    "/tmp/hermes-agent-watermark-risk-tests.log": {
+      "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_micro_compaction.py -q -k watermark_read_fails",
+      "sha256": "e9ec4dfc38ad17d1d4d509940b688d92dd00b8371056e77f8a038131d96232b5",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~37 tests) under ['tests/agent/test_micro_compaction.py']; running with -j 9\n[100.0% |    37/~37 | \u27132 | \u27170] \u2713 tests/agent/test_micro_compaction.py (2\u2713, 0.8s)\n\n=== Summary: 1 files, 2 tests passed, 0 failed (100% complete) in 0.9s (9 workers) ===\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 0.8s  (runner wall: 0.9s, parallelism: 9x)\n  P50: 0.85s  P90: 0.85s  P95: 0.85s  P99: 0.85s  Max: 0.85s\n  <1s: 1 files (100%)  <2s: 1 files (100%)\n  Top 10 slowest:\n      0.85s  tests/agent/test_micro_compaction.py\n"
+    },
+    "/tmp/hermes-agent-metadata-risk-tests.log": {
+      "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_custom_provider_ca_probes.py -q",
+      "sha256": "1d5e1111b93c9e9835df5c85b183e84f58140bca69b06e6629738c3c4044dd12",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~2 tests) under ['tests/agent/test_custom_provider_ca_probes.py']; running with -j 9\n[100.0% |     2/~2 | \u27139 | \u27170] \u2713 tests/agent/test_custom_provider_ca_probes.py (9\u2713, 0.8s)\n\n=== Summary: 1 files, 9 tests passed, 0 failed (100% complete) in 0.8s (9 workers) ===\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 0.8s  (runner wall: 0.8s, parallelism: 9x)\n  P50: 0.84s  P90: 0.84s  P95: 0.84s  P99: 0.84s  Max: 0.84s\n  <1s: 1 files (100%)  <2s: 1 files (100%)\n  Top 10 slowest:\n      0.84s  tests/agent/test_custom_provider_ca_probes.py\n"
+    }
+  }
+}

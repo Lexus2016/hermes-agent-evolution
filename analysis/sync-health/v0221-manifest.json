@@ -11977,6 +11977,319 @@
           "claim": "Exact reviewed source dependency or test exercising the named exception boundary."
         }
       ]
+    },
+    {
+      "id": "agent-failure-boundary-01",
+      "status": "reviewed",
+      "path": "agent/anthropic_adapter.py",
+      "scope": "_get_anthropic_sdk",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as exc:",
+      "candidate_blob": "1656471433815df8c963b1e518a47f31225e4097",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/anthropic_adapter.py",
+        "scope": "_get_anthropic_sdk",
+        "blob": "73e1d191060cab18c012bb71fdae5833179d21cf",
+        "unit_body_hash": "9bc9aa7fc1cfb045"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Owner-approved six-case preparation; independent controller identity review pending",
+        "compatibility": "Lazy PM setup failure is saved; real SDK import is still attempted. Missing SDK raises feature-specific ImportError retaining restart reason, not alternate credentials. Receipt injects PM InstallError/restart and missing actual SDK through build_anthropic_client; no live installation or provider call. This does not validate all PM failures or raw exception-message sanitation.",
+        "module_bindings": "Modified module review against pinned upstream: additions are compaction beta/config and request kwargs. The SDK sentinels _anthropic_sdk/_anthropic_install_error, local pm.ensure_import import, actual anthropic import, _require_sdk consumer and build_anthropic_client route retain their original ownership; no alias moved or overwritten. Failure test calls actual build_anthropic_client with mocked import unavailable.",
+        "receipt": "/tmp/hermes-agent-sdk-risk-tests.log; HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_anthropic_adapter.py -q -k missing_sdk_error_reports"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-agent-boundary-review.json",
+          "blob": "e2d01044e103718b7fa358b83bb1334921401447",
+          "outcome": "passed",
+          "claim": "Exact named bounded canonical failure receipts and source/global-binding review; explicit limits retained."
+        },
+        {
+          "path": "tests/agent/test_anthropic_adapter.py",
+          "blob": "7324fbc555c41402ddd9ea6c44161a4a098e2d74",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "pm/__init__.py",
+          "blob": "b738469c81615aa214f9f5eba2a409629e4ad734",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "pm/extras.py",
+          "blob": "213d39026f49b658502b328df6dee2d93cafd8d0",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "pm/package.py",
+          "blob": "e0a3073d39e635a85393b0fb9a916d3007e665b4",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        }
+      ]
+    },
+    {
+      "id": "agent-failure-boundary-02",
+      "status": "reviewed",
+      "path": "agent/bedrock_adapter.py",
+      "scope": "_require_boto3",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as exc:",
+      "candidate_blob": "6e92773da0cb7959ee2efbd2419d3891935db355",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/bedrock_adapter.py",
+        "scope": "_require_boto3",
+        "blob": "6e92773da0cb7959ee2efbd2419d3891935db355"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Owner-approved six-case preparation; independent controller identity review pending",
+        "compatibility": "Lazy setup failure falls through to real import; missing SDK raises explicit ImportError preserving install/restart reason. Version checks remain. Receipt injects PM InstallError/restart and missing boto3; no AWS calls or live dependency install. No claim covering every installation exception.",
+        "module_bindings": "Whole adapter matches pinned upstream. Local pm.ensure_import resolves through canonical pm lazy export to pm.extras, then real boto3 import and version check remain. Existing failure test patches canonical pm.ensure_import and sys.modules, not a duplicate alias. No AWS call is executed.",
+        "receipt": "/tmp/hermes-agent-boundary-risk-tests.log; HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_ssl_verify.py tests/agent/test_bedrock_adapter.py tests/agent/test_relay_runtime_plugins.py -q -k 'truststore_failure or activation_report_controls or lazy_install or restart'"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-agent-boundary-review.json",
+          "blob": "e2d01044e103718b7fa358b83bb1334921401447",
+          "outcome": "passed",
+          "claim": "Exact named bounded canonical failure receipts and source/global-binding review; explicit limits retained."
+        },
+        {
+          "path": "tests/agent/test_bedrock_adapter.py",
+          "blob": "67d7aac959fe249a464174f1368e13519238e54d",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "pm/__init__.py",
+          "blob": "b738469c81615aa214f9f5eba2a409629e4ad734",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "pm/extras.py",
+          "blob": "213d39026f49b658502b328df6dee2d93cafd8d0",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "pm/package.py",
+          "blob": "e0a3073d39e635a85393b0fb9a916d3007e665b4",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        }
+      ]
+    },
+    {
+      "id": "agent-failure-boundary-03",
+      "status": "reviewed",
+      "path": "agent/micro_compaction.py",
+      "scope": "MicroCompactionMixin._micro_start_watermark",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as exc:",
+      "candidate_blob": "42cad0c2d826e968841a0a89e50038ed619e18e9",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/micro_compaction.py",
+        "scope": "MicroCompactionMixin._micro_start_watermark",
+        "blob": "42cad0c2d826e968841a0a89e50038ed619e18e9"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Owner-approved six-case preparation; independent controller identity review pending",
+        "compatibility": "Watermark read error returns explicit watermark_unavailable, skipping pass; never interpreted as None/archive-all. Race tests preserve live messages. Injected real DB watermark read failure covers prune/micro pass no-op, held list identity, rolling summary and retained live rows; no arbitrary DB failure or remote-store guarantees.",
+        "module_bindings": "Whole micro-compaction module matches pinned upstream. _cc resolves canonical agent.context_compressor at call time; watermark comes from the live session DB. Existing test invokes prune/micro paths and real DB state with injected watermark error, then checks held identity, rolling summary and live generation after finalizer-like append. Modified canonical context_compressor and state dependencies are bound explicitly.",
+        "receipt": "/tmp/hermes-agent-watermark-risk-tests.log; HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_micro_compaction.py -q -k watermark_read_fails"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-agent-boundary-review.json",
+          "blob": "e2d01044e103718b7fa358b83bb1334921401447",
+          "outcome": "passed",
+          "claim": "Exact named bounded canonical failure receipts and source/global-binding review; explicit limits retained."
+        },
+        {
+          "path": "tests/agent/test_micro_compaction.py",
+          "blob": "a62d3a05e6cbf4c7755b84f015327f789a8d184f",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "agent/context_compressor.py",
+          "blob": "ab0c152ea66d4c1321738335bfbe0fa3efb1ffd0",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "hermes_state_messages.py",
+          "blob": "c0d3bd7c9194900bd85cd13d95f3bc091d87aaf5",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        }
+      ]
+    },
+    {
+      "id": "agent-failure-boundary-04",
+      "status": "reviewed",
+      "path": "agent/model_metadata_http.py",
+      "scope": "resolve_verify",
+      "rule": "S110",
+      "detail": "try/except/pass",
+      "code": "except Exception:",
+      "candidate_blob": "b408724c63207b386972d902d304cc2e0c75676e",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/model_metadata_http.py",
+        "scope": "resolve_verify",
+        "blob": "b408724c63207b386972d902d304cc2e0c75676e"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Owner-approved six-case preparation; independent controller identity review pending",
+        "compatibility": "Custom-provider discovery failure retains verified default TLS; existing config-error cases assert CERT_REQUIRED/check_hostname or True, with and without ambient CA. This does not prove arbitrary enterprise CA availability. Redirect credential scoping remains separate. Receipt covers config discovery error and verified-default construction with/without ambient CA settings. Enterprise/private CA reachability and intentional CA restriction availability are not established; fallback does not disable TLS verification.",
+        "module_bindings": "Whole metadata module matches pinned upstream. Local config getter lookup remains canonical and downstream resolve_httpx_verify uses current SSL module. Test patches provider catalog discovery through config, not the resolve_verify seam, so caught failure returns verified defaults. Network request/redirect hooks unchanged; no enterprise endpoint reachability claim.",
+        "receipt": "/tmp/hermes-agent-metadata-risk-tests.log; HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_custom_provider_ca_probes.py -q"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-agent-boundary-review.json",
+          "blob": "e2d01044e103718b7fa358b83bb1334921401447",
+          "outcome": "passed",
+          "claim": "Exact named bounded canonical failure receipts and source/global-binding review; explicit limits retained."
+        },
+        {
+          "path": "tests/agent/test_custom_provider_ca_probes.py",
+          "blob": "e56254a463a861bc4d3f16590bb827d0930d7aa0",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "agent/ssl_verify.py",
+          "blob": "2cd20238b442b7a317979fee41ae28a172e72f2f",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "hermes_cli/config.py",
+          "blob": "a7c32358fb4a7ec38d374f9d3efb86f10114e534",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "hermes_cli/urllib_security.py",
+          "blob": "00ee6ce165e816c7cabb3c086aaaa97c5d0853a5",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        }
+      ]
+    },
+    {
+      "id": "agent-failure-boundary-05",
+      "status": "reviewed",
+      "path": "agent/model_metadata_http.py",
+      "scope": "resolve_verify",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception:",
+      "candidate_blob": "b408724c63207b386972d902d304cc2e0c75676e",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/model_metadata_http.py",
+        "scope": "resolve_verify",
+        "blob": "b408724c63207b386972d902d304cc2e0c75676e"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Owner-approved six-case preparation; independent controller identity review pending",
+        "compatibility": "Custom-provider discovery failure retains verified default TLS; existing config-error cases assert CERT_REQUIRED/check_hostname or True, with and without ambient CA. This does not prove arbitrary enterprise CA availability. Redirect credential scoping remains separate. Receipt covers config discovery error and verified-default construction with/without ambient CA settings. Enterprise/private CA reachability and intentional CA restriction availability are not established; fallback does not disable TLS verification.",
+        "module_bindings": "Whole metadata module matches pinned upstream. Local config getter lookup remains canonical and downstream resolve_httpx_verify uses current SSL module. Test patches provider catalog discovery through config, not the resolve_verify seam, so caught failure returns verified defaults. Network request/redirect hooks unchanged; no enterprise endpoint reachability claim.",
+        "receipt": "/tmp/hermes-agent-metadata-risk-tests.log; HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_custom_provider_ca_probes.py -q"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-agent-boundary-review.json",
+          "blob": "e2d01044e103718b7fa358b83bb1334921401447",
+          "outcome": "passed",
+          "claim": "Exact named bounded canonical failure receipts and source/global-binding review; explicit limits retained."
+        },
+        {
+          "path": "tests/agent/test_custom_provider_ca_probes.py",
+          "blob": "e56254a463a861bc4d3f16590bb827d0930d7aa0",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "agent/ssl_verify.py",
+          "blob": "2cd20238b442b7a317979fee41ae28a172e72f2f",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "hermes_cli/config.py",
+          "blob": "a7c32358fb4a7ec38d374f9d3efb86f10114e534",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "hermes_cli/urllib_security.py",
+          "blob": "00ee6ce165e816c7cabb3c086aaaa97c5d0853a5",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        }
+      ]
+    },
+    {
+      "id": "agent-failure-boundary-06",
+      "status": "reviewed",
+      "path": "agent/ssl_verify.py",
+      "scope": "install_truststore",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as exc:",
+      "candidate_blob": "2cd20238b442b7a317979fee41ae28a172e72f2f",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/ssl_verify.py",
+        "scope": "install_truststore",
+        "blob": "2cd20238b442b7a317979fee41ae28a172e72f2f"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Owner-approved six-case preparation; independent controller identity review pending",
+        "compatibility": "Optional OS truststore failure warns and uses OpenSSL verified defaults, never CERT_NONE. Child-process missing-import regression checks repeat calls and hostname verification. Only missing truststore import is failure-tested. No coverage claim for partial inject_into_ssl failure, every truststore version, enterprise CA reachability, or a live TLS handshake.",
+        "module_bindings": "Whole SSL module matches pinned upstream. Module _installed memo remains its sole status owner; resolve_httpx_verify uses it before verified context construction. Child-process test removes only truststore import and observes original ssl.SSLContext plus CERT_REQUIRED/hostname checks. Partial injection errors are not evidenced.",
+        "receipt": "/tmp/hermes-agent-boundary-risk-tests.log; HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/agent/test_ssl_verify.py tests/agent/test_bedrock_adapter.py tests/agent/test_relay_runtime_plugins.py -q -k 'truststore_failure or activation_report_controls or lazy_install or restart'"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-agent-boundary-review.json",
+          "blob": "e2d01044e103718b7fa358b83bb1334921401447",
+          "outcome": "passed",
+          "claim": "Exact named bounded canonical failure receipts and source/global-binding review; explicit limits retained."
+        },
+        {
+          "path": "tests/agent/test_ssl_verify.py",
+          "blob": "07b571346f32ee0744cd931617af4df27cc3a3af",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        },
+        {
+          "path": "agent/model_metadata_http.py",
+          "blob": "b408724c63207b386972d902d304cc2e0c75676e",
+          "outcome": "passed",
+          "claim": "Reviewed canonical dependency or named test source; no blanket full-feature or live-service validation."
+        }
+      ]
     }
   ]
 }
