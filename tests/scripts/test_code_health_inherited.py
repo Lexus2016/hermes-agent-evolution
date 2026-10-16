@@ -284,3 +284,27 @@ def test_retained_original_cannot_fund_new_copy_without_own_finding(copied):
     with pytest.raises(RuntimeError, match="cannot relocate or rename"):
         assign_entries([entry], [finding], {fm.path: fm}, {"parent": {"p.py": old}},
                        lambda rev, path: blobs.get((rev, path)), "head", "reviewed-digest")
+
+
+def test_reviewed_baseline_advance_rejects_previous_base(history, monkeypatch):
+    """A reviewed fork advance needs a new exact pin, not a baseline wildcard."""
+    repo, previous, upstream, integration = history
+    _git(repo, "checkout", "--detach", previous)
+    advanced = _commit(repo, {"security-fix.txt": "reviewed fork correction\n"})
+    _git(repo, "merge", "--no-ff", integration, "-m", "retain both histories")
+    data = json.loads((repo / policy.MANIFEST).read_text(encoding="utf-8-sig"))
+    original_report = copy.deepcopy(data["report"])
+    data["base"] = advanced
+    serialized = json.dumps(data)
+    candidate = _commit(repo, {policy.MANIFEST: serialized})
+    monkeypatch.setattr(policy, "BASE", advanced)
+    monkeypatch.setattr(policy, "MANIFEST_SHA256", hashlib.sha256(serialized.encode()).hexdigest())
+
+    reviewed = policy._policy(repo, advanced, candidate)
+    assert reviewed["report"] == original_report
+    assert reviewed["upstream"] == upstream
+    with pytest.raises(RuntimeError, match="baseline differs"):
+        policy._policy(repo, previous, candidate)
+    # Once this integration becomes the base, ordinary future ratchets resume.
+    later = _commit(repo, {policy.MANIFEST: "future edits do not extend the exception"})
+    assert policy._policy(repo, candidate, later) is None

@@ -8,25 +8,27 @@ subsequent drift; candidate code cannot authenticate its own human review.
 ## Activation and future changes
 
 The transition requires exact main baseline
-`3cd9963bcce9c0aba451dadeaff5c701bca102e4` and actual ancestry from upstream release
+`365acb3229e7301a3b3566cc5b32114f06c023d1` and actual ancestry from upstream release
 `297552a9d646119871391d202509822cd86330df`. Missing history or a different baseline
 fails closed. There is no runtime override. The health CI checkout fetches full
 history. Once upstream is already an ancestor of the comparison base, this adapter
 is dormant and the ordinary ratchet applies with unchanged thresholds.
 
-The initial mechanism checkpoint has an empty manifest. The separately reviewed
-activations accept 222 demonstrated nonfunctional F811 occurrences, the exact
-context-compressor test-module size backed by 302 passing tests, 17 individually
-reviewed runtime findings with bounded regression evidence, and 32 frozen-fixture
-or dynamic-binding F821 occurrences. Five deferred-annotation findings and the
-unreadable-skill listing fallback remain unresolved. A later separately reviewed group adds eleven test-file size and two test-harness
-complexity findings, backed by 1,124 passing tests (eight explicit skips) and
-thirteen LSP lifecycle tests. This is 285 occurrences across 270 exact entries,
-not a claim of complete repository validation. The manifest
-is the separate accepted-debt report; it never rewrites the raw receipt. All other
-findings remain blocking until individually supported and reviewed. Owner authorization permits recording only
-inherited findings that do not impair fork functionality or security. Unknown
-behavior, real defects and integration growth cannot be accepted as inherited debt.
+The initial mechanism checkpoint has an empty manifest. Separately reviewed
+activations currently record **320 occurrences across 305 exact entries**. These
+cover individually reviewed name bindings, bounded runtime/error boundaries,
+process-bootstrap options, metadata latency, and structural test metrics. The
+manifest contains each precise rationale, source identity and validation limit.
+Structural-only test-size dispositions claim unchanged test organization, not a
+runtime pass or general feature compatibility. Real bugs and behavioral findings
+remain separate blocking gates. Five deferred-annotation findings and the
+unreadable-skill listing fallback remain unresolved.
+
+The manifest is the separate accepted-debt report; it never rewrites a raw receipt.
+All other findings remain blocking until individually supported and reviewed.
+Owner authorization permits recording only inherited findings that do not impair
+fork functionality or security. Unknown behavior, real defects and integration
+growth cannot be accepted as inherited debt.
 
 ## Evidence contract
 
@@ -71,7 +73,8 @@ replace actual fork regression suites and required exact-head hosted CI.
 ## Immutable intermediate report after initial dispositions
 
 `v0221-e4d3-health-report.json` records the fresh, uncached comparison of
-`e4d3f42197134f4830c3ec44463bbb75f1c6f75e` against the pinned main baseline.
+`e4d3f42197134f4830c3ec44463bbb75f1c6f75e` against the historical main baseline
+`3cd9963bcce9c0aba451dadeaff5c701bca102e4`.
 It completed in 527.4 seconds with exit 1: 1,178 raw blocking findings,
 272 matching reviewed dispositions, and **906 unresolved blockers**. The report
 SHA-256 is `1029b71a2bea931aa380915c1a5151bc50d71abc14ba1540a244c1034c6643c5`.
@@ -88,3 +91,22 @@ findings, 209 structural metrics, 25 name-binding findings, eight environment
 boundary findings and four asynchronous blocking-I/O findings. Individual review
 and relevant failure-path evidence remain necessary. Local terminal/socket/native
 limitations and pending hosted validation cannot be converted into passing receipts.
+
+## Reviewed fork-main advancement
+
+`v0221-main365-baseline-review.json` records the real main security merge and
+integration ancestry, scoped regression receipts, and unchanged disposition
+identities. Only the exact activation base moved from main3cd to main365; the
+historical report bytes and their original comparison identities remain intact.
+The old base cannot reuse the refreshed transition policy. A fresh complete
+comparison against main365 is still required.
+
+Scanner validation preserves the fork's existing off/yolo/permanent-allowlist and
+explicit unattended-approve bypasses. Invalid policy refuses when scanning is
+reached, including unattended-deny and interactive paths. Scanning is not universal.
+
+The fork scanner defaults remain enabled with path `tirith`, timeout five seconds
+and fail-open true, matching current main. Explicit disabled, fail-closed and
+custom settings survive configuration migrations; the upstream version-50 removal
+is retained only as a no-op compatibility slot. Values already erased by an earlier
+external upgrade cannot be reconstructed by this correction.
