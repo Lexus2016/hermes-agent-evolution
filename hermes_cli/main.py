@@ -2122,6 +2122,7 @@ _FROZEN_UPDATER_SURFACE: dict[str, tuple[str, ...]] = {
         "_stash_local_changes_if_needed", "_sync_with_upstream_if_needed",
         "_venv_launcher_ancestors",
         "_wait_for_windows_update_gateway_exit", "_warn_orphaned_update_autostashes",
+        "_warn_pending_fleet_restart_on_startup",
     ),
     "hermes_cli.old_updater_deps": (
         "_capture_active_lazy_features", "_handoff_reapable_backend_pids",
