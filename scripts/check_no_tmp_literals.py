@@ -204,7 +204,7 @@ def iter_files(root: Path | None = None):
 # its bytes requires a corresponding code review here. Artifact hashes bind the
 # reviewed source-checkpoint bytes; neither a renamed copy nor an edited receipt qualifies.
 _HISTORICAL_MAP = ROOT / ".github/no_tmp_historical_evidence.json"
-_HISTORICAL_MAP_SHA256 = "4c5c7c0b96d60dc04d6339268bda3538a7048d372a564296424db91b9d107777"
+_HISTORICAL_MAP_SHA256 = "884aab9b83c57384b9c604f4e11ae1dabde33c3e294b6c4d75342cbe2307a10a"
 
 
 def _validate_historical_header(data: object) -> None:
@@ -218,7 +218,7 @@ def _validate_historical_header(data: object) -> None:
             or set(data) != {"schema_version", "purpose", "source_commit", "files"}
             or type(data["schema_version"]) is not int or data["schema_version"] != 1
             or data["purpose"] != purpose
-            or data["source_commit"] != "5b1ff335a0c4945a38f2c1a9d64ba1184e4345b9"
+            or data["source_commit"] != "a25410312f4582d1b8cc5f71d635e11c118bc097"
             or not isinstance(data["files"], list) or not data["files"]):
         raise ValueError("invalid historical evidence inventory schema")
 
