@@ -180,6 +180,8 @@ class LSPClient:
         }
 
         self._docs: dict[str, _DocState] = {}  # keyed by absolute path (NOT URI)
+        # Serialize snapshots and document notifications; the protocol reader remains independent.
+        self._document_lock = asyncio.Lock()
         self._state: str = "stopped"
         self._sync_kind: int = 1  # 1=Full, 2=Incremental
         self._stopping: bool = False
@@ -584,13 +586,25 @@ class LSPClient:
 
     async def open_file(self, path: str, *, language_id: str = "plaintext") -> int:
         """Send didOpen (first time) or didChange (subsequent); return the new document version."""
-        if not self.is_running:
-            raise LSPProtocolError("client not running")
-        abs_path = os.path.abspath(path)
-        try:
-            text = Path(abs_path).read_text(encoding="utf-8-sig", errors="replace")
-        except OSError as e:
-            raise LSPProtocolError(f"cannot read {abs_path}: {e}") from e
+        proc = self._proc
+        async with self._document_lock:
+            self._require_document_process(proc)
+            abs_path = os.path.abspath(path)
+            try:
+                # Cancellation abandons the result, not the OS read; only this coroutine publishes it.
+                text = await asyncio.to_thread(Path(abs_path).read_text, encoding="utf-8-sig", errors="replace")
+            except OSError as e:
+                raise LSPProtocolError(f"cannot read {abs_path}: {e}") from e
+            self._require_document_process(proc)
+            return await self._sync_document_text(abs_path, text, language_id, proc)
+
+    def _require_document_process(self, proc: Optional[asyncio.subprocess.Process]) -> None:
+        if not self.is_running or self._stopping or self._proc is not proc:
+            raise LSPProtocolError("client stopped or restarted during file sync")
+
+    async def _sync_document_text(self, abs_path: str, text: str, language_id: str,
+                                  proc: Optional[asyncio.subprocess.Process]) -> int:
+        """Publish one snapshot while the caller holds the document lock."""
         uri = file_uri(abs_path)
         doc = self._docs.get(abs_path)
         if doc is not None and doc.version < 0:
@@ -599,6 +613,7 @@ class LSPClient:
         await self._send_notification(
             "workspace/didChangeWatchedFiles", {"changes": [{"uri": uri, "type": 1 if doc is None else 2}]}
         )
+        self._require_document_process(proc)
         if doc is None:
             # Fresh state: anything a pre-open push stashed under this path (relatedDocuments spillover) is discarded.
             self._docs.pop(abs_path, None)
@@ -607,7 +622,7 @@ class LSPClient:
                 "textDocument/didOpen",
                 {"textDocument": {"uri": uri, "languageId": language_id, "version": 0, "text": text}},
             )
-            await self._evict_lru_docs()
+            await self._evict_lru_docs(proc)
             return 0
         # pop + reinsert refreshes LRU recency (dicts are insertion-ordered).
         self._docs[abs_path] = self._docs.pop(abs_path)
@@ -627,10 +642,11 @@ class LSPClient:
         )
         return new_version
 
-    async def _evict_lru_docs(self) -> None:
+    async def _evict_lru_docs(self, proc: Optional[asyncio.subprocess.Process]) -> None:
         """Drop least-recently-touched documents beyond MAX_TRACKED_FILES; didClose the ones the server
-        has open so it releases its mirror too (version -1 entries were never opened)."""
+        has open so it releases its mirror too (version -1 entries were never opened). Caller holds the lock."""
         while len(self._docs) > MAX_TRACKED_FILES:
+            self._require_document_process(proc)
             old_path, old = next(iter(self._docs.items()))
             del self._docs[old_path]
             if old.version >= 0:
@@ -638,10 +654,12 @@ class LSPClient:
 
     async def save_file(self, path: str) -> None:
         """Send didSave for ``path``.  Some linters re-scan only on save."""
-        if self.is_running:
-            await self._send_notification(
-                "textDocument/didSave", {"textDocument": {"uri": file_uri(os.path.abspath(path))}}
-            )
+        proc = self._proc
+        async with self._document_lock:
+            if self.is_running and not self._stopping and self._proc is proc:
+                await self._send_notification(
+                    "textDocument/didSave", {"textDocument": {"uri": file_uri(os.path.abspath(path))}}
+                )
 
     # ---- diagnostics: pull + wait ----
 
