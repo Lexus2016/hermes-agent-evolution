@@ -98,8 +98,7 @@ limitations and pending hosted validation cannot be converted into passing recei
 integration ancestry, scoped regression receipts, and unchanged disposition
 identities. Only the exact activation base moved from main3cd to main365; the
 historical report bytes and their original comparison identities remain intact.
-The old base cannot reuse the refreshed transition policy. A fresh complete
-comparison against main365 is still required.
+The old base cannot reuse the refreshed transition policy. The fresh immutable comparison below records the first complete main365 result.
 
 Scanner validation preserves the fork's existing off/yolo/permanent-allowlist and
 explicit unattended-approve bypasses. Invalid policy refuses when scanning is
@@ -110,3 +109,27 @@ and fail-open true, matching current main. Explicit disabled, fail-closed and
 custom settings survive configuration migrations; the upstream version-50 removal
 is retained only as a no-op compatibility slot. Values already erased by an earlier
 external upgrade cannot be reconstructed by this correction.
+
+
+## Fresh main365 comparison at 9ad6d6a828
+
+`v0221-9ad6-main365-health-report.json` preserves the full unmodified report for
+head `9ad6d6a828dab0f1345e2e528c6121e8cd430c8b`, tree
+`b7b0f01d9c1116303f6ffbdfe8af18a2b08ecd2c`, compared with main
+`365acb3229e7301a3b3566cc5b32114f06c023d1`. Fresh measurement completed in
+527.2 seconds with exit 1. All 320 reviewed occurrence dispositions matched;
+1,145 raw blocking findings leave **825 unresolved blockers**. The report retains
+raw severity and separate inherited dispositions. Its SHA-256 is
+`1b511fdd12f0539d9fd7c5a61520dcb398bba9f5521bcc4ff76ca7005b2a8c46`.
+
+The unresolved rules are BLE001 366, CC 136, HX013 116, HX006 106, S110 32,
+FUNC_LINES 24, FILE_LINES 22, HX011 15, F821 5, NESTING 2 and HX002 1.
+Diagnostic provenance identifies 727 whole-file upstream matches, 92 same-scope
+Python-unit upstream matches, and six other cases. These identities do not prove
+correctness or grant acceptance. There are also 41 unallowed advisory findings
+and 124 inline-allowed findings. The full gate remains failed.
+
+This receipt applies only to the named head. Subsequent corrections require
+appropriate regression checks and a new final immutable comparison. Required
+hosted Python, Hindsight protected-API lifecycle, desktop typecheck, E2E and native
+platform gates remain pending; local socket limitations are not passing results.
