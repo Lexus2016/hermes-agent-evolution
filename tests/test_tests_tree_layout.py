@@ -16,7 +16,10 @@ noise in a directory listing and the number belongs in the docstring, where
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TESTS_ROOT = REPO_ROOT / "tests"
@@ -38,6 +41,10 @@ _NON_MIRROR_DIRS = {
     # covers tools/tool_cache.py; wisdom leftover after Collective revert.
     "evolution", "tool_cache", "wisdom",
 }
+
+# Retained fork suite for a nested bundled plugin, with its package-local
+# no-network/thread-cleanup fixtures. Require the actual source package below.
+_NESTED_SOURCE_TEST_DIRS = {"honcho_plugin": Path("plugins/memory/honcho")}
 
 # Root-level modules whose tests sit directly in tests/ (no package to mirror).
 _ROOT_MODULE_STEMS = {p.stem for p in REPO_ROOT.glob("*.py")}
@@ -67,17 +74,26 @@ def _source_dirs() -> set[str]:
     }
 
 
-def test_every_test_directory_mirrors_a_source_directory_or_is_declared():
-    """No sibling directory for a source package that already has one."""
+def _unmapped_test_directories():
     source_dirs = _source_dirs()
-    offenders = sorted(
+    for test_dir, source in _NESTED_SOURCE_TEST_DIRS.items():
+        assert (REPO_ROOT / source / "__init__.py").is_file(), (
+            f"mapped test directory {test_dir} has no source package: {source}"
+        )
+    return sorted(
         d.name
         for d in TESTS_ROOT.iterdir()
         if d.is_dir()
         and d.name not in ("__pycache__",)
         and d.name not in source_dirs
         and d.name not in _NON_MIRROR_DIRS
+        and d.name not in _NESTED_SOURCE_TEST_DIRS
     )
+
+
+def test_every_test_directory_mirrors_a_source_directory_or_is_declared():
+    """No sibling directory for a source package that already has one."""
+    offenders = _unmapped_test_directories()
     assert not offenders, (
         "tests/ directories that mirror no source package: "
         f"{offenders}. Put the tests under tests/<source dir>/ (tests/agent, "
@@ -98,3 +114,20 @@ def test_no_issue_numbers_in_test_filenames():
         f"Issue numbers in test filenames: {offenders}. Drop the number from the "
         "name and cite the issue in the module docstring instead."
     )
+
+
+@pytest.mark.parametrize("source_exists", [False, True], ids=["missing-source", "unrelated-orphan"])
+def test_nested_source_mapping_does_not_hide_missing_source_or_unrelated_tests(tmp_path, monkeypatch, source_exists):
+    tests = tmp_path / "tests"
+    (tests / "honcho_plugin").mkdir(parents=True)
+    (tests / "unrelated_orphan").mkdir()
+    monkeypatch.setattr(sys.modules[__name__], "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(sys.modules[__name__], "TESTS_ROOT", tests)
+    if source_exists:
+        source = tmp_path / "plugins/memory/honcho"
+        source.mkdir(parents=True)
+        (source / "__init__.py").write_text("", encoding="utf-8")
+        assert _unmapped_test_directories() == ["unrelated_orphan"]
+    else:
+        with pytest.raises(AssertionError, match="honcho_plugin has no source package"):
+            _unmapped_test_directories()
