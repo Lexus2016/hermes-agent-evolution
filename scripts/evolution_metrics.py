@@ -30,8 +30,29 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from evolution_funnel import is_evolution_halted, load_records
+
+
+def _default_evolution_dir() -> Path:
+    override = os.environ.get("EVOLUTION_PROFILE_DIR")
+    if override is not None:
+        return Path(override)
+    try:
+        from hermes_constants import get_hermes_home
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_constants":
+            raise
+        # Installed stdlib-only copies have no core modules. The scheduler must
+        # supply their owning profile explicitly; never infer it from ambient HOME.
+        home = os.environ.get("HERMES_HOME", "")
+        if not home.strip():
+            raise RuntimeError(
+                "Standalone evolution metrics requires HERMES_HOME or EVOLUTION_PROFILE_DIR"
+            ) from exc
+        return Path(os.path.expanduser(os.path.expandvars(home))) / "evolution"
+    return get_hermes_home() / "evolution"
 
 
 def _int(rec: dict[str, Any], key: str) -> int:
@@ -75,12 +96,7 @@ def compute_health(
     active = [r for r in window if _is_active(r)]
 
     if evolution_dir is None:
-        evolution_dir = Path(
-            os.environ.get(
-                "EVOLUTION_PROFILE_DIR",
-                str(Path.home() / ".hermes" / "evolution"),
-            )
-        )
+        evolution_dir = _default_evolution_dir()
 
     sel = sum(_int(r, "selected") for r in active)
     mrg = sum(_int(r, "merged") for r in active)
@@ -231,14 +247,7 @@ def format_health(h: dict[str, Any]) -> str:
 
 
 def main(argv: list[str]) -> int:
-    import os
-
-    evolution_dir = Path(
-        os.environ.get(
-            "EVOLUTION_PROFILE_DIR",
-            str(Path.home() / ".hermes" / "evolution"),
-        )
-    )
+    evolution_dir = _default_evolution_dir()
     args = argv[1:]
     last = 30
     if "--last" in args:
