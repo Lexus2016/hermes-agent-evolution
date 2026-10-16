@@ -1,0 +1,144 @@
+name: Media cache security native validation
+
+# On-demand security backport gate. No PR/main trigger, credentials, or deployment.
+on:
+  push:
+    branches: ["security-validation/media-cache-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: media-cache-security-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-security:
+    name: Security boundary (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            platform: macos
+          - runner: windows-latest
+            platform: windows
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify candidate identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git log -1 --format='candidate=%H tree=%T'
+
+      - name: Install locked native test dependencies
+        uses: ./.github/actions/setup-pm
+        with:
+          extras: '["all", "anthropic", "bedrock", "mistral", "fal", "modal", "daytona", "parallel-web"]'
+          test-environment: 'true'
+          cache: 'false'
+          cache-python: 'false'
+          cache-node: 'false'
+
+      - name: Execute native boundary and compatibility tests
+        shell: bash
+        env:
+          NATIVE_PLATFORM: ${{ matrix.platform }}
+          HERMES_TEST_FILE_RETRIES: "0"
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/hermes-security-home"
+          export USERPROFILE="$HOME"
+          mkdir -p "$HOME" "$RUNNER_TEMP/hermes-security-results"
+          export SECURITY_RESULTS="$RUNNER_TEMP/hermes-security-results"
+
+          run_file() {
+            label="$1"
+            file="$2"
+            shift 2
+            bash scripts/run_tests.sh -j 1 --file-timeout 120 "$file" \
+              -- -o addopts= -v --tb=short --timeout=90 \
+              --junitxml="$SECURITY_RESULTS/$label.xml" "$@"
+          }
+          if [ "$NATIVE_PLATFORM" = macos ]; then
+            run_file media tests/gateway/test_media_cache_privacy.py -k _macos
+          else
+            run_file media tests/gateway/test_media_cache_privacy.py -k test_non_posix_exclusive_write_is_supported
+          fi
+          run_file documents tests/gateway/test_document_cache.py
+          run_file async-media tests/gateway/test_async_media_cache.py
+          run_file whatsapp tests/gateway/test_whatsapp_connect.py \
+            -k "test_no_name_error_when_json_always_fails or test_connect_keeps_real_health_checks_and_private_bridge_cache"
+
+          "$HERMES_PYTHON" - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          folder = Path(os.environ["SECURITY_RESULTS"])
+          marker = os.environ["NATIVE_PLATFORM"]
+          required = {
+              "macos": {
+                  "media": [
+                      "test_explicit_policy_preserves_private_payload_contract_macos[private-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[private-document]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[docker_uid_gid-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[docker_uid_gid-document]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[container_preserved-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[container_preserved-document]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[container_private-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[container_private-document]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[container_invalid-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[container_invalid-document]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[skip_chmod_preserved-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[skip_chmod_preserved-document]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[skip_chmod_private-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[skip_chmod_private-document]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[skip_chmod_invalid-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[skip_chmod_invalid-document]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[detected_preserved-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[detected_preserved-document]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[detected_private-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[detected_private-document]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[detected_invalid-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[detected_invalid-document]",
+                      "test_privacy_failure_never_writes_payload_macos[file_collision-image]",
+                      "test_privacy_failure_never_writes_payload_macos[file_collision-document]",
+                  ],
+              },
+              "windows": {
+                  "media": [
+                      "test_non_posix_exclusive_write_is_supported[image]",
+                      "test_non_posix_exclusive_write_is_supported[document]",
+                  ],
+              },
+          }[marker]
+          required["whatsapp"] = ["test_no_name_error_when_json_always_fails", "test_connect_keeps_real_health_checks_and_private_bridge_cache"]
+          for label in ("documents", "async-media"):
+              required[label] = []
+          for label, families in required.items():
+              cases = list(ET.parse(folder / f"{label}.xml").getroot().iter("testcase"))
+              assert cases, f"{label}: no executed tests"
+              for case in cases:
+                  assert not any(case.find(tag) is not None for tag in ("failure", "error", "skipped")), (
+                      label, case.attrib
+                  )
+              names = [case.attrib["name"] for case in cases]
+              for family in families:
+                  assert any(name.startswith(family) for name in names), (label, "missing executed family", family)
+              print(f"{marker}: {label}: {len(cases)} executed passes, zero skips")
+          PY

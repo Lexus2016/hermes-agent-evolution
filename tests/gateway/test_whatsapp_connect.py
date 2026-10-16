@@ -13,9 +13,11 @@ Regression tests for two bugs in WhatsAppAdapter.connect():
 """
 
 import asyncio
+import os
 import signal
 import sys
 import types
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -30,6 +32,19 @@ from gateway.platforms.base import SendResult
 # ---------------------------------------------------------------------------
 
 
+class _AsyncCM:
+    """Async transport context around synthetic HTTP responses."""
+
+    def __init__(self, value):
+        self.value = value
+
+    async def __aenter__(self):
+        return self.value
+
+    async def __aexit__(self, *args):
+        return False
+
+
 @pytest.fixture(autouse=True)
 def _pm_node(monkeypatch):
     """Stand-in for PM's Node/npm; the user's PATH copy is never picked up."""
@@ -40,13 +55,14 @@ def _pm_node(monkeypatch):
 def _make_adapter():
     """Create a WhatsAppAdapter with test attributes (bypass __init__)."""
     from plugins.platforms.whatsapp.adapter import WhatsAppAdapter
+    from hermes_constants import get_hermes_home
 
     adapter = WhatsAppAdapter.__new__(WhatsAppAdapter)
     adapter.platform = Platform.WHATSAPP
     adapter.config = MagicMock()
     adapter._bridge_port = 19876
     adapter._bridge_script = "/tmp/test-bridge.js"
-    adapter._session_path = Path("/tmp/test-wa-session")
+    adapter._session_path = get_hermes_home() / "test-wa-session"
     adapter._bridge_log_fh = None
     adapter._bridge_log = None
     adapter._bridge_process = None
@@ -73,8 +89,10 @@ def _connect_patches(mock_proc, mock_fh):
     """Return common patches needed to reach the health-check loop."""
     base = [
         patch("plugins.platforms.whatsapp.adapter.check_whatsapp_requirements", return_value=True),
-        patch.object(Path, "exists", return_value=True),
-        patch.object(Path, "mkdir", return_value=None),
+        # Mock bridge availability, not the entire filesystem: the bridge env
+        # must receive real, permission-checked cache directories under test HOME.
+        patch("plugins.platforms.whatsapp.adapter.WhatsAppAdapter._preflight", return_value=True),
+        patch("plugins.platforms.whatsapp.adapter.WhatsAppAdapter._ensure_bridge_deps", return_value=True),
         patch("subprocess.run", return_value=MagicMock(returncode=0)),
         patch("subprocess.Popen", return_value=mock_proc),
         patch("builtins.open", return_value=mock_fh),
@@ -128,6 +146,51 @@ class TestDataInitialized:
 
         # The bridge HTTP server is up, so timeout uses the warn-and-proceed path.
         assert result is True
+
+
+    @pytest.mark.asyncio
+    async def test_connect_keeps_real_health_checks_and_private_bridge_cache(self, monkeypatch):
+        """Malformed JSON still reaches both polls and real private cache setup."""
+        from hermes_constants import get_hermes_home
+
+        monkeypatch.setenv("HERMES_HOME_MODE", "700")
+        for name in ("HERMES_UID", "HERMES_GID"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setattr("hermes_cli.config.is_managed", lambda: False)
+        response = MagicMock(status=200)
+        response.json = AsyncMock(side_effect=ValueError("synthetic malformed JSON"))
+        session = MagicMock()
+        session.get.return_value = _AsyncCM(response)
+        aiohttp = types.ModuleType("aiohttp")
+        aiohttp.ClientSession = MagicMock(return_value=_AsyncCM(session))
+        aiohttp.ClientTimeout = MagicMock()
+        monkeypatch.setitem(sys.modules, "aiohttp", aiohttp)
+        adapter = _make_adapter()
+        mock_proc = MagicMock()
+        mock_proc.poll.return_value = None
+        patches = _connect_patches(mock_proc, MagicMock())
+
+        with ExitStack() as stack:
+            mocks = [stack.enter_context(p) for p in patches]
+            for name in ("_kill_port_process", "_kill_stale_bridge_by_pidfile", "_write_bridge_pidfile"):
+                stack.enter_context(patch(f"plugins.platforms.whatsapp.adapter.{name}"))
+            stack.enter_context(patch.object(adapter, "_acquire_platform_lock", return_value=True))
+            stack.enter_context(patch.object(adapter, "_wire_plugin_handlers"))
+            stack.enter_context(patch.object(type(adapter), "_poll_messages", return_value=MagicMock()))
+            health = stack.enter_context(patch.object(adapter, "_poll_bridge_health", wraps=adapter._poll_bridge_health))
+            result = await adapter.connect()
+
+        assert result is True
+        assert adapter._running is True
+        assert health.await_count == 2
+        response.json.assert_awaited()
+        bridge_env = mocks[4].call_args.kwargs["env"]
+        for key in ("HERMES_IMAGE_CACHE_DIR", "HERMES_AUDIO_CACHE_DIR", "HERMES_DOCUMENT_CACHE_DIR"):
+            cache_dir = Path(bridge_env[key])
+            assert cache_dir.is_dir()
+            assert cache_dir.is_relative_to(get_hermes_home())
+            if os.name == "posix":
+                assert cache_dir.stat().st_mode & 0o777 == 0o700
 
 
 # ---------------------------------------------------------------------------

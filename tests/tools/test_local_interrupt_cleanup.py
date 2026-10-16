@@ -12,8 +12,8 @@ because _wait_for_process never got to call _kill_process before python
 died.  See commit message for full context.
 """
 import contextlib
+import json
 import os
-import signal
 import subprocess
 import threading
 import time
@@ -21,8 +21,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.environments import local as local_mod
 from tools.environments.local import LocalEnvironment
+from tests.waiting import wait_until
 
 
 @pytest.fixture(autouse=True)
@@ -67,12 +67,8 @@ def _wait_for_pgid_exit(pgid: int, timeout: float = 60.0) -> bool:
 
 
 @pytest.mark.platforms("linux")
-def test_kill_process_refuses_unverified_cached_pgid_after_wrapper_exit(monkeypatch, caplog):
-    """A cached group number alone cannot authorize signalling orphaned descendants.
-
-    With no leader identity, leave cleanup visibly incomplete instead of using a
-    possibly recycled group. The normal verified-owned path is tested separately.
-    """
+def test_kill_process_refuses_cached_pgid_without_live_ownership(monkeypatch, caplog):
+    """A cached numeric group cannot authorize signals after its owner disappears."""
     env = object.__new__(LocalEnvironment)
     proc = SimpleNamespace(
         pid=12345,
@@ -100,12 +96,13 @@ def test_kill_process_refuses_unverified_cached_pgid_after_wrapper_exit(monkeypa
 
 
 @pytest.mark.platforms("linux")
-def test_wait_for_process_kills_subprocess_on_keyboardinterrupt():
+def test_wait_for_process_kills_subprocess_on_keyboardinterrupt(monkeypatch):
     """When KeyboardInterrupt arrives mid-poll, the subprocess group must be
     killed before the exception is re-raised."""
     env = LocalEnvironment(cwd="/tmp")
     try:
         result_holder = {}
+        started, proc_holder = _observe_foreground_wait(env, monkeypatch)
 
         # Drive execute() on a separate thread so we can SIGNAL-interrupt it
         # via a thread-targeted exception without killing our test process.
@@ -120,42 +117,10 @@ def test_wait_for_process_kills_subprocess_on_keyboardinterrupt():
 
         t = threading.Thread(target=worker, daemon=True)
         t.start()
-        # Wait until the subprocess actually exists.  LocalEnvironment.execute
-        # does init_session() (one spawn) before the real command, so we need
-        # to wait until a sleep 30 is visible.  Use pgrep-style lookup via
-        # /proc to find the bash process running our sleep.
-        deadline = time.monotonic() + 20.0  # generous: init_session + spawn dilate under CI load
-        target_pid = None
-        while time.monotonic() < deadline:
-            # Walk our children and grand-children to find one running 'sleep 30'
-            try:
-                import psutil  # optional — fall back if absent
-                for p in psutil.Process(os.getpid()).children(recursive=True):
-                    try:
-                        if "sleep 30" in " ".join(p.cmdline()):
-                            target_pid = p.pid
-                            break
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        continue
-            except ImportError:
-                # Fall back to ps
-                ps = subprocess.run(
-                    ["ps", "-eo", "pid,ppid,pgid,cmd"], capture_output=True, text=True,
-                    check=False,
-                )
-                for line in ps.stdout.splitlines():
-                    if "sleep 30" in line and "grep" not in line:
-                        parts = line.split()
-                        if parts and parts[0].isdigit():
-                            target_pid = int(parts[0])
-                            break
-            if target_pid:
-                break
-            time.sleep(0.1)
-
-        assert target_pid is not None, (
-            "test setup: couldn't find 'sleep 30' subprocess after 5 s"
-        )
+        # Observe the actual published handle, never an argv substring during
+        # helper startup before its private session has been established.
+        assert started.wait(20), "foreground command never reached its wait"
+        target_pid = proc_holder["proc"].pid
         pgid = os.getpgid(target_pid)
         assert _pgid_still_alive(pgid), "sanity: subprocess should be alive"
 
@@ -203,17 +168,18 @@ def test_wait_for_process_kills_subprocess_on_keyboardinterrupt():
             pass
 
 
-def _descendant_running(marker: str):
-    import psutil
-    for p in psutil.Process(os.getpid()).children(recursive=True):
-        try:
-            if marker in " ".join(p.cmdline()):
-                return p
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return None
+def _observe_foreground_wait(env, monkeypatch):
+    started, captured = threading.Event(), {}
+    wait = env._wait_for_process
+    def observed(proc, *args, **kwargs):
+        captured["proc"] = proc
+        started.set()
+        return wait(proc, *args, **kwargs)
+    monkeypatch.setattr(env, "_wait_for_process", observed)
+    return started, captured
 
 
+@pytest.mark.platforms("linux")
 def test_exit_cleanup_kills_foreground_command_still_running(monkeypatch):
     """The host-exit funnel (CLI, one-shot, messaging gateway, serve atexit) must take an
     in-flight foreground command's process group with it: it runs in its own session, so
@@ -223,13 +189,13 @@ def test_exit_cleanup_kills_foreground_command_still_running(monkeypatch):
     monkeypatch.setattr(terminal_tool_lifecycle, "_scratch_paths", list)
     env = LocalEnvironment(cwd="/tmp")
     result: dict = {}
+    started, captured = _observe_foreground_wait(env, monkeypatch)
+    proc = None
     t = threading.Thread(target=lambda: result.update(env.execute("sleep 3517", timeout=600)), daemon=True)
     try:
         t.start()
-        deadline = time.monotonic() + 20.0
-        while (proc := _descendant_running("sleep 3517")) is None and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert proc is not None, "test setup: foreground sleep never started"
+        assert started.wait(20), "foreground command never reached its wait"
+        proc = captured["proc"]
         pgid = os.getpgid(proc.pid)
 
         terminal_tool_lifecycle.cleanup_all_environments()
@@ -239,62 +205,95 @@ def test_exit_cleanup_kills_foreground_command_still_running(monkeypatch):
         t.join(timeout=15.0)
         assert not t.is_alive() and result.get("returncode") not in (None, 0), result
     finally:
-        with contextlib.suppress(Exception):
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        if proc is not None:
+            env._kill_process(proc)
         env.cleanup()
 
 
 # Child for the hard-exit race tests: it really os._exit()s right after the kill, like the watchdogs.
 _HARD_EXIT_RACE_CHILD = r"""
-import os, sys, threading
+import json, os, sys, threading, time
+from pathlib import Path
+import psutil
 from tools.environments import base
 from tools.environments.local import LocalEnvironment
-scenario, cmd = sys.argv[1], sys.argv[2]
+scenario, cmd, root = sys.argv[1], sys.argv[2], Path(sys.argv[3])
 env = LocalEnvironment(cwd=os.getcwd())
+spawned, release = threading.Event(), threading.Event()
+real_run_bash = LocalEnvironment._run_bash
+
+def gated(self, command, **kw):
+    proc = real_run_bash(self, command, **kw)
+    if cmd in command:
+        # This command execs its sleeper. Only its supervisor and direct workload
+        # can survive: publish their identities before the parent permits exit.
+        owned = [psutil.Process(pid) for pid in (proc.pid, proc.command_pid)]
+        (root / "owned.json").write_text(json.dumps(
+            [[p.pid, p.create_time()] for p in owned]))
+        (root / "ready").touch()
+        spawned.set()
+        release.wait(15)
+    return proc
+LocalEnvironment._run_bash = gated
 if scenario == "spawn_before_publish":
-    spawned, release = threading.Event(), threading.Event()
-    real_run_bash = LocalEnvironment._run_bash
-    def gated(self, command, **kw):
-        proc = real_run_bash(self, command, **kw)
-        if cmd in command:
-            spawned.set()
-            release.wait(10)  # barrier: the child exists, it is not published yet
-        return proc
-    LocalEnvironment._run_bash = gated
     threading.Thread(target=env.execute, args=(cmd,), kwargs={"timeout": 600}, daemon=True).start()
     assert spawned.wait(20)
-    threading.Timer(0.2, release.set).start()  # registration lands while the killer is in flight
+    while not (root / "observed").exists():
+        time.sleep(0.01)
+    threading.Timer(0.2, release.set).start()
     base.kill_live_foreground_processes(now=True)
 else:  # launch_after_fence
     base.kill_live_foreground_processes(now=True)
     t = threading.Thread(target=env.execute, args=(cmd,), kwargs={"timeout": 600}, daemon=True)
     t.start()
     t.join(3)
+    if not spawned.is_set():
+        (root / "owned.json").write_text("[]")
+        (root / "ready").touch()
+    while not (root / "observed").exists():
+        time.sleep(0.01)
+    release.set()
 os._exit(0)
 """
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
-@pytest.mark.live_system_guard_bypass  # a red run must reap survivors reparented to init
+@pytest.mark.platforms("posix")
+@pytest.mark.live_system_guard_bypass
 @pytest.mark.parametrize("scenario", ["spawn_before_publish", "launch_after_fence"])
 def test_hard_exit_leaves_no_foreground_survivor_around_the_spawn(scenario, tmp_path):
-    """A hard exit must own every foreground child: one spawned but not yet registered when the kill
-    runs, and one launched after the kill took its snapshot (the exit fence refuses it)."""
+    """Hard exit owns both unpublished children and launches racing the exit fence."""
     import sys
 
     import psutil
 
-    cmd = f"sleep {35000 + os.getpid() % 1000}.{len(scenario)}"
+    cmd = "exec sleep 30"
     repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    r = subprocess.run([sys.executable, "-c", _HARD_EXIT_RACE_CHILD, scenario, cmd], cwd=str(tmp_path),
-                       env={**os.environ, "PYTHONPATH": repo}, capture_output=True, text=True, timeout=120, check=False)
-    assert r.returncode == 0, r.stderr[-2000:]
-    time.sleep(0.3)
-    survivors = [p for p in psutil.process_iter(["cmdline"]) if cmd in " ".join(p.info["cmdline"] or [])]
-    for p in survivors:
-        with contextlib.suppress(psutil.Error):
-            p.kill()
-    assert not survivors, f"{scenario}: {[' '.join(p.info['cmdline']) for p in survivors]} outlived the hard exit"
+    owned = []
+    controller = subprocess.Popen(
+        [sys.executable, "-c", _HARD_EXIT_RACE_CHILD, scenario, cmd, str(tmp_path)],
+        cwd=tmp_path, env={**os.environ, "PYTHONPATH": repo},
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        wait_until(lambda: (tmp_path / "ready").exists(), timeout=30,
+                   what="synthetic controller published its child identities")
+        for pid, created in json.loads((tmp_path / "owned.json").read_text()):
+            proc = psutil.Process(pid)
+            assert proc.create_time() == created, "test child identity changed before observation"
+            owned.append(proc)
+        (tmp_path / "observed").touch()
+        stdout, stderr = controller.communicate(timeout=30)
+        assert controller.returncode == 0, (stdout, stderr)
+        wait_until(lambda: all(not p.is_running() or p.status() == psutil.STATUS_ZOMBIE for p in owned),
+                   timeout=10, what=f"{scenario} test-owned children exited")
+    finally:
+        (tmp_path / "observed").touch()
+        if controller.poll() is None:
+            controller.kill()
+        controller.communicate(timeout=10)
+        for proc in owned:
+            with contextlib.suppress(psutil.Error):
+                if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+                    proc.kill()
 
 
 def test_hard_exit_kill_never_blocks_on_a_slow_remote_cancel(monkeypatch):

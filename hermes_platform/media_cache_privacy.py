@@ -14,10 +14,13 @@ def _posix_permissions() -> bool:
 def _shared_policy() -> bool:
     # A failed policy lookup must never be interpreted as permission to share.
     from hermes_cli.config import is_managed
+    from hermes_constants import _container_or_chmod_skipped
 
     if is_managed():
         return True
     configured = os.environ.get("HERMES_HOME_MODE", "").strip()
+    if not configured and _container_or_chmod_skipped():
+        return True
     try:
         mode = int(configured, 8) if configured else 0
         return 0 <= mode <= 0o7777 and bool(mode & 0o077)
@@ -29,7 +32,7 @@ def _verify_owner(info) -> None:
     from hermes_constants import _resolve_hermes_uid_gid
 
     uid, gid = _resolve_hermes_uid_gid()
-    expected_uid = uid if uid is not None and uid >= 0 else os.geteuid()
+    expected_uid = uid if uid is not None and uid >= 0 else os.geteuid()  # windows-footgun: ok — POSIX-only callers
     if info.st_uid != expected_uid or (gid is not None and gid >= 0 and info.st_gid != gid):
         raise PermissionError("Media cache ownership could not be established")
 
@@ -46,7 +49,7 @@ def _open_directory(cache_dir: Path) -> int:
 
 
 def secure_media_cache_dir(cache_dir: Path) -> None:
-    """Honor explicit sharing; otherwise require an owner-private POSIX directory."""
+    """Honor canonical sharing/preservation; otherwise require private POSIX access."""
     shared = _shared_policy()
     cache_dir.mkdir(parents=True, exist_ok=True, mode=0o777 if shared else 0o700)
     if not _posix_permissions():
@@ -58,7 +61,7 @@ def secure_media_cache_dir(cache_dir: Path) -> None:
         # The canonical helper accepts an fd: chmod/chown cannot follow a replaced path.
         _secure_dir(fd)
         if not shared:
-            # Restrict the inode even when container policy skips chmod or mode is invalid.
+            # Private or invalid explicit modes must be verified, not best-effort.
             os.fchmod(fd, 0o700)
             _verify_private_directory(fd)
     finally:

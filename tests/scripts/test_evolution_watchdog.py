@@ -181,6 +181,72 @@ class TestStageReports:
         )
         assert check_stage_reports(tmp_path, NOW, jf) == []
 
+    def test_missing_report_quiet_when_stage_job_disabled(self, tmp_path):
+        # A paused stage cannot emit a report. An explicit disable is the
+        # owner's decision, not a pipeline fault — check_jobs() already
+        # ignores disabled jobs for the same reason.
+        self._make_reports(tmp_path, skip=("research",))
+        jf = self._jobs_file(tmp_path, "evolution-research", enabled=False)
+        assert check_stage_reports(tmp_path, NOW, jf) == []
+
+    def test_missing_report_quiet_while_pipeline_halted(self, tmp_path):
+        # halt-state.txt (zero-deliverable streak) makes every expensive stage
+        # skip by design and a skipped stage writes NOTHING, so a missing
+        # report is the halt's shadow — not "the job died without record".
+        # The halt itself is surfaced by check_health(), not by stage alerts.
+        (tmp_path / "halt-state.txt").write_text("# Evolution pipeline HALTED\n")
+        assert check_stage_reports(tmp_path, NOW) == []
+
+    def test_small_report_still_alerts_while_pipeline_halted(self, tmp_path):
+        # The halt only excuses a MISSING report; a present-but-trivial one is
+        # a produced-nothing cycle and must still alert.
+        (tmp_path / "halt-state.txt").write_text("# Evolution pipeline HALTED\n")
+        self._make_reports(tmp_path, tiny=("analysis",))
+        alerts = check_stage_reports(tmp_path, NOW)
+        assert len(alerts) == 1
+        assert "analysis" in alerts[0] and "small" in alerts[0]
+
+    def test_missing_weekly_report_alerts_even_after_clean_recent_run(self, tmp_path):
+        # Merged-semantics guard: a weekly stage that ran a whole cadence WITHOUT
+        # emitting a report IS the anomaly (see the weekly branch of
+        # check_stage_reports — it never falls through to the daily
+        # "clean run = idle cycle" suppression). Only an explicit DISABLE or an
+        # active pipeline halt may silence a weekly stage.
+        self._make_reports(tmp_path, skip=("introspection",))
+        jf = self._jobs_file(
+            tmp_path,
+            "evolution-introspection",
+            last_run=(NOW - timedelta(hours=11)).isoformat(),
+            schedule={"kind": "cron", "expr": "50 20 * * 3", "display": "50 20 * * 3"},
+        )
+        alerts = check_stage_reports(tmp_path, NOW, jf)
+        assert len(alerts) == 1 and "introspection" in alerts[0]
+
+    def test_weekly_report_quiet_for_disabled_stage(self, tmp_path):
+        # ...while a DISABLED weekly stage stays quiet: nobody is scheduled to
+        # produce it, so the absent report carries no information.
+        self._make_reports(tmp_path, skip=("introspection",))
+        jf = self._jobs_file(
+            tmp_path,
+            "evolution-introspection",
+            enabled=False,
+            schedule={"kind": "cron", "expr": "50 20 * * 3", "display": "50 20 * * 3"},
+        )
+        assert check_stage_reports(tmp_path, NOW, jf) == []
+
+    def test_missing_weekly_report_alerts_when_weekly_run_is_stale(self, tmp_path):
+        # ...but a weekly stage that has NOT run within 8 days is still a real
+        # death — the suppression must not become a blanket "weekly = quiet".
+        self._make_reports(tmp_path, skip=("introspection",))
+        jf = self._jobs_file(
+            tmp_path,
+            "evolution-introspection",
+            last_run=(NOW - timedelta(days=12)).isoformat(),
+            schedule={"kind": "cron", "expr": "50 20 * * 3", "display": "50 20 * * 3"},
+        )
+        alerts = check_stage_reports(tmp_path, NOW, jf)
+        assert len(alerts) == 1 and "introspection" in alerts[0]
+
 
 class TestWeeklyStageReportDates:
     """Weekly stages must be judged against their own cron weekday.
@@ -374,6 +440,38 @@ class TestJobsHealth:
                 self._job(
                     name="evolution-upstream-sync",
                     last_run_at=(NOW - timedelta(hours=30)).isoformat(),
+                )
+            ],
+        )
+        assert check_jobs(p, NOW) == []
+
+    def test_daily_cron_expr_still_alerts_when_stale(self, tmp_path):
+        # Inverse guard: a DAILY job (DOW field "*") keeps the tight 26h
+        # threshold — the cron-derived weekly rule must not loosen everything.
+        p = self._jobs_file(
+            tmp_path,
+            [
+                self._job(
+                    name="evolution-analysis",
+                    last_run_at=(NOW - timedelta(hours=30)).isoformat(),
+                    schedule={"kind": "cron", "expr": "15 21 * * *", "display": "15 21 * * *"},
+                )
+            ],
+        )
+        alerts = check_jobs(p, NOW)
+        assert len(alerts) == 1 and "stale" in alerts[0]
+
+    def test_weekly_cron_expr_uses_8day_threshold(self, tmp_path):
+        # A weekly live registration (restricted DOW field) is not "stale"
+        # 30h after its run — this is the generic form of the false alarm
+        # that fired daily for evolution-research / -introspection.
+        p = self._jobs_file(
+            tmp_path,
+            [
+                self._job(
+                    name="evolution-research",
+                    last_run_at=(NOW - timedelta(hours=30)).isoformat(),
+                    schedule={"kind": "cron", "expr": "30 9 * * 1", "display": "30 9 * * 1"},
                 )
             ],
         )

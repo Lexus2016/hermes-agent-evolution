@@ -9,6 +9,7 @@ as agent/deadline.py kill_process_tree) and sweeps any snapshotted survivor
 outside the (now-dead) group with SIGKILL afterwards.
 """
 
+import json
 import os
 import signal
 import subprocess
@@ -58,12 +59,13 @@ def test_timeout_kill_reaps_setsid_grandchild(tmp_path):
     pid_file = tmp_path / "grandchild.pid"
     script = textwrap.dedent(
         """
-        import os, sys, time
+        import json, os, sys, time
+        import psutil
         pid = os.fork()
         if pid == 0:
             os.setsid()  # escape the command's process group/session
             with open(sys.argv[1], "w") as f:
-                f.write(str(os.getpid()))
+                f.write(json.dumps([os.getpid(), psutil.Process().create_time()]))
             time.sleep(30)
             os._exit(0)
         time.sleep(30)
@@ -87,7 +89,7 @@ def test_timeout_kill_reaps_setsid_grandchild(tmp_path):
         while time.monotonic() < deadline and not pid_file.exists():
             time.sleep(0.05)
         assert pid_file.exists(), "grandchild never wrote its pid file"
-        grandchild_pid = int(pid_file.read_text().strip())
+        grandchild_pid, _created = json.loads(pid_file.read_text())
 
         assert _wait_for_pid_exit(grandchild_pid), (
             f"setsid grandchild {grandchild_pid} SURVIVED the timeout "
@@ -99,8 +101,12 @@ def test_timeout_kill_reaps_setsid_grandchild(tmp_path):
         # Belt and braces: never leak the sleeper into the test host.
         try:
             if pid_file.exists():
-                os.kill(int(pid_file.read_text().strip()), signal.SIGKILL)
-        except (OSError, ValueError):
+                import psutil
+                pid, created = json.loads(pid_file.read_text())
+                child = psutil.Process(pid)
+                if child.create_time() == created and child.is_running():
+                    child.kill()
+        except (OSError, ValueError, psutil.Error):
             pass
         try:
             env.cleanup()
@@ -183,7 +189,6 @@ def test_kill_process_never_killpgs_the_callers_own_group(monkeypatch):
     assert killed == [12345]
 
 
-@pytest.mark.skipif(os.name != "posix", reason="POSIX process-group semantics")
 class TestReapUntrackedGroupGuard:
     """ProcessRegistry._reap_untracked terminates through _terminate_host_pid,
     which revalidates the kernel start time captured at spawn before signalling.

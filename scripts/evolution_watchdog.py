@@ -209,16 +209,65 @@ def expected_weekly_report_date(
     return candidate.date().isoformat()
 
 
+def _cron_is_weekly(expr) -> bool:
+    """True when a cron expression restricts its day-of-week field.
+
+    ``30 9 * * 1`` (weekly Mon) is weekly; ``15 21 * * *`` (daily) is not.
+    Reads the LIVE registration so the staleness threshold follows the actual
+    cadence instead of a hardcoded name list that drifts from it."""
+    fields = str(expr or "").split()
+    return len(fields) >= 5 and fields[4].strip() not in ("*", "?")
+
+
+def _job_is_weekly(job: dict) -> bool:
+    """Whether a cron job fires weekly (explicit name list or cron DOW field)."""
+    if str(job.get("name", "")) in WEEKLY_JOBS:
+        return True
+    sched = job.get("schedule")
+    expr = sched.get("expr") if isinstance(sched, dict) else sched
+    return _cron_is_weekly(expr)
+
+
+def _pipeline_halted(evolution_dir: Path) -> bool:
+    """True when the pipeline halt marker is present.
+
+    ``evolution_funnel.py`` writes ``halt-state.txt`` after N consecutive
+    zero-deliverable cycles; while it exists every expensive stage skips by
+    design (that is exactly what the stage gates read). Fail-open: an
+    unreadable directory means "not halted" — never a crash."""
+    try:
+        return (evolution_dir / "halt-state.txt").exists()
+    except OSError:
+        return False
+
+
 def check_stage_reports(
     evolution_dir: Path, now: datetime, jobs_file: Path | None = None
 ) -> list[str]:
     """Alert for every stage whose expected report is missing or trivial.
 
-    A missing report is suppressed (not a death) when the stage's cron job ran
-    clean for the slot — see ``_stage_ran_clean_for_slot``."""
+    A missing report is suppressed (not a death) when
+      1. the stage's cron job is disabled — a paused stage cannot emit
+         anything and an explicit disable is the owner's decision, not a
+         pipeline fault (the same reasoning check_jobs() already applies),
+      2. the pipeline is HALTED (halt-state.txt) — a skipped stage writes
+         nothing, so its absent report is the halt's shadow, not "the job
+         died without record"; the halt itself is still reported by
+         check_health(),
+      3. the stage's cron job ran clean for the slot — see
+         ``_stage_ran_clean_for_slot``.
+    A report that EXISTS but is trivially small still alerts in all cases."""
     alerts: list[str] = []
     jobs = _load_jobs(jobs_file)
+    by_name = {str(j.get("name", "")): j for j in jobs}
+    halted = _pipeline_halted(evolution_dir)
     for stage, (slot_hour, ext) in STAGES.items():
+        job = by_name.get(f"evolution-{stage}")
+        # A paused stage cannot emit a report — skip it entirely rather than
+        # alert every single day about a deliverable nobody is scheduled to
+        # produce (research has been paused since 2026-09-11).
+        if job is not None and not job.get("enabled", True):
+            continue
         # A weekly stage's slot is its cron WEEKDAY, not "the most recent daily
         # slot": demanding yesterday's report from a Monday-only stage fires a
         # false alarm on every other day of the week.
@@ -244,6 +293,12 @@ def check_stage_reports(
                         continue
             if recent:
                 continue
+            if halted:
+                # The halt deliberately skips this stage, and a skipped stage
+                # writes no report — the absence is the halt's own shadow, not
+                # "the job died without record". check_health() reports the
+                # halt itself (edge-triggered, so no daily spam).
+                continue
             # No report for the weekly slot AND none inside the whole weekly
             # window: the deliverable is genuinely missing. The daily-stage
             # clean-run suppression below must NOT swallow this — a weekly
@@ -257,6 +312,11 @@ def check_stage_reports(
             )
             continue
         if not report.exists():
+            if halted:
+                # Same halt logic as the weekly branch above: no stage runs
+                # while halt-state.txt exists, so an absent report proves
+                # nothing about the job's health.
+                continue
             clean_job = _stage_clean_job_for_slot(jobs, stage, date, slot_hour)
             if clean_job is not None:
                 if clean_job.get("last_tool_calls") == 0:
@@ -318,7 +378,7 @@ def check_jobs(jobs_file: Path, now: datetime) -> list[str]:
                 f"job '{name}': last run FAILED — {job.get('last_error') or 'no error text'}"
             )
 
-        stale_hours = WEEKLY_STALE_HOURS if name in WEEKLY_JOBS else DAILY_STALE_HOURS
+        stale_hours = WEEKLY_STALE_HOURS if _job_is_weekly(job) else DAILY_STALE_HOURS
         last_run = _parse_iso(job.get("last_run_at"))
         if last_run is None:
             created = _parse_iso(job.get("created_at"))
@@ -346,6 +406,24 @@ def check_jobs(jobs_file: Path, now: datetime) -> list[str]:
 
 
 def _default_runner(cmd: list[str]) -> tuple[int, str]:
+    # Cron subprocesses inherit a RESTRICTED PATH that excludes ~/.local/bin —
+    # which is exactly where gh lives on this host. A bare "gh" therefore
+    # raised FileNotFoundError and the watchdog printed "gh unavailable" on
+    # EVERY run (2026-10-09..16) while gh was installed AND authenticated, so
+    # the entire GitHub half of the health check was silently blind. Extend
+    # PATH for the child instead of trusting the caller's environment.
+    env = dict(os.environ)
+    parts = [p for p in env.get("PATH", "").split(os.pathsep) if p]
+    for extra in (
+        str(Path.home() / ".local" / "bin"),
+        str(Path(__file__).resolve().parent),
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+    ):
+        if extra not in parts:
+            parts.append(extra)
+    env["PATH"] = os.pathsep.join(parts)
     proc = subprocess.run(
         cmd,
         capture_output=True,
@@ -354,6 +432,7 @@ def _default_runner(cmd: list[str]) -> tuple[int, str]:
         errors="replace",
         timeout=30,
         check=False,
+        env=env,
     )
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 

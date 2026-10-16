@@ -1479,7 +1479,8 @@ def cache_document_from_bytes(data: bytes, filename: str) -> str:
     # Final safety check: ensure path stays inside cache dir
     if not filepath.resolve().is_relative_to(cache_dir.resolve()):
         raise ValueError(f"Path traversal rejected: {filename!r}")
-    filepath.write_bytes(data)
+    from gateway.platforms.media_cache_privacy import write_cache_file
+    write_cache_file(filepath, data)
     return str(filepath)
 
 

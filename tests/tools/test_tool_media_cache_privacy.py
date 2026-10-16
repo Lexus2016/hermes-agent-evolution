@@ -23,8 +23,12 @@ def media(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    for name in ("HERMES_HOME_MODE", "HERMES_UID", "HERMES_GID"):
+    for name in ("HERMES_HOME_MODE", "HERMES_UID", "HERMES_GID", "HERMES_CONTAINER", "HERMES_SKIP_CHMOD"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("hermes_constants._detect_container", lambda: False)
+    from hermes_cli.config import ensure_hermes_home
+
+    ensure_hermes_home()
     monkeypatch.setattr("hermes_cli.config.is_managed", lambda: False)
     root = tmp_path / "cache-root"
     for sub in ("cache/images", "cache/computer_use", "cache/vision", "cache/video"):
@@ -113,6 +117,25 @@ def test_capture_managed_directory_policy_is_preserved(media, monkeypatch):
     for name in ("screenshot_path", "elements_file"):
         path = Path(result["meta"][name])
         assert stat.S_IMODE(path.parent.stat().st_mode) == 0o755
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+@pytest.mark.platforms("posix")
+@pytest.mark.parametrize("signal", ["container", "skip_chmod", "detected"])
+@pytest.mark.parametrize("mode", ["preserved", "private", "invalid"])
+def test_capture_canonical_container_policy_keeps_payload_private(media, monkeypatch, signal, mode):
+    if signal == "detected":
+        monkeypatch.setattr("hermes_constants._detect_container", lambda: True)
+    else:
+        name = "HERMES_CONTAINER" if signal == "container" else "HERMES_SKIP_CHMOD"
+        monkeypatch.setenv(name, "1")
+    if mode != "preserved":
+        monkeypatch.setenv("HERMES_HOME_MODE", "700" if mode == "private" else "invalid")
+    result = cu._capture_response(media.cap, max_elements=0)
+    for name in ("screenshot_path", "elements_file"):
+        path = Path(result["meta"][name])
+        assert path.read_bytes()
+        assert stat.S_IMODE(path.parent.stat().st_mode) == (0o755 if mode == "preserved" else 0o700)
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 

@@ -45,7 +45,8 @@ def test_execute_returns_when_wait_loop_never_returns(monkeypatch):
     assert result["returncode"] == 124
     assert "timed out" in result["output"].lower()
     assert ("kill", fake_proc) in killed
-    # POSIX must not bypass local ownership validation with a raw-PID retry.
+    # POSIX local cleanup must stay inside the per-handle ownership guard.
+    # The native Windows backstop retains its existing dispatch.
     assert (("tree", 424242) in killed) == (os.name == "nt")
 
 
