@@ -393,6 +393,9 @@ def test_tui_gateway_model_switch_routing(tmp_path: Path, request: pytest.Fixtur
                 # traffic: wait for the upgraded title main's aux endpoint answered, or a slow
                 # runner lands the request after leg 1's marks and it reads as a leak.
                 gw.seen_or_wait(_titled(gw, sid, "aux-from-main"), timeout=120)
+                assert fleet.servers["main"].aux_requests()[0]["messages"][-1] == {
+                    "role": "user", "content": "turn 0",
+                }
             log = fleet.since(marks)
             payload = (done.get("params") or {}).get("payload") or {}
             ctx = f"leg {i} ({leg.value!r} -> {leg.host}): {done.get('params', {}).get('type')} {str(payload)[:300]}\n{describe(log)}"

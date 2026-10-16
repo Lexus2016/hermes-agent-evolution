@@ -31,6 +31,7 @@ import base64
 import fnmatch
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -73,6 +74,7 @@ HIGH_RISK_GLOBS: tuple[str, ...] = (
     # The agent's OWN enforcement + deploy machinery.
     "tools/approval.py",
     "scripts/evolution_merge_gate.py",
+    "scripts/evolution_admission.py",
     "scripts/register_evolution_cron.py",
     # The rest of the autonomous self-modification machinery: the per-stage job
     # definitions (their prompts CARRY the safety instructions — incl. this
@@ -604,6 +606,11 @@ def main(argv: list[str]) -> int:
         pr_metrics=pr_metrics,
     )
     violations += check_merge_method_policy(head_branch, method)
+    admission = None
+    if head_branch.startswith("evolution/issue-"):
+        from evolution_admission import verify_receipt
+        admission, admission_errors = verify_receipt(files, head, slug, runner, pr=pr)
+        violations.extend(admission_errors)
     if violations:
         print(f"[merge-gate] PR #{pr} BLOCKED from autonomous self-merge:")
         for v in violations:
@@ -617,10 +624,25 @@ def main(argv: list[str]) -> int:
     if not head:
         print(f"[merge-gate] could not resolve PR #{pr} head SHA — refusing to merge")
         return 1
+    if admission is not None:
+        from evolution_admission import recheck_pr_binding
+        if binding_errors := recheck_pr_binding(admission, slug, runner):
+            print("[merge-gate] " + "; ".join(binding_errors))
+            return 1
+    if admission is not None:
+        from evolution_admission import record_admission
+        try:
+            accounting = record_admission(admission, repository=slug, cycle=head_branch)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            print(f"[merge-gate] admission accounting failed; refusing merge: {exc}")
+            return 1
+        print("[merge-gate] admission cycle " + json.dumps(accounting, sort_keys=True))
     # Atomic merge: the head SHA came from the SAME snapshot as the reviewed
     # files, so passing it to the merge API means a concurrent push landed since
     # the read → 409 abort, instead of merging a diff the policy never saw.
     slug = repo or os.environ.get("EVOLUTION_REPO_SLUG", "")
+    # HEAD is atomically fenced below. Base changes after this recheck are not:
+    # GitHub exposes no base-SHA compare-and-swap on the pull-request merge API.
     api = f"repos/{slug}/pulls/{pr}/merge"
     code, _out, err = runner([
         "gh",

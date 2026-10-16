@@ -183,7 +183,7 @@ class Chamber:
         try:
             rc = proc.wait(timeout=deadline)
         except subprocess.TimeoutExpired:
-            kill9_and_reap(proc)
+            self.kill9(name)
             raise AssertionError(f"{name} did not exit within {deadline}s\n{self.stderr(name)}") from None
         finally:
             proc._stderr_file.close()  # type: ignore[attr-defined]
@@ -194,11 +194,16 @@ class Chamber:
         return self.reap(name, deadline=deadline)
 
     def sigterm(self, name: str) -> None:
-        self.procs[name].send_signal(signal.SIGTERM)
+        with self._lock:
+            self.procs[name].send_signal(signal.SIGTERM)
 
     def kill9(self, name: str) -> None:
         proc = self.procs[name]
-        kill9_and_reap(proc)
+        # live() polls (and reaps) in the fd monitor. Keep the owned child
+        # unreaped until signal dispatch finishes: Popen's poll/kill sequence
+        # alone does not prevent another thread from releasing its PID.
+        with self._lock:
+            kill9_and_reap(proc)
         proc._stderr_file.close()  # type: ignore[attr-defined]
 
     def live(self) -> list[tuple[str, subprocess.Popen]]:
@@ -213,7 +218,7 @@ class Chamber:
             try:
                 proc.wait(timeout=max(0.1, end - time.monotonic()))
             except subprocess.TimeoutExpired:
-                kill9_and_reap(proc)
+                self.kill9(_name)
             f = getattr(proc, "_stderr_file", None)
             if f is not None and not f.closed:
                 f.close()

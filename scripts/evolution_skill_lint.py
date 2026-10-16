@@ -383,7 +383,15 @@ def lint_repo(repo_root: Optional[Path] = None) -> list[dict[str, str]]:
     # within per-tool caps before it is trusted for reuse. No declaration
     # means no new violations (opt-in, zero false positives); an unreachable
     # S1 module degrades to a no-op via the lazy import, never a crash.
+    # Direct CLI runs put scripts/, not the repository root, on sys.path.
+    module_root = str(Path(__file__).resolve().parents[1])
+    if module_root not in sys.path:
+        sys.path.insert(0, module_root)
+    from tools.skill_contracts import check_contract_edit
     for name, text in skill_texts.items():
+        if contract_error := check_contract_edit(text):
+            violations.append({"kind": "skill_contract", "stage": "evolution", "skill": name,
+                               "detail": contract_error})
         for v in find_cap_violations(extract_declared_inputs(text)):
             v["skill"] = name
             violations.append(v)

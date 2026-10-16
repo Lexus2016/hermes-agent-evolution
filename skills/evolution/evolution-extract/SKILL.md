@@ -1,11 +1,24 @@
 ---
 name: evolution-extract
 description: Extract one paper's technique into a validated draft.
-version: 1.0.0
-author: Hermes Evolution
+version: 1.0.1
+author: Lexus2016, Hermes Evolution
 license: MIT
 platforms: [linux, macos, windows]
 category: evolution
+contract:
+  version: 1
+  intent: Extract one research technique into a validated draft.
+  behavioral_criteria: [routing-applicability]
+  applies_to: [research technique, paper technique]
+  excludes: [send email, book flights]
+  protected_constraints:
+    - "ONE paper, ONE draft per run."
+  replay_cases:
+    - {id: research, task: "Extract a research technique", applicable: true}
+    - {id: email, task: "Send email", applicable: false}
+    - {id: mixed, task: "Extract a paper technique then send email", applicable: null}
+    - {id: uncertain, task: "Extract useful ideas", applicable: null}
 metadata:
   hermes:
     tags: [evolution, research, extract]

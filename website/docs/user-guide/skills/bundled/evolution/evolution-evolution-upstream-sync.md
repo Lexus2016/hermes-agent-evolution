@@ -105,6 +105,33 @@ git diff --name-only --diff-filter=U
   Do NOT blind-resolve a judgement-heavy merge autonomously — that is how features
   get silently dropped.
 
+#### Sizing a multi-release gap
+
+For a catch-up spanning several releases, fetch the desired tags in step 0, then
+size each candidate offline in a detached temporary worktree:
+
+```bash
+python scripts/sync_batch_probe.py --source origin/main --tags v0.21.6 v0.21.7 v0.22.0 v0.22.1 --out-dir analysis
+BASE=$(git merge-base origin/main v0.21.7)
+python scripts/sync_classify.py --base "$BASE" --fork origin/main --upstream v0.21.7 --paths-file analysis/sync-paths-v0.21.7.nul --out-dir analysis
+```
+
+The probe writes JSON (pinned SHAs, paths and counts), a markdown decision table,
+and NUL-delimited conflict lists. It never fetches or pushes. Each tag is compared
+against the same source, **not** the result of a previous candidate; re-probe after
+each landed release. Exit 2 means a probe failed, never a zero-conflict success.
+`AUTONOMOUS` means ≤10 conflicts with none in core; the other sync gates above
+still apply. Core includes all `agent/`, `hermes_cli/`, `hermes_state*`,
+`run_agent.py` and `cron/` paths, conservatively.
+
+The classifier reads only committed trees; it does not need a live merge. It
+compares base/fork/upstream object IDs and file modes (including binary files,
+additions and deletions), writes per-path evidence plus bucket totals, and exits
+1 when any path needs a manual decision. Invalid refs fail instead of pretending
+that files were absent. Mode changes are conservatively treated as edits.
+Historical conflict counts depend on the exact source, tags and merge-driver
+configuration; use the new report's pinned refs rather than assuming old totals.
+
 ### 2. Resolve conflicts — authorship-driven, keep OURS, follow upstream
 
 For EACH conflicted file, decide by **who authored each side**, not by guesswork.

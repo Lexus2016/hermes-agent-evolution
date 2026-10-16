@@ -11,8 +11,10 @@ This is an implementation record, not approval to deploy or publish a release.
 - Initial merge: 207 conflicting paths, including 59 core paths. These are
   measurements of the frozen inputs, not promises about future merge attempts.
 - Concurrent remediation main: `3cd9963bcce9c0aba451dadeaff5c701bca102e4`
-  (aggregate #3485). Its true ancestry and behavior must enter this candidate before
-  final validation; incorporation is still pending.
+  (aggregate #3485). Incorporated with true merge ancestry and explicit
+  cross-version ports; final candidate validation remains pending.
+- Upstream semantic checkpoint: `dc825e4cc4b144df88e4592a466040015bb400bc`.
+- Separate safe style checkpoint: `38525794d077775f473716a0a640a59e7038a093`.
 
 ## Preservation checklist and decisions
 
@@ -62,12 +64,39 @@ limit remains intact.
 The pinned embedded Hindsight 0.6.1 dependency set requires Python 3.12 rather
 than the core Python 3.14 runtime. The explicit canonical PM selector provisioned official CPython 3.12.13 and the
 exact pinned server dependencies; installed-runtime imports passed. Synthetic
-lifecycle coverage passed 103 tests, with one skip. Actual server startup reached
+lifecycle coverage passed 108 tests, with one skip. Actual server startup reached
 PostgreSQL initialization but was blocked by local Unix-socket permissions.
 Installed-runtime health, protected-endpoint authentication and successful shutdown
 remain required trusted-CI gates. Readiness and authentication are separate contracts.
 
 Native Windows/macOS behavior still requires the corresponding native CI lanes.
+
+## Concurrent-main interaction checks
+
+The main merge retains reviewed action pins while keeping upstream PM workflow
+architecture and fork execution guards. All 22 workflow conflicts were verified
+as action-pin-only incoming changes; retired advisory review-label automation
+remains retired under the approved policy decision.
+
+- Admission uses primary trusted PR receipts plus independently verified exact-head
+  non-release dispatch E2E evidence. Current PR base/head are fetched independently
+  and rechecked before accounting/merge. The API has no atomic base-SHA compare-and-swap;
+  this limitation remains explicit. Integrated admission/gate suite: 89 passed.
+- Advisor enrichment preserves the existing JSON result envelope, original failure
+  fields, multimodal content and blocked-result consultation suppression. Actual
+  sequential/concurrent execution, persistence and reopened database tests: 8 passed;
+  broader runtime slices: 262 passed.
+- Cron decision fencing executes before canonical submission and on the owner's
+  fresh job before pre-scripts/monitors, covering replans across both writer awaits.
+  Owner and related suites: 18 passed; ledger suite: 7 passed. A full cron diagnostic
+  had 1,705 passed, three socket-environment failures and three skips.
+- Skill contracts remain in guarded writes, full frontmatter parsing and live
+  retrieval metadata. Memory grounding uses canonical rendering while budgeting raw
+  stored content and preserving frozen snapshots. Tools interaction slice: 305 passed;
+  catalog slice: 56 passed; cron-tool slice: 118 passed.
+- The real pinned Hindsight smoke is an unconditional standard-Linux job inside the
+  required Python validation workflow, with read-only permissions and a 40-minute
+  bound. It must succeed in trusted CI; local synthetic passes do not replace it.
 
 ## Validation rules and remaining work
 
@@ -101,7 +130,7 @@ through both revisions but lost execution state during an environment refresh,
 without a terminal result. Both require successful exact-candidate validation.
 
 Before merge:
-- [ ] Incorporate the landed fork remediation aggregate with ancestry preserved.
+- [x] Incorporate the landed fork remediation aggregate with ancestry preserved.
 - [ ] Freeze the final candidate tree and rerun all required test/lint gates.
 - [ ] Resolve every diagnostic failure or document a reproducible environment blocker.
 - [ ] Validate native platform lanes and frontend checks where applicable.

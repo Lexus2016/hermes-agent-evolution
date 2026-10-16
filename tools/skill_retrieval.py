@@ -260,7 +260,10 @@ def rank_skills(
             usage = {}
 
     ranked: list[RankedSkill] = []
+    from tools.skill_contracts import applicability
     for candidate in candidates:
+        if applicability(candidate.get("contract"), query) is False:
+            continue
         name = str(candidate.get("name") or "").strip()
         if not name:
             continue

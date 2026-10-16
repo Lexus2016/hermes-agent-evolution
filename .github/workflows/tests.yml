@@ -40,6 +40,31 @@ concurrency:
   cancel-in-progress: ${{ github.ref_type != 'tag' && inputs.commit == '' }}
 
 jobs:
+  hindsight-smoke:
+    name: Real isolated Hindsight smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+      - name: Set up locked Python and Hindsight host dependencies
+        uses: ./.github/actions/setup-pm
+        with:
+          extras: '["hindsight"]'
+      - name: Verify real pinned Hindsight runtime without provider calls
+        # This is a required Linux gate, not a live-provider test. It provisions
+        # an isolated Python 3.12 runtime and uses only disposable local data.
+        # Missing socket support, failed auth or incomplete cleanup must fail.
+        run: |
+          "$HERMES_PYTHON" scripts/smoke_hindsight_isolated.py \
+            --work-root "$RUNNER_TEMP/hermes-hindsight-smoke"
+      - name: Check the checkout is clean
+        uses: ./.github/actions/check-clean-worktree
+
   generate:
     name: "Generate slices"
     runs-on: ubuntu-latest

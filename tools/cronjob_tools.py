@@ -864,6 +864,7 @@ def _action_create(a: dict[str, Any]) -> str:
             # CLI-only lane: absent from CRONJOB_SCHEMA and the model dispatch (models don't pick models).
             reasoning_effort=a["reasoning_effort"], interpreter=a["interpreter"],
             pinned=bool(a["pinned"]),
+            decision=a.get("decision"),
             failure_deliver=_resolve_cron_context_deliver(_normalize_deliver_param(a["failure_deliver"])),
             approval_mode=a.get("approval_mode"),
             delivery_verbosity=a.get("delivery_verbosity"),
@@ -1077,6 +1078,8 @@ def _update_run_fields(job: dict[str, Any], a: dict[str, Any], updates: dict[str
         updates["enabled_toolsets"] = a["enabled_toolsets"]
     if a["attach_to_session"] is not None:
         updates["attach_to_session"] = bool(a["attach_to_session"])
+    if a.get("decision") is not None:
+        updates["decision"] = a["decision"]
     if a["workdir"] is not None:
         # Empty string clears; otherwise update_job() validates/normalizes.
         updates["workdir"] = _normalize_optional_job_value(a["workdir"]) or None
@@ -1191,7 +1194,8 @@ def cronjob(
     paused: bool = False,
     paused_reason: Optional[str] = None,
     pinned: Optional[bool] = None,
-    interpreter: Optional[str] = None) -> str:
+    interpreter: Optional[str] = None,
+    decision: Optional[dict[str, Any]] = None) -> str:
     """Unified cron job management tool."""
     # Retry-rate limiter: noisy failure loops are capped per task.
     # Only *check* the current streak — do NOT increment here. The counter
@@ -1344,6 +1348,14 @@ Jobs run in a fresh session with no current-chat context, so prompts must be sel
                 "items": {"type": "string"},
                 "description": "Optional toolset names to restrict the job's agent to (e.g. [\"web\", \"terminal\"]) — cuts token overhead. Infer from the prompt. Omit for all default tools. [] = an explicit zero-tool allowlist (the job's agent gets no toolsets, MCP servers included unless named); it is preserved as [], never widened back to the default."
             },
+            "decision": {
+                "type": "object",
+                "description": "Premises to recheck before execution. Changed/unreadable/stale evidence pauses the job. Set again to replan; never grants permission.",
+                "properties": {
+                    "watch_files": {"type": "array", "items": {"type": "string"}, "description": "Up to 16 absolute local file paths (1 MiB each)."},
+                    "max_age_seconds": {"type": "number", "description": "Positive maximum age of captured evidence."}
+                }
+            },
             "workdir": {
                 "type": "string",
                 "description": "Optional absolute existing path to run the job from: injects that directory's AGENTS.md/context files and anchors terminal/file tools there. On update, '' clears."
@@ -1385,7 +1397,7 @@ def check_cronjob_requirements() -> bool:
 _HANDLER_FORWARDED_ARGS = (
     "job_id", "prompt", "schedule", "name", "repeat", "deliver", "failure_deliver", "skill", "skills", "reason",
     "script", "context_from", "continuity", "enabled_toolsets", "workdir", "no_agent", "attach_to_session",
-    "approval_mode", "delivery_verbosity", "paused_reason", "pinned", "all")
+    "approval_mode", "delivery_verbosity", "paused_reason", "pinned", "all", "decision")
 
 
 def _cronjob_handler(args, **kw):

@@ -91,7 +91,7 @@ _EXIT_CODE_RE = re.compile(r"exit code[:\s]+([1-9]\d*)", re.IGNORECASE)
 # instead of the generic fail threshold, bounding the spiral and nudging the
 # agent toward alternatives sooner.
 _NON_RETRYABLE = frozenset(
-    {"timeout", "permission", "missing_command", "limit", "provider_dead", "refusal"}
+    {"timeout", "permission", "missing_command", "limit", "provider_dead", "refusal", "safety_gate_blocked"}
 )
 _NONRETRY_THRESHOLD = 2
 
@@ -994,6 +994,11 @@ def maybe_nudge(
     if not runs:
         return _semantic_loop_nudge(messages)
     tool = runs[0][0]
+
+    # A safety refusal must never receive generic retry/fallback advice, even
+    # on the first occurrence or after a long run of other failure classes.
+    if runs[0][2] == "safety_gate_blocked":
+        return f"[loop-guard] {_category_hint('safety_gate_blocked')}"
 
     # Pick thresholds based on tool category (#432).
     # Unknown tools get mutating thresholds as the safer default.

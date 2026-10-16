@@ -330,3 +330,17 @@ class TestUSRSignalInjection:
         msg = make_tool_result_message("web_search", None, "c8")
         assert "[tool_error]" in msg["content"]
         assert "NOT" in msg["content"] or "not a" in msg["content"].lower()
+
+
+def test_safety_gate_diagnostics_keep_safe_recovery(monkeypatch):
+    from agent.tool_executor import _harm_blocked_tool_result
+    from tools.tool_failure_classifier import SAFETY_GATE_RECOVERY_HINT
+
+    monkeypatch.setenv("HERMES_DIAGNOSTICS_INLINE", "1")
+    # Incidental error words must not override the gate's explicit refusal.
+    result = _harm_blocked_tool_result("permission denied; command not found")
+    assert classify(result) == ("safety_gate_blocked", SAFETY_GATE_RECOVERY_HINT)
+    message = make_tool_result_message("terminal", result, "blocked")
+    suffix = message["content"].split("[diagnostic]", 1)[1]
+    assert SAFETY_GATE_RECOVERY_HINT in suffix
+    assert "Try an alternative" not in suffix

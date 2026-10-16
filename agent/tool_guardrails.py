@@ -513,6 +513,12 @@ def classify_tool_failure(tool_name: str, result: str | None) -> tuple[bool, str
     if is_guardrail_refusal(result):
         return False, ""
 
+    # Pre-execution refusals have no exit code. Match the display verdict for
+    # callers of after_call() that rely on this fallback classification.
+    data = safe_json_loads(result)
+    if isinstance(data, dict) and data.get("status") == "blocked" and data.get("error"):
+        return True, f" [{data['error']}]"
+
     # Terminal and process: non-zero exit code is the canonical failure
     # signal. The process tool (action=poll/log/wait) returns a JSON dict
     # with exit_code but no "error" key when the background process exits

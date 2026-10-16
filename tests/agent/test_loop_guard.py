@@ -932,3 +932,15 @@ class TestStructuralFailureDetection:
 
     def test_a_single_failure_still_stays_quiet(self):
         assert maybe_nudge(self._terminal_run("no such file")) is None
+
+
+def test_safety_gate_nudge_never_suggests_fallback():
+    from agent.tool_executor import _harm_blocked_tool_result
+    from tools.tool_failure_classifier import SAFETY_GATE_RECOVERY_HINT
+
+    result = _harm_blocked_tool_result("permission denied")
+    for count in (1, 2, 4, 12):
+        nudge = maybe_nudge(_run("terminal", count, result=result))
+        assert nudge == f"[loop-guard] {SAFETY_GATE_RECOVERY_HINT}"
+
+    assert run_warrants_cron_hard_stop(_distinct_run("read_file", 2, result=result))

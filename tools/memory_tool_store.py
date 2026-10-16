@@ -159,6 +159,18 @@ def parse_provenance(stored: str):
     return display, src, tier
 
 
+def _entry_grounding(stored: str) -> tuple[str, str, str, str]:
+    """Resolve context metadata; neither model tags nor storage approval grant authority.
+
+    There is no authenticated arrangement-acceptance receipt in the memory
+    format. Legacy/default entries therefore remain unacknowledged, even when
+    their source/trust labels claim user input or high reliability.
+    """
+    entry, superseded_at = parse_supersession(stored)
+    text, source, trust = parse_provenance(entry)
+    return text, source, trust, "revised" if superseded_at is not None else "unacknowledged"
+
+
 # ---------------------------------------------------------------------------
 # Memory content scanning — lightweight check for injection/exfiltration
 # in content that gets injected into the system prompt.
@@ -615,10 +627,9 @@ class MemoryStore:
 
         Empty or already-block-marker entries pass through unchanged.
 
-        Provenance trailers (#316) are stripped before rendering: the snapshot
-        shows the clean display text, never the ``⟦src:…⟧`` sentinel. The scan
-        still runs over the raw entry so threat detection is unaffected, and
-        untagged legacy entries render byte-identically to before.
+        Provenance and non-authorizing grounding status remain visible in the
+        frozen snapshot. The scan still runs over the raw entry before rendering.
+        Legacy files are not rewritten or silently promoted to user approval.
         """
         from tools.threat_patterns import scan_for_threats
 
@@ -651,9 +662,10 @@ class MemoryStore:
                     f"to delete the original.]"
                 )
             else:
-                # Render clean display text (no provenance trailer). For
-                # untagged entries this is the entry verbatim.
-                sanitized.append(parse_provenance(entry)[0])
+                text, source, trust, grounding = _entry_grounding(entry)
+                sanitized.append(
+                    f"[grounding={grounding}; source={source}; trust={trust}; authority=none]\n{text}"
+                )
         return sanitized
 
     def _load_blocked_warnings(self) -> set:
@@ -1671,7 +1683,8 @@ class MemoryStore:
                 continue
             if min_rank is not None and _trust_rank(tier) < min_rank:
                 continue
-            row = {"text": text, "source_class": src, "trust_tier": tier}
+            row = {"text": text, "source_class": src, "trust_tier": tier,
+                   "grounding": _entry_grounding(entry)[3], "authorizes_actions": False}
             if sup_ts is not None:
                 row["superseded_at"] = sup_ts
             rows.append(row)
@@ -1833,7 +1846,8 @@ class MemoryStore:
 
         limit = self._char_limit(target)
         content = ENTRY_DELIMITER.join(entries)
-        current = len(content)
+        # Annotation overhead is prompt context, not persisted memory budget.
+        current = self._char_count(target)
         pct = min(100, int((current / limit) * 100)) if limit > 0 else 0
 
         if target == "user":

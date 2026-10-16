@@ -287,7 +287,8 @@ def _validate_frontmatter(content: str, *, new_skill: bool = False) -> Optional[
             f"Move detail into the skill body.")
     if not content[end_match.end() + 3:].strip():
         return "SKILL.md must have content after the frontmatter (instructions, procedures, etc.)."
-    return None
+    from tools.skill_contracts import check_contract_edit
+    return check_contract_edit(content)
 
 
 def _validate_content_size(content: str, label: str = "SKILL.md") -> Optional[str]:
@@ -513,6 +514,10 @@ def _guarded_write(name: str, skill_dir: Path, target: Path, action: str, label:
         if read_guard := _background_review_read_before_write_guard(name, target, action, label):
             return read_guard
         original = target.read_text(encoding="utf-8-sig")
+    if target.name == "SKILL.md":
+        from tools.skill_contracts import check_contract_edit
+        if contract_error := check_contract_edit(content, original):
+            return _err(contract_error)
     from hermes_constants import mkdir_under_hermes_home
     mkdir_under_hermes_home(target.parent)
     atomic_write_text(target, content, preserve_mode=True, create_mode=0o644)
@@ -677,6 +682,11 @@ def _delete_skill(name: str, absorbed_into: Optional[str] = None) -> dict[str, A
     skill_dir, guard = _locate_for_write(name, "delete")
     if guard := guard or _curator_consolidation_delete_guard(name, absorbed_into):
         return guard
+    if unsafe := _validate_delete_target(skill_dir):
+        return _err(unsafe)
+    frontmatter, _ = _parse_frontmatter((skill_dir / "SKILL.md").read_text(encoding="utf-8-sig"))
+    if "contract" in frontmatter:
+        return _err("Contracted skills cannot be deleted through skill_manage; retire the contract through a reviewed repository change.")
     if pinned_err := _pinned_guard(name):
         return _err(pinned_err)
     absorbed_target = absorbed_into.strip() if isinstance(absorbed_into, str) else ""
@@ -754,6 +764,10 @@ def _remove_file(name: str, file_path: str) -> dict[str, Any]:
         return _err(f"File '{file_path}' not found in skill '{name}'.", available_files=available or None)
     if read_guard := _background_review_read_before_write_guard(name, target, "remove_file", file_path):
         return read_guard
+    if target.name == "SKILL.md":
+        from tools.skill_contracts import check_contract_edit
+        if contract_error := check_contract_edit("", target.read_text(encoding="utf-8-sig")):
+            return _err(contract_error)
     target.unlink()
     _rmdir_if_empty(target.parent, skill_dir)
     return {"success": True, "message": f"File '{file_path}' removed from skill '{name}'."}

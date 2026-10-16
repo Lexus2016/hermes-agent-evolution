@@ -18,8 +18,16 @@ import os
 import re
 from typing import Any, Optional, Tuple
 
+from tools.tool_failure_classifier import SAFETY_GATE_RECOVERY_HINT
+
 # Ordered most-specific first; first match wins. (regex, category, hint).
 _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
+    # The explicit gate refusal outranks incidental error words in its reason.
+    (
+        re.compile(r"tool execution blocked by safety gate:", re.I),
+        "safety_gate_blocked",
+        SAFETY_GATE_RECOVERY_HINT,
+    ),
     (
         re.compile(
             r"command not found|not recognized as|: No such file or directory.*\b(sh|bash|exec)\b|executable file not found",

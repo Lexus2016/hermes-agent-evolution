@@ -213,6 +213,22 @@ gh pr list --repo "$REPO" --state open --limit 50 \
 ```bash
 python3 scripts/evolution_merge_gate.py --pr <N> --repo "$REPO" --merge --method squash
 ```
+   **Missing E2E admission receipt:** PR CI deliberately skips E2E. For an
+   `evolution/issue-*` change requiring E2E, use the gate's exact non-release
+   validation command only when CI execution is already authorized. The existing
+   manual `ci.yaml` run includes native OS and other validation lanes, so obtain
+   authorization if that cost is not already covered. Keep `release=false`; do
+   not invoke release, publication, or live-provider workflows. Use `terminal`
+   to check the current server head, request the indicated candidate branch,
+   then inspect `gh run list --repo "$REPO" --workflow ci.yaml --event
+   workflow_dispatch --commit <reviewed-head-sha> --json databaseId,headSha,status,conclusion`
+   and wait with `gh run watch <matching-run-id> --repo "$REPO" --exit-status`.
+   Rerun the gate after completion. Never substitute a different-head or skipped
+   run, and never bypass a failed/newer attempt. The primary PR run and unchanged
+   immutable baseline remain required. The gate rechecks head/base before merge;
+   only the head has an atomic API fence, not the base. See
+   `website/docs/developer-guide/evolution-admission.md` for the receipt procedure.
+
    **Exception — upstream sync PRs (#2783):** a PR whose head branch is `sync/*`
    MUST merge with `--method merge` (a TRUE merge commit), never squash/rebase —
    squash makes the upstream release SHA unreachable from `main`'s ancestry, so

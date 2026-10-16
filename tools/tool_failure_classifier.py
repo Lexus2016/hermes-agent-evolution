@@ -51,6 +51,7 @@ class ToolFailureCategory(str, Enum):
     invalid_arguments = "invalid_arguments"
     not_found = "not_found"
     permission_denied = "permission_denied"
+    safety_gate_blocked = "safety_gate_blocked"
     rate_limited = "rate_limited"
     # Quota/billing exhaustion on a sub-tool's paid backend (vision model,
     # search API, etc.). Unlike ``rate_limited`` (which clears over time),
@@ -146,6 +147,7 @@ _CATEGORY_RETRYABLE: dict[ToolFailureCategory, bool] = {
     ToolFailureCategory.invalid_arguments: False,
     ToolFailureCategory.not_found: False,
     ToolFailureCategory.permission_denied: False,
+    ToolFailureCategory.safety_gate_blocked: False,
     ToolFailureCategory.rate_limited: True,
     ToolFailureCategory.quota_exhausted: False,
     ToolFailureCategory.transient_network: True,
@@ -166,7 +168,16 @@ _PERSISTENT_OTHER_HINT: str = (
     "it can be decomposed into a named bucket."
 )
 
+SAFETY_GATE_RECOVERY_HINT = (
+    "Do not retry or bypass this safety refusal with another tool, shell write, "
+    "or reworded content. Stop and report the blocked operation and risk flags "
+    "to the user for review through an authorized approval channel. Approval "
+    "does not disable this gate; leave the operation incomplete until it can "
+    "proceed under the applicable safety policy."
+)
+
 _CATEGORY_HINTS: dict[ToolFailureCategory, str] = {
+    ToolFailureCategory.safety_gate_blocked: SAFETY_GATE_RECOVERY_HINT,
     ToolFailureCategory.tool_unavailable: (
         "The tool or one of its dependencies is unavailable (not installed, not "
         "connected, or disabled). Do not retry — switch to an alternative tool "
@@ -248,6 +259,8 @@ def _rule(
 #     -> not_found rule so a missing adapter/plugin is not mistaken for missing
 #     data (and vice versa).
 _BUILTIN_RULES: list[_Rule] = [
+    # Pre-execution refusal, never a tool/dependency failure or retry prompt.
+    _rule(r"tool execution blocked by safety gate:", ToolFailureCategory.safety_gate_blocked),
     # Argument-shaped "X not found" (missing required field / edit's old_string)
     # before the generic not_found rule.
     _rule(

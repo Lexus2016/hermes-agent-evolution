@@ -678,7 +678,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         "before running tests (pre-PR gate for the autonomous pipeline; default: off)",
     )
 
+    parser.add_argument("--contract-base", default="origin/main",
+                        help="Immutable baseline ref for skill contract replay")
     args = parser.parse_args(argv)
+    from evolution_skill_contracts import check_repository_edits
+    contract_errors = check_repository_edits(args.repo_root or Path.cwd(), args.contract_base)
+    if contract_errors:
+        print("\n".join(contract_errors), file=sys.stderr)
+        return 1
 
     # Resolve changed files
     changed_files = _parse_changed_files_arg(args.changed_files)

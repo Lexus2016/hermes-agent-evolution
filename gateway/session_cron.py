@@ -143,6 +143,22 @@ async def operation(authority, name, params, actor=None):
             ref, request_id = _create(authority, actor, params)
         from functools import partial
         from gateway.session_runtime_workers import tracked_write
+        # Carry the submitted revision across both writer awaits. Never adopt a
+        # newer replan silently while admitting this frozen execution policy.
+        if isinstance(ref, dict):
+            frozen_job = json.loads(ref['policy']['request_json'])['cron_job']
+        else:
+            from gateway.config import Platform
+            from gateway.session_local_recovery import local_adapter_map
+            policy = local_adapter_map(authority)[Platform.LOCAL].policies[ref.session_id]
+            frozen_job = json.loads(policy.request_json)['cron_job']
+
+        def authorize_decision(_conn):
+            from cron.decision_ledger import preflight_current
+            with owner_scope(authority):
+                if preflight_current(frozen_job, persist=False) is not None:
+                    raise RuntimeStoreError('admission_conflict')
+
         if isinstance(ref, dict):
             # The creation commit waits on the writer off the owner loop, like session.create (N50).
             from gateway.session_local_recovery import restore_local_session
@@ -152,7 +168,7 @@ async def operation(authority, name, params, actor=None):
         receipt = await tracked_write(authority, partial(
             admit_session_input, authority.db, epoch=authority.epoch, principal_id=actor.subject,
             session_id=ref.session_id, request_id=request_id, payload={'text': params['extra_prompt'] or ''},
-            _authorize_write=authority._admission_gate()), then=partial(authority._admitted, ref, None), ordered=True,
+            _authorize_write=authority._admission_gate(authorize_decision)), then=partial(authority._admitted, ref, None), ordered=True,
             after=partial(authority._schedule_admitted, ref))
         return {'session_id': ref.session_id, 'admission_id': receipt.admission_id}
     if set(params) != {'session_id', 'admission_id'} or name not in {'status', 'cancel'}:
@@ -207,6 +223,11 @@ def _run_identified(run_job, job, execution_id, **kwargs):
     The scheduler binds it in the FIRING thread, but the owner executes on its own loop, whose
     context never saw that binding; re-bind it here from the same ledger row, in the profile scope
     the caller entered (so the row and the profile name are this profile's)."""
+    from cron.decision_ledger import preflight_current
+    # Execute on the owner's scoped worker after any queue/writer waits, before
+    # scripts, monitors or model work. A changed revision never inherits approval.
+    if (decision_error := preflight_current(job)) is not None:
+        return False, '', '', decision_error
     from cron.execution_identity import enter_cron_execution, exit_cron_execution
     from cron.executions import get_execution
     token = enter_cron_execution(job, execution_id, get_execution(execution_id) or {})

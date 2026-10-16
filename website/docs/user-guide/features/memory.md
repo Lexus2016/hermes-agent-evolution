@@ -553,3 +553,23 @@ hermes memory status     # check what's active
 ```
 
 See the [Memory Providers](./memory-providers.md) guide for full details on each provider, setup instructions, and comparison.
+
+### Provenance and grounding are context, not permission
+
+Built-in memory search and the frozen session-start prompt preserve each entry's
+source/trust labels and expose its arrangement grounding status. Without an
+authenticated arrangement-confirmation record, entries are `unacknowledged`;
+superseded entries are `revised`. Legacy files keep their existing bytes and
+receive safe defaults on read. Mid-session writes do not change the frozen
+prompt; subsequent sessions see the new content and annotations.
+
+All entries have `authorizes_actions: false`. A model-supplied `user_input` source,
+`trusted` trust tier, an embedded “accepted” claim, or approval to **save** a memory
+entry does not authorize carrying out a remembered proposal. Cron agents also
+load memory, with background review disabled. The same non-authorizing guidance
+applies to external memory providers without changing their plugin interfaces.
+
+These annotations preserve grounding context; they are not an enforceable action
+permission system. Hermes does not yet link a remembered arrangement to an
+authenticated, scoped action-approval receipt, so this change does not introduce
+an `accepted` authorization state or replace existing action approvals.

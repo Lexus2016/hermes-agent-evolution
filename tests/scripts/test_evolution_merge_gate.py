@@ -263,7 +263,7 @@ class TestMainWiring:
         # clean, mergeable diff (files present, head resolved) — post-#1244 the
         # gh IO is _pr_snapshot (files + head in one call), not _pr_files.
         monkeypatch.setattr(
-            emg, "_pr_snapshot", lambda pr, repo, runner: ([], "deadbeef", "evolution/issue-x")
+            emg, "_pr_snapshot", lambda pr, repo, runner: ([], "deadbeef", "feature/quality-wiring")
         )
         monkeypatch.setattr(emg, "_run", lambda cmd: (0, "[]", ""))
 

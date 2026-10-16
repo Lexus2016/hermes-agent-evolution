@@ -356,6 +356,10 @@ def _classify_failure_reason(content: Any) -> Optional[str]:
             hints.append(v)
     haystack = " ".join(hints)
 
+    if data.get("reason") == "safety-gate-blocked" or re.search(
+        r"tool execution blocked by safety gate:", haystack, re.IGNORECASE
+    ):
+        return "safety-gate-blocked"
     if _FILE_NOT_FOUND_RE.search(haystack):
         return "file-not-found"
     if _PERMISSION_RE.search(haystack):

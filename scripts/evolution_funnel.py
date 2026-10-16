@@ -164,7 +164,13 @@ def compute_funnel(
         except (TypeError, ValueError):
             mock_ratio_value = None
 
+    try:
+        from scripts.delegation_escalation_report import summarize as escalation_summary
+    except ModuleNotFoundError:  # Direct script invocation outside the checkout.
+        from delegation_escalation_report import summarize as escalation_summary
+
     return {
+        "delegation_escalation": escalation_summary(evolution_dir / "trajectories", date),
         "date": date,
         # inflow
         "research_proposals": int(issues.get("total_proposals", 0) or 0),
@@ -180,6 +186,10 @@ def compute_funnel(
         # outflow
         "merged": len(merged) if isinstance(merged, list) else 0,
         "skipped": len(skipped) if isinstance(skipped, list) else 0,
+        "decisions_reopened": sum(
+            1 for path in (evolution_dir / "decision-reopens").glob("*.json")
+            if str(_as_dict(_load_json(path)).get("created_at", "")).startswith(date + "T")
+        ),
         # test-quality (#1210) — longitudinal mock-ratio trend
         "mock_ratio": mock_ratio_value,
     }

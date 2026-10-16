@@ -82,3 +82,78 @@ delegation config > parent; the selected provider supplies its own credential
 bundle. An unresolvable provider raises `SubagentLifecycleError` before launch.
 Core does not expose `provider` to the model: the plugin chooses it, for example
 from operator config.
+
+## Delegation escalation prototype
+
+Every delegated run records a content-free contact trajectory under the active
+profile's `evolution/trajectories/`: run start, each committed tool result (including
+blocked results), and an outcome report. Decisions include the state, result class,
+SILENT/CONSULT values, consultation price, and suppression reason. The report is
+also returned in the child's `escalation` field and aggregated by `evolution_funnel.py`.
+Goals, raw tool results, and advice are not stored in these records.
+
+By default the controller only observes and makes no advisor requests. Configure
+`delegation.escalation` in `config.yaml` to opt in:
+
+```yaml
+delegation:
+  escalation:
+    enabled: true
+    consultation_price: 0.5
+    budget_mode: count_only
+    max_consultations: 1
+auxiliary:
+  delegation_advisor:
+    provider: your-configured-provider
+    model: your-configured-advisor-model
+```
+
+This prototype enforces a request-count budget (maximum 10 consultations per run),
+512 output tokens per request and a 30-second request timeout. It does not enforce
+a dollar ceiling. Configure the advisor through the existing auxiliary routing
+system. No new provider credentials or privileges are created. The consultation
+price is a dimensionless reward penalty, not USD. Missing or invalid budget mode
+suppresses consultation; increasing the price suppresses marginal consultations.
+Safety/approval denials and interrupted runs cannot request consultation. Advisor
+text is explicitly untrusted, non-authorizing tool-result context, incorporated
+before persistence while preserving structured JSON result envelopes; it does
+not authorize actions or modify the system prompt.
+
+The shipped values are an inspectable heuristic in `tools/delegation_escalation.py`.
+The controller selects CONSULT only when `Q(CONSULT) - price > Q(SILENT)`.
+Per-profile learned values load at run start from
+`evolution/delegation-action-values.json`. Invalid tables fall back to the defaults.
+
+Offline reports and first-visit Monte Carlo updates require no model calls:
+
+```sh
+python scripts/delegation_escalation_report.py ~/.hermes/evolution/trajectories
+python scripts/delegation_escalation_report.py ~/.hermes/evolution/trajectories \
+  --verified-outcomes reviewed-outcomes.json --price 0.5 \
+  --output ~/.hermes/evolution/delegation-action-values.json
+```
+
+The reviewed outcome file maps trajectory session IDs to
+`{"verified": true, "reward": 1.0}` (finite rewards between zero and one).
+Only independently reviewed outcomes belong here. Runtime completion is not a
+training label. Rebuilding the table is idempotent; each state/action contributes
+once per trajectory. Values include penalties for subsequent consultations;
+the current consultation price is subtracted once at selection. Keep the training
+price and runtime price aligned when using a learned table. Unseen state/actions
+retain their default values. Use separate, held-out trajectories for evaluation;
+never update a policy with an evaluation run's future outcome before replaying it.
+
+Reports distinguish unknown monetary cost from zero. A successful consulted run
+is not evidence of a recovered failure: recovered failures versus always-proceed
+remain null until a separately controlled paired evaluation exists. Tests use
+synthetic fixtures to check wiring and accounting, and make no quality claim.
+
+For a separately controlled always-proceed comparison, reviewed outcomes may also
+include `paired_baseline_verified: true`, a `baseline_evidence` reference and binary
+`baseline_reward`. Supplying `--verified-outcomes` without `--output` produces a
+report using only those reviewed pairs, including paired coverage and recovered
+failures. Unpaired runs do not become counterfactual evidence. The live funnel
+remains explicitly unmeasured until such evidence is supplied to the offline report.
+Advisor routes must be explicit (no auto/MoA routing) and their transports must
+support disabling retries per request; unsupported transports fail closed. Capacity
+errors do not invoke the auxiliary fallback ladder or the main model endpoint.

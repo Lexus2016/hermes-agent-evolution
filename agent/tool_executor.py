@@ -52,6 +52,7 @@ from agent.tool_dispatch_helpers import (
     _plan_tool_batch_segments,
     make_tool_result_message,
 )
+from utils import safe_json_loads
 from tools.terminal_tool_lifecycle import get_active_env
 from tools.thread_context import propagate_context_to_thread
 from tools.tool_result_storage import (
@@ -470,11 +471,16 @@ def _harm_gate_block_reason(function_name: str, function_args: Any) -> Optional[
 
 
 def _harm_blocked_tool_result(reason: str) -> str:
+    from tools.tool_failure_classifier import SAFETY_GATE_RECOVERY_HINT
+
     return json.dumps(
         {
             "error": f"Tool execution blocked by safety gate: {reason}",
             "status": "blocked",
             "harm_gate": "agent_process_bench",
+            "reason": "safety-gate-blocked",
+            "retryable": False,
+            "recovery_hint": SAFETY_GATE_RECOVERY_HINT,
         },
         ensure_ascii=False,
     )
@@ -1346,6 +1352,32 @@ def _commit_tool_result(
         )
     _record_persisted_path_for_stub(agent, tool_call_id, persisted_result)
     note_tool_result(agent, function_name, tool_call_id, function_result, persisted_result)
+
+    # The delegated controller consumes the real result before the append-only
+    # persistence fence. Advice remains tool data, never a synthetic user turn.
+    escalation = getattr(agent, "_delegation_escalation", None)
+    if escalation is not None:
+        from tools.delegation_escalation import EscalationRun
+        if isinstance(escalation, EscalationRun):
+            try:
+                advice = escalation.contact(function_name, function_result, blocked=blocked)
+                if advice:
+                    if _is_multimodal_tool_result(persisted_result):
+                        _append_subdir_hint_to_multimodal(persisted_result, advice)
+                    else:
+                        # Keep structured failures parseable by diagnostics and UI.
+                        # Advice is untrusted context, never a replacement verdict.
+                        payload = safe_json_loads(persisted_result)
+                        if isinstance(payload, dict):
+                            key = "delegation_advisor_context"
+                            while key in payload:
+                                key = "_" + key
+                            payload[key] = advice
+                            persisted_result = json.dumps(payload, ensure_ascii=False)
+                        else:
+                            persisted_result += advice
+            except Exception:
+                logging.warning("Delegation contact processing failed", exc_info=True)
 
     subdir_hints = agent._subdirectory_hints.check_tool_call(function_name, function_args)
     if subdir_hints:

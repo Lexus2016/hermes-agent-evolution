@@ -1,6 +1,7 @@
 """Tests for tools/cronjob_tools.py — prompt scanning, schedule/list/remove dispatchers."""
 
 import json
+from types import SimpleNamespace
 from pathlib import Path
 import pytest
 
@@ -517,7 +518,7 @@ class TestCronPreflightAndValidation:
         passes.  We monkeypatch CRON_DIR to a temp dir so the test does not
         depend on the real ~/.hermes state."""
         monkeypatch.setattr("cron.jobs.CRON_DIR", tmp_path / "cron")
-        monkeypatch.setattr("tools.cronjob_tools.shutil.which", lambda cmd: "/usr/bin/crontab")
+        monkeypatch.setattr("tools.cronjob_tools.locate_command", lambda cmd: SimpleNamespace(command=("/usr/bin/crontab",)))
 
         fake_result = type(
             "FakeResult",
@@ -535,13 +536,13 @@ class TestCronPreflightAndValidation:
         (with a warning) so job operations proceed via the internal JSON
         scheduler instead of being blocked."""
         monkeypatch.setattr("cron.jobs.CRON_DIR", tmp_path / "cron")
-        monkeypatch.setattr("tools.cronjob_tools.shutil.which", lambda cmd: None)
+        monkeypatch.setattr("tools.cronjob_tools.locate_command", lambda cmd: SimpleNamespace(command=()))
         err = _cron_preflight_check()
         assert err is None
 
     def test_preflight_reports_crontab_error_output(self, tmp_path, monkeypatch):
         monkeypatch.setattr("cron.jobs.CRON_DIR", tmp_path / "cron")
-        monkeypatch.setattr("tools.cronjob_tools.shutil.which", lambda cmd: "/usr/bin/crontab")
+        monkeypatch.setattr("tools.cronjob_tools.locate_command", lambda cmd: SimpleNamespace(command=("/usr/bin/crontab",)))
 
         fake_result = type(
             "FakeResult",
@@ -650,7 +651,7 @@ class TestCronRetryLimiter:
         monkeypatch.setattr("cron.jobs.OUTPUT_DIR", cron_dir / "output")
         # crontab absent is now a soft-fail (PR #985), so list succeeds via
         # the internal JSON scheduler.
-        monkeypatch.setattr("tools.cronjob_tools.shutil.which", lambda cmd: None)
+        monkeypatch.setattr("tools.cronjob_tools.locate_command", lambda cmd: SimpleNamespace(command=()))
 
         result = json.loads(cronjob(action="list", task_id=task_id))
         assert result["success"] is True

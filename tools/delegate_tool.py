@@ -924,7 +924,14 @@ def _build_child_agent(
     return child
 
 
-def _run_single_child(
+def _run_single_child(task_index, goal, child=None, parent_agent=None, **kwargs):
+    from tools.delegation_escalation import run_with_escalation
+    return run_with_escalation(
+        _run_single_child_impl, task_index, goal, child, parent_agent, **kwargs,
+    )
+
+
+def _run_single_child_impl(
     task_index: int, goal: str, child=None, parent_agent=None, *, owner_session_id: Optional[str] = None,
     owner_transport: Any = None, owner_session_record: Any = None, **_kwargs,
 ) -> dict[str, Any]:

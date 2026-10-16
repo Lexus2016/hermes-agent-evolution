@@ -16,8 +16,8 @@ Extract one paper's technique into a validated draft.
 |---|---|
 | Source | Bundled (installed by default) |
 | Path | `skills/evolution/evolution-extract` |
-| Version | `1.0.0` |
-| Author | Hermes Evolution |
+| Version | `1.0.1` |
+| Author | Lexus2016, Hermes Evolution |
 | License | MIT |
 | Platforms | linux, macos, windows |
 | Tags | `evolution`, `research`, `extract` |

@@ -81,6 +81,7 @@ _CATEGORY_STRATEGY: dict[ToolFailureCategory, RecoveryStrategy] = {
     ToolFailureCategory.invalid_arguments: RecoveryStrategy.fix_arguments,
     ToolFailureCategory.not_found: RecoveryStrategy.verify_target,
     ToolFailureCategory.permission_denied: RecoveryStrategy.surface_blocker,
+    ToolFailureCategory.safety_gate_blocked: RecoveryStrategy.surface_blocker,
     ToolFailureCategory.rate_limited: RecoveryStrategy.retry_with_backoff,
     ToolFailureCategory.quota_exhausted: RecoveryStrategy.surface_blocker,
     ToolFailureCategory.transient_network: RecoveryStrategy.retry_with_backoff,
@@ -200,6 +201,9 @@ def dispatch_recovery(
     directive = _STRATEGY_DIRECTIVE.get(
         strategy, _STRATEGY_DIRECTIVE[RecoveryStrategy.surface_blocker]
     )
+    if category is ToolFailureCategory.safety_gate_blocked:
+        # No diagnostic retry or alternate-tool instruction for a safety block.
+        directive = classification.hint
     return RecoveryAction(
         category=category,
         strategy=strategy,
@@ -323,4 +327,16 @@ def maybe_append_recovery_guidance(
         )
     except Exception:
         return text
+    if action.category is ToolFailureCategory.safety_gate_blocked:
+        # Keep refusal envelopes parseable by the digest and UI. Do not attach
+        # generic symptom interventions that might suggest an alternate tool.
+        guidance = _format_recovery_guidance(action)
+        try:
+            payload = json.loads(text)
+        except (ValueError, TypeError):
+            payload = None
+        if isinstance(payload, dict):
+            payload["recovery_hint"] = guidance.strip()
+            return json.dumps(payload, ensure_ascii=False)
+        return text + guidance
     return text + _format_recovery_guidance(action, raw_error=text[:2000])

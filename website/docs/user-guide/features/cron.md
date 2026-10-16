@@ -1395,3 +1395,28 @@ Cron jobs run in a completely fresh agent session. The prompt must contain every
 ## Security
 
 Scheduled task prompts are scanned for prompt-injection and credential-exfiltration patterns at creation and update time. Prompts containing invisible Unicode tricks, SSH backdoor attempts, or obvious secret-exfiltration payloads are blocked.
+
+### Recheck a deferred decision's premises
+
+The `cronjob` tool accepts `decision` on create/update, for example
+`{"watch_files": ["/absolute/project/approval.txt"], "max_age_seconds": 3600}`.
+Files must be inside the active profile or the job's explicit `workdir`; symlink
+escapes and other profiles are rejected. At most 16 regular files of 1 MiB each
+are read. File watches require descriptor-relative, no-follow file opens
+(POSIX); unsupported platforms reject watched jobs rather than use unsafe reads. Only paths, SHA-256 digests and observation timestamps are stored, not
+file contents. These records are evidence metadata, **never authorization**.
+
+The scheduler checks those exact files before running scripts, monitors or an
+agent. Changed, stale, missing, malformed or unreadable evidence reopens the
+decision and pauses the job. Review the premise and explicitly update `decision`
+to capture fresh evidence, then resume. Resume or run alone does not acknowledge
+a change. Reopen events contribute `decisions_reopened` to the evolution funnel. The pause
+is persisted before telemetry; an event-write failure is logged and can undercount
+reopens, but never allows the action to proceed.
+
+New jobs record an empty dependency list unless `decision.watch_files` is set;
+that means no external premises were checked. A freshness ceiling measures time
+since capture, not the source information's original age. Existing jobs without
+a ledger remain compatible. Checks are point-in-time, not a transaction locking
+the world while the later action runs. File checks do not replace any required
+permission or action-time validation.
