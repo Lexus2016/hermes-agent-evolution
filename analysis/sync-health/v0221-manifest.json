@@ -11506,7 +11506,7 @@
         "reviewer": "Independent integration controller; owner-approved exact seven-case preparation",
         "compatibility": "The log-level option is read once in an isolated child before callbacks. The parent builds its environment under the owning profile via served_profile_child_env. The actual seven-case host suite verifies out-of-process profile/session behavior and crash/restart; this finding covers the process-local logging option only, not every plugin failure path or native Desktop launch. Invalid logging configuration may reject startup.",
         "module_bindings": "PluginHost.ensure_started creates a child process with PluginHost._env. That env is built in the owning profile context via served_profile_child_env(target_home=self._home, inherit_credentials=True), which scrubs launch credentials and overlays target secrets. Child main reads its own log-level env only at logging initialization, before serving callbacks.",
-        "receipt": "/tmp/hermes-hx002-plugin-host-final.log:7 tests passed after the separately reviewed process cleanup correction. Independent source review on 2026-10-15; generated identities require separate verification."
+        "receipt": "/tmp/hermes-hx002-plugin-host-final.log:7 tests passed after the separately reviewed process cleanup correction. Independent source review on 2026-10-15; generated identities require separate verification. Refreshed local process cleanup dependency after final63-pass/1-skip suite including7 plugin-host tests; exact receipt and unchanged environment helper identities recorded separately."
       },
       "validation": [
         {
@@ -11523,7 +11523,7 @@
         },
         {
           "path": "tools/environments/local.py",
-          "blob": "acf6042a6ac13d90da1513c7e6914b1b2a77aa14",
+          "blob": "8d44e91f403397c2d052a2352ea496895b47c110",
           "outcome": "passed",
           "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
         },
@@ -11532,6 +11532,12 @@
           "blob": "0cda2cbd7e1af167ea9300d2bcf50de23487c4ca",
           "outcome": "passed",
           "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "analysis/sync-health/v0221-plugin-host-dependency-refresh.json",
+          "blob": "cc79fa893722a223687d6344a1a99556cadb8bcc",
+          "outcome": "passed",
+          "claim": "Independent ownership correction review, unchanged environment helper ASTs, and final source63-pass suite including7 plugin-host cases; native Windows remains unverified."
         }
       ]
     },
