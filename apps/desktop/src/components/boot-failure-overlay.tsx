@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
-import { type ComponentProps, lazy, type ReactNode, Suspense, useEffect, useState } from 'react'
+import { type ComponentProps, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { DialogCloseButton } from '@/components/ui/dialog'
@@ -14,9 +14,10 @@ import { reestablishCloudAgentSession } from '@/lib/cloud-agent-session'
 import { DESKTOP_DOCS_URL } from '@/lib/docs'
 import { openExternalLink } from '@/lib/external-link'
 import { ChevronLeft, ExternalLink, FileText, Loader2, LogIn, RefreshCw, SlidersHorizontal, Wrench } from '@/lib/icons'
-import { $desktopBoot } from '@/store/boot'
+import { $desktopBoot, type DesktopBootState } from '@/store/boot'
 import { notify, notifyError } from '@/store/notifications'
 import { $desktopOnboarding } from '@/store/onboarding'
+import { $connection } from '@/store/session'
 
 import { classifyLocalBootFailure, type LocalBootFailureCopy, localBootFailureCopy } from './boot-failure-cause'
 import type { RemoteReauth } from './boot-failure-reauth'
@@ -37,6 +38,93 @@ const GatewaySettings = lazy(() =>
 
 type BusyAction = 'local' | 'repair' | 'retry' | 'signin' | null
 type RecoveryView = 'connect' | 'recovery'
+
+interface BootRecovery {
+  config: DesktopConnectionConfig
+  reauth: RemoteReauth | null
+  isCurrent: () => boolean
+  invalidate: () => void
+}
+
+function sameRecoveryOwner(left: DesktopConnectionConfig, right: DesktopConnectionConfig) {
+  return (
+    left.mode === right.mode &&
+    left.profile === right.profile &&
+    left.remoteUrl === right.remoteUrl &&
+    left.remoteAuthMode === right.remoteAuthMode &&
+    left.cloudOrg === right.cloudOrg
+  )
+}
+
+/** Classification and its sign-in URL are one failure-owned snapshot. */
+function useBootRecovery(boot: DesktopBootState, visible: boolean) {
+  const connection = useStore($connection)
+  const [recovery, setRecovery] = useState<BootRecovery | null>(null)
+
+  useEffect(() => {
+    setRecovery(null)
+
+    if (!visible) {
+      return
+    }
+
+    let cancelled = false
+    // Check the live stores too: a switch can happen before React runs cleanup.
+    // The boot snapshot distinguishes repeated A → B → A failures.
+    const isCurrent = () => !cancelled && $connection.get() === connection && $desktopBoot.get() === boot
+
+    const invalidate = () => {
+      if (isCurrent()) {
+        cancelled = true
+        setRecovery(null)
+      }
+    }
+    void (async () => {
+      const desktop = window.hermesDesktop
+
+      if (!desktop?.getConnectionConfig) {
+        return
+      }
+
+      let config: DesktopConnectionConfig
+
+      try {
+        config = { ...(await desktop.getConnectionConfig()) }
+      } catch {
+        return
+      }
+
+      if (!isCurrent()) {
+        return
+      }
+
+      setRecovery({ config, reauth: null, isCurrent, invalidate })
+
+      if (!isRemoteReauthFailure(config, boot.error)) {
+        return
+      }
+
+      let shape = deriveProviderShape(null)
+
+      try {
+        const probe = await desktop.probeConnectionConfig(config.remoteUrl)
+        shape = deriveProviderShape(probe?.providers)
+      } catch {
+        // The same owner remains actionable with generic provider copy.
+      }
+
+      if (isCurrent()) {
+        setRecovery({ config, reauth: { url: config.remoteUrl, ...shape }, isCurrent, invalidate })
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [boot, visible, connection])
+
+  return recovery?.isCurrent() ? recovery : null
+}
 
 // A remote gateway whose access cookie has lapsed (e.g. the dashboard
 // restarted on the remote box) boots into this overlay with a reauth-shaped
@@ -88,6 +176,155 @@ function BootFailureModal({
   )
 }
 
+interface RecoveryPresentationInput {
+  copy: ReturnType<typeof useI18n>['t']['boot']['failure']
+  error: string | null
+  remoteReauth: boolean
+  remoteFailure: boolean
+  cloudDown: boolean
+  bundled: boolean
+  label: string
+  onSettings: () => void
+  onRetry: () => void
+  onLocal: () => void
+  onSignIn: () => void
+  onRepair: () => void
+}
+
+type RecoveryVariant = ComponentProps<typeof Button>['variant']
+interface RecoveryAction {
+  key: string
+  label: string
+  onClick: () => void
+  icon?: ReactNode
+  variant?: RecoveryVariant
+  busy?: Exclude<BusyAction, null>
+}
+
+// Keep presentation policy separate from failure-owned asynchronous recovery.
+function recoveryPresentation({
+  copy,
+  error,
+  remoteReauth,
+  remoteFailure,
+  cloudDown,
+  bundled,
+  label,
+  onSettings,
+  onRetry,
+  onLocal,
+  onSignIn,
+  onRepair
+}: RecoveryPresentationInput) {
+  const settingsAction: RecoveryAction = {
+    key: 'settings',
+    label: copy.gatewaySettings,
+    onClick: onSettings,
+    icon: <SlidersHorizontal />
+  }
+
+  const retryAction: RecoveryAction = {
+    key: 'retry',
+    label: copy.retry,
+    onClick: onRetry,
+    icon: <RefreshCw />,
+    busy: 'retry'
+  }
+
+  const localAction: RecoveryAction = {
+    key: 'local',
+    label: copy.useLocalGateway,
+    onClick: onLocal,
+    variant: 'secondary',
+    busy: 'local'
+  }
+
+  let actions: RecoveryAction[]
+  let hint: string
+  // The electron boot path flags a Nous Cloud backend-down (502/503/504) with
+  // the structured isCloudBackendDown/statusCode it carries through boot
+  // progress. When set, the recovery screen leads with the cloud-specific
+  // guidance instead of the generic remote-failure copy (#85335).
+
+  if (remoteReauth) {
+    actions = [
+      {
+        key: 'signin',
+        label: copy.signOutAndSignIn,
+        onClick: onSignIn,
+        icon: <LogIn />,
+        busy: 'signin'
+      },
+      { ...settingsAction, variant: 'secondary' },
+      localAction
+    ]
+    hint = copy.remoteSignInHint(label)
+  } else if (cloudDown) {
+    // A Nous Cloud agent is down — the user cannot restart the managed
+    // instance and Repair is local-only. Lead with the paths that actually
+    // resolve it: check the portal (status/instance controls), switch to the
+    // local gateway, retry, or get support on Discord. Portal/Discord are
+    // buttons (not URLs buried in the hint prose) so localized hints can't
+    // drift the links.
+    actions = [
+      {
+        key: 'portal',
+        label: copy.cloudDownCheckPortal,
+        onClick: () => openExternalLink('https://portal.nousresearch.com'),
+        icon: <ExternalLink />
+      },
+      localAction,
+      { ...retryAction, variant: 'secondary' },
+      {
+        key: 'discord',
+        label: copy.cloudDownDiscord,
+        onClick: () => openExternalLink('https://discord.gg/NousResearch'),
+        variant: 'ghost'
+      },
+      { ...settingsAction, variant: 'ghost' }
+    ]
+    hint = copy.cloudDownHint
+  } else if (remoteFailure) {
+    actions = [settingsAction, { ...retryAction, variant: 'secondary' }, localAction]
+    hint = copy.remoteFailureHint
+  } else {
+    // Local failure: Use-local is redundant with Retry (both re-target local), so
+    // it's dropped here; keep it for remote failures where it's the fall-back.
+    // A bundled install's payload is immutable, so there is no installer to
+    // re-run: Repair is dropped, and "Reinstall the app" is offered only when
+    // the payload itself is what's broken — a port clash or timeout on a
+    // bundled install is not fixed by reinstalling.
+    const damagedPayload: boolean = bundled && classifyLocalBootFailure(error) === 'installMissing'
+
+    const fixAction: RecoveryAction | null = damagedPayload
+      ? {
+          key: 'reinstall',
+          label: copy.reinstallApp,
+          onClick: () => openExternalLink(DESKTOP_DOCS_URL),
+          icon: <ExternalLink />,
+          variant: 'secondary'
+        }
+      : bundled
+        ? null
+        : {
+            key: 'repair',
+            label: copy.repairInstall,
+            onClick: onRepair,
+            icon: <Wrench />,
+            variant: 'secondary',
+            busy: 'repair'
+          }
+
+    actions = [retryAction, ...(fixAction ? [fixAction] : []), { ...settingsAction, variant: 'ghost' }]
+    hint = damagedPayload ? copy.bundledReinstallHint : bundled ? '' : copy.repairHint
+  }
+
+  const title = remoteReauth ? copy.remoteTitle : cloudDown ? copy.cloudDownTitle : copy.title
+  const description = remoteReauth ? copy.remoteDescription : cloudDown ? copy.cloudDownDescription : copy.description
+
+  return { actions, hint, title, description }
+}
+
 export function BootFailureOverlay() {
   const boot = useStore($desktopBoot)
   const onboarding = useStore($desktopOnboarding)
@@ -95,11 +332,7 @@ export function BootFailureOverlay() {
   const [busy, setBusy] = useState<BusyAction>(null)
   const [logs, setLogs] = useState<string[]>([])
   const [showLogs, setShowLogs] = useState(false)
-  const [remoteReauth, setRemoteReauth] = useState<RemoteReauth | null>(null)
-  const [connectionConfig, setConnectionConfig] = useState<DesktopConnectionConfig | null>(null)
-  // A remote/cloud backend that failed to boot is fixable from gateway settings,
-  // so the escape hatch earns emphasis (local failures keep it as a quiet ghost).
-  const [remoteFailure, setRemoteFailure] = useState(false)
+  const signInOwner = useRef<BootRecovery | null>(null)
   // A bundled install (payload ships in-app) has no installer to repair with.
   // Read from the bootstrap state snapshot so Repair is never offered there;
   // "Reinstall the app" replaces it only when the payload itself is damaged.
@@ -117,6 +350,16 @@ export function BootFailureOverlay() {
   // progress; the recovery overlay is for hard failures, which it covers via a
   // higher z-index regardless of onboarding state.
   const suppressed = onboarding.flow.status !== 'idle' && onboarding.flow.status !== 'error'
+  const recovery = useBootRecovery(boot, visible)
+  const remoteReauth = recovery?.reauth ?? null
+  const connectionConfig = recovery?.config ?? null
+  const remoteFailure = isRemoteConfig(connectionConfig)
+
+  useEffect(() => {
+    if (signInOwner.current && !signInOwner.current.isCurrent()) {
+      setBusy(current => (current === 'signin' ? null : current))
+    }
+  }, [recovery])
 
   useEffect(() => {
     setDismissedError(current => (boot.running || current !== boot.error ? null : current))
@@ -157,68 +400,11 @@ export function BootFailureOverlay() {
     }
   }, [boot.error, visible])
 
-  // Resolve whether this boot failure is a remote-gateway reauth so we can
-  // offer the actionable "Sign in" path instead of the local-only recovery
-  // buttons. Runs whenever the overlay becomes visible.
   useEffect(() => {
     if (!visible) {
-      setRemoteReauth(null)
-      setConnectionConfig(null)
-      setRemoteFailure(false)
       setView('recovery')
-
-      return
     }
-
-    let cancelled = false
-
-    void (async () => {
-      const desktop = window.hermesDesktop
-
-      if (!desktop?.getConnectionConfig) {
-        return
-      }
-
-      let config: DesktopConnectionConfig
-
-      try {
-        config = await desktop.getConnectionConfig()
-      } catch {
-        return
-      }
-
-      if (cancelled) {
-        return
-      }
-
-      setConnectionConfig(config)
-      setRemoteFailure(isRemoteConfig(config))
-
-      if (!isRemoteReauthFailure(config, boot.error)) {
-        return
-      }
-
-      // Best-effort probe for the provider shape so the button copy matches
-      // what the user will see in the login window (password form vs OAuth
-      // redirect). Probe failure just keeps the generic copy.
-      let shape = deriveProviderShape(null)
-
-      try {
-        const probe = await desktop.probeConnectionConfig(config.remoteUrl)
-        shape = deriveProviderShape(probe?.providers)
-      } catch {
-        // Generic copy is fine.
-      }
-
-      if (!cancelled) {
-        setRemoteReauth({ url: config.remoteUrl, ...shape })
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [boot.error, visible])
+  }, [visible])
 
   if (!visible || suppressed) {
     return null
@@ -272,25 +458,44 @@ export function BootFailureOverlay() {
   // The cloud ladder is shared with Settings (reestablishCloudAgentSession) so
   // the boot recovery and the in-Settings recovery cannot drift apart.
   const signInRemote = async () => {
-    if (!remoteReauth) {
+    const owner = recovery
+
+    if (!owner?.reauth || signInOwner.current?.isCurrent()) {
       return
     }
 
+    signInOwner.current = owner
+    const isCurrent = () => signInOwner.current === owner && owner.isCurrent()
+    const { config, reauth } = owner
     setBusy('signin')
 
     try {
       const desktop = window.hermesDesktop
+      const currentConfig = await desktop?.getConnectionConfig?.().catch(() => null)
+
+      if (!isCurrent()) {
+        return
+      }
+
+      if (
+        !currentConfig ||
+        !sameRecoveryOwner(config, currentConfig) ||
+        !isRemoteReauthFailure(currentConfig, boot.error)
+      ) {
+        owner.invalidate()
+
+        return
+      }
 
       let connected: boolean
-      // Only the oauth arm reports a reason (DesktopOauthLoginResult.error);
-      // the incomplete sign-in notice below surfaces it. The cloud ladder
-      // reports an outcome, handled in its own branch.
       let error: string | undefined
 
-      if (connectionConfig?.mode === 'cloud' && desktop?.cloud) {
-        // The ladder drops this gateway's lapsed cookies itself — logging out
-        // here as well would fire the IPC twice for the cloud path.
-        const outcome = await reestablishCloudAgentSession(desktop, remoteReauth.url)
+      if (config.mode === 'cloud' && desktop.cloud) {
+        const outcome = await reestablishCloudAgentSession(desktop, reauth.url)
+
+        if (!isCurrent()) {
+          return
+        }
 
         if (outcome === 'portal-incomplete') {
           notify({
@@ -304,16 +509,29 @@ export function BootFailureOverlay() {
 
         connected = true
       } else {
-        await desktop?.oauthLogoutConnectionConfig?.(remoteReauth.url)
+        await desktop.oauthLogoutConnectionConfig?.(reauth.url)
 
-        const result: DesktopOauthLoginResult | undefined = await desktop?.oauthLoginConnectionConfig(remoteReauth.url)
+        if (!isCurrent()) {
+          return
+        }
+
+        const result: DesktopOauthLoginResult | undefined = await desktop.oauthLoginConnectionConfig(reauth.url)
+
+        if (!isCurrent()) {
+          return
+        }
+
         connected = result?.connected === true
         error = result?.error
       }
 
       if (connected) {
-        if (connectionConfig?.mode === 'cloud') {
-          await desktop?.resetBootstrap().catch(() => undefined)
+        if (config.mode === 'cloud') {
+          await desktop.resetBootstrap().catch(() => undefined)
+        }
+
+        if (!isCurrent()) {
+          return
         }
 
         notify({ kind: 'success', title: t.boot.failure.signedInTitle, message: t.boot.failure.signedInMessage })
@@ -328,9 +546,14 @@ export function BootFailureOverlay() {
         message: error ? `${t.boot.failure.signInIncompleteMessage}: ${error}` : t.boot.failure.signInIncompleteMessage
       })
     } catch (err) {
-      notifyError(err, t.boot.failure.signInFailed)
+      if (isCurrent()) {
+        notifyError(err, t.boot.failure.signInFailed)
+      }
     } finally {
-      setBusy(null)
+      if (isCurrent()) {
+        signInOwner.current = null
+        setBusy(null)
+      }
     }
   }
 
@@ -353,124 +576,20 @@ export function BootFailureOverlay() {
     withProvider: copy.signInWithProvider
   })
 
-  // Recovery actions are shaped by the failure kind so the leading (primary)
-  // button is the one that actually fixes it: Sign in for a lapsed remote
-  // session, Connection settings for any other remote failure (local Retry /
-  // Repair can't revive a dead remote — Repair is dropped there), Retry for a
-  // local backend. Open logs is always appended.
-  type RecoveryVariant = ComponentProps<typeof Button>['variant']
-  interface RecoveryAction {
-    key: string
-    label: string
-    onClick: () => void
-    icon?: ReactNode
-    variant?: RecoveryVariant
-    busy?: Exclude<BusyAction, null>
-  }
-
-  const settingsAction: RecoveryAction = {
-    key: 'settings',
-    label: copy.gatewaySettings,
-    onClick: () => setView('connect'),
-    icon: <SlidersHorizontal />
-  }
-
-  const retryAction: RecoveryAction = {
-    key: 'retry',
-    label: copy.retry,
-    onClick: () => void retry(),
-    icon: <RefreshCw />,
-    busy: 'retry'
-  }
-
-  const localAction: RecoveryAction = {
-    key: 'local',
-    label: copy.useLocalGateway,
-    onClick: () => void switchToLocalGateway(),
-    variant: 'secondary',
-    busy: 'local'
-  }
-
-  let actions: RecoveryAction[]
-  let hint: string
-  // The electron boot path flags a Nous Cloud backend-down (502/503/504) with
-  // the structured isCloudBackendDown/statusCode it carries through boot
-  // progress. When set, the recovery screen leads with the cloud-specific
-  // guidance instead of the generic remote-failure copy (#85335).
-  const cloudDown = Boolean(boot.isCloudBackendDown)
-
-  if (remoteReauth) {
-    actions = [
-      {
-        key: 'signin',
-        label: copy.signOutAndSignIn,
-        onClick: () => void signInRemote(),
-        icon: <LogIn />,
-        busy: 'signin'
-      },
-      { ...settingsAction, variant: 'secondary' },
-      localAction
-    ]
-    hint = copy.remoteSignInHint(label)
-  } else if (cloudDown) {
-    // A Nous Cloud agent is down — the user cannot restart the managed
-    // instance and Repair is local-only. Lead with the paths that actually
-    // resolve it: check the portal (status/instance controls), switch to the
-    // local gateway, retry, or get support on Discord. Portal/Discord are
-    // buttons (not URLs buried in the hint prose) so localized hints can't
-    // drift the links.
-    actions = [
-      {
-        key: 'portal',
-        label: copy.cloudDownCheckPortal,
-        onClick: () => openExternalLink('https://portal.nousresearch.com'),
-        icon: <ExternalLink />
-      },
-      localAction,
-      { ...retryAction, variant: 'secondary' },
-      {
-        key: 'discord',
-        label: copy.cloudDownDiscord,
-        onClick: () => openExternalLink('https://discord.gg/NousResearch'),
-        variant: 'ghost'
-      },
-      { ...settingsAction, variant: 'ghost' }
-    ]
-    hint = copy.cloudDownHint
-  } else if (remoteFailure) {
-    actions = [settingsAction, { ...retryAction, variant: 'secondary' }, localAction]
-    hint = copy.remoteFailureHint
-  } else {
-    // Local failure: Use-local is redundant with Retry (both re-target local), so
-    // it's dropped here; keep it for remote failures where it's the fall-back.
-    // A bundled install's payload is immutable, so there is no installer to
-    // re-run: Repair is dropped, and "Reinstall the app" is offered only when
-    // the payload itself is what's broken — a port clash or timeout on a
-    // bundled install is not fixed by reinstalling.
-    const damagedPayload: boolean = bundled && classifyLocalBootFailure(boot.error) === 'installMissing'
-
-    const fixAction: RecoveryAction | null = damagedPayload
-      ? {
-          key: 'reinstall',
-          label: copy.reinstallApp,
-          onClick: () => openExternalLink(DESKTOP_DOCS_URL),
-          icon: <ExternalLink />,
-          variant: 'secondary'
-        }
-      : bundled
-        ? null
-        : {
-            key: 'repair',
-            label: copy.repairInstall,
-            onClick: () => void repair(),
-            icon: <Wrench />,
-            variant: 'secondary',
-            busy: 'repair'
-          }
-
-    actions = [retryAction, ...(fixAction ? [fixAction] : []), { ...settingsAction, variant: 'ghost' }]
-    hint = damagedPayload ? copy.bundledReinstallHint : bundled ? '' : copy.repairHint
-  }
+  const { actions, hint, title, description } = recoveryPresentation({
+    copy,
+    error: boot.error,
+    remoteReauth: Boolean(remoteReauth),
+    remoteFailure,
+    cloudDown: Boolean(boot.isCloudBackendDown),
+    bundled,
+    label,
+    onSettings: () => setView('connect'),
+    onRetry: () => void retry(),
+    onLocal: () => void switchToLocalGateway(),
+    onSignIn: () => void signInRemote(),
+    onRepair: () => void repair()
+  })
 
   if (view === 'connect') {
     return (
@@ -505,13 +624,9 @@ export function BootFailureOverlay() {
           <ErrorIcon className="mt-0.5" size="1.25rem" />
           <div>
             <DialogPrimitive.Title asChild>
-              <h2 className="text-[0.9375rem] font-semibold tracking-tight">
-                {remoteReauth ? copy.remoteTitle : cloudDown ? copy.cloudDownTitle : copy.title}
-              </h2>
+              <h2 className="text-[0.9375rem] font-semibold tracking-tight">{title}</h2>
             </DialogPrimitive.Title>
-            <p className="mt-1 text-[0.8125rem] leading-5 text-(--ui-text-tertiary)">
-              {remoteReauth ? copy.remoteDescription : cloudDown ? copy.cloudDownDescription : copy.description}
-            </p>
+            <p className="mt-1 text-[0.8125rem] leading-5 text-(--ui-text-tertiary)">{description}</p>
           </div>
         </div>
 

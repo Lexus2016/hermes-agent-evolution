@@ -5,6 +5,7 @@ import { en } from '@/i18n/en'
 import { $desktopBoot } from '@/store/boot'
 import { $notifications } from '@/store/notifications'
 import { $desktopOnboarding } from '@/store/onboarding'
+import { $connection } from '@/store/session'
 
 import { BootFailureOverlay } from './boot-failure-overlay'
 
@@ -451,6 +452,331 @@ describe('BootFailureOverlay', () => {
       restore()
       Object.defineProperty(window, 'location', originalLocation)
       $notifications.set([])
+    }
+  })
+})
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+
+  const promise = new Promise<T>(done => {
+    resolve = done
+  })
+
+  return { promise, resolve }
+}
+
+function recoveryHarness() {
+  let config = {
+    ...remoteToken,
+    remoteAuthMode: 'oauth',
+    remoteTokenSet: false,
+    remoteUrl: 'https://gateway-a.invalid'
+  }
+
+  const getConfig = vi.fn(async () => config)
+  const probe = vi.fn(async () => ({ providers: [{ id: 'basic', type: 'password' }] }))
+  const logout = vi.fn(async () => ({ ok: true, connected: false }))
+  const login = vi.fn(async () => ({ ok: true, connected: false }))
+  const reset = vi.fn(async () => undefined)
+  const reload = vi.fn()
+  const originalLocation = Object.getOwnPropertyDescriptor(window, 'location')!
+  Object.defineProperty(window, 'location', { configurable: true, value: { ...window.location, reload } })
+
+  const restore = stubDesktop(config, {
+    getConnectionConfig: getConfig,
+    probeConnectionConfig: probe,
+    oauthLogoutConnectionConfig: logout,
+    oauthLoginConnectionConfig: login,
+    resetBootstrap: reset
+  })
+
+  return {
+    getConfig,
+    probe,
+    logout,
+    login,
+    reset,
+    reload,
+    switchTo(patch: Partial<typeof config>, error = 'A different boot failure') {
+      config = { ...config, ...patch }
+      $desktopBoot.set({ ...$desktopBoot.get(), error })
+    },
+    restore() {
+      cleanup()
+      restore()
+      Object.defineProperty(window, 'location', originalLocation)
+      $connection.set(null)
+      $notifications.set([])
+    }
+  }
+}
+
+describe('boot recovery ownership', () => {
+  it('removes A sign-in when visible B is a non-reauth failure', async () => {
+    const h = recoveryHarness()
+
+    try {
+      render(<BootFailureOverlay />)
+      await screen.findByRole('button', { name: /sign out & sign in/i })
+      act(() => h.switchTo({ mode: 'cloud', remoteAuthMode: 'token', remoteUrl: 'https://gateway-b.invalid' }))
+      await waitFor(() => expect(h.getConfig).toHaveBeenCalledTimes(2))
+      expect(screen.queryByRole('button', { name: /sign out & sign in/i })).toBeNull()
+      expect(screen.getByRole('button', { name: /gateway settings/i })).toBeTruthy()
+      expect(h.logout).not.toHaveBeenCalled()
+      expect(h.login).not.toHaveBeenCalled()
+    } finally {
+      h.restore()
+    }
+  })
+
+  it.each(['missing', 'rejected'])('clears A recovery when B config lookup is %s', async failure => {
+    const h = recoveryHarness()
+
+    try {
+      render(<BootFailureOverlay />)
+      await screen.findByRole('button', { name: /sign out & sign in/i })
+
+      if (failure === 'missing') {
+        Object.defineProperty(window.hermesDesktop, 'getConnectionConfig', { value: undefined, configurable: true })
+      } else {
+        h.getConfig.mockRejectedValueOnce(new Error('synthetic lookup failure'))
+      }
+
+      act(() => h.switchTo({ remoteUrl: 'https://gateway-b.invalid' }))
+      await act(async () => undefined)
+      expect(screen.queryByRole('button', { name: /sign out & sign in/i })).toBeNull()
+      expect(h.logout).not.toHaveBeenCalled()
+    } finally {
+      h.restore()
+    }
+  })
+
+  it('ignores reversed old probes and repeated switches while the current owner remains actionable', async () => {
+    const h = recoveryHarness()
+    const oldProbe = deferred<Awaited<ReturnType<typeof h.probe>>>()
+    const middleProbe = deferred<Awaited<ReturnType<typeof h.probe>>>()
+    h.probe.mockReturnValueOnce(oldProbe.promise).mockReturnValueOnce(middleProbe.promise)
+
+    try {
+      render(<BootFailureOverlay />)
+      await waitFor(() => expect(h.probe).toHaveBeenCalledTimes(1))
+      act(() => h.switchTo({ remoteUrl: 'https://gateway-b.invalid' }, 'B failure'))
+      await waitFor(() => expect(h.probe).toHaveBeenCalledTimes(2))
+      act(() => h.switchTo({ remoteUrl: 'https://gateway-c.invalid' }, 'C failure'))
+      await screen.findByRole('button', { name: /sign out & sign in/i })
+      await act(async () => {
+        middleProbe.resolve({ providers: [] })
+        oldProbe.resolve({ providers: [] })
+      })
+      fireEvent.click(screen.getByRole('button', { name: /sign out & sign in/i }))
+      await waitFor(() => expect(h.login).toHaveBeenCalledExactlyOnceWith('https://gateway-c.invalid'))
+      expect(h.logout).toHaveBeenCalledExactlyOnceWith('https://gateway-c.invalid')
+    } finally {
+      h.restore()
+    }
+  })
+
+  it('invalidates a same-error connection switch before React cleanup can run', async () => {
+    const h = recoveryHarness()
+    const configRead = deferred<Awaited<ReturnType<typeof h.getConfig>>>()
+
+    try {
+      render(<BootFailureOverlay />)
+      const signIn = await screen.findByRole('button', { name: /sign out & sign in/i })
+      h.getConfig.mockReturnValueOnce(configRead.promise)
+      fireEvent.click(signIn)
+      await act(async () => {
+        $connection.set({
+          baseUrl: 'https://gateway-b.invalid',
+          connectionId: 'b',
+          isFullscreen: false,
+          nativeOverlayWidth: 0,
+          token: '',
+          wsUrl: '',
+          logs: [],
+          windowButtonPosition: null
+        })
+        configRead.resolve({
+          ...remoteToken,
+          remoteAuthMode: 'oauth',
+          remoteTokenSet: false,
+          remoteUrl: 'https://gateway-a.invalid'
+        })
+      })
+      expect(h.logout).not.toHaveBeenCalled()
+      expect(h.login).not.toHaveBeenCalled()
+      expect(h.reset).not.toHaveBeenCalled()
+      expect(h.reload).not.toHaveBeenCalled()
+    } finally {
+      h.restore()
+    }
+  })
+
+  it.each(['changed', 'rejected', 'missing'])(
+    'revalidates the config owner before sign-in when lookup is %s',
+    async failure => {
+      const h = recoveryHarness()
+
+      try {
+        render(<BootFailureOverlay />)
+        const signIn = await screen.findByRole('button', { name: /sign out & sign in/i })
+
+        if (failure === 'changed') {
+          h.getConfig.mockResolvedValueOnce({ ...remoteToken, mode: 'cloud', remoteUrl: 'https://gateway-b.invalid' })
+        } else if (failure === 'rejected') {
+          h.getConfig.mockRejectedValueOnce(new Error('synthetic lookup failure'))
+        } else {
+          Object.defineProperty(window.hermesDesktop, 'getConnectionConfig', { value: undefined, configurable: true })
+        }
+
+        fireEvent.click(signIn)
+        await waitFor(() => expect(screen.queryByRole('button', { name: /sign out & sign in/i })).toBeNull())
+        expect(h.logout).not.toHaveBeenCalled()
+        expect(h.login).not.toHaveBeenCalled()
+      } finally {
+        h.restore()
+      }
+    }
+  )
+
+  it('does not let pending A sign-in reload B or clear B sign-in busy state', async () => {
+    const h = recoveryHarness()
+    const firstLogin = deferred<Awaited<ReturnType<typeof h.login>>>()
+    const nextLogin = deferred<Awaited<ReturnType<typeof h.login>>>()
+    h.login.mockReturnValueOnce(firstLogin.promise).mockReturnValueOnce(nextLogin.promise)
+
+    try {
+      render(<BootFailureOverlay />)
+      fireEvent.click(await screen.findByRole('button', { name: /sign out & sign in/i }))
+      await waitFor(() => expect(h.login).toHaveBeenCalledTimes(1))
+      act(() => h.switchTo({ remoteUrl: 'https://gateway-b.invalid' }))
+      const nextSignIn = await screen.findByRole('button', { name: /sign out & sign in/i })
+      await waitFor(() => expect(nextSignIn.hasAttribute('disabled')).toBe(false))
+      fireEvent.click(nextSignIn)
+      await waitFor(() => expect(h.login).toHaveBeenCalledTimes(2))
+      await act(async () => firstLogin.resolve({ ok: true, connected: true }))
+      expect(h.reset).not.toHaveBeenCalled()
+      expect(h.reload).not.toHaveBeenCalled()
+      expect(nextSignIn.hasAttribute('disabled')).toBe(true)
+      await act(async () => nextLogin.resolve({ ok: true, connected: false }))
+      expect(nextSignIn.hasAttribute('disabled')).toBe(false)
+    } finally {
+      h.restore()
+    }
+  })
+
+  it('does not reset or reload B after an already-started cloud A cascade completes', async () => {
+    const h = recoveryHarness()
+    const cascade = deferred<{ baseUrl: string; connected: boolean }>()
+    const agentSignIn = vi.fn(() => cascade.promise)
+    Object.defineProperty(window.hermesDesktop, 'cloud', {
+      configurable: true,
+      value: {
+        status: vi.fn(async () => ({ signedIn: true })),
+        agentSignIn
+      }
+    })
+    h.switchTo({ mode: 'cloud' }, 'Cloud A failure')
+
+    try {
+      render(<BootFailureOverlay />)
+      fireEvent.click(await screen.findByRole('button', { name: /sign out & sign in/i }))
+      await waitFor(() => expect(agentSignIn).toHaveBeenCalledWith('https://gateway-a.invalid'))
+      act(() => h.switchTo({ mode: 'remote', remoteAuthMode: 'token', remoteUrl: 'https://gateway-b.invalid' }))
+      await act(async () => cascade.resolve({ baseUrl: 'https://gateway-a.invalid', connected: true }))
+      expect(h.reset).not.toHaveBeenCalled()
+      expect(h.reload).not.toHaveBeenCalled()
+    } finally {
+      h.restore()
+    }
+  })
+
+  it.each(['remote', 'cloud'])('completes one current %s recovery and reloads', async mode => {
+    const h = recoveryHarness()
+    h.login.mockResolvedValue({ ok: true, connected: true })
+    const agentSignIn = vi.fn(async () => ({ baseUrl: 'https://gateway-a.invalid', connected: true }))
+    Object.defineProperty(window.hermesDesktop, 'cloud', {
+      configurable: true,
+      value: {
+        status: vi.fn(async () => ({ signedIn: true })),
+        agentSignIn
+      }
+    })
+    h.switchTo({ mode }, 'Current owner failure')
+
+    try {
+      render(<BootFailureOverlay />)
+      const button = await screen.findByRole('button', { name: /sign out & sign in/i })
+      fireEvent.click(button)
+      fireEvent.click(button)
+      await waitFor(() => expect(h.reload).toHaveBeenCalledTimes(1))
+      expect(h.logout).toHaveBeenCalledExactlyOnceWith('https://gateway-a.invalid')
+      expect(h.reset).toHaveBeenCalledTimes(mode === 'cloud' ? 1 : 0)
+      expect(h.login).toHaveBeenCalledTimes(mode === 'remote' ? 1 : 0)
+      expect(agentSignIn).toHaveBeenCalledTimes(mode === 'cloud' ? 1 : 0)
+    } finally {
+      h.restore()
+    }
+  })
+
+  it('does not reload B when A reset was already started before the switch', async () => {
+    const h = recoveryHarness()
+    const reset = deferred<void>()
+    h.reset.mockReturnValueOnce(reset.promise)
+    Object.defineProperty(window.hermesDesktop, 'cloud', {
+      configurable: true,
+      value: {
+        status: vi.fn(async () => ({ signedIn: true })),
+        agentSignIn: vi.fn(async () => ({ baseUrl: 'https://gateway-a.invalid', connected: true }))
+      }
+    })
+    h.switchTo({ mode: 'cloud' }, 'Cloud A failure')
+
+    try {
+      render(<BootFailureOverlay />)
+      fireEvent.click(await screen.findByRole('button', { name: /sign out & sign in/i }))
+      await waitFor(() => expect(h.reset).toHaveBeenCalledTimes(1))
+      act(() => h.switchTo({ remoteAuthMode: 'token', remoteUrl: 'https://gateway-b.invalid' }))
+      await act(async () => reset.resolve())
+      expect(h.reload).not.toHaveBeenCalled()
+    } finally {
+      h.restore()
+    }
+  })
+
+  it.each(['probe', 'signin'])('does not publish or reload after unmount during %s', async stage => {
+    const h = recoveryHarness()
+    const probe = deferred<Awaited<ReturnType<typeof h.probe>>>()
+    const login = deferred<Awaited<ReturnType<typeof h.login>>>()
+
+    if (stage === 'probe') {
+      h.probe.mockReturnValueOnce(probe.promise)
+    } else {
+      h.login.mockReturnValueOnce(login.promise)
+    }
+
+    try {
+      const { unmount } = render(<BootFailureOverlay />)
+
+      if (stage === 'probe') {
+        await waitFor(() => expect(h.probe).toHaveBeenCalledTimes(1))
+      } else {
+        fireEvent.click(await screen.findByRole('button', { name: /sign out & sign in/i }))
+        await waitFor(() => expect(h.login).toHaveBeenCalledTimes(1))
+      }
+
+      unmount()
+      await act(async () => {
+        probe.resolve({ providers: [] })
+        login.resolve({ ok: true, connected: true })
+      })
+      expect(screen.queryByRole('dialog')).toBeNull()
+      expect(h.reset).not.toHaveBeenCalled()
+      expect(h.reload).not.toHaveBeenCalled()
+      expect($notifications.get().some(item => item.kind === 'success')).toBe(false)
+    } finally {
+      h.restore()
     }
   })
 })
