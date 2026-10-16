@@ -29,8 +29,9 @@ RECORDED = 178864182760  # spawn-time baseline (start ticks / psutil centisecond
 def _fake_proc():
     """A live wrapper whose spawn-time PGID/start-time baselines were captured."""
     return SimpleNamespace(
-        pid=12345,
+        pid=67890,
         _hermes_pgid=67890,
+        _hermes_process_identity=(67890, RECORDED),
         _hermes_pgid_start=RECORDED,
         poll=lambda: 0,
         wait=lambda timeout=None: 0,

@@ -122,7 +122,8 @@ def test_kill_process_survives_psutil_snapshot_failure(monkeypatch):
     env = object.__new__(LocalEnvironment)
     proc = SimpleNamespace(
         pid=12345,
-        _hermes_pgid=67890,
+        _hermes_pgid=12345,
+        _hermes_process_identity=(12345, 1000000),
         poll=lambda: 0,
         wait=lambda timeout=None: 0,
         kill=lambda: None,
@@ -130,7 +131,7 @@ def test_kill_process_survives_psutil_snapshot_failure(monkeypatch):
     killpg_calls = []
 
     def fake_getpgid(_pid):
-        return 67890
+        return 12345
 
     def fake_killpg(pgid, sig):
         killpg_calls.append((pgid, sig))
@@ -141,6 +142,7 @@ def test_kill_process_survives_psutil_snapshot_failure(monkeypatch):
         raise RuntimeError("psutil exploded")
 
     monkeypatch.setattr(os, "getpgid", fake_getpgid)
+    monkeypatch.setattr("gateway.status.get_process_start_time", lambda pid: 1000000)
     monkeypatch.setattr(os, "killpg", fake_killpg)
     monkeypatch.setattr(psutil, "Process", boom)
 
@@ -148,8 +150,8 @@ def test_kill_process_survives_psutil_snapshot_failure(monkeypatch):
 
     # SIGTERM was delivered to the group and the alive-probe ran: the
     # escalation path completed despite the snapshot failure.
-    assert killpg_calls[0] == (67890, signal.SIGTERM)
-    assert (67890, 0) in killpg_calls
+    assert killpg_calls[0] == (12345, signal.SIGTERM)
+    assert (12345, 0) in killpg_calls
 
 
 def test_kill_process_never_killpgs_the_callers_own_group(monkeypatch):
@@ -162,6 +164,8 @@ def test_kill_process_never_killpgs_the_callers_own_group(monkeypatch):
     killed = []
     proc = SimpleNamespace(
         pid=12345,
+        _hermes_pgid=67890,
+        _hermes_process_identity=(12345, 1000000),
         poll=lambda: 0,
         wait=lambda timeout=None: 0,
         kill=lambda: killed.append(12345),
@@ -169,6 +173,7 @@ def test_kill_process_never_killpgs_the_callers_own_group(monkeypatch):
     killpg_calls = []
 
     monkeypatch.setattr(os, "getpgid", lambda _pid: 67890)
+    monkeypatch.setattr("gateway.status.get_process_start_time", lambda pid: 1000000)
     monkeypatch.setattr(os, "getpgrp", lambda: 67890)
     monkeypatch.setattr(os, "killpg", lambda pgid, sig: killpg_calls.append((pgid, sig)))
 
