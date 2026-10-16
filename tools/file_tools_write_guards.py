@@ -10,9 +10,11 @@ deny), ``_check_binary_document_write``, ``_check_protected_instruction_write``
 whole-file overwrite of content this task never saw or that changed since.
 """
 
+import errno
 import fnmatch
 import os
 import re
+import stat
 from pathlib import Path
 
 from agent.file_safety import get_nt_namespace_error
@@ -452,7 +454,7 @@ def _target_regular_file_state(filepath: str, task_id: str = "default") -> str:
     (the task's backend, not the controller's disk — #122662)?
 
     Returns ``"exists"``, ``"absent"`` or ``"unavailable"``. Host-backed envs
-    keep ``Path.is_file`` semantics; anything not proven absent is
+    follow symlinks, but unlike ``Path.is_file`` retain stat failures; anything not proven absent is
     ``"unavailable"`` and callers must fail closed.
     """
     from tools.file_tools import _file_ops_uses_host_paths, _get_file_ops
@@ -469,9 +471,9 @@ def _target_regular_file_state(filepath: str, task_id: str = "default") -> str:
         # ``_expand_tilde`` fallback — probe exactly that string.
         probe = _expand_tilde(filepath) if resolved is None else resolved
         try:
-            return "exists" if Path(probe).is_file() else "absent"
-        except OSError:
-            return "absent"
+            return "exists" if stat.S_ISREG(Path(probe).stat().st_mode) else "absent"
+        except OSError as exc:
+            return "absent" if exc.errno == errno.ENOENT else "unavailable"
     try:
         # Backend writes land on ``_expand_path(_resolved or path)``: the
         # backend's own home for a tilde fallback, never the host's.
