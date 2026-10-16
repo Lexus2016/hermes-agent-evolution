@@ -13806,6 +13806,254 @@
           "claim": "Reviewed helper binding or exact scoped regression dependency; no broader runtime guarantee."
         }
       ]
+    },
+    {
+      "id": "desktop-ui-structure-069",
+      "status": "reviewed",
+      "path": "apps/desktop/src/app/shell/model-catalog-menu.tsx",
+      "scope": "ModelFamilyRow",
+      "rule": "CC",
+      "detail": "CC 44 > target 20 (new code must meet the target)",
+      "candidate_blob": "7e344a747f94b1fd1221b035a346932de72ee76b",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/shell/model-catalog-menu.tsx",
+        "scope": "ModelFamilyRow",
+        "blob": "7e344a747f94b1fd1221b035a346932de72ee76b",
+        "unit_body_hash": "d02d28a3bfcfbeeb"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC is the family row's active/base-fast matching, preset/capability/price/progress/settings display and submenu render branching. Selection and options remain supplied controller actions; star click stops propagation. Full function/binding read and exact upstream unit/cap identify no structural integration conflict. Async selection failure, provider limits and option semantics remain unverified runtime contracts. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "ModelFamilyRow local function + complete props, ModelMenuController contract/close context, familyLimit, model-family/preset/pricing and UI imports",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-subset-review.json",
+          "blob": "91d4af2208b5f687e6d564fe4df3eee2a940dce9",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; callbacks/hooks/parser/task-state and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-072",
+      "status": "reviewed",
+      "path": "apps/desktop/src/components/assistant-ui/tool/fallback-model/index.ts",
+      "scope": "buildToolView",
+      "rule": "CC",
+      "detail": "CC 41 > 40, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "91f86eefb7b2a67ad3ea50a6238b5f8e086719b1",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/components/assistant-ui/tool/fallback-model/index.ts",
+        "scope": "buildToolView",
+        "blob": "91f86eefb7b2a67ad3ea50a6238b5f8e086719b1",
+        "unit_body_hash": "27424418a400cd9f"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "Complete function is a pure presentation-object assembly: pending/success/error/unavailable titles, optional search/count/image/preview data and separate terminal streams. It retains the input inlineDiff and explicit statuses rather than executing tools. Actual upstream file/unit/cap match; no structural binding conflict identified. The correctness of heuristic tool result/status parsers and URL safety is not waived by this CC candidate. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "Exported buildToolView(part,inlineDiff) with ToolPart/ToolView types and formatting imports; full neighboring toolPreviewOutcome, file-local helper declaration lookup for tool status/meta/title/subtitle/detail/count/preview/streams; bound by ToolEntry view memo",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-subset-review.json",
+          "blob": "91d4af2208b5f687e6d564fe4df3eee2a940dce9",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; callbacks/hooks/parser/task-state and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-100",
+      "status": "reviewed",
+      "path": "apps/desktop/src/plugins/hermes-bots/screen-hero.tsx",
+      "scope": "ScreenHeroContent",
+      "rule": "CC",
+      "detail": "CC 21 > target 20 (was 20)",
+      "candidate_blob": "74bfb538613c7a9351c765623cb98f73498b6a0a",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/plugins/hermes-bots/screen-hero.tsx",
+        "scope": "ScreenHeroContent",
+        "blob": "74bfb538613c7a9351c765623cb98f73498b6a0a",
+        "unit_body_hash": "dd4daae95e787e3c"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC describes tone-to-caption/CTA/icon/ring and live/stale image presentation. The wrapper remounts by bot identity; unsupported/unavailable states are explicitly hidden and user click owns opening. Entire component and local hook context read; actual upstream source/unit unchanged. Timer, thumbnail failure/privacy, display control and polling contracts are not waived. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "ScreenHero wrapper keyed by botSelectionKey, ScreenHeroContent props, full useLiveThumbnail binding, useScreenPortalState/displayRequest/openBotScreen",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-subset-review.json",
+          "blob": "91d4af2208b5f687e6d564fe4df3eee2a940dce9",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; callbacks/hooks/parser/task-state and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-102",
+      "status": "reviewed",
+      "path": "apps/desktop/src/plugins/kanban/board.tsx",
+      "scope": "CardFooter",
+      "rule": "CC",
+      "detail": "CC 31 > 29, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "8b05b1fbb2c2fab18da0576a1c51618481d3f4fa",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/plugins/kanban/board.tsx",
+        "scope": "CardFooter",
+        "blob": "8b05b1fbb2c2fab18da0576a1c51618481d3f4fa",
+        "unit_body_hash": "4a188c908ef10f7d"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC describes queued/running/stale/blocked indicators, explicit/default/orchestrator assignee display, timestamps and optional priority/progress/comments/links/warnings. Complete function with imports and helper binding context read; output is presentation, no task dispatch/write occurs here. Exact upstream source/cap with no identified structural conflict. Dispatcher assignment and heartbeat truth are not validated by this candidate. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "Local CardFooter(arc,task), Meta, KanbanTask/ArcState, useKanban/useDefaultAssignee/useOrchestration, columnMeta and presentational child imports",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-subset-review.json",
+          "blob": "91d4af2208b5f687e6d564fe4df3eee2a940dce9",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; callbacks/hooks/parser/task-state and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-063",
+      "status": "reviewed",
+      "path": "apps/desktop/src/app/settings/local-models-model-rows.tsx",
+      "scope": "CatalogModelRow",
+      "rule": "CC",
+      "detail": "CC 33 > target 20 (new code must meet the target)",
+      "candidate_blob": "bb98ebaed09a0323a499859adfb0f3fc35d7f650",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/settings/local-models-model-rows.tsx",
+        "scope": "CatalogModelRow",
+        "blob": "bb98ebaed09a0323a499859adfb0f3fc35d7f650",
+        "unit_body_hash": "744628dac14d2139"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC is primarily catalog-row action/render variants for download, active/loading/resident model, memory-fit/context/vision/recommendation pills. Actions preserve the owning LocalModelsActionScope rather than reaching directly into machine APIs. Complete component plus local helpers/adjacent sideload binding reviewed; exact upstream source/cap with no identified structural conflict. Download/delete/activation failure semantics are not approved. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "Exported CatalogModelRow props, residencyOf/runningActivation/anyActivationRunning, ResidencyPills, EjectModelButton/DeleteModelButton, LocalModelsActionScope imports",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-second-subset-review.json",
+          "blob": "b37d1c5eb589751ec3ddc6e4da9cc0750dbc86f1",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; installer/auth/roster/route and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-064",
+      "status": "reviewed",
+      "path": "apps/desktop/src/app/settings/local-models-runtime-section.tsx",
+      "scope": "LocalModelsRuntimeSection",
+      "rule": "CC",
+      "detail": "CC 26 > target 20 (new code must meet the target)",
+      "candidate_blob": "acde9534a1267a015e1f31a7255fe7bfe43673f6",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/app/settings/local-models-runtime-section.tsx",
+        "scope": "LocalModelsRuntimeSection",
+        "blob": "acde9534a1267a015e1f31a7255fe7bfe43673f6",
+        "unit_body_hash": "c7ae3185beb70414"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC arises from runtime installed/running/installing/paused/update/error render states and repeated action variants. Mutation key and job actions retain explicit owner/client scope; up-to-date derives from authoritative status tags. Complete body/bindings equal upstream at the exact cap with no structural conflict identified. Runtime install/server action and error/timeout contracts excluded. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "Exported LocalModelsRuntimeSection props, owning action scope, localModelsKey/runningRuntimeInstall/startLocalRuntimeInstall, nested handleServer",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-second-subset-review.json",
+          "blob": "b37d1c5eb589751ec3ddc6e4da9cc0750dbc86f1",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; installer/auth/roster/route and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-080",
+      "status": "reviewed",
+      "path": "apps/desktop/src/components/remote-setup/fields.tsx",
+      "scope": "RemoteSetupFields",
+      "rule": "CC",
+      "detail": "CC 35 > target 20 (new code must meet the target)",
+      "candidate_blob": "75e016ae99df3a8250176aa5eccbb22076d8b173",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/components/remote-setup/fields.tsx",
+        "scope": "RemoteSetupFields",
+        "blob": "75e016ae99df3a8250176aa5eccbb22076d8b173",
+        "unit_body_hash": "6ce578f3a659ebd4"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "CC is UI branching by host, explicit token/OAuth mode, probe status, connected status and input/button availability. Full function and binding context reviewed, and actual upstream source/unit cap match. No identified structural conflict. Credential masking/storage/sign-in/sign-out and remote authentication behavior are not approved or waived. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "RemoteSetupFields typed setup/disabled/urlDisabled/urlOnly callback props; local Field component, RemoteSetup hook interface; settings/registry/first-run call-site search",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-second-subset-review.json",
+          "blob": "b37d1c5eb589751ec3ddc6e4da9cc0750dbc86f1",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; installer/auth/roster/route and native runtime limitations remain explicit."
+        }
+      ]
+    },
+    {
+      "id": "desktop-ui-structure-090",
+      "status": "reviewed",
+      "path": "apps/desktop/src/plugins/hermes-bots/bot-row.tsx",
+      "scope": "BotRow",
+      "rule": "CC",
+      "detail": "CC 42 > 40, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "c5d24667ec238a9da27d836f1007229104ee9074",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "apps/desktop/src/plugins/hermes-bots/bot-row.tsx",
+        "scope": "BotRow",
+        "blob": "c5d24667ec238a9da27d836f1007229104ee9074",
+        "unit_body_hash": "11a54efa2784c850"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller second-source review and desktop UI structural reviewer; owner-approved exact preparation",
+        "compatibility": "Full row read; CC is identity/status/preview/age/attention and context menu presentation. Main click and explicit Bot Chat action delegate to openRosterBot; recent session remains a separately named menu action. Actual upstream source/unit cap matches and no new structural binding divergence identified. The pre-existing preview fallback to last_session when canonical_session is absent is not validated here; canonical resolution, metadata writes, warm catches and source ownership remain outside disposition. Structural disposition only; not approval or activation. No exception for catch handling, timeouts, credentials, authorization, privacy, lifecycle or other runtime behavior. No desktop test pass claim; typecheck exit 137 remains unresolved. Generated manifest identity/cap and controller verification required before any activation.",
+        "module_bindings": "Exported BotRow props, rowAge, source-qualified selection/meta/attention/owner helpers, canonical session ID helper and openRosterBot; complete context menu handlers",
+        "receipt": "Complete function and surrounding binding source review, 2026-10-16; no native/typecheck/runtime execution receipt claimed."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-desktop-ui-second-subset-review.json",
+          "blob": "b37d1c5eb589751ec3ddc6e4da9cc0750dbc86f1",
+          "outcome": "passed",
+          "claim": "Independent complete-scope structural organization review for this exact metric only; installer/auth/roster/route and native runtime limitations remain explicit."
+        }
+      ]
     }
   ]
 }
