@@ -39,11 +39,15 @@ interface McpRpcResult {
   unsupported?: boolean
 }
 
-async function mcpRpc(method: string, params: Record<string, unknown>): Promise<McpRpcResult> {
+async function mcpRpc(
+  method: string,
+  params: Record<string, unknown>,
+  request: typeof host.request = host.request
+): Promise<McpRpcResult> {
   // Returns { ok, result } or { ok:false, unsupported:true } when the gateway
   // doesn't know the method (older backend) vs a real error.
   try {
-    const res = await host.request<McpServerPayload>(method, params)
+    const res = await request<McpServerPayload>(method, params)
 
     return {
       ok: true,
@@ -94,8 +98,16 @@ interface McpCatalogEntry {
  *  source-scoped bot. */
 type McpSetupScope = null | string | undefined | { connectionId?: null | string; profile?: null | string }
 
+export interface McpSetupTarget {
+  connectionId: string | null
+  profile: string
+  request: typeof host.request
+  completeMcpOAuth: typeof host.completeMcpOAuth
+}
+
 interface McpSetupButtonProps {
   ensureProfile?: () => Promise<null | string>
+  ensureTarget?: () => Promise<McpSetupTarget | null>
   entry: McpCatalogEntry
   onDone?: () => void
   // TODO(bot-mode-types): Edit Profile passes `botBackendProfileScope(...)`, which
@@ -107,7 +119,7 @@ interface McpSetupButtonProps {
   profile: McpSetupScope
 }
 
-export function McpSetupButton({ profile, entry, onDone, ensureProfile }: McpSetupButtonProps) {
+export function McpSetupButton({ profile, entry, onDone, ensureProfile, ensureTarget }: McpSetupButtonProps) {
   const { t } = useI18n()
   const b = useBots()
   // entry: { name, requires:[env keys], auth?, fromCatalog, installed }
@@ -123,9 +135,51 @@ export function McpSetupButton({ profile, entry, onDone, ensureProfile }: McpSet
   // wins wherever both exist, so there is nothing to mirror into the ref and
   // no render of lag between the parent supplying a profile and us using it.
   const createdProfileRef = useRef<McpSetupScope>(null)
+  const createdTargetRef = useRef<McpSetupTarget | null>(null)
+
+  const requestMcp = (method: string, params: Record<string, unknown>) =>
+    mcpRpc(method, params, createdTargetRef.current?.request)
 
   // Resolve the target profile, creating it on demand for the New Bot flow.
   const resolveProfile = async () => {
+    if (ensureTarget) {
+      try {
+        const target = createdTargetRef.current || (await ensureTarget())
+
+        if (!target) {
+          return null
+        }
+
+        if (createdTargetRef.current) {
+          return target.profile
+        }
+
+        // The ambient process-wide probe cannot decide another owner's
+        // capabilities. Probe this captured target only, on first setup.
+        const probe = await mcpRpc('mcp.servers.list', {}, target.request)
+
+        if (probe.unsupported) {
+          setSupported(false)
+
+          return null
+        }
+
+        if (!probe.ok) {
+          throw new Error(probe.error || b.tools.setupFailed)
+        }
+
+        createdTargetRef.current = target
+        createdProfileRef.current = target.profile
+
+        return target.profile
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : String(error))
+        setPhase('error')
+
+        return null
+      }
+    }
+
     const known = profile || createdProfileRef.current
 
     if (known) {
@@ -145,10 +199,13 @@ export function McpSetupButton({ profile, entry, onDone, ensureProfile }: McpSet
     return null
   }
 
+  const ownsTarget = Boolean(ensureTarget)
+
   useEffect(() => {
     const epoch = oauthEpoch
     let alive = true
-    mcpSetupSupported().then(ok => {
+    const probe = ownsTarget ? Promise.resolve(true) : mcpSetupSupported()
+    probe.then(ok => {
       if (alive) {
         setSupported(ok)
       }
@@ -159,7 +216,7 @@ export function McpSetupButton({ profile, entry, onDone, ensureProfile }: McpSet
 
       epoch.current++
     }
-  }, [])
+  }, [ownsTarget])
   const isOAuth = (entry.auth || '').toLowerCase() === 'oauth'
   const requires = entry.requires || []
 
@@ -170,13 +227,15 @@ export function McpSetupButton({ profile, entry, onDone, ensureProfile }: McpSet
     const profile = await resolveProfile()
 
     if (!profile) {
-      setPhase('idle')
+      if (!ensureTarget) {
+        setPhase('idle')
+      }
 
       return
     }
 
     if (entry.fromCatalog && !entry.installed) {
-      const add = await mcpRpc('mcp.servers.add', {
+      const add = await requestMcp('mcp.servers.add', {
         profile,
         name: entry.name,
         preset: entry.name
@@ -211,7 +270,7 @@ export function McpSetupButton({ profile, entry, onDone, ensureProfile }: McpSet
         continue
       }
 
-      const r = await mcpRpc('mcp.servers.set_api_key', {
+      const r = await requestMcp('mcp.servers.set_api_key', {
         profile: target,
         name: entry.name,
         env_var: k,
@@ -227,7 +286,7 @@ export function McpSetupButton({ profile, entry, onDone, ensureProfile }: McpSet
     }
 
     // Verify via test.
-    const t = await mcpRpc('mcp.servers.test', {
+    const t = await requestMcp('mcp.servers.test', {
       profile: target,
       name: entry.name
     })
@@ -258,20 +317,27 @@ export function McpSetupButton({ profile, entry, onDone, ensureProfile }: McpSet
     const resolvedProfile = await resolveProfile()
 
     if (!resolvedProfile) {
-      setPhase('idle')
+      if (!ensureTarget) {
+        setPhase('idle')
+      }
 
       return
     }
 
-    const scope = {
-      ...source,
-      profile: typeof resolvedProfile === 'object' ? resolvedProfile.profile : resolvedProfile
-    }
+    const target = createdTargetRef.current
+
+    const scope = target
+      ? { connectionId: target.connectionId, profile: target.profile }
+      : {
+          ...source,
+          profile: typeof resolvedProfile === 'object' ? resolvedProfile.profile : resolvedProfile
+        }
 
     try {
       setPhase('oauth')
       setMessage(b.tools.completeSignIn)
-      await host.completeMcpOAuth({
+      const completeMcpOAuth = target?.completeMcpOAuth || host.completeMcpOAuth
+      await completeMcpOAuth({
         serverName: entry.name,
         profile: scope,
         catalogPreset: entry.fromCatalog && !entry.installed ? entry.name : undefined,

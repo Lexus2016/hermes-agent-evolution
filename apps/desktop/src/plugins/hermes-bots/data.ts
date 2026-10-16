@@ -250,6 +250,63 @@ interface BotOwner {
   route: null | ProfileRoute
 }
 
+type BotMetaRequest = (method: string, params: Record<string, unknown>) => Promise<unknown>
+
+interface DraftMetaBinding {
+  request: BotMetaRequest
+  storage: BotMetaStorage | undefined
+  v2: boolean
+  isCurrent: () => boolean
+}
+
+/** A new draft keeps its metadata on the same owner as its profile. Legacy
+ * name-keyed caches are usable only while that exact gateway is current. */
+export function captureDraftBotMeta(owner: RosterRow | string, request: BotMetaRequest, isCurrent: () => boolean) {
+  const target: BotOwner =
+    typeof owner === 'string' ? { bot: { name: owner }, name: owner, key: owner, route: null } : botOwner(owner)
+
+  const storage = getPluginCtx()?.storage
+
+  const binding: DraftMetaBinding = {
+    request,
+    storage: storage
+      ? { get: storage.get?.bind(storage), set: storage.set.bind(storage), remove: storage.remove.bind(storage) }
+      : undefined,
+    v2: Boolean(target.route) || botMetaV2Active,
+    isCurrent
+  }
+
+  let pending: Promise<BotMetaSaveResult> | null = null
+
+  return {
+    save: (patch: StoredBotMeta) => {
+      pending = saveBotMetaForOwner(target, patch, binding)
+
+      return pending
+    },
+    discard: async () => {
+      await pending
+
+      if (!target.route && !isCurrent()) {
+        return
+      }
+
+      // Read after the pending save, not at capture time: unrelated owners
+      // may have written the same slug while the draft was being deleted.
+      const next = { ...$botMeta.get() }
+      delete next[target.key]
+      $botMeta.set(next)
+      botMetaWriteAt.delete(target.key)
+
+      try {
+        await (binding.v2 ? commitBotMetaV2(binding.storage, next) : binding.storage?.set(BOT_META_V1_KEY, next))
+      } catch {
+        /* profile is deleted; stale local appearance is harmless if storage fails */
+      }
+    }
+  }
+}
+
 export function botOwner(owner: RosterRow | string): BotOwner {
   if (typeof owner === 'string') {
     const name = owner.trim()
@@ -336,14 +393,17 @@ const BOT_META_CAS_ATTEMPTS = 3
 async function readServerBotMeta(
   bot: RosterRow,
   name: string,
-  route: null | ProfileRoute
+  route: null | ProfileRoute,
+  request?: BotMetaRequest
 ): Promise<null | ServerBotMeta> {
   const params = { include_sessions: false }
 
   // The read is the first half of a user's save: it dials foreground like the write.
-  const result = (await (route
-    ? requestForBot(bot, 'profiles.list', params, { spawnPriority: 'foreground' })
-    : host.request('profiles.list', params))) as {
+  const result = (await (request
+    ? request('profiles.list', params)
+    : route
+      ? requestForBot(bot, 'profiles.list', params, { spawnPriority: 'foreground' })
+      : host.request('profiles.list', params))) as {
     profiles?: RosterRow[]
   }
 
@@ -372,12 +432,13 @@ async function persistBotMetaPatch(
   bot: RosterRow,
   name: string,
   route: null | ProfileRoute,
-  patch: StoredBotMeta
+  patch: StoredBotMeta,
+  request?: BotMetaRequest
 ): Promise<null | ProfilesConfigureResult> {
   const { image: _image, pet: _pet, ...fields } = patch
 
   for (let attempt = 0; attempt < BOT_META_CAS_ATTEMPTS; attempt++) {
-    const server = await readServerBotMeta(bot, name, route)
+    const server = await readServerBotMeta(bot, name, route, request)
 
     if (!server) {
       return null
@@ -401,9 +462,11 @@ async function persistBotMetaPatch(
       }
     }
 
-    const result = (await (route
-      ? requestForBot(bot, 'profiles.configure', params)
-      : host.request('profiles.configure', params))) as ProfilesConfigureResult
+    const result = (await (request
+      ? request('profiles.configure', params)
+      : route
+        ? requestForBot(bot, 'profiles.configure', params)
+        : host.request('profiles.configure', params))) as ProfilesConfigureResult
 
     if (!result?.applied?.ui_meta_conflicts) {
       return result
@@ -418,8 +481,72 @@ async function persistBotMetaPatch(
 }
 
 export async function saveBotMeta(owner: RosterRow | string, patch: StoredBotMeta): Promise<BotMetaSaveResult> {
-  const { bot, key, name, route } = botOwner(owner)
-  const prevMeta = $botMeta.get()[key] || {}
+  return saveBotMetaForOwner(botOwner(owner), patch)
+}
+
+/** Publish only a changed avatar. The returned settled request lets draft
+ * cleanup drain the write; ordinary editor saves keep it in the background. */
+function persistBotAvatar(
+  { bot, name, route }: Pick<BotOwner, 'bot' | 'name' | 'route'>,
+  patch: StoredBotMeta,
+  previous: StoredBotMeta,
+  request?: BotMetaRequest
+): Promise<unknown> | null {
+  if (!('image' in patch) || patch.image === (previous.image ?? null)) {
+    return null
+  }
+
+  const params = {
+    name,
+    asset: 'avatar',
+    ...(patch.image ? { data: patch.image } : { clear: true })
+  }
+
+  try {
+    const pending = request
+      ? request('profiles.set_asset', params)
+      : route
+        ? requestForBot(bot, 'profiles.set_asset', params)
+        : host.request('profiles.set_asset', params)
+
+    return pending.catch(() => undefined)
+  } catch {
+    // Older gateways retain their local appearance fallback.
+    return null
+  }
+}
+
+/** Preserve the documented legacy fallback separately from an explicit
+ * negative acknowledgement by a gateway that supports ui_meta persistence. */
+async function botMetaServerOutcome(
+  pending: Promise<null | ProfilesConfigureResult> | null
+): Promise<BotMetaServerOutcome> {
+  try {
+    const result = await pending
+
+    if (result?.applied?.ui_meta === true) {
+      return 'persisted'
+    }
+
+    if (result && typeof result === 'object' && result.applied && typeof result.applied === 'object') {
+      return 'failed'
+    }
+  } catch {
+    // Older/unavailable gateways retain the saved local appearance fallback.
+  }
+
+  return 'unsupported'
+}
+
+async function saveBotMetaForOwner(
+  { bot, key, name, route }: BotOwner,
+  patch: StoredBotMeta,
+  binding?: DraftMetaBinding
+): Promise<BotMetaSaveResult> {
+  const canWriteLocal = !binding || Boolean(route) || binding.isCurrent()
+  // A legacy bare key belongs to the current gateway. After a switch it
+  // cannot be the comparison base for this draft's avatar or other fields.
+  const prevMeta = canWriteLocal ? $botMeta.get()[key] || {} : {}
 
   const next = {
     ...$botMeta.get(),
@@ -429,17 +556,23 @@ export async function saveBotMeta(owner: RosterRow | string, patch: StoredBotMet
     }
   }
 
-  noteBotMetaWrite(key)
-  $botMeta.set(next)
+  if (canWriteLocal) {
+    noteBotMetaWrite(key)
+    $botMeta.set(next)
+  }
 
   // Local plugin storage: instant, and the fallback for older gateways.
   let localPersistence = Promise.resolve()
 
   try {
-    const persisted =
-      route || botMetaV2Active
-        ? commitBotMetaV2(getPluginCtx()?.storage, next)
-        : Promise.resolve(getPluginCtx()?.storage?.set?.(BOT_META_V1_KEY, next))
+    const storage = binding ? binding.storage : getPluginCtx()?.storage
+    const v2 = binding ? binding.v2 : route || botMetaV2Active
+
+    const persisted = canWriteLocal
+      ? v2
+        ? commitBotMetaV2(storage, next)
+        : Promise.resolve(storage?.set?.(BOT_META_V1_KEY, next))
+      : Promise.resolve()
 
     localPersistence = persisted.catch(() => undefined)
   } catch {
@@ -457,77 +590,24 @@ export async function saveBotMeta(owner: RosterRow | string, patch: StoredBotMet
   let serverRequest: null | Promise<null | ProfilesConfigureResult> = null
 
   try {
-    serverRequest = persistBotMetaPatch(bot, name, route, patch)
+    serverRequest = persistBotMetaPatch(bot, name, route, patch, binding?.request)
   } catch {
     /* older/unavailable gateway — the local fallback remains saved */
   }
 
-  // Avatar image → profile asset store (feature-detected; local storage
-  // remains the fallback rendering source on older gateways) — but only when
-  // the image actually CHANGED. Every Edit Profile save sends the image key
-  // (changed or not); a no-op `clear` from one machine can race another
-  // machine's just-pushed avatar and wipe it server-side, and a no-op
-  // `data` push re-uploads the full data URL for nothing.
-  if ('image' in patch && patch.image !== (prevMeta.image ?? null)) {
-    try {
-      const req = patch.image
-        ? route
-          ? requestForBot(bot, 'profiles.set_asset', {
-              name,
-              asset: 'avatar',
-              data: patch.image
-            })
-          : host.request('profiles.set_asset', {
-              name,
-              asset: 'avatar',
-              data: patch.image
-            })
-        : route
-          ? requestForBot(bot, 'profiles.set_asset', {
-              name,
-              asset: 'avatar',
-              clear: true
-            })
-          : host.request('profiles.set_asset', {
-              name,
-              asset: 'avatar',
-              clear: true
-            })
+  const assetRequest = persistBotAvatar({ bot, name, route }, patch, prevMeta, binding?.request)
 
-      req.catch(() => undefined)
-    } catch {
-      /* older gateway */
-    }
+  const serverOutcome = await botMetaServerOutcome(serverRequest)
+
+  // A snapshot fetched while the write was pending predates the new ui_meta.
+  if (serverRequest && (!binding || route || binding.isCurrent())) {
+    noteBotMetaWrite(key)
   }
 
-  // Three-way outcome so callers can tell a REAL remote failure from the
-  // documented legacy fallback ("older gateways reject the param shape;
-  // that's fine, local wins"):
-  //   'persisted'   — gateway confirmed applied.ui_meta === true
-  //   'unsupported' — older gateway: request rejected, or response carries
-  //                   no `applied` contract at all. Silent local fallback;
-  //                   an error toast here would fire on EVERY save forever.
-  //   'failed'      — gateway speaks the contract and explicitly reported
-  //                   the ui_meta write did NOT apply.
-  let serverOutcome: BotMetaServerOutcome = 'unsupported'
-
-  if (serverRequest) {
-    try {
-      const result = await serverRequest
-
-      if (result?.applied?.ui_meta === true) {
-        serverOutcome = 'persisted'
-      } else if (result && typeof result === 'object' && result.applied && typeof result.applied === 'object') {
-        serverOutcome = 'failed'
-      }
-    } catch {
-      /* older/unavailable gateway — the local fallback remains saved */
-    }
-
-    // Re-stamp now that the server write settled: a roster snapshot fetched
-    // while profiles.configure was still in flight predates the new ui_meta
-    // just as surely as one fetched before the local write.
-    noteBotMetaWrite(key)
+  // A draft cannot be deleted while its earlier avatar write is still in
+  // flight. Ordinary editor saves retain their existing background behavior.
+  if (binding) {
+    await assetRequest
   }
 
   await localPersistence
