@@ -29,7 +29,7 @@ interface CapabilitiesViewProps {
 
 const mocks = vi.hoisted(() => ({
   active: { connectionId: null as string | null, profile: 'default' },
-  connections: vi.fn(async () => [] as { id: string; label: string }[]),
+  connections: vi.fn(async (): Promise<Awaited<ReturnType<typeof HermesSdk.host.connections>>> => []),
   completeMcpOAuth: vi.fn(
     async (
       _options: Parameters<typeof HermesSdk.host.completeMcpOAuth>[0]
@@ -42,7 +42,7 @@ const mocks = vi.hoisted(() => ({
     })
   ),
   createCanonicalChat: vi.fn(async () => 'session-1'),
-  deleteProfile: vi.fn(async () => undefined),
+  deleteProfile: vi.fn(async (): Promise<void> => undefined),
   draftImage: { value: null as string | null },
   gateway: { current: null as ReturnType<typeof HermesSdk.host.getGateway> },
   host: null as null | typeof HermesSdk.host,
@@ -58,6 +58,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@hermes/plugin-sdk', async importOriginal => {
   const original = await importOriginal<typeof HermesSdk>()
+  const { atom } = await import('nanostores')
 
   const CapabilitiesViewStub = (props: CapabilitiesViewProps) => {
     mocks.skillsView.push(props)
@@ -69,7 +70,7 @@ vi.mock('@hermes/plugin-sdk', async importOriginal => {
   // remote targets too, pinned to the target machine's backend.
   CapabilitiesViewStub.supportsFixedConnection = true
 
-  const host = {
+  const host: typeof HermesSdk.host = {
     ...original.host,
     connections: mocks.connections,
     completeMcpOAuth: mocks.completeMcpOAuth,
@@ -78,15 +79,15 @@ vi.mock('@hermes/plugin-sdk', async importOriginal => {
     notify: mocks.notify,
     notifyError: mocks.notifyError,
     request: mocks.request,
-    requestProfile: mocks.requestProfile,
+    requestProfile: mocks.requestProfile as typeof HermesSdk.host.requestProfile,
     state: {
       ...original.host.state,
-      connectionId: { get: () => mocks.active.connectionId },
-      profile: { get: () => mocks.active.profile }
+      connectionId: { ...atom<string | null>(null), get: () => mocks.active.connectionId },
+      profile: { ...atom('default'), get: () => mocks.active.profile }
     }
   }
 
-  mocks.host = host as typeof HermesSdk.host
+  mocks.host = host
 
   const mocked: Record<string, unknown> = {
     ...original,
@@ -129,6 +130,11 @@ vi.mock('./data', async importOriginal => {
 vi.setConfig({ testTimeout: 30_000 })
 
 const roster: RosterRow[] = [{ connectionId: 'local', name: 'default' }]
+
+const registryConnections: Awaited<ReturnType<typeof HermesSdk.host.connections>> = [
+  { id: 'local', kind: 'local', label: 'This Mac', primary: true, tokenPreview: null, tokenSet: false },
+  { id: 'studio', kind: 'remote', label: 'Studio', primary: false, tokenPreview: null, tokenSet: false }
+]
 
 /** A catalog entry that needs an API key — the only row that renders setup. */
 const catalog = { auth: null as string | null, installed: false, name: 'linear', requires: ['LINEAR_API_KEY'] }
@@ -273,10 +279,7 @@ describe('materializing the draft profile', () => {
   })
 
   it('pins a remote-target draft to the TARGET machine, not the active gateway', async () => {
-    mocks.connections.mockResolvedValue([
-      { id: 'local', label: 'This Mac' },
-      { id: 'studio', label: 'Studio' }
-    ])
+    mocks.connections.mockResolvedValue(registryConnections)
 
     await renderDialog(true)
 
@@ -303,10 +306,7 @@ describe('materializing the draft profile', () => {
   })
 
   it('lets a remote-target Bot start fresh instead of forcing a clone of the target default', async () => {
-    mocks.connections.mockResolvedValue([
-      { id: 'local', label: 'This Mac' },
-      { id: 'studio', label: 'Studio' }
-    ])
+    mocks.connections.mockResolvedValue(registryConnections)
 
     await renderDialog(true)
 
@@ -402,10 +402,7 @@ describe('provider readiness before the intro turn', () => {
   })
 
   it('checks a remote bot on its own machine and warns without an editor shortcut', async () => {
-    mocks.connections.mockResolvedValue([
-      { id: 'local', label: 'This Mac' },
-      { id: 'studio', label: 'Studio' }
-    ])
+    mocks.connections.mockResolvedValue(registryConnections)
     mocks.requestProfile.mockImplementation(async () => notReady)
 
     await renderDialog(true, vi.fn())
@@ -469,10 +466,7 @@ describe('the draft retains its original owner', () => {
   function modernOwner() {
     mocks.active.connectionId = 'local'
     mocks.active.profile = 'work'
-    mocks.connections.mockResolvedValue([
-      { id: 'local', label: 'This Mac' },
-      { id: 'studio', label: 'Studio' }
-    ])
+    mocks.connections.mockResolvedValue(registryConnections)
   }
 
   it('locks name and target at materialization and keeps submit on the captured SDK route', async () => {

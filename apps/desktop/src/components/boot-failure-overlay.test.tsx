@@ -478,7 +478,7 @@ function recoveryHarness() {
   const probe = vi.fn(async () => ({ providers: [{ id: 'basic', type: 'password' }] }))
   const logout = vi.fn(async () => ({ ok: true, connected: false }))
   const login = vi.fn(async () => ({ ok: true, connected: false }))
-  const reset = vi.fn(async () => undefined)
+  const reset = vi.fn(async (): Promise<void> => undefined)
   const reload = vi.fn()
   const originalLocation = Object.getOwnPropertyDescriptor(window, 'location')!
   Object.defineProperty(window, 'location', { configurable: true, value: { ...window.location, reload } })
