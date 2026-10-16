@@ -140,3 +140,10 @@ three-occurrence remote-probe disposition was removed because the exact upstream
 unit identity no longer holds. The historical review artifact is retained for
 traceability, but grants no current exception. Real metadata uncertainty now
 refuses replacement rather than treating an existing file as absent.
+
+
+Two postponed Cron provider return-annotation findings retain an explicit metadata
+limitation: generic `typing.get_type_hints` raises `NameError`. Supported provider
+discovery and dispatch do not evaluate these annotations; seven focused caller
+tests and actual canonical-provider probes passed. The narrow disposition does
+not claim repaired introspection and introduces no eager scheduler/profile setup.

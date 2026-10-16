@@ -14195,6 +14195,152 @@
           "claim": "Independent complete-scope structural organization review for this exact metric only; hydration/polling/callback/notice ownership and native runtime limitations remain explicit."
         }
       ]
+    },
+    {
+      "id": "cron-loader-metadata-load_cron_scheduler",
+      "status": "reviewed",
+      "path": "plugins/cron_providers/__init__.py",
+      "scope": "load_cron_scheduler",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "def load_cron_scheduler(name: str) -> Optional[CronScheduler]:",
+      "candidate_blob": "8651836d50688ade46a2da1582e628386075d63d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "plugins/cron_providers/__init__.py",
+        "scope": "load_cron_scheduler",
+        "blob": "8651836d50688ade46a2da1582e628386075d63d",
+        "unit_body_hash": "5c8720fcf60fee0d"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Root-approved bounded preparation; independent controller approval pending",
+        "compatibility": "The names occur only in postponed return annotations. Current supported discovery and provider execution never evaluate these annotations: real named/directory loaders return canonical ABC instances, and resolver/fallback contracts pass. Importing discovery remains lazy with no cron package initialization. Retaining this metadata defect does not alter these demonstrated fork paths. Generic typing.get_type_hints on either function DOES raise NameError, even after provider execution. This is an unresolved introspection limitation, not corrected typing or a general F821 exemption. No supported in-repository consumer evaluates these two annotations; external reflection/documentation consumers are not proven safe. A new such consumer invalidates this rationale. Lazy metadata resolution was rejected because it initializes cron/profile scaffolding during introspection.",
+        "receipt": "/tmp/hermes-cron-annotation-existing-callers-20261016T002825.log; 7 passed plus embedded isolated actual-loader and failed-introspection probes."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cron-loader-annotation-limitation.json",
+          "blob": "a402cd66f5a08bdd1faf1145764603b86864e742",
+          "outcome": "passed",
+          "claim": "Bounded supported-caller compatibility evidence with explicit unresolved generic introspection failure; no claim that get_type_hints succeeds."
+        },
+        {
+          "path": "cron/scheduler_provider.py",
+          "blob": "040909363a220d3adb40f4fb0ae2bcad20f6aa6a",
+          "outcome": "passed",
+          "claim": "resolve_cron_scheduler directly calls named loader, checks availability and returns canonical provider/builtin fallback; no loader-annotation evaluation."
+        },
+        {
+          "path": "plugins/plugin_loader.py",
+          "blob": "21ac41376f19cd34e66da15d84bde1f8c24ebda7",
+          "outcome": "passed",
+          "claim": "load_named directly invokes callback; instance_from_module uses canonical base class and subclass checks, not type hints."
+        },
+        {
+          "path": "cron/__init__.py",
+          "blob": "ad13295b2ca09dbfede004ac0fcc28b32c646b3a",
+          "outcome": "passed",
+          "claim": "Importing the canonical ABC requires package initialization, including bootstrap and scheduler imports; eager metadata resolution would change lazy discovery startup."
+        },
+        {
+          "path": "cron/worker_bootstrap.py",
+          "blob": "e95e2229389c3905a7f7104c3eb1ce7ee36fa9ee",
+          "outcome": "passed",
+          "claim": "Existing worker bootstrap is invoked by cron package initialization; no changes proposed."
+        },
+        {
+          "path": "hermes_cli/web_read_coalescing.py",
+          "blob": "3f5b5498a95b21022711da9e1a0152dd183b8e11",
+          "outcome": "passed",
+          "claim": "Runtime get_type_hints consumer wraps web route callables, not cron discovery functions."
+        },
+        {
+          "path": "scripts/gen_gateway_contracts.py",
+          "blob": "5c281a21a7716fb60ee13636a78b2d0c09407fa5",
+          "outcome": "passed",
+          "claim": "Build-time get_type_hints consumer evaluates gateway ToolsRead model fields, not cron discovery functions."
+        },
+        {
+          "path": "tests/cron/test_scheduler_provider.py",
+          "blob": "d0ebeed8c3d63dd428d5aff6e84444f3168449b5",
+          "outcome": "passed",
+          "claim": "Seven selected canonical tests passed: default/missing/unknown/unavailable/available resolver behavior, package shadowing and additive ABC contract."
+        }
+      ]
+    },
+    {
+      "id": "cron-loader-metadata-load_provider_from_dir",
+      "status": "reviewed",
+      "path": "plugins/cron_providers/__init__.py",
+      "scope": "_load_provider_from_dir",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "def _load_provider_from_dir(provider_dir: Path) -> Optional[CronScheduler]:",
+      "candidate_blob": "8651836d50688ade46a2da1582e628386075d63d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "plugins/cron_providers/__init__.py",
+        "scope": "_load_provider_from_dir",
+        "blob": "8651836d50688ade46a2da1582e628386075d63d",
+        "unit_body_hash": "6b53e679215bdf48"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Root-approved bounded preparation; independent controller approval pending",
+        "compatibility": "The names occur only in postponed return annotations. Current supported discovery and provider execution never evaluate these annotations: real named/directory loaders return canonical ABC instances, and resolver/fallback contracts pass. Importing discovery remains lazy with no cron package initialization. Retaining this metadata defect does not alter these demonstrated fork paths. Generic typing.get_type_hints on either function DOES raise NameError, even after provider execution. This is an unresolved introspection limitation, not corrected typing or a general F821 exemption. No supported in-repository consumer evaluates these two annotations; external reflection/documentation consumers are not proven safe. A new such consumer invalidates this rationale. Lazy metadata resolution was rejected because it initializes cron/profile scaffolding during introspection.",
+        "receipt": "/tmp/hermes-cron-annotation-existing-callers-20261016T002825.log; 7 passed plus embedded isolated actual-loader and failed-introspection probes."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-cron-loader-annotation-limitation.json",
+          "blob": "a402cd66f5a08bdd1faf1145764603b86864e742",
+          "outcome": "passed",
+          "claim": "Bounded supported-caller compatibility evidence with explicit unresolved generic introspection failure; no claim that get_type_hints succeeds."
+        },
+        {
+          "path": "cron/scheduler_provider.py",
+          "blob": "040909363a220d3adb40f4fb0ae2bcad20f6aa6a",
+          "outcome": "passed",
+          "claim": "resolve_cron_scheduler directly calls named loader, checks availability and returns canonical provider/builtin fallback; no loader-annotation evaluation."
+        },
+        {
+          "path": "plugins/plugin_loader.py",
+          "blob": "21ac41376f19cd34e66da15d84bde1f8c24ebda7",
+          "outcome": "passed",
+          "claim": "load_named directly invokes callback; instance_from_module uses canonical base class and subclass checks, not type hints."
+        },
+        {
+          "path": "cron/__init__.py",
+          "blob": "ad13295b2ca09dbfede004ac0fcc28b32c646b3a",
+          "outcome": "passed",
+          "claim": "Importing the canonical ABC requires package initialization, including bootstrap and scheduler imports; eager metadata resolution would change lazy discovery startup."
+        },
+        {
+          "path": "cron/worker_bootstrap.py",
+          "blob": "e95e2229389c3905a7f7104c3eb1ce7ee36fa9ee",
+          "outcome": "passed",
+          "claim": "Existing worker bootstrap is invoked by cron package initialization; no changes proposed."
+        },
+        {
+          "path": "hermes_cli/web_read_coalescing.py",
+          "blob": "3f5b5498a95b21022711da9e1a0152dd183b8e11",
+          "outcome": "passed",
+          "claim": "Runtime get_type_hints consumer wraps web route callables, not cron discovery functions."
+        },
+        {
+          "path": "scripts/gen_gateway_contracts.py",
+          "blob": "5c281a21a7716fb60ee13636a78b2d0c09407fa5",
+          "outcome": "passed",
+          "claim": "Build-time get_type_hints consumer evaluates gateway ToolsRead model fields, not cron discovery functions."
+        },
+        {
+          "path": "tests/cron/test_scheduler_provider.py",
+          "blob": "d0ebeed8c3d63dd428d5aff6e84444f3168449b5",
+          "outcome": "passed",
+          "claim": "Seven selected canonical tests passed: default/missing/unknown/unavailable/available resolver behavior, package shadowing and additive ABC contract."
+        }
+      ]
     }
   ]
 }
