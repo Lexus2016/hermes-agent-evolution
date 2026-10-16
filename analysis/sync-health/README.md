@@ -15,8 +15,12 @@ history. Once upstream is already an ancestor of the comparison base, this adapt
 is dormant and the ordinary ratchet applies with unchanged thresholds.
 
 The initial mechanism checkpoint has an empty manifest. The separately reviewed
-activation accepts only 222 demonstrated nonfunctional F811 occurrences and the
-exact context-compressor test-module size backed by 302 passing tests. The manifest
+activations accept 222 demonstrated nonfunctional F811 occurrences, the exact
+context-compressor test-module size backed by 302 passing tests, 17 individually
+reviewed runtime findings with bounded regression evidence, and 32 frozen-fixture
+or dynamic-binding F821 occurrences. Five deferred-annotation findings and the
+unreadable-skill listing fallback remain unresolved. This is 272 occurrences across
+257 exact entries, not a claim of complete repository validation. The manifest
 is the separate accepted-debt report; it never rewrites the raw receipt. All other
 findings remain blocking until individually supported and reviewed. Owner authorization permits recording only
 inherited findings that do not impair fork functionality or security. Unknown

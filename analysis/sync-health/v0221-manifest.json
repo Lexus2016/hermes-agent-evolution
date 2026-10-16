@@ -7623,6 +7623,3086 @@
           "claim": "Exact test source bytes match the module whose 302 tests passed in the reviewed canonical execution."
         }
       ]
+    },
+    {
+      "id": "runtime-f122f7214cb6243a",
+      "status": "reviewed",
+      "path": "agent/auxiliary_client.py",
+      "scope": "_read_codex_singleton_token",
+      "rule": "S110",
+      "detail": "try/except/pass",
+      "candidate_blob": "98ef753aea40a6eb040aeeac0a74876466f21f9d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/auxiliary_client.py",
+        "scope": "_read_codex_singleton_token",
+        "blob": "d438b306fa53a764734f5f122d977d55bd43b737",
+        "unit_body_hash": "96fb98caa0679198"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "JWT decoding is an expiry optimization, not a local authentication decision. Opaque tokens remain valid provider inputs; malformed/expired credentials cannot confer local permissions. Expired parseable JWTs return None so fallback proceeds. Outer read errors also return None. Canonical hermes_cli.auth is imported at call time under the active profile, and pool route/key selection stays paired before this fallback. Debug exception logging remains existing diagnostic debt, not proof of sanitization.",
+        "module_bindings": "The reviewed functions retain their original auxiliary_client globals; credential and provider catalogs are imported from canonical hermes_cli owners at call time. Extracted auxiliary_error_policy and vision payload helpers do not own auth caches or profile routing state. Active profile auth resolution, pool key/URL pairing and independent named-provider fallback were reviewed and exercised.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "hermes_cli/auth.py",
+          "blob": "243fae4bbf637d737bca74f0b397710adfdf8975",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/auth_codex.py",
+          "blob": "257b43145cafa599c853815c9e7c6cf5a737d4ef",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/providers.py",
+          "blob": "fc4062c36e3ea4fcffda0674606f483d79873aad",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/runtime_provider.py",
+          "blob": "8593a3a4342c63a905aa348e5663eefef277f96e",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/runtime_provider_custom.py",
+          "blob": "3bfe977514e4e5fe82c4f6919e93c84932a4ace5",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_auxiliary_client.py",
+          "blob": "8f1021ed378328f76dd5bab2bec5f73b16cc53fb",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_auxiliary_provider_fallbacks.py",
+          "blob": "7aaf151861c5a0deaf3e59b27b5224b5d9264836",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_inherited_failure_contracts.py",
+          "blob": "9267cfe988e4a3b0301a93d867571479d5c6839f",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception:"
+    },
+    {
+      "id": "runtime-eaaa8088f013e8f0",
+      "status": "reviewed",
+      "path": "agent/auxiliary_client.py",
+      "scope": "_read_codex_singleton_token",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "98ef753aea40a6eb040aeeac0a74876466f21f9d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/auxiliary_client.py",
+        "scope": "_read_codex_singleton_token",
+        "blob": "d438b306fa53a764734f5f122d977d55bd43b737",
+        "unit_body_hash": "96fb98caa0679198"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "JWT decoding is an expiry optimization, not a local authentication decision. Opaque tokens remain valid provider inputs; malformed/expired credentials cannot confer local permissions. Expired parseable JWTs return None so fallback proceeds. Outer read errors also return None. Canonical hermes_cli.auth is imported at call time under the active profile, and pool route/key selection stays paired before this fallback. Debug exception logging remains existing diagnostic debt, not proof of sanitization.",
+        "module_bindings": "The reviewed functions retain their original auxiliary_client globals; credential and provider catalogs are imported from canonical hermes_cli owners at call time. Extracted auxiliary_error_policy and vision payload helpers do not own auth caches or profile routing state. Active profile auth resolution, pool key/URL pairing and independent named-provider fallback were reviewed and exercised.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "hermes_cli/auth.py",
+          "blob": "243fae4bbf637d737bca74f0b397710adfdf8975",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/auth_codex.py",
+          "blob": "257b43145cafa599c853815c9e7c6cf5a737d4ef",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/providers.py",
+          "blob": "fc4062c36e3ea4fcffda0674606f483d79873aad",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/runtime_provider.py",
+          "blob": "8593a3a4342c63a905aa348e5663eefef277f96e",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/runtime_provider_custom.py",
+          "blob": "3bfe977514e4e5fe82c4f6919e93c84932a4ace5",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_auxiliary_client.py",
+          "blob": "8f1021ed378328f76dd5bab2bec5f73b16cc53fb",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_auxiliary_provider_fallbacks.py",
+          "blob": "7aaf151861c5a0deaf3e59b27b5224b5d9264836",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_inherited_failure_contracts.py",
+          "blob": "9267cfe988e4a3b0301a93d867571479d5c6839f",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception:"
+    },
+    {
+      "id": "runtime-2633b4e09889822b",
+      "status": "reviewed",
+      "path": "agent/auxiliary_client.py",
+      "scope": "_read_codex_singleton_token",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "98ef753aea40a6eb040aeeac0a74876466f21f9d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/auxiliary_client.py",
+        "scope": "_read_codex_singleton_token",
+        "blob": "d438b306fa53a764734f5f122d977d55bd43b737",
+        "unit_body_hash": "96fb98caa0679198"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "JWT decoding is an expiry optimization, not a local authentication decision. Opaque tokens remain valid provider inputs; malformed/expired credentials cannot confer local permissions. Expired parseable JWTs return None so fallback proceeds. Outer read errors also return None. Canonical hermes_cli.auth is imported at call time under the active profile, and pool route/key selection stays paired before this fallback. Debug exception logging remains existing diagnostic debt, not proof of sanitization.",
+        "module_bindings": "The reviewed functions retain their original auxiliary_client globals; credential and provider catalogs are imported from canonical hermes_cli owners at call time. Extracted auxiliary_error_policy and vision payload helpers do not own auth caches or profile routing state. Active profile auth resolution, pool key/URL pairing and independent named-provider fallback were reviewed and exercised.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "hermes_cli/auth.py",
+          "blob": "243fae4bbf637d737bca74f0b397710adfdf8975",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/auth_codex.py",
+          "blob": "257b43145cafa599c853815c9e7c6cf5a737d4ef",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/providers.py",
+          "blob": "fc4062c36e3ea4fcffda0674606f483d79873aad",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/runtime_provider.py",
+          "blob": "8593a3a4342c63a905aa348e5663eefef277f96e",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/runtime_provider_custom.py",
+          "blob": "3bfe977514e4e5fe82c4f6919e93c84932a4ace5",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_auxiliary_client.py",
+          "blob": "8f1021ed378328f76dd5bab2bec5f73b16cc53fb",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_auxiliary_provider_fallbacks.py",
+          "blob": "7aaf151861c5a0deaf3e59b27b5224b5d9264836",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_inherited_failure_contracts.py",
+          "blob": "9267cfe988e4a3b0301a93d867571479d5c6839f",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception as exc:"
+    },
+    {
+      "id": "runtime-29513f04c85223c1",
+      "status": "reviewed",
+      "path": "agent/auxiliary_client.py",
+      "scope": "_builtin_provider_present",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "98ef753aea40a6eb040aeeac0a74876466f21f9d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/auxiliary_client.py",
+        "scope": "_builtin_provider_present",
+        "blob": "d438b306fa53a764734f5f122d977d55bd43b737",
+        "unit_body_hash": "a7c879491435bb4c"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "Catalog failure retains the explicit high-risk OAuth/provider names rather than anonymously re-routing them. Named-provider lookup is attempted independently, so catalog import failure cannot suppress a configured custom route. Both dependencies are resolved dynamically at their canonical module owners.",
+        "module_bindings": "The reviewed functions retain their original auxiliary_client globals; credential and provider catalogs are imported from canonical hermes_cli owners at call time. Extracted auxiliary_error_policy and vision payload helpers do not own auth caches or profile routing state. Active profile auth resolution, pool key/URL pairing and independent named-provider fallback were reviewed and exercised.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "hermes_cli/auth.py",
+          "blob": "243fae4bbf637d737bca74f0b397710adfdf8975",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/auth_codex.py",
+          "blob": "257b43145cafa599c853815c9e7c6cf5a737d4ef",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/providers.py",
+          "blob": "fc4062c36e3ea4fcffda0674606f483d79873aad",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/runtime_provider.py",
+          "blob": "8593a3a4342c63a905aa348e5663eefef277f96e",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/runtime_provider_custom.py",
+          "blob": "3bfe977514e4e5fe82c4f6919e93c84932a4ace5",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_auxiliary_client.py",
+          "blob": "8f1021ed378328f76dd5bab2bec5f73b16cc53fb",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_auxiliary_provider_fallbacks.py",
+          "blob": "7aaf151861c5a0deaf3e59b27b5224b5d9264836",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_inherited_failure_contracts.py",
+          "blob": "9267cfe988e4a3b0301a93d867571479d5c6839f",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception:"
+    },
+    {
+      "id": "runtime-68c95a344150c345",
+      "status": "reviewed",
+      "path": "agent/auxiliary_client.py",
+      "scope": "_named_custom_provider_present",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "98ef753aea40a6eb040aeeac0a74876466f21f9d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/auxiliary_client.py",
+        "scope": "_named_custom_provider_present",
+        "blob": "d438b306fa53a764734f5f122d977d55bd43b737",
+        "unit_body_hash": "f5d5f75b68b768bc"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "Unreadable configuration returns False instead of inventing a configured provider or credential. This can make unavailable configuration produce an unavailable/anonymous route; it does not grant authority. Built-in preservation remains independent and explicit task URL/key are not replaced by a fabricated named entry. Acceptance covers graceful handling of unavailable configuration, not a claim that a broken configuration can authenticate successfully.",
+        "module_bindings": "The reviewed functions retain their original auxiliary_client globals; credential and provider catalogs are imported from canonical hermes_cli owners at call time. Extracted auxiliary_error_policy and vision payload helpers do not own auth caches or profile routing state. Active profile auth resolution, pool key/URL pairing and independent named-provider fallback were reviewed and exercised.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "hermes_cli/auth.py",
+          "blob": "243fae4bbf637d737bca74f0b397710adfdf8975",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/auth_codex.py",
+          "blob": "257b43145cafa599c853815c9e7c6cf5a737d4ef",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/providers.py",
+          "blob": "fc4062c36e3ea4fcffda0674606f483d79873aad",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/runtime_provider.py",
+          "blob": "8593a3a4342c63a905aa348e5663eefef277f96e",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/runtime_provider_custom.py",
+          "blob": "3bfe977514e4e5fe82c4f6919e93c84932a4ace5",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_auxiliary_client.py",
+          "blob": "8f1021ed378328f76dd5bab2bec5f73b16cc53fb",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_auxiliary_provider_fallbacks.py",
+          "blob": "7aaf151861c5a0deaf3e59b27b5224b5d9264836",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_inherited_failure_contracts.py",
+          "blob": "9267cfe988e4a3b0301a93d867571479d5c6839f",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception:"
+    },
+    {
+      "id": "runtime-28477a009e9487a9",
+      "status": "reviewed",
+      "path": "agent/chat_completion_helpers.py",
+      "scope": "_StreamingCall._call_chat_completions",
+      "rule": "CC",
+      "detail": "CC 31 > 27, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "9e30057b37025fdc89757f1f181085ee56c98adb",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/chat_completion_helpers.py",
+        "scope": "_StreamingCall._call_chat_completions",
+        "blob": "01c26afe7a56aeca6a1960e76bc5908189425d6c",
+        "unit_body_hash": "fd6e75e325a4af28"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "Complexity represents real event/reasoning/tool/usage/refusal branches. Actual owner remains chat_completion_helpers; relay accumulator, stream writer and request-client lifecycle are canonical imports. Every chunk checks interrupt and attempt ownership before display, tool fragments are accumulated rather than executed, reasoning carriers retain replay fields, and partial/empty/runaway handling remains explicit. No duplicated mutable globals were introduced by pure helper extraction.",
+        "module_bindings": "StreamingCall remains the canonical runtime owner. Provider stream parsing and context estimates were extracted as pure reexports; relay_llm, anthropic_adapter and reasoning_carriers stay canonical lazy imports. Request-client state, writer tokens, result dictionary, interrupt flag and stream accumulators remain on the same call/agent objects. Failure-path tests exercise actual closures, request-client poisoning, stale writer rejection and Anthropic parsing.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "agent/anthropic_adapter.py",
+          "blob": "1656471433815df8c963b1e518a47f31225e4097",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/chat_completion_helpers_relay.py",
+          "blob": "14bc94dcb6dc1a9d10837c7f910a306050455521",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/chat_completion_helpers_tool_calls.py",
+          "blob": "02e11c7d738c85656bbb72807d3de13bd6805ef3",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/provider_stream_errors.py",
+          "blob": "cc9ad4312e92e8c46269ff1f85c57d10f52b0ea8",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/reasoning_carriers.py",
+          "blob": "632e61773b4b51973e108da9716c4182af9a27c5",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/relay_llm.py",
+          "blob": "e52f0b89176b583b2318bf32eefff7a99af55b79",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/request_context_estimate.py",
+          "blob": "c22f273ada5af18ef5bbfb198bb05ae7f6908606",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_request_client_reuse_abort_races.py",
+          "blob": "381ec7104cbdd56ab36397d5d44adb9bdaab1203",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_interrupt_retry.py",
+          "blob": "2b569eaffd7f57fb05f06a63f2b191a746d4052f",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_single_writer.py",
+          "blob": "f0ef221cdd765ca5340b5b822b96893f2c669601",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_unmask_5xx.py",
+          "blob": "fe2458f23557d9ea900832c52664f33202beb5a6",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_streaming.py",
+          "blob": "e3673ac658bd41b316d486b888cca811bbf9de46",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ]
+    },
+    {
+      "id": "runtime-28ba79a500a8ba84",
+      "status": "reviewed",
+      "path": "agent/chat_completion_helpers.py",
+      "scope": "_StreamingCall._call_anthropic",
+      "rule": "CC",
+      "detail": "CC 22 > target 20 (was 18)",
+      "candidate_blob": "9e30057b37025fdc89757f1f181085ee56c98adb",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/chat_completion_helpers.py",
+        "scope": "_StreamingCall._call_anthropic",
+        "blob": "01c26afe7a56aeca6a1960e76bc5908189425d6c",
+        "unit_body_hash": "d47196f8dfa2ca68"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "The event-type ladder distinguishes message_stop, stop-reason usage, tool-start and text/thinking deltas. Tool-start suppresses ordinary text display; runaway monitors cover both channels. Missing message_stop raises EmptyStreamError; final response is not manufactured as success. Managed stream and SDK context are closed in nested finally blocks. Canonical relay and anthropic adapter remain the live owners; request-local client limits cancellation to the active attempt.",
+        "module_bindings": "StreamingCall remains the canonical runtime owner. Provider stream parsing and context estimates were extracted as pure reexports; relay_llm, anthropic_adapter and reasoning_carriers stay canonical lazy imports. Request-client state, writer tokens, result dictionary, interrupt flag and stream accumulators remain on the same call/agent objects. Failure-path tests exercise actual closures, request-client poisoning, stale writer rejection and Anthropic parsing.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "agent/anthropic_adapter.py",
+          "blob": "1656471433815df8c963b1e518a47f31225e4097",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/chat_completion_helpers_relay.py",
+          "blob": "14bc94dcb6dc1a9d10837c7f910a306050455521",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/chat_completion_helpers_tool_calls.py",
+          "blob": "02e11c7d738c85656bbb72807d3de13bd6805ef3",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/provider_stream_errors.py",
+          "blob": "cc9ad4312e92e8c46269ff1f85c57d10f52b0ea8",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/reasoning_carriers.py",
+          "blob": "632e61773b4b51973e108da9716c4182af9a27c5",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/relay_llm.py",
+          "blob": "e52f0b89176b583b2318bf32eefff7a99af55b79",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/request_context_estimate.py",
+          "blob": "c22f273ada5af18ef5bbfb198bb05ae7f6908606",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_request_client_reuse_abort_races.py",
+          "blob": "381ec7104cbdd56ab36397d5d44adb9bdaab1203",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_interrupt_retry.py",
+          "blob": "2b569eaffd7f57fb05f06a63f2b191a746d4052f",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_single_writer.py",
+          "blob": "f0ef221cdd765ca5340b5b822b96893f2c669601",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_unmask_5xx.py",
+          "blob": "fe2458f23557d9ea900832c52664f33202beb5a6",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_streaming.py",
+          "blob": "e3673ac658bd41b316d486b888cca811bbf9de46",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ]
+    },
+    {
+      "id": "runtime-ffaf4f900cd81811",
+      "status": "reviewed",
+      "path": "agent/chat_completion_helpers.py",
+      "scope": "_StreamingCall._call_chat_completions._close_half_read_stream",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "9e30057b37025fdc89757f1f181085ee56c98adb",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/chat_completion_helpers.py",
+        "scope": "_StreamingCall._call_chat_completions._close_half_read_stream",
+        "blob": "01c26afe7a56aeca6a1960e76bc5908189425d6c",
+        "unit_body_hash": "bb29e0ce5f705de9"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "A failed close is handled by poisoning/aborting this attempt client; it is not returned to the reusable pool. Abort failures propagate rather than being silently treated as successful close. The captured stream and _attempt_request_client belong to this invocation; no facade state alias is involved.",
+        "module_bindings": "StreamingCall remains the canonical runtime owner. Provider stream parsing and context estimates were extracted as pure reexports; relay_llm, anthropic_adapter and reasoning_carriers stay canonical lazy imports. Request-client state, writer tokens, result dictionary, interrupt flag and stream accumulators remain on the same call/agent objects. Failure-path tests exercise actual closures, request-client poisoning, stale writer rejection and Anthropic parsing.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "agent/anthropic_adapter.py",
+          "blob": "1656471433815df8c963b1e518a47f31225e4097",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/chat_completion_helpers_relay.py",
+          "blob": "14bc94dcb6dc1a9d10837c7f910a306050455521",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/chat_completion_helpers_tool_calls.py",
+          "blob": "02e11c7d738c85656bbb72807d3de13bd6805ef3",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/provider_stream_errors.py",
+          "blob": "cc9ad4312e92e8c46269ff1f85c57d10f52b0ea8",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/reasoning_carriers.py",
+          "blob": "632e61773b4b51973e108da9716c4182af9a27c5",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/relay_llm.py",
+          "blob": "e52f0b89176b583b2318bf32eefff7a99af55b79",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/request_context_estimate.py",
+          "blob": "c22f273ada5af18ef5bbfb198bb05ae7f6908606",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_request_client_reuse_abort_races.py",
+          "blob": "381ec7104cbdd56ab36397d5d44adb9bdaab1203",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_interrupt_retry.py",
+          "blob": "2b569eaffd7f57fb05f06a63f2b191a746d4052f",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_single_writer.py",
+          "blob": "f0ef221cdd765ca5340b5b822b96893f2c669601",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_unmask_5xx.py",
+          "blob": "fe2458f23557d9ea900832c52664f33202beb5a6",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_streaming.py",
+          "blob": "e3673ac658bd41b316d486b888cca811bbf9de46",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception:"
+    },
+    {
+      "id": "runtime-592d13c90e4ff0ed",
+      "status": "reviewed",
+      "path": "agent/chat_completion_helpers.py",
+      "scope": "_StreamingCall._call_anthropic",
+      "rule": "HX011",
+      "detail": "if/elif ladder on one name",
+      "candidate_blob": "9e30057b37025fdc89757f1f181085ee56c98adb",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/chat_completion_helpers.py",
+        "scope": "_StreamingCall._call_anthropic",
+        "blob": "01c26afe7a56aeca6a1960e76bc5908189425d6c",
+        "unit_body_hash": "d47196f8dfa2ca68"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "The event-type ladder distinguishes message_stop, stop-reason usage, tool-start and text/thinking deltas. Tool-start suppresses ordinary text display; runaway monitors cover both channels. Missing message_stop raises EmptyStreamError; final response is not manufactured as success. Managed stream and SDK context are closed in nested finally blocks. Canonical relay and anthropic adapter remain the live owners; request-local client limits cancellation to the active attempt.",
+        "module_bindings": "StreamingCall remains the canonical runtime owner. Provider stream parsing and context estimates were extracted as pure reexports; relay_llm, anthropic_adapter and reasoning_carriers stay canonical lazy imports. Request-client state, writer tokens, result dictionary, interrupt flag and stream accumulators remain on the same call/agent objects. Failure-path tests exercise actual closures, request-client poisoning, stale writer rejection and Anthropic parsing.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "agent/anthropic_adapter.py",
+          "blob": "1656471433815df8c963b1e518a47f31225e4097",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/chat_completion_helpers_relay.py",
+          "blob": "14bc94dcb6dc1a9d10837c7f910a306050455521",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/chat_completion_helpers_tool_calls.py",
+          "blob": "02e11c7d738c85656bbb72807d3de13bd6805ef3",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/provider_stream_errors.py",
+          "blob": "cc9ad4312e92e8c46269ff1f85c57d10f52b0ea8",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/reasoning_carriers.py",
+          "blob": "632e61773b4b51973e108da9716c4182af9a27c5",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/relay_llm.py",
+          "blob": "e52f0b89176b583b2318bf32eefff7a99af55b79",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/request_context_estimate.py",
+          "blob": "c22f273ada5af18ef5bbfb198bb05ae7f6908606",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_request_client_reuse_abort_races.py",
+          "blob": "381ec7104cbdd56ab36397d5d44adb9bdaab1203",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_interrupt_retry.py",
+          "blob": "2b569eaffd7f57fb05f06a63f2b191a746d4052f",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_single_writer.py",
+          "blob": "f0ef221cdd765ca5340b5b822b96893f2c669601",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_unmask_5xx.py",
+          "blob": "fe2458f23557d9ea900832c52664f33202beb5a6",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_streaming.py",
+          "blob": "e3673ac658bd41b316d486b888cca811bbf9de46",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "if event_type == \"message_stop\":"
+    },
+    {
+      "id": "runtime-a7a58c2614cee0ee",
+      "status": "reviewed",
+      "path": "agent/chat_completion_helpers.py",
+      "scope": "_StreamingCall._unmask_server_error_with_nonstreaming",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "9e30057b37025fdc89757f1f181085ee56c98adb",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/chat_completion_helpers.py",
+        "scope": "_StreamingCall._unmask_server_error_with_nonstreaming",
+        "blob": "01c26afe7a56aeca6a1960e76bc5908189425d6c",
+        "unit_body_hash": "12226b4ae92015be"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "Probe is bounded to eligible pre-delivery 5xx chat-completion failures and a 60-second rate window. Pending interruption suppresses it; KeyboardInterrupt/InterruptedError propagate. Probe 4xx replaces the opaque error; probe 5xx/unknown keeps the original failure. Stale timeout is restored in finally. This catch does not convert failed validation into a successful completion.",
+        "module_bindings": "StreamingCall remains the canonical runtime owner. Provider stream parsing and context estimates were extracted as pure reexports; relay_llm, anthropic_adapter and reasoning_carriers stay canonical lazy imports. Request-client state, writer tokens, result dictionary, interrupt flag and stream accumulators remain on the same call/agent objects. Failure-path tests exercise actual closures, request-client poisoning, stale writer rejection and Anthropic parsing.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "agent/anthropic_adapter.py",
+          "blob": "1656471433815df8c963b1e518a47f31225e4097",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/chat_completion_helpers_relay.py",
+          "blob": "14bc94dcb6dc1a9d10837c7f910a306050455521",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/chat_completion_helpers_tool_calls.py",
+          "blob": "02e11c7d738c85656bbb72807d3de13bd6805ef3",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/provider_stream_errors.py",
+          "blob": "cc9ad4312e92e8c46269ff1f85c57d10f52b0ea8",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/reasoning_carriers.py",
+          "blob": "632e61773b4b51973e108da9716c4182af9a27c5",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/relay_llm.py",
+          "blob": "e52f0b89176b583b2318bf32eefff7a99af55b79",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "agent/request_context_estimate.py",
+          "blob": "c22f273ada5af18ef5bbfb198bb05ae7f6908606",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_request_client_reuse_abort_races.py",
+          "blob": "381ec7104cbdd56ab36397d5d44adb9bdaab1203",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_interrupt_retry.py",
+          "blob": "2b569eaffd7f57fb05f06a63f2b191a746d4052f",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_single_writer.py",
+          "blob": "f0ef221cdd765ca5340b5b822b96893f2c669601",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_stream_unmask_5xx.py",
+          "blob": "fe2458f23557d9ea900832c52664f33202beb5a6",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_streaming.py",
+          "blob": "e3673ac658bd41b316d486b888cca811bbf9de46",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception as probe_err:"
+    },
+    {
+      "id": "runtime-2a2696633ce6b060",
+      "status": "reviewed",
+      "path": "agent/conversation_loop.py",
+      "scope": "_refresh_bot_chat_tools",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "39e8e9535e0e239b4ca6415858fcc0828468b355",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/conversation_loop.py",
+        "scope": "_refresh_bot_chat_tools",
+        "blob": "60666cd156446128ac3626f4299ec5837b7c1995",
+        "unit_body_hash": "6f83131a73e7d7c7"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "Active gateway session policy overrides live config; only unowned desktop/TUI uses live surface builders. Canonical tools.mcp_tool_agent computes new definitions on locals and publishes tools/names together; broad catch retains the prior authorized snapshot and warns. A refresh error can delay a configuration change, so this is availability/observability debt, not an authorization mechanism. Invocation-side policy remains the authority.",
+        "module_bindings": "Tool refresh retains canonical active_policy context lookup and imports tools.mcp_tool_agent at call time. Billing-guidance extraction does not alter these dependencies. The actual refresh builder computes tools/names before publication; direct builder-exception evidence retains both old objects by identity. Frozen gateway policy is used instead of live desktop configuration.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "gateway/session_policy.py",
+          "blob": "032f8619af765447a75c85ec5a9e746021ea59db",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "model_tools.py",
+          "blob": "b7c7cffa23a2b484f8e048371e6055d05e14ba67",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tools/mcp_tool_agent.py",
+          "blob": "4207c0f832e78757146441e946c287ea9a31e7fb",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tui_gateway/server.py",
+          "blob": "5f6cb5d10a5e79ea456f5ff031a6530ca5b8562b",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_bot_chat_toolset_refresh.py",
+          "blob": "1e92cff494953a8e094e92cfe7183b94788ae72a",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/agent/test_inherited_failure_contracts.py",
+          "blob": "9267cfe988e4a3b0301a93d867571479d5c6839f",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception as exc:"
+    },
+    {
+      "id": "runtime-dada670c9761108a",
+      "status": "reviewed",
+      "path": "agent/prompt_builder.py",
+      "scope": "_bot_screen_hint",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "a46eddedfd22f3bc043a657010529f1319c942f2",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/prompt_builder.py",
+        "scope": "_bot_screen_hint",
+        "blob": "a2baa531d40fa4485ce1c1a902274ef6bc6e3d5d",
+        "unit_body_hash": "3b78e39e3ba24c33"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "This is optional descriptive prompt text. Failed screen/lease reads omit the hint; they do not acquire a lease or authorize GUI control. Canonical tools.bot_desktop lease/runtime owners are imported at call time; remote backend deliberately excludes host-screen hints. Screen ownership must continue to be enforced by the tool, not this prompt.",
+        "module_bindings": "Bot Screen hint still resolves tools.bot_desktop lease and runtime dynamically; extracted platform prompt constants do not substitute these globals. It is optional descriptive text; it does not acquire a lease. Remote backend excludes host-screen hints, and missing screen state omits the hint. Tool enforcement is separate from the prompt.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "agent/platform_prompt_hints.py",
+          "blob": "224eb68e2ecc6b67de85b1b8cf0beaf789ff50fb",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tools/bot_desktop/lease.py",
+          "blob": "1d540cf1da193e4eee2ca2c1c9f6c79e0ad9b226",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tools/bot_desktop/runtime.py",
+          "blob": "8107e5cc9fb1494c1a7e0a4c0bc833aa780c7a36",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_prompt_builder.py",
+          "blob": "7f339b625db3f0042573aafac11ecbbc8bd79694",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception:"
+    },
+    {
+      "id": "runtime-d6588b58e679eb13",
+      "status": "reviewed",
+      "path": "gateway/platforms/api_server.py",
+      "scope": "_names_launch_profile",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "d1ef91b7fb86c133c774acfac80746a9b8c846b1",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "gateway/platforms/api_server.py",
+        "scope": "_names_launch_profile",
+        "blob": "7ff23f7cd4c824f0731f0fd2a3ffa18fc425b631",
+        "unit_body_hash": "41948c643b2df9d2"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "On failed profile resolution returns False, causing a routed profile to retain its namespace rather than collapse into the launch profile. Failure may split continuity but cannot intentionally coalesce identities. Canonical routing-process home is used, not ambient mutable request home.",
+        "module_bindings": "The session namespace helper retains lazy canonical profile_matches_home and get_routing_process_hermes_home imports. Pure request projection extraction does not replace either owner or the ID seed derivation. Direct exception-path test verifies distinct profile and unprefixed namespaces plus deterministic repeat IDs; resolution failure does not collapse profiles.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "gateway/platforms/api_request_projection.py",
+          "blob": "cbb6e2311675f6be647fc72263a8535ed86b32dc",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/profiles.py",
+          "blob": "3399685bab5fca83e7c62d61f6a489bc785c03b3",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_constants.py",
+          "blob": "84d3384d64e02c0c8252653625aa0e1975b1e307",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/agent/test_inherited_failure_contracts.py",
+          "blob": "9267cfe988e4a3b0301a93d867571479d5c6839f",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/gateway/test_api_server.py",
+          "blob": "5da39ea18ea4bd86b0436e723269890031874dff",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception:"
+    },
+    {
+      "id": "runtime-e0e19bb659865334",
+      "status": "reviewed",
+      "path": "hermes_state_messages.py",
+      "scope": "SessionMessagesMixin._carry_parent_timestamps",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "c0d3bd7c9194900bd85cd13d95f3bc091d87aaf5",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_state_messages.py",
+        "scope": "SessionMessagesMixin._carry_parent_timestamps",
+        "blob": "639dc3e19afa0897a3c5f6ae876eb32dffc02b49",
+        "unit_body_hash": "547ed4a2d107fdca"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "Only optional timestamp fields of copied handoff messages are carried. Donors are active rows of the specified parent, matched by full message/tool identity and consumed once; explicit child timestamp is retained. Errors leave publish-time fallback timestamps without changing message origin, UID allocation, ownership or transaction fences. Partial carries can degrade display ordering but cannot adopt trusted provenance.",
+        "module_bindings": "Timestamp carry remains a SessionMessagesMixin method using the caller transaction and parent session ID. JSON/tool normalization and timestamp coercion remain canonical dependencies. Replay projection extraction does not change timestamp donor matching, origin trust or UID allocation. Direct lineage timestamp tests plus origin/UID suites preserve these separate contracts.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "hermes_state.py",
+          "blob": "2734f8a38cde8c3e68eaf6e80d452ff8a158a4e3",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_state_message_projection.py",
+          "blob": "ab0c7cf79e2aaf2676637140367027bef126609c",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/hermes_state/test_hermes_state.py",
+          "blob": "1926bfaccec6affdfbd5c6071584a3235acde446",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/hermes_state/test_message_origin.py",
+          "blob": "190f9a815383402564b7ac489d20d1a462d62659",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        },
+        {
+          "path": "tests/hermes_state/test_message_uid.py",
+          "blob": "6dd2cd85dca610c66060163f1fc1d5b86d321195",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception:"
+    },
+    {
+      "id": "runtime-01f8f689fa394919",
+      "status": "reviewed",
+      "path": "tui_gateway/methods_session.py",
+      "scope": "_#14",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "7594b237df70b373fdc2506b727b5e3451671879",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tui_gateway/methods_session.py",
+        "scope": "_#14",
+        "blob": "f642cd9782bfceef1fb8d0c7b1990b2a48973a95",
+        "unit_body_hash": "f852dd6851f34039"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "Actual registered session.archive callback scopes the DB to owning session/profile and returns RPC error5007 on DB exception, with no success result. pending_archived is only set after a false no-row return, not on an exception. Global server binding is installed by registration and exercised through _methods.",
+        "module_bindings": "All three registered handler scopes remain unchanged at their original path and ordinal. Server bind_module wiring remains the actual global owner; extracted session-row summary is separately registered before requests. Real _methods callbacks exercise archive failure, unavailable billing state and failed session save. Session/profile DB context helpers and profile_home ownership remain live canonical globals, not copied mutable aliases.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "agent/billing_view.py",
+          "blob": "6317a5ac2a350373da12d27ca41d96fc5e915fe7",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/session_export.py",
+          "blob": "c9548f2ab6e105620b9152893d1f938d3069af21",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tui_gateway/methods_session_rows.py",
+          "blob": "4fbb6a34fe5768c3697ab09d148066ff412ba699",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tui_gateway/server.py",
+          "blob": "5f6cb5d10a5e79ea456f5ff031a6530ca5b8562b",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/tui_gateway/test_session_failure_contracts.py",
+          "blob": "d3f7720418e99b50647abfd1123e3251a4ace11e",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception as e:"
+    },
+    {
+      "id": "runtime-17f672d7fc090d2e",
+      "status": "reviewed",
+      "path": "tui_gateway/methods_session.py",
+      "scope": "_#38",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "7594b237df70b373fdc2506b727b5e3451671879",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tui_gateway/methods_session.py",
+        "scope": "_#38",
+        "blob": "f642cd9782bfceef1fb8d0c7b1990b2a48973a95",
+        "unit_body_hash": "e75444fc1be458af"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "billing.state is a read-only presentation RPC. Exception returns logged_in=False/free_tier_account=False and an explicit error. It cannot grant an account, debit credit, or authorize billing; profile-scoped canonical billing imports remain dynamic.",
+        "module_bindings": "All three registered handler scopes remain unchanged at their original path and ordinal. Server bind_module wiring remains the actual global owner; extracted session-row summary is separately registered before requests. Real _methods callbacks exercise archive failure, unavailable billing state and failed session save. Session/profile DB context helpers and profile_home ownership remain live canonical globals, not copied mutable aliases.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "agent/billing_view.py",
+          "blob": "6317a5ac2a350373da12d27ca41d96fc5e915fe7",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/session_export.py",
+          "blob": "c9548f2ab6e105620b9152893d1f938d3069af21",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tui_gateway/methods_session_rows.py",
+          "blob": "4fbb6a34fe5768c3697ab09d148066ff412ba699",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tui_gateway/server.py",
+          "blob": "5f6cb5d10a5e79ea456f5ff031a6530ca5b8562b",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/tui_gateway/test_session_failure_contracts.py",
+          "blob": "d3f7720418e99b50647abfd1123e3251a4ace11e",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception:"
+    },
+    {
+      "id": "runtime-0f39f0cc97ed1845",
+      "status": "reviewed",
+      "path": "tui_gateway/methods_session.py",
+      "scope": "_#45",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "candidate_blob": "7594b237df70b373fdc2506b727b5e3451671879",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tui_gateway/methods_session.py",
+        "scope": "_#45",
+        "blob": "f642cd9782bfceef1fb8d0c7b1990b2a48973a95",
+        "unit_body_hash": "89d9b7b42cf723bd"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact17 runtime recommendations",
+        "compatibility": "session.save persistence failure returns error5011, never a file-success receipt. Destination derives from the session profile home, and DB snapshot read is also scoped. Existing error text includes local destination/path, so this approval is limited to the authorized local RPC surface and is not a claim of redacted diagnostics.",
+        "module_bindings": "All three registered handler scopes remain unchanged at their original path and ordinal. Server bind_module wiring remains the actual global owner; extracted session-row summary is separately registered before requests. Real _methods callbacks exercise archive failure, unavailable billing state and failed session save. Session/profile DB context helpers and profile_home ownership remain live canonical globals, not copied mutable aliases.",
+        "receipt": "Independent runtime source/global-binding review on 2026-10-15 plus named bounded canonical passing receipts preserved in v0221-runtime-binding-review.json; generated identities pending independent verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-binding-review.json",
+          "blob": "1db2ed3e35b20b2e4cfd08293bab6caa1d8f4745",
+          "outcome": "passed",
+          "claim": "Bounded canonical test receipts and independent per-unit compatibility/global-binding review are recorded for these exact source units; this does not claim a full repository pass."
+        },
+        {
+          "path": "agent/billing_view.py",
+          "blob": "6317a5ac2a350373da12d27ca41d96fc5e915fe7",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "hermes_cli/session_export.py",
+          "blob": "c9548f2ab6e105620b9152893d1f938d3069af21",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tui_gateway/methods_session_rows.py",
+          "blob": "4fbb6a34fe5768c3697ab09d148066ff412ba699",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tui_gateway/server.py",
+          "blob": "5f6cb5d10a5e79ea456f5ff031a6530ca5b8562b",
+          "outcome": "passed",
+          "claim": "Canonical dependency/global binding reviewed against the exact candidate source; dependency identity is bound to invalidate review after changes."
+        },
+        {
+          "path": "tests/tui_gateway/test_session_failure_contracts.py",
+          "blob": "d3f7720418e99b50647abfd1123e3251a4ace11e",
+          "outcome": "passed",
+          "claim": "Exact regression test source is bound to the bounded passing file or selected-case receipt in v0221-runtime-binding-review.json; no claim that unrelated cases were executed."
+        }
+      ],
+      "code": "except Exception as e:"
+    },
+    {
+      "id": "f821-2819340cf6b9ef87",
+      "status": "reviewed",
+      "path": "plugins/platforms/feishu/adapter.py",
+      "scope": "FeishuAdapter._build_delete_message_request",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "return _sdk_build(DeleteMessageRequest, message_id=message_id)",
+      "candidate_blob": "950694c32df13751b5ad2cdef12f4a30742483d6",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "plugins/platforms/feishu/adapter.py",
+        "scope": "FeishuAdapter._build_delete_message_request",
+        "blob": "950694c32df13751b5ad2cdef12f4a30742483d6"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "DeleteMessageRequest is inserted into module globals as None from _LARK_SDK_IMPORTS at import; _load_lark_oapi atomically replaces it with SDK class before FEISHU_AVAILABLE becomes True. _sdk_build handles None. Probe executes both None fallback and bound synthetic builder; TestDeleteMessage.test_delete_message_calls_im_message_delete exercises async public call.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "plugins/platforms/feishu/adapter.py",
+          "blob": "950694c32df13751b5ad2cdef12f4a30742483d6",
+          "outcome": "passed",
+          "claim": "Reviewed SDK global initialization/atomic loader binding or mocked builder/public-delete execution test; no live SDK service call claimed."
+        },
+        {
+          "path": "tests/gateway/test_feishu_lazy_import.py",
+          "blob": "15df49c570f24bb4150bb44df9619addf0efee39",
+          "outcome": "passed",
+          "claim": "Reviewed SDK global initialization/atomic loader binding or mocked builder/public-delete execution test; no live SDK service call claimed."
+        },
+        {
+          "path": "tests/gateway/test_feishu.py",
+          "blob": "e1fd2e14224ef20004c966848db96cea7cb07334",
+          "outcome": "passed",
+          "claim": "Reviewed SDK global initialization/atomic loader binding or mocked builder/public-delete execution test; no live SDK service call claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-be6eba3e5b0b5881",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_install_psutil_android_compat",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m()._run_install_with_heartbeat(",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_install_psutil_android_compat",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical Android helper is stopped at its real hermes_cli.psutil_android import (line32) before download or _m dereference; dedicated old_android_updater_handoffs_before_download test passes.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-a30d9c66f5c85ae8",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_ensure_venv_pip(pip_cmd, sys.executable)",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-74ed3d76bf4da510",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m().PROJECT_ROOT",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-9d1aba2a6f2aee31",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m()._abort_dependency_sync_if_self_locked(_windows_gateway_resume)",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Fixture caller injects this exact pre-handoff global via old module attributes before invocation; test_old_updater_retains_its_code_but_loads_new_managed_uv executes ownership/self-lock/marker then handoff and verifies order. This is a frozen fixture, not imported production code.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-213926a117dfc44f",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m()._clear_lazy_refresh_incomplete_marker()",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-f99b1a52535cd087",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m()._clear_update_incomplete_marker()",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-d0a28694c2d0a6ed",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m()._install_python_dependencies_with_optional_fallback(",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-d9ee3f277502e512",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m()._install_python_dependencies_with_optional_fallback(pip_cmd, group=install_group)",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-0ecf04c596c6ed85",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m()._refresh_active_memory_provider_dependencies()",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-480597bd6aeead61",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m()._reload_updated_runtime_modules()",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-ba6ac7c851230d3b",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m()._restore_active_tool_dependencies(",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-c5ce11dc8bc1b416",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m()._upgrade_pip_before_lazy_refresh(install_prefix, env=lazy_env)",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-3161d6c1ef3476e9",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m()._verify_console_scripts_installed(install_prefix, env=lazy_env)",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-642504e2619ee9a8",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_m()._verify_core_dependencies_installed(",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-25343a3c91ecdef3",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_refuse_update_if_venv_foreign_owned(_m().PROJECT_ROOT)",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 2,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Fixture caller injects this exact pre-handoff global via old module attributes before invocation; test_old_updater_retains_its_code_but_loads_new_managed_uv executes ownership/self-lock/marker then handoff and verifies order. This is a frozen fixture, not imported production code.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-458bece748fcca90",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_sweep_bytecode_after_update(branch)",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-2f1785ee38661b37",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_write_lazy_refresh_incomplete_marker()",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-80e70b448b8a0685",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "_write_update_incomplete_marker()",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Fixture caller injects this exact pre-handoff global via old module attributes before invocation; test_old_updater_retains_its_code_but_loads_new_managed_uv executes ownership/self-lock/marker then handoff and verifies order. This is a frozen fixture, not imported production code.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-855f58286c19d86b",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "deps_current = _editable_install_is_current(",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Fixture caller injects this exact pre-handoff global via old module attributes before invocation; test_old_updater_retains_its_code_but_loads_new_managed_uv executes ownership/self-lock/marker then handoff and verifies order. This is a frozen fixture, not imported production code.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-2923ace43905ae8f",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "git_cmd, _m().PROJECT_ROOT, pre_pull_sha",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Fixture caller injects this exact pre-handoff global via old module attributes before invocation; test_old_updater_retains_its_code_but_loads_new_managed_uv executes ownership/self-lock/marker then handoff and verifies order. This is a frozen fixture, not imported production code.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-1b0f8272ccc0040c",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "if _m()._is_termux_env() and _is_android_python():",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 2,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-485f1bbeb6b248e3",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "if _m()._is_termux_env():",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-00141f96fa786adc",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "if _m()._is_termux_env(uv_env) and _is_android_python():",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 2,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-36efd8e4fc0e1f68",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "if _m()._is_termux_env(uv_env):",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-4c268d74f93252d1",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "import_ok, failing_module, import_error = _validate_critical_modules_import(",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-da43dd911f55eb1d",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "lazy_ok = _m()._refresh_active_lazy_features(",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-0837aff01b41dd79",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "uv_bin = _ensure_uv_for_termux(pip_cmd)",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
+    },
+    {
+      "id": "f821-c57ef630a1bf1c99",
+      "status": "reviewed",
+      "path": "tests/compat/old_updater_dependencies.py",
+      "scope": "_sync_python_dependencies_after_pull",
+      "rule": "F821",
+      "detail": "undefined name",
+      "code": "uv_env[\"VIRTUAL_ENV\"] = str(_m().PROJECT_ROOT / \"venv\")",
+      "candidate_blob": "b958fbf2288ff1831e07d41ed3473e5be4079706",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/compat/old_updater_dependencies.py",
+        "scope": "_sync_python_dependencies_after_pull",
+        "blob": "b958fbf2288ff1831e07d41ed3473e5be4079706"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved bounded preparation",
+        "compatibility": "Historical post-handoff body: real update_managed_uv at line86 invokes NoReturn stop_for_relaunch, so this occurrence is unreachable in the current fixture contract. Dedicated frozen-updater test requires exit and no external work; these old branches are deliberately retained verbatim, not claimed executable standalone.",
+        "receipt": "Reviewed 2026-10-15: bounded canonical run 190 passed,7 skipped; exact31 frozen caller and1 Feishu dynamic binding scope only. Preparation authorized; generated identity verification required before activation."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-f821-binding-review.json",
+          "blob": "4cd36486bd7742fd1c0e6671a209121b440e3994",
+          "outcome": "passed",
+          "claim": "Exact occurrence source/binding review plus 190-pass bounded execution receipt supports this frozen fixture or dynamic binding; generated identity still requires controller verification."
+        },
+        {
+          "path": "hermes_cli/managed_uv.py",
+          "blob": "b3838c058c970a72335cf5420695acdc4703a0e1",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/psutil_android.py",
+          "blob": "4a85c73a7286b53650adbeb5f2f32828e8809a06",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "hermes_cli/_old_updater.py",
+          "blob": "c22dde335a9da6e465ffb06d74450cab741c24bb",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/hermes_cli/test_old_updater_shims.py",
+          "blob": "a9d0d82b2b1d1150444d0467ac6b59888cc1e5e3",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        },
+        {
+          "path": "tests/compat/old_updater_support.py",
+          "blob": "a58b8e433066ac23bf5e23f2e792fb3fc4d1dec4",
+          "outcome": "passed",
+          "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
+        }
+      ]
     }
   ]
 }
