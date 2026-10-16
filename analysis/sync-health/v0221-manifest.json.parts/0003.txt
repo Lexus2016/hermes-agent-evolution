@@ -2158,7 +2158,7 @@
         },
         {
           "path": "hermes_cli/main.py",
-          "blob": "e151651aeb15579dcda01fc9228d3a766f18046f",
+          "blob": "664ed86e6293e185387c543eed0c3f1cd3a64cda",
           "outcome": "passed",
           "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
         },
@@ -2173,6 +2173,12 @@
           "blob": "b62a8d385949e8788a00f2e7acc71563dd543b8e",
           "outcome": "passed",
           "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "analysis/sync-health/v0221-env02-decoding-dependency-refresh.json",
+          "blob": "3a33fddc57029ee1651d3bd7f7ada4f2e37d99d8",
+          "outcome": "passed",
+          "claim": "Unchanged full GUI caller/import/registration AST context after sole unrelated CLI decoding kwargs change; actual accessibility precedence test passed without Electron launch."
         }
       ]
     },
@@ -4332,13 +4338,3 @@
         {
           "path": "apps/desktop/electron/windows-stack-cookie-fallback.ts",
           "blob": "7df2ab0c177a8e6cb0551a858de6ecb791087a90",
-          "outcome": "passed",
-          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
-        }
-      ]
-    },
-    {
-      "id": "desktop-core-structure-02",
-      "status": "reviewed",
-      "path": "apps/desktop/electron/linux-nvidia-egl-fallback.ts",
-      "scope": "decideNvidiaEglFallback",

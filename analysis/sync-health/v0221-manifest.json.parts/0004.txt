@@ -1,3 +1,13 @@
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        }
+      ]
+    },
+    {
+      "id": "desktop-core-structure-02",
+      "status": "reviewed",
+      "path": "apps/desktop/electron/linux-nvidia-egl-fallback.ts",
+      "scope": "decideNvidiaEglFallback",
       "rule": "CC",
       "detail": "CC 26 > target 20 (new code must meet the target)",
       "candidate_blob": "527d3482aa986c5d9dc8c62b2491f08fbf1e79de",
