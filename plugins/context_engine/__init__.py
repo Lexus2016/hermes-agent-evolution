@@ -10,6 +10,8 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from agent.context_engine import ContextEngine
+
 from plugins import plugin_loader as _loader
 
 logger = logging.getLogger(__name__)
@@ -70,7 +72,6 @@ def load_context_engine(name: str) -> Optional[ContextEngine]:
 
 def _load_engine_from_dir(engine_dir: Path) -> Optional[ContextEngine]:
     """Import an engine module and extract its ContextEngine (register(ctx) or subclass)."""
-    from agent.context_engine import ContextEngine
     name = engine_dir.name
     is_bundled = engine_dir.parent == _CONTEXT_ENGINE_PLUGINS_DIR
     module_name = f"plugins.context_engine.{name}" if is_bundled else f"{_USER_NAMESPACE}.{name}"
