@@ -17,6 +17,7 @@ Run from `apps/desktop`:
 node ../../node_modules/vitest/vitest.mjs run --maxWorkers=2 --project electron electron/quick-entry.test.ts --project ui src/store/quick-entry.test.ts src/app/quick-entry/quick-entry-app.test.tsx src/app/contrib/hooks/use-quick-entry-bridge.test.ts src/lib/ime.test.ts src/lib/chat-messages/reconciliation.test.ts src/plugins/hermes-bots/create-agent-lazy-profile.test.tsx src/plugins/hermes-bots/data.bot-meta.test.ts src/plugins/hermes-bots/data.bot-meta-migration.test.ts src/plugins/hermes-bots/group-chat-scroll.test.tsx src/plugins/hermes-bots/group-chat-view.render.test.tsx src/lib/chat-messages/tool-part-identity.test.ts src/app/session/hooks/use-message-stream/late-tool-events.test.tsx src/lib/chat-messages.test.ts src/lib/chat-messages/tool-result-preservation.test.ts src/lib/chat-messages/competing-contracts.test.ts src/components/boot-failure-overlay.test.tsx src/components/boot-failure-reauth.test.ts src/components/boot-failure-cause.test.ts
 ```
 
+<!-- no-tmp: ok — historical Linux evidence location, not a runtime path or command recommendation. -->
 Evidence: `/tmp/hermes-desktop-all-corrections-receipt.json` and `/tmp/hermes-desktop-all-corrections-tests.log`. The receipt includes the exact command, timestamps, terminal exit code, before/after HEAD/tree/status and all selected hashes.
 
 ## Limits

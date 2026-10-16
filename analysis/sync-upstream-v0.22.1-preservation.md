@@ -111,6 +111,7 @@ Unix-socket bootstrap by the local sandbox. It ran while fixes were being applie
 and is neither complete nor final-tree validation. Final approval requires an
 immutable candidate tree, complete reruns and review of concurrent main changes.
 
+<!-- no-tmp: ok — historical Linux evidence location, not a runtime path or command recommendation. -->
 This environment denies some socket operations and its `/tmp/.git` placeholder
 changes repository discovery for temporary fixtures. Isolated temporary roots
 resolved the latter in targeted verification. Environment-blocked tests are not

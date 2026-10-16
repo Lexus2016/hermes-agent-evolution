@@ -230,10 +230,11 @@ From the repository root, reconstruct and independently compare an artifact with
 the published pre-packaging checkpoint (substitute any filename from the table):
 
 ```bash
-python -m scripts.code_health.evidence_parts analysis/sync-health/v0221-manifest.json > /tmp/v0221-manifest.json
-git show 7daf390b3fb41c2ed97de13367d05def561620b7:analysis/sync-health/v0221-manifest.json > /tmp/v0221-manifest-original.json
-cmp /tmp/v0221-manifest-original.json /tmp/v0221-manifest.json
-sha256sum /tmp/v0221-manifest.json
+scratch="$(python -c 'import tempfile; print(tempfile.mkdtemp(prefix="hermes-evidence-"))')"
+python -m scripts.code_health.evidence_parts analysis/sync-health/v0221-manifest.json > "$scratch/v0221-manifest.json"
+git show 7daf390b3fb41c2ed97de13367d05def561620b7:analysis/sync-health/v0221-manifest.json > "$scratch/v0221-manifest-original.json"
+cmp "$scratch/v0221-manifest-original.json" "$scratch/v0221-manifest.json"
+sha256sum "$scratch/v0221-manifest.json"
 ```
 
 The independent local review used `23551df05bf722d1cda34b0c9fd33518c31ee2f1`

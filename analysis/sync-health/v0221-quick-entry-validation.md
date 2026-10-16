@@ -10,10 +10,13 @@ From `apps/desktop`:
 npx vitest run --project electron electron/quick-entry.test.ts --project ui src/store/quick-entry.test.ts src/app/quick-entry/quick-entry-app.test.tsx src/app/contrib/hooks/use-quick-entry-bridge.test.ts src/lib/ime.test.ts
 ```
 
+<!-- no-tmp: ok — historical Linux evidence location, not a runtime path or command recommendation. -->
 Result: **119 tests passed in 5 files**. Receipt: `/tmp/hermes-quick-entry-transport-tests.log`.
 
+<!-- no-tmp: ok — historical Linux evidence location, not a runtime path or command recommendation. -->
 The tests execute the actual relay, registered IPC handlers, imported preload, pure reducer and real React/jsdom App. Native windows/IPC transport are mocked. Coverage includes positive safe-integer IDs, duplicate/unknown/wrong-window/wrong-generation rejection, one-use completion, older authenticated hide=false cleanup, 30-second capability-only expiry, multiple reordered timeouts/results, failed-draft FIFO, current edits, unknown-status explanation, IME/target behavior, StrictMode exactly-one send/listener, delayed/failed handshake, real view unmount/remount gaps and explicit document teardown. Existing shortcut/settings/window-bounds tests remain byte-identical; existing 38 reducer cases and native option contrast regression remain exercised. Detailed mapping: `/tmp/hermes-quick-entry-transport-retention.json`.
 
+<!-- no-tmp: ok — historical Linux evidence location, not a runtime path or command recommendation. -->
 From the repository root, ESLint on the exact nine paths exits 0; `git diff --check` is clean. Log: `/tmp/hermes-quick-entry-transport-eslint.log`. The bounded TypeScript structure parser reports **zero changed units above CC 20 / function lines 300 / nesting 6**. Existing main.ts over-cap units are unchanged and the file shrinks by 35 lines. This is a scoped body-identity comparison, not a full health rerun. Paths, hashes and metrics: `/tmp/hermes-quick-entry-transport-paths.json`, `/tmp/hermes-quick-entry-transport-receipt.json`, `/tmp/hermes-quick-entry-transport-ratchet.json`.
 
 ## Typecheck boundaries
@@ -21,12 +24,15 @@ From the repository root, ESLint on the exact nine paths exits 0; `git diff --ch
 These focused checks exit 0:
 
 ```sh
+# no-tmp: ok — archived command records the Linux validation receipt; not a portable rerun instruction.
 npx tsc --noEmit -p /tmp/hermes-quick-entry-transport-tsconfig.json
 npx tsc --noEmit --skipLibCheck --target es2022 --module esnext --moduleResolution bundler --types node apps/desktop/electron/quick-entry.ts
 ```
 
+<!-- no-tmp: ok — historical Linux evidence location, not a runtime path or command recommendation. -->
 The scratch UI config extends the desktop config and includes the actual global/Vite declarations, store, App and their direct tests. Logs: `/tmp/hermes-quick-entry-transport-ui-types.log`, `/tmp/hermes-quick-entry-transport-relay-types.log`.
 
+<!-- no-tmp: ok — historical Linux evidence location, not a runtime path or command recommendation. -->
 An expanded Electron test/preload import check exits 2 with 371 diagnostics in preload.ts, connection-config.ts, api-transport.ts and profile-delete-routing.ts; it reports none in quick-entry.ts or quick-entry.test.ts. Log: `/tmp/hermes-quick-entry-transport-electron-types.log`. This does not certify the whole Electron graph. The earlier full desktop typecheck exit 137 remains unresolved. No full desktop/typecheck/health success is claimed.
 
 ## Native verification still required
