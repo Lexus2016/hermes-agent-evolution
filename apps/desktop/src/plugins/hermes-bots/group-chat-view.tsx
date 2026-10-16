@@ -36,7 +36,7 @@ import {
   useValue
 } from '@hermes/plugin-sdk'
 import type { ClipboardEvent, DragEvent, ReactNode } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { avatarColor, botAppearance, BotFace } from './avatar'
 import { isBackfilledFacePng } from './avatar-image'
@@ -834,28 +834,23 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
   // already near the bottom, so reading history is never yanked away.
   const bottomSentinelRef = useRef<HTMLDivElement | null>(null)
   const stickToBottomRef = useRef(true)
-  // eslint-disable-next-line no-restricted-syntax -- tracks live scroll position from a DOM listener, not an atom
-  useEffect(() => {
-    const sentinel = bottomSentinelRef.current
 
-    if (!sentinel) {
+  // Bind the owned overflow container, not a shell ancestor. Ref cleanup
+  // detaches this exact node when it is replaced or the workspace unmounts.
+  const logViewportRef = useCallback((viewport: HTMLDivElement | null) => {
+    if (!viewport) {
       return
     }
 
-    const viewport = sentinel.closest('[data-slot="scroll-area-viewport"]')
-
-    if (viewport) {
-      const onScroll = () => {
-        stickToBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80
-      }
-
-      viewport.addEventListener('scroll', onScroll, {
-        passive: true
-      })
-
-      return () => viewport.removeEventListener('scroll', onScroll)
+    const onScroll = () => {
+      stickToBottomRef.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80
     }
+
+    viewport.addEventListener('scroll', onScroll, { passive: true })
+
+    return () => viewport.removeEventListener('scroll', onScroll)
   }, [])
+
   useEffect(() => {
     if (stickToBottomRef.current) {
       bottomSentinelRef.current?.scrollIntoView({
@@ -1542,7 +1537,7 @@ function LegacyGroupChatWorkspace({ group, members, onBack, visible = true }: Gr
         members={members}
       />
       {activityPanel}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain" ref={logViewportRef}>
         {/* minmax(0,1fr): an implicit grid track is min-content sized, so one */}
         {/* unbreakable code line widened every entry to its own width and the */}
         {/* log scrolled sideways as a whole instead of the code block (#91878). */}
