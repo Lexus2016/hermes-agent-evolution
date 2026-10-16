@@ -153,6 +153,59 @@ async def test_cancelled_start_terminates_spawned_server(tmp_path: Path):
     assert client._proc is None
 
 
+def _cleanup_live_descendant(child):
+    """Zombies still report is_running() until reaped; they need no further signal."""
+    if child is None:
+        return
+    import psutil
+
+    try:
+        if child.is_running() and child.status() != psutil.STATUS_ZOMBIE:
+            child.kill()
+    except psutil.NoSuchProcess:
+        pass
+
+
+@pytest.mark.parametrize("state", [
+    "absent", "exited", "zombie", "gone_during_status", "gone_during_kill",
+    "live", "access_denied", "guard_denied",
+])
+def test_descendant_cleanup_only_signals_confirmed_live_processes(state):
+    """Cleanup preserves termination proof and propagates uncertain/denied access."""
+    from unittest.mock import Mock
+
+    import psutil
+
+    child = Mock(spec=["is_running", "status", "kill"])
+    child.is_running.return_value = state != "exited"
+    child.status.return_value = (
+        psutil.STATUS_ZOMBIE if state == "zombie" else psutil.STATUS_SLEEPING
+    )
+    errors = {
+        "gone_during_status": ("status", psutil.NoSuchProcess(12345)),
+        "gone_during_kill": ("kill", psutil.NoSuchProcess(12345)),
+        "access_denied": ("status", psutil.AccessDenied(12345)),
+        "guard_denied": ("kill", RuntimeError("live-system guard refused signal")),
+    }
+    if state in errors:
+        method, error = errors[state]
+        getattr(child, method).side_effect = error
+
+    if state == "access_denied":
+        with pytest.raises(psutil.AccessDenied):
+            _cleanup_live_descendant(child)
+    elif state == "guard_denied":
+        with pytest.raises(RuntimeError, match="live-system guard refused signal"):
+            _cleanup_live_descendant(child)
+    else:
+        _cleanup_live_descendant(None if state == "absent" else child)
+
+    if state in {"live", "gone_during_kill", "guard_denied"}:
+        child.kill.assert_called_once_with()
+    else:
+        child.kill.assert_not_called()
+
+
 @pytest.mark.platforms("linux")
 @pytest.mark.asyncio
 async def test_cancelled_start_hard_kills_sigterm_ignoring_descendant(tmp_path: Path):
@@ -186,10 +239,7 @@ async def test_cancelled_start_hard_kills_sigterm_ignoring_descendant(tmp_path: 
         if not start.done():
             start.cancel()
             await asyncio.gather(start, return_exceptions=True)
-        if child is not None:
-            # The descendant can exit between a liveness check and the signal; killing a gone process is fine.
-            with contextlib.suppress(psutil.NoSuchProcess):
-                child.kill()
+        _cleanup_live_descendant(child)
 
 
 @pytest.mark.asyncio

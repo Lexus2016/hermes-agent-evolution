@@ -26,7 +26,38 @@ def _spawn(tmp_path, code, *args, stdin_data=None):
 
 
 def _alive(child):
-    return child.is_running() and child.status() != psutil.STATUS_ZOMBIE
+    try:
+        return child.is_running() and child.status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        # Cleanup can reap the child between the two observations.
+        return False
+
+
+@pytest.mark.parametrize(("running", "status", "expected"), [
+    pytest.param(True, psutil.STATUS_RUNNING, True, id="live"),
+    pytest.param(True, psutil.STATUS_ZOMBIE, False, id="zombie"),
+    pytest.param(False, None, False, id="already-gone"),
+    pytest.param(psutil.NoSuchProcess(123), None, False, id="gone-before-liveness"),
+    pytest.param(True, psutil.NoSuchProcess(123), False, id="gone-between-reads"),
+    pytest.param(True, psutil.AccessDenied(123), psutil.AccessDenied, id="access-denied"),
+])
+def test_lifetime_observer_handles_exit_without_hiding_unknown_state(running, status, expected):
+    calls = []
+
+    def read(name, result):
+        calls.append(name)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    child = SimpleNamespace(is_running=lambda: read("running", running),
+                            status=lambda: read("status", status))
+    if expected is psutil.AccessDenied:
+        with pytest.raises(psutil.AccessDenied):
+            _alive(child)
+    else:
+        assert _alive(child) is expected
+    assert calls == (["running", "status"] if running is True else ["running"])
 
 
 def _gone(child):
