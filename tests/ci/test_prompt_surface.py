@@ -13,7 +13,10 @@ from __future__ import annotations
 import filecmp
 import importlib.util
 import shutil
+import sys
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 _spec = importlib.util.spec_from_file_location("prompt_surface", REPO / "scripts" / "ci" / "prompt_surface.py")
@@ -109,3 +112,32 @@ def test_full_render_is_identical_under_distinct_temp_roots(tmp_path, monkeypatc
     assert "You are a coding agent pairing" in code
     assert "Workspace (snapshot" not in plain
     assert "You are a coding agent pairing" not in plain
+
+
+@pytest.mark.platforms("posix")
+def test_full_render_ignores_host_acp_availability(tmp_path, monkeypatch):
+    from tools.delegate_tool import _acp_binary_available
+
+    absent = tmp_path / "no-acp"
+    present = tmp_path / "with-acp"
+    absent.mkdir()
+    present.mkdir()
+    invoked = tmp_path / "acp-invoked"
+    executable = present / "codex"
+    executable.write_text(
+        f"#!{sys.executable}\nfrom pathlib import Path\n"
+        f"Path({str(invoked)!r}).touch()\nraise SystemExit(99)\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o700)
+
+    outputs = []
+    for path, available in ((absent, False), (present, True)):
+        monkeypatch.setenv("PATH", str(path))
+        assert _acp_binary_available() is available
+        output = tmp_path / f"{path.name}-output"
+        assert prompt_surface.render(output) == 0
+        outputs.append(output)
+
+    assert not _tree_differences(*outputs)
+    assert not invoked.exists()

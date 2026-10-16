@@ -87,6 +87,9 @@ def _pin_environment() -> None:
     # read credentials, binaries and the tool store, which vary by host and would hide schemas.
     import tools.registry as registry_module
     registry_module._check_fn_cached = lambda _fn: True  # type: ignore[assignment]
+    # The schema-only ACP capability probe follows the same fully configured install convention.
+    from tools import delegate_tool
+    delegate_tool._acp_binary_available = lambda _cmd=None: True
     from agent import skill_utils
     skill_utils._ENV_DETECT_CACHE.update({"docker": False, "s6": False})
     # The toolchain probe line reports the host's python/node/pip; it is environment, not code.
