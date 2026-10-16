@@ -147,3 +147,27 @@ limitation: generic `typing.get_type_hints` raises `NameError`. Supported provid
 discovery and dispatch do not evaluate these annotations; seven focused caller
 tests and actual canonical-provider probes passed. The narrow disposition does
 not claim repaired introspection and introduces no eager scheduler/profile setup.
+
+
+## Fresh corrected-source comparison at 9ff0fd4197
+
+`v0221-9ff0-main365-health-report.json` preserves the full unmodified report for
+head `9ff0fd41973bff45a288e56e1700f9b6433d7675`, tree
+`969c303093d70a9b4e2a2d8222f8fe83d0fb451f`, against the same exact main365
+baseline. It completed normally in 539.6 seconds with exit 1: 1,134 raw blocking
+findings, 352 matched reviewed dispositions, and **782 unresolved blockers**.
+Its SHA-256 is `3e6ec0448f68ba5e9860cc253024bcb0e21eb5359491c0c1bad518f301788276`.
+The previous 825-blocker receipt remains an unchanged historical result.
+
+The summary records every rule/domain count. Diagnostic provenance identifies
+665 exact upstream files, 91 same-scope Python units and 26 other findings;
+that classifier does not establish TypeScript unit identity or correctness.
+No unreviewed disposition is inferred from these counts. The gate still fails.
+
+The exact clean source passed canonical Ruff and the consolidated corrected
+desktop selection: 381 tests in 19 suites, with all 32 selected file hashes
+unchanged before/after. The bound receipt and validation report preserve scope
+and commands. These mocked/React tests do not replace hosted full Python,
+Hindsight protected API/lifecycle, native platform or full desktop typechecks.
+Boot recovery cannot cancel an already-started cloud ladder/reset; stale results
+are prevented from resetting or reloading a replacement owner.
