@@ -574,7 +574,7 @@ async function saveBotMetaForOwner(
         : Promise.resolve(storage?.set?.(BOT_META_V1_KEY, next))
       : Promise.resolve()
 
-    localPersistence = persisted.catch(() => undefined)
+    localPersistence = persisted.then(() => undefined).catch(() => undefined)
   } catch {
     /* storage unavailable — look persists for this window only */
   }
