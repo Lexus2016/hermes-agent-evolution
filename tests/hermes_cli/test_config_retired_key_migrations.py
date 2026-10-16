@@ -81,7 +81,7 @@ class TestRetiredKeysWhateverTheStamp:
 
     def test_branch_stamped_home_still_gets_main_retired_key_steps(self, tmp_path, monkeypatch):
         """A home stamped 50 by a build whose v50 was the cron-key step skipped main's v46 (MCP
-        `disabled: true`) and v50 (tirith keys). Both apply, and a second pass writes nothing."""
+        `disabled: true`). That retirement applies, retained Tirith policy survives, and a second pass writes nothing."""
         from hermes_cli.config import migrate_config
 
         config_path = tmp_path / "config.yaml"
@@ -94,7 +94,7 @@ class TestRetiredKeysWhateverTheStamp:
         migrate_config(interactive=False, quiet=True)
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         assert raw["mcp_servers"]["old"] == {"command": "x", "enabled": False}
-        assert raw["security"] == {"redact_secrets": True}
+        assert raw["security"] == {"redact_secrets": True, "tirith_enabled": True}
         settled = config_path.read_bytes()
         assert migrate_config(interactive=False, quiet=True)["config_added"] == []
         assert config_path.read_bytes() == settled

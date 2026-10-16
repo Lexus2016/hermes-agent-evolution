@@ -734,23 +734,14 @@ def _migrate_to_49(results: dict[str, Any], quiet: bool) -> None:
             print("  ✓ Cleared TERMINAL_VERCEL_RUNTIME from .env (was the old default; the image is used instead)")
 
 
-_RETIRED_TIRITH_KEYS = ("tirith_enabled", "tirith_path", "tirith_timeout", "tirith_fail_open")
-
-
 def _migrate_to_50(results: dict[str, Any], quiet: bool) -> None:
-    # 49 → 50: the bundled tirith scanner left Hermes. Nothing reads its keys now, so they are
-    # dropped; nothing replaces them.
-    config = read_raw_config()
-    security = config.get("security")
-    if not isinstance(security, dict):
-        return
-    present = [key for key in _RETIRED_TIRITH_KEYS if key in security]
-    if not present:
-        return
-    for key in present:
-        del security[key]
-    _commit(config, results, quiet, "removed security.tirith_* (scanner no longer bundled)",
-            "  ✓ Removed security.tirith_* — the tirith scanner is no longer bundled with Hermes.")
+    """Reserve upstream's version without retiring this fork's active scanner policy.
+
+    Tirith remains supported here, so explicit enabled/disabled, binary, timeout and
+    fail-open choices must survive. Values erased by an earlier external upgrade
+    cannot be reconstructed safely from the current config.
+    """
+    return
 
 
 MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
@@ -884,7 +875,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
     (48, _migrate_to_48),
     # 48 → 49: the seeded Vercel runtime pin is dropped so fresh sandboxes use the managed image (see _migrate_to_49).
     (49, _migrate_to_49),
-    # 49 → 50: security.tirith_* dropped; the bundled scanner is gone (see _migrate_to_50).
+    # 49 → 50: reserved compatibility step; this fork retains the Tirith scanner policy.
     (50, _migrate_to_50),
     # 50 → 51: cron.bot_chat_delivery_timeout_seconds is gone with the local `hermes chat`
     # fallback lane it bounded. Bot Chat deliveries are admitted to the running gateway and
@@ -909,7 +900,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
 #: out: it clears OPENAI_MODEL from .env, a generic name Hermes never reads but the user's tools may.
 #: v41 is left out too: it rewrites profile SOUL.md on a heading match, an artifact whose
 #: provenance the config stamp says nothing about.
-LEGACY_KEY_STEPS = frozenset({12, 14, 16, 17, 29, 33, 38, 39, 42, 43, 46, 50, 51})
+LEGACY_KEY_STEPS = frozenset({12, 14, 16, 17, 29, 33, 38, 39, 42, 43, 46, 51})
 
 #: Legacy-key steps that run on every migration pass whatever the stamp says, because a stamp at
 #: or past their version does not prove they ran: unreleased builds of the gateway-runtime branch
@@ -919,7 +910,7 @@ LEGACY_KEY_STEPS = frozenset({12, 14, 16, 17, 29, 33, 38, 39, 42, 43, 46, 50, 51
 #: something consumes). The value-based steps such a home also skipped (44 curator defaults, 45
 #: connections, 47 threshold_tokens) are NOT re-run: past the stamp, their trigger value may be
 #: the user's own choice.
-STAMP_INDEPENDENT_STEPS = frozenset({46, 50})
+STAMP_INDEPENDENT_STEPS = frozenset({46})
 
 
 def run_migrations(

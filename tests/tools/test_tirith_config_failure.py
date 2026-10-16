@@ -51,8 +51,14 @@ def test_valid_missing_or_disabled_policy_still_allows(monkeypatch, security, en
     monkeypatch.setattr("hermes_cli.config.load_config_readonly", lambda: {"security": security})
     if enabled is not None:
         monkeypatch.setenv("TIRITH_ENABLED", enabled)
-    monkeypatch.setattr(tirith_security, "check_command_security", Mock(side_effect=AssertionError("disabled scanner")))
+    scan = Mock(return_value={"action": "allow", "findings": [], "summary": "synthetic scanner"})
+    monkeypatch.setattr(tirith_security, "check_command_security", scan)
     assert approval._tirith_scan("echo synthetic")["action"] == "allow"
+    if not security and enabled is None:
+        scan.assert_called_once()
+        assert scan.call_args.kwargs["_config"]["tirith_enabled"] is True
+    else:
+        scan.assert_not_called()
 
 
 @pytest.mark.parametrize("enabled", [None, "true"])

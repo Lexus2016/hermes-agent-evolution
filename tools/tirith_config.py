@@ -40,7 +40,7 @@ def read_security_policy() -> dict:
     return security
 
 
-def load_security_config(*, default_enabled: bool = False) -> dict:
+def load_security_config(*, default_enabled: bool = True) -> dict:
     security = read_security_policy()
 
     def boolean(key, default):

@@ -8,8 +8,8 @@ import pytest
 from tools import approval
 
 
-@pytest.mark.parametrize("security", [{}, {"tirith_enabled": False, "tirith_fail_open": False}])
-def test_unconfigured_or_disabled_scanner_is_not_imported(monkeypatch, security):
+@pytest.mark.parametrize("security", [{"tirith_enabled": False}, {"tirith_enabled": False, "tirith_fail_open": False}])
+def test_explicitly_disabled_scanner_is_not_imported(monkeypatch, security):
     monkeypatch.delenv("TIRITH_ENABLED", raising=False)
     monkeypatch.setattr("hermes_cli.config.load_config_readonly", lambda: {"security": security})
     original = builtins.__import__
