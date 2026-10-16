@@ -77,19 +77,17 @@ def test_local_guard_still_refuses_recycled_pgid(monkeypatch, killpg_calls):
     assert killpg_calls == []
 
 
-def test_local_guard_unreadable_start_time_live_leader_is_best_effort(monkeypatch, killpg_calls):
-    """An unreadable current start time for a still-live leader keeps the legacy
-    best-effort kill, and so does a gone leader: POSIX never reuses a PGID while a
-    group member lives, so its reparented grandchildren must still be reached."""
+def test_local_guard_unreadable_or_gone_leader_refuses_group_signal(monkeypatch, killpg_calls):
+    """An unreadable or gone leader cannot authenticate the group ownership."""
     from tools.environments.local import _kill_process_group_posix, _leader_is_ours
 
     monkeypatch.setattr("gateway.status.get_process_start_time", lambda pid: None)
     monkeypatch.setattr("gateway.status._pid_exists", lambda pid: True)
     _kill_process_group_posix(_fake_proc())
-    assert (67890, signal.SIGTERM) in killpg_calls
+    assert killpg_calls == []
 
     monkeypatch.setattr("gateway.status._pid_exists", lambda pid: False)
-    assert _leader_is_ours(67890, RECORDED) is True
+    assert _leader_is_ours(67890, RECORDED) is False
 
 
 # --- stdio MCP orphan reaper ------------------------------------------------

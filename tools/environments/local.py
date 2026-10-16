@@ -879,33 +879,26 @@ def _sweep_escaped_descendants(descendants: list, pgid: int) -> None:
 
 
 def _leader_is_ours(pgid, expected_start) -> bool:
-    """The setsid group leader's PID == its PGID.  Confirm it is still the process we
-    spawned before signalling the whole group, so a recycled PID/PGID can never take
-    down an unrelated process group (#43044).  The baseline and the current reading
-    come from the same host at different times, so they go through the drift-tolerant
-    fingerprint comparator — same-host readings drift ~1 s on macOS (#117505), and
-    exact equality made the guard refuse to kill live, legitimately-owned groups.
-    When no baseline was captured, or the current reading is unreadable, keep the
-    legacy best-effort behaviour rather than refusing to kill: only a LIVE leader with
-    a different start time proves recycling."""
-    if pgid is None:
+    """Require a readable, matching spawn identity before signalling a process group.
+
+    Same-host fingerprints tolerate platform clock drift. Missing or unreadable
+    identity cannot prove ownership, including after a leader has disappeared.
+    """
+    if pgid is None or expected_start is None:
         return False
-    if expected_start is None:
-        return True
     from gateway.status import get_process_start_time, start_time_fingerprints_match
     try:
         current = get_process_start_time(pgid)
-    except Exception:
-        return True
+    except Exception as exc:
+        logger.debug("Local cleanup could not verify group ownership (%s)", type(exc).__name__,
+                     exc_info=(RuntimeError, RuntimeError(type(exc).__name__), None))
+        return False
     if current is None:
-        # Unreadable while alive: best effort. Gone: POSIX never reuses a PGID while any
-        # member of the group lives, so the group (if it still exists) is ours and its
-        # reparented grandchildren still need the signal; an empty group is just ESRCH.
-        return True
+        return False
     try:
         return start_time_fingerprints_match(expected_start, current)
-    except (TypeError, ValueError):  # junk fingerprints: best-effort, never break signalling
-        return True
+    except (TypeError, ValueError):
+        return False
 
 
 def _kill_process_group_posix(proc) -> None:
@@ -922,18 +915,9 @@ def _kill_process_group_posix(proc) -> None:
         if (pgid := getattr(proc, "_hermes_pgid", None)) is None:
             raise
     if not _leader_is_ours(pgid, expected_start):
-        # Leader exited and its PID/PGID may have been recycled onto an unrelated
-        # process group; signalling the stale number is unsafe. Bail out — a rare
-        # orphaned grandchild may leak, which is strictly preferable to killing a
-        # stranger. Sweep the snapshotted descendants by PID (identity-checked)
-        # so we still reach escapees that are verifiably ours.
-        descendants = []
-        try:
-            import psutil
-            descendants = psutil.Process(proc.pid).children(recursive=True)
-        except Exception:
-            pass
-        _sweep_escaped_descendants(descendants, pgid)
+        # A fresh PID lookup could now describe a foreign process and its children.
+        # No independently verified descendant snapshot exists at this point.
+        logger.warning("Local process cleanup incomplete: group ownership could not be verified")
         return
     try:  # psutil children snapshot; empty on any failure (must never break the kill)
         import psutil
@@ -1111,23 +1095,36 @@ class LocalEnvironment(BaseEnvironment):
         try:
             (_kill_process_windows if _IS_WINDOWS else _kill_process_group_posix)(proc)
         except OSError:  # ProcessLookupError / PermissionError included
-            with contextlib.suppress(Exception):
-                proc.kill()
+            if _IS_WINDOWS:
+                with contextlib.suppress(Exception):
+                    proc.kill()
+            else:
+                logger.warning("Local process cleanup incomplete: group ownership could not be verified")
+
+    def _kill_spawned_tree(self, spawned) -> None:
+        """Keep the timeout backstop inside the local ownership guard.
+
+        The base raw-PID retry cannot distinguish a recycled wrapper identity.
+        Unverified cleanup is logged by the guard and must not trigger that retry.
+        """
+        if _IS_WINDOWS:
+            return super()._kill_spawned_tree(spawned)
+        self._kill_process(spawned)
 
     def _force_kill_process(self, proc):
         """SIGKILL the whole group with no TERM grace or wait: the caller os._exit()s next."""
         if _IS_WINDOWS:  # already a forced tree kill
             return self._kill_process(proc)
-        with contextlib.suppress(OSError):
+        try:
             pgid = getattr(proc, "_hermes_pgid", None) or os.getpgid(proc.pid)
-            # PID-reuse guard (#43044): never SIGKILL a group whose leader's start time
-            # no longer matches the spawn-time baseline — the PGID may have been recycled
-            # onto an unrelated process group. Comparison is drift-tolerant (#117505);
-            # without a baseline keep the legacy best-effort behaviour.
-            if pgid != os.getpgrp() and _leader_is_ours(pgid, getattr(proc, "_hermes_pgid_start", None)):
+            if not _leader_is_ours(pgid, getattr(proc, "_hermes_pgid_start", None)):
+                logger.warning("Local process cleanup incomplete: group ownership could not be verified")
+                return
+            if pgid != os.getpgrp():
                 os.killpg(pgid, signal.SIGKILL)  # windows-footgun: ok — POSIX only (_IS_WINDOWS returned above)
-        with contextlib.suppress(OSError):
             proc.kill()
+        except OSError:
+            logger.warning("Local process cleanup incomplete: owned process could not be signalled")
 
     def _extract_cwd_from_output(self, result: dict):
         """Base semantics plus: Git Bash ``pwd -P`` emits MSYS form on Windows —

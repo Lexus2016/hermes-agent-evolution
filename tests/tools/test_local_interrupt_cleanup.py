@@ -67,12 +67,11 @@ def _wait_for_pgid_exit(pgid: int, timeout: float = 60.0) -> bool:
 
 
 @pytest.mark.platforms("linux")
-def test_kill_process_uses_cached_pgid_if_wrapper_already_exited(monkeypatch):
-    """If the shell wrapper exits before cleanup, still kill its process group.
+def test_kill_process_refuses_unverified_cached_pgid_after_wrapper_exit(monkeypatch, caplog):
+    """A cached group number alone cannot authorize signalling orphaned descendants.
 
-    Without the cached pgid fallback, ``os.getpgid(proc.pid)`` raises for the
-    dead wrapper and cleanup falls back to ``proc.kill()``, which cannot reach
-    orphaned grandchildren still running in the original process group.
+    With no leader identity, leave cleanup visibly incomplete instead of using a
+    possibly recycled group. The normal verified-owned path is tested separately.
     """
     env = object.__new__(LocalEnvironment)
     proc = SimpleNamespace(
@@ -96,7 +95,8 @@ def test_kill_process_uses_cached_pgid_if_wrapper_already_exited(monkeypatch):
 
     env._kill_process(proc)
 
-    assert killpg_calls == [(67890, signal.SIGTERM), (67890, 0)]
+    assert killpg_calls == []
+    assert "cleanup incomplete" in caplog.text
 
 
 @pytest.mark.platforms("linux")
