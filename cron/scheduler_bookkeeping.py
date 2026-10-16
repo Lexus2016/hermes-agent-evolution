@@ -55,13 +55,14 @@ def finish_completed_run(d, fire_owner: Optional[str], execution_id: str, *, rec
     ``d`` is the scheduler's ``_RunDelivery``. Store and ledger writers are read off the
     ``cron.scheduler`` facade, which is where tests and the receipt-recovery path patch them."""
     from cron import scheduler
+    logger = scheduler.logger
     job = d.job
     if not d.success:
         try:
             scheduler.save_job_failure(job, success=False, error=d.error, output=d.output or "")
             scheduler.logger.warning("Job '%s' failure record saved to cron/failures", job.get("id"))
         except Exception as exc:
-            scheduler.logger.error("Could not save cron failure record: %s", exc, exc_info=True)
+            logger.exception("Could not save cron failure record: %s", exc)
     if not d.should_deliver and job.get("last_delivery_queued"):
         from cron.jobs import update_job
         update_job(job["id"], {"last_delivery_queued": None})

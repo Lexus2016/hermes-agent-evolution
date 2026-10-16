@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from tests.fakes.fake_llm_provider import FakeLLMServer, Text, write_hermes_home
+from tests.waiting import wait_until
 
 pytestmark = pytest.mark.skipif(shutil.which("tmux") is None, reason="needs tmux")
 
@@ -95,13 +96,20 @@ def test_resizes_keep_each_transcript_line_once_in_tmux_scrollback(tmp_path: Pat
         # stamped the change), then wait past that window before Enter.
         question = f"question zq{turn}q please"
         tmux("send-keys", "-t", "p", "-l", question)
-        end = time.monotonic() + 30
-        while not any(
-            (tail := prompt_tail(line)) is not None and question in tail
-            for line in transcript().splitlines()
-        ):
-            assert time.monotonic() < end, f"prompt never showed {question!r}:\n{transcript()[-1500:]}"
-            time.sleep(0.05)
+        try:
+            wait_until(
+                lambda: any(
+                    (tail := prompt_tail(line)) is not None and question in tail
+                    for line in transcript().splitlines()
+                ),
+                timeout=30,
+                interval=0.05,
+                what=f"composer showing {question!r}",
+            )
+        except AssertionError as exc:
+            raise AssertionError(
+                f"prompt never showed {question!r}:\n{transcript()[-1500:]}"
+            ) from exc
         time.sleep(0.5)
         tmux("send-keys", "-t", "p", "Enter")
 

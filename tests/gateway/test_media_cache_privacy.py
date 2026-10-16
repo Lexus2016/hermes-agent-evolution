@@ -105,8 +105,8 @@ def test_explicit_shared_mode_is_preserved(cache, monkeypatch):
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
 
-def test_non_posix_exclusive_write_is_supported(cache, monkeypatch):
-    monkeypatch.setattr(privacy, "_posix_permissions", lambda: False)
+@pytest.mark.platforms("windows")
+def test_non_posix_exclusive_write_is_supported(cache):
     target = _write()
     assert target.read_bytes().endswith(b"private")
 

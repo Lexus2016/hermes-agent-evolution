@@ -15,11 +15,15 @@ import concurrent.futures
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 import json
+import logging
 from pathlib import Path
 import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
+
+
+logger = logging.getLogger(__name__)
 
 
 class CompactionState(Enum):
@@ -342,7 +346,12 @@ class ParallelCompactor:
                     snapshot_dir=self.config.snapshot_dir,
                     session_id=self._session_id,
                 )
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Optional compaction snapshot write failed (%s); continuing in memory",
+                    type(exc).__name__,
+                    exc_info=(RuntimeError, RuntimeError("Snapshot failure details redacted"), None),
+                )
                 self._snapshot_path = None
         else:
             self._snapshot_path = None

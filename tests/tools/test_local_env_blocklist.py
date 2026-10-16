@@ -15,6 +15,8 @@ from tools.environments import local
 from tools.environments import local_pythonpath as pp
 from tools.environments.local_env_policy import _HERMES_PROVIDER_ENV_BLOCKLIST
 
+__all__ = ["child_env"]  # pytest fixture re-export; parameters request this fixture by name
+
 
 def _running_venv_site_packages() -> Path:
     """Independently construct the host-native venv site-packages path."""
