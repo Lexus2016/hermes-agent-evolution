@@ -1736,7 +1736,9 @@ class ProcessRegistry(ProcessTerminationMixin, ProcessCheckpointMixin, ProcessOu
             from tools.async_delegation import restore_undelivered_completions
             return restore_undelivered_completions(self.completion_queue)
         except Exception as exc:
-            logger.warning("Could not restore async delegation completions: %s", exc)
+            self._completions_restored = False  # a failed attempt is not a completed replay
+            logger.exception("Could not restore async delegation completions; retrying on next consumer",
+                             exc_info=(RuntimeError, RuntimeError(type(exc).__name__), None))
             return 0
         finally:
             reset_hermes_home_override(token)
