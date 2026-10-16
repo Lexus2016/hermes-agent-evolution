@@ -125,9 +125,14 @@ preservation checks, not proof that every historical test has an exact equivalen
 Local desktop type checking terminated with exit 137 twice. Available evidence
 does not establish the cause, and no type-check pass is claimed. The code-health
 wrapper timed out after 900 seconds while measuring the large integration diff;
-this is an incomplete gate. A subsequent immutable-tree diagnostic made progress
-through both revisions but lost execution state during an environment refresh,
-without a terminal result. Both require successful exact-candidate validation.
+this was an incomplete gate. A subsequent immutable-tree diagnostic lost execution
+state during an environment refresh. The next completed run against the original
+frozen fork baseline (`dbf42ade`) finished in 829.7 seconds with 1,263 blocking
+findings and 41 advisories, exit 1. Of those blockers, 1,035 occur in files
+byte-identical to pinned upstream and six in files byte-identical to reviewed
+current main. Provenance does not exempt findings or prove correctness. A
+latest-main comparison and an explicit disposition of inherited code-health debt
+remain required; no threshold or blanket allowance has been changed.
 
 Before merge:
 - [x] Incorporate the landed fork remediation aggregate with ancestry preserved.

@@ -1200,18 +1200,19 @@ def _tirith_scan(command: str) -> dict:
     """Tirith result for the interactive flow; an un-importable scanner allows
     (default) or, under fail-closed, synthesizes a HIGH warn finding that goes
     through the normal approval flow (#20733)."""
+    from tools.tirith_config import (
+        TirithConfigurationError, configuration_error_result, load_security_config,
+    )
     try:
-        from hermes_cli.config import load_config_readonly
-        security = (load_config_readonly() or {}).get("security", {}) or {}
-    except Exception:
-        security = {}
-    enabled = str(os.getenv("TIRITH_ENABLED", security.get("tirith_enabled", False))).lower() in {"1", "true", "yes"}
-    if not enabled:
+        config = load_security_config()
+    except TirithConfigurationError:
+        return configuration_error_result()
+    if not config["tirith_enabled"]:
         return {"action": "allow", "findings": [], "summary": ""}
-    fail_open = str(os.getenv("TIRITH_FAIL_OPEN", security.get("tirith_fail_open", True))).lower() in {"1", "true", "yes"}
+    fail_open = config["tirith_fail_open"]
     try:
         from tools.tirith_security import check_command_security
-        return check_command_security(command)
+        return check_command_security(command, _config=config)
     except ImportError:
         if fail_open:
             return {"action": "allow", "findings": [], "summary": ""}
@@ -1251,6 +1252,11 @@ def check_all_command_guards(command: str, env_type: str,
 
     approval_callback, is_cli, is_gateway, is_ask = _presence(approval_callback)
     tirith_result = _tirith_scan(command)
+    # Existing off/yolo/permanent-allowlist precedence remains above this point.
+    # An unreadable policy is not a finding that approval can override/cache.
+    if tirith_result.get("configuration_error"):
+        return {"approved": False, "message": tirith_result["summary"],
+                "failure_class": "configuration_error"}
     if not is_cli and not is_gateway and not is_ask:
         if tirith_result.get("action") in {"block", "warn"}:
             return {"approved": False, "message": "BLOCKED: " + _format_tirith_description(tirith_result)}

@@ -24,7 +24,7 @@ def test_configured_scanner_verdict_survives_plugin_migration(monkeypatch):
     monkeypatch.delenv("TIRITH_ENABLED", raising=False)
     monkeypatch.setattr("hermes_cli.config.load_config_readonly", lambda: {"security": {"tirith_enabled": True}})
     verdict = {"action": "block", "summary": "unsafe URL", "findings": []}
-    monkeypatch.setitem(sys.modules, "tools.tirith_security", SimpleNamespace(check_command_security=lambda command: verdict))
+    monkeypatch.setitem(sys.modules, "tools.tirith_security", SimpleNamespace(check_command_security=lambda command, **kwargs: verdict))
     assert approval._tirith_scan("echo unsafe") == verdict
 
 

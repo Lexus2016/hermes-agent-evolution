@@ -45,16 +45,8 @@ def _env_int(key: str, default: int) -> int:
 
 def _load_security_config() -> dict:
     """Security settings from config.yaml, with env var overrides."""
-    try:
-        from hermes_cli.config import load_config_readonly
-        cfg = load_config_readonly().get("security", {}) or {}
-    except Exception:
-        cfg = {}
-    return {
-        "tirith_enabled": _env_bool("TIRITH_ENABLED", cfg.get("tirith_enabled", True)),
-        "tirith_path": os.getenv("TIRITH_BIN", cfg.get("tirith_path", "tirith")),
-        "tirith_timeout": _env_int("TIRITH_TIMEOUT", cfg.get("tirith_timeout", 5)),
-        "tirith_fail_open": _env_bool("TIRITH_FAIL_OPEN", cfg.get("tirith_fail_open", True))}
+    from tools.tirith_config import load_security_config
+    return load_security_config(default_enabled=True)
 
 
 # --- Module state ---
@@ -510,11 +502,15 @@ def _crash(fail_open: bool, open_summary: str, closed_summary: str) -> dict:
     return _fail(fail_open, open_summary, closed_summary)
 
 
-def check_command_security(command: str) -> dict:
+def check_command_security(command: str, *, _config: dict | None = None) -> dict:
     """Run the tirith scan on a command -> ``{"action": allow|warn|block, "findings", "summary"}``.
     Exit code determines the action; JSON enriches. Spawn failures/timeouts respect fail_open."""
     global _crash_count, _circuit_open, _circuit_open_at
-    cfg = _load_security_config()
+    from tools.tirith_config import TirithConfigurationError, configuration_error_result
+    try:
+        cfg = _load_security_config() if _config is None else _config
+    except TirithConfigurationError:
+        return configuration_error_result()
     if not cfg["tirith_enabled"]:
         return _verdict("allow")
     # Circuit breaker: if tirith has crashed _CRASH_LIMIT times in a row, stop trying and fail open (issue

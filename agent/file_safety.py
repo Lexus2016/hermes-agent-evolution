@@ -316,17 +316,34 @@ def _classify_resolved_write_denial(homes: set[str], resolved: str) -> Optional[
     if safe_roots and not any(_is_under(resolved, root) for root in safe_roots):
         return "safe_root"
 
-    if _ACTIVE_VERIFICATION_SCOPE is not None:
-        try:
-            from agent.verification_scope import VerificationScopeEnforcer
+    return _verification_scope_denial(resolved, mode="write")
 
-            enforcer = VerificationScopeEnforcer(_ACTIVE_VERIFICATION_SCOPE)
-            ok, _ = enforcer.check_file_access(resolved, mode="write")
-            if not ok:
-                return "verification_scope"
-        except Exception:
-            pass
 
+def _verification_scope_denial(resolved: str | Path, *, mode: str) -> Optional[str]:
+    """Fail closed when an active scope cannot be evaluated; optional when unset."""
+    scope = _ACTIVE_VERIFICATION_SCOPE
+    if scope is None:
+        return None
+    try:
+        from agent.verification_scope import VerificationScopeEnforcer
+    except ImportError:
+        return "verification_scope_unavailable"
+    except Exception:
+        # An active check must not turn import-time initialization errors into permission.
+        return "verification_scope_error"
+    try:
+        ok, _ = VerificationScopeEnforcer(scope).check_file_access(resolved, mode=mode)
+    except Exception:
+        # Exceptions may contain sensitive paths or credentials; expose only a safe reason.
+        return "verification_scope_error"
+    return None if ok else "verification_scope"
+
+
+def _verification_scope_check_error(denial: str, *, verb: str) -> Optional[str]:
+    if denial == "verification_scope_unavailable":
+        return f"{verb} denied: active verification scope checker is unavailable. Restore the checker and retry."
+    if denial == "verification_scope_error":
+        return f"{verb} denied: active verification scope could not be evaluated. Repair the checker and retry."
     return None
 
 
@@ -340,6 +357,9 @@ def get_write_denied_error(path: str, *, verb: str = "Write", entry: bool = Fals
     denial = _classify_write_denial(path, entry=entry)
     if denial is None:
         return None
+    check_error = _verification_scope_check_error(denial, verb=verb)
+    if check_error:
+        return check_error
     if denial == "verification_scope":
         scope_name = getattr(_ACTIVE_VERIFICATION_SCOPE, "name", "active_scope")
         return f"{verb} denied: '{path}' violates active verification scope ({scope_name})."
@@ -444,17 +464,13 @@ def get_read_block_error(path: str) -> Optional[str]:
     if reason:
         return f"Access denied: {path} {reason}"
 
-    if _ACTIVE_VERIFICATION_SCOPE is not None:
-        try:
-            from agent.verification_scope import VerificationScopeEnforcer
-
-            enforcer = VerificationScopeEnforcer(_ACTIVE_VERIFICATION_SCOPE)
-            ok, _ = enforcer.check_file_access(resolved, mode="read")
-            if not ok:
-                scope_name = getattr(_ACTIVE_VERIFICATION_SCOPE, "name", "active_scope")
-                return f"Access denied: '{path}' violates active verification scope ({scope_name})."
-        except Exception:
-            pass
+    denial = _verification_scope_denial(resolved, mode="read")
+    if denial:
+        check_error = _verification_scope_check_error(denial, verb="Access")
+        if check_error:
+            return check_error
+        scope_name = getattr(_ACTIVE_VERIFICATION_SCOPE, "name", "active_scope")
+        return f"Access denied: '{path}' violates active verification scope ({scope_name})."
 
     return None
 
@@ -463,12 +479,18 @@ def raise_if_read_blocked(path: str) -> None:
     """Raise ``ValueError`` if ``path`` is a denied Hermes read (see ``get_read_block_error``).
 
     Shared chokepoint for provider input-loading sites (e.g. image-gen local
-    paths). Best-effort: unexpected internal errors no-op rather than break
-    local-file loading; a real block still propagates.
+    paths). Without an active verification scope, unexpected internal errors
+    retain best-effort loading. An active scope fails closed; real blocks propagate.
     """
     try:
         blocked = get_read_block_error(path)
     except Exception:
+        if _ACTIVE_VERIFICATION_SCOPE is not None:
+            raise ValueError(
+                _verification_scope_check_error(
+                    "verification_scope_error", verb="Access"
+                )
+            ) from None
         return
     if blocked:
         raise ValueError(blocked)
