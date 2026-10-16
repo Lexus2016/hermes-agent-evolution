@@ -413,12 +413,21 @@ def _spend_departures(head: dict[str, FileMeasure], splits: dict[str, Split],
             splits[path][hit] = (old, remaining)
 
 
+def _unchanged_scopes_by_path(same_body: set[Key]) -> dict[str, set[str]]:
+    """Index the completed match once; no identity decisions or credits change."""
+    by_path: dict[str, set[str]] = defaultdict(set)
+    for path, qual in same_body:
+        by_path[path].add(qual)
+    return by_path
+
+
 def compare(base: dict[str, FileMeasure], head: dict[str, FileMeasure],
             changes: list[Change]) -> list[Finding]:
     base_of = {c.new: c.old for c in changes if c.new}
     head_of = {c.old: c.new for c in changes if c.old}
     matcher = _Matcher(base, head, base_of, head_of)
     match = matcher.run()
+    unchanged_by_path = _unchanged_scopes_by_path(matcher.same_body)
     owner_of = _owners(head_of, match)
     owned = _owned_base_hits(base, owner_of)
     moved_kept = _moved_unit_lines(base, head, base_of, match, matcher.same_body)
@@ -429,7 +438,7 @@ def compare(base: dict[str, FileMeasure], head: dict[str, FileMeasure],
         kept, survived_lines = _line_survival(hf, base.get(bpath) if bpath else None)
         if bpath:
             survived[bpath] = survived_lines
-        unchanged = {qual for hpath, qual in matcher.same_body if hpath == path}
+        unchanged = unchanged_by_path.get(path, set())
         splits[path] = _split_hits(hf, kept | moved_kept.get(path, set()), unchanged)
     _spend_departures(head, splits, base_of, _Departures(base, survived), owner_of, owned)
     findings: list[Finding] = []
