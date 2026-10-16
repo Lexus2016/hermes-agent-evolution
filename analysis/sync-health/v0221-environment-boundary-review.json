@@ -1,0 +1,204 @@
+{
+  "scope": "Seven individually reviewed process/bootstrap environment findings; no credential fallback or general raw-environment allowance. Native desktop seed remains unresolved.",
+  "recommendations": [
+    {
+      "path": "agent/kanban_turn_recovery.py",
+      "scope": "max_recovery_attempts",
+      "environment": "HERMES_KANBAN_TURN_RECOVERY",
+      "recommendation": "process_budget_contract_supported",
+      "caller_trace": "Not exclusively bootstrap: kanban_turn_recovery_enabled/should_recover_turn/recover_failed_kanban_turns call this during live turns, including gateway.session_kanban._run_task_turns. That caller passes frame task_id and exact live-claim checker, but no budget carrier. The raw process environment still decides retry count for every served task.",
+      "compatibility_and_holds": "The canonical secret-scope contract explicitly classifies every HERMES_KANBAN_* name as global process/deployment configuration (agent/secret_scope.py:168\u2013211), even under multiplex. The prefix existed in the original scope isolation commit f538470cf4afddb9ae6cc476c4f71b671f5a8420. Original bounded-recovery commit5fd24f47fd925db1de81095ba928d21dc2bca367 introduced the env budget for one-shot worker processes; owner-path commitcd8425c8763ddd0839be728fc7694afecd4a8b93 explicitly reuses it while moving only task/DB/run/claim proof to the bound frame. No documented per-profile recovery budget/config field was found. Thus a scoped secret value is intentionally not a per-profile override for this process knob. Bounded0\u201310 and typed/live-claim/cancellation/billing gates remain separate authority checks. Prior speculation about a supported per-profile disable is withdrawn, not treated as a proven bug.",
+      "receipt": "/tmp/hermes-hx002-boundary-tests.log:57 recovery tests+2 owner-frame tests passed. No A\u2192B budget isolation case exists in this receipt.",
+      "candidate_blob": "eecea3149168f6f7a1a56b580d5fd05633138a7b",
+      "references": [
+        {
+          "path": "gateway/session_kanban.py",
+          "blob": "826883f9a89565302dcabc41cb149e8fd94d45da"
+        },
+        {
+          "path": "agent/kanban_turn_recovery.py",
+          "blob": "eecea3149168f6f7a1a56b580d5fd05633138a7b"
+        },
+        {
+          "path": "tests/agent/test_kanban_turn_recovery.py",
+          "blob": "ee77480812a0383a0e8273366bfcb8385829f2e3"
+        },
+        {
+          "path": "tests/gateway/test_session_kanban_turn_recovery.py",
+          "blob": "43a81de2f2bb964aff9298b2a9728ed737f8a1d9"
+        },
+        {
+          "path": "agent/secret_scope.py",
+          "blob": "dfe185a28820a0116fce4050fd8d815c29e65aa3"
+        }
+      ],
+      "history": [
+        "5fd24f47fd925db1de81095ba928d21dc2bca367",
+        "cd8425c8763ddd0839be728fc7694afecd4a8b93",
+        "f538470cf4afddb9ae6cc476c4f71b671f5a8420"
+      ]
+    },
+    {
+      "path": "hermes_cli/main_desktop.py",
+      "scope": "_desktop_launch_env",
+      "environment": "HERMES_DESKTOP_RENDERER_ACCESSIBILITY",
+      "recommendation": "process_launch_boundary_supported",
+      "caller_trace": "hermes_cli.main registers cmd_gui; cmd_gui computes Electron child environment once before bundled/source/package launch. Explicit accessibility env overrides desktop.renderer_accessibility config by documented launcher precedence. The changed dict is copied by with_hermes_node_path; it is not a mutation of a multiplex request environment.",
+      "compatibility_and_holds": "This changes child renderer accessibility behavior, not provider credentials, session identity or authorization. Scope is the launched desktop process. No per-turn caller was found. Actual GUI/native accessibility behavior still needs native UI CI, but env precedence itself is directly tested without launching Electron.",
+      "receipt": "/tmp/hermes-hx002-launch-env-tests.log:1 selected actual helper precedence test passed; no desktop launch.",
+      "candidate_blob": "2326a395b901e8cea1391a71458105235ef69a46",
+      "references": [
+        {
+          "path": "hermes_cli/main.py",
+          "blob": "e151651aeb15579dcda01fc9228d3a766f18046f"
+        },
+        {
+          "path": "hermes_constants.py",
+          "blob": "84d3384d64e02c0c8252653625aa0e1975b1e307"
+        },
+        {
+          "path": "tests/hermes_cli/test_gui_command.py",
+          "blob": "b62a8d385949e8788a00f2e7acc71563dd543b8e"
+        }
+      ]
+    },
+    {
+      "path": "hermes_cli/update_receipt.py",
+      "scope": "_launcher_correlation_id",
+      "environment": "HERMES_UPDATE_CORRELATION_ID",
+      "recommendation": "external_launcher_boundary_supported",
+      "caller_trace": "UpdateReceipt.__init__ and handoff receipt reconstruction read a launcher-provided correlation identifier. Desktop managed-SSH update explicitly exports it for POSIX/Windows commands and requires matching receipt. Internal update_id remains separately generated and is used for PM receipt correlation.",
+      "compatibility_and_holds": "This is attribution for a dedicated update process, not an active-profile credential lookup. Handoff preserves the original ID when the new interpreter lacks the env. A supplied correlation ID is not by itself authorization to run an update. Full remote/native launcher remains hosted, while the receipt contract is directly covered.",
+      "receipt": "/tmp/hermes-hx002-correlation-tests.log:4 TestLauncherCorrelation tests passed, including handoff and unset ID.",
+      "candidate_blob": "3166b2fc86735ed0f0ed4b730c5cd9559fe0b7a6",
+      "references": [
+        {
+          "path": "apps/desktop/electron/managed-ssh-update.ts",
+          "blob": "29217f08d05e2a1429ee05047bb0c43f780db059"
+        },
+        {
+          "path": "tests/hermes_cli/test_update_receipt.py",
+          "blob": "f2bfbc90e84de0c08a46ac001d61bca4c75d571d"
+        }
+      ]
+    },
+    {
+      "path": "hermes_constants.py",
+      "scope": "_get_platform_default_hermes_home",
+      "environment": "HERMES_DATA_DIR_SUFFIX",
+      "recommendation": "process_distribution_boundary_supported",
+      "caller_trace": "Platform default root is used by process-home fallback and default-install root resolution; active get_hermes_home first returns its ContextVar override. Suffix is a distribution/channel-level data-root discriminator. Named profile paths remain under that chosen root; changing suffix explicitly changes default process root, intentionally live.",
+      "compatibility_and_holds": "Explicit active profile home wins and is not replaced by the default suffix. Raw suffix is operator-controlled packaging input, not untrusted message data. get_default_hermes_root deliberately describes process/install assets rather than active request secrets. A caller that needs a served profile must use get_hermes_home or pass home; no violating call was established in this bounded trace.",
+      "receipt": "/tmp/hermes-hx002-boundary-tests.log:6 native Linux suffix tests passed, including separate interpreter chain, explicit profile and changed suffix. macOS/Windows counterparts remain native CI.",
+      "candidate_blob": "84d3384d64e02c0c8252653625aa0e1975b1e307",
+      "references": [
+        {
+          "path": "hermes_cli/profiles.py",
+          "blob": "3399685bab5fca83e7c62d61f6a489bc785c03b3"
+        },
+        {
+          "path": "tests/hermes_cli/test_data_dir_suffix.py",
+          "blob": "2dc270b919e3f80a89a478814a4db3be1b9c4f51"
+        }
+      ]
+    },
+    {
+      "path": "pm/environments.py",
+      "scope": "store_root",
+      "environment": "HERMES_RUNTIME_DIR",
+      "recommendation": "process_toolchain_boundary_supported",
+      "caller_trace": "Runtime store override is a process execution/toolchain choice, shared across profiles. PM path/runtime callers use it for runtime resolution. hermes_cli._launchers.resolve_store_python(publication=True) first resolves store_root(honor_runtime_override=False), binding recorded tree store before considering runtime fallback when tree records none.",
+      "compatibility_and_holds": "The explicit override is not a provider secret or per-profile home. Persistent launchers must not accidentally bind a foreign transient store; current caller implements that distinction and selected tests verify it. Source publication test only writes temporary fixture wrappers; no real install, service start or desktop launch was run.",
+      "receipt": "/tmp/hermes-hx002-store-boundary-tests.log:2 selected tests passed (tree store despite inherited override; runtime execution still honors override); runtime_entrypoints6 passed in boundary log.",
+      "candidate_blob": "7121c279e52159d7551ac65e0315899322276d9c",
+      "references": [
+        {
+          "path": "pm/paths.py",
+          "blob": "52d4f0a882d0b91c8ad3b40f9118725b3b3d612c"
+        },
+        {
+          "path": "hermes_cli/_launchers.py",
+          "blob": "61ca4d8ef779675d012d9436fe1d10a6ed837cb0"
+        },
+        {
+          "path": "tests/hermes_cli/test_source_launcher_publication.py",
+          "blob": "1d84a0556409bb53efc371ee841c17549816e9dc"
+        },
+        {
+          "path": "tests/pm/test_runtime_entrypoints.py",
+          "blob": "5de220bfd3be2ffa1b755671764769d056e80650"
+        }
+      ]
+    },
+    {
+      "path": "pm/paths.py",
+      "scope": "install_root",
+      "environment": "HERMES_INSTALL_ROOT",
+      "recommendation": "process_install_boundary_supported",
+      "caller_trace": "Install-stamp location for the executing package can be supplied by steward/Nix wrappers. install_stamp_path uses that override only when its requested project root resolves to the executing repo; other roots are taken literally. PM runtime resolves the package stamp rather than borrowing profile state.",
+      "compatibility_and_holds": "This is intentionally install-wide code identity, independent of active profile ContextVar. Tests safely model packaged Nix/Docker roots with isolated temporary trees and fail if packaged PM tries to download tools. No native Nix deployment is claimed; no cross-profile runtime secret lookup was identified.",
+      "receipt": "/tmp/hermes-hx002-boundary-tests.log:runtime_entrypoints6 passed, including executing-tree canonical stamp and explicit packaged Nix/Docker runtime selection without downloads.",
+      "candidate_blob": "52d4f0a882d0b91c8ad3b40f9118725b3b3d612c",
+      "references": [
+        {
+          "path": "pm/environments.py",
+          "blob": "7121c279e52159d7551ac65e0315899322276d9c"
+        },
+        {
+          "path": "pm/runtime.py",
+          "blob": "db3455efa0e21590ab94f447fa4883e98a36e039"
+        },
+        {
+          "path": "tests/pm/test_runtime_entrypoints.py",
+          "blob": "5de220bfd3be2ffa1b755671764769d056e80650"
+        }
+      ]
+    },
+    {
+      "path": "hermes_cli/plugin_host_child.py",
+      "scope": "main",
+      "environment": "HERMES_PLUGIN_HOST_LOG_LEVEL",
+      "recommendation": "isolated_child_logging_boundary_supported",
+      "caller_trace": "PluginHost.ensure_started creates a child process with PluginHost._env. That env is built in the owning profile context via served_profile_child_env(target_home=self._home, inherit_credentials=True), which scrubs launch credentials and overlays target secrets. Child main reads its own log-level env only at logging initialization, before serving callbacks.",
+      "compatibility_and_holds": "The log-level option is read once in an isolated child before callbacks. The parent builds its environment under the owning profile via served_profile_child_env. The actual seven-case host suite verifies out-of-process profile/session behavior and crash/restart; this finding covers the process-local logging option only, not every plugin failure path or native Desktop launch. Invalid logging configuration may reject startup.",
+      "receipt": "/tmp/hermes-hx002-plugin-host-final.log:7 tests passed after the separately reviewed process cleanup correction.",
+      "candidate_blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d",
+      "references": [
+        {
+          "path": "hermes_cli/plugin_host.py",
+          "blob": "b0cd37ee545e24e88af210996590960913b60938"
+        },
+        {
+          "path": "tools/environments/local.py",
+          "blob": "acf6042a6ac13d90da1513c7e6914b1b2a77aa14"
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_host.py",
+          "blob": "0cda2cbd7e1af167ea9300d2bcf50de23487c4ca"
+        }
+      ]
+    }
+  ],
+  "receipts": {
+    "/tmp/hermes-hx002-boundary-tests.log": {
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 4 test files (~36 tests) under ['tests/agent/test_kanban_turn_recovery.py', 'tests/gateway/test_session_kanban_turn_recovery.py', 'tests/hermes_cli/test_data_dir_suffix.py', 'tests/pm/test_runtime_entrypoints.py']; running with -j 4\n[ 13.9% |     5/~36 | \u27136 | \u27170] \u2713 tests/pm/test_runtime_entrypoints.py (6\u2713, 0.8s)\n[ 22.2% |     8/~36 | \u271312 | \u2717 0] \u2713 tests/hermes_cli/test_data_dir_suffix.py (6\u2713, 1.5s)\n[ 27.8% |    10/~36 | \u271314 | \u2717 0] \u2713 tests/gateway/test_session_kanban_turn_recovery.py (2\u2713, 1.7s)\n[100.0% |    36/~36 | \u271371 | \u2717 0] \u2713 tests/agent/test_kanban_turn_recovery.py (57\u2713, 6.1s)\n\n=== Summary: 4 files, 71 tests passed, 0 failed (100% complete) in 6.2s (4 workers) ===\n\n  note: platforms('macos') tests (in 1 file) were SKIPPED on this host (linux); they run on the macOS Python-tests lane.\n  note: platforms('windows') tests (in 1 file) were SKIPPED on this host (linux); they run on the Windows Python-tests lane.\n  Durations cached to test_durations.json (4 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   4\n  Total subprocess CPU-wall: 10.1s  (runner wall: 6.2s, parallelism: 4x)\n  P50: 1.68s  P90: 6.14s  P95: 6.14s  P99: 6.14s  Max: 6.14s\n  <1s: 1 files (25%)  <2s: 3 files (75%)\n  Top 10 slowest:\n      6.14s  tests/agent/test_kanban_turn_recovery.py\n      1.68s  tests/gateway/test_session_kanban_turn_recovery.py\n      1.49s  tests/hermes_cli/test_data_dir_suffix.py\n      0.76s  tests/pm/test_runtime_entrypoints.py\n",
+      "sha256": "6aedfba9da77de21a119953481a480efffbddb8686c3ae4ee51bfb05bbde2e2d"
+    },
+    "/tmp/hermes-hx002-launch-env-tests.log": {
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~56 tests) under ['tests/hermes_cli/test_gui_command.py']; running with -j 1\n[100.0% |    56/~56 | \u27131 | \u27170] \u2713 tests/hermes_cli/test_gui_command.py (1\u2713, 1.0s)\n\n=== Summary: 1 files, 1 tests passed, 0 failed (100% complete) in 1.0s (1 workers) ===\n\n  note: platforms('macos') tests (in 1 file) were SKIPPED on this host (linux); they run on the macOS Python-tests lane.\n  note: platforms('windows') tests (in 1 file) were SKIPPED on this host (linux); they run on the Windows Python-tests lane.\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 1.0s  (runner wall: 1.0s, parallelism: 1x)\n  P50: 1.00s  P90: 1.00s  P95: 1.00s  P99: 1.00s  Max: 1.00s\n  <1s: 1 files (100%)  <2s: 1 files (100%)\n  Top 10 slowest:\n      1.00s  tests/hermes_cli/test_gui_command.py\n",
+      "sha256": "a8437a62f94c624b99fb934dd86ef7c366f601b540ed62dbff485564e792bbd3"
+    },
+    "/tmp/hermes-hx002-correlation-tests.log": {
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~28 tests) under ['tests/hermes_cli/test_update_receipt.py']; running with -j 1\n[100.0% |    28/~28 | \u27134 | \u27170] \u2713 tests/hermes_cli/test_update_receipt.py (4\u2713, 5.9s)\n\n=== Summary: 1 files, 4 tests passed, 0 failed (100% complete) in 5.9s (1 workers) ===\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 5.9s  (runner wall: 5.9s, parallelism: 1x)\n  P50: 5.90s  P90: 5.90s  P95: 5.90s  P99: 5.90s  Max: 5.90s\n  <1s: 0 files (0%)  <2s: 0 files (0%)\n  Top 10 slowest:\n      5.90s  tests/hermes_cli/test_update_receipt.py\n",
+      "sha256": "aa868584f0f70a17112aafecab2c309d5c277ff58adbbb3e7a2d0043c1709da5"
+    },
+    "/tmp/hermes-hx002-store-boundary-tests.log": {
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~23 tests) under ['tests/hermes_cli/test_source_launcher_publication.py']; running with -j 1\n[100.0% |    23/~23 | \u27132 | \u27170] \u2713 tests/hermes_cli/test_source_launcher_publication.py (2\u2713, 1.1s)\n\n=== Summary: 1 files, 2 tests passed, 0 failed (100% complete) in 1.2s (1 workers) ===\n\n  note: platforms('windows') tests (in 1 file) were SKIPPED on this host (linux); they run on the Windows Python-tests lane.\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 1.1s  (runner wall: 1.2s, parallelism: 1x)\n  P50: 1.14s  P90: 1.14s  P95: 1.14s  P99: 1.14s  Max: 1.14s\n  <1s: 0 files (0%)  <2s: 1 files (100%)\n  Top 10 slowest:\n      1.14s  tests/hermes_cli/test_source_launcher_publication.py\n",
+      "sha256": "7add9ab4ee9f3fa5d8fa1c7ca4d2c2d2babb1127419245bbf1ce022d598d4014"
+    },
+    "/tmp/hermes-hx002-plugin-host-final.log": {
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~7 tests) under ['tests/hermes_cli/test_plugin_host.py']; running with -j 9\n[100.0% |     7/~7 | \u27137 | \u27170] \u2713 tests/hermes_cli/test_plugin_host.py (7\u2713, 5.4s)\n\n=== Summary: 1 files, 7 tests passed, 0 failed (100% complete) in 5.4s (9 workers) ===\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 5.4s  (runner wall: 5.4s, parallelism: 9x)\n  P50: 5.42s  P90: 5.42s  P95: 5.42s  P99: 5.42s  Max: 5.42s\n  <1s: 0 files (0%)  <2s: 0 files (0%)\n  Top 10 slowest:\n      5.42s  tests/hermes_cli/test_plugin_host.py\n",
+      "sha256": "1a095c69880d9b48452fdc8fdebbede2374fc75e76d3cdf3402ba54ecfffae75"
+    }
+  }
+}

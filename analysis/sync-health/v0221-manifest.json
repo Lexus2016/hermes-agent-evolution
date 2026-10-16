@@ -11164,6 +11164,356 @@
           "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
         }
       ]
+    },
+    {
+      "id": "environment-boundary-01",
+      "status": "reviewed",
+      "path": "agent/kanban_turn_recovery.py",
+      "scope": "max_recovery_attempts",
+      "rule": "HX002",
+      "detail": "new HERMES_* environment variable",
+      "code": "raw = (os.environ.get(\"HERMES_KANBAN_TURN_RECOVERY\") or \"\").strip()",
+      "candidate_blob": "eecea3149168f6f7a1a56b580d5fd05633138a7b",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/kanban_turn_recovery.py",
+        "scope": "max_recovery_attempts",
+        "blob": "eecea3149168f6f7a1a56b580d5fd05633138a7b"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact seven-case preparation",
+        "compatibility": "The canonical secret-scope contract explicitly classifies every HERMES_KANBAN_* name as global process/deployment configuration (agent/secret_scope.py:168\u2013211), even under multiplex. The prefix existed in the original scope isolation commit f538470cf4afddb9ae6cc476c4f71b671f5a8420. Original bounded-recovery commit5fd24f47fd925db1de81095ba928d21dc2bca367 introduced the env budget for one-shot worker processes; owner-path commitcd8425c8763ddd0839be728fc7694afecd4a8b93 explicitly reuses it while moving only task/DB/run/claim proof to the bound frame. No documented per-profile recovery budget/config field was found. Thus a scoped secret value is intentionally not a per-profile override for this process knob. Bounded0\u201310 and typed/live-claim/cancellation/billing gates remain separate authority checks. Prior speculation about a supported per-profile disable is withdrawn, not treated as a proven bug.",
+        "module_bindings": "Not exclusively bootstrap: kanban_turn_recovery_enabled/should_recover_turn/recover_failed_kanban_turns call this during live turns, including gateway.session_kanban._run_task_turns. That caller passes frame task_id and exact live-claim checker, but no budget carrier. The raw process environment still decides retry count for every served task.",
+        "receipt": "/tmp/hermes-hx002-boundary-tests.log:57 recovery tests+2 owner-frame tests passed. No A\u2192B budget isolation case exists in this receipt. Independent source review on 2026-10-15; generated identities require separate verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-environment-boundary-review.json",
+          "blob": "2f93980305edbd981c4daa1ab4b8c4462d860aee",
+          "outcome": "passed",
+          "claim": "Independent process-boundary source review and exact named canonical receipts; native-host and unrelated behavior limits remain explicit."
+        },
+        {
+          "path": "gateway/session_kanban.py",
+          "blob": "826883f9a89565302dcabc41cb149e8fd94d45da",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "agent/kanban_turn_recovery.py",
+          "blob": "eecea3149168f6f7a1a56b580d5fd05633138a7b",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "tests/agent/test_kanban_turn_recovery.py",
+          "blob": "ee77480812a0383a0e8273366bfcb8385829f2e3",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "tests/gateway/test_session_kanban_turn_recovery.py",
+          "blob": "43a81de2f2bb964aff9298b2a9728ed737f8a1d9",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "agent/secret_scope.py",
+          "blob": "dfe185a28820a0116fce4050fd8d815c29e65aa3",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        }
+      ]
+    },
+    {
+      "id": "environment-boundary-02",
+      "status": "reviewed",
+      "path": "hermes_cli/main_desktop.py",
+      "scope": "_desktop_launch_env",
+      "rule": "HX002",
+      "detail": "new HERMES_* environment variable",
+      "code": "if not config_renderer_a11y and \"HERMES_DESKTOP_RENDERER_ACCESSIBILITY\" not in os.environ:",
+      "candidate_blob": "2326a395b901e8cea1391a71458105235ef69a46",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/main_desktop.py",
+        "scope": "_desktop_launch_env",
+        "blob": "2326a395b901e8cea1391a71458105235ef69a46"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact seven-case preparation",
+        "compatibility": "This changes child renderer accessibility behavior, not provider credentials, session identity or authorization. Scope is the launched desktop process. No per-turn caller was found. Actual GUI/native accessibility behavior still needs native UI CI, but env precedence itself is directly tested without launching Electron.",
+        "module_bindings": "hermes_cli.main registers cmd_gui; cmd_gui computes Electron child environment once before bundled/source/package launch. Explicit accessibility env overrides desktop.renderer_accessibility config by documented launcher precedence. The changed dict is copied by with_hermes_node_path; it is not a mutation of a multiplex request environment.",
+        "receipt": "/tmp/hermes-hx002-launch-env-tests.log:1 selected actual helper precedence test passed; no desktop launch. Independent source review on 2026-10-15; generated identities require separate verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-environment-boundary-review.json",
+          "blob": "2f93980305edbd981c4daa1ab4b8c4462d860aee",
+          "outcome": "passed",
+          "claim": "Independent process-boundary source review and exact named canonical receipts; native-host and unrelated behavior limits remain explicit."
+        },
+        {
+          "path": "hermes_cli/main.py",
+          "blob": "e151651aeb15579dcda01fc9228d3a766f18046f",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "hermes_constants.py",
+          "blob": "84d3384d64e02c0c8252653625aa0e1975b1e307",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "tests/hermes_cli/test_gui_command.py",
+          "blob": "b62a8d385949e8788a00f2e7acc71563dd543b8e",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        }
+      ]
+    },
+    {
+      "id": "environment-boundary-03",
+      "status": "reviewed",
+      "path": "hermes_cli/update_receipt.py",
+      "scope": "_launcher_correlation_id",
+      "rule": "HX002",
+      "detail": "new HERMES_* environment variable",
+      "code": "return os.environ.get(\"HERMES_UPDATE_CORRELATION_ID\", \"\").strip() or None",
+      "candidate_blob": "3166b2fc86735ed0f0ed4b730c5cd9559fe0b7a6",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/update_receipt.py",
+        "scope": "_launcher_correlation_id",
+        "blob": "3166b2fc86735ed0f0ed4b730c5cd9559fe0b7a6"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact seven-case preparation",
+        "compatibility": "This is attribution for a dedicated update process, not an active-profile credential lookup. Handoff preserves the original ID when the new interpreter lacks the env. A supplied correlation ID is not by itself authorization to run an update. Full remote/native launcher remains hosted, while the receipt contract is directly covered.",
+        "module_bindings": "UpdateReceipt.__init__ and handoff receipt reconstruction read a launcher-provided correlation identifier. Desktop managed-SSH update explicitly exports it for POSIX/Windows commands and requires matching receipt. Internal update_id remains separately generated and is used for PM receipt correlation.",
+        "receipt": "/tmp/hermes-hx002-correlation-tests.log:4 TestLauncherCorrelation tests passed, including handoff and unset ID. Independent source review on 2026-10-15; generated identities require separate verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-environment-boundary-review.json",
+          "blob": "2f93980305edbd981c4daa1ab4b8c4462d860aee",
+          "outcome": "passed",
+          "claim": "Independent process-boundary source review and exact named canonical receipts; native-host and unrelated behavior limits remain explicit."
+        },
+        {
+          "path": "apps/desktop/electron/managed-ssh-update.ts",
+          "blob": "29217f08d05e2a1429ee05047bb0c43f780db059",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "tests/hermes_cli/test_update_receipt.py",
+          "blob": "f2bfbc90e84de0c08a46ac001d61bca4c75d571d",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        }
+      ]
+    },
+    {
+      "id": "environment-boundary-04",
+      "status": "reviewed",
+      "path": "hermes_constants.py",
+      "scope": "_get_platform_default_hermes_home",
+      "rule": "HX002",
+      "detail": "new HERMES_* environment variable",
+      "code": "suffix = os.environ.get(\"HERMES_DATA_DIR_SUFFIX\", \"\")",
+      "candidate_blob": "84d3384d64e02c0c8252653625aa0e1975b1e307",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_constants.py",
+        "scope": "_get_platform_default_hermes_home",
+        "blob": "dc3dfd1599f733e04bb6f5d6b763fbcd88881dd3",
+        "unit_body_hash": "2cca5eddfb1873a9"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact seven-case preparation",
+        "compatibility": "Explicit active profile home wins and is not replaced by the default suffix. Raw suffix is operator-controlled packaging input, not untrusted message data. get_default_hermes_root deliberately describes process/install assets rather than active request secrets. A caller that needs a served profile must use get_hermes_home or pass home; no violating call was established in this bounded trace.",
+        "module_bindings": "Platform default root is used by process-home fallback and default-install root resolution; active get_hermes_home first returns its ContextVar override. Suffix is a distribution/channel-level data-root discriminator. Named profile paths remain under that chosen root; changing suffix explicitly changes default process root, intentionally live.",
+        "receipt": "/tmp/hermes-hx002-boundary-tests.log:6 native Linux suffix tests passed, including separate interpreter chain, explicit profile and changed suffix. macOS/Windows counterparts remain native CI. Independent source review on 2026-10-15; generated identities require separate verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-environment-boundary-review.json",
+          "blob": "2f93980305edbd981c4daa1ab4b8c4462d860aee",
+          "outcome": "passed",
+          "claim": "Independent process-boundary source review and exact named canonical receipts; native-host and unrelated behavior limits remain explicit."
+        },
+        {
+          "path": "hermes_cli/profiles.py",
+          "blob": "3399685bab5fca83e7c62d61f6a489bc785c03b3",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "tests/hermes_cli/test_data_dir_suffix.py",
+          "blob": "2dc270b919e3f80a89a478814a4db3be1b9c4f51",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        }
+      ]
+    },
+    {
+      "id": "environment-boundary-05",
+      "status": "reviewed",
+      "path": "pm/environments.py",
+      "scope": "store_root",
+      "rule": "HX002",
+      "detail": "new HERMES_* environment variable",
+      "code": "override = os.environ.get(\"HERMES_RUNTIME_DIR\")",
+      "candidate_blob": "7121c279e52159d7551ac65e0315899322276d9c",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "pm/environments.py",
+        "scope": "store_root",
+        "blob": "7121c279e52159d7551ac65e0315899322276d9c"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact seven-case preparation",
+        "compatibility": "The explicit override is not a provider secret or per-profile home. Persistent launchers must not accidentally bind a foreign transient store; current caller implements that distinction and selected tests verify it. Source publication test only writes temporary fixture wrappers; no real install, service start or desktop launch was run.",
+        "module_bindings": "Runtime store override is a process execution/toolchain choice, shared across profiles. PM path/runtime callers use it for runtime resolution. hermes_cli._launchers.resolve_store_python(publication=True) first resolves store_root(honor_runtime_override=False), binding recorded tree store before considering runtime fallback when tree records none.",
+        "receipt": "/tmp/hermes-hx002-store-boundary-tests.log:2 selected tests passed (tree store despite inherited override; runtime execution still honors override); runtime_entrypoints6 passed in boundary log. Independent source review on 2026-10-15; generated identities require separate verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-environment-boundary-review.json",
+          "blob": "2f93980305edbd981c4daa1ab4b8c4462d860aee",
+          "outcome": "passed",
+          "claim": "Independent process-boundary source review and exact named canonical receipts; native-host and unrelated behavior limits remain explicit."
+        },
+        {
+          "path": "pm/paths.py",
+          "blob": "52d4f0a882d0b91c8ad3b40f9118725b3b3d612c",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "hermes_cli/_launchers.py",
+          "blob": "61ca4d8ef779675d012d9436fe1d10a6ed837cb0",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "tests/hermes_cli/test_source_launcher_publication.py",
+          "blob": "1d84a0556409bb53efc371ee841c17549816e9dc",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "tests/pm/test_runtime_entrypoints.py",
+          "blob": "5de220bfd3be2ffa1b755671764769d056e80650",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        }
+      ]
+    },
+    {
+      "id": "environment-boundary-06",
+      "status": "reviewed",
+      "path": "pm/paths.py",
+      "scope": "install_root",
+      "rule": "HX002",
+      "detail": "new HERMES_* environment variable",
+      "code": "env = os.environ.get(\"HERMES_INSTALL_ROOT\")",
+      "candidate_blob": "52d4f0a882d0b91c8ad3b40f9118725b3b3d612c",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "pm/paths.py",
+        "scope": "install_root",
+        "blob": "52d4f0a882d0b91c8ad3b40f9118725b3b3d612c"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact seven-case preparation",
+        "compatibility": "This is intentionally install-wide code identity, independent of active profile ContextVar. Tests safely model packaged Nix/Docker roots with isolated temporary trees and fail if packaged PM tries to download tools. No native Nix deployment is claimed; no cross-profile runtime secret lookup was identified.",
+        "module_bindings": "Install-stamp location for the executing package can be supplied by steward/Nix wrappers. install_stamp_path uses that override only when its requested project root resolves to the executing repo; other roots are taken literally. PM runtime resolves the package stamp rather than borrowing profile state.",
+        "receipt": "/tmp/hermes-hx002-boundary-tests.log:runtime_entrypoints6 passed, including executing-tree canonical stamp and explicit packaged Nix/Docker runtime selection without downloads. Independent source review on 2026-10-15; generated identities require separate verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-environment-boundary-review.json",
+          "blob": "2f93980305edbd981c4daa1ab4b8c4462d860aee",
+          "outcome": "passed",
+          "claim": "Independent process-boundary source review and exact named canonical receipts; native-host and unrelated behavior limits remain explicit."
+        },
+        {
+          "path": "pm/environments.py",
+          "blob": "7121c279e52159d7551ac65e0315899322276d9c",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "pm/runtime.py",
+          "blob": "db3455efa0e21590ab94f447fa4883e98a36e039",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "tests/pm/test_runtime_entrypoints.py",
+          "blob": "5de220bfd3be2ffa1b755671764769d056e80650",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        }
+      ]
+    },
+    {
+      "id": "environment-boundary-07",
+      "status": "reviewed",
+      "path": "hermes_cli/plugin_host_child.py",
+      "scope": "main",
+      "rule": "HX002",
+      "detail": "new HERMES_* environment variable",
+      "code": "logging.basicConfig(stream=sys.stderr, level=os.environ.get(\"HERMES_PLUGIN_HOST_LOG_LEVEL\", \"WARNING\"),",
+      "candidate_blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugin_host_child.py",
+        "scope": "main",
+        "blob": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact seven-case preparation",
+        "compatibility": "The log-level option is read once in an isolated child before callbacks. The parent builds its environment under the owning profile via served_profile_child_env. The actual seven-case host suite verifies out-of-process profile/session behavior and crash/restart; this finding covers the process-local logging option only, not every plugin failure path or native Desktop launch. Invalid logging configuration may reject startup.",
+        "module_bindings": "PluginHost.ensure_started creates a child process with PluginHost._env. That env is built in the owning profile context via served_profile_child_env(target_home=self._home, inherit_credentials=True), which scrubs launch credentials and overlays target secrets. Child main reads its own log-level env only at logging initialization, before serving callbacks.",
+        "receipt": "/tmp/hermes-hx002-plugin-host-final.log:7 tests passed after the separately reviewed process cleanup correction. Independent source review on 2026-10-15; generated identities require separate verification."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-environment-boundary-review.json",
+          "blob": "2f93980305edbd981c4daa1ab4b8c4462d860aee",
+          "outcome": "passed",
+          "claim": "Independent process-boundary source review and exact named canonical receipts; native-host and unrelated behavior limits remain explicit."
+        },
+        {
+          "path": "hermes_cli/plugin_host.py",
+          "blob": "b0cd37ee545e24e88af210996590960913b60938",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "tools/environments/local.py",
+          "blob": "acf6042a6ac13d90da1513c7e6914b1b2a77aa14",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_host.py",
+          "blob": "0cda2cbd7e1af167ea9300d2bcf50de23487c4ca",
+          "outcome": "passed",
+          "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
+        }
+      ]
     }
   ]
 }
