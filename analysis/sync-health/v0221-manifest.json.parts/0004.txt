@@ -1,3 +1,11 @@
+          "path": "apps/desktop/electron/linux-gpu-fallback.ts",
+          "blob": "101c66bccdf231050d2fb4ffc391f8e1fc58d0b3",
+          "outcome": "passed",
+          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
+        },
+        {
+          "path": "apps/desktop/electron/windows-stack-cookie-fallback.ts",
+          "blob": "7df2ab0c177a8e6cb0551a858de6ecb791087a90",
           "outcome": "passed",
           "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
         }

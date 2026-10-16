@@ -1,0 +1,24 @@
+{
+  "scope": "Existing environment-boundary-02 dependency refresh after one retained fork lazy-facade name restoration. No new occurrence, budget or desktop behavior.",
+  "checkpoint": "abe2c4018aded1bd38184b1a7942ec59eeede117",
+  "old_dependency_blob": "664ed86e6293e185387c543eed0c3f1cd3a64cda",
+  "new_dependency_blob": "d67a009e3baefce43ff6f638c56a19974b478fde",
+  "proof": "Python3.14 full main.py AST equality after removing only the one _warn_pending_fleet_restart_on_startup Constant from _FROZEN_UPDATER_SURFACE. GUI imports, parser registration and caller context are identical.",
+  "old_full_ast_sha256": "de53f65d3a54b3bfd577b5a9e82c0efc29b9f334c6909bc33ca9d9caad899b35",
+  "candidate_unchanged": "2326a395b901e8cea1391a71458105235ef69a46",
+  "limits": "Synthetic lazy identity/forwarding plus actual accessibility precedence only. Existing real-warning output test remains unchanged and was not executed locally. No startup/restart/ownership or native GUI claim.",
+  "receipts": [
+    {
+      "name": "hermes-env02-warning-refresh-tests.log",
+      "location": "temporary directory; original output embedded",
+      "sha256": "4ef8257a11a642f9800e044991eea9bc390cb63c8ba45058d43b1d815ca9619e",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~56 tests) under ['tests/hermes_cli/test_gui_command.py']; running with -j 9\n[100.0% |    56/~56 | \u27131 | \u27170] \u2713 tests/hermes_cli/test_gui_command.py (1\u2713, 1.0s)\n\n=== Summary: 1 files, 1 tests passed, 0 failed (100% complete) in 1.0s (9 workers) ===\n\n  note: platforms('macos') tests (in 1 file) were SKIPPED on this host (linux); they run on the macOS Python-tests lane.\n  note: platforms('windows') tests (in 1 file) were SKIPPED on this host (linux); they run on the Windows Python-tests lane.\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 1.0s  (runner wall: 1.0s, parallelism: 9x)\n  P50: 0.99s  P90: 0.99s  P95: 0.99s  P99: 0.99s  Max: 0.99s\n  <1s: 1 files (100%)  <2s: 1 files (100%)\n  Top 10 slowest:\n      0.99s  tests/hermes_cli/test_gui_command.py\n"
+    },
+    {
+      "name": "hermes-startup-warning-seam-final.log",
+      "location": "temporary directory; original output embedded",
+      "sha256": "312634490b035c7b1e5aa6608b42d1bb4c9c9baf79605fe2e841f1c5a9ac7b61",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~1 tests) under ['tests/hermes_cli/test_main_startup_warning_export.py']; running with -j 9\n[100.0% |     1/~1 | \u27131 | \u27170] \u2713 tests/hermes_cli/test_main_startup_warning_export.py (1\u2713, 0.9s)\n\n=== Summary: 1 files, 1 tests passed, 0 failed (100% complete) in 1.0s (9 workers) ===\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 0.9s  (runner wall: 1.0s, parallelism: 9x)\n  P50: 0.94s  P90: 0.94s  P95: 0.94s  P99: 0.94s  Max: 0.94s\n  <1s: 1 files (100%)  <2s: 1 files (100%)\n  Top 10 slowest:\n      0.94s  tests/hermes_cli/test_main_startup_warning_export.py\n"
+    }
+  ]
+}

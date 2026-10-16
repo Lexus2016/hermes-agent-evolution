@@ -2158,7 +2158,7 @@
         },
         {
           "path": "hermes_cli/main.py",
-          "blob": "664ed86e6293e185387c543eed0c3f1cd3a64cda",
+          "blob": "d67a009e3baefce43ff6f638c56a19974b478fde",
           "outcome": "passed",
           "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
         },
@@ -2179,6 +2179,12 @@
           "blob": "827b0452b57c990361b84bace13fe473a31a9864",
           "outcome": "passed",
           "claim": "Unchanged full GUI caller/import/registration AST context after sole unrelated CLI decoding kwargs change; actual accessibility precedence test passed without Electron launch."
+        },
+        {
+          "path": "analysis/sync-health/v0221-env02-warning-seam-dependency-refresh.json",
+          "blob": "688394d0ada758fa206f5db5508d3e140bfbf303",
+          "outcome": "passed",
+          "claim": "Unchanged full desktop import/registration/caller AST context after one unrelated retained lazy export; fresh accessibility precedence and synthetic export tests, with runtime/native exclusions."
         }
       ]
     },
@@ -4330,11 +4336,3 @@
           "claim": "Independent complete function/binding organization review for this exact structural metric only; behavioral exclusions retained."
         },
         {
-          "path": "apps/desktop/electron/linux-gpu-fallback.ts",
-          "blob": "101c66bccdf231050d2fb4ffc391f8e1fc58d0b3",
-          "outcome": "passed",
-          "claim": "Exact surrounding binding source inspected for structural compatibility; runtime/privacy/authority not independently certified."
-        },
-        {
-          "path": "apps/desktop/electron/windows-stack-cookie-fallback.ts",
-          "blob": "7df2ab0c177a8e6cb0551a858de6ecb791087a90",
