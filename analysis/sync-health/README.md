@@ -14,8 +14,11 @@ fails closed. There is no runtime override. The health CI checkout fetches full
 history. Once upstream is already an ancestor of the comparison base, this adapter
 is dormant and the ordinary ratchet applies with unchanged thresholds.
 
-The initial manifest has no accepted entries. All findings remain blocking until
-individually supported and reviewed. Owner authorization permits recording only
+The initial mechanism checkpoint has an empty manifest. The separately reviewed
+activation accepts only 222 demonstrated nonfunctional F811 occurrences and the
+exact context-compressor test-module size backed by 302 passing tests. The manifest
+is the separate accepted-debt report; it never rewrites the raw receipt. All other
+findings remain blocking until individually supported and reviewed. Owner authorization permits recording only
 inherited findings that do not impair fork functionality or security. Unknown
 behavior, real defects and integration growth cannot be accepted as inherited debt.
 

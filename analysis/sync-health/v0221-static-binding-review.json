@@ -1,0 +1,3581 @@
+{
+  "review_scope": "Direct source and binding review only; no underlying feature execution claim.",
+  "source_commit": "297552a9d646119871391d202509822cd86330df",
+  "findings": [
+    {
+      "path": "hermes_cli/codex_models.py",
+      "rule": "F811",
+      "scope": "_read_default_model",
+      "line": 193,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "tomllib",
+      "diagnostic": "Redefinition of unused `tomllib` from line 192: `tomllib` redefined here"
+    },
+    {
+      "path": "hermes_cli/gateway_launchd.py",
+      "rule": "F811",
+      "scope": "generate_launchd_plist",
+      "line": 354,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "escape",
+      "diagnostic": "Redefinition of unused `escape` from line 17: `escape` redefined here"
+    },
+    {
+      "path": "hermes_cli/web_server_chat.py",
+      "rule": "F811",
+      "scope": "<module>",
+      "line": 21,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "Optional",
+      "diagnostic": "Redefinition of unused `Optional` from line 17: `Optional` redefined here"
+    },
+    {
+      "path": "tests/agent/test_probe_cache_followups.py",
+      "rule": "F811",
+      "scope": "TestLocalhostIPv4SiblingSites.test_endpoint_and_props_followup_use_ipv4",
+      "line": 162,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "metadata_transport",
+      "fixture_source": "tests/agent/metadata_transport.py",
+      "fixture_symbol": "metadata_transport"
+    },
+    {
+      "path": "tests/agent/test_stream_serving_provider.py",
+      "rule": "F811",
+      "scope": "test_mid_stream_drop_retry_line_names_the_serving_provider",
+      "line": 41,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "agent",
+      "fixture_source": "tests/agent/test_first_chunk_at_hook.py",
+      "fixture_symbol": "agent"
+    },
+    {
+      "path": "tests/agent/test_stream_serving_provider.py",
+      "rule": "F811",
+      "scope": "TestServingProviderReachesPostApiRequest.test_streamed_attempt_reports_the_serving_provider",
+      "line": 71,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "agent",
+      "fixture_source": "tests/agent/test_first_chunk_at_hook.py",
+      "fixture_symbol": "agent"
+    },
+    {
+      "path": "tests/agent/transports/test_codex_app_server_runtime.py",
+      "rule": "F811",
+      "scope": "TestCodexAppServerClose.test_close_reaps_independent_descendant_process_group",
+      "line": 115,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "sys",
+      "diagnostic": "Redefinition of unused `sys` from line 10: `sys` redefined here"
+    },
+    {
+      "path": "tests/ci/test_channel_build_publication.py",
+      "rule": "F811",
+      "scope": "staged_channel",
+      "line": 40,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_channel_build_publication.py",
+      "rule": "F811",
+      "scope": "test_channel_handoff_binds_full_request_and_feed_bytes",
+      "line": 97,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_channel_build_publication.py",
+      "rule": "F811",
+      "scope": "test_scoped_receiver_publication_preserves_existing_head_and_requires_smoke",
+      "line": 145,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_channel_build_publication.py",
+      "rule": "F811",
+      "scope": "run_shell",
+      "line": 175,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_channel_build_publication.py",
+      "rule": "F811",
+      "scope": "test_real_workflow_admission_and_public_smoke_fetch",
+      "line": 206,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_channel_build_publication.py",
+      "rule": "F811",
+      "scope": "test_workflow_promotion_missing_native_gate_does_not_write",
+      "line": 250,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_channel_build_publication.py",
+      "rule": "F811",
+      "scope": "test_real_publication_cas_and_manifest_summary",
+      "line": 265,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_channel_build_publication.py",
+      "rule": "F811",
+      "scope": "test_channel_windows_record_stage_and_assembly_handoff_shell",
+      "line": 343,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_commit_build_staging.py",
+      "rule": "F811",
+      "scope": "shell_step",
+      "line": 29,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_commit_build_staging.py",
+      "rule": "F811",
+      "scope": "test_failed_commit_summary_publishes_downloads_or_run_links",
+      "line": 66,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_commit_build_staging.py",
+      "rule": "F811",
+      "scope": "test_commit_staging_and_summary_bind_every_produced_file_without_channels",
+      "line": 126,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_desktop_bundle_smoke.py",
+      "rule": "F811",
+      "scope": "test_public_smoke_fetches_the_receipt_bound_native_format",
+      "line": 61,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_desktop_bundle_smoke.py",
+      "rule": "F811",
+      "scope": "test_download_faults_never_export_an_accepted_artifact",
+      "line": 98,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_desktop_bundle_smoke.py",
+      "rule": "F811",
+      "scope": "test_stable_phase_result_requires_smoke_but_preserves_other_phases",
+      "line": 121,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_desktop_bundle_smoke.py",
+      "rule": "F811",
+      "scope": "test_canary_publisher_consumes_staged_bytes_and_writes_pointer_last",
+      "line": 185,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_protected_canary_publication.py",
+      "rule": "F811",
+      "scope": "canary",
+      "line": 51,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_protected_canary_publication.py",
+      "rule": "F811",
+      "scope": "test_canary_metadata_is_recorded_and_receipt_bound",
+      "line": 150,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_protected_canary_publication.py",
+      "rule": "F811",
+      "scope": "test_published_canary_workflow_advances_only_after_every_gate",
+      "line": 197,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/ci/test_tag_builds_summary.py",
+      "rule": "F811",
+      "scope": "test_admitted_failure_publishes_tag_info_without_promoting_channel",
+      "line": 19,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/gateway/test_relay_source_platform_metrics.py",
+      "rule": "F811",
+      "scope": "test_multiplatform_relay_replies_are_labelled_by_the_inbound_platform",
+      "line": 29,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "rows",
+      "fixture_source": "tests/gateway/test_platform_shared_metrics.py",
+      "fixture_symbol": "rows"
+    },
+    {
+      "path": "tests/gateway/test_relay_source_platform_metrics.py",
+      "rule": "F811",
+      "scope": "test_single_platform_relay_inbound_is_labelled_by_the_connector_platform",
+      "line": 46,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "rows",
+      "fixture_source": "tests/gateway/test_platform_shared_metrics.py",
+      "fixture_symbol": "rows"
+    },
+    {
+      "path": "tests/gateway/test_relay_source_platform_metrics.py",
+      "rule": "F811",
+      "scope": "test_an_unresolvable_relay_chat_keeps_the_relay_label",
+      "line": 57,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "rows",
+      "fixture_source": "tests/gateway/test_platform_shared_metrics.py",
+      "fixture_symbol": "rows"
+    },
+    {
+      "path": "tests/gateway/test_relay_source_platform_metrics.py",
+      "rule": "F811",
+      "scope": "test_an_unstamped_chat_on_a_multiplatform_connector_is_not_labelled_as_its_primary",
+      "line": 70,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "rows",
+      "fixture_source": "tests/gateway/test_platform_shared_metrics.py",
+      "fixture_symbol": "rows"
+    },
+    {
+      "path": "tests/gateway/test_slack_reply_expected.py",
+      "rule": "F811",
+      "scope": "test_admitted_message_carries_whether_it_was_addressed",
+      "line": 36,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "adapter",
+      "fixture_source": "tests/gateway/test_slack_ignore_other_user_mentions.py",
+      "fixture_symbol": "adapter"
+    },
+    {
+      "path": "tests/hermes_cli/test_cmd_uninstall.py",
+      "rule": "F811",
+      "scope": "test_data_entrypoints_preserve_runtime",
+      "line": 13,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "layout",
+      "fixture_source": "tests/hermes_cli/test_data_uninstall.py",
+      "fixture_symbol": "layout"
+    },
+    {
+      "path": "tests/hermes_cli/test_cmd_uninstall.py",
+      "rule": "F811",
+      "scope": "test_module_subprocess_removes_only_the_disposable_home",
+      "line": 42,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "layout",
+      "fixture_source": "tests/hermes_cli/test_data_uninstall.py",
+      "fixture_symbol": "layout"
+    },
+    {
+      "path": "tests/hermes_cli/test_cmd_uninstall.py",
+      "rule": "F811",
+      "scope": "test_module_uses_the_desktop_instances_explicit_data_path",
+      "line": 68,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "layout",
+      "fixture_source": "tests/hermes_cli/test_data_uninstall.py",
+      "fixture_symbol": "layout"
+    },
+    {
+      "path": "tests/hermes_cli/test_cmd_update.py",
+      "rule": "F811",
+      "scope": "TestGitTrampolineSelfHeal.test_healthy_git_command_unchanged",
+      "line": 46,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "update_cmd",
+      "diagnostic": "Redefinition of unused `update_cmd` from line 8: `update_cmd` redefined here"
+    },
+    {
+      "path": "tests/hermes_cli/test_cmd_update.py",
+      "rule": "F811",
+      "scope": "TestGitTrampolineSelfHeal.test_trampoline_swaps_to_real_git",
+      "line": 64,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "update_cmd",
+      "diagnostic": "Redefinition of unused `update_cmd` from line 8: `update_cmd` redefined here"
+    },
+    {
+      "path": "tests/hermes_cli/test_cmd_update.py",
+      "rule": "F811",
+      "scope": "TestGitTrampolineSelfHeal.test_trampoline_no_real_git_keeps_command",
+      "line": 84,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "update_cmd",
+      "diagnostic": "Redefinition of unused `update_cmd` from line 8: `update_cmd` redefined here"
+    },
+    {
+      "path": "tests/hermes_cli/test_cmd_update.py",
+      "rule": "F811",
+      "scope": "TestGitTrampolineSelfHeal.test_off_windows_noop",
+      "line": 101,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "update_cmd",
+      "diagnostic": "Redefinition of unused `update_cmd` from line 8: `update_cmd` redefined here"
+    },
+    {
+      "path": "tests/hermes_cli/test_data_uninstall_holders.py",
+      "rule": "F811",
+      "scope": "test_unconfirmed_removal_never_contacts_the_gateway",
+      "line": 13,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "layout",
+      "fixture_source": "tests/hermes_cli/test_data_uninstall.py",
+      "fixture_symbol": "layout"
+    },
+    {
+      "path": "tests/hermes_cli/test_data_uninstall_holders.py",
+      "rule": "F811",
+      "scope": "test_live_chat_lease_blocks_data_deletion",
+      "line": 34,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "layout",
+      "fixture_source": "tests/hermes_cli/test_data_uninstall.py",
+      "fixture_symbol": "layout"
+    },
+    {
+      "path": "tests/hermes_cli/test_data_uninstall_holders.py",
+      "rule": "F811",
+      "scope": "test_manual_gateway_drains_over_real_control_transport_before_deletion",
+      "line": 51,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "layout",
+      "fixture_source": "tests/hermes_cli/test_data_uninstall.py",
+      "fixture_symbol": "layout"
+    },
+    {
+      "path": "tests/hermes_cli/test_data_uninstall_holders.py",
+      "rule": "F811",
+      "scope": "test_backend_initial_profile_is_not_its_write_scope",
+      "line": 109,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "layout",
+      "fixture_source": "tests/hermes_cli/test_data_uninstall.py",
+      "fixture_symbol": "layout"
+    },
+    {
+      "path": "tests/hermes_cli/test_data_uninstall_holders.py",
+      "rule": "F811",
+      "scope": "test_detached_cron_attempt_must_finish_before_data_removal",
+      "line": 120,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "layout",
+      "fixture_source": "tests/hermes_cli/test_data_uninstall.py",
+      "fixture_symbol": "layout"
+    },
+    {
+      "path": "tests/hermes_cli/test_data_uninstall_holders.py",
+      "rule": "F811",
+      "scope": "test_named_profile_cannot_delete_data_served_by_the_default_multiplexer",
+      "line": 136,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "layout",
+      "fixture_source": "tests/hermes_cli/test_data_uninstall.py",
+      "fixture_symbol": "layout"
+    },
+    {
+      "path": "tests/hermes_cli/test_data_uninstall_holders.py",
+      "rule": "F811",
+      "scope": "test_data_removal_respects_the_checkpoint_store_owner",
+      "line": 158,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "layout",
+      "fixture_source": "tests/hermes_cli/test_data_uninstall.py",
+      "fixture_symbol": "layout"
+    },
+    {
+      "path": "tests/hermes_cli/test_desktop_source_build.py",
+      "rule": "F811",
+      "scope": "desktop_source",
+      "line": 12,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "source_products",
+      "fixture_source": "tests/hermes_cli/test_source_build.py",
+      "fixture_symbol": "source_products"
+    },
+    {
+      "path": "tests/hermes_cli/test_local_component_jobs.py",
+      "rule": "F811",
+      "scope": "test_component_job_pause_retains_pin_and_stops_sequence",
+      "line": 24,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/hermes_cli/test_local_download_jobs.py",
+      "fixture_symbol": "client"
+    },
+    {
+      "path": "tests/hermes_cli/test_local_component_jobs.py",
+      "rule": "F811",
+      "scope": "test_component_job_pause_retains_pin_and_stops_sequence",
+      "line": 24,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/hermes_cli/test_local_download_jobs.py",
+      "rule": "F811",
+      "scope": "test_browsed_download_can_pause_and_resume_pm_transfer",
+      "line": 61,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/hermes_cli/test_local_download_jobs.py",
+      "rule": "F811",
+      "scope": "test_quickstart_plan_progress_uses_actual_whole_plan_bytes",
+      "line": 105,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/hermes_cli/test_local_download_jobs.py",
+      "rule": "F811",
+      "scope": "test_existing_weights_do_not_skip_missing_companion_download",
+      "line": 118,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/hermes_cli/test_local_job_registry.py",
+      "rule": "F811",
+      "scope": "test_jobs_keep_every_active_download_ahead_of_bounded_history",
+      "line": 13,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/hermes_cli/test_local_download_jobs.py",
+      "fixture_symbol": "client"
+    },
+    {
+      "path": "tests/hermes_cli/test_local_job_registry.py",
+      "rule": "F811",
+      "scope": "test_pause_request_prevents_transition_into_activation",
+      "line": 27,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/hermes_cli/test_local_download_jobs.py",
+      "fixture_symbol": "client"
+    },
+    {
+      "path": "tests/hermes_cli/test_local_models_routes.py",
+      "rule": "F811",
+      "scope": "_serve_plan",
+      "line": 530,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/hermes_cli/test_local_models_routes.py",
+      "rule": "F811",
+      "scope": "test_download_resume_completes_bytes",
+      "line": 588,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/hermes_cli/test_local_models_routes.py",
+      "rule": "F811",
+      "scope": "test_repeated_resume_never_spawns_concurrent_writers",
+      "line": 623,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/hermes_cli/test_local_models_routes.py",
+      "rule": "F811",
+      "scope": "test_quickstart_pause_stops_the_sequence",
+      "line": 673,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/hermes_cli/test_plugin_dependency_consent.py",
+      "rule": "F811",
+      "scope": "test_install_only_requests_relevant_python_consent",
+      "line": 14,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "admission_env",
+      "fixture_source": "tests/pm/test_plugin_survival_contract.py",
+      "fixture_symbol": "admission_env"
+    },
+    {
+      "path": "tests/hermes_cli/test_plugin_dependency_consent.py",
+      "rule": "F811",
+      "scope": "test_yes_deps_carries_consent_through_non_interactive_install",
+      "line": 69,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "admission_env",
+      "fixture_source": "tests/pm/test_plugin_survival_contract.py",
+      "fixture_symbol": "admission_env"
+    },
+    {
+      "path": "tests/hermes_cli/test_plugin_install_manifest_version.py",
+      "rule": "F811",
+      "scope": "test_install_accepts_every_loader_supported_manifest_version",
+      "line": 44,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client"
+    },
+    {
+      "path": "tests/hermes_cli/test_plugin_install_manifest_version.py",
+      "rule": "F811",
+      "scope": "test_manifest_version_above_shared_support_is_refused_cleanly",
+      "line": 64,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client"
+    },
+    {
+      "path": "tests/hermes_cli/test_plugin_update_transaction.py",
+      "rule": "F811",
+      "scope": "installed",
+      "line": 48,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "admission_env",
+      "fixture_source": "tests/pm/test_plugin_survival_contract.py",
+      "fixture_symbol": "admission_env"
+    },
+    {
+      "path": "tests/hermes_cli/test_plugins_cmd.py",
+      "rule": "F811",
+      "scope": "TestSubdirInstallE2E._isolated_publication",
+      "line": 775,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client"
+    },
+    {
+      "path": "tests/hermes_cli/test_plugins_cmd.py",
+      "rule": "F811",
+      "scope": "prepared_publication",
+      "line": 958,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client"
+    },
+    {
+      "path": "tests/hermes_cli/test_plugins_cmd_catalog.py",
+      "rule": "F811",
+      "scope": "world",
+      "line": 33,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client"
+    },
+    {
+      "path": "tests/hermes_cli/test_plugins_update_sync.py",
+      "rule": "F811",
+      "scope": "test_cli_update_scan_refusal_keeps_the_installed_tree",
+      "line": 13,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "installed",
+      "fixture_source": "tests/hermes_cli/test_plugin_update_transaction.py",
+      "fixture_symbol": "installed"
+    },
+    {
+      "path": "tests/hermes_cli/test_plugins_update_sync.py",
+      "rule": "F811",
+      "scope": "test_disabled_update_does_not_change_dependencies_or_enablement",
+      "line": 37,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "installed",
+      "fixture_source": "tests/hermes_cli/test_plugin_update_transaction.py",
+      "fixture_symbol": "installed"
+    },
+    {
+      "path": "tests/hermes_cli/test_plugins_update_sync.py",
+      "rule": "F811",
+      "scope": "test_enablement_before_lock_acquisition_cannot_skip_validation",
+      "line": 56,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "installed",
+      "fixture_source": "tests/hermes_cli/test_plugin_update_transaction.py",
+      "fixture_symbol": "installed"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_efficiency.py",
+      "rule": "F811",
+      "scope": "test_task_cost_is_one_row_per_user_turn_with_its_tokens_and_work",
+      "line": 69,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_efficiency.py",
+      "rule": "F811",
+      "scope": "test_undo_and_retry_count_the_tokens_of_the_turns_they_discard",
+      "line": 95,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_efficiency.py",
+      "rule": "F811",
+      "scope": "test_tool_output_truncation_is_judged_after_the_turn_budget",
+      "line": 116,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_efficiency.py",
+      "rule": "F811",
+      "scope": "test_tool_overhead_and_unused_toolsets_report_once_per_conversation",
+      "line": 147,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_efficiency.py",
+      "rule": "F811",
+      "scope": "test_several_known_causes_before_one_cold_read_are_one_break",
+      "line": 166,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_efficiency.py",
+      "rule": "F811",
+      "scope": "test_cache_breaks_count_known_causes_once_and_unannounced_cold_reads_as_misses",
+      "line": 176,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_efficiency.py",
+      "rule": "F811",
+      "scope": "test_nothing_is_recorded_while_disabled",
+      "line": 216,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_engagement.py",
+      "rule": "F811",
+      "scope": "test_a_closed_day_reports_active_time_surfaces_and_primary_model_once",
+      "line": 60,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_engagement.py",
+      "rule": "F811",
+      "scope": "test_internal_and_unattended_turns_are_not_engagement",
+      "line": 90,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_engagement.py",
+      "rule": "F811",
+      "scope": "test_collection_off_writes_no_engagement_state",
+      "line": 123,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_engagement.py",
+      "rule": "F811",
+      "scope": "test_a_compressed_conversation_is_one_session_row_with_its_whole_volume",
+      "line": 132,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_engagement.py",
+      "rule": "F811",
+      "scope": "test_only_compression_joins_segments_and_the_retired_segment_closes_at_hand_off",
+      "line": 158,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_engagement.py",
+      "rule": "F811",
+      "scope": "test_switch_and_undo_right_after_a_rotation_reach_the_conversation",
+      "line": 198,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_engagement.py",
+      "rule": "F811",
+      "scope": "test_a_background_review_fork_on_the_session_id_adds_no_session_volume",
+      "line": 215,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_engagement.py",
+      "rule": "F811",
+      "scope": "test_turns_before_switch_ignore_failover_and_review_forks",
+      "line": 229,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_engagement.py",
+      "rule": "F811",
+      "scope": "test_turns_before_switch_count_the_model_left_across_rotation",
+      "line": 253,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_harness.py",
+      "rule": "F811",
+      "scope": "test_patch_and_write_file_count_outcome_and_the_strategy_that_landed",
+      "line": 43,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_harness.py",
+      "rule": "F811",
+      "scope": "test_matcher_calls_outside_an_edit_tool_call_are_not_counted",
+      "line": 71,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_harness.py",
+      "rule": "F811",
+      "scope": "test_foreground_terminal_commands_count_by_kind_and_outcome",
+      "line": 111,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_harness.py",
+      "rule": "F811",
+      "scope": "test_backend_exception_mentioning_timeout_is_not_a_terminal_timeout",
+      "line": 128,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_harness.py",
+      "rule": "F811",
+      "scope": "test_loop_guards_count_once_per_turn_per_signal_and_detector",
+      "line": 143,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_harness.py",
+      "rule": "F811",
+      "scope": "test_real_guardrail_halt_reaches_the_metric",
+      "line": 165,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_harness.py",
+      "rule": "F811",
+      "scope": "test_each_failed_call_resolves_against_the_models_next_call",
+      "line": 194,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_harness.py",
+      "rule": "F811",
+      "scope": "test_every_primary_reply_counts_once_with_its_issue",
+      "line": 218,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_harness.py",
+      "rule": "F811",
+      "scope": "test_everything_is_a_no_op_while_disabled",
+      "line": 240,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_loop.py",
+      "rule": "F811",
+      "scope": "home",
+      "line": 33,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model.py",
+      "rule": "F811",
+      "scope": "test_every_emitted_tool_call_counts_once_with_its_issue",
+      "line": 53,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model.py",
+      "rule": "F811",
+      "scope": "test_tool_call_quality_records_nothing_while_disabled",
+      "line": 82,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model.py",
+      "rule": "F811",
+      "scope": "test_friction_is_attributed_to_the_model_that_produced_the_turn",
+      "line": 102,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model.py",
+      "rule": "F811",
+      "scope": "test_context_peak_is_one_bucketed_row_per_session",
+      "line": 133,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model_attribution.py",
+      "rule": "F811",
+      "scope": "test_user_named_models_never_leave_in_any_model_metric",
+      "line": 83,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model_attribution.py",
+      "rule": "F811",
+      "scope": "test_shipped_provider_and_public_model_are_reported_as_is",
+      "line": 100,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model_attribution.py",
+      "rule": "F811",
+      "scope": "test_user_provider_plugin_name_and_model_never_leave",
+      "line": 114,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model_attribution.py",
+      "rule": "F811",
+      "scope": "test_network_address_model_ids_and_raw_injected_marks_never_reach_counters",
+      "line": 158,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model_attribution.py",
+      "rule": "F811",
+      "scope": "test_tui_switch_before_first_prompt_blames_the_configured_route",
+      "line": 196,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model_attribution.py",
+      "rule": "F811",
+      "scope": "test_gateway_switch_reports_the_configured_route_not_the_switch_default",
+      "line": 259,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model_attribution.py",
+      "rule": "F811",
+      "scope": "test_multiplexed_gateway_switch_records_in_the_owning_profile",
+      "line": 273,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model_attribution.py",
+      "rule": "F811",
+      "scope": "test_cli_undo_counts_friction_only_when_something_was_undone",
+      "line": 306,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model_attribution.py",
+      "rule": "F811",
+      "scope": "test_cli_undo_n_counts_the_user_turns_actually_undone_not_compaction_handoffs",
+      "line": 325,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_shared_metrics_model_attribution.py",
+      "rule": "F811",
+      "scope": "test_context_peak_is_one_row_per_conversation_across_compression_rotation",
+      "line": 339,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "direct_runtime",
+      "fixture_source": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "fixture_symbol": "direct_runtime"
+    },
+    {
+      "path": "tests/hermes_cli/test_tui_npm_install.py",
+      "rule": "F811",
+      "scope": "tui_source",
+      "line": 39,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "source_products",
+      "fixture_source": "tests/hermes_cli/test_source_build.py",
+      "fixture_symbol": "source_products"
+    },
+    {
+      "path": "tests/hermes_cli/test_update_autostash.py",
+      "rule": "F811",
+      "scope": "test_update_preserves_local_work_and_rescues_orphan_before_reset",
+      "line": 21,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "update_tree",
+      "fixture_source": "tests/hermes_cli/test_update_target_identity.py",
+      "fixture_symbol": "update_tree"
+    },
+    {
+      "path": "tests/hermes_cli/test_update_completion_routing.py",
+      "rule": "F811",
+      "scope": "test_historical_completion_hook_never_reports_success",
+      "line": 28,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "fresh_child",
+      "fixture_source": "tests/compat/old_updater_support.py",
+      "fixture_symbol": "fresh_child"
+    },
+    {
+      "path": "tests/hermes_cli/test_update_existing_branch_baseline.py",
+      "rule": "F811",
+      "scope": "test_command_hands_off_after_existing_main_switch",
+      "line": 224,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "update_tree",
+      "fixture_source": "tests/hermes_cli/test_update_target_identity.py",
+      "fixture_symbol": "update_tree"
+    },
+    {
+      "path": "tests/hermes_cli/test_update_missing_configured_deps.py",
+      "rule": "F811",
+      "scope": "configured_update",
+      "line": 25,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "source_launch",
+      "fixture_source": "tests/pm/test_source_update_launch.py",
+      "fixture_symbol": "source_launch"
+    },
+    {
+      "path": "tests/hermes_cli/test_update_no_gateway_restart.py",
+      "rule": "F811",
+      "scope": "test_restart_deferral_crosses_real_completion_process",
+      "line": 11,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "transition",
+      "fixture_source": "tests/hermes_cli/test_update_completion_process.py",
+      "fixture_symbol": "transition"
+    },
+    {
+      "path": "tests/hermes_cli/test_venv_sync_currency.py",
+      "rule": "F811",
+      "scope": "test_check_uses_real_pm_selection_and_keeps_invalid_evidence",
+      "line": 17,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "admission_env",
+      "fixture_source": "tests/pm/test_plugin_survival_contract.py",
+      "fixture_symbol": "admission_env"
+    },
+    {
+      "path": "tests/hermes_cli/test_venv_sync_currency.py",
+      "rule": "F811",
+      "scope": "test_own_tree_sync_reuses_pm_without_writing_an_extra_stamp",
+      "line": 109,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "admission_env",
+      "fixture_source": "tests/pm/test_plugin_survival_contract.py",
+      "fixture_symbol": "admission_env"
+    },
+    {
+      "path": "tests/hermes_cli/test_web_ui_build.py",
+      "rule": "F811",
+      "scope": "test_web_build_prepares_once_and_skips_a_current_product",
+      "line": 40,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "source_products",
+      "fixture_source": "tests/hermes_cli/test_source_build.py",
+      "fixture_symbol": "source_products"
+    },
+    {
+      "path": "tests/hermes_cli/test_web_ui_build.py",
+      "rule": "F811",
+      "scope": "test_web_failure_is_not_success_even_with_an_old_dist",
+      "line": 53,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "source_products",
+      "fixture_source": "tests/hermes_cli/test_source_build.py",
+      "fixture_symbol": "source_products"
+    },
+    {
+      "path": "tests/hermes_cli/test_web_ui_build.py",
+      "rule": "F811",
+      "scope": "test_failed_preparation_never_runs_web_compilation",
+      "line": 67,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "source_products",
+      "fixture_source": "tests/hermes_cli/test_source_build.py",
+      "fixture_symbol": "source_products"
+    },
+    {
+      "path": "tests/hermes_cli/test_web_ui_build.py",
+      "rule": "F811",
+      "scope": "test_web_rebuild_reuses_the_existing_desktop_union",
+      "line": 77,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "source_products",
+      "fixture_source": "tests/hermes_cli/test_source_build.py",
+      "fixture_symbol": "source_products"
+    },
+    {
+      "path": "tests/hermes_cli/test_web_ui_build.py",
+      "rule": "F811",
+      "scope": "test_lock_open_failure_does_not_start_an_unprotected_build",
+      "line": 129,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "source_products",
+      "fixture_source": "tests/hermes_cli/test_source_build.py",
+      "fixture_symbol": "source_products"
+    },
+    {
+      "path": "tests/pm/test_activation_runtime.py",
+      "rule": "F811",
+      "scope": "test_bash_cold_sync_changed_input_and_warm_noop",
+      "line": 32,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "fake_store",
+      "diagnostic": "Redefinition of unused `fake_store` from line 11: `fake_store` redefined here",
+      "binding_evidence": "tests.pm.test_activate_scripts reexports fake_store imported unchanged from tests.pm.activation_support; local import resolves same callable"
+    },
+    {
+      "path": "tests/pm/test_activation_setup.py",
+      "rule": "F811",
+      "scope": "test_activation_real_setup_pm_lifecycle",
+      "line": 44,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "served",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "served"
+    },
+    {
+      "path": "tests/pm/test_artifact_mirror.py",
+      "rule": "F811",
+      "scope": "test_cold_consumers_recover_after_upstream_removal",
+      "line": 18,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_download_mirrors.py",
+      "rule": "F811",
+      "scope": "test_fallback_retains_hash_destination_and_progress",
+      "line": 11,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_download_mirrors.py",
+      "rule": "F811",
+      "scope": "test_bad_hash_is_not_a_mirror_miss",
+      "line": 41,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_download_mirrors.py",
+      "rule": "F811",
+      "scope": "test_exhausted_mirrors_name_each_attempted_url",
+      "line": 54,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_download_mirrors.py",
+      "rule": "F811",
+      "scope": "test_only_availability_failures_can_use_a_mirror",
+      "line": 74,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_download_progress.py",
+      "rule": "F811",
+      "scope": "test_progress_counts_cached_files_and_distinguishes_equal_basenames",
+      "line": 9,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_download_progress.py",
+      "rule": "F811",
+      "scope": "test_unknown_length_sources_do_not_lose_completed_bytes",
+      "line": 25,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_download_retry_limits.py",
+      "rule": "F811",
+      "scope": "test_download_failure_never_publishes_partial_bytes",
+      "line": 17,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_download_retry_limits.py",
+      "rule": "F811",
+      "scope": "test_pause_interrupts_real_http_retry_backoff",
+      "line": 66,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_download_serial_fallback.py",
+      "rule": "F811",
+      "scope": "test_serial_fallback_survives_a_transient_retry",
+      "line": 12,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_downloader_integrity.py",
+      "rule": "F811",
+      "scope": "test_resume_never_trusts_unbound_coverage",
+      "line": 259,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_install_download_control.py",
+      "rule": "F811",
+      "scope": "test_install_pause_preserves_archives_and_resumes_the_same_pin",
+      "line": 46,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_installed_package.py",
+      "rule": "F811",
+      "scope": "test_installed_lookup_prefers_current_pin_then_recorded_fallback",
+      "line": 16,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "pm_env",
+      "fixture_source": "tests/pm/test_pm_authority.py",
+      "fixture_symbol": "pm_env"
+    },
+    {
+      "path": "tests/pm/test_installed_package.py",
+      "rule": "F811",
+      "scope": "test_state_fact_in_shared_facts_file_is_not_a_store_install",
+      "line": 38,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "pm_env",
+      "fixture_source": "tests/pm/test_pm_authority.py",
+      "fixture_symbol": "pm_env"
+    },
+    {
+      "path": "tests/pm/test_installed_package.py",
+      "rule": "F811",
+      "scope": "test_entry_staged_without_exec_bit_is_usable_again",
+      "line": 57,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "pm_env",
+      "fixture_source": "tests/pm/test_pm_authority.py",
+      "fixture_symbol": "pm_env"
+    },
+    {
+      "path": "tests/pm/test_network_retries.py",
+      "rule": "F811",
+      "scope": "test_install_recovers_from_transient_http_failure",
+      "line": 23,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_network_retries.py",
+      "rule": "F811",
+      "scope": "test_pm_metadata_reads_retry_transient_http_failure",
+      "line": 94,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_npm_dist_tags.py",
+      "rule": "F811",
+      "scope": "test_tag_endpoint_drives_package_updates_and_preserves_escaped_names",
+      "line": 9,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "upstream",
+      "fixture_source": "tests/pm/test_update_request_reuse.py",
+      "fixture_symbol": "upstream"
+    },
+    {
+      "path": "tests/pm/test_pm_authority.py",
+      "rule": "F811",
+      "scope": "pm_env",
+      "line": 27,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "core_env",
+      "fixture_source": "tests/pm/test_pm_core.py",
+      "fixture_symbol": "pm_env"
+    },
+    {
+      "path": "tests/pm/test_setup_lock_format.py",
+      "rule": "F811",
+      "scope": "test_setup_reads_pins_independent_of_indentation",
+      "line": 30,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "served",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "served"
+    },
+    {
+      "path": "tests/pm/test_source_update_launch.py",
+      "rule": "F811",
+      "scope": "source_launch",
+      "line": 33,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "isolated_python",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "isolated_python"
+    },
+    {
+      "path": "tests/pm/test_source_update_launch.py",
+      "rule": "F811",
+      "scope": "test_real_bootstrap_reexecs_before_app_imports",
+      "line": 367,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "isolated_python",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "isolated_python"
+    },
+    {
+      "path": "tests/pm/test_source_update_launch.py",
+      "rule": "F811",
+      "scope": "test_failed_launch_completion_degrades_to_a_warning",
+      "line": 458,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "isolated_python",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "isolated_python"
+    },
+    {
+      "path": "tests/pm/test_store_extensions.py",
+      "rule": "F811",
+      "scope": "test_missing_bundle_tool_is_installed_in_writable_store",
+      "line": 11,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "pm_env",
+      "fixture_source": "tests/pm/test_pm_authority.py",
+      "fixture_symbol": "pm_env"
+    },
+    {
+      "path": "tests/pm/test_update_artifact_refresh.py",
+      "rule": "F811",
+      "scope": "test_same_minor_refresh_updates_real_bytes_and_preserves_unresolved_targets",
+      "line": 22,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_update_request_reuse.py",
+      "rule": "F811",
+      "scope": "upstream",
+      "line": 22,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_worker.py",
+      "rule": "F811",
+      "scope": "test_worker_artifact_lifecycle_keeps_identity_and_relays_progress",
+      "line": 287,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_worker.py",
+      "rule": "F811",
+      "scope": "test_pause_event_reaches_running_worker_without_hanging",
+      "line": 350,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_worker.py",
+      "rule": "F811",
+      "scope": "test_installed_tool_needs_no_pm_runtime",
+      "line": 391,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_worker.py",
+      "rule": "F811",
+      "scope": "test_cold_manager_build_does_not_bootstrap_a_worker",
+      "line": 531,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "locked_wheelhouse",
+      "fixture_source": "tests/pm/test_runtime_wheelhouse.py",
+      "fixture_symbol": "locked_wheelhouse"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_worker_publishes_selection_even_when_dependencies_are_current",
+      "line": 19,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client",
+      "diagnostic": "Redefinition of unused `client` from line 15: `client` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_staged_plugin_publication_uses_installed_identity_and_local_dependencies",
+      "line": 50,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client",
+      "diagnostic": "Redefinition of unused `client` from line 15: `client` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_staged_plugin_publication_uses_installed_identity_and_local_dependencies",
+      "line": 50,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "isolated_python",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "isolated_python",
+      "diagnostic": "Redefinition of unused `isolated_python` from line 15: `isolated_python` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_selection_refuses_config_edits_during_preparation",
+      "line": 109,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client",
+      "diagnostic": "Redefinition of unused `client` from line 15: `client` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_selection_refuses_config_edits_during_preparation",
+      "line": 109,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "isolated_python",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "isolated_python",
+      "diagnostic": "Redefinition of unused `isolated_python` from line 15: `isolated_python` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_worker_rejects_unloadable_staged_plugin_without_app_dependencies",
+      "line": 136,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client",
+      "diagnostic": "Redefinition of unused `client` from line 15: `client` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_additional_candidates_are_discovered_by_sync_and_passive_probe",
+      "line": 161,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client",
+      "diagnostic": "Redefinition of unused `client` from line 15: `client` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_worker_death_recovers_at_each_durable_publication_boundary",
+      "line": 187,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client",
+      "diagnostic": "Redefinition of unused `client` from line 15: `client` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_worker_death_recovers_at_each_durable_publication_boundary",
+      "line": 187,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "isolated_python",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "isolated_python",
+      "diagnostic": "Redefinition of unused `isolated_python` from line 15: `isolated_python` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_staged_publication_refuses_concurrent_input_edits",
+      "line": 277,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client",
+      "diagnostic": "Redefinition of unused `client` from line 15: `client` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_staged_publication_refuses_concurrent_input_edits",
+      "line": 277,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "isolated_python",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "isolated_python",
+      "diagnostic": "Redefinition of unused `isolated_python` from line 15: `isolated_python` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_staged_publication_preserves_a_concurrent_sibling_install_record",
+      "line": 317,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client",
+      "diagnostic": "Redefinition of unused `client` from line 15: `client` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_staged_publication_preserves_a_concurrent_sibling_install_record",
+      "line": 317,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "isolated_python",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "isolated_python",
+      "diagnostic": "Redefinition of unused `isolated_python` from line 15: `isolated_python` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_inactive_portable_publication_does_not_inspect_unrelated_dependency_manifests",
+      "line": 359,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client",
+      "diagnostic": "Redefinition of unused `client` from line 15: `client` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_selection_preserves_yaml11_values_and_quotes_plugin_names",
+      "line": 381,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client",
+      "diagnostic": "Redefinition of unused `client` from line 15: `client` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_explicit_publication_keeps_its_intent_through_tool_acquisition",
+      "line": 395,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client",
+      "diagnostic": "Redefinition of unused `client` from line 15: `client` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_explicit_publication_keeps_its_intent_through_tool_acquisition",
+      "line": 395,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "isolated_python",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "isolated_python",
+      "diagnostic": "Redefinition of unused `isolated_python` from line 15: `isolated_python` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_publication.py",
+      "rule": "F811",
+      "scope": "test_stale_enablement_cannot_replace_a_newer_selection",
+      "line": 414,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "transitively_reexported_pytest_fixture_parameter",
+      "name": "client",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "client",
+      "diagnostic": "Redefinition of unused `client` from line 15: `client` redefined here",
+      "binding_evidence": "tests/pm/test_worker.py imports fixture as same-name public alias from tests.pm._fixtures"
+    },
+    {
+      "path": "tests/pm/test_worker_registry.py",
+      "rule": "F811",
+      "scope": "test_registered_package_installs_archive_in_real_worker",
+      "line": 31,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "worker_python",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "isolated_python"
+    },
+    {
+      "path": "tests/pm/test_worker_registry.py",
+      "rule": "F811",
+      "scope": "test_registered_package_installs_archive_in_real_worker",
+      "line": 31,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "dl_server",
+      "fixture_source": "tests/pm/_range_server.py",
+      "fixture_symbol": "dl_server"
+    },
+    {
+      "path": "tests/pm/test_workspace.py",
+      "rule": "F811",
+      "scope": "layout",
+      "line": 28,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "locked_project",
+      "fixture_source": "tests/pm/test_environment_build.py",
+      "fixture_symbol": "locked_project"
+    },
+    {
+      "path": "tests/scripts/test_appinstaller.py",
+      "rule": "F811",
+      "scope": "test_canary_publication_verifies_native_identity_and_uploads_bundle_before_pointer",
+      "line": 14,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_archive_inputs.py",
+      "rule": "F811",
+      "scope": "test_real_cli_miss_hit_and_staging_use_the_same_archived_bytes",
+      "line": 68,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_archive_inputs.py",
+      "rule": "F811",
+      "scope": "test_corrupt_or_denied_archive_never_publishes_a_destination",
+      "line": 105,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_archive_inputs.py",
+      "rule": "F811",
+      "scope": "test_racing_misses_verify_the_immutable_winner",
+      "line": 136,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_archive_inputs.py",
+      "rule": "F811",
+      "scope": "test_all_digests_start_together_and_seed_every_reference",
+      "line": 157,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_archive_inputs.py",
+      "rule": "F811",
+      "scope": "test_parallel_readback_failure_reaches_cli_and_preserves_destination",
+      "line": 193,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_archive_inputs.py",
+      "rule": "F811",
+      "scope": "test_historical_recovery_keeps_the_original_digest",
+      "line": 228,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_archive_inputs.py",
+      "rule": "F811",
+      "scope": "test_ci_toolchain_seed_runs_before_the_tool_installer",
+      "line": 253,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_artifacts.py",
+      "rule": "F811",
+      "scope": "staged_candidate",
+      "line": 68,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_artifacts.py",
+      "rule": "F811",
+      "scope": "staged_candidate",
+      "line": 68,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "https_origin",
+      "fixture_source": "tests/scripts/test_stable_release.py",
+      "fixture_symbol": "https_origin"
+    },
+    {
+      "path": "tests/scripts/test_release_artifacts.py",
+      "rule": "F811",
+      "scope": "test_bootstrap_reuses_published_candidate_and_rejects_substitution",
+      "line": 139,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_artifacts.py",
+      "rule": "F811",
+      "scope": "test_candidate_publication_and_store_selection",
+      "line": 187,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_artifacts.py",
+      "rule": "F811",
+      "scope": "test_promote_writes_the_stable_mac_feed_from_the_attempt_archive",
+      "line": 254,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_artifacts.py",
+      "rule": "F811",
+      "scope": "test_promote_writes_the_stable_mac_feed_from_the_attempt_archive",
+      "line": 254,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "https_origin",
+      "fixture_source": "tests/scripts/test_stable_release.py",
+      "fixture_symbol": "https_origin"
+    },
+    {
+      "path": "tests/scripts/test_release_artifacts.py",
+      "rule": "F811",
+      "scope": "test_promote_refuses_when_one_macos_arch_is_missing",
+      "line": 289,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_artifacts.py",
+      "rule": "F811",
+      "scope": "test_promote_refuses_when_one_macos_arch_is_missing",
+      "line": 289,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "https_origin",
+      "fixture_source": "tests/scripts/test_stable_release.py",
+      "fixture_symbol": "https_origin"
+    },
+    {
+      "path": "tests/scripts/test_release_artifacts.py",
+      "rule": "F811",
+      "scope": "candidate_workflow_step",
+      "line": 305,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_artifacts.py",
+      "rule": "F811",
+      "scope": "test_candidate_smoke_survives_real_promotion_and_renderer",
+      "line": 391,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_artifacts.py",
+      "rule": "F811",
+      "scope": "test_candidate_smoke_survives_real_promotion_and_renderer",
+      "line": 392,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "https_origin",
+      "fixture_source": "tests/scripts/test_stable_release.py",
+      "fixture_symbol": "https_origin"
+    },
+    {
+      "path": "tests/scripts/test_release_artifacts.py",
+      "rule": "F811",
+      "scope": "test_candidate_smoke_admission_fails_before_publication",
+      "line": 417,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_canary_git.py",
+      "rule": "F811",
+      "scope": "canary_repo",
+      "line": 12,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "release_repo",
+      "fixture_source": "tests/scripts/test_release_tags.py",
+      "fixture_symbol": "release_repo"
+    },
+    {
+      "path": "tests/scripts/test_release_darwin.py",
+      "rule": "F811",
+      "scope": "test_real_prune_protects_live_macos_artifacts_and_fails_closed",
+      "line": 57,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_darwin.py",
+      "rule": "F811",
+      "scope": "test_finalize_uses_the_real_signed_transport_and_publishes_last",
+      "line": 141,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_darwin.py",
+      "rule": "F811",
+      "scope": "test_finalize_rejects_a_downgrade_over_the_live_feed",
+      "line": 168,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_darwin.py",
+      "rule": "F811",
+      "scope": "test_finalize_live_feed_faults",
+      "line": 194,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_handoff.py",
+      "rule": "F811",
+      "scope": "test_stage_and_fetch_bind_tag_commit_and_files_without_feed_writes",
+      "line": 13,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_handoff.py",
+      "rule": "F811",
+      "scope": "test_failed_stage_never_publishes_a_receipt_or_channel",
+      "line": 78,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_handoff.py",
+      "rule": "F811",
+      "scope": "test_shared_receipt_files_download_once_and_conflicts_leave_targets_intact",
+      "line": 98,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_handoff.py",
+      "rule": "F811",
+      "scope": "test_commit_identity_and_simultaneous_namespaces",
+      "line": 131,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_handoff.py",
+      "rule": "F811",
+      "scope": "test_public_handoff_downloads_exact_staged_bytes_without_credentials",
+      "line": 159,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_handoff.py",
+      "rule": "F811",
+      "scope": "test_public_handoff_rejects_unsafe_origins_paths_and_redirects",
+      "line": 218,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_release_r2.py",
+      "rule": "F811",
+      "scope": "test_verify_remote_artifact_streams_without_buffering",
+      "line": 734,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "base64",
+      "diagnostic": "Redefinition of unused `base64` from line 18: `base64` redefined here"
+    },
+    {
+      "path": "tests/scripts/test_render_builds_publication.py",
+      "rule": "F811",
+      "scope": "test_tag_publication_pending_rerun_stale_and_dry_run",
+      "line": 39,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_render_builds_publication.py",
+      "rule": "F811",
+      "scope": "test_incomplete_tag_keeps_channel_and_links_diagnostics",
+      "line": 111,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "r2_server",
+      "fixture_source": "tests/scripts/test_release_r2.py",
+      "fixture_symbol": "r2_server"
+    },
+    {
+      "path": "tests/scripts/test_setup_toolchain.py",
+      "rule": "F811",
+      "scope": "test_development_setup_keeps_test_groups_out_of_the_runtime",
+      "line": 19,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "build_worker",
+      "fixture_source": "tests/pm/_fixtures.py",
+      "fixture_symbol": "build_worker"
+    },
+    {
+      "path": "tests/tools/test_bot_relay_windows_paths.py",
+      "rule": "F811",
+      "scope": "<module>",
+      "line": 29,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "pytest",
+      "diagnostic": "Redefinition of unused `pytest` from line 25: `pytest` redefined here"
+    },
+    {
+      "path": "tests/tools/test_browser_process_tree.py",
+      "rule": "F811",
+      "scope": "test_real_shared_group_child_does_not_signal_us",
+      "line": 118,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "_kill_process_tree",
+      "diagnostic": "Redefinition of unused `_kill_process_tree` from line 11: `_kill_process_tree` redefined here"
+    },
+    {
+      "path": "tests/tools/test_browser_process_tree.py",
+      "rule": "F811",
+      "scope": "test_real_group_leader_child_is_tree_killed",
+      "line": 197,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "_kill_process_tree",
+      "diagnostic": "Redefinition of unused `_kill_process_tree` from line 11: `_kill_process_tree` redefined here"
+    },
+    {
+      "path": "tests/tools/test_build_subprocess_env.py",
+      "rule": "F811",
+      "scope": "test_factory_child_policy_and_profile_home",
+      "line": 12,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "child_env",
+      "fixture_source": "tests/tools/_child_env_fixtures.py",
+      "fixture_symbol": "child_env"
+    },
+    {
+      "path": "tests/tools/test_code_execution_modes.py",
+      "rule": "F811",
+      "scope": "test_selected_interpreter_environment_and_real_rpc",
+      "line": 20,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "child_env",
+      "fixture_source": "tests/tools/_child_env_fixtures.py",
+      "fixture_symbol": "child_env"
+    },
+    {
+      "path": "tests/tools/test_code_execution_modes.py",
+      "rule": "F811",
+      "scope": "test_selected_interpreter_environment_and_real_rpc",
+      "line": 20,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "project_python",
+      "fixture_source": "tests/tools/_child_env_fixtures.py",
+      "fixture_symbol": "project_python"
+    },
+    {
+      "path": "tests/tools/test_code_execution_modes.py",
+      "rule": "F811",
+      "scope": "test_credential_policy_and_whitelist_in_real_child",
+      "line": 77,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "child_env",
+      "fixture_source": "tests/tools/_child_env_fixtures.py",
+      "fixture_symbol": "child_env"
+    },
+    {
+      "path": "tests/tools/test_code_execution_modes.py",
+      "rule": "F811",
+      "scope": "test_project_without_active_venv_falls_back",
+      "line": 139,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "child_env",
+      "fixture_source": "tests/tools/_child_env_fixtures.py",
+      "fixture_symbol": "child_env"
+    },
+    {
+      "path": "tests/tools/test_code_execution_modes.py",
+      "rule": "F811",
+      "scope": "test_project_stale_cwd_falls_through_then_uses_process_cwd",
+      "line": 143,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "child_env",
+      "fixture_source": "tests/tools/_child_env_fixtures.py",
+      "fixture_symbol": "child_env"
+    },
+    {
+      "path": "tests/tools/test_file_ops_cwd_tracking.py",
+      "rule": "F811",
+      "scope": "<module>",
+      "line": 21,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "redundant_same_binding_import",
+      "name": "pytest",
+      "diagnostic": "Redefinition of unused `pytest` from line 19: `pytest` redefined here"
+    },
+    {
+      "path": "tests/tools/test_spawn_site_child_env.py",
+      "rule": "F811",
+      "scope": "_compute_host_seen",
+      "line": 31,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "child_env",
+      "fixture_source": "tests/tools/_child_env_fixtures.py",
+      "fixture_symbol": "child_env"
+    },
+    {
+      "path": "tests/tools/test_spawn_site_child_env.py",
+      "rule": "F811",
+      "scope": "test_compute_host_is_hermes_and_keeps_its_full_environment",
+      "line": 45,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "child_env",
+      "fixture_source": "tests/tools/_child_env_fixtures.py",
+      "fixture_symbol": "child_env"
+    },
+    {
+      "path": "tests/tools/test_spawn_site_child_env.py",
+      "rule": "F811",
+      "scope": "test_third_party_children_never_see_hermes_credentials",
+      "line": 55,
+      "detail": "redefinition of unused name",
+      "blocking": true,
+      "allowed_reason": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "review_class": "imported_pytest_fixture_parameter",
+      "name": "child_env",
+      "fixture_source": "tests/tools/_child_env_fixtures.py",
+      "fixture_symbol": "child_env"
+    }
+  ]
+}
