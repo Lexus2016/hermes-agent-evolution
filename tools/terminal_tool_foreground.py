@@ -6,7 +6,7 @@ Runtime facade lookups preserve the terminal tool's existing patch points.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 if TYPE_CHECKING:
     from tools.terminal_tool import _ExecPlan
@@ -38,10 +38,12 @@ def _run_foreground(
     task_id: Optional[str], session_id: Optional[str], session_key: str,
     workdir: Optional[str], approval_note: Optional[str], clear_interrupt: bool,
     metered: bool = True,
+    _observe_backend_outcome: Callable[[str | None], None],
 ) -> str:
     """Execute in the foreground with retry on transient errors, then finalize. ``metered``
     is False for Hermes' own control-plane commands (``_host_local``)."""
     from hermes_cli.observability.shared_metrics_harness import record_terminal_outcome
+    from hermes_cli.observability.shared_metrics_loop import terminal_backend_error_class
     from tools import terminal_tool as tt
     max_retries = 3
     env_type, eff, effective_timeout = plan.env_type, plan.effective_task_id, plan.effective_timeout
@@ -68,6 +70,7 @@ def _run_foreground(
                 **kwargs,
             )
         except Exception as e:
+            _observe_backend_outcome("timeout" if isinstance(e, TimeoutError) else "exception")
             classification = tt.classify_terminal_failure(
                 command,
                 exit_code=-1,
@@ -133,6 +136,7 @@ def _run_foreground(
                 result_dict["recommendation"] = rec
             return tt.json.dumps(result_dict, ensure_ascii=False)
 
+        _observe_backend_outcome(terminal_backend_error_class(result))
         if result.get("yielded_session_id"):
             return tt.json.dumps({
                 "output": result.get("output", ""), "exit_code": None, "error": None,

@@ -295,6 +295,22 @@ def _terminal_failure(data: dict[str, Any]) -> str | None:
     return "tool_error" if data.get("error") else None
 
 
+def terminal_backend_error_class(result: Any) -> str | None:
+    """Observe a raw foreground result. ``none`` means the backend completed execution,
+    not that the command succeeded. Unknown shapes retain the legacy result classifier."""
+    if not isinstance(result, dict):
+        return None
+    if result.get("hermes_timed_out") is True:
+        return "timeout"
+    if result.get("hermes_interrupted") is True:
+        return "interrupted"
+    yielded = result.get("yielded_session_id")
+    if isinstance(yielded, str) and yielded:
+        return "none"
+    code = result.get("returncode")
+    return "none" if isinstance(code, int) and not isinstance(code, bool) else None
+
+
 def _code_failure(data: dict[str, Any]) -> str | None:
     status = _norm(data.get("status"))
     if status in _STATUS_ERROR_CLASSES:
@@ -321,6 +337,8 @@ def execution_backend_fields(*, kind: Any, backend: Any, result: Any, error_clas
         return None
     backend_value = _norm(backend() if callable(backend) else backend)
     failure = error_class if error_class is not None else _FAILURE_CLASSIFIERS[kind_value](_parsed(result))
+    if failure == "none":
+        failure = None
     return {
         "backend": backend_value if backend_value in EXECUTION_BACKENDS_BY_KIND[kind_value] else "other",
         "error_class": "none" if failure is None else failure if failure in TOOL_ERROR_CLASSES else "unknown",

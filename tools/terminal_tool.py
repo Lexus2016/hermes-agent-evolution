@@ -1744,12 +1744,17 @@ def terminal_tool(
             if plan.promoted_from_foreground_timeout is not None:
                 result = _with_promoted_note(result, plan.promoted_from_foreground_timeout)
             return _metered(None if _host_local else plan, result)
-        return _metered(None if _host_local else plan, _run_foreground(
+        # Capture only fixed backend outcomes; retries replace earlier observations and
+        # the public result retains its command-level diagnostics unchanged.
+        backend_outcomes = [None]
+        result = _run_foreground(
             command, env, plan,
             task_id=task_id, session_id=session_id, session_key=session_key,
             workdir=workdir, approval_note=verdict.note, clear_interrupt=verdict.approved_run,
             metered=not _host_local,
-        ))
+            _observe_backend_outcome=backend_outcomes.append,
+        )
+        return _metered(None if _host_local else plan, result, error_class=backend_outcomes[-1])
     except _Rejected as r:
         return r.result_json
     except EnvironmentConnectionError as e:
