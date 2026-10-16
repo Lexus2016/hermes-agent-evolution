@@ -19,8 +19,10 @@ activations accept 222 demonstrated nonfunctional F811 occurrences, the exact
 context-compressor test-module size backed by 302 passing tests, 17 individually
 reviewed runtime findings with bounded regression evidence, and 32 frozen-fixture
 or dynamic-binding F821 occurrences. Five deferred-annotation findings and the
-unreadable-skill listing fallback remain unresolved. This is 272 occurrences across
-257 exact entries, not a claim of complete repository validation. The manifest
+unreadable-skill listing fallback remain unresolved. A later separately reviewed group adds eleven test-file size and two test-harness
+complexity findings, backed by 1,124 passing tests (eight explicit skips) and
+thirteen LSP lifecycle tests. This is 285 occurrences across 270 exact entries,
+not a claim of complete repository validation. The manifest
 is the separate accepted-debt report; it never rewrites the raw receipt. All other
 findings remain blocking until individually supported and reviewed. Owner authorization permits recording only
 inherited findings that do not impair fork functionality or security. Unknown
@@ -65,3 +67,24 @@ Synthetic real-Git tests exercise ancestry, manifest drift, source occurrence
 budgets, stale evidence, copied files and units, metric growth and dormant operation.
 They test enforcement mechanics; they do not prove the truth of human review or
 replace actual fork regression suites and required exact-head hosted CI.
+
+## Immutable intermediate report after initial dispositions
+
+`v0221-e4d3-health-report.json` records the fresh, uncached comparison of
+`e4d3f42197134f4830c3ec44463bbb75f1c6f75e` against the pinned main baseline.
+It completed in 527.4 seconds with exit 1: 1,178 raw blocking findings,
+272 matching reviewed dispositions, and **906 unresolved blockers**. The report
+SHA-256 is `1029b71a2bea931aa380915c1a5151bc50d71abc14ba1540a244c1034c6643c5`.
+This is an intermediate failed gate, not final acceptance of later corrections.
+
+Diagnostic provenance classified 775 unresolved findings in exact upstream files,
+118 in exact upstream Python units within modified files, and 13 other module/unit
+cases. A separate canonical TypeScript measurement establishes one of those 13
+(the mock-server callback) also has identical upstream body and complexity.
+Provenance alone does not establish safety or qualify any entry for acceptance.
+
+Remaining families include 422 exception-handling findings, 238 subprocess/timeout
+findings, 209 structural metrics, 25 name-binding findings, eight environment
+boundary findings and four asynchronous blocking-I/O findings. Individual review
+and relevant failure-path evidence remain necessary. Local terminal/socket/native
+limitations and pending hosted validation cannot be converted into passing receipts.

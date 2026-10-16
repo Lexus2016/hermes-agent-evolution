@@ -10703,6 +10703,467 @@
           "claim": "Reviewed handoff shim, injected fixture globals, or guarded test harness for executed frozen updater contract; no post-handoff installer behavior claimed."
         }
       ]
+    },
+    {
+      "id": "static-test-metric-01",
+      "status": "reviewed",
+      "path": "tests/agent/lsp/_mock_lsp_server.py",
+      "scope": "main",
+      "rule": "CC",
+      "detail": "CC 38 > 36, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "c02c13dcf15066119815b6855f9142b5bee68a0d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/agent/lsp/_mock_lsp_server.py",
+        "scope": "main",
+        "blob": "c02c13dcf15066119815b6855f9142b5bee68a0d"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Test-only JSON-RPC stdin/stdout simulator. Complexity increase consists exactly of large_stderr and oversized_stderr stress modes, then resumes clean lifecycle; real subprocess tests exercise both, diagnostics, errors and shutdown. No production dispatch or external LSP service accepted.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/agent/lsp/_mock_lsp_server.py",
+          "blob": "c02c13dcf15066119815b6855f9142b5bee68a0d",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        },
+        {
+          "path": "tests/agent/lsp/test_client_e2e.py",
+          "blob": "e198b60eeaf5c0697b035e4e5ad7e822125d11eb",
+          "outcome": "passed",
+          "claim": "Actual subprocess lifecycle tests cover the test harness stress modes and clean shutdown."
+        }
+      ]
+    },
+    {
+      "id": "static-test-metric-02",
+      "status": "reviewed",
+      "path": "tests/agent/test_model_metadata.py",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2052 > target 2000 (was 1907)",
+      "candidate_blob": "13f8ffa818e9ddcc8a31134022ecf874219fe256",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/agent/test_model_metadata.py",
+        "scope": "<module>",
+        "blob": "13f8ffa818e9ddcc8a31134022ecf874219fe256"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/agent/test_model_metadata.py",
+          "blob": "13f8ffa818e9ddcc8a31134022ecf874219fe256",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        }
+      ]
+    },
+    {
+      "id": "static-test-metric-03",
+      "status": "reviewed",
+      "path": "tests/agent/test_run_agent_codex_responses.py",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2731 > 2577, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "5f7f64351cd0bc2aaf9b3e4cd278a7a69ed3565d",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/agent/test_run_agent_codex_responses.py",
+        "scope": "<module>",
+        "blob": "5f7f64351cd0bc2aaf9b3e4cd278a7a69ed3565d"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/agent/test_run_agent_codex_responses.py",
+          "blob": "5f7f64351cd0bc2aaf9b3e4cd278a7a69ed3565d",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        }
+      ]
+    },
+    {
+      "id": "static-test-metric-04",
+      "status": "reviewed",
+      "path": "tests/agent/test_streaming.py",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2026 > 2024, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "e3673ac658bd41b316d486b888cca811bbf9de46",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/agent/test_streaming.py",
+        "scope": "<module>",
+        "blob": "e3673ac658bd41b316d486b888cca811bbf9de46"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/agent/test_streaming.py",
+          "blob": "e3673ac658bd41b316d486b888cca811bbf9de46",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        }
+      ]
+    },
+    {
+      "id": "static-test-metric-05",
+      "status": "reviewed",
+      "path": "tests/agent/transports/test_codex_transport.py",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2017 > target 2000 (was 1958)",
+      "candidate_blob": "95fc50046db432b8dbabc0b4ba9129ed13d3abeb",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/agent/transports/test_codex_transport.py",
+        "scope": "<module>",
+        "blob": "95fc50046db432b8dbabc0b4ba9129ed13d3abeb"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/agent/transports/test_codex_transport.py",
+          "blob": "95fc50046db432b8dbabc0b4ba9129ed13d3abeb",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        }
+      ]
+    },
+    {
+      "id": "static-test-metric-06",
+      "status": "reviewed",
+      "path": "tests/gateway/test_run_progress_topics.py",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2179 > 2008, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "e4811cd4c303abdc382fc237dd6a1ea7a4d3dd64",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/gateway/test_run_progress_topics.py",
+        "scope": "<module>",
+        "blob": "e4811cd4c303abdc382fc237dd6a1ea7a4d3dd64"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/gateway/test_run_progress_topics.py",
+          "blob": "e4811cd4c303abdc382fc237dd6a1ea7a4d3dd64",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        }
+      ]
+    },
+    {
+      "id": "static-test-metric-07",
+      "status": "reviewed",
+      "path": "tests/hermes_cli/test_gateway_service.py",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2927 > 2761, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "ded5b696fd5640e6004f27af4a0ffba7b685322b",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/hermes_cli/test_gateway_service.py",
+        "scope": "<module>",
+        "blob": "ded5b696fd5640e6004f27af4a0ffba7b685322b"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/hermes_cli/test_gateway_service.py",
+          "blob": "ded5b696fd5640e6004f27af4a0ffba7b685322b",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        }
+      ]
+    },
+    {
+      "id": "static-test-metric-08",
+      "status": "reviewed",
+      "path": "tests/hermes_cli/test_kanban_db.py",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2084 > 2010, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "ca9989879ebfb919b4df705967e3cb8e548aadb1",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/hermes_cli/test_kanban_db.py",
+        "scope": "<module>",
+        "blob": "ca9989879ebfb919b4df705967e3cb8e548aadb1"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/hermes_cli/test_kanban_db.py",
+          "blob": "ca9989879ebfb919b4df705967e3cb8e548aadb1",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        }
+      ]
+    },
+    {
+      "id": "static-test-metric-09",
+      "status": "reviewed",
+      "path": "tests/hermes_cli/test_model_switch_custom_providers.py",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2441 > 2407, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "4bc8d79beae7baa44ab2d715bcbb5a42c7b7b440",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/hermes_cli/test_model_switch_custom_providers.py",
+        "scope": "<module>",
+        "blob": "4bc8d79beae7baa44ab2d715bcbb5a42c7b7b440"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/hermes_cli/test_model_switch_custom_providers.py",
+          "blob": "4bc8d79beae7baa44ab2d715bcbb5a42c7b7b440",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        }
+      ]
+    },
+    {
+      "id": "static-test-metric-10",
+      "status": "reviewed",
+      "path": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 3055 > 2623, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "397ecaf0c64f305090145b10e08b34c8c3b84f87",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+        "scope": "<module>",
+        "blob": "397ecaf0c64f305090145b10e08b34c8c3b84f87"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+          "blob": "397ecaf0c64f305090145b10e08b34c8c3b84f87",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        }
+      ]
+    },
+    {
+      "id": "static-test-metric-11",
+      "status": "reviewed",
+      "path": "tests/hermes_state/test_hermes_state.py",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 6785 > 6324, its value on main (over target 2000: it may only go down)",
+      "candidate_blob": "1926bfaccec6affdfbd5c6071584a3235acde446",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/hermes_state/test_hermes_state.py",
+        "scope": "<module>",
+        "blob": "1926bfaccec6affdfbd5c6071584a3235acde446"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/hermes_state/test_hermes_state.py",
+          "blob": "1926bfaccec6affdfbd5c6071584a3235acde446",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        }
+      ]
+    },
+    {
+      "id": "static-test-metric-12",
+      "status": "reviewed",
+      "path": "tests/scripts/test_release_sequencer.py",
+      "scope": "_sequencer_fixture.run",
+      "rule": "CC",
+      "detail": "CC 24 > target 20 (new code must meet the target)",
+      "candidate_blob": "da845126fc92e2db145f761f6766baa6bb62a947",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/scripts/test_release_sequencer.py",
+        "scope": "_sequencer_fixture.run",
+        "blob": "da845126fc92e2db145f761f6766baa6bb62a947"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Release-sequencer fixture dispatches synthetic git/gh/docker command shapes into in-memory tags/releases; unexpected argv raises AssertionError. It executes no actual release or remote subprocess. All32 sequencer tests pass through mocked workflow interactions.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/scripts/test_release_sequencer.py",
+          "blob": "da845126fc92e2db145f761f6766baa6bb62a947",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        }
+      ]
+    },
+    {
+      "id": "static-test-metric-13",
+      "status": "reviewed",
+      "path": "tests/tui_gateway/test_protocol.py",
+      "scope": "<module>",
+      "rule": "FILE_LINES",
+      "detail": "lines 2136 > target 2000 (was 1573)",
+      "candidate_blob": "8bbf936ae57e384bce91e6639cc10c0f71e82551",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests/tui_gateway/test_protocol.py",
+        "scope": "<module>",
+        "blob": "8bbf936ae57e384bce91e6639cc10c0f71e82551"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner approved preparation 2026-10-15",
+        "compatibility": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+        "receipt": "Controller reviewed source and canonical receipts: selected twelve files 1124 passed with eight explicit skips; LSP lifecycle thirteen passed. This entry covers only the named test metric."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-static-metric-validation.json",
+          "blob": "574c8d1c4cfdece4ba3557a21ee342b275ec57f7",
+          "outcome": "passed",
+          "claim": "Independent source review and actual canonical execution receipts for this bounded test-only metric; existing skips remain explicit."
+        },
+        {
+          "path": "tests/tui_gateway/test_protocol.py",
+          "blob": "8bbf936ae57e384bce91e6639cc10c0f71e82551",
+          "outcome": "passed",
+          "claim": "Exact tested source matches pinned upstream bytes; all original tests and assertions retained."
+        }
+      ]
     }
   ]
 }

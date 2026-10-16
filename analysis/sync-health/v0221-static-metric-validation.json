@@ -1,0 +1,226 @@
+{
+  "scope": "Thirteen independently reviewed test-only metrics; no production catch, timeout, lifecycle or whole integration acceptance. Eight existing skips remain unvalidated on this host.",
+  "review_source_head": "e4d3f42197134f4830c3ec44463bbb75f1c6f75e",
+  "upstream": "297552a9d646119871391d202509822cd86330df",
+  "recommendations": [
+    {
+      "path": "tests/agent/lsp/_mock_lsp_server.py",
+      "rule": "CC",
+      "scope": "main",
+      "line": 82,
+      "detail": "CC 38 > 36, its value on main (over target 20: it may only go down)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "c02c13dcf15066119815b6855f9142b5bee68a0d",
+      "rationale": "Test-only JSON-RPC stdin/stdout simulator. Complexity increase consists exactly of large_stderr and oversized_stderr stress modes, then resumes clean lifecycle; real subprocess tests exercise both, diagnostics, errors and shutdown. No production dispatch or external LSP service accepted.",
+      "receipt": "/tmp/hermes-lsp-metric-review-tests.log",
+      "test_dependency": "tests/agent/lsp/test_client_e2e.py"
+    },
+    {
+      "path": "tests/agent/test_model_metadata.py",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "line": 1,
+      "detail": "lines 2052 > target 2000 (was 1907)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "13f8ffa818e9ddcc8a31134022ecf874219fe256",
+      "rationale": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+      "receipt": "/tmp/hermes-static-metric-review-tests.log"
+    },
+    {
+      "path": "tests/agent/test_run_agent_codex_responses.py",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "line": 1,
+      "detail": "lines 2731 > 2577, its value on main (over target 2000: it may only go down)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "5f7f64351cd0bc2aaf9b3e4cd278a7a69ed3565d",
+      "rationale": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+      "receipt": "/tmp/hermes-static-metric-review-tests.log"
+    },
+    {
+      "path": "tests/agent/test_streaming.py",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "line": 1,
+      "detail": "lines 2026 > 2024, its value on main (over target 2000: it may only go down)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "e3673ac658bd41b316d486b888cca811bbf9de46",
+      "rationale": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+      "receipt": "/tmp/hermes-static-metric-review-tests.log"
+    },
+    {
+      "path": "tests/agent/transports/test_codex_transport.py",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "line": 1,
+      "detail": "lines 2017 > target 2000 (was 1958)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "95fc50046db432b8dbabc0b4ba9129ed13d3abeb",
+      "rationale": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+      "receipt": "/tmp/hermes-static-metric-review-tests.log"
+    },
+    {
+      "path": "tests/gateway/test_run_progress_topics.py",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "line": 1,
+      "detail": "lines 2179 > 2008, its value on main (over target 2000: it may only go down)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "e4811cd4c303abdc382fc237dd6a1ea7a4d3dd64",
+      "rationale": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+      "receipt": "/tmp/hermes-static-metric-review-tests.log"
+    },
+    {
+      "path": "tests/hermes_cli/test_gateway_service.py",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "line": 1,
+      "detail": "lines 2927 > 2761, its value on main (over target 2000: it may only go down)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "ded5b696fd5640e6004f27af4a0ffba7b685322b",
+      "rationale": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+      "receipt": "/tmp/hermes-static-metric-review-tests.log"
+    },
+    {
+      "path": "tests/hermes_cli/test_kanban_db.py",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "line": 1,
+      "detail": "lines 2084 > 2010, its value on main (over target 2000: it may only go down)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "ca9989879ebfb919b4df705967e3cb8e548aadb1",
+      "rationale": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+      "receipt": "/tmp/hermes-static-metric-review-tests.log"
+    },
+    {
+      "path": "tests/hermes_cli/test_model_switch_custom_providers.py",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "line": 1,
+      "detail": "lines 2441 > 2407, its value on main (over target 2000: it may only go down)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "4bc8d79beae7baa44ab2d715bcbb5a42c7b7b440",
+      "rationale": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+      "receipt": "/tmp/hermes-static-metric-review-tests.log"
+    },
+    {
+      "path": "tests/hermes_cli/test_relay_shared_metrics_runtime.py",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "line": 1,
+      "detail": "lines 3055 > 2623, its value on main (over target 2000: it may only go down)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "397ecaf0c64f305090145b10e08b34c8c3b84f87",
+      "rationale": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+      "receipt": "/tmp/hermes-static-metric-review-tests.log"
+    },
+    {
+      "path": "tests/hermes_state/test_hermes_state.py",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "line": 1,
+      "detail": "lines 6785 > 6324, its value on main (over target 2000: it may only go down)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "1926bfaccec6affdfbd5c6071584a3235acde446",
+      "rationale": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+      "receipt": "/tmp/hermes-static-metric-review-tests.log"
+    },
+    {
+      "path": "tests/scripts/test_release_sequencer.py",
+      "rule": "CC",
+      "scope": "_sequencer_fixture.run",
+      "line": 453,
+      "detail": "CC 24 > target 20 (new code must meet the target)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "da845126fc92e2db145f761f6766baa6bb62a947",
+      "rationale": "Release-sequencer fixture dispatches synthetic git/gh/docker command shapes into in-memory tags/releases; unexpected argv raises AssertionError. It executes no actual release or remote subprocess. All32 sequencer tests pass through mocked workflow interactions.",
+      "receipt": "/tmp/hermes-static-metric-review-tests.log"
+    },
+    {
+      "path": "tests/tui_gateway/test_protocol.py",
+      "rule": "FILE_LINES",
+      "scope": "<module>",
+      "line": 1,
+      "detail": "lines 2136 > target 2000 (was 1573)",
+      "blocking": true,
+      "allowed_reason": null,
+      "inherited_debt": null,
+      "exact_file_matches": [
+        "upstream"
+      ],
+      "candidate_blob": "8bbf936ae57e384bce91e6639cc10c0f71e82551",
+      "rationale": "Test-only module organization metric; retains complete pinned-upstream test cases/assertions. Current canonical full-file execution passes; accepting this size does not waive tested production behavior or future growth.",
+      "receipt": "/tmp/hermes-static-metric-review-tests.log"
+    }
+  ],
+  "receipts": {
+    "/tmp/hermes-static-metric-review-tests.log": {
+      "sha256": "c0afed9dc6b968828bf7d78cc26d1201a9bbb8ac9efd880b0caad94bed1dbed5",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 12 test files (~945 tests) under ['tests/agent/test_model_metadata.py', 'tests/agent/test_run_agent_codex_responses.py', 'tests/agent/test_streaming.py', 'tests/agent/transports/test_codex_transport.py', 'tests/gateway/test_run_progress_topics.py', 'tests/hermes_cli/test_gateway_service.py', 'tests/hermes_cli/test_kanban_db.py', 'tests/hermes_cli/test_model_switch_custom_providers.py', 'tests/hermes_cli/test_relay_shared_metrics_runtime.py', 'tests/hermes_state/test_hermes_state.py', 'tests/tui_gateway/test_protocol.py', 'tests/scripts/test_release_sequencer.py']; running with -j 9\n[  9.7% |    92/~945 | \u2713144 | \u2717  0] \u2713 tests/agent/transports/test_codex_transport.py (144\u2713, 1.7s)\n[ 19.5% |   184/~945 | \u2713261 | \u2717  0] \u2713 tests/agent/test_model_metadata.py (117\u2713, 4.1s)\n[ 22.5% |   213/~945 | \u2713293 | \u2717  0] \u2713 tests/scripts/test_release_sequencer.py (32\u2713, 0.8s)\n[ 27.9% |   264/~945 | \u2713349 | \u2717  0] \u2713 tests/hermes_cli/test_relay_shared_metrics_runtime.py (56\u2713, 6.2s)\n[ 40.2% |   380/~945 | \u2713462 | \u2717  0] \u2713 tests/hermes_cli/test_gateway_service.py (113\u2713 3s, 9.7s)\n[ 45.3% |   428/~945 | \u2713516 | \u2717  0] \u2713 tests/hermes_cli/test_kanban_db.py (54\u2713 1s, 12.1s)\n[ 71.2% |   673/~945 | \u2713813 | \u2717  0] \u2713 tests/hermes_state/test_hermes_state.py (297\u2713, 11.5s)\n[ 78.6% |   743/~945 | \u2713889 | \u2717  0] \u2713 tests/hermes_cli/test_model_switch_custom_providers.py (76\u2713, 14.1s)\n[ 82.9% |   783/~945 | \u2713929 | \u2717  0] \u2713 tests/agent/test_streaming.py (40\u2713 4s, 18.8s)\n[ 89.3% |   844/~945 | \u27131007 | \u2717   0] \u2713 tests/tui_gateway/test_protocol.py (78\u2713, 31.8s)\n[ 93.3% |   882/~945 | \u27131055 | \u2717   0] \u2713 tests/gateway/test_run_progress_topics.py (48\u2713, 40.1s)\n[100.0% |   945/~945 | \u27131124 | \u2717   0] \u2713 tests/agent/test_run_agent_codex_responses.py (69\u2713, 41.8s)\n\n=== Summary: 12 files, 1124 tests passed, 0 failed, 8 skipped (100% complete) in 41.8s (9 workers) ===\n\n  note: platforms('macos') tests (in 1 file) were SKIPPED on this host (linux); they run on the macOS Python-tests lane.\n  note: platforms('windows') tests (in 1 file) were SKIPPED on this host (linux); they run on the Windows Python-tests lane.\n  Durations cached to test_durations.json (12 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   12\n  Total subprocess CPU-wall: 193.0s  (runner wall: 41.8s, parallelism: 9x)\n  P50: 12.13s  P90: 40.11s  P95: 41.83s  P99: 41.83s  Max: 41.83s\n  <1s: 1 files (8%)  <2s: 2 files (17%)\n  Top 10 slowest:\n     41.83s  tests/agent/test_run_agent_codex_responses.py\n     40.11s  tests/gateway/test_run_progress_topics.py\n     31.84s  tests/tui_gateway/test_protocol.py\n     18.81s  tests/agent/test_streaming.py\n     14.14s  tests/hermes_cli/test_model_switch_custom_providers.py\n     12.13s  tests/hermes_cli/test_kanban_db.py\n     11.54s  tests/hermes_state/test_hermes_state.py\n      9.66s  tests/hermes_cli/test_gateway_service.py\n      6.24s  tests/hermes_cli/test_relay_shared_metrics_runtime.py\n      4.15s  tests/agent/test_model_metadata.py\n"
+    },
+    "/tmp/hermes-lsp-metric-review-tests.log": {
+      "sha256": "dfd3d8c2f4e53f5d214ae85a28dc4ed2e6a1a2cb60c46615eaff6195e18ed65c",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~12 tests) under ['tests/agent/lsp/test_client_e2e.py']; running with -j 9\n[100.0% |    12/~12 | \u271313 | \u2717 0] \u2713 tests/agent/lsp/test_client_e2e.py (13\u2713, 5.0s)\n\n=== Summary: 1 files, 13 tests passed, 0 failed (100% complete) in 5.1s (9 workers) ===\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 5.0s  (runner wall: 5.1s, parallelism: 9x)\n  P50: 5.04s  P90: 5.04s  P95: 5.04s  P99: 5.04s  Max: 5.04s\n  <1s: 0 files (0%)  <2s: 0 files (0%)\n  Top 10 slowest:\n      5.04s  tests/agent/lsp/test_client_e2e.py\n"
+    }
+  }
+}
