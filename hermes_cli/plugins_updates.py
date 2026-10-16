@@ -169,8 +169,10 @@ def check_provenanced(
     if saved is not None:
         try:
             feed_text = fetch(saved)
-        except Exception as exc:
-            result.reason = f"feed fetch failed: {exc}"
+        except Exception:
+            # Network errors can include credential-bearing URLs. Public results
+            # are persisted in receipts and rendered by CLI/dashboard consumers.
+            result.reason = "feed fetch failed: check the approved update source and retry"
             return result
         try:
             feed = parse_feed_yml(feed_text)
@@ -226,8 +228,9 @@ def check_provenanced(
         return result
     try:
         head = ls_remote(source)
-    except Exception as exc:
-        result.reason = f"ls-remote failed: {exc}"
+    except Exception:
+        # TimeoutExpired includes argv; Git stderr can also echo source credentials.
+        result.reason = "ls-remote failed: check repository access and retry"
         return result
     result.latest = head
     result.update_available = bool(head) and head != result.current
