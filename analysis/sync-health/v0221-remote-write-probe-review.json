@@ -1,0 +1,88 @@
+{
+  "status": "proposal_only_pending_generated_identity_review",
+  "candidate_head": "c389e480cd71385d3199c6b860a47970d25cbb18",
+  "source_commit": "297552a9d646119871391d202509822cd86330df",
+  "path": "tools/file_tools_write_guards.py",
+  "scope": "_target_regular_file_state",
+  "rule": "BLE001",
+  "code": "except Exception:",
+  "lines": [
+    461,
+    465,
+    479
+  ],
+  "source_lines": [
+    453,
+    457,
+    471
+  ],
+  "count": 3,
+  "candidate_blob": "c99d09867b8aa9930c741b289a386bbc4a9a9831",
+  "source_blob": "32b4b31d6e0de496b7484d1e40d9f73d98005d1c",
+  "unit_body_hash": "a0b5b6aca5af65dd",
+  "measurement": {
+    "ruff_version": "0.15.10",
+    "source_count": 3,
+    "candidate_count": 3
+  },
+  "compatibility": "Optional resolver failure retains raw-path backend expansion/probing, rather than declaring absence or universally refusing. Existing remote binary stays protected; proven-absent path passes the binary guard. File-ops acquisition and backend expansion/probe exceptions produce unavailable, and write/replace/V4A callers refuse mutation. Persistent resolver failures in other guards can independently become registry error results; tests verify unchanged bytes rather than mislabeling those as this guard refusal.",
+  "limits": "Exactly three BLE001 catches of this unit. Host Path.is_file OSError-to-absent behavior is excluded and remains provisional. No general profile/write/transport safety or whole-subsystem waiver; synthetic fault injection plus real local-shell namespace transport is not live SSH/Docker validation.",
+  "dependencies": [
+    {
+      "path": "tests/tools/test_write_probe_failure_boundaries.py",
+      "blob": "841e42ae669747c2ba39beaabc00b04eea910df8",
+      "outcome": "passed",
+      "claim": "Ten direct failure cases: resolver/backend raw-path fallback, acquisition and probe failures, actual registry write/replace/V4A error results and preserved target bytes; absent-path classification remains usable."
+    },
+    {
+      "path": "tests/tools/test_remote_binary_write_guard.py",
+      "blob": "989813ab77113c55c2b26857ad91041ff018ab09",
+      "outcome": "passed",
+      "claim": "Real local-shell namespace transport fixture, registry dispatch helpers and existing binary preservation suite executed in the recorded run."
+    },
+    {
+      "path": "tools/file_tools.py",
+      "blob": "03c55e4e04fb6c9d73bf5031803702342771a7d6",
+      "outcome": "passed",
+      "claim": "Actual write/patch callers consume binary guard error before mutation; canonical file-ops facade is patched at real call boundary."
+    },
+    {
+      "path": "tools/file_tools_paths.py",
+      "blob": "4422086e3ae117b517af7d8bc72b992e163dc58b",
+      "outcome": "passed",
+      "claim": "Task-aware path resolver supplies optional resolved path; raw input remains backend expansion fallback."
+    },
+    {
+      "path": "tools/file_operations.py",
+      "blob": "fc4e36ace4abbfade5a0b1d812cfaffd11c7970f",
+      "outcome": "passed",
+      "claim": "Shell file operation implementation consumed by the task-aware facade."
+    },
+    {
+      "path": "tools/registry.py",
+      "blob": "398ecbc3342b8290e7abca7f834ce0cc6aeea7de",
+      "outcome": "passed",
+      "claim": "Actual registry dispatch serializes raised tool errors; tests assert error envelope and byte retention."
+    },
+    {
+      "path": "tools/environments/local.py",
+      "blob": "8d44e91f403397c2d052a2352ea496895b47c110",
+      "outcome": "passed",
+      "claim": "Namespace test transport runs bounded real shell operations through local environment."
+    },
+    {
+      "path": "tests/tools/conftest.py",
+      "blob": "e40c2bf0b5fee0e0d56d2d63ddefa8f1d559fdb6",
+      "outcome": "passed",
+      "claim": "Scoped tools test fixtures; generic approval resolver isolation is explicit opt-in and does not apply to these probe tests."
+    }
+  ],
+  "receipt": {
+    "path": "/tmp/hermes-boundary-annotation-final-20261015T235300.log",
+    "sha256": "b8df2f1c98021aa2f020797dd4aff22c487c74e3c64dff4a6abcd1b6e1914497",
+    "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 4 test files (~7 tests) under ['tests/plugins/test_loader_type_hints.py', 'tests/plugins/test_context_engine_user_dir.py', 'tests/tools/test_write_probe_failure_boundaries.py', 'tests/tools/test_remote_binary_write_guard.py']; running with -j 9\n[ 14.3% |     1/~7 | \u27131 | \u27170] \u2713 tests/plugins/test_context_engine_user_dir.py (1\u2713, 0.8s)\n[ 42.9% |     3/~7 | \u27134 | \u27170] \u2713 tests/plugins/test_loader_type_hints.py (3\u2713, 0.9s)\n[ 71.4% |     5/~7 | \u271314 | \u2717 0] \u2713 tests/tools/test_write_probe_failure_boundaries.py (10\u2713, 4.3s)\n[100.0% |     7/~7 | \u271321 | \u2717 0] \u2713 tests/tools/test_remote_binary_write_guard.py (7\u2713, 5.4s)\n\n=== Summary: 4 files, 21 tests passed, 0 failed (100% complete) in 5.4s (9 workers) ===\n  Durations cached to test_durations.json (4 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   4\n  Total subprocess CPU-wall: 11.4s  (runner wall: 5.4s, parallelism: 9x)\n  P50: 4.35s  P90: 5.43s  P95: 5.43s  P99: 5.43s  Max: 5.43s\n  <1s: 2 files (50%)  <2s: 2 files (50%)\n  Top 10 slowest:\n      5.43s  tests/tools/test_remote_binary_write_guard.py\n      4.35s  tests/tools/test_write_probe_failure_boundaries.py\n      0.89s  tests/plugins/test_loader_type_hints.py\n      0.75s  tests/plugins/test_context_engine_user_dir.py\n",
+    "summary": "4 files, 21 passed, 0 failed; this total includes context-loader tests, while 10 new cases directly exercise this probe group",
+    "command": "HERMES_PYTHON=$PWD/.venv/bin/python scripts/run_tests.sh tests/plugins/test_loader_type_hints.py tests/plugins/test_context_engine_user_dir.py tests/tools/test_write_probe_failure_boundaries.py tests/tools/test_remote_binary_write_guard.py -q"
+  },
+  "proposed_evidence_repository_path": "analysis/sync-health/v0221-remote-write-probe-review.json"
+}
