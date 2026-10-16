@@ -20,9 +20,12 @@ import type {
   PetOverlayStatePayload
 } from './store/pet-overlay'
 import type {
+  QuickEntryComposerSession,
+  QuickEntryCorrelatedResult,
   QuickEntryStatePush,
   QuickEntryStatus,
   QuickEntrySubmitPayload,
+  QuickEntrySubmitRequest,
   QuickEntrySubmitResult
 } from './store/quick-entry'
 
@@ -175,7 +178,9 @@ declare global {
         // Quick window → main: send this payload (main forwards it to the
         // primary renderer, which routes it to the target session and submits
         // through the normal prompt path) and hide.
-        submit: (payload: QuickEntrySubmitPayload) => Promise<QuickEntrySubmitResult>
+        getComposerSession: () => Promise<QuickEntryComposerSession | null>
+        submit: (payload: QuickEntrySubmitRequest) => Promise<QuickEntryCorrelatedResult>
+        completeSubmit: (payload: { correlationId: string; generation: string; hide: boolean }) => Promise<boolean>
         ackSubmit: (correlationId: string, result: QuickEntrySubmitResult) => void
         // Quick window → main: hide without sending (Escape / blur).
         dismiss: () => void
@@ -194,9 +199,7 @@ declare global {
         onShown: (callback: () => void) => () => void
         // Quick window subscribes to the outcome of a submit whose relay timed
         // out (delivery is unknown until this arrives).
-        onLateResult: (
-          callback: (payload: { correlationId: string; result: QuickEntrySubmitResult }) => void
-        ) => () => void
+        onLateResult: (callback: (payload: QuickEntryCorrelatedResult) => void) => () => void
       }
       getBootProgress: () => Promise<DesktopBootProgress>
       getConnectionConfig: (profile?: null | string) => Promise<DesktopConnectionConfig>

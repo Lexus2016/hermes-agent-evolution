@@ -482,9 +482,12 @@ import {
   tagRemoteSessionRows
 } from './profile-session-routing'
 import {
+  bindQuickEntryComposerDocument,
+  completeQuickEntryWindow,
   createQuickEntryShortcut,
   createQuickEntrySubmitRelay,
   quickEntryWindowBounds,
+  registerQuickEntrySubmitIpc,
   sanitizeQuickEntrySettings
 } from './quick-entry'
 import { createQuitFinalization } from './quit-finalization'
@@ -13746,6 +13749,8 @@ function spawnQuickEntryWindow() {
     }
   })
 
+  bindQuickEntryComposerDocument(win, quickEntrySubmitRelay)
+
   win.setAlwaysOnTop(true, IS_MAC ? 'floating' : 'screen-saver')
   win.setHiddenInMissionControl?.(true)
 
@@ -17214,62 +17219,24 @@ ipcMain.handle('hermes:quick-entry:settings:set', async (_event, patch) => {
 // payload is `{ target, text }` — target routing (current chat / a picked
 // session / new) is the renderer's job too.
 const quickEntrySubmitRelay = createQuickEntrySubmitRelay({
-  // A late ack for a timed-out submit proves the outcome. Forward it to the
-  // capture window so it can reconcile the unknown state instead of the user
-  // resending a prompt that may already be delivered.
-  onLateResult: (correlationId, result) => {
-    if (quickEntryWindow && !quickEntryWindow.isDestroyed()) {
-      quickEntryWindow.webContents.send('hermes:quick-entry:late-result', { correlationId, result })
+  onLateResult: (owner, result) => {
+    if (quickEntryWindow && !quickEntryWindow.isDestroyed() && quickEntryWindow.webContents.id === owner.windowId) {
+      quickEntryWindow.webContents.send('hermes:quick-entry:late-result', result)
     }
   },
-  onSuccess: () => {
-    hideQuickEntryWindow()
-
-    if (process.platform === 'darwin') {
-      app.dock?.show()
-    }
-
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show()
-      mainWindow.focus()
-    }
+  onComplete: (owner, focusPrimary) => {
+    completeQuickEntryWindow(owner, focusPrimary, quickEntryWindow, mainWindow, () => {
+      if (process.platform === 'darwin') {
+        app.dock?.show()
+      }
+    })
   }
 })
 
-// Main owns the request lifecycle so the capture window can keep text until
-// the primary renderer confirms delivery (#85590).
-ipcMain.handle('hermes:quick-entry:submit', (event, payload) => {
-  if (!quickEntryWindow || event.sender !== quickEntryWindow.webContents) {
-    return { code: 'forbidden', message: 'Quick Entry sender is not authorized.', ok: false, retryable: false }
-  }
-
-  const text =
-    typeof payload === 'string' ? payload.trim() : typeof payload?.text === 'string' ? payload.text.trim() : ''
-
-  if (!text) {
-    return { code: 'empty', message: 'Enter a prompt before submitting.', ok: false, retryable: false }
-  }
-
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return { code: 'no-primary', message: 'The primary Hermes window is unavailable.', ok: false, retryable: true }
-  }
-
-  const target =
-    typeof payload === 'object' && typeof payload?.target === 'string' && payload.target ? payload.target : 'current'
-
-  return quickEntrySubmitRelay.begin(correlationId => {
-    mainWindow.webContents.send('hermes:quick-entry:submit', { correlationId, target, text })
-  })
-})
-
-// Main cannot invoke the primary renderer, so the primary returns by id. Stale
-// or duplicate acknowledgements are intentionally ignored (#85590).
-ipcMain.on('hermes:quick-entry:ack', (event, payload) => {
-  if (!mainWindow || event.sender !== mainWindow.webContents) {
-    return
-  }
-
-  quickEntrySubmitRelay.acknowledge(payload?.correlationId, payload?.result)
+registerQuickEntrySubmitIpc(ipcMain, {
+  quickWindow: () => quickEntryWindow,
+  primaryWindow: () => mainWindow,
+  relay: quickEntrySubmitRelay
 })
 
 // Primary renderer → main → quick window: gateway connection state + the
@@ -17282,8 +17249,6 @@ ipcMain.on('hermes:quick-entry:state', (_event, payload) => {
     quickEntryWindow.webContents.send('hermes:quick-entry:state', payload)
   }
 })
-
-ipcMain.on('hermes:quick-entry:dismiss', () => hideQuickEntryWindow())
 
 // Disable F12 DevTools: maintained in the main process so a cold launch
 // restores it before any window is shown (applied on ready). The renderer

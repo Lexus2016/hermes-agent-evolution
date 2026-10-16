@@ -128,6 +128,22 @@ export interface QuickEntrySubmitPayload {
   text: string
 }
 
+export interface QuickEntryComposerSession {
+  generation: string
+  nextSubmitId: number
+}
+
+export interface QuickEntrySubmitRequest extends QuickEntrySubmitPayload {
+  generation: string
+  submitId: number
+}
+
+export interface QuickEntryCorrelatedResult extends QuickEntrySubmitResult {
+  correlationId?: string
+  generation: string
+  submitId: number
+}
+
 export interface QuickEntrySubmitResult {
   ok: boolean
   code?: string
@@ -169,6 +185,8 @@ export interface QuickComposerState {
    *  have accepted it. Kept so a late acknowledgement can reconcile, and never
    *  presented as retryable until non-acceptance is proven. */
   unknownSubmitId: number | null
+  /** All timed-out requests, including ones superseded before their timeout. */
+  unknownSubmitIds: number[]
   /** Where a submit lands: current / new / a stored session id. */
   target: string
   /** Whether the window should be visible. False asks the shell to hide. */
@@ -184,7 +202,7 @@ export type QuickComposerEvent =
   | { type: 'submit'; submitId?: number }
   | { type: 'submit-error'; message: string; submitId: number }
   | { message: string; submitId: number; type: 'submit-unknown' }
-  | { message: string; ok: boolean; type: 'late-result' }
+  | { message: string; ok: boolean; submitId: number; type: 'late-result' }
   | { type: 'submit-ok'; submitId: number }
   | { type: 'target'; target: string }
 
@@ -233,8 +251,11 @@ export const initialQuickComposerState: QuickComposerState = {
   submitting: false,
   target: QUICK_TARGET_CURRENT,
   unknownSubmitId: null,
+  unknownSubmitIds: [],
   visible: true
 }
+
+const UNKNOWN_DELIVERY_MESSAGE = 'Hermes has not confirmed an earlier prompt yet — it may still be delivered.'
 
 function consumeSubmitText(state: QuickComposerState, submitId: number): Record<number, string> {
   const pending = { ...state.pendingSubmitTexts }
@@ -252,12 +273,13 @@ function completeSubmit(state: QuickComposerState, submitId: number): QuickCompo
   return {
     ...state,
     draft: edited ? state.draft : '',
-    error: null,
+    error: state.unknownSubmitIds.some(id => id !== submitId) ? UNKNOWN_DELIVERY_MESSAGE : null,
     lastSubmitText: '',
     pendingSubmitId: null,
     pendingSubmitTexts: consumeSubmitText(state, submitId),
     submitting: false,
     unknownSubmitId: null,
+    unknownSubmitIds: state.unknownSubmitIds.filter(id => id !== submitId),
     visible: edited ? state.visible : false
   }
 }
@@ -266,7 +288,7 @@ function dismissQuickComposer(state: QuickComposerState): QuickComposerTransitio
   // Escape / focus loss discards a surface with nothing unresolved. A submit
   // already handed to main keeps its correlation and draft: the promise
   // still resolves, and a late failure must be able to restore the text.
-  const unresolved = state.submitting || state.unknownSubmitId !== null
+  const unresolved = state.submitting || Object.keys(state.pendingSubmitTexts).length > 0
 
   return {
     send: null,
@@ -291,8 +313,11 @@ function showQuickComposer(state: QuickComposerState): QuickComposerTransition {
   // generation and shows the text still being delivered. Otherwise the
   // surface is fresh — except that a failure whose generation lost the
   // window hands its text back rather than dropping it.
-  if (state.submitting || state.unknownSubmitId !== null) {
-    return { send: null, state: { ...state, error: null, visible: true } }
+  if (state.submitting || Object.keys(state.pendingSubmitTexts).length > 0) {
+    return {
+      send: null,
+      state: { ...state, error: state.unknownSubmitIds.length > 0 ? UNKNOWN_DELIVERY_MESSAGE : null, visible: true }
+    }
   }
 
   return {
@@ -341,16 +366,15 @@ function submitQuickComposer(
 ): QuickComposerTransition {
   const text = state.draft.trim()
 
+  if (state.unknownSubmitIds.length > 0) {
+    return { send: null, state: { ...state, error: UNKNOWN_DELIVERY_MESSAGE } }
+  }
+
   // Nothing to send — or nowhere to send it (gateway down): stay open and
   // keep the draft so a stray Enter can't make the text vanish. Re-entering
   // changed text supersedes the pending generation; an unknown outcome never
   // invites a second delivery attempt.
-  if (
-    !text ||
-    !state.connected ||
-    state.unknownSubmitId !== null ||
-    (state.submitting && text === state.lastSubmitText)
-  ) {
+  if (!text || !state.connected || (state.submitting && text === state.lastSubmitText)) {
     return { send: null, state }
   }
 
@@ -388,7 +412,15 @@ function acceptQuickComposerSubmit(
     send: null,
     state: owner
       ? completeSubmit(state, event.submitId)
-      : { ...state, pendingSubmitTexts: consumeSubmitText(state, event.submitId) }
+      : {
+          ...state,
+          pendingSubmitTexts: consumeSubmitText(state, event.submitId),
+          unknownSubmitIds: state.unknownSubmitIds.filter(id => id !== event.submitId),
+          error:
+            state.error === UNKNOWN_DELIVERY_MESSAGE && !state.unknownSubmitIds.some(id => id !== event.submitId)
+              ? null
+              : state.error
+        }
   }
 }
 
@@ -396,21 +428,21 @@ function markQuickComposerSubmitUnknown(
   state: QuickComposerState,
   event: Extract<QuickComposerEvent, { type: 'submit-unknown' }>
 ): QuickComposerTransition {
-  if (event.submitId <= 0 || state.pendingSubmitId !== event.submitId) {
+  if (!Object.hasOwn(state.pendingSubmitTexts, event.submitId) || state.unknownSubmitIds.includes(event.submitId)) {
     return { send: null, state }
   }
 
-  // Delivery is UNCONFIRMED, not failed: keep the draft, keep the
-  // correlation, and never present this as retryable.
+  const owner = state.pendingSubmitId === event.submitId
+
   return {
     send: null,
     state: {
       ...state,
-      error: event.message,
-      pendingSubmitId: null,
-      submitting: false,
-      unknownSubmitId: event.submitId,
-      visible: true
+      error: owner ? event.message : state.error,
+      pendingSubmitId: owner ? null : state.pendingSubmitId,
+      submitting: owner ? false : state.submitting,
+      unknownSubmitId: owner ? event.submitId : state.unknownSubmitId,
+      unknownSubmitIds: [...state.unknownSubmitIds, event.submitId]
     }
   }
 }
@@ -419,36 +451,15 @@ function applyQuickComposerLateResult(
   state: QuickComposerState,
   event: Extract<QuickComposerEvent, { type: 'late-result' }>
 ): QuickComposerTransition {
-  // A late outcome only reconciles a submit the window still holds as
-  // UNKNOWN. Without one it must not clobber a fresh draft.
-  if (state.unknownSubmitId === null) {
+  // A late native event can arrive before the timed-out invoke microtask.
+  // Its authenticated request ID still owns this text in either ordering.
+  if (!Object.hasOwn(state.pendingSubmitTexts, event.submitId)) {
     return { send: null, state }
   }
 
   return event.ok
-    ? {
-        send: null,
-        state: {
-          ...state,
-          draft: '',
-          error: null,
-          lastSubmitText: '',
-          pendingSubmitTexts: consumeSubmitText(state, state.unknownSubmitId),
-          unknownSubmitId: null,
-          visible: false
-        }
-      }
-    : {
-        send: null,
-        state: {
-          ...state,
-          error: event.message,
-          lastSubmitText: '',
-          pendingSubmitTexts: consumeSubmitText(state, state.unknownSubmitId),
-          unknownSubmitId: null,
-          visible: true
-        }
-      }
+    ? acceptQuickComposerSubmit(state, { submitId: event.submitId, type: 'submit-ok' })
+    : rejectQuickComposerSubmit(state, { message: event.message, submitId: event.submitId, type: 'submit-error' })
 }
 
 function rejectQuickComposerSubmit(
@@ -460,6 +471,7 @@ function rejectQuickComposerSubmit(
   }
 
   const pendingSubmitTexts = consumeSubmitText(state, event.submitId)
+  const unknownSubmitIds = state.unknownSubmitIds.filter(id => id !== event.submitId)
   const failedText = state.pendingSubmitTexts[event.submitId]
   const owner = state.pendingSubmitId === event.submitId || state.unknownSubmitId === event.submitId
 
@@ -480,6 +492,7 @@ function rejectQuickComposerSubmit(
         orphanedFailures,
         pendingSubmitId: null,
         pendingSubmitTexts,
+        unknownSubmitIds,
         submitting: false,
         visible: true
       }
@@ -497,6 +510,7 @@ function rejectQuickComposerSubmit(
         lastSubmitText: '',
         orphanedFailures,
         pendingSubmitTexts,
+        unknownSubmitIds,
         unknownSubmitId: null
       }
     }
@@ -508,9 +522,10 @@ function rejectQuickComposerSubmit(
     send: null,
     state: {
       ...state,
-      error: state.error ?? event.message,
+      error: state.error === UNKNOWN_DELIVERY_MESSAGE ? event.message : (state.error ?? event.message),
       orphanedFailures,
-      pendingSubmitTexts
+      pendingSubmitTexts,
+      unknownSubmitIds
     }
   }
 }
@@ -561,6 +576,222 @@ export function quickComposerReducer(state: QuickComposerState, event: QuickComp
     default: {
       return { send: null, state }
     }
+  }
+}
+
+/** One controller belongs to one renderer document. View unmounts do not cancel
+ * backend work or discard the text still owned by pending/unknown requests. */
+export type QuickComposerApi = Pick<
+  Window['hermesDesktop']['quickEntry'],
+  'completeSubmit' | 'dismiss' | 'getComposerSession' | 'onLateResult' | 'onShown' | 'onState' | 'submit'
+>
+
+interface QuickComposerSnapshot {
+  state: QuickComposerState
+  ready: boolean
+  sessionError: string | null
+  focusVersion: number
+}
+
+export class QuickComposerController {
+  private snapshot: QuickComposerSnapshot = {
+    state: initialQuickComposerState,
+    ready: false,
+    sessionError: null,
+    focusVersion: 0
+  }
+  private readonly listeners = new Set<() => void>()
+  private readonly cleanups: Array<() => void> = []
+  private session: QuickEntryComposerSession | null = null
+  private handshake: Promise<void> | null = null
+  private connected = false
+  private disposed = false
+
+  constructor(private readonly api: QuickComposerApi) {}
+
+  getSnapshot = (): QuickComposerSnapshot => this.snapshot
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+
+    return () => this.listeners.delete(listener)
+  }
+
+  private publish(patch: Partial<QuickComposerSnapshot>): void {
+    if (this.disposed) {
+      return
+    }
+
+    this.snapshot = { ...this.snapshot, ...patch }
+
+    for (const listener of this.listeners) {
+      listener()
+    }
+  }
+
+  connect = (): void => {
+    if (this.connected || this.disposed) {
+      return
+    }
+
+    this.connected = true
+    this.cleanups.push(
+      this.api.onShown(() => {
+        this.dispatch({ type: 'shown' })
+        this.publish({ focusVersion: this.snapshot.focusVersion + 1 })
+      }),
+      this.api.onState(payload =>
+        this.dispatch({
+          connected: payload?.connected === true,
+          sessions: Array.isArray(payload?.sessions) ? payload.sessions : [],
+          type: 'state'
+        })
+      ),
+      this.api.onLateResult(result => this.receive(result, true))
+    )
+    void this.retrySession()
+  }
+
+  retrySession = (): Promise<void> => {
+    if (this.disposed || this.session) {
+      return Promise.resolve()
+    }
+
+    if (this.handshake) {
+      return this.handshake
+    }
+
+    this.handshake = Promise.resolve()
+      .then(() => this.api.getComposerSession())
+      .then(session => {
+        if (this.disposed) {
+          return
+        }
+
+        if (
+          !session ||
+          !session.generation ||
+          !Number.isSafeInteger(session.nextSubmitId) ||
+          session.nextSubmitId <= 0
+        ) {
+          throw new Error('Quick Entry session unavailable')
+        }
+
+        this.session = { ...session }
+        this.publish({ ready: true, sessionError: null })
+      })
+      .catch(() => {
+        this.publish({ sessionError: 'Quick Entry could not connect. Press Enter to try again.' })
+      })
+      .finally(() => {
+        this.handshake = null
+      })
+
+    return this.handshake
+  }
+
+  dispatch = (event: QuickComposerEvent): void => {
+    if (this.disposed) {
+      return
+    }
+
+    if (event.type === 'submit' && !this.session) {
+      void this.retrySession()
+
+      return
+    }
+
+    // Assign identity before dispatch, not from a mutable counter in a React
+    // reducer. Rendering, StrictMode and effect replay cannot send a prompt.
+    const dispatched = event.type === 'submit' ? { ...event, submitId: this.session!.nextSubmitId++ } : event
+    const before = this.snapshot.state
+    const transition = quickComposerReducer(before, dispatched)
+    this.publish({ state: transition.state })
+
+    if (transition.send && dispatched.type === 'submit') {
+      void this.send(transition.send, dispatched.submitId!, this.session!.generation)
+    } else if ((event.type === 'blur' || event.type === 'dismiss') && before.visible) {
+      this.api.dismiss()
+    }
+  }
+
+  private async send(payload: QuickEntrySubmitPayload, submitId: number, generation: string): Promise<void> {
+    try {
+      const result = await this.api.submit({ ...payload, generation, submitId })
+
+      if (result.generation !== generation || result.submitId !== submitId) {
+        return
+      }
+
+      this.receive(result, false)
+    } catch {
+      // An IPC rejection cannot establish whether the backend accepted text.
+      // Keep it unknown rather than offering a potentially duplicate retry.
+      if (!this.disposed && this.session?.generation === generation) {
+        this.dispatch({
+          message: 'Hermes has not confirmed delivery. Your prompt may still be delivered.',
+          submitId,
+          type: 'submit-unknown'
+        })
+      }
+    }
+  }
+
+  private receive(result: QuickEntryCorrelatedResult, late: boolean): void {
+    if (this.disposed || result.generation !== this.session?.generation) {
+      return
+    }
+
+    const before = this.snapshot.state
+
+    const event: QuickComposerEvent = late
+      ? {
+          message: result.message ?? 'Hermes could not deliver the prompt.',
+          ok: result.ok,
+          submitId: result.submitId,
+          type: 'late-result'
+        }
+      : quickEntryResultEvent(result, result.submitId)
+
+    const next = quickComposerReducer(before, event).state
+
+    if (next === before) {
+      return
+    }
+
+    this.publish({ state: next })
+
+    if (result.ok && result.correlationId) {
+      // Completion grants no backend powers: it only releases a one-use native
+      // hide capability, with focus forbidden for late delivery confirmations.
+      void this.api
+        .completeSubmit({
+          correlationId: result.correlationId,
+          generation: result.generation,
+          hide: before.visible && !next.visible
+        })
+        .catch(() => {
+          // Delivery is already confirmed. A missed native hide is safe and its
+          // capability expires; never retry the prompt or clear newer edits.
+        })
+    }
+  }
+
+  dispose = (): void => {
+    if (this.disposed) {
+      return
+    }
+
+    this.disposed = true
+
+    for (const cleanup of this.cleanups) {
+      cleanup()
+    }
+
+    this.cleanups.length = 0
+    this.listeners.clear()
+    this.session = null
+    this.snapshot = { state: initialQuickComposerState, ready: false, sessionError: null, focusVersion: 0 }
   }
 }
 

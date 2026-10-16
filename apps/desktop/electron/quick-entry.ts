@@ -1,3 +1,5 @@
+import type { BrowserWindow, IpcMain, IpcMainEvent, IpcMainInvokeEvent } from 'electron'
+
 /**
  * Quick Entry — the global-hotkey mini composer.
  *
@@ -33,78 +35,361 @@ export interface QuickEntrySubmitRelayResult {
   [key: string]: unknown
 }
 
-export interface QuickEntrySubmitRelay {
-  begin: (forward: (correlationId: string) => void) => Promise<QuickEntrySubmitRelayResult>
-  acknowledge: (correlationId: string, result: QuickEntrySubmitRelayResult) => void
-  pendingCount: () => number
-  /** Correlations whose outcome is UNKNOWN: the relay timed out but the backend
-   *  may still have accepted the prompt. Kept so a late ack reconciles instead
-   *  of being silently dropped. */
-  reconcilableCount: () => number
+export interface QuickEntryComposerSession {
+  generation: string
+  nextSubmitId: number
 }
 
-export function createQuickEntrySubmitRelay(options: {
-  onLateResult?: (correlationId: string, result: QuickEntrySubmitRelayResult) => void
-  onSuccess: () => void
+export interface QuickEntrySubmitOwner {
+  windowId: number
+  generation: string
+  submitId: number
+}
+
+export interface QuickEntryRelayReply extends QuickEntrySubmitRelayResult {
+  correlationId?: string
+  generation: string
+  submitId: number
+}
+
+interface RelayRequest {
+  owner: QuickEntrySubmitOwner
+  resolve: (result: QuickEntryRelayReply) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+interface AcceptedSubmit {
+  owner: QuickEntrySubmitOwner
+  late: boolean
+  timer: ReturnType<typeof setTimeout>
+}
+
+interface QuickEntryRelayOptions {
+  onLateResult: (owner: QuickEntrySubmitOwner, result: QuickEntryRelayReply) => void
+  onComplete: (owner: QuickEntrySubmitOwner, focusPrimary: boolean) => void
   timeoutMs?: number
-}): QuickEntrySubmitRelay {
-  const pending = new Map<string, { resolve: (result: QuickEntrySubmitRelayResult) => void; timer: NodeJS.Timeout }>()
+  completionTimeoutMs?: number
+}
 
-  // Timed-out correlations. Delivery is UNCONFIRMED, so a late ack must
-  // reconcile; a correlation is never resolved twice.
-  const reconcilable = new Set<string>()
-  let sequence = 0
+/** Main owns document generations. Reading a session never resets its counter
+ * or invalidates unresolved requests; only verified native lifecycle does. */
+class QuickEntrySubmitRelay {
+  private readonly sessions = new Map<number, { generation: string; highWater: number }>()
+  private readonly pending = new Map<string, RelayRequest>()
+  private readonly reconcilable = new Map<string, QuickEntrySubmitOwner>()
+  private readonly accepted = new Map<string, AcceptedSubmit>()
+  private sequence = 0
+  private generationSequence = 0
 
-  return {
-    acknowledge(correlationId, result) {
-      const request = pending.get(correlationId)
+  constructor(private readonly options: QuickEntryRelayOptions) {}
 
-      if (!request) {
-        // A late ack for a timed-out submit: the outcome is now known. Do NOT
-        // hide the window here — the user may already be typing again. The
-        // renderer reconciles the unknown outcome itself.
-        if (reconcilable.delete(correlationId)) {
-          options.onLateResult?.(correlationId, result)
-        }
+  openDocument(windowId: number): QuickEntryComposerSession {
+    this.disposeWindow(windowId)
+    this.sessions.set(windowId, { generation: `qe-document-${++this.generationSequence}`, highWater: 0 })
 
-        return
+    return this.getSession(windowId)!
+  }
+
+  getSession(windowId: number): QuickEntryComposerSession | null {
+    const session = this.sessions.get(windowId)
+
+    return session ? { generation: session.generation, nextSubmitId: session.highWater + 1 } : null
+  }
+
+  private ownsDocument(owner: QuickEntrySubmitOwner): boolean {
+    return this.sessions.get(owner.windowId)?.generation === owner.generation
+  }
+
+  private reply(
+    owner: QuickEntrySubmitOwner,
+    result: QuickEntrySubmitRelayResult,
+    correlationId?: string
+  ): QuickEntryRelayReply {
+    return { ...result, correlationId, generation: owner.generation, submitId: owner.submitId }
+  }
+
+  begin(owner: QuickEntrySubmitOwner, forward: (correlationId: string) => void): Promise<QuickEntryRelayReply> {
+    const session = this.sessions.get(owner.windowId)
+
+    if (
+      !this.ownsDocument(owner) ||
+      !Number.isSafeInteger(owner.submitId) ||
+      owner.submitId <= (session?.highWater ?? 0)
+    ) {
+      return Promise.resolve(
+        this.reply(owner, {
+          code: 'invalid-submit',
+          message: 'Quick Entry submission identity is stale or invalid.',
+          ok: false,
+          retryable: false
+        })
+      )
+    }
+
+    session!.highWater = owner.submitId
+    const correlationId = ['qe', Date.now(), ++this.sequence].join('-')
+
+    return new Promise(resolve => {
+      const timer = setTimeout(() => this.timeout(correlationId), this.options.timeoutMs ?? 15_000)
+      this.pending.set(correlationId, { owner, resolve, timer })
+
+      try {
+        forward(correlationId)
+      } catch {
+        // A synchronous send failure did not reach the primary renderer.
+        this.acknowledge(correlationId, {
+          code: 'forward-failed',
+          message: 'Quick Entry could not reach Hermes.',
+          ok: false,
+          retryable: true
+        })
+      }
+    })
+  }
+
+  private timeout(correlationId: string): void {
+    const request = this.pending.get(correlationId)
+
+    if (!request) {
+      return
+    }
+
+    this.pending.delete(correlationId)
+    this.reconcilable.set(correlationId, request.owner)
+    request.resolve(
+      this.reply(
+        request.owner,
+        {
+          code: 'timeout',
+          message: 'Hermes has not confirmed the prompt yet — it may still be delivered.',
+          ok: false,
+          retryable: false
+        },
+        correlationId
+      )
+    )
+  }
+
+  acknowledge(correlationId: string, result: QuickEntrySubmitRelayResult): void {
+    if (!result || typeof result.ok !== 'boolean') {
+      return
+    }
+
+    const request = this.pending.get(correlationId)
+    const owner = request?.owner ?? this.reconcilable.get(correlationId)
+
+    if (!owner || !this.ownsDocument(owner)) {
+      return
+    }
+
+    this.pending.delete(correlationId)
+    this.reconcilable.delete(correlationId)
+
+    if (request) {
+      clearTimeout(request.timer)
+    }
+
+    if (result.ok) {
+      // This timer revokes only the ability to hide/focus. It never discards
+      // unresolved text, cancels a backend submit, or invites a retry.
+      const timer = setTimeout(() => this.accepted.delete(correlationId), this.options.completionTimeoutMs ?? 30_000)
+      this.accepted.set(correlationId, { late: !request, owner, timer })
+    }
+
+    const reply = this.reply(owner, result, correlationId)
+
+    if (request) {
+      request.resolve(reply)
+    } else {
+      this.options.onLateResult(owner, reply)
+    }
+  }
+
+  complete(windowId: number, generation: string, correlationId: string, hide: boolean): boolean {
+    const accepted = this.accepted.get(correlationId)
+
+    if (
+      !accepted ||
+      accepted.owner.windowId !== windowId ||
+      accepted.owner.generation !== generation ||
+      !this.ownsDocument(accepted.owner)
+    ) {
+      return false
+    }
+
+    // Older accepted results may release their capability with hide=false.
+    // Only the newest request can hide the window or move native focus.
+    if (hide && this.sessions.get(windowId)?.highWater !== accepted.owner.submitId) {
+      return false
+    }
+
+    clearTimeout(accepted.timer)
+    this.accepted.delete(correlationId)
+
+    if (hide) {
+      this.options.onComplete(accepted.owner, !accepted.late)
+    }
+
+    return true
+  }
+
+  disposeWindow(windowId: number): void {
+    this.sessions.delete(windowId)
+
+    for (const [id, request] of this.pending) {
+      if (request.owner.windowId !== windowId) {
+        continue
       }
 
       clearTimeout(request.timer)
-      pending.delete(correlationId)
-      request.resolve(result)
-
-      if (result.ok === true) {
-        options.onSuccess()
-      }
-    },
-    begin(forward) {
-      const correlationId = ['qe', Date.now(), ++sequence].join('-')
-
-      return new Promise(resolve => {
-        const timer = setTimeout(() => {
-          pending.delete(correlationId)
-          // UNKNOWN, not failed: the prompt may already be accepted, so this
-          // must never invite a retry. Keep the correlation for late acks.
-          reconcilable.add(correlationId)
-          resolve({
-            code: 'timeout',
-            message: 'Hermes has not confirmed the prompt yet — it may still be delivered.',
-            ok: false,
-            retryable: false
-          })
-        }, options.timeoutMs ?? 15_000)
-
-        pending.set(correlationId, { resolve, timer })
-        forward(correlationId)
-      })
-    },
-    pendingCount() {
-      return pending.size
-    },
-    reconcilableCount() {
-      return reconcilable.size
+      this.pending.delete(id)
+      request.resolve(this.reply(request.owner, { code: 'disposed', ok: false, retryable: false }, id))
     }
+
+    for (const [id, owner] of this.reconcilable) {
+      if (owner.windowId === windowId) {
+        this.reconcilable.delete(id)
+      }
+    }
+
+    for (const [id, accepted] of this.accepted) {
+      if (accepted.owner.windowId !== windowId) {
+        continue
+      }
+
+      clearTimeout(accepted.timer)
+      this.accepted.delete(id)
+    }
+  }
+
+  pendingCount(): number {
+    return this.pending.size
+  }
+  reconcilableCount(): number {
+    return this.reconcilable.size
+  }
+  acceptedCount(): number {
+    return this.accepted.size
+  }
+}
+
+export function createQuickEntrySubmitRelay(options: QuickEntryRelayOptions): QuickEntrySubmitRelay {
+  return new QuickEntrySubmitRelay(options)
+}
+
+/** Commit is the document boundary: a started/aborted navigation still leaves
+ * the old editor alive. No session is exposed for the initial about:blank. */
+export function bindQuickEntryComposerDocument(win: BrowserWindow, relay: QuickEntrySubmitRelay): void {
+  const windowId = win.webContents.id
+  win.webContents.on('did-navigate', () => relay.openDocument(windowId))
+  win.webContents.on('render-process-gone', () => relay.disposeWindow(windowId))
+  win.on('closed', () => relay.disposeWindow(windowId))
+}
+
+interface QuickEntryIpcOptions {
+  quickWindow: () => BrowserWindow | null
+  primaryWindow: () => BrowserWindow | null
+  relay: QuickEntrySubmitRelay
+}
+
+function isQuickEntrySender(event: IpcMainEvent | IpcMainInvokeEvent, win: BrowserWindow | null): boolean {
+  return !!win && !win.isDestroyed() && event.sender === win.webContents && event.senderFrame === event.sender.mainFrame
+}
+
+/** These are the real registered IPC handlers, kept Electron-runtime-free so
+ * origin, generation and completion checks are tested at the actual seam. */
+export function registerQuickEntrySubmitIpc(ipc: Pick<IpcMain, 'handle' | 'on'>, options: QuickEntryIpcOptions): void {
+  const { relay } = options
+  ipc.handle('hermes:quick-entry:session', event => {
+    return isQuickEntrySender(event, options.quickWindow()) ? relay.getSession(event.sender.id) : null
+  })
+  ipc.handle('hermes:quick-entry:complete', (event, payload) => {
+    if (!isQuickEntrySender(event, options.quickWindow()) || typeof payload?.hide !== 'boolean') {
+      return false
+    }
+
+    return relay.complete(event.sender.id, payload.generation, payload.correlationId, payload.hide)
+  })
+  ipc.handle('hermes:quick-entry:submit', (event, payload) => {
+    const identity = { generation: payload?.generation, submitId: payload?.submitId }
+
+    if (!isQuickEntrySender(event, options.quickWindow())) {
+      return {
+        ...identity,
+        code: 'forbidden',
+        message: 'Quick Entry sender is not authorized.',
+        ok: false,
+        retryable: false
+      }
+    }
+
+    const text = typeof payload?.text === 'string' ? payload.text.trim() : ''
+
+    if (!text) {
+      return { ...identity, code: 'empty', message: 'Enter a prompt before submitting.', ok: false, retryable: false }
+    }
+
+    const primary = options.primaryWindow()
+
+    if (!primary || primary.isDestroyed()) {
+      return {
+        ...identity,
+        code: 'no-primary',
+        message: 'The primary Hermes window is unavailable.',
+        ok: false,
+        retryable: true
+      }
+    }
+
+    const target = typeof payload?.target === 'string' && payload.target ? payload.target : 'current'
+
+    return relay.begin({ ...identity, windowId: event.sender.id }, correlationId => {
+      primary.webContents.send('hermes:quick-entry:submit', { correlationId, target, text })
+    })
+  })
+  ipc.on('hermes:quick-entry:ack', (event, payload) => {
+    if (!isQuickEntrySender(event, options.primaryWindow())) {
+      return
+    }
+
+    relay.acknowledge(payload?.correlationId, payload?.result)
+  })
+  ipc.on('hermes:quick-entry:dismiss', event => {
+    const win = options.quickWindow()
+
+    if (isQuickEntrySender(event, win)) {
+      win!.hide()
+    }
+  })
+}
+
+export function completeQuickEntryWindow(
+  owner: QuickEntrySubmitOwner,
+  focusPrimary: boolean,
+  quickWindow: BrowserWindow | null,
+  primaryWindow: BrowserWindow | null,
+  showDock: () => void
+): void {
+  if (
+    !quickWindow ||
+    quickWindow.isDestroyed() ||
+    quickWindow.webContents.id !== owner.windowId ||
+    !quickWindow.isVisible()
+  ) {
+    return
+  }
+
+  quickWindow.hide()
+
+  if (!focusPrimary) {
+    return
+  }
+
+  showDock()
+
+  if (primaryWindow && !primaryWindow.isDestroyed()) {
+    primaryWindow.show()
+    primaryWindow.focus()
   }
 }
 

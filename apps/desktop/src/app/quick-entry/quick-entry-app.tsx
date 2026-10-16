@@ -1,15 +1,7 @@
-import { useEffect, useReducer, useRef } from 'react'
+import { useEffect, useRef, useSyncExternalStore } from 'react'
 
 import { isSubmitEnter } from '@/lib/ime'
-import {
-  initialQuickComposerState,
-  QUICK_TARGET_CURRENT,
-  QUICK_TARGET_NEW,
-  type QuickComposerEvent,
-  quickComposerReducer,
-  type QuickComposerState,
-  quickEntryResultEvent
-} from '@/store/quick-entry'
+import { QUICK_TARGET_CURRENT, QUICK_TARGET_NEW, QuickComposerController } from '@/store/quick-entry'
 
 // Native select popups do not reliably inherit the closed control's colors.
 // Paint both sides of the contrast pair on every option so Chromium cannot
@@ -18,6 +10,23 @@ const QUICK_TARGET_OPTION_STYLE = {
   backgroundColor: 'var(--ui-bg-elevated, var(--background))',
   color: 'var(--ui-text-primary, var(--foreground))'
 }
+
+let documentController: QuickComposerController | null = null
+
+function getQuickEntryController(): QuickComposerController {
+  // Capture the document's bridge once. A wrapper changing object identity is
+  // not authority to abandon pending requests or create another controller.
+  documentController ??= new QuickComposerController(window.hermesDesktop.quickEntry)
+
+  return documentController
+}
+
+export function disposeQuickEntryController(): void {
+  documentController?.dispose()
+  documentController = null
+}
+
+window.addEventListener('pagehide', disposeQuickEntryController)
 
 /**
  * The Quick Entry composer — the whole renderer surface of the global-hotkey
@@ -37,66 +46,22 @@ const QUICK_TARGET_OPTION_STYLE = {
  */
 export function QuickEntryApp() {
   const inputRef = useRef<HTMLInputElement>(null)
-  const submitIdRef = useRef(0)
+  const controller = getQuickEntryController()
+  const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
+  const { state } = snapshot
+  const dispatch = controller.dispatch
 
-  // The reducer returns { send, state }; this wrapper performs the side effect
-  // (hand the payload to the shell, ask to hide) and stores the next state, so
-  // the decision stays pure and testable while the effects stay in one place.
-  const [state, dispatch] = useReducer((current: QuickComposerState, event: QuickComposerEvent) => {
-    const { send, state: next } = quickComposerReducer(current, event)
-    const api = window.hermesDesktop?.quickEntry
-
-    if (send) {
-      const submitId = submitIdRef.current
-      void api?.submit(send).then(result => {
-        dispatch(quickEntryResultEvent(result, submitId))
-
-        if (!result.ok) {
-          requestAnimationFrame(() => inputRef.current?.focus())
-        }
-      })
-    } else if (!next.visible && current.visible) {
-      api?.dismiss()
-    }
-
-    return next
-  }, initialQuickComposerState)
-
-  // Re-summoned by the chord: the shell reuses the window, so reset the draft
-  // and take the keyboard back for a fresh capture. Also adopt gateway-state
-  // pushes (connection + recent sessions) relayed from the primary renderer.
   useEffect(() => {
-    const api = window.hermesDesktop?.quickEntry
+    controller.connect()
+    // The document, not this view, owns pending work. StrictMode and a genuine
+    // remount detach only the React subscriber, never the native listeners.
+  }, [controller])
 
-    const offShown = api?.onShown(() => {
-      dispatch({ type: 'shown' })
-      requestAnimationFrame(() => inputRef.current?.focus())
-    })
-
-    const offState = api?.onState(payload => {
-      dispatch({
-        connected: payload?.connected === true,
-        sessions: Array.isArray(payload?.sessions) ? payload.sessions : [],
-        type: 'state'
-      })
-    })
-
-    const offLateResult = api?.onLateResult(payload => {
-      dispatch({
-        message: payload?.result?.message ?? 'Hermes could not deliver the prompt.',
-        ok: payload?.result?.ok === true,
-        type: 'late-result'
-      })
-    })
-
-    inputRef.current?.focus()
-
-    return () => {
-      offShown?.()
-      offState?.()
-      offLateResult?.()
+  useEffect(() => {
+    if (state.visible) {
+      inputRef.current?.focus()
     }
-  }, [])
+  }, [snapshot.focusVersion, state.visible])
 
   return (
     <div
@@ -156,7 +121,7 @@ export function QuickEntryApp() {
             onKeyDown={event => {
               if (isSubmitEnter(event) && !event.shiftKey) {
                 event.preventDefault()
-                dispatch({ submitId: ++submitIdRef.current, type: 'submit' })
+                dispatch({ type: 'submit' })
               } else if (event.key === 'Escape') {
                 event.preventDefault()
                 dispatch({ type: 'dismiss' })
@@ -226,9 +191,9 @@ export function QuickEntryApp() {
             ))}
           </select>
         </div>
-        {state.error ? (
+        {state.error || snapshot.sessionError ? (
           <div role="alert" style={{ color: 'var(--destructive, #ef4444)', fontSize: 11 }}>
-            {state.error}
+            {state.error || snapshot.sessionError}
           </div>
         ) : null}
       </div>

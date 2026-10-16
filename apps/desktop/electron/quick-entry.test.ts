@@ -1,142 +1,366 @@
-import { describe, expect, it, vi } from 'vitest'
+import { EventEmitter } from 'node:events'
+
+import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  bindQuickEntryComposerDocument,
+  completeQuickEntryWindow,
   createQuickEntryShortcut,
   createQuickEntrySubmitRelay,
   DEFAULT_QUICK_ENTRY_SHORTCUT,
   type GlobalShortcutLike,
   parseQuickEntryShortcut,
   quickEntryWindowBounds,
+  registerQuickEntrySubmitIpc,
   sanitizeQuickEntrySettings
 } from './quick-entry'
 
+function relayHarness() {
+  const onComplete = vi.fn()
+  const onLateResult = vi.fn()
+  const relay = createQuickEntrySubmitRelay({ onComplete, onLateResult })
+  const session = relay.openDocument(10)
+  const owner = (submitId: number) => ({ generation: session.generation, submitId, windowId: 10 })
+
+  const send = (submitId: number) => {
+    let id = ''
+
+    const promise = relay.begin(owner(submitId), correlationId => {
+      id = correlationId
+    })
+
+    return { id, promise }
+  }
+
+  return { onComplete, onLateResult, owner, relay, send, session }
+}
+
 describe('quick-entry submit ack relay', () => {
-  it('ignores an ack for a stale correlation id', async () => {
-    const relay = createQuickEntrySubmitRelay({ onSuccess: vi.fn(), timeoutMs: 1000 })
-    let correlationId = ''
-    let settled = false
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => {
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  })
 
-    const pending = relay
-      .begin(id => {
-        correlationId = id
+  it('ignores unknown replies and completes a successful request once, only on renderer approval', async () => {
+    const h = relayHarness()
+    const sent = h.send(1)
+    h.relay.acknowledge('unknown', { ok: true })
+    expect(h.relay.pendingCount()).toBe(1)
+    h.relay.acknowledge(sent.id, { ok: true })
+    await expect(sent.promise).resolves.toMatchObject({
+      generation: h.session.generation,
+      submitId: 1,
+      correlationId: sent.id,
+      ok: true
+    })
+    expect(h.onComplete).not.toHaveBeenCalled()
+    expect(h.relay.complete(10, h.session.generation, sent.id, true)).toBe(true)
+    expect(h.relay.complete(10, h.session.generation, sent.id, true)).toBe(false)
+    expect(h.onComplete).toHaveBeenCalledExactlyOnceWith(h.owner(1), true)
+  })
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid submit ID %s',
+    async id => {
+      const h = relayHarness()
+      const forward = vi.fn()
+      await expect(h.relay.begin(h.owner(id), forward)).resolves.toMatchObject({ code: 'invalid-submit' })
+      expect(forward).not.toHaveBeenCalled()
+      expect(h.relay.pendingCount()).toBe(0)
+    }
+  )
+
+  it('rejects reused IDs and stale generations without advancing the current high-water', async () => {
+    const h = relayHarness()
+    const sent = h.send(5)
+    await expect(h.send(5).promise).resolves.toMatchObject({ code: 'invalid-submit' })
+    await expect(h.send(4).promise).resolves.toMatchObject({ code: 'invalid-submit' })
+    expect(h.relay.getSession(10)?.nextSubmitId).toBe(6)
+    h.relay.acknowledge(sent.id, { ok: false })
+    await sent.promise
+    await expect(h.relay.begin({ ...h.owner(6), generation: 'old' }, vi.fn())).resolves.toMatchObject({
+      code: 'invalid-submit'
+    })
+    expect(h.relay.getSession(10)?.nextSubmitId).toBe(6)
+  })
+
+  it('only gates hide/focus on latest: older hide=false can consume once', async () => {
+    const h = relayHarness()
+    const first = h.send(1)
+    const second = h.send(2)
+    h.relay.acknowledge(first.id, { ok: true })
+    h.relay.acknowledge(second.id, { ok: true })
+    await Promise.all([first.promise, second.promise])
+    expect(h.relay.complete(11, h.session.generation, second.id, true)).toBe(false)
+    expect(h.relay.complete(10, 'wrong', second.id, true)).toBe(false)
+    expect(h.relay.complete(10, h.session.generation, 'unknown', true)).toBe(false)
+    expect(h.relay.complete(10, h.session.generation, first.id, true)).toBe(false)
+    expect(h.relay.complete(10, h.session.generation, first.id, false)).toBe(true)
+    expect(h.relay.complete(10, h.session.generation, first.id, false)).toBe(false)
+    expect(h.onComplete).not.toHaveBeenCalled()
+    expect(h.relay.complete(10, h.session.generation, second.id, true)).toBe(true)
+    expect(h.onComplete).toHaveBeenCalledExactlyOnceWith(h.owner(2), true)
+  })
+
+  it.each([
+    [1, 2],
+    [2, 1]
+  ])('correlates multiple timeouts and late results in order %s,%s', async (first, second) => {
+    const h = relayHarness()
+    const sent = [h.send(1), h.send(2)]
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    for (const [index, request] of sent.entries()) {
+      await expect(request.promise).resolves.toMatchObject({
+        code: 'timeout',
+        retryable: false,
+        submitId: index + 1,
+        correlationId: request.id,
+        generation: h.session.generation
       })
-      .then(() => {
-        settled = true
+    }
+
+    expect(h.relay.reconcilableCount()).toBe(2)
+
+    for (const id of [first, second]) {
+      h.relay.acknowledge(sent[id - 1].id, { ok: id === 2 })
+    }
+
+    expect(h.onLateResult.mock.calls.map(([owner]) => owner.submitId)).toEqual([first, second])
+    expect(h.relay.reconcilableCount()).toBe(0)
+    h.relay.acknowledge(sent[1].id, { ok: true })
+    expect(h.onLateResult).toHaveBeenCalledTimes(2)
+    expect(h.relay.complete(10, h.session.generation, sent[1].id, true)).toBe(true)
+    expect(h.onComplete).toHaveBeenCalledExactlyOnceWith(h.owner(2), false)
+  })
+
+  it('expires only accepted native capabilities and retains unresolved requests', async () => {
+    const h = relayHarness()
+    const accepted = h.send(1)
+    const unknown = h.send(2)
+    h.relay.acknowledge(accepted.id, { ok: true })
+    await accepted.promise
+    await vi.advanceTimersByTimeAsync(30_000)
+    await unknown.promise
+    expect(h.relay.acceptedCount()).toBe(0)
+    expect(h.relay.complete(10, h.session.generation, accepted.id, true)).toBe(false)
+    expect(h.relay.reconcilableCount()).toBe(1)
+    h.relay.acknowledge(unknown.id, { ok: false })
+    expect(h.onLateResult).toHaveBeenCalledTimes(1)
+  })
+
+  it('disposes pending, unknown and accepted ownership without routing callbacks to a new document', async () => {
+    const h = relayHarness()
+    const unknown = h.send(1)
+    await vi.advanceTimersByTimeAsync(15_000)
+    await unknown.promise
+    const accepted = h.send(2)
+    h.relay.acknowledge(accepted.id, { ok: true })
+    await accepted.promise
+    const pending = h.send(3)
+    h.relay.disposeWindow(10)
+    await expect(pending.promise).resolves.toMatchObject({ code: 'disposed' })
+    const next = h.relay.openDocument(10)
+    expect(next).toEqual({ generation: expect.not.stringMatching(h.session.generation), nextSubmitId: 1 })
+
+    for (const id of [unknown.id, accepted.id, pending.id]) {
+      h.relay.acknowledge(id, { ok: true })
+    }
+
+    expect(h.relay.complete(10, next.generation, accepted.id, true)).toBe(false)
+    expect(h.onLateResult).not.toHaveBeenCalled()
+    expect(h.onComplete).not.toHaveBeenCalled()
+    expect([h.relay.pendingCount(), h.relay.reconcilableCount(), h.relay.acceptedCount()]).toEqual([0, 0, 0])
+  })
+
+  it('turns a synchronous forwarding failure into a correlated failure without leaving a timer', async () => {
+    const h = relayHarness()
+    await expect(
+      h.relay.begin(h.owner(1), () => {
+        throw new Error('closed')
       })
+    ).resolves.toMatchObject({ code: 'forward-failed', submitId: 1 })
+    expect(h.relay.pendingCount()).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+})
 
-    relay.acknowledge('qe-stale', { ok: true })
-    await Promise.resolve()
+function nativeWindow(id: number) {
+  const contents = Object.assign(new EventEmitter(), { id, mainFrame: {}, send: vi.fn() })
 
-    expect(settled).toBe(false)
-    expect(relay.pendingCount()).toBe(1)
-    relay.acknowledge(correlationId, { ok: false })
-    await pending
-    expect(relay.pendingCount()).toBe(0)
+  const win = Object.assign(new EventEmitter(), {
+    webContents: contents,
+    isDestroyed: vi.fn(() => false),
+    isVisible: vi.fn(() => true),
+    hide: vi.fn(),
+    show: vi.fn(),
+    focus: vi.fn()
   })
 
-  it('resolves an unacknowledged submit as an unknown, non-retryable timeout and keeps it reconcilable', async () => {
-    vi.useFakeTimers()
-    const relay = createQuickEntrySubmitRelay({ onSuccess: vi.fn(), timeoutMs: 15000 })
-    const pending = relay.begin(vi.fn())
+  return {
+    win,
+    native: win as unknown as BrowserWindow,
+    event: { sender: contents, senderFrame: contents.mainFrame } as unknown as IpcMainInvokeEvent
+  }
+}
 
-    await vi.advanceTimersByTimeAsync(15000)
-
-    await expect(pending).resolves.toMatchObject({ code: 'timeout', ok: false, retryable: false })
-    expect(relay.pendingCount()).toBe(0)
-    expect(relay.reconcilableCount()).toBe(1)
+describe('Quick Entry registered native handlers', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => {
+    vi.clearAllTimers()
     vi.useRealTimers()
   })
 
-  it('reconciles a late success through onLateResult without hiding the window', async () => {
-    vi.useFakeTimers()
-    const onSuccess = vi.fn()
-    const onLateResult = vi.fn()
-    const relay = createQuickEntrySubmitRelay({ onLateResult, onSuccess, timeoutMs: 15000 })
-    let correlationId = ''
-
-    const pending = relay.begin(id => {
-      correlationId = id
-    })
-
-    await vi.advanceTimersByTimeAsync(15000)
-    await pending
-    relay.acknowledge(correlationId, { ok: true })
-
-    expect(onLateResult).toHaveBeenCalledTimes(1)
-    expect(onLateResult).toHaveBeenCalledWith(correlationId, { ok: true })
-    expect(onSuccess).not.toHaveBeenCalled()
-    expect(relay.reconcilableCount()).toBe(0)
-    vi.useRealTimers()
+  it('rotates only committed main documents and invalidates renderer loss/closed windows', async () => {
+    const h = relayHarness()
+    const window = nativeWindow(20)
+    bindQuickEntryComposerDocument(window.native, h.relay)
+    expect(h.relay.getSession(20)).toBeNull()
+    window.win.webContents.emit('did-start-navigation', { isMainFrame: true })
+    window.win.webContents.emit('did-fail-load')
+    expect(h.relay.getSession(20)).toBeNull()
+    window.win.webContents.emit('did-navigate')
+    const original = h.relay.getSession(20)!
+    const pending = h.relay.begin({ ...original, submitId: 4, windowId: 20 }, vi.fn())
+    window.win.webContents.emit('did-start-navigation', { isMainFrame: true })
+    window.win.webContents.emit('did-fail-load')
+    window.win.webContents.emit('did-navigate-in-page')
+    expect(h.relay.getSession(20)).toEqual({ ...original, nextSubmitId: 5 })
+    window.win.webContents.emit('did-navigate')
+    await expect(pending).resolves.toMatchObject({ code: 'disposed' })
+    expect(h.relay.getSession(20)?.nextSubmitId).toBe(1)
+    expect(h.relay.getSession(20)?.generation).not.toBe(original.generation)
+    window.win.webContents.emit('render-process-gone')
+    expect(h.relay.getSession(20)).toBeNull()
+    window.win.webContents.emit('did-navigate')
+    expect(h.relay.getSession(20)).not.toBeNull()
+    window.win.emit('closed')
+    expect(h.relay.getSession(20)).toBeNull()
   })
 
-  it('reconciles a late failure through onLateResult', async () => {
-    vi.useFakeTimers()
-    const onLateResult = vi.fn()
-    const relay = createQuickEntrySubmitRelay({ onLateResult, onSuccess: vi.fn(), timeoutMs: 15000 })
-    let correlationId = ''
+  it('authenticates real submit/session/ack/complete/dismiss handlers by current window and main frame', async () => {
+    const h = relayHarness()
+    const quick = nativeWindow(10)
+    const primary = nativeWindow(1)
+    const other = nativeWindow(99)
+    const handlers = new Map<string, Parameters<IpcMain['handle']>[1]>()
+    const events = new Map<string, (...args: unknown[]) => void>()
 
-    const pending = relay.begin(id => {
-      correlationId = id
+    const ipc = {
+      handle: (name: string, handler: Parameters<IpcMain['handle']>[1]) => handlers.set(name, handler),
+      on: (name: string, handler: (...args: unknown[]) => void) => events.set(name, handler)
+    } as unknown as IpcMain
+
+    registerQuickEntrySubmitIpc(ipc, {
+      quickWindow: () => quick.native,
+      primaryWindow: () => primary.native,
+      relay: h.relay
     })
 
-    await vi.advanceTimersByTimeAsync(15000)
-    await pending
-    relay.acknowledge(correlationId, { code: 'submit-failed', ok: false })
+    const invoke = (name: string, event = quick.event, payload?: unknown) =>
+      handlers.get(`hermes:quick-entry:${name}`)!(event, payload)
 
-    expect(onLateResult).toHaveBeenCalledTimes(1)
-    expect(relay.reconcilableCount()).toBe(0)
-    vi.useRealTimers()
+    expect(invoke('session')).toEqual(h.session)
+    expect(invoke('session', other.event)).toBeNull()
+    expect(invoke('session', { ...quick.event, senderFrame: other.event.senderFrame })).toBeNull()
+    const payload = { ...h.session, submitId: 1, text: ' hello ', target: 'new' }
+    expect(invoke('submit', other.event, payload)).toMatchObject({ code: 'forbidden' })
+    const pending = invoke('submit', quick.event, payload)
+    const forwarded = primary.win.webContents.send.mock.calls[0][1]
+    expect(forwarded).toEqual({ correlationId: expect.any(String), target: 'new', text: 'hello' })
+    events.get('hermes:quick-entry:ack')!(other.event, { correlationId: forwarded.correlationId, result: { ok: true } })
+    expect(h.relay.pendingCount()).toBe(1)
+    events.get('hermes:quick-entry:ack')!(primary.event, {
+      correlationId: forwarded.correlationId,
+      result: { ok: true }
+    })
+    await expect(pending).resolves.toMatchObject({
+      generation: h.session.generation,
+      submitId: 1,
+      correlationId: forwarded.correlationId
+    })
+    const completion = { correlationId: forwarded.correlationId, generation: h.session.generation, hide: true }
+    expect(invoke('complete', other.event, completion)).toBe(false)
+    expect(invoke('complete', quick.event, { ...completion, hide: 'yes' })).toBe(false)
+    expect(invoke('complete', quick.event, completion)).toBe(true)
+    expect(invoke('complete', quick.event, completion)).toBe(false)
+    events.get('hermes:quick-entry:dismiss')!(other.event)
+    expect(quick.win.hide).not.toHaveBeenCalled()
+    events.get('hermes:quick-entry:dismiss')!(quick.event)
+    expect(quick.win.hide).toHaveBeenCalledOnce()
+    expect(invoke('session')?.nextSubmitId).toBe(2)
   })
 
-  it('ignores a duplicate late ack', async () => {
-    vi.useFakeTimers()
-    const onLateResult = vi.fn()
-    const relay = createQuickEntrySubmitRelay({ onLateResult, onSuccess: vi.fn(), timeoutMs: 15000 })
-    let correlationId = ''
-
-    const pending = relay.begin(id => {
-      correlationId = id
+  it('carries identities through the real preload and releases its exact late-result listener', async () => {
+    const renderer = Object.assign(new EventEmitter(), {
+      invoke: vi.fn(async () => true),
+      sendSync: vi.fn(),
+      send: vi.fn()
     })
 
-    await vi.advanceTimersByTimeAsync(15000)
-    await pending
-    relay.acknowledge(correlationId, { ok: true })
-    relay.acknowledge(correlationId, { ok: true })
+    let api!: {
+      getComposerSession: () => Promise<unknown>
+      submit: (payload: unknown) => Promise<unknown>
+      completeSubmit: (payload: unknown) => Promise<unknown>
+      onLateResult: (callback: (payload: unknown) => void) => () => void
+    }
 
-    expect(onLateResult).toHaveBeenCalledTimes(1)
-    expect(relay.reconcilableCount()).toBe(0)
-    vi.useRealTimers()
+    vi.doMock('electron', () => ({
+      contextBridge: {
+        exposeInMainWorld: (_name: string, bridge: { quickEntry: typeof api }) => {
+          api = bridge.quickEntry
+        }
+      },
+      ipcRenderer: renderer,
+      webFrame: {},
+      webUtils: {}
+    }))
+
+    try {
+      await import('./preload')
+      const request = { generation: 'g', submitId: 3, text: 'preserve identity', target: 'current' }
+      const completion = { generation: 'g', correlationId: 'native-correlation', hide: false }
+      await api.getComposerSession()
+      await api.submit(request)
+      await api.completeSubmit(completion)
+      expect(renderer.invoke.mock.calls).toEqual([
+        ['hermes:quick-entry:session'],
+        ['hermes:quick-entry:submit', request],
+        ['hermes:quick-entry:complete', completion]
+      ])
+      const callback = vi.fn()
+      const off = api.onLateResult(callback)
+      const result = { generation: 'g', submitId: 3, correlationId: 'native-correlation', ok: false }
+      renderer.emit('hermes:quick-entry:late-result', {}, result)
+      expect(callback).toHaveBeenCalledExactlyOnceWith(result)
+      off()
+      renderer.emit('hermes:quick-entry:late-result', {}, result)
+      expect(callback).toHaveBeenCalledOnce()
+      expect(renderer.listenerCount('hermes:quick-entry:late-result')).toBe(0)
+    } finally {
+      vi.doUnmock('electron')
+      vi.resetModules()
+    }
   })
 
-  it('runs hide and primary focus only after an ok acknowledgement', async () => {
-    const events: string[] = []
-
-    const relay = createQuickEntrySubmitRelay({
-      onSuccess: () => events.push('hide-primary-show-focus'),
-      timeoutMs: 1000
-    })
-
-    let correlationId = ''
-
-    const pending = relay.begin(id => {
-      correlationId = id
-      events.push('forward')
-    })
-
-    relay.acknowledge(correlationId, { ok: false })
-    await expect(pending).resolves.toMatchObject({ ok: false })
-    expect(events).toEqual(['forward'])
-
-    let okCorrelationId = ''
-
-    const okPending = relay.begin(id => {
-      okCorrelationId = id
-      events.push('forward-ok')
-    })
-
-    relay.acknowledge(okCorrelationId, { ok: true })
-    await expect(okPending).resolves.toMatchObject({ ok: true })
-    expect(events).toEqual(['forward', 'forward-ok', 'hide-primary-show-focus'])
+  it('never focuses for late results, hidden windows or a replacement window', () => {
+    const quick = nativeWindow(10)
+    const primary = nativeWindow(1)
+    const dock = vi.fn()
+    const owner = { windowId: 10, generation: 'g', submitId: 1 }
+    completeQuickEntryWindow(owner, false, quick.native, primary.native, dock)
+    expect(quick.win.hide).toHaveBeenCalledOnce()
+    expect(primary.win.focus).not.toHaveBeenCalled()
+    quick.win.isVisible.mockReturnValue(false)
+    completeQuickEntryWindow(owner, true, quick.native, primary.native, dock)
+    completeQuickEntryWindow(owner, true, nativeWindow(11).native, primary.native, dock)
+    expect(primary.win.focus).not.toHaveBeenCalled()
+    quick.win.isVisible.mockReturnValue(true)
+    completeQuickEntryWindow(owner, true, quick.native, primary.native, dock)
+    expect(primary.win.focus).toHaveBeenCalledOnce()
+    expect(dock).toHaveBeenCalledOnce()
   })
 })
 

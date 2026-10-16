@@ -54,6 +54,7 @@ describe('quickComposerReducer', () => {
       submitting: false,
       target: QUICK_TARGET_CURRENT,
       unknownSubmitId: null,
+      unknownSubmitIds: [],
       visible: true
     })
   })
@@ -333,13 +334,115 @@ describe('quickComposerReducer', () => {
     expect(retried.state.unknownSubmitId).toBe(7)
   })
 
+  it.each([
+    [7, 8],
+    [8, 7]
+  ])('tracks superseded timeouts and consumes correlated outcomes %s,%s', (first, second) => {
+    const initial = run([
+      connect,
+      { draft: 'first', type: 'edit' },
+      { submitId: 7, type: 'submit' },
+      { draft: 'second', type: 'edit' },
+      { submitId: 8, type: 'submit' },
+      { message: 'unknown first', submitId: 7, type: 'submit-unknown' },
+      { message: 'unknown second', submitId: 8, type: 'submit-unknown' },
+      { draft: 'new unsent edit', type: 'edit' }
+    ]).state
+
+    expect(initial.unknownSubmitIds).toEqual([7, 8])
+
+    const afterFirst = quickComposerReducer(initial, {
+      message: 'failed',
+      ok: first === 8,
+      submitId: first,
+      type: 'late-result'
+    }).state
+
+    expect(afterFirst.draft).toBe('new unsent edit')
+    expect(afterFirst.unknownSubmitIds).toEqual([second])
+
+    const afterBoth = quickComposerReducer(afterFirst, {
+      message: 'failed',
+      ok: second === 8,
+      submitId: second,
+      type: 'late-result'
+    }).state
+
+    expect(afterBoth).toMatchObject({
+      draft: 'new unsent edit',
+      pendingSubmitTexts: {},
+      unknownSubmitIds: [],
+      visible: true
+    })
+    expect(afterBoth.orphanedFailures).toEqual([{ message: 'failed', submitId: 7, text: 'first' }])
+    expect(
+      quickComposerReducer(afterBoth, { message: 'duplicate', ok: false, submitId: 7, type: 'late-result' }).state
+    ).toBe(afterBoth)
+  })
+
+  it('preserves an edited draft when its owning unknown submit later succeeds', () => {
+    const { state } = run([
+      connect,
+      { draft: 'submitted', type: 'edit' },
+      { submitId: 7, type: 'submit' },
+      { message: 'unknown', submitId: 7, type: 'submit-unknown' },
+      { draft: 'new edit', type: 'edit' },
+      { message: '', ok: true, submitId: 7, type: 'late-result' }
+    ])
+
+    expect(state).toMatchObject({ draft: 'new edit', visible: true, unknownSubmitIds: [], pendingSubmitTexts: {} })
+  })
+
+  it('keeps hidden timeouts hidden and preserves unresolved text over show/cancel', () => {
+    const hidden = run([
+      connect,
+      { draft: 'submitted', type: 'edit' },
+      { submitId: 7, type: 'submit' },
+      { type: 'dismiss' },
+      { message: 'unknown', submitId: 7, type: 'submit-unknown' }
+    ]).state
+
+    expect(hidden.visible).toBe(false)
+    const shown = quickComposerReducer(hidden, { type: 'shown' }).state
+    expect(shown).toMatchObject({ draft: 'submitted', unknownSubmitIds: [7], visible: true })
+    const hiddenAgain = quickComposerReducer(shown, { type: 'blur' }).state
+
+    const accepted = quickComposerReducer(hiddenAgain, {
+      message: '',
+      ok: true,
+      submitId: 7,
+      type: 'late-result'
+    }).state
+
+    expect(accepted).toMatchObject({ draft: '', pendingSubmitTexts: {}, unknownSubmitIds: [], visible: false })
+  })
+
+  it('accepts a late event before its timeout invoke microtask without losing newer text', () => {
+    const { state } = run([
+      connect,
+      { draft: 'first', type: 'edit' },
+      { submitId: 7, type: 'submit' },
+      { draft: 'second', type: 'edit' },
+      { submitId: 8, type: 'submit' },
+      { message: '', ok: true, submitId: 7, type: 'late-result' },
+      { message: 'delayed invoke', submitId: 7, type: 'submit-unknown' }
+    ])
+
+    expect(state).toMatchObject({
+      draft: 'second',
+      pendingSubmitId: 8,
+      pendingSubmitTexts: { 8: 'second' },
+      unknownSubmitIds: []
+    })
+  })
+
   it('a late success clears an unknown outcome', () => {
     const { state } = run([
       connect,
       { draft: 'pending prompt', type: 'edit' },
       { submitId: 7, type: 'submit' },
       { message: 'may still be delivered', submitId: 7, type: 'submit-unknown' },
-      { message: 'accepted', ok: true, type: 'late-result' }
+      { message: 'accepted', ok: true, submitId: 7, type: 'late-result' }
     ])
 
     expect(state.draft).toBe('')
@@ -354,7 +457,7 @@ describe('quickComposerReducer', () => {
       { draft: 'pending prompt', type: 'edit' },
       { submitId: 7, type: 'submit' },
       { message: 'may still be delivered', submitId: 7, type: 'submit-unknown' },
-      { message: 'gateway down', ok: false, type: 'late-result' }
+      { message: 'gateway down', ok: false, submitId: 7, type: 'late-result' }
     ])
 
     expect(state.unknownSubmitId).toBeNull()
@@ -367,7 +470,7 @@ describe('quickComposerReducer', () => {
     const { state } = run([
       connect,
       { draft: 'fresh draft', type: 'edit' },
-      { message: 'accepted', ok: true, type: 'late-result' }
+      { message: 'accepted', ok: true, submitId: 7, type: 'late-result' }
     ])
 
     expect(state.draft).toBe('fresh draft')
