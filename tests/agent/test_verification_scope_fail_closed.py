@@ -1,5 +1,7 @@
 """An active verification scope must never fail open on file reads or writes."""
 
+import builtins
+import json
 import sys
 from pathlib import Path
 from unittest.mock import Mock
@@ -7,6 +9,7 @@ from unittest.mock import Mock
 import pytest
 
 from agent import file_safety
+from tools import file_tools
 from agent.verification_scope import VerificationScope, VerificationScopeEnforcer
 from tools.file_operations import ShellFileOperations
 from tools.environments.local import LocalEnvironment
@@ -64,9 +67,6 @@ def test_unconfigured_scope_does_not_require_optional_enforcer(target, monkeypat
 
 @pytest.mark.parametrize("failure", ["exception", "unavailable", "violation"])
 def test_active_scope_denies_real_file_read(target, monkeypatch, failure):
-    import json
-    from tools import file_tools
-
     monkeypatch.setattr(
         file_safety,
         "_ACTIVE_VERIFICATION_SCOPE",
@@ -116,9 +116,6 @@ def test_unconfigured_provider_read_retains_best_effort(target, monkeypatch):
 
 
 def test_unconfigured_read_does_not_require_optional_enforcer(target, monkeypatch):
-    import json
-    from tools import file_tools
-
     monkeypatch.setitem(sys.modules, "agent.verification_scope", None)
     monkeypatch.setattr(
         file_tools,
@@ -131,9 +128,6 @@ def test_unconfigured_read_does_not_require_optional_enforcer(target, monkeypatc
 
 
 def test_valid_active_scope_allows_real_read_and_write(target, monkeypatch):
-    import json
-    from tools import file_tools
-
     monkeypatch.setattr(file_safety, "_ACTIVE_VERIFICATION_SCOPE",
                         VerificationScope(allowed_paths=[str(target)]))
     ops = ShellFileOperations(LocalEnvironment("/"))
@@ -145,3 +139,72 @@ def test_valid_active_scope_allows_real_read_and_write(target, monkeypatch):
     assert not read.get("error")
     assert "allowed-content" in str(read)
     file_safety.raise_if_read_blocked(str(target))
+
+
+# Main security backport matrix also covers import-time errors and exception chaining.
+@pytest.fixture
+def main_target(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "state"))
+    previous = file_safety.get_active_verification_scope()
+    file_safety.set_active_verification_scope(None)
+    path = tmp_path / "report.txt"
+    path.write_text("original", encoding="utf-8")
+    try:
+        yield path
+    finally:
+        file_safety.set_active_verification_scope(previous)
+
+
+@pytest.mark.parametrize("state", ["exception", "unavailable", "import_runtime", "violation", "allowed", "unset"])
+def test_real_file_read_write_require_evaluable_active_scope(main_target, monkeypatch, state):
+    if state != "unset":
+        scope = VerificationScope(denied_paths=[str(main_target)]) if state == "violation" else VerificationScope(allowed_paths=[str(main_target)])
+        file_safety.set_active_verification_scope(scope)
+    if state == "exception":
+        monkeypatch.setattr(VerificationScopeEnforcer, "check_file_access", Mock(side_effect=RuntimeError("synthetic private failure")))
+    elif state in {"unavailable", "unset"}:
+        monkeypatch.setitem(sys.modules, "agent.verification_scope", None)
+    elif state == "import_runtime":
+        original = builtins.__import__
+
+        def unavailable(name, *args, **kwargs):
+            if name == "agent.verification_scope":
+                raise RuntimeError("synthetic private failure")
+            return original(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", unavailable)
+    ops = ShellFileOperations(LocalEnvironment(str(main_target.parent)))
+    monkeypatch.setattr(file_tools, "_get_file_ops", lambda task_id: ops)
+    write = ops.write_file(str(main_target), "changed")
+    read = json.loads(file_tools.read_file_tool(str(main_target)))
+    if state in {"allowed", "unset"}:
+        assert write.error is None and not read.get("error")
+        assert main_target.read_text(encoding="utf-8") == "changed"
+        assert "changed" in str(read)
+        file_safety.raise_if_read_blocked(str(main_target))
+    else:
+        assert write.error and read.get("error")
+        assert main_target.read_text(encoding="utf-8") == "original"
+        assert "original" not in str(read)
+        with pytest.raises(ValueError, match="verification scope"):
+            file_safety.raise_if_read_blocked(str(main_target))
+        if state != "violation":
+            for error in (write.error, read["error"]):
+                assert str(main_target) not in error and "private failure" not in error
+                assert ("unavailable" if state == "unavailable" else "could not be evaluated") in error
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_provider_read_guard_cannot_swallow_active_failure(main_target, monkeypatch, active):
+    if active:
+        file_safety.set_active_verification_scope(VerificationScope())
+    monkeypatch.setattr(file_safety, "get_read_block_error", Mock(side_effect=RuntimeError("synthetic private failure")))
+    if active:
+        with pytest.raises(ValueError, match="could not be evaluated") as caught:
+            file_safety.raise_if_read_blocked(str(main_target))
+        assert "private failure" not in str(caught.value)
+        assert caught.value.__suppress_context__ is True
+    else:
+        file_safety.raise_if_read_blocked(str(main_target))

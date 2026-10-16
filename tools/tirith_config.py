@@ -1,7 +1,10 @@
 """Read Tirith policy once without treating an unreadable policy as disabled."""
 from __future__ import annotations
 
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 class TirithConfigurationError(ValueError):
@@ -17,14 +20,15 @@ def configuration_error_result() -> dict:
     }
 
 
-def load_security_config(*, default_enabled: bool = False) -> dict:
-    from hermes_cli.config import load_config_readonly
-    from hermes_cli.config_read_errors import FailedConfigRead
-
+def read_security_policy() -> dict:
     try:
+        from hermes_cli.config_read_errors import FailedConfigRead
+        from hermes_cli.config import load_config_readonly
         config = load_config_readonly()
     except Exception as exc:
-        raise TirithConfigurationError("Security configuration unavailable") from exc
+        logger.debug("Tirith policy unavailable (%s)", type(exc).__name__,
+                     exc_info=(RuntimeError, RuntimeError(type(exc).__name__), None))
+        raise TirithConfigurationError(f"Security configuration unavailable ({type(exc).__name__})") from None
     if isinstance(config, FailedConfigRead) or not isinstance(config, dict):
         raise TirithConfigurationError("Security configuration unavailable")
     security = config.get("security", {})
@@ -32,6 +36,12 @@ def load_security_config(*, default_enabled: bool = False) -> dict:
         security = {}
     if not isinstance(security, dict):
         raise TirithConfigurationError("Security configuration must be a mapping")
+
+    return security
+
+
+def load_security_config(*, default_enabled: bool = False) -> dict:
+    security = read_security_policy()
 
     def boolean(key, default):
         value = os.getenv(key, default)

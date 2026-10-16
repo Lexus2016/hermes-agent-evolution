@@ -331,6 +331,13 @@ def _get_unattended_approval_mode() -> str:
     return _binary_approval_mode("unattended_mode")
 
 
+def _tirith_fail_open() -> bool:
+    """Config-only import-failure policy; unreadable settings cannot grant access."""
+    from tools.tirith_config import read_security_policy
+    security = read_security_policy()
+    return bool(security.get("tirith_fail_open", True)) if security.get("tirith_enabled", True) else True
+
+
 def _get_approval_transport_config() -> tuple[str, str | None]:
     """Return explicitly selected transport and fail-closed fallback mode."""
     try:

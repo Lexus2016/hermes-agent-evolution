@@ -27,7 +27,8 @@ def get_provider_env(name: str) -> str:
     delegate children / subprocess runs. Stripped value, or ``""`` when unset.
 
     Falls back to a bare ``os.getenv`` when the config module is unavailable (stripped installs, early
-    import contexts). See #40190. Never when a profile secret scope is bound: a scoped miss means the
+    import contexts). See #40190. Only when scope state proves a standalone caller.
+    Never when a profile secret scope is bound: a scoped miss means the
     served profile has no key, and ``os.environ`` holds the LAUNCH profile's — a routed profile without
     an Exa/Parallel key must be refused, not search on another profile's key.
     """

@@ -445,7 +445,11 @@ def ensure_installed(*, log_failures: bool = True):
     """Resolved path if available now, else None after kicking off a daemon-thread download (local
     checks are synchronous; the download never blocks startup). Safe to call repeatedly."""
     global _install_thread
-    cfg = _load_security_config()
+    from tools.tirith_config import TirithConfigurationError
+    try:
+        cfg = _load_security_config()
+    except TirithConfigurationError:
+        return None
     if not cfg["tirith_enabled"]:
         return None
     if cached := _cached_path():

@@ -705,6 +705,12 @@ def _unattended_deny(command: str, ctx: _Unattended) -> dict | None:
         if ctx.name == "single_query":
             result.update(pattern_key=pattern_key, description=description)
         return result
+    tirith = _tirith_scan(command)
+    if tirith.get("configuration_error"):
+        return {"approved": False, "message": tirith["summary"],
+                "failure_class": "configuration_error"}
+    if tirith.get("action") in ("block", "warn"):
+        return block(_format_tirith_description(tirith))
     return None
 
 
@@ -1251,15 +1257,7 @@ def check_all_command_guards(command: str, env_type: str,
         return _approved()
 
     approval_callback, is_cli, is_gateway, is_ask = _presence(approval_callback)
-    tirith_result = _tirith_scan(command)
-    # Existing off/yolo/permanent-allowlist precedence remains above this point.
-    # An unreadable policy is not a finding that approval can override/cache.
-    if tirith_result.get("configuration_error"):
-        return {"approved": False, "message": tirith_result["summary"],
-                "failure_class": "configuration_error"}
     if not is_cli and not is_gateway and not is_ask:
-        if tirith_result.get("action") in {"block", "warn"}:
-            return {"approved": False, "message": "BLOCKED: " + _format_tirith_description(tirith_result)}
         for ctx in _unattended_contexts():
             result = _unattended_deny(command, ctx)
             if result is not None:
@@ -1268,6 +1266,11 @@ def check_all_command_guards(command: str, env_type: str,
 
     # Gather findings: warnings = [(pattern_key, description, is_tirith)]. Tirith block AND warn both go through the
     # approval flow (block used to be a hard stop) so users can inspect the findings and approve.
+    tirith_result = _tirith_scan(command)
+    # A missing policy cannot be approved or cached as an ordinary scan finding.
+    if tirith_result.get("configuration_error"):
+        return {"approved": False, "message": tirith_result["summary"],
+                "failure_class": "configuration_error"}
     is_dangerous, pattern_key, description = detect_dangerous_command(command)
     warnings = []
     session_key = get_current_session_key()
