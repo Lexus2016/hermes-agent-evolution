@@ -35,6 +35,29 @@ describe('tool events for a part that already exists on a sealed message', () =>
     cleanup()
   })
 
+  it.each([{ command: 'echo B' }, { command: 'echo A' }, undefined])(
+    'keeps an unmatched completion separate from the current provider-owned row: %j',
+    args => {
+      event('message.start', 10)
+      event('tool.start', 11, { args: { command: 'echo A' }, name: 'terminal', tool_id: 'provider-A' })
+      // A reconnect may first observe B at completion while A is still pending.
+      event('tool.complete', 12, { args, name: 'terminal', result: 'B result', tool_id: 'provider-B' })
+      event('tool.complete', 13, { name: 'terminal', tool_id: 'provider-B' })
+
+      expect(toolRows('provider-A')).toHaveLength(1)
+      expect(toolRows('provider-A')[0].part).toMatchObject({ args: { command: 'echo A' }, timestamp: 11 })
+      expect(toolRows('provider-A')[0].part).not.toHaveProperty('result')
+      expect(toolRows('provider-A')[0].part.completedAt).toBeUndefined()
+      expect(toolRows('provider-B')).toHaveLength(1)
+      expect(toolRows('provider-B')[0].part).toMatchObject({ args: args ?? {}, result: 'B result', timestamp: 12 })
+
+      event('tool.complete', 14, { name: 'terminal', result: 'A result', tool_id: 'provider-A' })
+      expect(toolRows('provider-A')[0].part).toMatchObject({ result: 'A result' })
+      expect(toolRows('provider-B')[0].part).toMatchObject({ result: 'B result' })
+      expect(stream.state(SID).messages).toHaveLength(1)
+    }
+  )
+
   it('attaches a late completion to the sealed bubble that owns the call', () => {
     event('message.start', 100)
     event('message.delta', 101, { text: 'Scraping the page.' })

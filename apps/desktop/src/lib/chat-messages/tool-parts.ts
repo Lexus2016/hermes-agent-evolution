@@ -164,6 +164,53 @@ function hasToolMatchOverlap(left: string[], right: string[]): boolean {
   return left.some(value => rightSet.has(value))
 }
 
+function matchesLegacyToolCompletion(
+  part: Extract<ChatMessagePart, { type: 'tool-call' }>,
+  payload: GatewayEventPayload | undefined
+): boolean {
+  const args = parseMaybeJsonObject(part.args)
+
+  // Older starts carried only context and sometimes used a different event ID.
+  // A full-args provider row already has its owner, even if another call repeats
+  // the command. Cosmetic previews cannot establish the legacy relation.
+  if (Object.keys(args).some(key => !['context', 'preview', TOOL_LABELS_ARG].includes(key))) {
+    return false
+  }
+
+  const context = firstStringField(args, ['context'])
+
+  const identity = firstStringField(liveToolArgs(payload), [
+    'search_term',
+    'query',
+    'question',
+    'server',
+    'command',
+    'code',
+    'path'
+  ])
+
+  return Boolean(context && identity && normalizeToolMatchValue(context) === normalizeToolMatchValue(identity))
+}
+
+function allowsPendingToolIdMatch(
+  part: Extract<ChatMessagePart, { type: 'tool-call' }>,
+  stableId: string,
+  payload: GatewayEventPayload | undefined,
+  phase: 'running' | 'complete'
+): boolean {
+  if (
+    !stableId ||
+    !part.toolCallId ||
+    part.toolCallId === stableId ||
+    part.toolCallId.startsWith('live-tool:') ||
+    REQUEST_BACKED_TOOLS.has(part.toolName)
+  ) {
+    return true
+  }
+
+  return phase === 'complete' && matchesLegacyToolCompletion(part, payload)
+}
+
 function findToolPartIndex(
   parts: ChatMessagePart[],
   name: string,
@@ -216,16 +263,7 @@ function findToolPartIndex(
       part.result === undefined &&
       part.completedAt === undefined
     ) {
-      // Interactive request IDs differ from provider call IDs and correlate by identifying arguments.
-      const requestBacked = REQUEST_BACKED_TOOLS.has(name)
-
-      if (
-        !requestBacked &&
-        stableId &&
-        phase === 'running' &&
-        part.toolCallId &&
-        !part.toolCallId.startsWith('live-tool:')
-      ) {
+      if (!allowsPendingToolIdMatch(part, stableId, payload, phase)) {
         continue
       }
 
