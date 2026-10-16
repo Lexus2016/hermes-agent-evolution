@@ -2836,7 +2836,30 @@ security:
 
 - `redact_secrets` — when `true`, automatically detects and redacts patterns that look like API keys, tokens, and passwords in tool output before it enters the conversation context and logs. **On by default**. Set to `false` explicitly only when you need raw credential-like strings for debugging or redactor development. Reading a secret-bearing file (`.env`-style files, shell rc/profile files, the Hermes `config.yaml` under `HERMES_HOME` and its `backups/config/` copies) with `read_file`, `search_files` or a terminal `cat`/`grep` also masks credential-shaped assignments (`SOME_API_TOKEN: …`) with a non-reusable `«redacted-secret»` marker, whatever the value looks like; ordinary source and project config files keep only the vendor-prefix patterns so fixtures such as `MAX_TOKENS: 100` are never mangled.
 
-Earlier releases also had `tirith_*` keys for a bundled command scanner; it was removed and upgrading drops those keys. Content-level command checks are described in [Content-Level Command Checks](security.md#content-level-command-checks).
+### Tirith Command Scanning
+
+This fork retains Tirith pre-execution scanning for eligible terminal commands, alongside the [Content-Level Command Checks](security.md#content-level-command-checks). The defaults are:
+
+```yaml
+security:
+  tirith_enabled: true
+  tirith_path: "tirith"
+  tirith_timeout: 5
+  tirith_fail_open: true
+```
+
+- `security.tirith_enabled` enables the scanner. Set it to `false` to disable Tirith without disabling the other command guards.
+- `security.tirith_path` selects the executable. The default `"tirith"` searches `PATH`, then the active profile's `HERMES_HOME/bin/tirith`; on supported platforms, Hermes may automatically download a missing binary. An explicit alternate path or executable name does not trigger a replacement download if missing.
+- `security.tirith_timeout` is the scanner subprocess timeout in seconds, default `5`; it does not limit download time.
+- `security.tirith_fail_open` defaults to `true`: scanner import, launch, timeout, or unexpected-exit failures do not themselves prevent the command. With `false`, those failures enter the normal approval flow, or are rejected in unattended deny mode. An unreadable security configuration blocks at the Tirith guard regardless of this setting.
+
+The environment overrides are `TIRITH_ENABLED`, `TIRITH_BIN`, `TIRITH_TIMEOUT`, and `TIRITH_FAIL_OPEN`, respectively.
+
+Scanner `warn` and `block` findings use the existing approval flow when an approval surface is present; unattended deny mode rejects them. Tirith findings can be approved for a session, but are not permanently allowlisted.
+
+:::warning
+Enabling Tirith does not guarantee that every command is scanned. Existing sandbox exemptions, `approvals.mode: off`, yolo mode, permanent command allowlists, and unattended runs configured to approve can bypass scanning. Unsupported platforms and an open scanner crash circuit breaker also skip scanning, even with `security.tirith_fail_open: false`.
+:::
 
 ## Website Blocklist
 

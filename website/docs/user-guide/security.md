@@ -817,8 +817,8 @@ destructive-verb list misses:
 
 Both go through the normal approval flow like every other dangerous pattern.
 
-Earlier releases bundled the external tirith scanner here. It was removed;
-upgrading drops the `security.tirith_*` settings and enables nothing in its place.
+This fork also retains Tirith scanning for eligible terminal commands. See
+[Tirith Command Scanning](configuration.md#tirith-command-scanning) for its defaults, failure behavior, and approval-policy bypasses.
 
 ### Context File Injection Protection
 
