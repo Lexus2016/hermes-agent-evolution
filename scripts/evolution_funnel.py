@@ -36,6 +36,21 @@ try:
 except ImportError:  # pragma: no cover - standalone copy without the guard
     _HAS_TELEMETRY_GUARD = False
 
+try:  # In the checkout the sibling lives under scripts/.
+    from scripts.delegation_escalation_report import summarize as escalation_summary
+except ModuleNotFoundError:  # Standalone copy: the sibling sits beside this file.
+    try:
+        from delegation_escalation_report import summarize as escalation_summary
+    except ModuleNotFoundError:
+        # Degrade ONE optional telemetry field instead of killing the run. This
+        # job is the pipeline's measurement spine — it appends metrics.jsonl and
+        # arms/clears the halt — so a missing sidecar module must never take the
+        # whole cycle down. evolution-funnel died exactly this way on 2026-10-16,
+        # when its daily slot ran against a refreshed copy whose sibling module
+        # had not been deployed (fixed for future deploys by
+        # scripts/register_evolution_cron.py::_evolution_sibling_modules).
+        escalation_summary = None
+
 
 def _load_json(path: Path) -> Any | None:
     try:
@@ -164,13 +179,20 @@ def compute_funnel(
         except (TypeError, ValueError):
             mock_ratio_value = None
 
-    try:
-        from scripts.delegation_escalation_report import summarize as escalation_summary
-    except ModuleNotFoundError:  # Direct script invocation outside the checkout.
-        from delegation_escalation_report import summarize as escalation_summary
+    if escalation_summary is None:
+        logger.warning(
+            "delegation_escalation_report is not importable — recording a null "
+            "delegation_escalation sidecar. The scheduler runs this script from "
+            "HERMES_HOME/scripts, so the evolution sibling modules must be "
+            "installed there (scripts/register_evolution_cron.py deploys them)."
+        )
 
     return {
-        "delegation_escalation": escalation_summary(evolution_dir / "trajectories", date),
+        "delegation_escalation": (
+            escalation_summary(evolution_dir / "trajectories", date)
+            if escalation_summary is not None
+            else None
+        ),
         "date": date,
         # inflow
         "research_proposals": int(issues.get("total_proposals", 0) or 0),

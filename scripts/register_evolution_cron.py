@@ -340,6 +340,50 @@ def _resume_paused_no_write(job: dict, update_job, resume_job) -> bool:
 
 
 
+def _evolution_sibling_modules(repo_root: Path, family: list[Path]) -> list[str]:
+    """Bare-name script modules the ``evolution_*`` family imports from its own dir.
+
+    ``_install_evolution_helpers`` mirrors the family by an ``evolution_*.py``
+    glob, but the family's imports reach OUTSIDE that prefix: ``evolution_funnel``
+    imports ``delegation_escalation_report`` and ``evolution_evaluator`` imports
+    ``eval_tasks``. Neither was ever installed, so the copy the scheduler runs
+    (HERMES_HOME/scripts — the only directory it may execute from) raised
+    ImportError on the import site and the whole job died: evolution-funnel
+    failed on 2026-10-16 the first time its daily slot ran after the funnel copy
+    was refreshed. Only the hand-added ``introspection_extract.py`` install below
+    kept ``evolution_trace_miner`` alive, which is exactly the maintenance this
+    derivation removes.
+
+    Derived from the family's own imports rather than a hand-kept list, because a
+    list rots the moment a new sibling appears (``eval_tasks`` was already
+    waiting to bite). Only modules that really exist as ``scripts/<name>.py`` are
+    returned, so unrelated files in that directory are never dragged in.
+    """
+    import ast
+
+    candidates: set[str] = set()
+    for path in family:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, ValueError):
+            continue  # fail-open: an unparseable file must not block the deploy
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                candidates.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+                # Both `from delegation_escalation_report import x` (the form that
+                # resolves in a copy) and `from scripts.<name> import x` (the form
+                # that resolves in a checkout) name the same sibling file.
+                candidates.add(node.module.split(".")[-1])
+
+    return [
+        f"{name}.py"
+        for name in sorted(candidates)
+        if not name.startswith("evolution_")
+        and (repo_root / "scripts" / f"{name}.py").is_file()
+    ]
+
+
 def _install_evolution_helpers(repo_root: Path) -> list[str]:
     """Install the whole ``evolution_*.py`` script family into HERMES_HOME/scripts.
 
@@ -351,11 +395,20 @@ def _install_evolution_helpers(repo_root: Path) -> list[str]:
     no-ops (the import is guarded), so the sidecars freeze and the watchdog reads
     stale health. Installing the whole family keeps every intra-family import
     resolvable from the one directory the scheduler executes from. Future helper
-    scripts are picked up automatically by the glob."""
+    scripts are picked up automatically by the glob.
+
+    The family's imports do not stop at the prefix, so the non-``evolution_*``
+    siblings they import are installed too — see ``_evolution_sibling_modules``
+    for why that derivation is not a hand-kept list.
+    """
     installed: list[str] = []
-    for src in sorted((repo_root / "scripts").glob("evolution_*.py")):
+    family = sorted((repo_root / "scripts").glob("evolution_*.py"))
+    for src in family:
         if _install_script(repo_root, src.name):
             installed.append(src.name)
+    for name in _evolution_sibling_modules(repo_root, family):
+        if _install_script(repo_root, name):
+            installed.append(name)
     return installed
 
 
