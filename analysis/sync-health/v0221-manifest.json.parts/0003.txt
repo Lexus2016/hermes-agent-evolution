@@ -3379,7 +3379,7 @@
         },
         {
           "path": "tools/memory_tool.py",
-          "blob": "3c10ad53140b56115436df21269335bf5cce969c",
+          "blob": "d5f6b8a3b049b2ffc8702dc633bfc9bb53076c7d",
           "outcome": "passed",
           "claim": "_gate_or_stage permits mutation only on decision.allow; a staged decision is serialized as staged after pending-record creation."
         },
@@ -3412,6 +3412,12 @@
           "blob": "717e6aeeabc1a756d1dfc59ec41a215276f3af7b",
           "outcome": "passed",
           "claim": "8 canonical tests covering batch/single preview, chained create/write_file/patch state, ambiguous/replace_all patch behavior, and the diff subcommand."
+        },
+        {
+          "path": "analysis/sync-health/v0221-memory-display-dependency-refresh.json",
+          "blob": "b80c278b3dd8742e21d997aa34561e7ae880f4d0",
+          "outcome": "passed",
+          "claim": "Exact unchanged staging/replay helper ASTs and import bindings after telemetry-only correction; embedded340 broad,11 targeted and32 display passes with existing coverage limits."
         }
       ]
     },
@@ -3458,7 +3464,7 @@
         },
         {
           "path": "tools/memory_tool.py",
-          "blob": "3c10ad53140b56115436df21269335bf5cce969c",
+          "blob": "d5f6b8a3b049b2ffc8702dc633bfc9bb53076c7d",
           "outcome": "passed",
           "claim": "_gate_or_stage permits mutation only on decision.allow; a staged decision is serialized as staged after pending-record creation."
         },
@@ -3491,6 +3497,12 @@
           "blob": "717e6aeeabc1a756d1dfc59ec41a215276f3af7b",
           "outcome": "passed",
           "claim": "8 canonical tests covering batch/single preview, chained create/write_file/patch state, ambiguous/replace_all patch behavior, and the diff subcommand."
+        },
+        {
+          "path": "analysis/sync-health/v0221-memory-display-dependency-refresh.json",
+          "blob": "b80c278b3dd8742e21d997aa34561e7ae880f4d0",
+          "outcome": "passed",
+          "claim": "Exact unchanged staging/replay helper ASTs and import bindings after telemetry-only correction; embedded340 broad,11 targeted and32 display passes with existing coverage limits."
         }
       ]
     },
@@ -3537,7 +3549,7 @@
         },
         {
           "path": "tools/memory_tool.py",
-          "blob": "3c10ad53140b56115436df21269335bf5cce969c",
+          "blob": "d5f6b8a3b049b2ffc8702dc633bfc9bb53076c7d",
           "outcome": "passed",
           "claim": "_gate_or_stage permits mutation only on decision.allow; a staged decision is serialized as staged after pending-record creation."
         },
@@ -3570,6 +3582,12 @@
           "blob": "717e6aeeabc1a756d1dfc59ec41a215276f3af7b",
           "outcome": "passed",
           "claim": "8 canonical tests covering batch/single preview, chained create/write_file/patch state, ambiguous/replace_all patch behavior, and the diff subcommand."
+        },
+        {
+          "path": "analysis/sync-health/v0221-memory-display-dependency-refresh.json",
+          "blob": "b80c278b3dd8742e21d997aa34561e7ae880f4d0",
+          "outcome": "passed",
+          "claim": "Exact unchanged staging/replay helper ASTs and import bindings after telemetry-only correction; embedded340 broad,11 targeted and32 display passes with existing coverage limits."
         }
       ]
     },
@@ -3616,7 +3634,7 @@
         },
         {
           "path": "tools/memory_tool.py",
-          "blob": "3c10ad53140b56115436df21269335bf5cce969c",
+          "blob": "d5f6b8a3b049b2ffc8702dc633bfc9bb53076c7d",
           "outcome": "passed",
           "claim": "_gate_or_stage permits mutation only on decision.allow; a staged decision is serialized as staged after pending-record creation."
         },
@@ -3649,6 +3667,12 @@
           "blob": "717e6aeeabc1a756d1dfc59ec41a215276f3af7b",
           "outcome": "passed",
           "claim": "8 canonical tests covering batch/single preview, chained create/write_file/patch state, ambiguous/replace_all patch behavior, and the diff subcommand."
+        },
+        {
+          "path": "analysis/sync-health/v0221-memory-display-dependency-refresh.json",
+          "blob": "b80c278b3dd8742e21d997aa34561e7ae880f4d0",
+          "outcome": "passed",
+          "claim": "Exact unchanged staging/replay helper ASTs and import bindings after telemetry-only correction; embedded340 broad,11 targeted and32 display passes with existing coverage limits."
         }
       ]
     },
@@ -4318,17 +4342,3 @@
       "status": "reviewed",
       "path": "apps/desktop/electron/linux-nvidia-egl-fallback.ts",
       "scope": "decideNvidiaEglFallback",
-      "rule": "CC",
-      "detail": "CC 26 > target 20 (new code must meet the target)",
-      "candidate_blob": "527d3482aa986c5d9dc8c62b2491f08fbf1e79de",
-      "source": {
-        "commit": "297552a9d646119871391d202509822cd86330df",
-        "path": "apps/desktop/electron/linux-nvidia-egl-fallback.ts",
-        "scope": "decideNvidiaEglFallback",
-        "blob": "527d3482aa986c5d9dc8c62b2491f08fbf1e79de",
-        "unit_body_hash": "fa8eaf1e61c97740"
-      },
-      "max_occurrences": 1,
-      "review": {
-        "reviewer": "Independent integration controller and desktop structural reviewer; owner-approved exact preparation",
-        "compatibility": "CC 26 is a single shallow priority ladder for NVIDIA launch decisions. Early returns preserve opt-out, platform/driver gating, GPU override, remote/WSL exclusion, forced fallback, same-version marker and aborted-boot cases; all paths return enable/reason/nextMarker. Exact upstream source is retained without adding another fallback branch. No compatibility conflict identified in this complete static function/binding review. Only the named structural metric and its exact pinned upstream cap are candidates; no runtime-behavior approval. No catch, timeout, credential, security, filesystem, network, or external-process behavior is waived. No desktop test or typecheck success is claimed; local typecheck exit 137 remains unresolved. Candidate only: root approval for preparation and controller verification of generated identities are required before activation.",
