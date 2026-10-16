@@ -511,11 +511,14 @@ def test_cron_list_warns_when_gateway_not_running(monkeypatch, capsys):
 
 def test_cron_tick_invokes_scheduler_tick_with_verbose(monkeypatch):
     calls = []
-    monkeypatch.setattr("cron.scheduler.tick", lambda verbose=False: calls.append(verbose))
+    monkeypatch.setattr(
+        "cron.scheduler.tick",
+        lambda verbose=False, headless=False: calls.append((verbose, headless)),
+    )
 
     cron_cli.cron_tick()
 
-    assert calls == [True]
+    assert calls == [(True, True)]
 
 
 def test_cron_create_failure_returns_nonzero(monkeypatch, capsys):

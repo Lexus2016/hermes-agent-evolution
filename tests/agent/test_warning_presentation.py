@@ -117,11 +117,11 @@ def test_operator_callbacks_keep_diagnostics_and_logs(tmp_path, monkeypatch, cap
 @pytest.mark.parametrize("suppress", [None, False, True])
 def test_entitlement_guidance_is_classified_at_direct_print(tmp_path, monkeypatch, suppress):
     import hermes_yaml as yaml
-    from agent import conversation_loop
+    from agent import conversation_loop, turn_billing_guidance
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(
         {} if suppress is None else {"display": {"suppress_warning_notifications": suppress}}))
-    monkeypatch.setattr(conversation_loop, "_nous_entitlement_message", lambda capability: "entitlement detail\nnext step")
+    monkeypatch.setattr(turn_billing_guidance, "_nous_entitlement_message", lambda capability: "entitlement detail\nnext step")
     agent = Emitter()
     printed = []
     agent._print_fn = lambda *a, **k: printed.append(a)
