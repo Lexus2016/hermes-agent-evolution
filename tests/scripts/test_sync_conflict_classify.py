@@ -96,6 +96,7 @@ def test_cli_preserves_binary_mode_deletion_evidence_and_counts(repo, tmp_path):
         text=True,
         encoding="utf-8",
         errors="replace",
+        check=False,
     )
     assert result.returncode == 1, result.stderr
     report = json.loads(
@@ -136,6 +137,7 @@ def test_cli_preserves_binary_mode_deletion_evidence_and_counts(repo, tmp_path):
         text=True,
         encoding="utf-8",
         errors="replace",
+        check=False,
     )
     assert legacy.returncode == 1
     assert "FORK-MODIFIED 1" in legacy.stdout

@@ -24,7 +24,7 @@ from tools.tool_failure_classifier import SAFETY_GATE_RECOVERY_HINT
 _RULES: tuple[tuple[re.Pattern, str, str], ...] = (
     # The explicit gate refusal outranks incidental error words in its reason.
     (
-        re.compile(r"tool execution blocked by safety gate:", re.I),
+        re.compile(r"tool execution blocked by safety gate:", re.IGNORECASE),
         "safety_gate_blocked",
         SAFETY_GATE_RECOVERY_HINT,
     ),
