@@ -23,7 +23,7 @@ from scripts.code_health.inherited_evidence import assign_entries
 BASE = "9efba6dcfa78013a3763778aaca4fe37921c495e"
 UPSTREAM = "297552a9d646119871391d202509822cd86330df"
 MANIFEST = "analysis/sync-health/v0221-manifest.json"
-MANIFEST_SHA256 = "36774ae356f8755727317ff9b5fca9e14cfc5e260654601333b928f0b0ad1a35"
+MANIFEST_SHA256 = "6703fbb5dd3ed3906be25c993b1b45059addfd94db28610255759e61a16644c7"
 
 
 def blob(repo: Path, revision: str | None, path: str, *, max_bytes: int | None = None) -> tuple[str, bytes] | None:

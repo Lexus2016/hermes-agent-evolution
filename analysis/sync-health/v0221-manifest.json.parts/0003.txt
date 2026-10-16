@@ -2176,7 +2176,7 @@
         },
         {
           "path": "analysis/sync-health/v0221-env02-decoding-dependency-refresh.json",
-          "blob": "3a33fddc57029ee1651d3bd7f7ada4f2e37d99d8",
+          "blob": "827b0452b57c990361b84bace13fe473a31a9864",
           "outcome": "passed",
           "claim": "Unchanged full GUI caller/import/registration AST context after sole unrelated CLI decoding kwargs change; actual accessibility precedence test passed without Electron launch."
         }
