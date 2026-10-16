@@ -271,6 +271,78 @@ it('folds a preserved attachment error onto the durable reply via the tolerant c
   expect(merged[1]).toMatchObject({ error: 'upstream timeout', pending: false })
 })
 
+it.each([
+  ['missing', []],
+  ['pending', [row('a-pending', 'assistant', 'not settled', { pending: true })]],
+  ['interim', [row('a-interim', 'assistant', 'not final', { interim: true })]],
+  ['hidden', [row('a-hidden', 'assistant', 'not visible', { hidden: true })]]
+] as const)(
+  'keeps an attachment failure on its own turn when its durable assistant is %s',
+  (_kind, owningCandidates) => {
+    // This shape comes from real hydration: A's user persisted, A's assistant
+    // did not, then another visible user turn B successfully completed.
+    const hydrated = toChatMessages([
+      { role: 'user', content: 'Check this image [Image attached at: /tmp/a.png]', row_id: 1, timestamp: 1 },
+      { role: 'user', content: 'Unrelated next question', row_id: 2, timestamp: 2 },
+      { role: 'assistant', content: 'Successful answer for B', row_id: 3, timestamp: 3 }
+    ])
+
+    const stored = [hydrated[0], ...owningCandidates, ...hydrated.slice(1)]
+
+    const localError = row('local-a-error', 'assistant', '', {
+      error: 'A attachment request failed',
+      errorSurface: { code: 'a-failed', layer: 'streaming', retryable: true }
+    })
+
+    const local = [
+      row('local-a-user', 'user', 'Check this image', { attachmentRefs: ['data:image/png;base64,AAAA'] }),
+      localError,
+      ...hydrated.slice(1)
+    ]
+
+    const result = preserveLocalAssistantErrors(stored, local)
+    expect(result.find(message => message.rowId === 3)?.error).toBeUndefined()
+    expect(result.find(message => message.id === localError.id)).toMatchObject({
+      error: localError.error,
+      errorSurface: localError.errorSurface
+    })
+    expect(result.filter(message => message.id === localError.id)).toHaveLength(1)
+    // Repeated refresh must not duplicate the conservative local handback.
+    const refreshed = preserveLocalAssistantErrors(stored, result)
+    expect(refreshed.map(message => message.id)).toEqual(result.map(message => message.id))
+    expect(refreshed.find(message => message.rowId === 3)?.error).toBeUndefined()
+  }
+)
+
+it('keeps hidden controls and interim tool activity within the owning attachment turn', () => {
+  const user = row('durable-a-user', 'user', 'Check this image [Image attached at: /tmp/a.png]', { rowId: 1 })
+  const ownedAnswer = row('durable-a-answer', 'assistant', 'partial answer', { rowId: 2 })
+  const nextUser = row('durable-b-user', 'user', 'Next question', { rowId: 3 })
+  const nextAnswer = row('durable-b-answer', 'assistant', 'Successful next answer', { rowId: 4 })
+  const hiddenControl = row('hidden-control', 'user', 'internal directive', { hidden: true })
+
+  const toolActivity = row('tool-activity', 'assistant', '', {
+    interim: true,
+    parts: [{ type: 'tool-call', toolCallId: 'call-a', toolName: 'read_file', args: {} as never, argsText: '{}' }]
+  })
+
+  const stored = [user, hiddenControl, toolActivity, ownedAnswer, nextUser, nextAnswer]
+
+  const local = [
+    row('local-a-user', 'user', 'Check this image', { attachmentRefs: ['data:image/png;base64,AAAA'] }),
+    row('local-a-error', 'assistant', 'partial answer', { error: 'A failed' }),
+    nextUser,
+    nextAnswer
+  ]
+
+  const result = preserveLocalAssistantErrors(stored, local)
+  expect(result.map(message => message.id)).toEqual(stored.map(message => message.id))
+  expect(result.find(message => message.id === ownedAnswer.id)?.error).toBe('A failed')
+  expect(result.find(message => message.id === toolActivity.id)?.error).toBeUndefined()
+  expect(result.find(message => message.id === nextAnswer.id)?.error).toBeUndefined()
+  expect(preserveLocalAssistantErrors(stored, result)).toEqual(result)
+})
+
 it('never tolerance-matches a plain repeated prompt without attachment evidence (#120978)', () => {
   // Gating: the stored row carries rewrite markers but the local repeat is a
   // bare caption with no refs — a genuine repeat must survive.

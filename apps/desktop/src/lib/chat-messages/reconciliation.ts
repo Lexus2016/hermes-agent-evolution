@@ -158,8 +158,15 @@ const attachmentTurnAssistantMatchIndex = (
 
   const storedUserIndex = matchingStoredUserIndices[localCaptionOrdinal]
 
+  // A persisted prompt need not have a persisted assistant. Never borrow the
+  // next visible turn's reply to represent this failure; hidden control rows
+  // still belong to the same visible user turn.
+  const nextUserIndex = storedMessages.findIndex(
+    (message, index) => index > storedUserIndex && message.role === 'user' && !message.hidden
+  )
+
   const reply = storedMessages
-    .slice(storedUserIndex + 1)
+    .slice(storedUserIndex + 1, nextUserIndex === -1 ? undefined : nextUserIndex)
     .find(message => message.role === 'assistant' && !message.hidden && !message.pending && !message.interim)
 
   if (!reply) {
