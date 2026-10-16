@@ -3079,13 +3079,13 @@ class FeishuAdapter(BasePlatformAdapter):
     async def _maybe_extract_text_document(self, cached_path: str, media_type: str) -> str:
         if not cached_path or not media_type.startswith("text/"):
             return ""
+        from plugins.platforms.feishu.feishu_text_documents import read_bounded_text
         try:
-            if os.path.getsize(cached_path) > _MAX_TEXT_INJECT_BYTES:
-                return ""
             ext = Path(cached_path).suffix.lower()
             if ext not in {".txt", ".md"} and media_type not in {"text/plain", "text/markdown"}:
                 return ""
-            content = Path(cached_path).read_text(encoding="utf-8-sig")
+            if (content := await asyncio.to_thread(read_bounded_text, cached_path, _MAX_TEXT_INJECT_BYTES)) is None:
+                return ""
             display_name = self._display_name_from_cached_path(cached_path)
             return f"[Content of {display_name}]:\n{content}"
         except (OSError, UnicodeDecodeError):
