@@ -13148,6 +13148,320 @@
           "claim": "Scoped tools test fixtures; generic approval resolver isolation is explicit opt-in and does not apply to these probe tests."
         }
       ]
+    },
+    {
+      "id": "runtime-error-boundary-01",
+      "status": "reviewed",
+      "path": "gateway/run_adapters.py",
+      "scope": "GatewayAdapterLifecycleMixin._credential_claim_origin",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception:",
+      "candidate_blob": "0c44022bd0858a09add590ab3d5265efbd8d56e1",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "gateway/run_adapters.py",
+        "scope": "GatewayAdapterLifecycleMixin._credential_claim_origin",
+        "blob": "0c44022bd0858a09add590ab3d5265efbd8d56e1",
+        "unit_body_hash": "c8c18b3947ff64d2"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller behavior review; generated identity approval pending",
+        "compatibility": "The optional dotenv-origin diagnostic catches synthetic RuntimeError and falls back to the existing ambient-origin label. The actual secondary-adapter startup still publishes fatal duplicate_credential and returns zero connections; it never calls connect, disconnect or profile-adapter configuration and leaves resource ownership intact. Only the specified injected lookup failures and observed boundary contracts are supported. No broader log-payload sanitization, persistence, authentication, security, arbitrary exception, or live-provider safety waiver is proposed.",
+        "module_bindings": "Whole module is identical to pinned upstream. The local load_env_file import resolves through canonical agent.secret_scope; PLATFORM_TOKEN_ENV_NAMES is from gateway.config. Real profile scope, credential fingerprint, startup caller, and duplicate refusal execute in the synthetic test. Injection is restricted to the diagnostic call, after real isolated profile loading and adapter creation.",
+        "receipt": "/tmp/hermes-runtime-error-focused-regression.log; sha256=e00669a94c1b7be29354ec71219d76537542b103b627b5d91ff73c8ff5057033; set -o pipefail; test_home=$(mktemp -d /tmp/hermes-runtime-error-review-home.XXXXXX); HOME=\"$test_home\" HERMES_HOME=\"$test_home/hermes\" HERMES_PYTHON=\"$PWD/.venv/bin/python\" HERMES_TEST_FILE_RETRIES=0 scripts/run_tests.sh tests/gateway/test_credential_origin_failure_boundaries.py tests/agent/test_runtime_error_failure_boundaries.py tests/gateway/test_host_gateway_profile_env.py tests/gateway/test_multiplex_adapter_registry.py tests/agent/test_error_surface.py tests/agent/test_session_row_under_live_agent_persist.py -q 2>&1 | tee /tmp/hermes-runtime-error-focused-regression.log"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-error-boundary-review.json",
+          "blob": "e820ce11460bc7c1b4ed30dea5504feca22a13bb",
+          "outcome": "passed",
+          "claim": "Exact five-catch behavioral review and embedded 86-pass bounded receipt; explicit limits retained."
+        },
+        {
+          "path": "tests/gateway/test_credential_origin_failure_boundaries.py",
+          "blob": "6265b57244b6ffcb8811d24f8bc9fa872431632b",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "tests/gateway/test_host_gateway_profile_env.py",
+          "blob": "2e1ab65431f6f5fe0f446058b5d853e3f87ab2a7",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "tests/gateway/test_multiplex_adapter_registry.py",
+          "blob": "1ce45d3cec2e4104a17d02868b02842ceeadf015",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "gateway/run.py",
+          "blob": "89ea29db1fabaf990ee7775d03e002caaa0820cf",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "gateway/config.py",
+          "blob": "61a24aacae948047f23c5e62484e4a72b659ea63",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "agent/secret_scope.py",
+          "blob": "dfe185a28820a0116fce4050fd8d815c29e65aa3",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "hermes_constants.py",
+          "blob": "84d3384d64e02c0c8252653625aa0e1975b1e307",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "hermes_cli/profiles.py",
+          "blob": "3399685bab5fca83e7c62d61f6a489bc785c03b3",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "tools/terminal_scope.py",
+          "blob": "270a47a06b892d0f20d4a879b63eb551bd08f1f4",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        }
+      ]
+    },
+    {
+      "id": "runtime-error-boundary-02",
+      "status": "reviewed",
+      "path": "gateway/run_adapters.py",
+      "scope": "GatewayAdapterLifecycleMixin._duplicate_credential_origins",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception:",
+      "candidate_blob": "0c44022bd0858a09add590ab3d5265efbd8d56e1",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "gateway/run_adapters.py",
+        "scope": "GatewayAdapterLifecycleMixin._duplicate_credential_origins",
+        "blob": "0c44022bd0858a09add590ab3d5265efbd8d56e1",
+        "unit_body_hash": "721eabb83317b593"
+      },
+      "max_occurrences": 2,
+      "review": {
+        "reviewer": "Independent integration controller behavior review; generated identity approval pending",
+        "compatibility": "Separate synthetic RuntimeError failures from get_default_hermes_root and get_profile_dir leave owner origin unknown without weakening duplicate_credential refusal. The actual secondary startup keeps claims unchanged and never connects or disconnects either adapter. Only the specified injected lookup failures and observed boundary contracts are supported. No broader log-payload sanitization, persistence, authentication, security, arbitrary exception, or live-provider safety waiver is proposed.",
+        "module_bindings": "Whole module is identical to pinned upstream. Both late imports remain canonical: hermes_constants.get_default_hermes_root and hermes_cli.profiles.get_profile_dir. The two owner branches are individually exercised through _start_one_profile_adapters with real isolated incoming profile scope, actual credential claim and actual refusal handling.",
+        "receipt": "/tmp/hermes-runtime-error-focused-regression.log; sha256=e00669a94c1b7be29354ec71219d76537542b103b627b5d91ff73c8ff5057033; set -o pipefail; test_home=$(mktemp -d /tmp/hermes-runtime-error-review-home.XXXXXX); HOME=\"$test_home\" HERMES_HOME=\"$test_home/hermes\" HERMES_PYTHON=\"$PWD/.venv/bin/python\" HERMES_TEST_FILE_RETRIES=0 scripts/run_tests.sh tests/gateway/test_credential_origin_failure_boundaries.py tests/agent/test_runtime_error_failure_boundaries.py tests/gateway/test_host_gateway_profile_env.py tests/gateway/test_multiplex_adapter_registry.py tests/agent/test_error_surface.py tests/agent/test_session_row_under_live_agent_persist.py -q 2>&1 | tee /tmp/hermes-runtime-error-focused-regression.log"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-error-boundary-review.json",
+          "blob": "e820ce11460bc7c1b4ed30dea5504feca22a13bb",
+          "outcome": "passed",
+          "claim": "Exact five-catch behavioral review and embedded 86-pass bounded receipt; explicit limits retained."
+        },
+        {
+          "path": "tests/gateway/test_credential_origin_failure_boundaries.py",
+          "blob": "6265b57244b6ffcb8811d24f8bc9fa872431632b",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "tests/gateway/test_host_gateway_profile_env.py",
+          "blob": "2e1ab65431f6f5fe0f446058b5d853e3f87ab2a7",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "tests/gateway/test_multiplex_adapter_registry.py",
+          "blob": "1ce45d3cec2e4104a17d02868b02842ceeadf015",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "gateway/run.py",
+          "blob": "89ea29db1fabaf990ee7775d03e002caaa0820cf",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "gateway/config.py",
+          "blob": "61a24aacae948047f23c5e62484e4a72b659ea63",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "agent/secret_scope.py",
+          "blob": "dfe185a28820a0116fce4050fd8d815c29e65aa3",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "hermes_constants.py",
+          "blob": "84d3384d64e02c0c8252653625aa0e1975b1e307",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "hermes_cli/profiles.py",
+          "blob": "3399685bab5fca83e7c62d61f6a489bc785c03b3",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "tools/terminal_scope.py",
+          "blob": "270a47a06b892d0f20d4a879b63eb551bd08f1f4",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        }
+      ]
+    },
+    {
+      "id": "runtime-error-boundary-03",
+      "status": "reviewed",
+      "path": "agent/session_persistence.py",
+      "scope": "_db_flush_session_row_gone",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as lookup_exc:",
+      "candidate_blob": "58c1e36543283bc303c40770ab4b169683a68352",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/session_persistence.py",
+        "scope": "_db_flush_session_row_gone",
+        "blob": "28d0c90eda88e5476fef264c37abbc1009ad8e49",
+        "unit_body_hash": "ca28189f9d5c4fa9"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller behavior review; generated identity approval pending",
+        "compatibility": "Synthetic RuntimeError and sqlite3.OperationalError in get_session are not evidence that the session row is absent. After an injected FK append error, the real flush returns False without row recreation, replay, or changing durable history markers. After both failures are removed, real SQLite appends the pending tail exactly once. Only the specified injected lookup failures and observed boundary contracts are supported. No broader log-payload sanitization, persistence, authentication, security, arbitrary exception, or live-provider safety waiver is proposed.",
+        "module_bindings": "The reviewed unit and its lookup/logger bindings are identical to upstream. The only module differences are the fork DB-usability preflight and trajectory model-call capture. Neither changes this helper, imports, or the caller condition requiring confirmed absence before resetting markers/recreating a session. Tests execute the real SessionPersistenceMixin flush and a real temporary SessionDB, injecting only append and get_session faults; existing AIAgent row-loss tests also pass in the same receipt.",
+        "receipt": "/tmp/hermes-runtime-error-focused-regression.log; sha256=e00669a94c1b7be29354ec71219d76537542b103b627b5d91ff73c8ff5057033; set -o pipefail; test_home=$(mktemp -d /tmp/hermes-runtime-error-review-home.XXXXXX); HOME=\"$test_home\" HERMES_HOME=\"$test_home/hermes\" HERMES_PYTHON=\"$PWD/.venv/bin/python\" HERMES_TEST_FILE_RETRIES=0 scripts/run_tests.sh tests/gateway/test_credential_origin_failure_boundaries.py tests/agent/test_runtime_error_failure_boundaries.py tests/gateway/test_host_gateway_profile_env.py tests/gateway/test_multiplex_adapter_registry.py tests/agent/test_error_surface.py tests/agent/test_session_row_under_live_agent_persist.py -q 2>&1 | tee /tmp/hermes-runtime-error-focused-regression.log"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-error-boundary-review.json",
+          "blob": "e820ce11460bc7c1b4ed30dea5504feca22a13bb",
+          "outcome": "passed",
+          "claim": "Exact five-catch behavioral review and embedded 86-pass bounded receipt; explicit limits retained."
+        },
+        {
+          "path": "tests/agent/test_runtime_error_failure_boundaries.py",
+          "blob": "6c652b2637c53f826f910cc26c86cd3777c5bd9a",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "tests/agent/test_session_row_under_live_agent_persist.py",
+          "blob": "4caa2b64777fd372f927f9977cfada7cc2e5f7a3",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "hermes_state.py",
+          "blob": "2734f8a38cde8c3e68eaf6e80d452ff8a158a4e3",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "hermes_state_sessions.py",
+          "blob": "ce2032608b8ad0c80795a09e3a3563b83e450716",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "hermes_state_messages.py",
+          "blob": "c0d3bd7c9194900bd85cd13d95f3bc091d87aaf5",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "hermes_state_errors.py",
+          "blob": "8ee7a76885e97284f3c0003c6ab9fa0f00257ff5",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "agent/context_compressor.py",
+          "blob": "ab0c152ea66d4c1321738335bfbe0fa3efb1ffd0",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "agent/transcript_repair.py",
+          "blob": "3997b10767bba923cf8b724a0c40a7469f3fc91f",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "agent/message_metadata.py",
+          "blob": "15f9130eb4f0e271aa9fbef553295b1e9d9509e4",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        }
+      ]
+    },
+    {
+      "id": "runtime-error-boundary-04",
+      "status": "reviewed",
+      "path": "agent/error_surface.py",
+      "scope": "_api_key_env",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception:",
+      "candidate_blob": "ff977fa852606ba269d684dd8bc911b7ffcab914",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "agent/error_surface.py",
+        "scope": "_api_key_env",
+        "blob": "ff977fa852606ba269d684dd8bc911b7ffcab914",
+        "unit_body_hash": "e26678ca1de2b8c2"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller behavior review; generated identity approval pending",
+        "compatibility": "An injected provider_catalog_by_slug RuntimeError omits the optional API-key settings-row hint. The real build_error_surface_from_result still returns the original nonretryable auth_permanent layer/code and provider/model identity. Only the specified injected lookup failures and observed boundary contracts are supported. No broader log-payload sanitization, persistence, authentication, security, arbitrary exception, or live-provider safety waiver is proposed.",
+        "module_bindings": "Whole module is identical to pinned upstream. The helper imports canonical hermes_cli.provider_catalog.provider_catalog_by_slug at call time. The test patches that dependency, not _api_key_env or the error-envelope builder, and verifies the actual auth envelope remains available.",
+        "receipt": "/tmp/hermes-runtime-error-focused-regression.log; sha256=e00669a94c1b7be29354ec71219d76537542b103b627b5d91ff73c8ff5057033; set -o pipefail; test_home=$(mktemp -d /tmp/hermes-runtime-error-review-home.XXXXXX); HOME=\"$test_home\" HERMES_HOME=\"$test_home/hermes\" HERMES_PYTHON=\"$PWD/.venv/bin/python\" HERMES_TEST_FILE_RETRIES=0 scripts/run_tests.sh tests/gateway/test_credential_origin_failure_boundaries.py tests/agent/test_runtime_error_failure_boundaries.py tests/gateway/test_host_gateway_profile_env.py tests/gateway/test_multiplex_adapter_registry.py tests/agent/test_error_surface.py tests/agent/test_session_row_under_live_agent_persist.py -q 2>&1 | tee /tmp/hermes-runtime-error-focused-regression.log"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-runtime-error-boundary-review.json",
+          "blob": "e820ce11460bc7c1b4ed30dea5504feca22a13bb",
+          "outcome": "passed",
+          "claim": "Exact five-catch behavioral review and embedded 86-pass bounded receipt; explicit limits retained."
+        },
+        {
+          "path": "tests/agent/test_runtime_error_failure_boundaries.py",
+          "blob": "6c652b2637c53f826f910cc26c86cd3777c5bd9a",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "tests/agent/test_error_surface.py",
+          "blob": "ca689639a9a4def01256160a930b8f771f7b5731",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "hermes_cli/provider_catalog.py",
+          "blob": "1bc60b45524b9e2c4da8c1e0a95db87846042ce5",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        },
+        {
+          "path": "hermes_cli/models.py",
+          "blob": "5b900144ae3f18b4c6365b6d78227e4a3473a19a",
+          "outcome": "passed",
+          "claim": "Current direct dependency or exercised test-source identity for the bounded injected lookup-failure contract; no full-feature or security validation claim."
+        }
+      ]
     }
   ]
 }
