@@ -29,7 +29,9 @@ _GUARD_SCRIPTS = (
     "scripts/ci/check_lazy_deps_imports.py", "scripts/ci/check_profile_archive_boundary.py",
     "scripts/ci/check_agents_md_size.py", "scripts/ci/check_blob_size.py",
 )
-_SUPPORT = ("scripts/ci/profile_scope_patterns.json", "agent/subdirectory_hints.py", *_GUARD_SCRIPTS)
+_EVIDENCE_INVENTORY = ".github/no_tmp_historical_evidence.json"
+_SUPPORT = (_EVIDENCE_INVENTORY, "scripts/ci/profile_scope_patterns.json",
+            "agent/subdirectory_hints.py", *_GUARD_SCRIPTS)
 _LEGACY = "def legacy(x):\n" + "".join(f"    if x == {i}:\n        return {i}\n" for i in range(21))
 _GROWN = _LEGACY + "    if x == 99:\n        return 99\n"
 _ENV_COPY = "import os\n\n\ndef child_env():\n    env = os.environ.copy()\n    return env\n"
@@ -95,7 +97,7 @@ def _add_engine(repo: Path, checker: bool = True) -> list[str]:
         shutil.copy2(REPO / "scripts/check", repo / "scripts/check")
         shutil.copytree(REPO / "scripts/code_health", repo / "scripts/code_health",
                         ignore=shutil.ignore_patterns("__pycache__"), dirs_exist_ok=True)
-    return ["agent", "scripts", "tests"]
+    return ["agent", "scripts", "tests", _EVIDENCE_INVENTORY]
 
 
 def _engine_repo(tmp_path: Path) -> Path:
@@ -110,6 +112,17 @@ def _engine_repo(tmp_path: Path) -> Path:
 
 def _check(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return _sh(repo, sys.executable, str(repo / "scripts/check"), *args)
+
+
+def test_exported_checker_refuses_missing_evidence_inventory(tmp_path):
+    repo = _engine_repo(tmp_path)
+    base = _git(repo, "rev-parse", "HEAD")
+    head = _commit(repo, {_EVIDENCE_INVENTORY: None})
+
+    proc = _check(repo, "--commit", head, "--only", "no-tmp", "--base", base)
+
+    assert proc.returncode != 0
+    assert "invalid historical evidence inventory" in proc.stdout + proc.stderr
 
 
 def _timeless(report: str) -> str:
