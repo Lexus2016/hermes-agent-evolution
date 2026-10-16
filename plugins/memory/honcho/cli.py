@@ -587,6 +587,9 @@ def _ensure_sdk_installed() -> bool:
         from pm import sync_venv
         sync_venv(["honcho"], explicit=True)
     except Exception as exc:
+        import logging
+        logging.exception("Memory dependency preparation failed",
+                          exc_info=(RuntimeError, RuntimeError(type(exc).__name__), None))
         print(f"  Cannot install: {exc}\n  Run manually: hermes pm install --extra honcho\n")
         return False
     print("  Installed. Restart Hermes to use the selected dependency environment.\n")

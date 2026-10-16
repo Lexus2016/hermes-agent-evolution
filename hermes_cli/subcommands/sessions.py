@@ -280,41 +280,7 @@ def build_sessions_parser(subparsers, *, cmd_sessions: Callable) -> None:
 
     sessions_subparsers.add_parser("stats", help="Show session store statistics")
 
-    # Fork: per-session spend with per-tool/per-subagent attribution.
-    sessions_cost = sessions_subparsers.add_parser(
-        "cost",
-        help="Show per-session spend plus per-tool and per-subagent cost breakdown",
-        description=(
-            "Per-session estimated spend with per-tool and per-subagent "
-            "(delegate) cost attribution. Reuses the same cost model as "
-            "'hermes insights' / /insights."
-        ),
-    )
-    sessions_cost.add_argument(
-        "--days", type=int, default=30, help="Number of days to analyze (default: 30)"
-    )
-    sessions_cost.add_argument(
-        "--source", help="Filter by platform (cli, telegram, subagent, etc.)"
-    )
-    sessions_cost.add_argument(
-        "--limit",
-        type=int,
-        default=20,
-        help="Max per-session rows to show (0 for all; default: 20)",
-    )
-    sessions_cost.add_argument(
-        "--json",
-        action="store_true",
-        help="Emit the raw cost report as JSON instead of a table",
-    )
-
-    sessions_entropy = sessions_subparsers.add_parser(
-        "entropy",
-        help="Analyze dialogue entropy and degradation markers for a session",
-    )
-    sessions_entropy.add_argument(
-        "session_id", nargs="?", default=None, help="Session ID to analyze (defaults to latest)"
-    )
+    _add_cost_and_entropy(sessions_subparsers)
 
     _add_rename_and_discard(sessions_subparsers)
 
@@ -372,3 +338,41 @@ def build_sessions_parser(subparsers, *, cmd_sessions: Callable) -> None:
         return cmd_sessions(_args, sessions_parser=sessions_parser)
 
     sessions_parser.set_defaults(func=_dispatch_sessions)
+
+
+def _add_cost_and_entropy(sessions_subparsers) -> None:
+    # Fork: per-session spend with per-tool/per-subagent attribution.
+    sessions_cost = sessions_subparsers.add_parser(
+        "cost",
+        help="Show per-session spend plus per-tool and per-subagent cost breakdown",
+        description=(
+            "Per-session estimated spend with per-tool and per-subagent "
+            "(delegate) cost attribution. Reuses the same cost model as "
+            "'hermes insights' / /insights."
+        ),
+    )
+    sessions_cost.add_argument(
+        "--days", type=int, default=30, help="Number of days to analyze (default: 30)"
+    )
+    sessions_cost.add_argument(
+        "--source", help="Filter by platform (cli, telegram, subagent, etc.)"
+    )
+    sessions_cost.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        help="Max per-session rows to show (0 for all; default: 20)",
+    )
+    sessions_cost.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the raw cost report as JSON instead of a table",
+    )
+
+    sessions_entropy = sessions_subparsers.add_parser(
+        "entropy",
+        help="Analyze dialogue entropy and degradation markers for a session",
+    )
+    sessions_entropy.add_argument(
+        "session_id", nargs="?", default=None, help="Session ID to analyze (defaults to latest)"
+    )

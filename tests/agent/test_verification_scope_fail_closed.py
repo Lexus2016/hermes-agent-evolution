@@ -23,7 +23,7 @@ def target(tmp_path, monkeypatch):
     return path
 
 
-def test_active_enforcer_exception_denies_real_file_write(target, monkeypatch):
+def test_active_enforcer_exception_denies_real_file_write(target, monkeypatch, caplog):
     monkeypatch.setattr(file_safety, "_ACTIVE_VERIFICATION_SCOPE", VerificationScope())
     monkeypatch.setattr(
         VerificationScopeEnforcer,
@@ -39,6 +39,8 @@ def test_active_enforcer_exception_denies_real_file_write(target, monkeypatch):
     assert str(target) not in result.error and "secret-token" not in result.error
     assert "/private/fixture" not in result.error
     assert target.read_text() == "original"
+    assert "secret-token" not in caplog.text and "/private/fixture" not in caplog.text
+    assert "verification scope evaluation failed" in caplog.text.lower()
 
 
 def test_active_scope_missing_enforcer_is_distinct_denial(target, monkeypatch):

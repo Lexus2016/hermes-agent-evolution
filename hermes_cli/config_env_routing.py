@@ -85,3 +85,47 @@ def read_env_setting(key: str) -> Optional[str]:
             print(f"  (note: {key} is a stale top-level config.yaml copy; `hermes config set {key} <value>` "
                   f"moves it to .env, `hermes config unset {key}` removes it)", file=sys.stderr)
     return value
+
+
+def route_config_set_input(key: str, value: str) -> bool:
+    """Validate write routing and handle environment-backed keys before YAML mutation.
+
+    Returns whether this write was fully handled. Facade helpers remain late-bound
+    so managed-policy and credential-validation patch seams retain their owners.
+    """
+    from hermes_cli.config import (
+        _exit_invalid, _split_key_path, _exit_if_key_managed, _is_env_config_key, get_env_path,
+    )
+    # Empty segments (``"agent."``) would write config["agent"][""] into a live schema section.
+    if key != key.strip() or not key.strip():
+        _exit_invalid(f"✗ Invalid config key: {key!r} (empty or surrounding whitespace).")
+    if "" in _split_key_path(key):
+        _exit_invalid(
+            f"✗ Invalid config key: {key!r} — contains an empty path segment "
+            "(leading, trailing, or doubled '.').")
+    _exit_if_key_managed(key, "set")
+    if _is_env_config_key(key):
+        from hermes_cli.credential_lifecycle import save_provider_env_credential
+
+        # Unified lifecycle: also rotates any config.yaml mirror of the old value so a stale
+        # higher-precedence copy can't win (#62269).
+        try:
+            save_provider_env_credential(key.upper(), value)
+        except ValueError as exc:
+            _exit_invalid(f"✗ {exc}")
+        print(f"✓ Set {key} in {get_env_path()}")
+        return True
+
+    if is_env_setting_key(key):
+        # Every UPPER_SNAKE name is an environment setting: same file the platform setup flows and
+        # /sethome write, and the only one os.getenv readers see. config.yaml never gets one from
+        # here, --force included (#111848). The env writer's denylist (HERMES_YOLO_MODE, PATH, ...)
+        # therefore also refuses the config.yaml detour that used to bridge those into os.environ.
+        try:
+            save_env_setting(key, value)
+        except ValueError as exc:
+            _exit_invalid(f"✗ {exc}")
+        print(f"✓ Set {key.upper()} in {get_env_path()}")
+        return True
+
+    return False

@@ -236,3 +236,26 @@ def test_discovery_loaded_setup_module_exposes_post_setup(monkeypatch):
             if k.startswith("plugins.memory.mem0"):
                 del sys.modules[k]
         sys.modules.update(saved)
+
+
+def test_setup_version_check_does_not_import_sdk_or_write_outside_profile(tmp_path, monkeypatch):
+    import builtins
+
+    monkeypatch.setattr("sys.argv", ["hermes", "--mode", "platform", "--api-key", "synthetic-key"])
+    monkeypatch.setattr("plugins.memory.mem0._setup.get_hermes_home", lambda: tmp_path)
+    monkeypatch.setattr("importlib.metadata.version", lambda distribution: "2.0.7")
+    _inject_fake_hermes_cli(monkeypatch)
+    monkeypatch.setitem(post_setup.__globals__, "_prompt", lambda label, default=None, secret=False: default or "")
+    monkeypatch.setitem(post_setup.__globals__, "get_hermes_home", lambda: tmp_path)
+    monkeypatch.setitem(post_setup.__globals__, "_curses_select", lambda *args, **kwargs: 1)
+    original = builtins.__import__
+    def guarded(name, *args, **kwargs):
+        assert name != "mem0" and not name.startswith("mem0."), "version inspection imported stateful SDK"
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", guarded)
+    config = {"memory": {}}
+    post_setup(str(tmp_path), config)
+    assert config["memory"]["provider"] == "mem0"
+    assert json.loads((tmp_path / "mem0.json").read_text())["mode"] == "platform"
+    assert "MEM0_API_KEY=synthetic-key" in (tmp_path / ".env").read_text()
+    assert not (tmp_path / ".mem0").exists()

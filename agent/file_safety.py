@@ -8,6 +8,7 @@ clear denial for models that respect tool errors plus a visible audit trail.
 from __future__ import annotations
 
 import os
+import logging
 from pathlib import Path
 from contextlib import suppress
 from typing import Any, Optional
@@ -330,11 +331,15 @@ def _verification_scope_denial(resolved: str | Path, *, mode: str) -> Optional[s
         return "verification_scope_unavailable"
     except Exception:
         # An active check must not turn import-time initialization errors into permission.
+        logging.error("Active verification scope checker initialization failed; access denied",
+                      exc_info=(RuntimeError, RuntimeError("verification checker initialization failed"), None))
         return "verification_scope_error"
     try:
         ok, _ = VerificationScopeEnforcer(scope).check_file_access(resolved, mode=mode)
     except Exception:
         # Exceptions may contain sensitive paths or credentials; expose only a safe reason.
+        logging.error("Active verification scope evaluation failed; access denied",
+                      exc_info=(RuntimeError, RuntimeError("verification scope evaluation failed"), None))
         return "verification_scope_error"
     return None if ok else "verification_scope"
 

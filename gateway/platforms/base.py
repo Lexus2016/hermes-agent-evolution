@@ -1,5 +1,28 @@
 """Base platform adapter interface; every platform adapter inherits from BasePlatformAdapter."""
 
+from gateway.platforms.adapter_models import (
+    CachedMedia,
+    TextDebounceState,
+    ExecApprovalPrompt,
+)
+
+from gateway.platforms.delivery_outcomes import (
+    SendResult,
+    undelivered_tail_after_partial,
+    _error_blob,
+    _any_in,
+    classify_send_error,
+    is_chat_level_not_found,
+    EphemeralReply,
+    merge_pending_message_event,
+    _append_text,
+    SEND_ERROR_KINDS,
+    _CHAT_LEVEL_NOT_FOUND_SUBSTRINGS,
+    _SUBCHAT_NOT_FOUND_SUBSTRINGS,
+    _SEND_ERROR_CLASSIFIERS,
+    _RETRYABLE_ERROR_PATTERNS,
+)
+
 import asyncio
 import contextlib
 import inspect
@@ -1507,20 +1530,6 @@ async def cache_document_from_bytes_async(data: bytes, filename: str) -> str:
 
 
 # Unified media caching: classify attachment bytes by ext/MIME, route to cache_*_from_bytes.
-@dataclass
-class CachedMedia:
-    """Result of caching one attachment's bytes."""
-    path: str                 # absolute HOST cache path (same coordinate system as cache_*_from_bytes)
-    media_type: str           # MIME type recorded on the MessageEvent
-    kind: str                 # "image" | "video" | "audio" | "document"
-    display_name: str         # human-readable name for transcript notes
-
-    def context_note(self) -> str:
-        """One-line transcript annotation pointing the agent at the file (sandbox-translated at
-        render time, never baked into ``path``: ``event.media_urls`` must hold one coordinate
-        system so the routed turn can re-home and translate every entry alike, #101134)."""
-        from tools.credential_files import to_agent_visible_cache_path
-        return f"[{self.kind} '{self.display_name}' saved at: {to_agent_visible_cache_path(self.path)}]"
 
 
 # MIME -> extension reverse lookup; FIRST match across image, video, document tables wins
@@ -1586,22 +1595,8 @@ async def cache_media_bytes_async(
     )
 
 
-@dataclass
-class TextDebounceState:
-    event: MessageEvent
-    task: asyncio.Task | None
-    first_ts: float
-    last_ts: float
-
-    def cancel_timer(self, *, unless: asyncio.Task | None = None) -> None:
-        """Cancel the pending flush timer (if live and not ``unless``)."""
-        if self.task is not None and self.task is not unless and not self.task.done():
-            self.task.cancel()
 
 
-def _append_text(existing: Optional[str], new: Optional[str]) -> str:
-    """``existing\\nnew`` when both non-empty; the non-empty one otherwise."""
-    return f"{existing}\n{new}" if existing else new
 
 
 @dataclass
@@ -1637,71 +1632,10 @@ def coerce_plaintext_gateway_command(event: MessageEvent) -> None:
             event.text = "/restart"
 
 
-@dataclass
-class ExecApprovalPrompt:
-    """One exec-approval prompt, ready for a platform to render natively (see
-    ``BasePlatformAdapter.send_exec_approval``). ``actions`` rows are ``(label, choice, style)``
-    with ``choice`` in ``once`` / ``session`` / ``always`` / ``deny`` — the vocabulary
-    ``tools.approval.resolve_gateway_approval`` accepts — and ``style`` in ``primary`` /
-    ``danger`` / ``""``."""
-    chat_id: str
-    session_key: str
-    text: str
-    actions: list[tuple[str, str, str]]
-    command: str
-    description: str
-    smart_denied: bool
-    metadata: Optional[dict[str, Any]] = None
-
-    @property
-    def choices(self) -> list[str]:
-        return [choice for _, choice, _ in self.actions]
 
 
-@dataclass
-class SendResult:
-    """Result of sending a message."""
-    success: bool
-    message_id: Optional[str] = None
-    error: Optional[str] = None
-    # Adapter-specific metadata. Contract: Telegram edit-overflow partials set
-    # raw_response["partial_overflow"] so the stream consumer sends the missing tail.
-    raw_response: Any = None
-    retryable: bool = False  # transient connection error — base retries automatically
-    retry_after: Optional[float] = None  # server-requested delay (Telegram FloodWait) beats our backoff
-    # Extra ids (send order) when a payload was split; ``message_id`` is then the LAST id so
-    # later edits target the newest chunk.
-    continuation_message_ids: tuple = ()
-    # SEND_ERROR_KINDS member (failures only) via :func:`classify_send_error`, so consumers
-    # branch without substring-matching ``error``.
-    error_kind: Optional[str] = None
 
 
-def undelivered_tail_after_partial(result: "SendResult", sent: str) -> Optional[str]:
-    """The not-yet-delivered remainder of ``sent`` when an adapter reported a PARTIAL split send
-    (``raw_response["partial_overflow"]``), else ``None``.
-
-    A payload over the platform's cap goes out as several messages, so a refusal on a later chunk
-    (typically a flood-control fail-closed) leaves the earlier chunks on screen. Re-sending the
-    whole payload duplicates that visible head; dropping it leaves the reader with a reply that
-    stops mid-sentence. Both are wrong — resend only what this returns.
-    """
-    raw = getattr(result, "raw_response", None)
-    if not (isinstance(raw, dict) and raw.get("partial_overflow")):
-        return None
-    # Resuming is only sound when non-delivery is CERTAIN. A read/write timeout may have been
-    # accepted by the platform after the client gave up (see ``_is_timeout_error``), so treating
-    # its "tail" as owed would duplicate content — the very thing this helper exists to avoid.
-    # Flood refusals and explicit rejections are definite; these are not.
-    if BasePlatformAdapter._is_timeout_error(str(getattr(result, "error", "") or "")):
-        return None
-    tail = raw.get("undelivered_tail")
-    if isinstance(tail, str) and tail.strip() and tail != sent:
-        return tail
-    prefix = raw.get("delivered_prefix")
-    if isinstance(prefix, str) and prefix and sent.startswith(prefix) and len(prefix) < len(sent):
-        return sent[len(prefix):].lstrip() or None
-    return None
 
 
 # Longest server ``retry_after`` ``_send_with_retry`` will sleep inline. Longer penalties return the
@@ -1713,133 +1647,28 @@ _SEND_RETRY_INLINE_WAIT_CAP_SECS = 60.0
 # bad_format (markup rejected; plain-text retry fixes), forbidden (the bot CANNOT reach the user),
 # not_found (chat/thread/message gone), rate_limited, transient (connection-level, retry-safe),
 # unknown.
-SEND_ERROR_KINDS = frozenset(
-    {"too_long", "bad_format", "forbidden", "not_found", "rate_limited", "transient", "unknown"})
 
 # ``not_found`` substrings by blast radius: chat-level = target dead; thread/topic/message-level
 # leaves the parent chat reachable.
-_CHAT_LEVEL_NOT_FOUND_SUBSTRINGS = ("chat not found",)
-_SUBCHAT_NOT_FOUND_SUBSTRINGS = (
-    "message to edit not found", "message to reply not found", "thread not found", "topic_deleted",
-    "message_id_invalid")
 
 
-def _error_blob(exc: Optional[BaseException] = None, error_text: str = "") -> str:
-    """Lowercased blob (error_text + str(exc) + exception class name) that both
-    send-error classifiers match against — one builder so they can never drift."""
-    parts = [error_text] if error_text else []
-    if exc is not None:
-        parts.extend(p for p in (str(exc), exc.__class__.__name__) if p)
-    return " ".join(parts).lower()
 
 
-def _any_in(blob: str, *needles: str) -> bool:
-    return any(n in blob for n in needles)
 
 
 # Ordered (kind, predicate) table for classify_send_error — first match wins.
-_SEND_ERROR_CLASSIFIERS: tuple[tuple[str, Callable[[str], bool]], ...] = (
-    ("too_long", lambda b: _any_in(b, "message_too_long", "too long", "message is too long")),
-    ("bad_format", lambda b: (
-        _any_in(b, "can't parse entities", "cant parse entities", "can't find end", "unsupported start tag")
-        or ("entity" in b and "parse" in b)
-        or ("bad request" in b and "entit" in b))),
-    ("forbidden", lambda b: _any_in(
-        b, "forbidden", "bot was blocked", "blocked by the user", "user is deactivated",
-        "not enough rights", "have no rights", "not a member")),
-    ("not_found", lambda b: _any_in(b, *_CHAT_LEVEL_NOT_FOUND_SUBSTRINGS, *_SUBCHAT_NOT_FOUND_SUBSTRINGS)),
-    ("rate_limited", lambda b: _any_in(b, "flood", "too many requests", "retry after", "rate limit")),
-    ("transient", lambda b: _any_in(b, *_RETRYABLE_ERROR_PATTERNS, "connecttimeout")))
 
 
-def classify_send_error(exc: Optional[BaseException], error_text: str = "") -> str:
-    """Map a send exception / error string to a :data:`SEND_ERROR_KINDS` value; anything
-    unrecognized is ``"unknown"`` so an unclassified failure is never mistaken for a benign one."""
-    blob = _error_blob(exc, error_text)
-    return next((kind for kind, matches in _SEND_ERROR_CLASSIFIERS if matches(blob)), "unknown")
 
 
-def is_chat_level_not_found(exc: Optional[BaseException] = None, error_text: str = "") -> bool:
-    """Whether a ``not_found`` failure means the *whole chat* is gone (only that marks a target
-    dead; a deleted topic / edited-away message leaves the parent chat reachable). When both
-    markers are present the sub-chat reading wins."""
-    blob = _error_blob(exc, error_text)
-    return (not _any_in(blob, *_SUBCHAT_NOT_FOUND_SUBSTRINGS)
-            and _any_in(blob, *_CHAT_LEVEL_NOT_FOUND_SUBSTRINGS))
 
 
-class EphemeralReply(str):
-    """System-notice reply that auto-deletes after ``ttl_seconds`` on platforms implementing
-    ``delete_message`` (others leave it). ``None`` ttl uses ``display.ephemeral_system_ttl``
-    (``0`` disables globally). Subclassing ``str`` keeps it transparent to everything that
-    treats handler results as text; ``isinstance`` lets the send path schedule deletion."""
-    ttl_seconds: Optional[int]
-
-    def __new__(cls, text: str, ttl_seconds: Optional[int] = None):
-        instance = super().__new__(cls, text)
-        instance.ttl_seconds = ttl_seconds
-        return instance
-
-    @property
-    def text(self) -> str:
-        """The underlying text (explicit form of ``str(reply)``)."""
-        return str.__str__(self)
 
 
-def merge_pending_message_event(pending_messages: dict[str, MessageEvent], session_key: str,
-                                event: MessageEvent, *, merge_text: bool = False) -> None:
-    """Store or merge a pending event: photo bursts/albums merge into the queued event so the next
-    turn sees the whole burst; with ``merge_text`` rapid TEXT follow-ups append instead of
-    replace."""
-    existing = pending_messages.get(session_key)
-    if existing:
-        existing_type = getattr(existing, "message_type", None)
-        existing_is_photo = existing_type == MessageType.PHOTO
-        incoming_is_photo = event.message_type == MessageType.PHOTO
-        both_photo = existing_is_photo and incoming_is_photo
-        incoming_has_media = bool(event.media_urls)
-
-        def _padded_inline_flags(msg: MessageEvent) -> list[Optional[bool]]:
-            flags = list(getattr(msg, "media_text_inlined", []) or [])
-            return flags + [None] * (len(msg.media_urls) - len(flags))
-        incoming_inline_flags: list[Optional[bool]] = []
-        if incoming_has_media:
-            existing.media_text_inlined = _padded_inline_flags(existing)
-            incoming_inline_flags = _padded_inline_flags(event)
-        # A photo burst always absorbs; otherwise merge only when media is involved on either
-        # side. Captions merge in every absorbing case.
-        if both_photo or existing.media_urls or incoming_has_media:
-            if both_photo or incoming_has_media:
-                existing.media_urls.extend(event.media_urls)
-                existing.media_types.extend(event.media_types)
-                existing.media_text_inlined.extend(incoming_inline_flags)
-            if event.text:
-                existing.text = BasePlatformAdapter._merge_caption(existing.text, event.text)
-            existing.absorb_reply_expected(event)
-            if existing_is_photo or incoming_is_photo:
-                existing.message_type = MessageType.PHOTO
-            elif existing_type == MessageType.TEXT and event.message_type != MessageType.TEXT:
-                existing.message_type = event.message_type
-            # Drop the *derived* STT cache (event changed); the echo ledger must survive or
-            # notes echo twice.
-            for attr in ("_gateway_pending_stt_text", "_gateway_pending_stt_transcripts"):
-                if hasattr(existing, attr):
-                    delattr(existing, attr)
-            return
-        both_text = existing_type == MessageType.TEXT and event.message_type == MessageType.TEXT
-        if merge_text and both_text:
-            if event.text:
-                existing.text = _append_text(existing.text, event.text)
-            existing.absorb_reply_expected(event)
-            return
-    pending_messages[session_key] = event
 
 
 # Transient *connection* failures worth retrying. Plain/read/write "timeout" excluded on purpose:
 # the send may have reached the server (retry = duplicate); "connecttimeout" never connected.
-_RETRYABLE_ERROR_PATTERNS = (
-    "connecterror", "connectionerror", "connectionreset", "connectionrefused", "connecttimeout",
-    "network", "broken pipe", "remotedisconnected", "eoferror")
 
 # Handler result: str (reply), ``EphemeralReply`` (auto-delete) or None (already delivered).
 MessageHandler = Callable[[MessageEvent], Awaitable[Optional[Union[str, "EphemeralReply"]]]]

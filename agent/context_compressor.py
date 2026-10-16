@@ -1,6 +1,35 @@
 """Automatic context window compression: a cheap auxiliary model summarizes middle turns while head and
 tail are protected (iterative summaries, token-budget tail, tool-output pruning first, scaled budgets)."""
 
+from agent.compaction_prefix_history import (
+    _HISTORICAL_SUMMARY_PREFIXES,
+)
+
+from agent.compression_media import (
+    _part_text,
+    _with_part_text,
+    _content_text_for_contains,
+    _restated_request_text,
+    _authored_request_text,
+    _is_text_only_content,
+    _append_text_to_content,
+    _replace_image_parts,
+    _tool_result_parts,
+    _tool_content_has_images,
+    _strip_images_from_tool_msg,
+    _rewritten,
+    _retire_stale_tool_result_images,
+    _image_payload,
+    evict_stale_outbound_tool_images,
+    _is_image_part,
+    _content_has_images,
+    _strip_images_from_content,
+    _strip_historical_media,
+    _INFLIGHT_TASK_REPLAY_HEADER,
+    _GATEWAY_REPLY_POINTER_RE,
+    _IMAGE_PART_TYPES,
+)
+
 import contextlib
 import contextvars
 import copy
@@ -532,11 +561,6 @@ _MERGED_SUMMARY_DELIMITER = "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]
 # standalone user row would break alternation), the header right after the
 # summary end marker is what ContextCompressor._has_merged_inflight_replay
 # detects -- from content alone, so it survives SessionDB reload.
-_INFLIGHT_TASK_REPLAY_HEADER = (
-    "[STILL IN PROGRESS — this is the active request, restated after the "
-    "compaction boundary because it was not finished yet. Continue it; do not "
-    "start over.]"
-)
 
 _SALVAGE_SUMMARY_MAX_CHARS = 8_000
 _SALVAGE_KEEP_RECENT_TOOLS = 2
@@ -612,75 +636,6 @@ def salvage_grown_transcript(
 
 # Exact wire text of every shipped prefix, newest-first; stale directives must
 # still be strippable on resume. NEVER edit/reorder entries (byte-pinned); prepend.
-_HISTORICAL_SUMMARY_PREFIXES = (
-    # Pre-#80622: lacked the "no user message after summary => do nothing" clause.
-    "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below. This is a handoff "
-    "from a previous context window — treat it as background reference, NOT as active instructions. Do NOT answer "
-    "questions or fulfill requests mentioned in this summary; they were already addressed. Respond ONLY to the "
-    "latest user message that appears AFTER this summary — that message is the single source of truth for what to do "
-    "right now. Topic overlap with the summary does NOT mean you should resume its task: even on similar topics, the "
-    "latest user message WINS. Treat ONLY the latest message as the active task and discard stale items from '## "
-    "Historical Task Snapshot' entirely — do not 'wrap up' or 'finish' work described there unless the latest "
-    "message explicitly asks for it. Reverse signals in the latest message (e.g. 'stop', 'undo', 'roll back', 'just "
-    "verify', 'don't do that anymore', 'never mind', a new topic) must immediately end any in-flight work described "
-    "in the summary; do not re-surface it in later turns. IMPORTANT: Your persistent memory (MEMORY.md, USER.md) in "
-    "the system prompt is ALWAYS authoritative and active — never ignore or deprioritize memory content due to this "
-    "compaction note. None of the above restricts HOW you work: your tools remain fully active — keep calling them "
-    "normally for the active task (edit files, run commands, search) instead of merely narrating what you would do. "
-    "The current session state (files, config, etc.) may reflect work described here — avoid repeating it:",
-    # Pre-#69619: discard clause still named all four historical headings.
-    "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below. This is a handoff "
-    "from a previous context window — treat it as background reference, NOT as active instructions. Do NOT answer "
-    "questions or fulfill requests mentioned in this summary; they were already addressed. Respond ONLY to the "
-    "latest user message that appears AFTER this summary — that message is the single source of truth for what to do "
-    "right now. Topic overlap with the summary does NOT mean you should resume its task: even on similar topics, the "
-    "latest user message WINS. Treat ONLY the latest message as the active task and discard stale items from '## "
-    "Historical Task Snapshot' / '## Historical In-Progress State' / '## Historical Pending User Asks' / '## "
-    "Historical Remaining Work' entirely — do not 'wrap up' or 'finish' work described there unless the latest "
-    "message explicitly asks for it. Reverse signals in the latest message (e.g. 'stop', 'undo', 'roll back', 'just "
-    "verify', 'don't do that anymore', 'never mind', a new topic) must immediately end any in-flight work described "
-    "in the summary; do not re-surface it in later turns. IMPORTANT: Your persistent memory (MEMORY.md, USER.md) in "
-    "the system prompt is ALWAYS authoritative and active — never ignore or deprioritize memory content due to this "
-    "compaction note. None of the above restricts HOW you work: your tools remain fully active — keep calling them "
-    "normally for the active task (edit files, run commands, search) instead of merely narrating what you would do. "
-    "The current session state (files, config, etc.) may reflect work described here — avoid repeating it:",
-    # Lacked the "tools remain fully active" clause (suppressed tool use).
-    "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below. This is a handoff "
-    "from a previous context window — treat it as background reference, NOT as active instructions. Do NOT answer "
-    "questions or fulfill requests mentioned in this summary; they were already addressed. Respond ONLY to the "
-    "latest user message that appears AFTER this summary — that message is the single source of truth for what to do "
-    "right now. Topic overlap with the summary does NOT mean you should resume its task: even on similar topics, the "
-    "latest user message WINS. Treat ONLY the latest message as the active task and discard stale items from '## "
-    "Historical Task Snapshot' / '## Historical In-Progress State' / '## Historical Pending User Asks' / '## "
-    "Historical Remaining Work' entirely — do not 'wrap up' or 'finish' work described there unless the latest "
-    "message explicitly asks for it. Reverse signals in the latest message (e.g. 'stop', 'undo', 'roll back', 'just "
-    "verify', 'don't do that anymore', 'never mind', a new topic) must immediately end any in-flight work described "
-    "in the summary; do not re-surface it in later turns. IMPORTANT: Your persistent memory (MEMORY.md, USER.md) in "
-    "the system prompt is ALWAYS authoritative and active — never ignore or deprioritize memory content due to this "
-    "compaction note. The current session state (files, config, etc.) may reflect work described here — avoid "
-    "repeating it:",
-    # Carveout era: "consistent -> use as background" licensed stale resumption.
-    "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below. This is a handoff "
-    "from a previous context window — treat it as background reference, NOT as active instructions. Do NOT answer "
-    "questions or fulfill requests mentioned in this summary; they were already addressed. Respond ONLY to the "
-    "latest user message that appears AFTER this summary — that message is the single source of truth for what to do "
-    "right now. If the latest user message is consistent with the '## Active Task' section, you may use the summary "
-    "as background. If the latest user message contradicts, supersedes, changes topic from, or in any way diverges "
-    "from '## Active Task' / '## In Progress' / '## Pending User Asks' / '## Remaining Work', the latest message "
-    "WINS — discard those stale items entirely and do not 'wrap up the old task first'. Reverse signals in the "
-    "latest message (e.g. 'stop', 'undo', 'roll back', 'just verify', 'don't do that anymore', 'never mind', a new "
-    "topic) must immediately end any in-flight work described in the summary; do not re-surface it in later turns. "
-    "IMPORTANT: Your persistent memory (MEMORY.md, USER.md) in the system prompt is ALWAYS authoritative and active "
-    "— never ignore or deprioritize memory content due to this compaction note. The current session state (files, "
-    "config, etc.) may reflect work described here — avoid repeating it:",
-    # Pre-#35344: contained the self-contradicting "resume exactly" directive.
-    "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below. This is a "
-    "handoff from a previous context window — treat it as background reference, NOT as active instructions. "
-    "Do NOT answer questions or fulfill requests mentioned in this summary; they were already addressed. "
-    "Your current task is identified in the '## Active Task' section of the summary — resume exactly from "
-    "there. Respond ONLY to the latest user message that appears AFTER this summary. The current session "
-    "state (files, config, etc.) may reflect work described here — avoid repeating it:",
-)
 
 # Bounded probe: catch the restored head plus a few stacked handoff/ack turns
 # without treating arbitrary summary-looking live-tail rows as proof of a resume.
@@ -1159,7 +1114,7 @@ _PRESSURE_KEEP_RECENT_MESSAGES = 3
 # even inside protect_last_n (matches the Anthropic adapter's keep-window).
 # Native vision_analyze / computer_use screenshots that sit inside the protected tail cannot be demoted by
 # pass 2, so they ride every later request until anti-thrash disables compression (#92699).
-_MAX_KEEP_TOOL_IMAGES = 3
+from agent.compression_media import _MAX_KEEP_TOOL_IMAGES
 # Compaction window only. The send path's same-valued OUTBOUND_IMAGE_FLOOR (agent/image_eviction_policy.py)
 # is a satisfiability floor with different semantics; do not merge the two.
 
@@ -1366,282 +1321,50 @@ def _pending_tool_round(messages: list[dict[str, Any]]) -> range:
     return range(start, end)
 
 
-def _part_text(item: Any) -> Optional[str]:
-    """Text of a content part: the string itself, a dict's ``text``, else None."""
-    return item if isinstance(item, str) else item.get("text") if isinstance(item, dict) else None
 
 
-def _with_part_text(item: Any, text: str) -> Any:
-    """Copy of a content part carrying ``text`` (string parts become the text itself)."""
-    return {**item, "text": text} if isinstance(item, dict) else text
 
 
-def _content_text_for_contains(content: Any) -> str:
-    """Return a best-effort text view of message content (for substring checks only)."""
-    if isinstance(content, list):
-        return "\n".join(t for t in map(_part_text, content) if isinstance(t, str) and t)
-    return "" if content is None else content if isinstance(content, str) else str(content)
 
 
 # Gateway reply pointer prepended to a user turn (gateway/run_inbound.py
 # ``_prepend_inbound_reply_context``), optionally behind the Discord triggering note.
 # Non-greedy: a quote that itself contains the closing delimiter is only partly
 # stripped, which over-counts the request and keeps the conservative anchor.
-_GATEWAY_REPLY_POINTER_RE = re.compile(
-    r'\A(?:\[Triggering message id: [^\n]*\]\n\n)?'
-    r'\[Replying to(?: your previous message)?: ".*?"\]\n\n',
-    re.DOTALL,
-)
 
 
-def _restated_request_text(content: Any) -> str:
-    """A user turn's text, stripped, after the last in-flight replay header if present.
-
-    A request restated by an earlier compaction carries the replay header (and possibly the
-    old summary) before it; the text after the last header is the request itself, so a task
-    that survives several cycles never stacks headers or drags an old summary along.
-    """
-    text = _content_text_for_contains(content).strip()
-    if _INFLIGHT_TASK_REPLAY_HEADER in text:
-        text = text.rsplit(_INFLIGHT_TASK_REPLAY_HEADER, 1)[1].strip()
-    return text
 
 
-def _authored_request_text(content: Any) -> str:
-    """Text the user wrote in a turn, without the gateway's reply-to pointer.
-
-    The pointer quotes another message verbatim; it disambiguates which message is being
-    answered but is not part of the request, so it must not count toward request size.
-    """
-    return _GATEWAY_REPLY_POINTER_RE.sub("", _restated_request_text(content), count=1).strip()
 
 
-def _is_text_only_content(content: Any) -> bool:
-    """Whether the active request can be restated without losing a content part."""
-    if isinstance(content, str):
-        return True
-    return isinstance(content, list) and all(
-        isinstance(part, str)
-        or (
-            isinstance(part, dict)
-            and part.get("type") in {"text", "input_text"}
-            and isinstance(part.get("text"), str)
-        )
-        for part in content
-    )
 
 
-def _append_text_to_content(content: Any, text: str, *, prepend: bool = False) -> Any:
-    """Append or prepend plain text to message content (string or multimodal list)."""
-    if content is None:
-        return text
-    if isinstance(content, list):
-        text_block = {"type": "text", "text": text}
-        return [text_block, *content] if prepend else [*content, text_block]
-    rendered = content if isinstance(content, str) else str(content)
-    return text + rendered if prepend else rendered + text
 
 
-def _replace_image_parts(parts: Any, placeholder: str) -> Optional[list[Any]]:
-    """New parts list with every image part replaced by a text placeholder; None if no images."""
-    if not isinstance(parts, list) or not any(_is_image_part(p) for p in parts):
-        return None
-    return [{"type": "text", "text": placeholder} if _is_image_part(p) else p for p in parts]
 
 
-def _tool_result_parts(content: Any) -> Any:
-    """Part list of a tool-result body, unwrapping the ``_multimodal`` envelope."""
-    return content.get("content") if isinstance(content, dict) and content.get("_multimodal") else content
 
 
-def _tool_content_has_images(content: Any) -> bool:
-    """True when a tool-result body (part list or ``_multimodal`` envelope) carries images."""
-    return _content_has_images(_tool_result_parts(content))
 
 
-def _strip_images_from_tool_msg(msg: dict[str, Any]) -> Optional[dict[str, Any]]:
-    """Copy of a tool message with image payloads replaced (stale ``api_content`` dropped); ``None`` if nothing to strip."""
-    content = msg.get("content")
-    if isinstance(content, dict) and content.get("_multimodal"):
-        summary = content.get("text_summary") or "[screenshot removed to save context]"
-        return _rewritten(msg, f"[screenshot removed] {str(summary)[:200]}")
-    stripped = _replace_image_parts(content, "[screenshot removed to save context]")
-    return None if stripped is None else _rewritten(msg, stripped)
 
 
-def _rewritten(msg: dict[str, Any], content: Any) -> dict[str, Any]:
-    """Copy of ``msg`` carrying ``content``; drops the stale ``api_content`` sidecar so replay can't resend it."""
-    new_msg = {**msg, "content": content}
-    drop_stale_api_content(new_msg)
-    return new_msg
 
 
-def _retire_stale_tool_result_images(
-    result: list[dict[str, Any]], keep_newest: int = _MAX_KEEP_TOOL_IMAGES, spared: range = range(0),
-) -> int:
-    """Replace image payloads on older tool results with text placeholders.
-    Keeps the newest ``keep_newest`` image-bearing tool messages and any spared pending round;
-    spared images still count toward the newest window. User uploads are untouched. Mutates
-    ``result`` in place; returns the number of messages rewritten. Compaction only: it commits the
-    rewrite into the canonical transcript once. The send path uses
-    :func:`evict_stale_outbound_tool_images` (a per-request keep-newest window rewrites the cached
-    prefix on every new image, #113517)."""
-    seen = pruned = 0
-    for i in range(len(result) - 1, -1, -1):
-        msg = result[i]
-        if not isinstance(msg, dict) or msg.get("role") != "tool" or not _tool_content_has_images(msg.get("content")):
-            continue
-        seen += 1
-        if seen <= max(keep_newest, 0) or i in spared:
-            continue
-        new_msg = _strip_images_from_tool_msg(msg)
-        if new_msg is not None:
-            result[i] = new_msg
-            pruned += 1
-    return pruned
 
 
-def _image_payload(msg: dict[str, Any]) -> tuple[int, int]:
-    """``(blocks, bytes)`` of image payload in a message.
-
-    The provider counts BLOCKS: one ``tool_result`` carrying three screenshots is three against
-    the per-request limit. Bytes are the data-URL / base64 length — the payload is ASCII and the
-    JSON framing around it is noise against a 24 MB budget, so no per-request re-serialization.
-    """
-    parts = _tool_result_parts(msg.get("content"))
-    if not isinstance(parts, list):
-        return 0, 0
-    blocks = payload = 0
-    for p in parts:
-        if not _is_image_part(p):
-            continue
-        blocks += 1
-        image_url = p.get("image_url")
-        source = p.get("source")
-        data = (
-            (image_url.get("url") if isinstance(image_url, dict) else image_url)
-            or (source.get("data") if isinstance(source, dict) else None)
-            or ""
-        )
-        payload += len(data) if isinstance(data, str) else 0
-    return blocks, payload
 
 
-def evict_stale_outbound_tool_images(api_messages: list[dict[str, Any]]) -> int:
-    """Drop stale screenshot/vision payloads from the per-call API copy.
-
-    Compression's keep-newest pass only runs when prune/compress fires, and the Anthropic
-    adapter's screenshot eviction only sees nested ``tool_result`` blocks. OpenAI-style
-    ``image_url`` tool results otherwise ride every subsequent request until a 413 forces
-    the reactive strip (#89286). Call this on the cloned ``api_messages`` list after
-    sanitization (#89296). Do not pass persisted history — the rewrite is send-path only.
-
-    Eviction is driven by the provider limit, counted in image BLOCKS, with user uploads
-    reserved against the ceiling but never rewritten — policy and rationale in
-    :mod:`agent.image_eviction_policy`. Returns the number of messages rewritten.
-    """
-    carriers: list[tuple[int, tuple[int, int]]] = []
-    reserved_blocks = reserved_bytes = 0
-    for i in range(len(api_messages) - 1, -1, -1):
-        msg = api_messages[i]
-        if not isinstance(msg, dict):
-            continue
-        blocks, size = _image_payload(msg)
-        if not blocks:
-            continue
-        if msg.get("role") == "tool":
-            carriers.append((i, (blocks, size)))
-        else:
-            reserved_blocks += blocks
-            reserved_bytes += size
-    retire = outbound_image_retire_count(
-        [blocks for _, (blocks, _) in carriers],
-        reserved_blocks,
-        carrier_bytes_newest_first=[size for _, (_, size) in carriers],
-        reserved_bytes=reserved_bytes,
-    )
-    pruned = 0
-    for i, _ in carriers[len(carriers) - retire:]:
-        new_msg = _strip_images_from_tool_msg(api_messages[i])
-        if new_msg is not None:
-            api_messages[i] = new_msg
-            pruned += 1
-    return pruned
 
 
-_IMAGE_PART_TYPES = frozenset({"image_url", "input_image", "image"})
 
 
-def _is_image_part(part: Any) -> bool:
-    """True if ``part`` is an image block (``image_url``, ``input_image``, or ``image``)."""
-    return isinstance(part, dict) and part.get("type") in _IMAGE_PART_TYPES
 
 
-def _content_has_images(content: Any) -> bool:
-    """True if a message's ``content`` is a multimodal list with image parts."""
-    return isinstance(content, list) and any(_is_image_part(p) for p in content)
 
 
-def _strip_images_from_content(content: Any) -> Any:
-    """``content`` with image parts replaced by placeholders; unchanged (same object) when none."""
-    stripped = _replace_image_parts(content, "[Attached image — stripped after compression]")
-    return content if stripped is None else stripped
 
 
-def _strip_historical_media(messages: list[dict[str, Any]], spared: range = range(0)) -> list[dict[str, Any]]:
-    """Replace image parts in older messages with placeholder text.
-    Rule 1: strip everything before the newest image-bearing user message. Rule 1b: the opening
-    attachment ages out once a newer tool image exists. Rule 2: keep only the newest tool-result image,
-    except tool results in a spared pending round.
-    Unchanged list when nothing applies; input never mutated."""
-    if not messages:
-        return messages
-
-    def _newest(role: str, has_images) -> int:
-        hits = (i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == role)
-        return max((i for i in hits if has_images(messages[i].get("content"))), default=-1)
-
-    # Anchor on image-bearing user messages (not all) so a text follow-up still strips the old image.
-    anchor = _newest("user", _content_has_images)
-    # Tool-result images age on their own timeline: keep only the newest one, wherever it sits.
-    # Envelope-aware matcher so the native {_multimodal: True} dict shape anchors too.
-    tool_anchor = _newest("tool", _tool_content_has_images)
-
-    if anchor <= 0 and tool_anchor < 0:
-        # Nothing to strip under any rule.
-        return messages
-
-    def _is_stale(index: int, message: dict[str, Any]) -> bool:
-        if index in spared:
-            return False
-        # Rule 1: everything before the newest image-bearing user message. Rule 1b: the opening
-        # attachment ages out once a newer tool image exists (the text placeholder keeps the user row
-        # non-empty for the zero-user-turn guard). Rule 2: superseded tool-result image, even in the tail.
-        return (
-            (0 < anchor and index < anchor)
-            # When the ONLY image-bearing user message is the very first one (``anchor == 0``) and newer
-            # tool-result images exist, the model has moved on — but the opening base64 blob used to survive
-            # every compaction forever, which is half the wedge in #89938 (the reported session opened with
-            # a ~200KB poster). When nothing newer exists the opening image IS the newest image and is kept,
-            # consistent with keep-newest everywhere else.
-            or (anchor == 0 and index == 0 and tool_anchor > 0)
-            or (message.get("role") == "tool" and index != tool_anchor)
-        )
-
-    def _stripped(i: int, msg: Any) -> Optional[dict[str, Any]]:
-        if not isinstance(msg, dict) or not _is_stale(i, msg):
-            return None
-        content = msg.get("content")
-        # Native multimodal envelope: route through the tool-message stripper
-        # (collapses to text summary, drops stale api_content sidecar).
-        if msg.get("role") == "tool" and isinstance(content, dict) and content.get("_multimodal"):
-            return _strip_images_from_tool_msg(msg) if _tool_content_has_images(content) else None
-        return _rewritten(msg, _strip_images_from_content(content)) if _content_has_images(content) else None
-
-    result = [(_stripped(i, msg), msg) for i, msg in enumerate(messages)]
-    if all(new is None for new, _ in result):
-        return messages
-    return [msg if new is None else new for new, msg in result]
 
 
 def _summary_part_text(part: Any) -> str:

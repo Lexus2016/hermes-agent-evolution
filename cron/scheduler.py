@@ -3457,10 +3457,8 @@ def _run_job_impl(
     if (decision_error := preflight_current(job)) is not None:
         return False, "", "", decision_error
 
-    from gateway.session_cron import current_execution
-    owner_execution = current_execution()
-    if owner_execution is not None and owner_execution[2:] != (job['id'], execution_id):
-        owner_execution = None
+    from cron.scheduler_authority import matching_owner_execution
+    owner_execution = matching_owner_execution(job, execution_id)
     if not job.get("no_agent") and owner_execution is None:
         from cron.scheduler_authority import run_canonical_job
         return run_canonical_job(job, extra_prompt=extra_prompt, cancel_event=cancel_event,

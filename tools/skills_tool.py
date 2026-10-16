@@ -653,6 +653,34 @@ def _log_security_warnings(name: str, skill_md: Path, content: str, all_dirs, ac
         logger.warning("Skill security warning for '%s': %s", name, "; ".join(warnings))
 
 
+def _skill_dependency_note(frontmatter: dict[str, Any]) -> str | None:
+    """Prepare declared PM dependencies; preserve skill content and surface failures."""
+    deps_note = None
+    declared_deps = frontmatter.get("deps") or []
+    if isinstance(declared_deps, str):
+        declared_deps = [declared_deps]
+    if isinstance(declared_deps, list) and declared_deps:
+        failed_deps = []
+        for dep in [str(d).strip() for d in declared_deps if str(d).strip()]:
+            try:
+                import pm
+
+                pm.ensure(dep)
+            except Exception as exc:
+                logger.exception("Skill tool dependency preparation failed",
+                                 exc_info=(RuntimeError, RuntimeError(type(exc).__name__), None))
+                failed_deps.append(f"{dep}: {exc}")
+        if failed_deps:
+            deps_note = (
+                "Tool dependencies could not be installed — "
+                + "; ".join(failed_deps)
+                + ". Run `hermes pm install "
+                + " ".join(str(d) for d in declared_deps)
+                + "` and reload."
+            )
+    return deps_note
+
+
 def skill_view(
     name: str, file_path: str | None = None, task_id: str | None = None, preprocess: bool = True,
     schema_only: bool = False) -> str:
@@ -735,32 +763,7 @@ def skill_view(
             except Exception:
                 logger.debug("Could not resolve org provenance for %s", skill_name, exc_info=True)
         skill_schema = extract_skill_schema(frontmatter)
-        # ── pm tool deps (`deps: [ffmpeg]` frontmatter) ──────────────
-        # Loading the skill IS the activation moment: ensure each declared
-        # pm package now so the skill's commands work when the model runs
-        # them. Failure never blocks the skill content — the note carries
-        # the remedy.
-        deps_note = None
-        declared_deps = frontmatter.get("deps") or []
-        if isinstance(declared_deps, str):
-            declared_deps = [declared_deps]
-        if isinstance(declared_deps, list) and declared_deps:
-            failed_deps = []
-            for dep in [str(d).strip() for d in declared_deps if str(d).strip()]:
-                try:
-                    import pm
-
-                    pm.ensure(dep)
-                except Exception as exc:
-                    failed_deps.append(f"{dep}: {exc}")
-            if failed_deps:
-                deps_note = (
-                    "Tool dependencies could not be installed — "
-                    + "; ".join(failed_deps)
-                    + ". Run `hermes pm install "
-                    + " ".join(str(d) for d in declared_deps)
-                    + "` and reload."
-                )
+        deps_note = _skill_dependency_note(frontmatter)
 
         result = {
             "success": True, "name": skill_name, "description": frontmatter.get("description", ""),

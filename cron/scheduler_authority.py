@@ -228,3 +228,10 @@ def reconcile_pending(*, allow_connect=True):
                 _lift_pause(params['job_id'], record.get('pause_recorded'))
         except Exception:
             logging.getLogger(__name__).warning('Cron receipt recovery deferred: %s', journal, exc_info=True)
+
+
+def matching_owner_execution(job, execution_id):
+    """Return only the canonical owner identity matching this exact job execution."""
+    from gateway.session_cron import current_execution
+    owner = current_execution()
+    return owner if owner is not None and owner[2:] == (job['id'], execution_id) else None

@@ -424,10 +424,6 @@ def memory_tool(
     if not content and new_text:
         content = new_text
 
-    # Accept new_text as an alias for content (single-op path). See docstring.
-    if not content and new_text:
-        content = new_text
-
     # Some strict providers fill optional schema fields with JSON null rather
     # than omitting them.  Treat ``target: null`` as omitted so memory writes
     # still use the documented default store instead of failing validation.

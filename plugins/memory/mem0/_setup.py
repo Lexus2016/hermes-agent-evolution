@@ -437,6 +437,9 @@ def _install_provider_deps(llm_id: str, embedder_id: str, vector_id: str) -> Non
         from pm import sync_venv
         sync_venv(["mem0-oss"], explicit=True)
     except Exception as exc:
+        import logging
+        logging.exception("Memory dependency preparation failed",
+                          exc_info=(RuntimeError, RuntimeError(type(exc).__name__), None))
         print(f"  Warning: Could not prepare Mem0 OSS dependencies: {exc}. "
               "Run: hermes pm install --extra mem0-oss")
     else:
@@ -497,9 +500,10 @@ _MODE_PICKER = (_setup_platform, _setup_selfhosted, _setup_oss)
 def post_setup(hermes_home: str, config: dict) -> None:
     """Entry point for `hermes memory setup`: routes on --mode (platform / selfhosted / oss), else shows a picker.
     OSS is non-interactive only when the mode came from the flag."""
-    with suppress(ImportError):  # mem0ai must meet the minimum version from plugin.yaml
-        import mem0
-        installed_ver = getattr(mem0, "__version__", None)
+    from importlib.metadata import PackageNotFoundError, version
+    # Version inspection must not import the SDK: its import creates ~/.mem0 state.
+    with suppress(PackageNotFoundError):  # mem0ai must meet plugin.yaml's minimum version
+        installed_ver = version("mem0ai")
         if installed_ver and tuple(int(x) for x in installed_ver.split(".")[:3]) < (2, 0, 7):
             print(f"\n  ⚠ mem0ai {installed_ver} installed but >=2.0.7 required.\n  Run: uv pip install --python {sys.executable} 'mem0ai>=2.0.7'")
     flags = parse_flags(sys.argv[1:])

@@ -390,3 +390,39 @@ def test_launcher_inaccessible_identity_cannot_be_signalled(monkeypatch):
                               terminate=lambda: pytest.fail("unverified process signalled"))
     with pytest.raises(psutil.AccessDenied):
         _terminate_owned_process(process, "synthetic", 10.0)
+
+
+def test_launcher_main_sets_private_nonce_only_in_owned_child(monkeypatch):
+    import subprocess
+
+    monkeypatch.delenv("HERMES_HINDSIGHT_OWNER_NONCE", raising=False)
+    root = str(Path(__file__).resolve().parents[3])
+    script = f'''
+import sys,types,os
+sys.path.insert(0,{root!r})
+from plugins.memory.hindsight import daemon_launcher as launcher
+launcher._verify_runtime=lambda:None
+package=types.ModuleType("hindsight_api"); package.__path__=[]
+api=types.ModuleType("hindsight_api.main")
+def check():
+    nonce=os.environ.get("HERMES_HINDSIGHT_OWNER_NONCE")
+    assert nonce and nonce != "public-generation"
+api.main=check
+package.main=api
+sys.modules["hindsight_api"]=package
+sys.modules["hindsight_api.main"]=api
+pg=types.ModuleType("pg0")
+pg.Pg0=type("Pg0",(),{{"start":lambda self:None,"stop":lambda self:None}})
+sys.modules["pg0"]=pg
+embedded=types.ModuleType("hindsight_api.pg0")
+embedded.EmbeddedPostgres=type("EmbeddedPostgres",(),{{"is_running":lambda self:False}})
+sys.modules["hindsight_api.pg0"]=embedded
+sys.modules["uvicorn"]=types.ModuleType("uvicorn")
+launcher.main()
+'''
+    result = subprocess.run([sys.executable, "-I", "-c", script],
+                            input=json.dumps({"environment": {}, "generation": "public-generation", "idle_timeout": 0}) + "\n",
+                            capture_output=True, text=True, timeout=10, check=True)
+    assert json.loads(result.stdout) == {"event": "clean", "generation": "public-generation"}
+    assert "HERMES_HINDSIGHT_OWNER_NONCE" not in os.environ
+    assert not result.stderr

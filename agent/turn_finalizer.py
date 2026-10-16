@@ -526,24 +526,9 @@ def apply_llm_output_transform(
     return final_response, transformed, pre_transform
 
 
-def finalize_turn(
-    agent, *, final_response, api_call_count, interrupted, failed, messages, conversation_history,
-    effective_task_id, turn_id, user_message, original_user_message, _should_review_memory,
-    _turn_exit_reason, _pending_verification_response=None,
-    _pending_verification_response_previewed=False,
-):
-    """Run the post-loop finalization and return the turn ``result`` dict."""
-    from agent.conversation_loop import logger
-
-    final_response, _turn_exit_reason, preserved_verification_fallback, interrupted = _resolve_budget_fallback(
-        agent, final_response=final_response, api_call_count=api_call_count,
-        interrupted=interrupted, failed=failed, messages=messages,
-        _turn_exit_reason=_turn_exit_reason,
-        _pending_verification_response=_pending_verification_response,
-        _pending_verification_response_previewed=_pending_verification_response_previewed,
-        logger=logger,
-    )
-
+def _close_pending_tool_result(agent, final_response, interrupted, failed, messages, exit_reason, logger):
+    """Return visible close and failure state for an otherwise silent tool-result tail."""
+    _turn_exit_reason = exit_reason
     # A non-interrupted turn that fell out of the loop after a tool result, with no
     # follow-up assistant text, is the Desktop/TUI "silent stop" (#55316, #54756): the
     # composer returns to ready (or keeps spinning) while the durable transcript ends
@@ -570,6 +555,8 @@ def finalize_turn(
                     agent._format_turn_completion_explanation("pending_tool_result", None) or ""
                 )
         except Exception:
+            logger.debug("Pending-tool explainer failed; using built-in fallback",
+                         exc_info=(RuntimeError, RuntimeError("completion explainer failed"), None))
             final_response = ""
         if not final_response:
             # The turn-completion explainer opt-out must not reintroduce the silent stop.
@@ -577,6 +564,45 @@ def finalize_turn(
                 "No reply: the turn stopped while a tool result was still pending. "
                 "Send `continue` to let the model summarize."
             )
+
+    return final_response, failed, _turn_exit_reason
+
+
+def _take_skill_review_trigger(agent):
+    """Consume a due skill-review nudge after the turn's tool count is final."""
+    # Skill trigger is checked NOW — based on how many tool iterations THIS turn used.
+    _should_review_skills = (
+        agent._skill_nudge_interval > 0
+        and agent._iters_since_skill >= agent._skill_nudge_interval
+        and "skill_manage" in agent.valid_tool_names
+    )
+    if _should_review_skills:
+        agent._iters_since_skill = 0
+
+    return _should_review_skills
+
+
+def finalize_turn(
+    agent, *, final_response, api_call_count, interrupted, failed, messages, conversation_history,
+    effective_task_id, turn_id, user_message, original_user_message, _should_review_memory,
+    _turn_exit_reason, _pending_verification_response=None,
+    _pending_verification_response_previewed=False,
+):
+    """Run the post-loop finalization and return the turn ``result`` dict."""
+    from agent.conversation_loop import logger
+
+    final_response, _turn_exit_reason, preserved_verification_fallback, interrupted = _resolve_budget_fallback(
+        agent, final_response=final_response, api_call_count=api_call_count,
+        interrupted=interrupted, failed=failed, messages=messages,
+        _turn_exit_reason=_turn_exit_reason,
+        _pending_verification_response=_pending_verification_response,
+        _pending_verification_response_previewed=_pending_verification_response_previewed,
+        logger=logger,
+    )
+
+    final_response, failed, _turn_exit_reason = _close_pending_tool_result(
+        agent, final_response, interrupted, failed, messages, _turn_exit_reason, logger,
+    )
 
     # Loop exits that are failures in their own right (outer-loop error cap, shutdown, context
     # that could not be shrunk) carry the verdict the UI descriptor needs; a bare
@@ -775,14 +801,7 @@ def finalize_turn(
     from agent.voice_turn_route import end_voice_turn_route
     end_voice_turn_route(agent)
 
-    # Skill trigger is checked NOW — based on how many tool iterations THIS turn used.
-    _should_review_skills = (
-        agent._skill_nudge_interval > 0
-        and agent._iters_since_skill >= agent._skill_nudge_interval
-        and "skill_manage" in agent.valid_tool_names
-    )
-    if _should_review_skills:
-        agent._iters_since_skill = 0
+    _should_review_skills = _take_skill_review_trigger(agent)
 
     # External memory provider: sync the completed turn + queue next prefetch.
     agent._sync_external_memory_for_turn(

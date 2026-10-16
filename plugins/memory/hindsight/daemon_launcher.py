@@ -83,6 +83,7 @@ def main() -> None:
     send_lock = threading.Lock()
     generation = settings["generation"]
     ownership_nonce = secrets.token_urlsafe(32)
+    # health: allow HX002 -- isolated child ownership nonce only; never host config/argv/ledger; process identity and no-host-mutation tests cover this boundary
     os.environ["HERMES_HINDSIGHT_OWNER_NONCE"] = ownership_nonce
 
     def send(event, **values):

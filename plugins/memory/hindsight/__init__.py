@@ -120,7 +120,8 @@ def _maybe_upgrade_client() -> None:
             sync_venv(["hindsight"])
             logger.info("Hindsight client refreshed; restart Hermes to use the selected generation.")
     except Exception as exc:
-        logger.warning("Hindsight client refresh unavailable: %s. Run: hermes pm install --extra hindsight", exc)
+        logger.exception("Hindsight client refresh unavailable: %s. Run: hermes pm install --extra hindsight", exc,
+                         exc_info=(RuntimeError, RuntimeError(type(exc).__name__), None))
 
 
 # update_mode='append' capability (Hindsight >= 0.5.0), cached per (API URL, key fingerprint)

@@ -115,6 +115,9 @@ def run_setup(provider, hermes_home: str, config: dict) -> None:
 
             install_runtime(explicit=True)
     except Exception as exc:
+        import logging
+        logging.exception("Memory dependency preparation failed",
+                          exc_info=(RuntimeError, RuntimeError(type(exc).__name__), None))
         print(f"  ⚠ Cannot install dependencies: {exc}")
         print("  Rerun hermes memory setup after resolving the dependency error.")
         return

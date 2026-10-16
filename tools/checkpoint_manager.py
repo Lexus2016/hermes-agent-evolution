@@ -1517,8 +1517,6 @@ class CheckpointManager:
             if not ok:
                 logger.error("Checkpoint git-add failed after retry: %s", err)
                 return False
-        if not ok:
-            return False
 
         if self.max_file_size_mb > 0:
             self._drop_oversize_from_index(store, working_dir, index_file)
