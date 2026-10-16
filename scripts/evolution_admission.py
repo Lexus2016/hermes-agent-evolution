@@ -66,8 +66,8 @@ def _baseline_evidence(run, head, slug, runner, pr):
         old = item.get("previous_filename", path)
         baseline_test = old.startswith(("tests/", "evals/")) and item.get("status") != "added"
         machinery = any(
-            name.startswith((".github/", "scripts/ci/", "scripts/run_tests", "scripts/check"))
-            or Path(name).name in {"conftest.py", "pytest.ini", "setup.cfg", "sitecustomize.py", "usercustomize.py"}
+            name.startswith((".github/", "scripts/ci/", "scripts/run_tests", "scripts/check", "scripts/code_health/", "analysis/sync-health/"))
+            or Path(name).name in {"conftest.py", "pytest.ini", "setup.cfg", "sitecustomize.py", "usercustomize.py", "ruff.toml", ".npmrc"}
             for name in (path, old)
         )
         if baseline_test or machinery:

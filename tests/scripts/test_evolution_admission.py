@@ -161,7 +161,10 @@ def test_admission_enforcement_cannot_self_modify():
 
 @pytest.mark.parametrize("path,status", [("tests/test_old.py", "modified"),
     ("tests/fixture.json", "removed"), ("tests/conftest.py", "added"),
-    ("scripts/run_tests_parallel.py", "modified")])
+    ("scripts/run_tests_parallel.py", "modified"),
+    ("scripts/code_health/inherited_evidence.py", "added"),
+    ("analysis/sync-health/v0221-manifest.json", "modified"),
+    ("ruff.toml", "modified"), (".npmrc", "modified")])
 def test_candidate_cannot_rewrite_independent_validation(path, status):
     run, jobs = receipts()
     def runner(cmd):

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "issue": 3455,
+  "base": "3cd9963bcce9c0aba451dadeaff5c701bca102e4",
+  "upstream": "297552a9d646119871391d202509822cd86330df",
+  "report": {
+    "path": "analysis/sync-health/v0221-raw-report.json",
+    "sha256": "8daa353c7bdabeaf47b7008cff8f1452d70e5286c2b7c0ac7e5357d49051c8bf",
+    "head": "ff327c842cbda7719afa5557df1f808dd57e0799",
+    "tree": "041523961dd3a7de11e155a385754f23ed86fc20"
+  },
+  "review_boundary": "Initial trust requires independent owner-authorized review of the exact candidate tree and CI wiring. The digest detects drift; it does not authenticate the candidate or establish behavioral correctness.",
+  "entries": []
+}

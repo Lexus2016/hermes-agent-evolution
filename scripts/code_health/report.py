@@ -66,7 +66,7 @@ def format_findings(findings: list[Finding]) -> str:
 
 
 def verdict(findings: list[Finding]) -> tuple[int, int]:
-    blocking = sum(1 for f in findings if f.blocking and f.allowed_reason is None)
+    blocking = sum(1 for f in findings if f.blocking and f.allowed_reason is None and f.inherited_debt is None)
     advisory = sum(1 for f in findings if not f.blocking and f.allowed_reason is None)
     return blocking, advisory
 

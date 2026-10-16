@@ -185,13 +185,14 @@ jobs:
     name: code health ratchet (blocking)
     if: inputs.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The full release transition measured ~14 minutes; timeout still fails the gate.
+    timeout-minutes: 60
     steps:
       - name: Checkout code
-        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.commit }}
-          fetch-depth: 2 # the merge commit and its first parent (the base branch tip)
+          fetch-depth: 0 # verify real pinned upstream ancestry; shallow history cannot prove dormancy
 
       - uses: ./.github/actions/setup-pm
         with:

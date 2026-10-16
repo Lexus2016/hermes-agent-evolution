@@ -78,3 +78,5 @@ class Finding:
     detail: str
     blocking: bool = True
     allowed_reason: str | None = None
+    # Separate one-time reviewed disposition; raw severity is never rewritten.
+    inherited_debt: dict[str, str] | None = None

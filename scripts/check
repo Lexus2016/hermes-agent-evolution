@@ -123,12 +123,13 @@ class _Job:
     argv: list[str]
     cwd: Path = REPO
     env: dict[str, str] | None = None
+    timeout: int = 900
 
 
 def _run(job: _Job) -> tuple[int, str]:
     proc = subprocess.run(
         job.argv, cwd=job.cwd, env=job.env, capture_output=True, text=True, encoding="utf-8",
-        errors="replace", stdin=subprocess.DEVNULL, timeout=900, check=False,
+        errors="replace", stdin=subprocess.DEVNULL, timeout=job.timeout, check=False,
     )
     return proc.returncode, (proc.stdout + proc.stderr).strip()
 
@@ -183,7 +184,7 @@ def _jobs(names: list[str], base: str | None, head: str | None,
             health = [sys.executable, "-m", "scripts.code_health"]
             health += ["--base", base] if base else []
             health += ["--head", head] if head else []
-            jobs[name] = _Job(health, root, env)
+            jobs[name] = _Job(health, root, env, timeout=3600)
     return jobs
 
 

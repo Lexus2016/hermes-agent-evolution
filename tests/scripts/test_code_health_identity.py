@@ -137,7 +137,11 @@ def _ts_base(tmp_path: Path, files: dict[str, str | None]) -> tuple[Path, str]:
     if shutil.which("node") is None:
         pytest.skip("node is not installed")
     repo, _ = _repo(tmp_path)
-    # The repo's pin; the measurer resolves (or installs) it into the user cache.
+    # Reuse the actual pinned parser in an isolated synthetic checkout. Identity
+    # tests exercise TypeScript measurement, not installation into the user's home.
+    parser = resolve_typescript(REPO)
+    shutil.copytree(parser, repo / "node_modules" / "typescript")
+    (repo / ".git" / "info" / "exclude").write_text("/node_modules/\n", encoding="utf-8")
     lock = {"packages": {"node_modules/typescript": {"version": pinned_typescript(REPO)}}}
     return repo, _commit(repo, {**files, "package-lock.json": json.dumps(lock)})
 

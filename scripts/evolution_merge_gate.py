@@ -75,6 +75,12 @@ HIGH_RISK_GLOBS: tuple[str, ...] = (
     "tools/approval.py",
     "scripts/evolution_merge_gate.py",
     "scripts/evolution_admission.py",
+    "scripts/code_health/*",
+    "analysis/sync-health/*",
+    "scripts/check",
+    "scripts/ci/profile_scope_patterns.json",
+    "ruff.toml",
+    ".npmrc",
     "scripts/register_evolution_cron.py",
     # The rest of the autonomous self-modification machinery: the per-stage job
     # definitions (their prompts CARRY the safety instructions — incl. this

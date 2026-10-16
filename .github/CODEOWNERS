@@ -82,3 +82,6 @@ uv.lock                         @Lexus2016
 
 # Each entry pins a third-party repo by sha; editing it changes what users install.
 /plugin-catalog/                @Lexus2016
+
+# One-time upstream debt evidence still requires owner-directed review.
+/analysis/sync-health/           @Lexus2016

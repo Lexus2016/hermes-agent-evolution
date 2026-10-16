@@ -68,6 +68,14 @@ class TestCheckMergePolicy:
             "tools/approval.py",
             "scripts/evolution_merge_gate.py",
             "scripts/register_evolution_cron.py",
+            "scripts/code_health/inherited_debt.py",
+            "scripts/code_health/nested/rules.py",
+            "analysis/sync-health/v0221-manifest.json",
+            "analysis/sync-health/v0221-raw-report.json",
+            "scripts/check",
+            "scripts/ci/profile_scope_patterns.json",
+            "ruff.toml",
+            ".npmrc",
         ):
             v = check_merge_policy([_f(p, 3, 1)])
             assert any("HIGH_RISK_PATH" in x for x in v), p

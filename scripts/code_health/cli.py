@@ -13,6 +13,7 @@ from pathlib import Path
 
 from scripts.code_health import gitio
 from scripts.code_health.compare import compare
+from scripts.code_health.inherited_debt import apply_inherited_debt, disposition_counts
 from scripts.code_health.config import in_scope
 from scripts.code_health.measure import Measurer
 from scripts.code_health.report import (
@@ -110,6 +111,7 @@ def run(repo: Path, base: str, head: str | None, as_json: bool = False,
     head_m = measurer.measure(head, head_paths)
     findings = compare(base_m, head_m, changes)
     apply_allows(findings, head_m)
+    apply_inherited_debt(repo, base, head, findings, head_m, measurer)
     blocking, advisory = verdict(findings)
     failed = bool(blocking) and mode == "blocking"
     if as_json:
@@ -121,6 +123,9 @@ def run(repo: Path, base: str, head: str | None, as_json: bool = False,
     elapsed = time.monotonic() - started
     print(f"\ncode health: {len(head_paths)} files vs {base[:12]}: {blocking} blocking, "
           f"{advisory} advisory ({elapsed:.1f}s)")
+    inherited, _ = disposition_counts(findings)
+    if inherited:
+        print(f"Inherited reviewed debt: {inherited}; raw blocking findings retained above and in JSON.")
     if blocking:
         print(_FOOTER)
     if blocking and not failed:
@@ -135,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ruff=={pinned_version(repo)}")
         return 0
     try:
-        head = gitio.resolve_tree(repo, args.head) if args.head else None
+        head = (gitio.commit_or_none(repo, args.head) or gitio.resolve_tree(repo, args.head)) if args.head else None
         if args.report:
             return _report(repo, head)
         if args.base:  # CI: the base is the target branch tip, which also holds the switch
