@@ -12990,6 +12990,35 @@
           "claim": "Reviewed literal lookup and overlay consumer contract; no runtime behavior or attribution-correctness claim."
         }
       ]
+    },
+    {
+      "id": "status-rule-structural-length-01",
+      "status": "reviewed",
+      "path": "ui-tui/src/components/appChrome.tsx",
+      "scope": "StatusRule",
+      "rule": "FUNC_LINES",
+      "detail": "FUNC_LINES 346 > 341, its value on main (over target 300: it may only go down)",
+      "candidate_blob": "967f26906560303965fbf81cc038bc4557bcef49",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "ui-tui/src/components/appChrome.tsx",
+        "scope": "StatusRule",
+        "blob": "967f26906560303965fbf81cc038bc4557bcef49"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact structural metric preparation",
+        "compatibility": "The 346-line StatusRule is one cohesive status-bar view: prop destructuring, width-budget and optional-segment calculations followed by explicit JSX for each visible segment. The reviewed function has no filesystem/network calls, credential or persistence updates, effect hooks or command execution. Local tailBudget mutation only decides progressive display; its click closure delegates the supplied session-count UI callback. Keeping this exact upstream composition creates no additional branch or line growth. This disposition covers function organization/length only, not rendering, child timer correctness, terminal accessibility or whole-fork compatibility. Native and TUI runtime gates remain required.",
+        "receipt": "Independent complete view-function structural review on 2026-10-15; no native rendering or timer correctness claim."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-status-rule-size-review.json",
+          "blob": "8bb7f7951d24b51f16c96b30e2af1e395d0b2625",
+          "outcome": "passed",
+          "claim": "Complete view-function inspection establishes existing display composition only; exact upstream bytes and function length verified. Runtime rendering and native gates remain separate."
+        }
+      ]
     }
   ]
 }
