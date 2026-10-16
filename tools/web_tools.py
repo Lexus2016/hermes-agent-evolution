@@ -34,19 +34,16 @@ logger = logging.getLogger(__name__)
 # ─── Backend Selection ────────────────────────────────────────────────────────
 
 def _env_value(name: str) -> str:
-    """Resolve ``name`` via the config-aware env layer (``hermes config set`` values), then process env.
+    """Resolve ``name`` through the provider's profile-aware credential boundary.
 
     Mirrors the SearXNG provider's ``_searxng_url()`` so that values set through Hermes' config/.env layer
     (``hermes config set``, ``hermes tools``) are honored here too — not just raw process-env exports.
     Without this, a config-only ``SEARXNG_URL`` (or any provider key) leaves the backend auto-detect cascade
     and ``check_web_api_key()`` blind to it. See #34290.
     """
-    try:
-        from hermes_cli.config import get_env_value
-        val = get_env_value(name)
-    except Exception:
-        val = None
-    return ((os.getenv(name, "") if val is None else val) or "").strip()
+    from agent.web_search_provider import get_provider_env
+
+    return get_provider_env(name)
 
 
 def _has_env(name: str) -> bool:
