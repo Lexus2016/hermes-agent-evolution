@@ -195,3 +195,18 @@ After this terminal run, separately reviewed metadata commit `c930dcfc2478` adde
 only two CC dispositions (bootstrap event presentation and profile normalization),
 validated with 27 adapter tests. The manifest now has 338 entries and 354 occurrence
 budgets. The d66b report is not relabeled as a report for that later commit.
+
+
+## Test timing evidence repair
+
+Commit `dfbffa67c4a15f76d3b2d4f7af383453780dcc90` changes only three test
+files: it observes the socket shutdown return, drives the attempt-origin budget
+with a module-local logical clock, and verifies every real refresh inter-hold gap.
+The same 83 collected cases and 46 test definitions/decorators are retained.
+A deliberately regressed lifecycle-origin control fails at the expected retirement
+deadline; the restored committed tree passes all 83 tests with retries disabled
+and full canonical Ruff. The real 2-second loopback prefill remains unchanged
+and has no accepted debt disposition. No production or acceptance policy changed.
+The full d66b health result remains historical and failed, not a report for this
+later test-only checkpoint. Exact receipts are in
+`v0221-dfbf-test-timing-validation.json`.
