@@ -218,26 +218,36 @@ def test_every_anchor_extra_exists_in_pyproject():
 
 
 def test_legacy_selection_carries_extras_the_main_era_venv_lazily_installed(monkeypatch, tmp_path):
-    """Migrating a main-era venv must keep opt-in extras it already had (FAL
-    image generation, a messaging SDK), or the first PM launch prompts to
-    reinstall them. Umbrella and gated-off extras are never carried."""
+    """Keep installed optional features, including fork-retained bundled providers.
+
+    Inventorying the old environment must not import or install dependencies;
+    absent, unknown, umbrella and gated-off extras are never carried.
+    """
+    def refuse_dependency_access(*args, **kwargs):
+        pytest.fail("legacy selection must inspect files without importing or installing dependencies")
+
+    monkeypatch.setattr(client, "sync_venv", refuse_dependency_access)
+    monkeypatch.setattr(extras, "_importable", refuse_dependency_access)
     monkeypatch.setattr(extras, "_PLATFORM_GATES", {"piper": "python_version < '0'"})
     site = tmp_path / "venv" / "lib" / "python3.11" / "site-packages"
-    (site / "fal_client").mkdir(parents=True)
-    (site / "telegram").mkdir()
-    (site / "piper").mkdir()
-    (site / "google").mkdir()
-    (site / "google" / "auth").mkdir()
+    for anchor in (
+        "fal_client", "telegram", "piper", "google/auth", "hindsight_client",
+        "honcho", "mem0", "aiohttp", "opentelemetry/sdk", "not_a_declared_extra",
+        "faster_whisper", "pyopen_wakeword",
+    ):
+        (site / anchor).mkdir(parents=True)
     (site / "exa_py.cpython-311-x86_64-linux-gnu.so").write_bytes(b"")
-    (site / "hindsight_client").mkdir()
 
     selection = extras.legacy_selection(tmp_path)
 
     assert selection[0] == "all"
-    assert {"fal", "telegram", "vertex", "exa"} <= set(selection)
-    assert "messaging" not in selection
+    assert {"fal", "telegram", "vertex", "exa", "stt-whisper", "wake-openwakeword"} <= set(selection)
+    # This fork deliberately retains these bundled features and their PM extras.
+    assert {"hindsight", "honcho", "mem0", "homeassistant", "otel"} <= set(selection)
+    assert not {"messaging", "voice", "wake"} & set(selection)
     assert "piper" not in selection
-    assert "hindsight" not in selection  # Catalog plugin owns this dependency, not a core extra.
+    assert "discord" not in selection  # Declared extra, but absent from the old environment.
+    assert "not-a-declared-extra" not in selection
     assert extras.legacy_selection(tmp_path / "no-venv") == ["all"]
 
 
