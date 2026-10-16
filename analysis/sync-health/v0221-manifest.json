@@ -14054,6 +14054,104 @@
           "claim": "Independent complete-scope structural organization review for this exact metric only; installer/auth/roster/route and native runtime limitations remain explicit."
         }
       ]
+    },
+    {
+      "id": "plugin-declaration-boundary-01",
+      "status": "reviewed",
+      "path": "hermes_cli/plugins_cmd_install.py",
+      "scope": "_install_plugin_python_deps",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as exc:",
+      "candidate_blob": "2aee13fdd3fbfe3b7c3299de4819aa9e114bd3e1",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugins_cmd_install.py",
+        "scope": "_install_plugin_python_deps",
+        "blob": "2aee13fdd3fbfe3b7c3299de4819aa9e114bd3e1"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; root approved preparation only",
+        "compatibility": "Malformed actual TOML returns explicit manifest_invalid refusal even with assume_yes; active replacement publish_plugin raises classified PluginOperationError before sync_venv and keeps installed tree byte-identical. Only named refusal/config-accessor catch paths tested. Successful environment resolution, activation rollback, previous admission fixture setup failures and native hosted CI remain outside this proof.",
+        "module_bindings": "Actual malformed TOML reader, consent refusal and public replacement publication gate; sync_venv never called on this failure. Dashboard detail warnings never grant consent.",
+        "receipt": "/tmp/hermes-cadence-read-final.log:21passed; exact named failure tests test_invalid_declaration_refuses_consent_even_when_preapproved,test_active_replacement_parse_failure_preserves_installed_tree_and_environment"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-plugin-declaration-boundary-review.json",
+          "blob": "7cec2905cfd944791284d35533e1cfbb5d4eb08e",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical receipt and bounded independent source/failure-path review; cadence and successful admission excluded."
+        },
+        {
+          "path": "hermes_cli/plugins_transaction.py",
+          "blob": "1838658cd7c26f935ccf29d5e9e30e1446f0e5ab",
+          "outcome": "passed",
+          "claim": "Exact reviewed dependency or targeted test of this refusal/display boundary."
+        },
+        {
+          "path": "pm/plugin_declarations.py",
+          "blob": "210cabe36b29b87272cdda0add85174c17809f6d",
+          "outcome": "passed",
+          "claim": "Exact reviewed dependency or targeted test of this refusal/display boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_policy_failure_boundaries.py",
+          "blob": "33d86372d5eb44b66fb6235cd5f9362375017846",
+          "outcome": "passed",
+          "claim": "Exact reviewed dependency or targeted test of this refusal/display boundary."
+        }
+      ]
+    },
+    {
+      "id": "plugin-declaration-boundary-02",
+      "status": "reviewed",
+      "path": "hermes_cli/plugins_cmd_install.py",
+      "scope": "_python_dependency_summary",
+      "rule": "BLE001",
+      "detail": "blind `except Exception`",
+      "code": "except Exception as exc:",
+      "candidate_blob": "2aee13fdd3fbfe3b7c3299de4819aa9e114bd3e1",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "hermes_cli/plugins_cmd_install.py",
+        "scope": "_python_dependency_summary",
+        "blob": "2aee13fdd3fbfe3b7c3299de4819aa9e114bd3e1"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; root approved preparation only",
+        "compatibility": "Malformed declaration yields empty UI detail with visible warning; same input independently refuses consent so empty display does not grant installation. Only named refusal/config-accessor catch paths tested. Successful environment resolution, activation rollback, previous admission fixture setup failures and native hosted CI remain outside this proof.",
+        "module_bindings": "Actual malformed TOML reader, consent refusal and public replacement publication gate; sync_venv never called on this failure. Dashboard detail warnings never grant consent.",
+        "receipt": "/tmp/hermes-cadence-read-final.log:21passed; exact named failure tests test_unreadable_dependency_summary_warns_without_granting_consent"
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-plugin-declaration-boundary-review.json",
+          "blob": "7cec2905cfd944791284d35533e1cfbb5d4eb08e",
+          "outcome": "passed",
+          "claim": "Embedded immutable canonical receipt and bounded independent source/failure-path review; cadence and successful admission excluded."
+        },
+        {
+          "path": "hermes_cli/plugins_transaction.py",
+          "blob": "1838658cd7c26f935ccf29d5e9e30e1446f0e5ab",
+          "outcome": "passed",
+          "claim": "Exact reviewed dependency or targeted test of this refusal/display boundary."
+        },
+        {
+          "path": "pm/plugin_declarations.py",
+          "blob": "210cabe36b29b87272cdda0add85174c17809f6d",
+          "outcome": "passed",
+          "claim": "Exact reviewed dependency or targeted test of this refusal/display boundary."
+        },
+        {
+          "path": "tests/hermes_cli/test_plugin_policy_failure_boundaries.py",
+          "blob": "33d86372d5eb44b66fb6235cd5f9362375017846",
+          "outcome": "passed",
+          "claim": "Exact reviewed dependency or targeted test of this refusal/display boundary."
+        }
+      ]
     }
   ]
 }
