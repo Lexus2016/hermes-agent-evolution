@@ -162,7 +162,8 @@ def test_loop_guards_count_once_per_turn_per_signal_and_detector(direct_runtime,
     ])
 
 
-def test_real_guardrail_halt_reaches_the_metric(direct_runtime, tmp_path):
+@pytest.mark.parametrize("tool_name", ["terminal", "browser_navigate"])
+def test_real_guardrail_halt_reaches_the_metric(direct_runtime, tmp_path, tool_name):
     from agent.tool_guardrails import ToolCallGuardrailConfig, ToolCallGuardrailController
     from run_agent import AIAgent
 
@@ -173,13 +174,13 @@ def test_real_guardrail_halt_reaches_the_metric(direct_runtime, tmp_path):
     agent._set_tool_guardrail_halt = lambda decision: AIAgent._set_tool_guardrail_halt(agent, decision)
     for i in range(8):
         AIAgent._append_guardrail_observation(
-            agent, "terminal", {"command": "false"}, '{"exit_code": 1, "error": "boom"}', failed=True,
+            agent, tool_name, {"command": "false"}, '{"exit_code": 1, "error": "boom"}', failed=True,
             tool_call_id=f"c{i}",
         )
     halt = agent._tool_guardrail_halt_decision
     assert halt is not None
     signals = {(s, d) for s, d, _v in _rows(tmp_path, contract.LOOP_GUARD_METRIC, "signal", "detector")}
-    assert ("loop_detected", harness._GUARD_DETECTORS[halt.code]) in signals
+    assert ("loop_detected", "same_tool_failure") in signals
     assert any(s == "repeated_tool_call" for s, _d in signals)
 
 
