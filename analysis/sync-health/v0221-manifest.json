@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "issue": 3455,
-  "base": "365acb3229e7301a3b3566cc5b32114f06c023d1",
+  "base": "9efba6dcfa78013a3763778aaca4fe37921c495e",
   "upstream": "297552a9d646119871391d202509822cd86330df",
   "report": {
     "path": "analysis/sync-health/v0221-raw-report.json",
@@ -10777,9 +10777,15 @@
         },
         {
           "path": "tests/agent/lsp/test_client_e2e.py",
-          "blob": "e198b60eeaf5c0697b035e4e5ad7e822125d11eb",
+          "blob": "bdb2889dd5ea914a920905c72979405fa9fcb169",
           "outcome": "passed",
           "claim": "Actual subprocess lifecycle tests cover the test harness stress modes and clean shutdown."
+        },
+        {
+          "path": "analysis/sync-health/v0221-main9ef-lsp-metric-refresh.json",
+          "blob": "90e1a7e7a92bb25095c923bf3ad052866340a116",
+          "outcome": "passed",
+          "claim": "Unchanged mock server and preserved real subprocess stress/lifecycle tests after reviewed main cleanup test correction; final named receipt only."
         }
       ]
     },
@@ -11524,7 +11530,7 @@
         "reviewer": "Independent integration controller; owner-approved exact seven-case preparation",
         "compatibility": "The log-level option is read once in an isolated child before callbacks. The parent builds its environment under the owning profile via served_profile_child_env. The actual seven-case host suite verifies out-of-process profile/session behavior and crash/restart; this finding covers the process-local logging option only, not every plugin failure path or native Desktop launch. Invalid logging configuration may reject startup.",
         "module_bindings": "PluginHost.ensure_started creates a child process with PluginHost._env. That env is built in the owning profile context via served_profile_child_env(target_home=self._home, inherit_credentials=True), which scrubs launch credentials and overlays target secrets. Child main reads its own log-level env only at logging initialization, before serving callbacks.",
-        "receipt": "/tmp/hermes-hx002-plugin-host-final.log:7 tests passed after the separately reviewed process cleanup correction. Independent source review on 2026-10-15; generated identities require separate verification. Refreshed local process cleanup dependency after final63-pass/1-skip suite including7 plugin-host tests; exact receipt and unchanged environment helper identities recorded separately."
+        "receipt": "/tmp/hermes-hx002-plugin-host-final.log:7 tests passed after the separately reviewed process cleanup correction. Independent source review on 2026-10-15; generated identities require separate verification. Refreshed local process cleanup dependency after final63-pass/1-skip suite including7 plugin-host tests; exact receipt and unchanged environment helper identities recorded separately. Main1cf reconciliation retains exact environment helper ASTs and final7 plugin-host passes,29 retained environment passes,112 lifecycle passes/72 native skips; separate reviewed refresh evidence binds the changed lifecycle implementation."
       },
       "validation": [
         {
@@ -11541,7 +11547,7 @@
         },
         {
           "path": "tools/environments/local.py",
-          "blob": "8d44e91f403397c2d052a2352ea496895b47c110",
+          "blob": "97dab310c51cc91f603308eaff174df9a73cd566",
           "outcome": "passed",
           "claim": "Reviewed caller, configuration-boundary or targeted test dependency bound to exact source; no broad feature validation claim."
         },
@@ -11556,6 +11562,30 @@
           "blob": "cc79fa893722a223687d6344a1a99556cadb8bcc",
           "outcome": "passed",
           "claim": "Independent ownership correction review, unchanged environment helper ASTs, and final source63-pass suite including7 plugin-host cases; native Windows remains unverified."
+        },
+        {
+          "path": "analysis/sync-health/v0221-main1cf-plugin-host-refresh.json",
+          "blob": "31f6b39b1a9cdd4de6413f890ee212ec69e984f1",
+          "outcome": "passed",
+          "claim": "Exact environment helper equivalence and final named plugin-host/environment/lifecycle receipts; native and unrelated path holds remain explicit."
+        },
+        {
+          "path": "tools/environments/local_process.py",
+          "blob": "343eb34cdba1e60969ee5e928b1343f7e9aae101",
+          "outcome": "passed",
+          "claim": "Independently reviewed final-main lifetime dependency; no extra environment access or native execution claim."
+        },
+        {
+          "path": "tools/environments/local_process_owner.py",
+          "blob": "4ff5ad4c29905cef6004101d5fbb3c9e8ee4cc4c",
+          "outcome": "passed",
+          "claim": "Independently reviewed final-main lifetime dependency; no extra environment access or native execution claim."
+        },
+        {
+          "path": "tools/process_registry.py",
+          "blob": "beb0339596314b7b482cf1effda48a62d6efe42f",
+          "outcome": "passed",
+          "claim": "Independently reviewed final-main lifetime dependency; no extra environment access or native execution claim."
         }
       ]
     },

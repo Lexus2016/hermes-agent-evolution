@@ -1,0 +1,18 @@
+{
+  "scope": "Existing static-test-metric-01 dependency refresh only after reviewed main zombie-cleanup test correction. No metric cap or occurrence change.",
+  "source_merge": "b8ff9644d5cdf0899bbfa5697c9cb6b1bd178d13",
+  "candidate_path": "tests/agent/lsp/_mock_lsp_server.py",
+  "candidate_blob": "c02c13dcf15066119815b6855f9142b5bee68a0d",
+  "scope_name": "main",
+  "metric": "CC38",
+  "max_occurrences": 1,
+  "old_test_blob": "e198b60eeaf5c0697b035e4e5ad7e822125d11eb",
+  "new_test_blob": "bdb2889dd5ea914a920905c72979405fa9fcb169",
+  "review": "Independent controller reviewed main cleanup helper and eight controls, preserving integration stderr/stress cases and existing lifecycle assertions. The harness source is unchanged.",
+  "receipt": {
+    "path": "/tmp/hermes-main9ef-targeted-final.log",
+    "sha256": "43acb0db6323e610253232ac45bbe72f97006a9a35fc3a2e7b07d8adb3be0274",
+    "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 3 test files (~21 tests) under ['tests/evolution/test_agent_process_bench.py', 'tests/agent/lsp/test_client_e2e.py', 'tests/tools/test_local_process_lifetime.py']; running with -j 9\n[ 19.0% |     4/~21 | \u27134 | \u27170] \u2713 tests/evolution/test_agent_process_bench.py (4\u2713, 1.9s)\n[ 81.0% |    17/~21 | \u271325 | \u2717 0] \u2713 tests/agent/lsp/test_client_e2e.py (21\u2713, 4.4s)\n[100.0% |    21/~21 | \u271355 | \u2717 0] \u2713 tests/tools/test_local_process_lifetime.py (30\u2713 25s, 10.3s)\n\n=== Summary: 3 files, 55 tests passed, 0 failed, 25 skipped (100% complete) in 10.3s (9 workers) ===\n\n  note: platforms('macos') tests (in 1 file) were SKIPPED on this host (linux); they run on the macOS Python-tests lane.\n  note: platforms('windows') tests (in 1 file) were SKIPPED on this host (linux); they run on the Windows Python-tests lane.\n  Durations cached to test_durations.json (3 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   3\n  Total subprocess CPU-wall: 16.6s  (runner wall: 10.3s, parallelism: 9x)\n  P50: 4.40s  P90: 10.29s  P95: 10.29s  P99: 10.29s  Max: 10.29s\n  <1s: 0 files (0%)  <2s: 1 files (33%)\n  Top 10 slowest:\n     10.29s  tests/tools/test_local_process_lifetime.py\n      4.40s  tests/agent/lsp/test_client_e2e.py\n      1.94s  tests/evolution/test_agent_process_bench.py\n"
+  },
+  "limits": "Receipt has55 passes and25 native platform skips across3files; LSP suite execution is direct subprocess evidence only for its named cases, not native macOS/Windows or external LSP service correctness."
+}

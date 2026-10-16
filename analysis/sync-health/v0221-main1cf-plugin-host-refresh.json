@@ -1,0 +1,57 @@
+{
+  "scope": "Refresh only the existing plugin child log-level finding dependency after true main1cf lifetime reconciliation. No new occurrence or new environment authority.",
+  "source_commit": "17418e68d9e6b9ecd781a92c5610a60d8cb490a4",
+  "old_local_blob": "8d44e91f403397c2d052a2352ea496895b47c110",
+  "new_local_blob": "97dab310c51cc91f603308eaff174df9a73cd566",
+  "unchanged_environment_helpers": {
+    "served_profile_child_env": {
+      "equal": true,
+      "sha256": "7a3f0ff90c0b175d297c0f980b59a55802e7419c37a6eab119aef4e87ac6ffcc"
+    },
+    "hermes_subprocess_env": {
+      "equal": true,
+      "sha256": "c8b4accf10218627736ee1a01f5109cd154cf34cdb09f53b5149ac58b5c80700"
+    },
+    "_is_routed_home": {
+      "equal": true,
+      "sha256": "c7e0af631d691108f4825dfd21120a5a4c61fc9b51036f4af525e5ca54c267c4"
+    },
+    "strip_launch_profile_env": {
+      "equal": true,
+      "sha256": "3df9d2c61580b21e15598534e7af562c392213e2e698996a999a1ee8c72d823b"
+    }
+  },
+  "ast_recipe": "Python3.14.7 ast.dump(full top-level FunctionDef, include_attributes=False), SHA256 UTF-8; old/new compared within the same runtime.",
+  "binding_review": "Independent controller cleared the exact main per-handle lifetime implementation and retained integration environment behavior. PluginHost._env and child startup source are unchanged; four environment helpers remain full-node AST-identical.",
+  "receipts": [
+    {
+      "path": "/tmp/hermes-main1cf-plugin-host-final.log",
+      "sha256": "4484f5a836033a132eba764812b860ff66795fd9da543f12f0fc5be09526df12",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 1 test files (~7 tests) under ['tests/hermes_cli/test_plugin_host.py']; running with -j 1\n[100.0% |     7/~7 | \u27137 | \u27170] \u2713 tests/hermes_cli/test_plugin_host.py (7\u2713, 7.1s)\n\n=== Summary: 1 files, 7 tests passed, 0 failed (100% complete) in 7.1s (1 workers) ===\n  Durations cached to test_durations.json (1 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   1\n  Total subprocess CPU-wall: 7.1s  (runner wall: 7.1s, parallelism: 1x)\n  P50: 7.08s  P90: 7.08s  P95: 7.08s  P99: 7.08s  Max: 7.08s\n  <1s: 0 files (0%)  <2s: 0 files (0%)\n  Top 10 slowest:\n      7.08s  tests/hermes_cli/test_plugin_host.py\n"
+    },
+    {
+      "path": "/tmp/hermes-main1cf-retained-local-env-final.log",
+      "sha256": "64434531984329e45d71d6fba1504b4a4d49fe062cd480af8609c4ebd44be7f2",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 4 test files (~26 tests) under ['tests/tools/test_local_persistent_shell.py', 'tests/tools/test_local_env_bot_desktop.py', 'tests/tools/test_local_env_session_leak.py', 'tests/tools/test_local_shell_init.py']; running with -j 4\n[ 15.4% |     4/~26 | \u27134 | \u27170] \u2713 tests/tools/test_local_env_bot_desktop.py (4\u2713, 2.8s)\n[ 46.2% |    12/~26 | \u271312 | \u2717 0] \u2713 tests/tools/test_local_env_session_leak.py (8\u2713, 2.8s)\n[ 88.5% |    23/~26 | \u271323 | \u2717 0] \u2713 tests/tools/test_local_shell_init.py (11\u2713, 3.7s)\n[100.0% |    26/~26 | \u271329 | \u2717 0] \u2713 tests/tools/test_local_persistent_shell.py (6\u2713, 7.5s)\n\n=== Summary: 4 files, 29 tests passed, 0 failed (100% complete) in 7.5s (4 workers) ===\n\n  note: platforms('macos') tests (in 1 file) were SKIPPED on this host (linux); they run on the macOS Python-tests lane.\n  Durations cached to test_durations.json (4 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   4\n  Total subprocess CPU-wall: 16.9s  (runner wall: 7.5s, parallelism: 4x)\n  P50: 3.74s  P90: 7.50s  P95: 7.50s  P99: 7.50s  Max: 7.50s\n  <1s: 0 files (0%)  <2s: 0 files (0%)\n  Top 10 slowest:\n      7.50s  tests/tools/test_local_persistent_shell.py\n      3.74s  tests/tools/test_local_shell_init.py\n      2.83s  tests/tools/test_local_env_session_leak.py\n      2.79s  tests/tools/test_local_env_bot_desktop.py\n"
+    },
+    {
+      "path": "/tmp/hermes-main1cf-process-lifecycle-final.log",
+      "sha256": "f01551af2e94daa15505b6d88ba61d4691a06cd8d24e5f3746b544d9d5edbf60",
+      "text": "\u25b6 not activated \u2014 using HERMES_PYTHON: /workspace/scratch/f3fe38bc8c74/hermes-upstream-v0221-20261015/.venv/bin/python\n\u25b6 running per-file parallel test suite via run_tests_parallel.py\n  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)\n\u25b6 pre-compiling bytecode cache\n\u25b6 launching test runner\nDiscovered 8 test files (~40 tests) under ['tests/tools/test_local_process_cleanup_ownership.py', 'tests/tools/test_local_process_lifetime.py', 'tests/tools/test_local_registry_lifetime.py', 'tests/tools/test_local_wrapper_exit_ownership.py', 'tests/tools/test_local_env_cwd_recovery.py', 'tests/tools/test_terminal_bounded_execute.py', 'tests/tools/test_local_interrupt_cleanup.py', 'tests/tools/test_local_setsid_descendant_sweep.py']; running with -j 4\n[ 15.0% |     6/~40 | \u27136 | \u27170] \u2713 tests/tools/test_local_env_cwd_recovery.py (6\u2713, 2.7s)\n[ 47.5% |    19/~40 | \u271363 | \u2717 0] \u2713 tests/tools/test_local_process_cleanup_ownership.py (57\u2713 37s, 2.6s)\n[ 60.0% |    24/~40 | \u271369 | \u2717 0] \u2713 tests/tools/test_local_interrupt_cleanup.py (6\u2713, 8.1s)\n[ 75.0% |    30/~40 | \u271375 | \u2717 0] \u2713 tests/tools/test_local_setsid_descendant_sweep.py (6\u2713, 6.7s)\n[ 80.0% |    32/~40 | \u271379 | \u2717 0] \u2713 tests/tools/test_local_wrapper_exit_ownership.py (4\u2713 4s, 2.6s)\n[ 85.0% |    34/~40 | \u271385 | \u2717 0] \u2713 tests/tools/test_local_registry_lifetime.py (6\u2713 6s, 9.0s)\n[ 92.5% |    37/~40 | \u2713109 | \u2717  0] \u2713 tests/tools/test_local_process_lifetime.py (24\u2713 25s, 11.8s)\n[100.0% |    40/~40 | \u2713112 | \u2717  0] \u2713 tests/tools/test_terminal_bounded_execute.py (3\u2713, 3.4s)\n\n=== Summary: 8 files, 112 tests passed, 0 failed, 72 skipped (100% complete) in 12.8s (4 workers) ===\n\n  note: platforms('macos') tests (in 4 files) were SKIPPED on this host (linux); they run on the macOS Python-tests lane.\n  note: platforms('windows') tests (in 2 files) were SKIPPED on this host (linux); they run on the Windows Python-tests lane.\n  Durations cached to test_durations.json (8 files)\n\n=== Per-file subprocess time distribution ===\n  Files:   8\n  Total subprocess CPU-wall: 47.0s  (runner wall: 12.8s, parallelism: 4x)\n  P50: 6.73s  P90: 11.79s  P95: 11.79s  P99: 11.79s  Max: 11.79s\n  <1s: 0 files (0%)  <2s: 0 files (0%)\n  Top 10 slowest:\n     11.79s  tests/tools/test_local_process_lifetime.py\n      9.05s  tests/tools/test_local_registry_lifetime.py\n      8.08s  tests/tools/test_local_interrupt_cleanup.py\n      6.73s  tests/tools/test_local_setsid_descendant_sweep.py\n      3.43s  tests/tools/test_terminal_bounded_execute.py\n      2.65s  tests/tools/test_local_env_cwd_recovery.py\n      2.65s  tests/tools/test_local_process_cleanup_ownership.py\n      2.61s  tests/tools/test_local_wrapper_exit_ownership.py\n"
+    }
+  ],
+  "limits": [
+    "Seven plugin-host cases cover their existing isolated-child/profile/session and restart contracts only.",
+    "112 lifecycle cases passed;72 native macOS/Windows cases skipped on Linux, native execution remains required.",
+    "This evidence does not resolve unrelated protected-path work or whole-repository health."
+  ],
+  "dependencies": {
+    "tools/environments/local.py": "97dab310c51cc91f603308eaff174df9a73cd566",
+    "tools/environments/local_process.py": "343eb34cdba1e60969ee5e928b1343f7e9aae101",
+    "tools/environments/local_process_owner.py": "4ff5ad4c29905cef6004101d5fbb3c9e8ee4cc4c",
+    "tools/process_registry.py": "beb0339596314b7b482cf1effda48a62d6efe42f",
+    "hermes_cli/plugin_host.py": "b0cd37ee545e24e88af210996590960913b60938",
+    "hermes_cli/plugin_host_child.py": "c9aee6a290a6394fe7969be30e6d9420e5ef5c3d",
+    "tests/hermes_cli/test_plugin_host.py": "0cda2cbd7e1af167ea9300d2bcf50de23487c4ca"
+  }
+}

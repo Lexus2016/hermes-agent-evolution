@@ -19,10 +19,10 @@ from pathlib import Path
 from scripts.code_health import gitio
 from scripts.code_health.inherited_evidence import assign_entries
 
-BASE = "365acb3229e7301a3b3566cc5b32114f06c023d1"
+BASE = "9efba6dcfa78013a3763778aaca4fe37921c495e"
 UPSTREAM = "297552a9d646119871391d202509822cd86330df"
 MANIFEST = "analysis/sync-health/v0221-manifest.json"
-MANIFEST_SHA256 = "645621a8a2f6dc17f3835a957a59edbf8df03299643561598bb95be9b4aa2648"
+MANIFEST_SHA256 = "9cc8ae0890c9a2a9fb63ea50d04100fa906df0746140ce8653425146904dde71"
 
 
 def blob(repo: Path, revision: str | None, path: str) -> tuple[str, bytes] | None:
