@@ -15,9 +15,9 @@ history. Once upstream is already an ancestor of the comparison base, this adapt
 is dormant and the ordinary ratchet applies with unchanged thresholds.
 
 The initial mechanism checkpoint has an empty manifest. Separately reviewed
-activations currently record **322 occurrences across 307 exact entries**. These
+activations currently record **323 occurrences across 308 exact entries**. These
 cover individually reviewed name bindings, bounded runtime/error boundaries,
-process-bootstrap options, metadata latency, structural test metrics, a literal attribution-map size, and one status-view function length. The
+process-bootstrap options, metadata latency, structural test metrics, a literal attribution-map size, one status-view function length, and one test-dispatcher complexity. The
 manifest contains each precise rationale, source identity and validation limit.
 Structural-only test-size dispositions claim unchanged test organization, not a
 runtime pass or general feature compatibility. Real bugs and behavioral findings

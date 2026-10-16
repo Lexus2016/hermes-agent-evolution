@@ -13037,6 +13037,37 @@
           "claim": "Complete view-function inspection establishes existing display composition only; exact upstream bytes and function length verified. Runtime rendering and native gates remain separate."
         }
       ]
+    },
+    {
+      "id": "mock-dispatch-structural-complexity-01",
+      "status": "reviewed",
+      "path": "tests-js/scripts/mock-server.ts",
+      "scope": "startMockServer.<anon>.server.<anon>#2",
+      "rule": "CC",
+      "detail": "CC 62 > 58, its value on main (over target 20: it may only go down)",
+      "candidate_blob": "1fe654d2ab6f8362447c73b581ad0ce18e569a68",
+      "source": {
+        "commit": "297552a9d646119871391d202509822cd86330df",
+        "path": "tests-js/scripts/mock-server.ts",
+        "scope": "startMockServer.<anon>.server.<anon>#2",
+        "blob": "43735b36ed3d95ef8b33c239909254e30eec1a8f",
+        "unit_body_hash": "2e283d01d2957b02"
+      },
+      "max_occurrences": 1,
+      "review": {
+        "reviewer": "Independent integration controller; owner-approved exact structural metric preparation",
+        "compatibility": "Complete callback inspection shows a test-only scripted-response dispatcher: named scenario trigger checks, per-scenario turn counters and paired streaming/non-streaming responders account for its CC62. The callback body is unchanged from upstream, and complexity/branch organization has not grown. This is structural maintenance debt only; successful E2E execution, malformed request robustness and timing/cancellation behavior are not established by this review and remain separate gates.",
+        "module_bindings": "The complete upstream-to-candidate module diff changes only INTERIM_SCRIPT constant entries and explanatory comments, alternating todo/session_search to preserve the fork loop-guard contract. Callback imports and referenced responder identities are unchanged; that fixture data adjustment introduces no dispatcher branch or complexity. No claim is made that every scripted scenario has passed on this host.",
+        "receipt": "Independent complete test-dispatcher and surrounding binding structural review on 2026-10-15; no E2E, timing, cancellation or malformed-request correctness claim."
+      },
+      "validation": [
+        {
+          "path": "analysis/sync-health/v0221-mock-dispatch-complexity-review.json",
+          "blob": "af68bf98f36664d17cf3ee8e3d11b5742ae961f7",
+          "outcome": "passed",
+          "claim": "Complete callback and surrounding binding inspection establishes unchanged test-dispatch complexity only; exact canonical unit body and CC verified. E2E, timing and robustness remain separate gates."
+        }
+      ]
     }
   ]
 }
