@@ -178,101 +178,20 @@ _DOWNLOAD_USER_AGENT = (
 )
 
 
-def _managed_install() -> bool:
-    """True when a package manager (NixOS) owns this install's modes.
-
-    Mirrors the check ``hermes_cli.config._secure_dir`` makes internally, read
-    here so the *creation* mode honours the same carve-out as reconciliation.
-    Import is local and failure means "not managed": an unimportable config
-    module is the single-user source-install case, where 0700 is correct.
-    """
-    try:
-        from hermes_cli.config import is_managed
-
-        return bool(is_managed())
-    except Exception:  # pragma: no cover - defensive
-        return False
-
-
 def _secure_cache_dir(new_subpath: str, old_name: str) -> Path:
-    """Resolve a Hermes media-cache dir, creating it owner-only (0700).
+    """Resolve a cache directory and verify the shared media privacy policy."""
+    from hermes_platform.media_cache_privacy import secure_media_cache_dir
 
-    A downloaded image or video is as sensitive as whatever the user pointed
-    the agent at — a private attachment, an internal screenshot, a document
-    scan. Created with a bare ``mkdir(parents=True, exist_ok=True)`` these
-    inherited the umask and landed 0755, readable by every other local
-    account. ``HERMES_HOME`` is 0700 by default so default-config exposure is
-    narrow; the concrete scenario is the documented ``HERMES_HOME_MODE=0701``
-    hatch (letting nginx/caddy traverse to a served subdirectory), where a
-    0755 child really is world-readable.
-
-    The mode is passed to ``mkdir`` so it is set *at creation*, leaving no
-    window where the directory sits world-readable before a follow-up chmod.
-    Policy is then reconciled through ``hermes_cli.config._secure_dir`` — the
-    house helper — rather than a hand-rolled chmod, which is what keeps this
-    correct off a single-user desktop: managed/NixOS installs are skipped,
-    ``HERMES_HOME_MODE`` stays honoured, and ``HERMES_UID``/``HERMES_GID``
-    ownership is applied so a root-created dir does not lock out uid-mapped
-    Docker workers (#34107).
-
-    The managed/NixOS carve-out applies to **creation as well as
-    reconciliation**. ``cache/vision`` and ``cache/video`` are not among the
-    directories the NixOS module's ``systemd.tmpfiles`` rules pre-create, so
-    they are made lazily at runtime; a hardcoded 0700 here would be the only
-    thing setting their mode and would silently override a design that pins
-    ``stateDir/.hermes`` to ``2770`` and runs the gateway with ``UMask =
-    "0007"`` so "interactive users in the hermes group can read/write"
-    gateway-created state. On such a host the gateway and a hostUsers CLI
-    share one ``$HERMES_HOME``, so a 0700 cache created by whichever ran
-    first makes vision fail with EACCES for the other. Skipping the explicit
-    mode there lets the inherited setgid + umask land 2770, matching
-    ``ensure_hermes_home``'s managed branch and its ``logs/curator``
-    lazy-mkdir precedent.
-
-    Running it unconditionally also heals a directory an older Hermes left at
-    0755. That retroactive tighten is safe *here* because this is
-    Hermes-private scratch that the same user re-reads in the same call —
-    there is no user-shared content to strand. Note ``parents=True`` applies
-    the mode to the leaf only, so an intermediate ``cache/`` keeps its default
-    mode; it is shared with other subsystems and holds only directory names.
-    """
     cache_dir = get_hermes_dir(new_subpath, old_name)
-    if _managed_install():
-        # Managed mode: the NixOS-configured umask/setgid owns the mode, and
-        # _secure_dir would no-op here anyway.
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir
-    # mode= is honored only for the leaf and is not further masked by umask
-    # for the bits we care about; _secure_dir reconciles anything unusual.
-    cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    try:
-        from hermes_cli.config import _secure_dir
-
-        _secure_dir(cache_dir)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("vision: cache dir chmod skipped: %s", exc)
+    secure_media_cache_dir(cache_dir)
     return cache_dir
 
 
 def _write_private_bytes(path: Path, data: bytes) -> None:
-    """Write ``data`` to ``path`` with owner-only (0600) permissions.
+    """Persist a new private media file without a permissive fallback."""
+    from hermes_platform.media_cache_privacy import write_cache_file
 
-    ``Path.write_bytes`` lands 0644 under a default umask. The enclosing cache
-    dir is 0700, so this matters only under ``HERMES_HOME_MODE=0701`` — but
-    ``tools.computer_use.tool`` already writes private captures into this
-    very directory, and one directory with two file-mode conventions is the
-    kind of inconsistency that rots. POSIX mode bits are advisory on Windows
-    (``os.chmod`` there only toggles the read-only flag), so on an ``os.open``
-    failure this degrades to a plain write rather than failing the download.
-    """
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    try:
-        fd = os.open(str(path), flags, 0o600)
-    except OSError:
-        path.write_bytes(data)
-        return
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(data)
+    write_cache_file(path, data)
 
 
 async def _ssrf_redirect_guard(response):

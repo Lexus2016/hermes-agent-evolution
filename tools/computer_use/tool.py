@@ -762,61 +762,17 @@ def _maybe_follow_capture(backend: ComputerUseBackend, res: ActionResult, do_cap
 
 # ── Cache files (screenshots, element spills, vision temps) ─────────────────
 def _secure_dir_policy(cache_dir) -> None:
-    """Create/reconcile a Hermes media-cache dir owner-only (0700), except managed.
+    """Verify cache directory privacy before any capture or element payload."""
+    from hermes_platform.media_cache_privacy import secure_media_cache_dir
 
-    A capture is as sensitive as the screen it came from — an open password
-    manager, a private chat, a bank tab. The umask-derived 0755 these dirs
-    used to get made every local account able to list (and read) those
-    frames whenever ``HERMES_HOME`` itself is traversable, which is exactly
-    what the documented ``HERMES_HOME_MODE=0701`` web-server escape hatch
-    arranges. Delegates to the same house policy as every Hermes secret dir —
-    ``hermes_cli.config._secure_dir`` — with the mode passed to ``mkdir`` so
-    there is no window between mkdir and chmod; managed/NixOS installs keep
-    their group-share design (the mode is left to the configured umask/setgid
-    because these lazily-created dirs are not covered by the module's
-    ``systemd.tmpfiles`` rules). Best-effort; never breaks a capture.
-    """
-    try:
-        managed = False
-        try:
-            from hermes_cli.config import is_managed
-
-            managed = bool(is_managed())
-        except Exception:  # pragma: no cover - defensive
-            pass
-        if managed:
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            return
-        cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        try:
-            from hermes_cli.config import _secure_dir
-
-            _secure_dir(cache_dir)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.debug("computer_use: cache dir chmod skipped: %s", exc)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("computer_use: cache dir creation failed for %s: %s", cache_dir, exc)
-        cache_dir.mkdir(parents=True, exist_ok=True)
+    secure_media_cache_dir(cache_dir)
 
 
 def _write_private_bytes(path, data: bytes) -> None:
-    """Write ``data`` to ``path`` with owner-only (0600) permissions.
+    """Persist a new private cache file without a permissive fallback."""
+    from hermes_platform.media_cache_privacy import write_cache_file
 
-    ``Path.write_bytes`` would land 0644 under a default umask. POSIX mode
-    bits are advisory on Windows (``os.chmod`` there only toggles the
-    read-only flag), so this is a best-effort narrowing that falls back to a
-    plain write rather than failing the capture.
-    """
-    import os as _os_priv
-
-    flags = _os_priv.O_WRONLY | _os_priv.O_CREAT | _os_priv.O_TRUNC
-    try:
-        fd = _os_priv.open(str(path), flags, 0o600)
-    except OSError:
-        path.write_bytes(data)
-        return
-    with _os_priv.fdopen(fd, "wb") as handle:
-        handle.write(data)
+    write_cache_file(path, data)
 
 
 def _cache_file(subdir: str, legacy: str, name: str, pattern: str = "", cap: int = 0):
@@ -858,7 +814,7 @@ def _spill_elements_to_file(cap: CaptureResult) -> Optional[str]:
                             for e in cap.elements]}
     return _write_cache_file("element spill", "cache/computer_use", "computer_use_cache", f"elements_{uuid.uuid4().hex}.json",
                              "elements_*.json", _MAX_SPILL_FILES,
-                             lambda p: p.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8"))
+                             lambda p: _write_private_bytes(p, json.dumps(payload, ensure_ascii=False, indent=1).encode("utf-8")))
 
 # ── auxiliary.vision routing for captured screenshots ───────────────────────
 _MAX_VISION_DIM = 1456  # longest image side handed to the aux vision model: full-resolution desktop captures tokenize heavily
