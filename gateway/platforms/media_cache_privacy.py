@@ -27,7 +27,7 @@ def _verify_owner(info) -> None:
     from hermes_constants import _resolve_hermes_uid_gid
 
     uid, gid = _resolve_hermes_uid_gid()
-    expected_uid = uid if uid is not None and uid >= 0 else os.geteuid()
+    expected_uid = uid if uid is not None and uid >= 0 else os.geteuid()  # windows-footgun: ok — POSIX-only callers
     if info.st_uid != expected_uid or (gid is not None and gid >= 0 and info.st_gid != gid):
         raise PermissionError("Media cache ownership could not be established")
 

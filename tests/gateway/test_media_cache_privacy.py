@@ -128,7 +128,7 @@ def _refuse_payload(cache, monkeypatch, kind, failure):
             raise RuntimeError("synthetic unavailable")
         monkeypatch.setattr("hermes_cli.config.is_managed", unavailable)
     elif failure == "directory_owner":
-        monkeypatch.setattr("hermes_constants._resolve_hermes_uid_gid", lambda: (os.geteuid() + 1000, None))
+        monkeypatch.setattr("hermes_constants._resolve_hermes_uid_gid", lambda: (os.geteuid() + 1000, None))  # windows-footgun: ok — native POSIX matrix only
         monkeypatch.setattr("hermes_cli.config._secure_dir", lambda fd: None)
     elif failure == "file_owner":
         original_stat = os.fstat

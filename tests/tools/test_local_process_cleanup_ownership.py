@@ -89,7 +89,7 @@ def _owned(cleanup, monkeypatch, caplog, scenario):
         child.kill.assert_called_once_with()
     elif scenario == "force":
         env._force_kill_process(proc)
-        signals.assert_called_once_with(500, signal.SIGKILL)
+        signals.assert_called_once_with(500, signal.SIGKILL)  # windows-footgun: ok — native POSIX matrix only
         lookup.assert_not_called()
     elif scenario in {"grace_reuse", "grace_missing", "permission_reuse", "snapshot_reuse"}:
         def lose_identity(*args):
@@ -178,3 +178,41 @@ def test_windows_cleanup_preserves_existing_dispatch(monkeypatch):
     env._kill_process(proc)
     env._force_kill_process(proc)
     assert windows_kill.call_args_list == [((proc,),), ((proc,),)]
+
+
+@pytest.mark.macos_only
+@pytest.mark.live_system_guard_bypass
+@pytest.mark.parametrize("shared_group", [False, True])
+@pytest.mark.parametrize("entrypoint", ["_kill_process", "_force_kill_process"])
+def test_native_owned_process_cleanup_macos(tmp_path, monkeypatch, shared_group, entrypoint):
+    """Validate real Darwin fingerprints/groups and teardown of only test-owned children."""
+    import shlex
+    import subprocess
+    import sys
+
+    env = object.__new__(local.LocalEnvironment)
+    env.cwd, env.env = str(tmp_path), {}
+    script = "import time; print('ready', flush=True); time.sleep(30)"
+    if shared_group:
+        proc = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, text=True)
+        local._capture_process_identity(proc)
+    else:
+        proc = env._run_bash(f"exec {shlex.quote(sys.executable)} -c {shlex.quote(script)}")
+    try:
+        assert proc.stdout.readline().strip() == "ready"
+        assert proc._hermes_process_identity[0] == proc.pid
+        assert local._owned_process_group(proc) == local.os.getpgid(proc.pid)
+        if shared_group:
+            assert proc._hermes_pgid == local.os.getpgrp()
+            monkeypatch.setattr(local.os, "killpg", lambda *args: pytest.fail("signalled caller group"))
+        else:
+            assert proc._hermes_pgid == proc.pid != local.os.getpgrp()
+        getattr(env, entrypoint)(proc)
+        assert proc.wait(timeout=10) is not None
+    finally:
+        # This Popen is exclusively our test child; never discover or signal unrelated PIDs.
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=10)
+        proc.stdout.close()

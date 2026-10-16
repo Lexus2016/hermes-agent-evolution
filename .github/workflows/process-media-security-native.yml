@@ -1,0 +1,147 @@
+name: Process and media security native validation
+
+# On-demand security backport gate. No PR/main trigger, credentials, or deployment.
+on:
+  push:
+    branches: ["security-validation/process-media-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: process-media-security-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-security:
+    name: Security boundary (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            marker: macos_only
+          - runner: windows-latest
+            marker: windows_only
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify candidate identity
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git log -1 --format='candidate=%H tree=%T'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.9.28"
+          enable-cache: false
+
+      - name: Set up Python 3.11
+        uses: ./.github/actions/retry
+        with:
+          command: uv python install 3.11
+
+      - name: Install locked native test dependencies
+        uses: ./.github/actions/retry
+        with:
+          command: uv sync --locked --python 3.11 --extra all --extra dev --extra anthropic --extra mistral --extra fal --extra modal --extra daytona --extra parallel-web
+
+      - name: Execute native boundary and compatibility tests
+        shell: bash
+        env:
+          NATIVE_MARKER: ${{ matrix.marker }}
+          HERMES_TEST_FILE_RETRIES: "0"
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+        run: |
+          set -euo pipefail
+          export HOME="$RUNNER_TEMP/hermes-security-home"
+          export USERPROFILE="$HOME"
+          mkdir -p "$HOME" "$RUNNER_TEMP/hermes-security-results"
+          export SECURITY_RESULTS="$RUNNER_TEMP/hermes-security-results"
+
+          run_file() {
+            label="$1"
+            file="$2"
+            shift 2
+            bash scripts/run_tests.sh -j 1 --file-timeout 120 "$file" \
+              -- -o addopts= -v --tb=short --timeout=90 \
+              --junitxml="$SECURITY_RESULTS/$label.xml" "$@"
+          }
+          run_file process tests/tools/test_local_process_cleanup_ownership.py -m "$NATIVE_MARKER"
+          run_file media tests/gateway/test_media_cache_privacy.py -m "$NATIVE_MARKER"
+          run_file documents tests/gateway/test_document_cache.py
+          run_file async-media tests/gateway/test_async_media_cache.py
+          if [ "$NATIVE_MARKER" = macos_only ]; then
+            run_file interruption tests/tools/test_local_interrupt_cleanup.py \
+              -k test_wait_for_process_kills_subprocess_on_keyboardinterrupt
+            run_file descendants tests/tools/test_local_setsid_descendant_sweep.py \
+              -k test_timeout_kill_reaps_setsid_grandchild
+          fi
+
+          uv run --no-sync python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          folder = Path(os.environ["SECURITY_RESULTS"])
+          marker = os.environ["NATIVE_MARKER"]
+          required = {
+              "macos_only": {
+                  "process": [
+                      "test_unverified_handle_never_discovers_or_signals_macos[",
+                      "test_owned_cleanup_preserves_identity_across_paths_macos[shared_group]",
+                      "test_owned_cleanup_preserves_identity_across_paths_macos[force_shared_group]",
+                      "test_owned_cleanup_preserves_identity_across_paths_macos[spawn_reuse]",
+                      "test_owned_cleanup_preserves_identity_across_paths_macos[grace_reuse]",
+                      "test_native_owned_process_cleanup_macos[_kill_process-False]",
+                      "test_native_owned_process_cleanup_macos[_kill_process-True]",
+                      "test_native_owned_process_cleanup_macos[_force_kill_process-False]",
+                      "test_native_owned_process_cleanup_macos[_force_kill_process-True]",
+                  ],
+                  "media": [
+                      "test_explicit_policy_preserves_private_payload_contract_macos[private-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[private-document]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[docker_uid_gid-image]",
+                      "test_explicit_policy_preserves_private_payload_contract_macos[docker_uid_gid-document]",
+                      "test_privacy_failure_never_writes_payload_macos[file_collision-image]",
+                      "test_privacy_failure_never_writes_payload_macos[file_collision-document]",
+                  ],
+                  "interruption": ["test_wait_for_process_kills_subprocess_on_keyboardinterrupt"],
+                  "descendants": ["test_timeout_kill_reaps_setsid_grandchild"],
+              },
+              "windows_only": {
+                  "process": ["test_windows_cleanup_preserves_existing_dispatch"],
+                  "media": [
+                      "test_non_posix_exclusive_write_is_supported[image]",
+                      "test_non_posix_exclusive_write_is_supported[document]",
+                  ],
+              },
+          }[marker]
+          for label in ("documents", "async-media"):
+              required[label] = []
+          for label, families in required.items():
+              cases = list(ET.parse(folder / f"{label}.xml").getroot().iter("testcase"))
+              assert cases, f"{label}: no executed tests"
+              for case in cases:
+                  assert not any(case.find(tag) is not None for tag in ("failure", "error", "skipped")), (
+                      label, case.attrib
+                  )
+              names = [case.attrib["name"] for case in cases]
+              for family in families:
+                  assert any(name.startswith(family) for name in names), (label, "missing executed family", family)
+              print(f"{marker}: {label}: {len(cases)} executed passes, zero skips")
+          PY
