@@ -196,6 +196,16 @@ def process_hermes_home_is_pinned() -> bool:
     return _PINNED_PROCESS_HERMES_HOME is not None
 
 
+def get_pinned_process_hermes_home() -> Path | None:
+    """Read the established raw process identity without expansion or environment fallback.
+
+    Identity-sensitive callers must still require an absolute canonical match. An
+    empty pin is unknown identity, even though legacy routing APIs can fall back.
+    """
+    pinned = _PINNED_PROCESS_HERMES_HOME
+    return Path(pinned) if pinned and pinned.strip() else None
+
+
 def get_routing_process_hermes_home() -> Path:
     """Launch home for routed-profile decisions: the pinned home, else :func:`get_process_hermes_home`."""
     pinned = _PINNED_PROCESS_HERMES_HOME

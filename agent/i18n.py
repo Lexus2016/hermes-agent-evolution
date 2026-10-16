@@ -204,12 +204,30 @@ def reset_language_cache() -> None:
     i18n_layers.clear_cache()
 
 
+def _unscoped_launch_language(home: str) -> str | None:
+    """Only a verified pinned launch-home UI may use the process language value."""
+    from hermes_constants import (
+        get_pinned_process_hermes_home,
+        hermes_home_key,
+    )
+
+    try:
+        process_home = get_pinned_process_hermes_home()
+        if process_home is None or not process_home.is_absolute():
+            return None
+        if hermes_home_key(home) != hermes_home_key(process_home):
+            return None
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return os.environ.get("HERMES_LANGUAGE")
+
+
 def _resolve_language(home: str) -> str:
     from agent.secret_scope import UnscopedSecretError, get_secret
     try:
         env_lang = get_secret("HERMES_LANGUAGE")
     except UnscopedSecretError:
-        env_lang = os.environ.get("HERMES_LANGUAGE")  # unscoped default-profile path: environ IS its own value
+        env_lang = _unscoped_launch_language(home)
     return _normalize_lang(env_lang, home) if env_lang else _config_language_cached(home) or DEFAULT_LANGUAGE
 
 
