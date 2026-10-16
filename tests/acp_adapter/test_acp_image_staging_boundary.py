@@ -36,9 +36,10 @@ def test_acp_image_mime_never_chooses_the_staged_extension(tmp_path, monkeypatch
     from gateway.platforms import base
     staging = tmp_path / "home" / "cache" / "images"
     staging.mkdir(parents=True)
-    monkeypatch.setattr(base, "get_image_cache_dir", lambda: staging)
+    monkeypatch.setattr(base, "IMAGE_CACHE_DIR", staging)
     block = ImageContentBlock(type="image", data=base64.b64encode(PNG).decode(), mime_type=mime)
     _, (attachment,) = _stage_user_content(_content_blocks_to_openai_user_content([block]))
     assert attachment["mime"] == "image/png"
     assert [p.suffix for p in staging.iterdir()] == [".png"]
     assert Path(attachment["path"]).parent == staging
+    assert Path(attachment["path"]).read_bytes() == PNG
