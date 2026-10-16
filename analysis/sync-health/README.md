@@ -15,7 +15,7 @@ history. Once upstream is already an ancestor of the comparison base, this adapt
 is dormant and the ordinary ratchet applies with unchanged thresholds.
 
 The initial mechanism checkpoint has an empty manifest. Separately reviewed
-activations currently record **341 occurrences across 323 exact entries**. These
+activations currently record **338 occurrences across 322 exact entries**. These
 cover individually reviewed name bindings, bounded runtime/error boundaries,
 process-bootstrap options, metadata latency, structural test metrics, a literal attribution-map size, one status-view function length, and one test-dispatcher complexity. The
 manifest contains each precise rationale, source identity and validation limit.
@@ -133,3 +133,10 @@ This receipt applies only to the named head. Subsequent corrections require
 appropriate regression checks and a new final immutable comparison. Required
 hosted Python, Hindsight protected-API lifecycle, desktop typecheck, E2E and native
 platform gates remain pending; local socket limitations are not passing results.
+
+
+The host-file metadata correction changed the enclosing probe function. Its prior
+three-occurrence remote-probe disposition was removed because the exact upstream
+unit identity no longer holds. The historical review artifact is retained for
+traceability, but grants no current exception. Real metadata uncertainty now
+refuses replacement rather than treating an existing file as absent.
