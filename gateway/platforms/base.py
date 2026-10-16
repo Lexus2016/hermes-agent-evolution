@@ -604,59 +604,18 @@ def _looks_like_image(data: bytes) -> bool:
 
 
 def _secure_media_cache_dir(cache_dir: Path) -> None:
-    """Create/reconcile a gateway media-cache dir owner-only (0700), except managed.
+    """Establish media-cache privacy before accepting inbound payloads."""
+    from gateway.platforms.media_cache_privacy import secure_media_cache_dir
 
-    Inbound media (photos, voice notes, documents a user sent through a
-    messaging platform) is user content, not regenerable cache: the
-    umask-derived 0755 these dirs inherited made them readable by every other
-    local account whenever ``HERMES_HOME`` is traversable — the documented
-    ``HERMES_HOME_MODE=0701`` web-server hatch. The mode is passed to ``mkdir``
-    so it is set at creation, then reconciled by the house policy helper
-    ``hermes_cli.config._secure_dir`` (managed/NixOS installs keep their
-    group-share design: these lazily-created dirs are not covered by the
-    module's ``systemd.tmpfiles`` rules, so the mode is left to the
-    configured umask/setgid). Best-effort: never fails a media write.
-    """
-    try:
-        managed = False
-        try:
-            from hermes_cli.config import is_managed
-
-            managed = bool(is_managed())
-        except Exception:  # pragma: no cover - defensive
-            pass
-        if managed:
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            return
-        cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        try:
-            from hermes_cli.config import _secure_dir
-
-            _secure_dir(cache_dir)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.debug("media cache dir chmod skipped: %s", exc)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("media cache dir creation failed for %s: %s", cache_dir, exc)
-        cache_dir.mkdir(parents=True, exist_ok=True)
+    secure_media_cache_dir(cache_dir)
 
 
 def _write_cache_file(cache_dir: Path, prefix: str, ext: str, data: bytes) -> str:
-    """Write ``data`` to ``<cache_dir>/<prefix>_<uuid12><ext>``; return the path string.
+    """Write an exclusive private payload without a default-permission fallback."""
+    from gateway.platforms.media_cache_privacy import write_cache_file
 
-    The file is written owner-only (0600) — inbound media is private user
-    content and the cache dir is hardened to 0700 by ``_secure_media_cache_dir``;
-    one directory should not carry two file-mode conventions. Best-effort on
-    platforms where POSIX mode bits are advisory (Windows): falls back to a
-    plain write rather than failing the media write.
-    """
     filepath = cache_dir / f"{prefix}_{uuid.uuid4().hex[:12]}{ext}"
-    try:
-        fd = os.open(str(filepath), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    except OSError:
-        filepath.write_bytes(data)
-        return str(filepath)
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(data)
+    write_cache_file(filepath, data)
     return str(filepath)
 
 
