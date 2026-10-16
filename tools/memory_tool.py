@@ -269,6 +269,7 @@ def _memory_enriched_error(exc: Exception, action: str) -> str:
     This maps the underlying exception type to a concrete category + recovery
     suggestion so the agent can act instead of blind-retrying.
     """
+    FAILURE_CLASS.set("exception")
     exc_type = type(exc).__name__
     exc_msg = str(exc)[:300]
 
@@ -347,6 +348,11 @@ def _memory_enriched_error(exc: Exception, action: str) -> str:
     )
 
 
+# Observability only: distinguish validation/gate refusals from store failures without
+# adding fields to the tool result. Tokens preserve outer calls and concurrent contexts.
+_memory_call_outcome: ContextVar[str] = ContextVar("memory_call_outcome", default="rejected")
+
+
 def _record_memory_call(fn):
     from functools import wraps
 
@@ -355,15 +361,18 @@ def _record_memory_call(fn):
         action = kwargs.get("action", args[0] if args else None)
         operations = kwargs.get("operations")
         token = FAILURE_CLASS.set("other")
+        outcome_token = _memory_call_outcome.set("rejected")
         try:
             result = fn(*args, **kwargs)
             payload = json.loads(result)
-            outcome = "rejected" if payload.get("staged") else "success" if payload.get("success") else "failed"
+            outcome = ("rejected" if payload.get("staged") else
+                       "success" if payload.get("success") else _memory_call_outcome.get())
             failure_class = "none" if outcome == "success" else FAILURE_CLASS.get()
             from hermes_cli.observability.shared_metrics_loop import record_builtin_memory_call
             record_builtin_memory_call(action, operations, outcome=outcome, failure_class=failure_class)
             return result
         finally:
+            _memory_call_outcome.reset(outcome_token)
             FAILURE_CLASS.reset(token)
     return wrapped
 
@@ -415,6 +424,7 @@ def memory_tool(
     Returns JSON string with results.
     """
     if store is None:
+        FAILURE_CLASS.set("disabled")
         return tool_error(
             "Memory is not available. It may be disabled in config or this environment.",
             success=False,
@@ -441,6 +451,7 @@ def memory_tool(
 
     # search is a read-only retrieval path — no gate, no required content.
     if action == "search":
+        _memory_call_outcome.set("failed")
         rows = store.search(
             target,
             source_filter=source_filter,
@@ -462,9 +473,11 @@ def memory_tool(
         try:
             target_size_int = int(target_size) if target_size is not None else None
         except (TypeError, ValueError):
+            FAILURE_CLASS.set("invalid_args")
             return tool_error(
                 "target_size must be an integer number of characters.", success=False
             )
+        _memory_call_outcome.set("failed")
         result = store.compact(target, target_size=target_size_int, prefer=prefer_param)
         return json.dumps(result, ensure_ascii=False)
 
@@ -475,6 +488,7 @@ def memory_tool(
     # --- Batch path -------------------------------------------------------
     if operations:
         if not isinstance(operations, list):
+            FAILURE_CLASS.set("invalid_args")
             return tool_error(
                 "operations must be a list of {action, content?, old_text?} objects.",
                 success=False,
@@ -486,6 +500,7 @@ def memory_tool(
         if gate_result is not None:
             return gate_result
         try:
+            _memory_call_outcome.set("failed")
             result = store.apply_batch(target, operations, memory_char_limit=memory_char_limit)
         except Exception as exc:
             return _memory_enriched_error(exc, "batch")
@@ -502,6 +517,7 @@ def memory_tool(
         if gate_result is not None:
             return gate_result
         try:
+            _memory_call_outcome.set("failed")
             result = _STORE_ACTIONS[action][0](
                 store, target, content, old_text,
                 source_class=source_class, trust_tier=trust_tier,
@@ -512,11 +528,13 @@ def memory_tool(
 
     if action == "supersede":
         try:
+            _memory_call_outcome.set("failed")
             result = store.supersede(target, old_text)
         except Exception as exc:
             return _memory_enriched_error(exc, "supersede")
         return json.dumps(result, ensure_ascii=False)
 
+    FAILURE_CLASS.set("invalid_args")
     return tool_error(
         f"Unknown action '{action}'. Use: add, patch, remove, search, compact, supersede",
         success=False,

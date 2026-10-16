@@ -423,10 +423,12 @@ def _locate_stored(entries: list[str], old_text: str, matched_entry: Optional[st
     if matched_entry is not None:
         idx = _pinned_index(entries, matched_entry)
         if idx is None:
+            FAILURE_CLASS.set("stale_entry")
             return None, {"success": False, "error": _stale_entry_message(matched_entry)}
         return idx, None
     idx, ambiguous = _find_unique_match(entries, old_text)
     if ambiguous:
+        FAILURE_CLASS.set("ambiguous")
         displays = [parse_provenance(e)[0] for e in entries]
         previews = [d[:80] + ("..." if len(d) > 80 else "") for d in displays if old_text in d]
         return None, {
@@ -435,8 +437,6 @@ def _locate_stored(entries: list[str], old_text: str, matched_entry: Optional[st
             "matches": previews,
         }
     return idx, None
-
-
 
 
 # Optional third value of an _apply closure: a dict merged into the success payload —
@@ -541,6 +541,7 @@ class MemoryStore:
 
     def _failure_with_entries(self, target: str, message: str) -> dict[str, Any]:
         """Consolidation failure carrying the live entries so the model can consolidate."""
+        FAILURE_CLASS.set("over_budget")
         current = self._char_count(target)
         limit = self._char_limit(target)
         return self._consolidation_failure({
@@ -1053,10 +1054,12 @@ class MemoryStore:
         """
         content = content.strip()
         if not content:
+            FAILURE_CLASS.set("missing_content")
             return {"success": False, "error": "Content cannot be empty."}
 
         prov_error = _validate_provenance(source_class, trust_tier)
         if prov_error:
+            FAILURE_CLASS.set("invalid_args")
             return {"success": False, "error": prov_error}
 
         # Scan the user-visible content (not the provenance trailer) for
@@ -1067,6 +1070,7 @@ class MemoryStore:
             self._last_provenance = _make_provenance(source_class, trust_tier)
         scan_error, content, guard_event = self._gate_write(content)
         if scan_error:
+            FAILURE_CLASS.set("scan_blocked")
             return {"success": False, "error": scan_error}
         if guard_event is not None:
             _log_guard_event("add", target, guard_event)
@@ -1136,6 +1140,7 @@ class MemoryStore:
                     resp["evicted"] = evicted
                     return resp
 
+                FAILURE_CLASS.set("over_budget")
                 current = self._char_count(target)
                 return self._consolidation_failure({
                     "success": False,
@@ -1458,6 +1463,7 @@ class MemoryStore:
         """Remove the entry containing old_text substring."""
         old_text = old_text.strip()
         if not old_text:
+            FAILURE_CLASS.set("missing_old_text")
             return {"success": False, "error": "old_text cannot be empty."}
 
         with self._file_lock(self._path_for(target)):
@@ -1472,6 +1478,7 @@ class MemoryStore:
             if loc_err:
                 return loc_err
             if idx is None:
+                FAILURE_CLASS.set("no_match")
                 return self._consolidation_failure({
                     "success": False,
                     "error": f"No entry matched '{old_text}'. Check current_entries below and retry with the exact text of the entry you want to remove.",
