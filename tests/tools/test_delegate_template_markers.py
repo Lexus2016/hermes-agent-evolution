@@ -148,7 +148,7 @@ def _completed(idx):
 def test_batch_with_known_marker_proceeds_after_substitution():
     # A goal carrying <NOW-ISO> must be substituted and dispatched, not
     # rejected — the exact silent no-op reported in issue #95.
-    goal = f"Record the pipeline run timestamp <NOW-ISO> in the output file"
+    goal = "Record the pipeline run timestamp <NOW-ISO> in the output file"
     with patch("tools.delegate_tool._run_single_child") as mock_run:
         mock_run.side_effect = [_completed(0), _completed(1)]
         result = _call([{"goal": GOOD_A}, {"goal": goal}])
@@ -183,7 +183,7 @@ def test_expand_substitutes_single_word_date_markers():
 
 
 def test_expand_substitutes_double_brace_now():
-    expanded, substituted, residual = expand_template_markers(
+    expanded, _substituted, residual = expand_template_markers(
         "dispatch at {{now}} and <current_date>",
         now_iso="2026-08-30T03:15:46Z",
     )

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Persistent programmatic context — context-as-variable store (Issue #2496).
 
 Enables working context and tool results to persist as named, re-readable objects
@@ -43,11 +42,11 @@ class ContextVariable:
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ContextVariable:
+    def from_dict(cls, data: dict[str, Any]) -> ContextVariable:
         return cls(
             name=str(data.get("name", "")),
             value=data.get("value"),
@@ -63,7 +62,7 @@ class ProgrammaticContextStore:
     def __init__(
         self,
         session_id: Optional[str] = None,
-        storage_dir: Optional[Union[str, Path]] = None,
+        storage_dir: Optional[str | Path] = None,
         auto_save: bool = True,
     ) -> None:
         self.session_id = session_id or "default"
@@ -71,7 +70,7 @@ class ProgrammaticContextStore:
             Path(storage_dir) if storage_dir else get_default_context_store_dir()
         )
         self.auto_save = auto_save
-        self._variables: Dict[str, ContextVariable] = {}
+        self._variables: dict[str, ContextVariable] = {}
         if self.storage_file.exists():
             self.load()
 
@@ -130,7 +129,7 @@ class ProgrammaticContextStore:
             return True
         return False
 
-    def list_vars(self) -> List[Dict[str, Any]]:
+    def list_vars(self) -> list[dict[str, Any]]:
         """List summary metadata for all stored context variables."""
         results = []
         for var in self._variables.values():
@@ -172,7 +171,7 @@ class ProgrammaticContextStore:
             lines.append(f"| `{var.name}` | {t} | {l} | {d} |")
         return "\n".join(lines)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize store to dictionary."""
         return {
             "session_id": self.session_id,
@@ -180,7 +179,7 @@ class ProgrammaticContextStore:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ProgrammaticContextStore:
+    def from_dict(cls, data: dict[str, Any]) -> ProgrammaticContextStore:
         """Construct store from dictionary."""
         store = cls(session_id=data.get("session_id", "default"), auto_save=False)
         vars_data = data.get("variables", {})
@@ -190,7 +189,7 @@ class ProgrammaticContextStore:
                     store._variables[k] = ContextVariable.from_dict(v)
         return store
 
-    def save(self, path: Optional[Union[str, Path]] = None) -> Path:
+    def save(self, path: Optional[str | Path] = None) -> Path:
         """Persist store variables to disk."""
         target = Path(path) if path else self.storage_file
         try:
@@ -200,7 +199,7 @@ class ProgrammaticContextStore:
             logger.warning("Failed to save programmatic context store: %s", e)
         return target
 
-    def load(self, path: Optional[Union[str, Path]] = None) -> bool:
+    def load(self, path: Optional[str | Path] = None) -> bool:
         """Load store variables from disk."""
         target = Path(path) if path else self.storage_file
         if not target.exists():

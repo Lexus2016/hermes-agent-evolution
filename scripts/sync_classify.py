@@ -61,7 +61,7 @@ def _tests(source: str) -> dict[str, str]:
 def _at(ref: str, path: str) -> dict[str, str]:
     blob = subprocess.run(
         ["git", "show", f"{ref}:{path}"], capture_output=True, text=True
-    )
+    , check=False)
     return _tests(blob.stdout) if blob.returncode == 0 else {}
 
 

@@ -83,7 +83,7 @@ _PATTERNS: list[tuple[re.Pattern, ToolErrorClass, RecoveryAction, str]] = [
     (
         re.compile(
             r"command not found|not recognized|no module named|importerror|modulenotfound|executable.*not found",
-            re.I,
+            re.IGNORECASE,
         ),
         ToolErrorClass.dependency,
         RecoveryAction.install_dependency,
@@ -92,7 +92,7 @@ _PATTERNS: list[tuple[re.Pattern, ToolErrorClass, RecoveryAction, str]] = [
     # Not found
     (
         re.compile(
-            r"no such file|file not found|does not exist|not found|enoent", re.I
+            r"no such file|file not found|does not exist|not found|enoent", re.IGNORECASE
         ),
         ToolErrorClass.not_found,
         RecoveryAction.check_path,
@@ -100,14 +100,14 @@ _PATTERNS: list[tuple[re.Pattern, ToolErrorClass, RecoveryAction, str]] = [
     ),
     # Permission
     (
-        re.compile(r"permission denied|forbidden|unauthorized|403|access denied", re.I),
+        re.compile(r"permission denied|forbidden|unauthorized|403|access denied", re.IGNORECASE),
         ToolErrorClass.permission,
         RecoveryAction.check_credentials,
         "Permission was denied. Check file permissions or API credentials.",
     ),
     # Rate limit
     (
-        re.compile(r"rate.?limit|too many requests|429|throttl", re.I),
+        re.compile(r"rate.?limit|too many requests|429|throttl", re.IGNORECASE),
         ToolErrorClass.rate_limit,
         RecoveryAction.retry,
         "Rate limited. Wait briefly before retrying, or reduce request frequency.",
@@ -116,7 +116,7 @@ _PATTERNS: list[tuple[re.Pattern, ToolErrorClass, RecoveryAction, str]] = [
     (
         re.compile(
             r"timeout|timed out|connection reset|temporarily unavailable|try again",
-            re.I,
+            re.IGNORECASE,
         ),
         ToolErrorClass.transient,
         RecoveryAction.retry,
@@ -126,7 +126,7 @@ _PATTERNS: list[tuple[re.Pattern, ToolErrorClass, RecoveryAction, str]] = [
     (
         re.compile(
             r"invalid|validation|bad request|wrong type|expected.*got|argument|param.*required|missing",
-            re.I,
+            re.IGNORECASE,
         ),
         ToolErrorClass.validation,
         RecoveryAction.fix_args,
@@ -136,7 +136,7 @@ _PATTERNS: list[tuple[re.Pattern, ToolErrorClass, RecoveryAction, str]] = [
     # deterministic (same malformed content fails identically on retry).
     # Classify generically; the per-tool refinement below handles write_file.
     (
-        re.compile(r"json|parse|decode|unexpected token|syntax error", re.I),
+        re.compile(r"json|parse|decode|unexpected token|syntax error", re.IGNORECASE),
         ToolErrorClass.validation,
         RecoveryAction.fix_args,
         "The input could not be parsed. Check the format of the arguments.",

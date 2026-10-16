@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for the autonomy gate + red-line config (#2528)."""
 
 from evolution.lib.autonomy_gate import (

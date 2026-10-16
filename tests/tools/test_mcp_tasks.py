@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for MCP Tasks extension (MCP 2026-07-28 spec, issue #2285)."""
 
 from __future__ import annotations
@@ -136,7 +135,7 @@ def test_poll_task_to_completion() -> None:
 
         session.send_request = AsyncMock(side_effect=mock_send_request)
 
-        progress_updates: List[float] = []
+        progress_updates: list[float] = []
 
         def on_prog(t: MCPTask) -> None:
             if t.progress is not None:

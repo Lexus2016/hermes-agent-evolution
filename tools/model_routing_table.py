@@ -38,7 +38,7 @@ TASK_DIMENSIONS = ("coding", "reasoning", "creative", "tool-use", "general")
 DEFAULT_EPSILON = 0.1
 
 
-def classify_task(task: Dict[str, Any]) -> str:
+def classify_task(task: dict[str, Any]) -> str:
     """Classify a task into a coarse dimension.
 
     Args:
@@ -93,7 +93,7 @@ class ModelPerformance:
         if success:
             self.successes += 1
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model": self.model,
             "dimension": self.dimension,
@@ -113,10 +113,10 @@ class RoutingTable:
         rng: random source (injectable for deterministic tests).
     """
 
-    models: List[str]
+    models: list[str]
     epsilon: float = DEFAULT_EPSILON
     rng: random.Random = field(default_factory=random.Random)
-    _records: Dict[str, ModelPerformance] = field(default_factory=dict)
+    _records: dict[str, ModelPerformance] = field(default_factory=dict)
 
     def _key(self, model: str, dimension: str) -> str:
         return f"{model}::{dimension}"
@@ -151,7 +151,7 @@ class RoutingTable:
         )
         return candidates[0].model
 
-    def select_model(self, task: Dict[str, Any]) -> Optional[str]:
+    def select_model(self, task: dict[str, Any]) -> Optional[str]:
         """Select a model for a task using epsilon-greedy exploration.
 
         With probability ``epsilon``, pick a random model (exploration).
@@ -177,7 +177,7 @@ class RoutingTable:
         # Cold start: no signal on this dimension yet — explore.
         return self.rng.choice(self.models)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "models": self.models,
             "epsilon": self.epsilon,
@@ -188,7 +188,7 @@ class RoutingTable:
         return json.dumps(self.to_dict(), indent=2)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "RoutingTable":
+    def from_dict(cls, data: dict[str, Any]) -> RoutingTable:
         table = cls(models=list(data.get("models", [])), epsilon=data.get("epsilon", DEFAULT_EPSILON))
         for rec in data.get("records", []):
             m = ModelPerformance(

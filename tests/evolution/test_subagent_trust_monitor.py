@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for subagent deviation monitoring with steer-not-isolate governance (Issue #2487, Slice A, AcMAS)."""
 
 from __future__ import annotations

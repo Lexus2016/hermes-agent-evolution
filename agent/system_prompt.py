@@ -574,7 +574,7 @@ def _identity_parts(agent: Any, ctx_len: Optional[int]) -> tuple[list[str], bool
 
 def _guidance_parts(agent: Any) -> list[str]:
     """Universal + tool-aware + model-gated guidance blocks, each gated by its config.yaml key."""
-    parts: List[str] = []
+    parts: list[str] = []
     # Universal task-completion / no-fabrication guidance (#3093).
     # When the session has execution/write capabilities (terminal, process,
     # process_manage, write_file, patch, execute_code), enforce finishing the job with real tool output.

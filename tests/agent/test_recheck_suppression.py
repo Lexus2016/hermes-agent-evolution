@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for recheck suppression (#1041)."""
 
 from __future__ import annotations
@@ -93,7 +92,7 @@ def test_controller_suppresses_high_confidence_recheck_and_logs():
 def test_controller_does_not_suppress_below_min_confidence():
     ctrl = RecheckController(RecheckSuppressionConfig(enabled=True, min_confidence=0.95))
     # immediate repeat confidence is 0.9 < 0.95 -> not suppressed, but still logged
-    suppress, result = ctrl.decide(
+    suppress, _result = ctrl.decide(
         "read_file", is_idempotent=True, is_immediate_repeat=True, prior_succeeded=True
     )
     assert suppress is False

@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-import evolution_backlog_gate as gate  # noqa: E402
+import evolution_backlog_gate as gate
 
 
 def _issue(title, labels=()):

@@ -16,9 +16,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from agent import experience_bank as eb  # noqa: E402
-from agent.experience_bank import ExperienceEntry, ExperiencePattern  # noqa: E402
-import evolution_experience_distill as dist  # noqa: E402
+from agent import experience_bank as eb
+from agent.experience_bank import ExperienceEntry, ExperiencePattern
+import evolution_experience_distill as dist
 
 
 NOW = 1_750_000_000.0

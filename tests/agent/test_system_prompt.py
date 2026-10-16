@@ -224,7 +224,7 @@ def _stable_prompt(agent):
 
 
 def test_deliberate_work_only_on_cron(monkeypatch):
-    import agent.system_prompt as system_prompt
+    from agent import system_prompt
 
     monkeypatch.setattr(system_prompt, "DELIBERATE_WORK_GUIDANCE", "DELIBERATE_WORK")
     monkeypatch.setattr(system_prompt, "ATTENTION_RESET_GUIDANCE", "ATTENTION_RESET")

@@ -128,7 +128,7 @@ class TestHandleProcessSessionIdAutoFill:
                 {"action": "poll"},  # no session_id
                 task_id="test",
             )
-            data = json.loads(result)
+            _data = json.loads(result)
             # Should have called poll with the auto-filled session_id
             mock_reg.poll.assert_called_once_with("proc_abc")
 

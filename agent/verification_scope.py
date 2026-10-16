@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Verification-scope boundary enforcement for Hermes execution path (issue #2436).
 
 Enforces the 'least agency' principle across delegated tasks and evolution pipeline
@@ -26,8 +25,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 __all__ = [
-    "VerificationScope",
     "ScopeViolation",
+    "VerificationScope",
     "VerificationScopeEnforcer",
     "get_stage_verification_scope",
 ]
@@ -37,20 +36,20 @@ __all__ = [
 class VerificationScope:
     """Explicit capability boundaries for a delegated task or pipeline stage."""
 
-    allowed_paths: List[str] = field(default_factory=list)
-    denied_paths: List[str] = field(default_factory=list)
-    allowed_commands: List[str] = field(default_factory=list)
-    denied_commands: List[str] = field(default_factory=list)
+    allowed_paths: list[str] = field(default_factory=list)
+    denied_paths: list[str] = field(default_factory=list)
+    allowed_commands: list[str] = field(default_factory=list)
+    denied_commands: list[str] = field(default_factory=list)
     allow_network: bool = True
-    allowed_hosts: List[str] = field(default_factory=list)
+    allowed_hosts: list[str] = field(default_factory=list)
     read_only: bool = False
     name: str = "default_scope"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> VerificationScope:
+    def from_dict(cls, d: dict[str, Any]) -> VerificationScope:
         return cls(
             allowed_paths=list(d.get("allowed_paths", []) or []),
             denied_paths=list(d.get("denied_paths", []) or []),
@@ -102,7 +101,7 @@ class ScopeViolation:
     scope_name: str = "default_scope"
     timestamp: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -111,13 +110,13 @@ class VerificationScopeEnforcer:
 
     def __init__(self, scope: Optional[VerificationScope] = None) -> None:
         self.scope = scope or VerificationScope()
-        self.violations: List[ScopeViolation] = []
+        self.violations: list[ScopeViolation] = []
 
     def check_file_access(
         self,
         target_path: str | Path,
         mode: str = "read",  # "read" | "write"
-    ) -> Tuple[bool, Optional[ScopeViolation]]:
+    ) -> tuple[bool, Optional[ScopeViolation]]:
         """Validate whether a file read/write is within scope boundaries."""
         path_str = str(Path(target_path).resolve())
 
@@ -172,7 +171,7 @@ class VerificationScopeEnforcer:
     def check_command_execution(
         self,
         command_line: str,
-    ) -> Tuple[bool, Optional[ScopeViolation]]:
+    ) -> tuple[bool, Optional[ScopeViolation]]:
         """Validate whether a terminal command is allowed under the current scope."""
         cmd = command_line.strip()
         if not cmd:
@@ -217,7 +216,7 @@ class VerificationScopeEnforcer:
     def check_network_access(
         self,
         host_or_url: str,
-    ) -> Tuple[bool, Optional[ScopeViolation]]:
+    ) -> tuple[bool, Optional[ScopeViolation]]:
         """Validate network outbound request against scope."""
         if not self.scope.allow_network:
             violation = ScopeViolation(
@@ -252,7 +251,7 @@ class VerificationScopeEnforcer:
 
         return True, None
 
-    def check_red_line(self) -> Tuple[bool, Optional[ScopeViolation]]:
+    def check_red_line(self) -> tuple[bool, Optional[ScopeViolation]]:
         """Reject a red-line configuration (safeguards off + network on, #2528).
 
         Returns False and records a violation when the scope has network

@@ -6,7 +6,7 @@ import hermes_telemetry as tel
 
 # OTel is an opt-in extra (pyproject `otel`); skip cleanly if it's absent.
 pytest.importorskip("opentelemetry")
-from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult  # noqa: E402
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 
 class _Collect(SpanExporter):
@@ -33,7 +33,7 @@ def _reset():
 
 class TestDisabledIsNoOp:
     def test_span_yields_none_when_disabled(self, monkeypatch):
-        monkeypatch.setattr(tel, "_otel_config", lambda: {})  # not enabled
+        monkeypatch.setattr(tel, "_otel_config", dict)  # not enabled
         with tel.span("anything", tool="terminal") as sp:
             assert sp is None  # no-op
         assert tel.is_enabled() is False

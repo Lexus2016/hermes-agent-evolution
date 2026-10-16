@@ -8,12 +8,12 @@ Only stdlib + pytest + unittest.mock. No live network calls.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from unittest.mock import patch
 
 import pytest
 
-from agent.memory_staleness import (  # noqa: E402
+from agent.memory_staleness import (
     DEFAULT_CONFIG,
     Note,
     StalenessReason,
@@ -45,8 +45,8 @@ def test_note_defaults():
 
 
 def test_note_age_days():
-    now = datetime(2025, 7, 1, tzinfo=timezone.utc)
-    created = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    now = datetime(2025, 7, 1, tzinfo=UTC)
+    created = datetime(2025, 1, 1, tzinfo=UTC)
     n = Note(id="1", title="Old", content="content", created_at=created)
     assert n.age_days(now=now) == pytest.approx(181.0, abs=1)
 
@@ -57,9 +57,9 @@ def test_note_age_days_no_timestamp():
 
 
 def test_note_age_uses_updated_at():
-    now = datetime(2025, 7, 1, tzinfo=timezone.utc)
-    created = datetime(2025, 1, 1, tzinfo=timezone.utc)
-    updated = datetime(2025, 6, 30, tzinfo=timezone.utc)
+    now = datetime(2025, 7, 1, tzinfo=UTC)
+    created = datetime(2025, 1, 1, tzinfo=UTC)
+    updated = datetime(2025, 6, 30, tzinfo=UTC)
     n = Note(id="1", title="X", content="c", created_at=created, updated_at=updated)
     # age should be measured from updated_at, not created_at
     assert n.age_days(now=now) == pytest.approx(1.0, abs=1)
@@ -102,8 +102,8 @@ def test_jaccard_partial():
 
 
 def test_detect_age_flags_old_notes():
-    now = datetime(2025, 7, 1, tzinfo=timezone.utc)
-    old = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    now = datetime(2025, 7, 1, tzinfo=UTC)
+    old = datetime(2024, 1, 1, tzinfo=UTC)
     n = Note(id="1", title="Old", content="old content", created_at=old)
     flags = detect_age([n], now=now, config={"max_age_days": 180})
     assert len(flags) == 1
@@ -111,25 +111,25 @@ def test_detect_age_flags_old_notes():
 
 
 def test_detect_age_skips_fresh():
-    now = datetime(2025, 7, 1, tzinfo=timezone.utc)
-    fresh = datetime(2025, 6, 1, tzinfo=timezone.utc)
+    now = datetime(2025, 7, 1, tzinfo=UTC)
+    fresh = datetime(2025, 6, 1, tzinfo=UTC)
     n = Note(id="1", title="Fresh", content="fresh", created_at=fresh)
     flags = detect_age([n], now=now, config={"max_age_days": 180})
     assert len(flags) == 0
 
 
 def test_detect_age_skips_deprecated():
-    now = datetime(2025, 7, 1, tzinfo=timezone.utc)
-    old = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    now = datetime(2025, 7, 1, tzinfo=UTC)
+    old = datetime(2024, 1, 1, tzinfo=UTC)
     n = Note(id="1", title="Old", content="old", created_at=old, deprecated=True)
     flags = detect_age([n], now=now, config={"max_age_days": 180})
     assert len(flags) == 0
 
 
 def test_detect_age_severity_scales():
-    now = datetime(2025, 7, 1, tzinfo=timezone.utc)
-    old_180 = datetime(2025, 1, 2, tzinfo=timezone.utc)  # ~180 days
-    old_360 = datetime(2024, 7, 2, tzinfo=timezone.utc)  # ~364 days
+    now = datetime(2025, 7, 1, tzinfo=UTC)
+    old_180 = datetime(2025, 1, 2, tzinfo=UTC)  # ~180 days
+    old_360 = datetime(2024, 7, 2, tzinfo=UTC)  # ~364 days
     n1 = Note(id="1", title="X", content="c", created_at=old_180)
     n2 = Note(id="2", title="Y", content="c", created_at=old_360)
     flags = detect_age([n1, n2], now=now, config={"max_age_days": 180})
@@ -170,8 +170,8 @@ def test_detect_low_quality_skips_deprecated():
 
 
 def test_detect_contradiction_flags_older():
-    old_ts = datetime(2025, 1, 1, tzinfo=timezone.utc)
-    new_ts = datetime(2025, 6, 1, tzinfo=timezone.utc)
+    old_ts = datetime(2025, 1, 1, tzinfo=UTC)
+    new_ts = datetime(2025, 6, 1, tzinfo=UTC)
     older = Note(
         id="old",
         title="Old",
@@ -194,8 +194,8 @@ def test_detect_contradiction_flags_older():
 
 
 def test_detect_contradiction_no_overlap():
-    old_ts = datetime(2025, 1, 1, tzinfo=timezone.utc)
-    new_ts = datetime(2025, 6, 1, tzinfo=timezone.utc)
+    old_ts = datetime(2025, 1, 1, tzinfo=UTC)
+    new_ts = datetime(2025, 6, 1, tzinfo=UTC)
     older = Note(
         id="old",
         title="X",
@@ -215,8 +215,8 @@ def test_detect_contradiction_no_overlap():
 
 
 def test_detect_contradiction_no_cue_word():
-    old_ts = datetime(2025, 1, 1, tzinfo=timezone.utc)
-    new_ts = datetime(2025, 6, 1, tzinfo=timezone.utc)
+    old_ts = datetime(2025, 1, 1, tzinfo=UTC)
+    new_ts = datetime(2025, 6, 1, tzinfo=UTC)
     older = Note(
         id="old",
         title="X",
@@ -324,7 +324,7 @@ def test_detect_deprecated_but_referenced_always_empty():
 
 
 def test_consolidation_groups():
-    now = datetime(2025, 7, 1, tzinfo=timezone.utc)
+    now = datetime(2025, 7, 1, tzinfo=UTC)
     n1 = Note(
         id="1",
         title="Deploy",
@@ -397,7 +397,7 @@ def test_quality_score_dedup_flagged_ids():
 
 
 def test_analyze_returns_report():
-    now = datetime(2025, 7, 1, tzinfo=timezone.utc)
+    now = datetime(2025, 7, 1, tzinfo=UTC)
     notes = [
         Note(
             id="1", title="Old", content="short", created_at=now - timedelta(days=200)
@@ -427,7 +427,7 @@ def test_analyze_empty():
 
 
 def test_render_report_contains_sections():
-    now = datetime(2025, 7, 1, tzinfo=timezone.utc)
+    now = datetime(2025, 7, 1, tzinfo=UTC)
     notes = [
         Note(
             id="1",
@@ -454,7 +454,7 @@ def test_render_report_empty_corpus():
 
 
 def test_render_report_no_flags():
-    now = datetime(2025, 7, 1, tzinfo=timezone.utc)
+    now = datetime(2025, 7, 1, tzinfo=UTC)
     notes = [
         Note(
             id="1",
@@ -521,7 +521,7 @@ def test_check_staleness_passes_config_through(monkeypatch):
 
     mm = MemoryManager()
     captured: dict = {}
-    real_analyze = ms.analyze  # save before monkeypatching
+    _real_analyze = ms.analyze  # save before monkeypatching
 
     def fake_analyze(notes, *, config=None, now=None):
         captured["config"] = config
@@ -530,7 +530,7 @@ def test_check_staleness_passes_config_through(monkeypatch):
             config=config or {},
         )
 
-    monkeypatch.setattr(mm, "collect_notes", lambda: [])
+    monkeypatch.setattr(mm, "collect_notes", list)
     monkeypatch.setattr(ms, "analyze", fake_analyze)
 
     mm.check_staleness(config={"max_age_days": 7})
@@ -542,7 +542,7 @@ def test_check_staleness_empty_corpus_is_pristine(monkeypatch):
     from agent.memory_manager import MemoryManager
 
     mm = MemoryManager()
-    monkeypatch.setattr(mm, "collect_notes", lambda: [])
+    monkeypatch.setattr(mm, "collect_notes", list)
     report = mm.check_staleness()
     assert report.total_notes == 0
     assert report.flags == []

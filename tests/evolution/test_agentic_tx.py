@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for Agentic Transaction Slice 1 — transaction envelope (#2762)."""
 
 import pytest

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Harness component observability — file-level inventory (issue #39, slice 1).
 
 The Agentic Harness Engineering research behind #39 starts from one premise:
@@ -72,7 +71,7 @@ class HarnessComponent:
     editable: bool = True
 
 
-def _find_skill_files(skills_dir: Path) -> List[Path]:
+def _find_skill_files(skills_dir: Path) -> list[Path]:
     """Return skill definition files under *skills_dir*.
 
     The convention is ``<category>/<skill-name>/SKILL.md``. We match
@@ -91,7 +90,7 @@ def _find_skill_files(skills_dir: Path) -> List[Path]:
     return sorted(exact + case_variants)
 
 
-def build_harness_inventory(root: Optional[Path] = None) -> List[HarnessComponent]:
+def build_harness_inventory(root: Optional[Path] = None) -> list[HarnessComponent]:
     """Build the file-level harness inventory for the repo at *root*.
 
     Defaults to this repository's root (discovered from the module path).
@@ -100,7 +99,7 @@ def build_harness_inventory(root: Optional[Path] = None) -> List[HarnessComponen
     partial checkout still yields a valid (possibly empty) inventory.
     """
     base = Path(root).resolve() if root is not None else _REPO_ROOT
-    components: List[HarnessComponent] = []
+    components: list[HarnessComponent] = []
 
     skills_dir = base / "skills"
     for skill_file in _find_skill_files(skills_dir):
@@ -136,7 +135,7 @@ def build_harness_inventory(root: Optional[Path] = None) -> List[HarnessComponen
 
 
 def render_inventory_markdown(
-    components: List[HarnessComponent], *, root: Optional[Path] = None
+    components: list[HarnessComponent], *, root: Optional[Path] = None
 ) -> str:
     """Render the inventory as a human-readable markdown manifest.
 
@@ -146,7 +145,7 @@ def render_inventory_markdown(
     """
     base = Path(root).resolve() if root is not None else _REPO_ROOT
     lines = [
-        f"# Harness component inventory",
+        "# Harness component inventory",
         "",
         f"Repository root: `{base}`",
         "",
@@ -165,7 +164,7 @@ def render_inventory_markdown(
     return "\n".join(lines)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     """CLI entry point: print the harness inventory as markdown.
 
     Usage: ``python evolution/harness_inventory.py [ROOT]`` — ROOT defaults

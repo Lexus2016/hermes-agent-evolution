@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_disable_failed_mcp import (  # noqa: E402
+from evolution_disable_failed_mcp import (
     check_tqmemory_health,
     disable_in_profiles,
     main,

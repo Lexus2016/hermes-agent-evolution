@@ -111,11 +111,11 @@ def _count_tool_calls(messages) -> int:
 
 
 def _maybe_cron_refusal_recovery(
-    result: Dict[str, Any],
+    result: dict[str, Any],
     agent: Optional[Any],
     job_name: str,
     run_in_context,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Attempt a single refusal-recovery re-run for a cron dispatch result.
 
     Cron dispatch bypasses ``conversation_loop.py``, so refusals in cron
@@ -250,7 +250,7 @@ def build_cron_failure_digest(adapters=None, loop=None) -> Optional[str]:
 
     now = _hermes_now()
     cutoff = now - _dt.timedelta(hours=24)
-    lines: List[str] = []
+    lines: list[str] = []
     jobs = load_jobs()
     for job in jobs:
         if not job.get("enabled", True):
@@ -746,7 +746,7 @@ def _summarize_cron_failure_for_delivery(job: dict, error: str | None) -> str:
     # no_agent jobs never reach a model, so provider errors are structurally impossible for them.
     # Gate on job MODE before substring matching, or a script's own wording ("timed out", "429")
     # would blame the wrong subsystem; the generic cleaner below reports what actually happened.
-    provider_reachable = not job.get("no_agent")
+    _provider_reachable = not job.get("no_agent")
 
     # Script runner contract ("Script timed out after {n}s: {path}") — also for agent jobs with a
     # context script. Must precede provider classification so it never claims a model failure.

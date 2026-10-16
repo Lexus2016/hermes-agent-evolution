@@ -8,10 +8,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from datetime import datetime  # noqa: E402
+from datetime import datetime
 
-import evolution_funnel as ef  # noqa: E402
-from evolution_funnel import (  # noqa: E402
+import evolution_funnel as ef
+from evolution_funnel import (
     append_funnel,
     compute_funnel,
     cycle_date,
@@ -437,7 +437,7 @@ class TestMergedFromGitHub:
 
         rc = ef.main(["evolution_funnel.py", d])
         assert rc == 0
-        rec = [r for r in load_records(tmp_path / "metrics.jsonl") if r["date"] == d][0]
+        rec = next(r for r in load_records(tmp_path / "metrics.jsonl") if r["date"] == d)
         assert rec["merged"] == 3  # distinct issues {752, 756, 798}, not 0
         assert rec["merged_issue_ids"] == [752, 756, 798]
         assert rec["selected_issue_ids"] == [756]
@@ -455,7 +455,7 @@ class TestMergedFromGitHub:
 
         rc = ef.main(["evolution_funnel.py", d])
         assert rc == 0
-        rec = [r for r in load_records(tmp_path / "metrics.jsonl") if r["date"] == d][0]
+        rec = next(r for r in load_records(tmp_path / "metrics.jsonl") if r["date"] == d)
         assert rec["merged"] == 1  # self-report preserved (fail-open)
 
     def test_resolve_repo_prefers_env(self, monkeypatch):

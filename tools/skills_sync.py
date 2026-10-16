@@ -265,8 +265,8 @@ def _drop_remaining_stale_copies(
     skill_name: str,
     origin_hash: str,
     dest: Path,
-    active_index: Optional[Dict[str, List[Path]]],
-    hub_paths: Set[str],
+    active_index: Optional[dict[str, list[Path]]],
+    hub_paths: set[str],
     quiet: bool,
 ) -> None:
     """Delete any further stale copies left by earlier moves of this skill."""
@@ -283,7 +283,7 @@ def _drop_remaining_stale_copies(
             continue
         try:
             _rmtree_writable(candidate)
-        except (OSError, IOError):
+        except OSError:
             logger.warning(
                 "Could not remove stale copy of renamed skill %s", candidate,
                 exc_info=True,
@@ -476,7 +476,7 @@ def sync_skills(quiet: bool = False) -> dict:
                 if origin_hash and _dir_hash(old_copy) == origin_hash:
                     try:
                         _rmtree_writable(old_copy)
-                    except (OSError, IOError):
+                    except OSError:
                         logger.debug("Could not remove stale copy %s", old_copy, exc_info=True)
                         kept_modified.append(old_copy)
                 else:
@@ -497,7 +497,7 @@ def sync_skills(quiet: bool = False) -> dict:
                     st.manifest[skill_name] = bundled_hash
                     st.relocated.append(skill_name)
                     st.say(f"  → {skill_name} (relocated to {dest.relative_to(_skills_dir())})")
-                except (OSError, IOError) as e:
+                except OSError as e:
                     st.say(f"  ! Failed to relocate {skill_name}: {e}")
 
     # Clean manifest entries for skills removed upstream once no copy is left. A dropped built-in still
@@ -526,7 +526,7 @@ def sync_skills(quiet: bool = False) -> dict:
         "skipped_opt_out": essential_only}  # lets callers report "opted out", not a normal sync
 
 
-def _find_skill_dirs_by_name(skill_name: str, exclude: Path) -> List[Path]:
+def _find_skill_dirs_by_name(skill_name: str, exclude: Path) -> list[Path]:
     """Find every directory in SKILLS_DIR holding a skill with this name.
 
     Used to detect copies stranded at OLD locations after a bundled skill
@@ -534,7 +534,7 @@ def _find_skill_dirs_by_name(skill_name: str, exclude: Path) -> List[Path]:
     ``exclude`` path (the current canonical dest) is skipped, as are
     transient ``.bak`` backups created by the update flow.
     """
-    matches: List[Path] = []
+    matches: list[Path] = []
     try:
         exclude_resolved = exclude.resolve()
     except OSError:
@@ -594,10 +594,10 @@ if __name__ == "__main__":
 # Names external plugins imported from this module before the Sep 2026 decomposition.
 # Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
 # The whole block is removed by reverting the commit that added it.
-from pathlib import PurePosixPath  # noqa: F401,E402
-from datetime import datetime  # noqa: F401,E402
-import json  # noqa: F401,E402
-from datetime import timezone  # noqa: F401,E402
+from pathlib import PurePosixPath
+from datetime import datetime
+import json
+from datetime import timezone
 
 def is_bundled_skills_opt_out() -> bool:
     """Return True if the active profile carries the opt-out marker."""

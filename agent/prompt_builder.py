@@ -29,7 +29,7 @@ from agent.skill_utils import (
     skill_matches_platform, skill_matches_platform_list,
 )
 from tools.threat_patterns import scan_for_threats as _scan_for_threats
-from agent.context_load_instrument import (  # noqa: F401  (re-exported for #2442)
+from agent.context_load_instrument import (
     KIND_AGENTS,
     KIND_CLAUDE,
     KIND_CURSORRULES,
@@ -530,7 +530,7 @@ EXECUTION_GUIDANCE_MODELS = (
 # Universal "finish the job" guidance (ALL models): don't stop after a stub, never
 # fabricate output when the real path is blocked. Ships in every cached prompt — keep tight.
 
-def build_nous_subscription_prompt(loaded_tool_names: Optional[Set[str]] = None, config: Any = None) -> str:
+def build_nous_subscription_prompt(loaded_tool_names: Optional[set[str]] = None, config: Any = None) -> str:
     """Build guidance prompt regarding Nous subscription capabilities (#1647)."""
     import tools.tool_backend_helpers as tbh
     if not tbh.managed_nous_tools_enabled():

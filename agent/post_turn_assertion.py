@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-def _load_contract(path: str) -> Optional[Dict[str, Any]]:
+def _load_contract(path: str) -> Optional[dict[str, Any]]:
     """Load and minimally validate an assertion contract. Returns None on any
     malformed input — a bad contract must never crash the turn finalizer."""
     try:
@@ -52,11 +52,11 @@ def _load_contract(path: str) -> Optional[Dict[str, Any]]:
     return data
 
 
-def _assistant_text(messages: List[Dict[str, Any]]) -> str:
+def _assistant_text(messages: list[dict[str, Any]]) -> str:
     """Concatenate all assistant-role textual content for substring matching.
     Tool-call arguments are deliberately excluded — only what the agent SAID to
     the user is checked, matching τ-bench COMMUNICATE semantics."""
-    parts: List[str] = []
+    parts: list[str] = []
     for m in messages:
         if not isinstance(m, dict) or m.get("role") != "assistant":
             continue
@@ -71,8 +71,8 @@ def _assistant_text(messages: List[Dict[str, Any]]) -> str:
 
 
 def _check_communicate(
-    contract: Dict[str, Any], messages: List[Dict[str, Any]]
-) -> Dict[str, Any]:
+    contract: dict[str, Any], messages: list[dict[str, Any]]
+) -> dict[str, Any]:
     """COMMUNICATE axis — every required substring appears verbatim in the
     agent's user-facing text. Returns {pass: bool, missing: [...]}."""
     required = contract.get("communicate") or []
@@ -83,7 +83,7 @@ def _check_communicate(
     return {"pass": not missing, "missing": missing, "applicable": True}
 
 
-def _check_db(contract: Dict[str, Any]) -> Dict[str, Any]:
+def _check_db(contract: dict[str, Any]) -> dict[str, Any]:
     """DB axis — hash a target file and compare to the expected sha256. Returns
     {pass: bool, reason: str, applicable: bool}. 'applicable: False' means no
     db assertion was specified (so it does not gate the composite)."""
@@ -116,7 +116,7 @@ def _check_db(contract: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def evaluate(contract_path: str, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+def evaluate(contract_path: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
     """Run the assertion contract against the recorded transcript and return a
     structured verdict. Safe to call from finalize_turn — never raises.
 
@@ -154,7 +154,7 @@ def evaluate(contract_path: str, messages: List[Dict[str, Any]]) -> Dict[str, An
     }
 
 
-def emit_verdict(verdict: Dict[str, Any]) -> None:
+def emit_verdict(verdict: dict[str, Any]) -> None:
     """Emit the verdict — single structured log line + optional JSON file when
     ``HERMES_ASSERT_RESULT_PATH`` is set. Never raises."""
     try:
@@ -178,7 +178,7 @@ def emit_verdict(verdict: Dict[str, Any]) -> None:
             pass
 
 
-def run_if_enabled(messages: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def run_if_enabled(messages: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
     """Top-level entry point called from ``finalize_turn``. Returns the verdict
     dict when an assertion contract is configured (``HERMES_ASSERT_CONTRACT``),
     otherwise None. This is the ONE call site — keep it thin."""

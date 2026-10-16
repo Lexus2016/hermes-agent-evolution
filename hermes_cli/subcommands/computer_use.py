@@ -141,7 +141,7 @@ def _cu_browser_approve(args) -> None:
     try:
         # Interactive passthrough: cua-driver requires a TTY to mint
         # the grant, prints the token itself, and owns the expiry.
-        proc = subprocess.run(cmd, env=cua_driver_child_env())
+        proc = subprocess.run(cmd, check=False, env=cua_driver_child_env())
     except OSError as exc:
         print(f"cua-driver browser-approve failed to launch: {exc}", file=sys.stderr)
         sys.exit(2)

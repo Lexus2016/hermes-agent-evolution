@@ -5,9 +5,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from scripts.evolution_gepa_optimize import main  # noqa: E402
-from tools.gepa_evolution import EvolutionTree, run_gepa_generation  # noqa: E402
-from tools.gepa_reflector import VariantResult  # noqa: E402
+from scripts.evolution_gepa_optimize import main
+from tools.gepa_evolution import EvolutionTree, run_gepa_generation
+from tools.gepa_reflector import VariantResult
 
 
 def test_run_gepa_generation_adds_child():

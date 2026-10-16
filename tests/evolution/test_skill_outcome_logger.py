@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for evolution.lib.skill_outcome_logger (#3218)."""
 
 import pytest

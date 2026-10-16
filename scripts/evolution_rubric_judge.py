@@ -59,7 +59,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 # Rubric definition — 6 dimensions, 20 criteria, max 52 points
 # ──────────────────────────────────────────────────────────────────────
 
-RUBRIC_DIMENSIONS: Dict[str, Dict[str, Any]] = {
+RUBRIC_DIMENSIONS: dict[str, dict[str, Any]] = {
     "research": {
         "max": 10,
         "criteria": {
@@ -216,7 +216,7 @@ def _keyword_requirements_judge(rubric_text: str, example: Any) -> bool:
     return bool(verdict)
 
 
-def resolve_active_rubric(evolution_dir: Path) -> Optional[Dict[str, Any]]:
+def resolve_active_rubric(evolution_dir: Path) -> Optional[dict[str, Any]]:
     """RubricForge consumer (#2780): pick the agreement-maximizing rubric.
 
     Reads ``rubric-forge/candidates.json`` (list of rubric texts — each may
@@ -248,7 +248,7 @@ def resolve_active_rubric(evolution_dir: Path) -> Optional[Dict[str, Any]]:
     best_text, agreement = select_best_rubric(
         [str(c) for c in candidates], labeled, labels, _keyword_requirements_judge
     )
-    max_overrides: Dict[str, float] = {}
+    max_overrides: dict[str, float] = {}
     for line in best_text.splitlines():
         m = re.match(r"^([a-z_]+)\s*:\s*(\d+)\s*$", line.strip())
         if m and m.group(1) in RUBRIC_DIMENSIONS:
@@ -336,7 +336,7 @@ def _load_md(path: Path) -> str | None:
         return None
 
 
-def _as_dict(x: Any) -> Dict[str, Any]:
+def _as_dict(x: Any) -> dict[str, Any]:
     return x if isinstance(x, dict) else {}
 
 
@@ -370,7 +370,7 @@ class StrictRubricJudgeGrader:
 
     # ── Research ──────────────────────────────────────────────────────
 
-    def _score_research(self, text: str | None) -> Dict[str, float]:
+    def _score_research(self, text: str | None) -> dict[str, float]:
         tx = text or ""
         # coverage: count unique-looking URLs / cited sources
         urls = set(re.findall(r"https?://\S+", tx))
@@ -412,7 +412,7 @@ class StrictRubricJudgeGrader:
 
     # ── Issues ────────────────────────────────────────────────────────
 
-    def _score_issues(self, data: Dict[str, Any]) -> Dict[str, float]:
+    def _score_issues(self, data: dict[str, Any]) -> dict[str, float]:
         issues = data.get("issues") or []
         meta = _as_dict(data.get("meta"))
 
@@ -473,7 +473,7 @@ class StrictRubricJudgeGrader:
 
     # ── Introspection ─────────────────────────────────────────────────
 
-    def _score_introspection(self, data: Any) -> Dict[str, float]:
+    def _score_introspection(self, data: Any) -> dict[str, float]:
         d = _as_dict(data) if data is not None else {}
 
         # session_coverage
@@ -528,7 +528,7 @@ class StrictRubricJudgeGrader:
 
     # ── Implementation ────────────────────────────────────────────────
 
-    def _score_implementation(self, text: str | None) -> Dict[str, float]:
+    def _score_implementation(self, text: str | None) -> dict[str, float]:
         tx = text or ""
 
         # scope_discipline: mentions issue # / PR #
@@ -574,7 +574,7 @@ class StrictRubricJudgeGrader:
 
     # ── Integration ───────────────────────────────────────────────────
 
-    def _score_integration(self, data: Dict[str, Any] | None) -> Dict[str, float]:
+    def _score_integration(self, data: dict[str, Any] | None) -> dict[str, float]:
         d = _as_dict(data) if data else {}
         tx = json.dumps(d)
 
@@ -616,7 +616,7 @@ class StrictRubricJudgeGrader:
         self,
         date: str,
         evolution_dir: Path,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         stages = {
             "research": "research",
             "issues": "issues",
@@ -698,7 +698,7 @@ class StrictRubricJudgeGrader:
 
     # ── Score all dimensions ─────────────────────────────────────────
 
-    def score(self, date: str, evolution_dir: Path | None = None) -> Dict[str, Any]:
+    def score(self, date: str, evolution_dir: Path | None = None) -> dict[str, Any]:
         if evolution_dir is None:
             evolution_dir = _hot_path(Path("."))
 
@@ -728,7 +728,7 @@ class StrictRubricJudgeGrader:
         max_overrides = (active_rubric or {}).get("max_overrides") or {}
 
         # Build dimension records
-        def _build_dimension(dim_name: str, scores: Dict[str, float]) -> Dict[str, Any]:
+        def _build_dimension(dim_name: str, scores: dict[str, float]) -> dict[str, Any]:
             dim_def = RUBRIC_DIMENSIONS[dim_name]
             total = sum(scores.values())
             return {
@@ -766,7 +766,7 @@ class StrictRubricJudgeGrader:
             pct = claim_stats["overall_percentage"]
 
         # Generate flags for concerning signals
-        flags: List[str] = []
+        flags: list[str] = []
         if pct < 30:
             flags.append("CRITICAL: overall quality < 30% — most stages failing")
         elif pct < 50:
@@ -852,7 +852,7 @@ class AgentJudgeGrader:
         self.cycle_date = cycle_date
         self.strict_grader = StrictRubricJudgeGrader()
 
-    def load_outputs(self) -> Dict[str, Any]:
+    def load_outputs(self) -> dict[str, Any]:
         """Return raw output content for every stage, fully loaded, for a
         given date.  Missing stages return None so the LLM can still comment
         on the absence."""
@@ -867,12 +867,12 @@ class AgentJudgeGrader:
             "analysis": _load_json(dir / "analysis" / f"{date}.json"),
         }
 
-    def get_strict_baseline(self) -> Dict[str, Any]:
+    def get_strict_baseline(self) -> dict[str, Any]:
         """Get the deterministic strict scores as a baseline for the
         LLM to adjust."""
         return self.strict_grader.score(self.cycle_date, self.evolution_dir)
 
-    def narrative_assessment(self, outputs: Dict[str, Any]) -> Dict[str, str]:
+    def narrative_assessment(self, outputs: dict[str, Any]) -> dict[str, str]:
         """Template for LLM output: per-dimension narrative commentary.
 
         The LLM should fill this dict by reading each stage's output and
@@ -889,9 +889,9 @@ class AgentJudgeGrader:
 
     def adjust_scores(
         self,
-        strict: Dict[str, Any],
-        narratives: Dict[str, str],
-    ) -> Dict[str, Any]:
+        strict: dict[str, Any],
+        narratives: dict[str, str],
+    ) -> dict[str, Any]:
         """After the LLM sets ``narratives`` keys, call this to merge them
         into the final scorecard.  The LLM can optionally tweak per-criterion
         scores via the narrative (the adjustment logic here is minimal by
@@ -938,11 +938,11 @@ _CLAIM_SIGNALS = (
 _CLAIM_URL_RE = re.compile(r"https?://\S+")
 
 
-def _markdown_sections(text: str) -> List[Tuple[str, str]]:
+def _markdown_sections(text: str) -> list[tuple[str, str]]:
     """Split markdown into ``(section_header, body)`` blocks in order;
     text before the first ``#`` header is an unnamed preamble block."""
-    blocks: List[Tuple[str, str]] = []
-    current: List[str] = []
+    blocks: list[tuple[str, str]] = []
+    current: list[str] = []
     current_header = ""
     for line in text.splitlines():
         if line.startswith("#") and line.strip("# "):
@@ -957,9 +957,9 @@ def _markdown_sections(text: str) -> List[Tuple[str, str]]:
     return [(h.strip(), b) for h, b in blocks if b.strip()]
 
 
-def _split_sentences(block: str) -> List[str]:
+def _split_sentences(block: str) -> list[str]:
     """Deterministic per-line sentence splitter for markdown prose."""
-    sentences: List[str] = []
+    sentences: list[str] = []
     for raw in block.splitlines():
         raw = raw.strip().lstrip("-* \t")
         if not raw:
@@ -977,9 +977,9 @@ def _is_claim_sentence(sentence: str) -> bool:
 
 
 def extract_claims(
-    *artifacts: Tuple[str, Optional[str]],
+    *artifacts: tuple[str, Optional[str]],
     max_per_source: int = 12,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Deterministically extract discrete claims from judged artifacts.
 
     A claim is a sentence asserting an outcome (improvement, reduction,
@@ -989,7 +989,7 @@ def extract_claims(
     sorted so identical input always yields identical output (Slice A
     determinism). ``artifacts`` are ``(stage, markdown_text)`` pairs.
     """
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     seen: set = set()
     for stage, text in artifacts:
         if not text:
@@ -1023,9 +1023,9 @@ def extract_claims(
 # Claim triage taxonomy — Slice B (#2482 / #2514)
 # ──────────────────────────────────────────────────────────────────────
 
-CLAIM_VERDICTS: Tuple[str, ...] = ("verified", "falsified", "toy-scale", "no-evidence")
+CLAIM_VERDICTS: tuple[str, ...] = ("verified", "falsified", "toy-scale", "no-evidence")
 
-CLAIM_VERDICT_WEIGHTS: Dict[str, float] = {
+CLAIM_VERDICT_WEIGHTS: dict[str, float] = {
     "verified": 1.0,
     "toy-scale": 0.3,
     "no-evidence": 0.0,
@@ -1046,7 +1046,7 @@ _VERIFIED_METRIC_RE = re.compile(
 )
 
 
-def triage_claim(claim_item: Dict[str, Any]) -> Dict[str, Any]:
+def triage_claim(claim_item: dict[str, Any]) -> dict[str, Any]:
     """Classify an extracted claim into the 4-verdict triage taxonomy (#2514).
 
     Verdicts:
@@ -1081,15 +1081,15 @@ def triage_claim(claim_item: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def triage_claims(claims: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def triage_claims(claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Triage a list of extracted claims, classifying each into the 4-verdict taxonomy."""
     return [triage_claim(c) for c in claims]
 
 
 def compute_claim_score(
-    claims: List[Dict[str, Any]],
+    claims: list[dict[str, Any]],
     dimension_max: float = 52.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute aggregate quality score and statistics from triaged claim verdicts."""
     counts = {
         "verified": 0,
@@ -1147,7 +1147,7 @@ _TEST_NAME_RE = re.compile(
 )
 
 # (flag, pattern) — one pattern per inferential violation.
-_STAT_VALIDITY_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
+_STAT_VALIDITY_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     (
         "significance-without-test",
         re.compile(
@@ -1206,7 +1206,7 @@ _GROUNDING_FLAGS = {
 }
 
 
-def assess_stat_validity(claim_item: Dict[str, Any]) -> Dict[str, Any]:
+def assess_stat_validity(claim_item: dict[str, Any]) -> dict[str, Any]:
     """Attach a deterministic inferential-sanity verdict to a claim.
 
     ``non-quantitative`` is skipped; ``ok`` passes; ``suspect`` lists
@@ -1229,12 +1229,12 @@ def assess_stat_validity(claim_item: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def assess_stat_validity_claims(claims: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def assess_stat_validity_claims(claims: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Batch variant: attach ``stat_validity`` to every extracted claim."""
     return [assess_stat_validity(c) for c in claims]
 
 
-def compute_stat_validity_stats(claims: List[Dict[str, Any]]) -> Dict[str, int]:
+def compute_stat_validity_stats(claims: list[dict[str, Any]]) -> dict[str, int]:
     """Scorecard aggregate: ``checked`` = quantitative, ``suspect`` = flagged."""
     verdicts = [c.get("stat_validity", {}).get("verdict") for c in claims]
     return {
@@ -1247,7 +1247,7 @@ def compute_stat_validity_stats(claims: List[Dict[str, Any]]) -> Dict[str, int]:
 # Rejection-bias (post-hoc rationalization) detection — Slice C (#2482 / #2515)
 # ──────────────────────────────────────────────────────────────────────
 
-_RATIONALIZATION_PATTERNS: List[Tuple[str, str, str, re.Pattern[str]]] = [
+_RATIONALIZATION_PATTERNS: list[tuple[str, str, str, re.Pattern[str]]] = [
     (
         "dismissed_failure",
         "high",
@@ -1292,15 +1292,15 @@ _RATIONALIZATION_PATTERNS: List[Tuple[str, str, str, re.Pattern[str]]] = [
 
 
 def detect_rejection_bias(
-    artifacts: List[Tuple[str, Optional[str]]],
+    artifacts: list[tuple[str, Optional[str]]],
     max_detections: int = 10,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Scan judged artifacts for post-hoc rationalization / rejection-bias patterns.
 
     Detects structural over-scoring patterns where negative results or failures
     are rationalized away without empirical justification (Slice C / #2515).
     """
-    detections: List[Dict[str, Any]] = []
+    detections: list[dict[str, Any]] = []
     seen: set = set()
 
     for stage, text in artifacts:
@@ -1344,9 +1344,9 @@ def detect_rejection_bias(
 # ──────────────────────────────────────────────────────────────────────
 
 
-def load_scorecards(scorecard_file: Path) -> List[Dict[str, Any]]:
+def load_scorecards(scorecard_file: Path) -> list[dict[str, Any]]:
     """Read all rubric scorecards, oldest-first, skipping malformed lines."""
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     if not scorecard_file.exists():
         return out
     for ln in scorecard_file.read_text(encoding="utf-8-sig").splitlines():
@@ -1364,11 +1364,11 @@ def load_scorecards(scorecard_file: Path) -> List[Dict[str, Any]]:
 
 def append_scorecard(
     scorecard_file: Path,
-    record: Dict[str, Any],
+    record: dict[str, Any],
 ) -> None:
     """Append one JSON line, idempotently: replace any existing line for the
     same date + grader combination so re-runs don't duplicate."""
-    lines: List[str] = []
+    lines: list[str] = []
     key = (record["cycle_date"], record.get("grader", "strict"))
     if scorecard_file.exists():
         for ln in scorecard_file.read_text(encoding="utf-8-sig").splitlines():
@@ -1388,8 +1388,8 @@ def append_scorecard(
 
 
 def summarize_scorecards(
-    records: List[Dict[str, Any]], last: int = 7
-) -> Dict[str, Any]:
+    records: list[dict[str, Any]], last: int = 7
+) -> dict[str, Any]:
     """Aggregate the last ``last`` strict scorecards into a quality trend summary."""
     strict_records = [r for r in records if r.get("grader") == "strict"]
     recent = strict_records[-last:] if last and last > 0 else list(strict_records)
@@ -1415,7 +1415,7 @@ def summarize_scorecards(
             trend = "flat"
 
     # Collect all flags
-    all_flags: List[str] = []
+    all_flags: list[str] = []
     for r in recent:
         all_flags.extend(r.get("flags") or [])
 
@@ -1429,7 +1429,7 @@ def summarize_scorecards(
     }
 
 
-def format_summary(summary: Dict[str, Any]) -> str:
+def format_summary(summary: dict[str, Any]) -> str:
     """One-line rendering for no_agent cron output."""
     tail = (
         " | ".join(summary["persistent_flags"][:3])
@@ -1457,7 +1457,7 @@ def format_summary(summary: Dict[str, Any]) -> str:
 # into [1, RUBRIC_RELIABILITY_MAX_RUNS], so the worst case is a bounded
 # 10x single-run spend per cycle.
 
-RUBRIC_RELIABILITY_DEFAULTS: Dict[str, Any] = {
+RUBRIC_RELIABILITY_DEFAULTS: dict[str, Any] = {
     "n_runs": 3,  # evaluations per cycle (1 = legacy single-run, 2-10 = N-run)
     "temperature": 0.7,  # sampling temperature (> 0) for run diversity
     "variance_threshold": 10.0,  # stddev of overall_percentage that flags unreliable
@@ -1503,7 +1503,7 @@ def _parse_positive_float(value: Any, default: float) -> float:
     return f if f > 0 else default
 
 
-def load_rubric_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
+def load_rubric_config(config_path: Optional[Path] = None) -> dict[str, Any]:
     """Load the rubric judge's ``reliability:`` config from cron YAML.
 
     Resolution order: explicit ``config_path`` (CLI ``--config``) → the
@@ -1512,7 +1512,7 @@ def load_rubric_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
     to the default. Missing YAML (standalone script deployment) yields
     the defaults, preserving pre-#50 behavior.
     """
-    config: Dict[str, Any] = dict(RUBRIC_RELIABILITY_DEFAULTS)
+    config: dict[str, Any] = dict(RUBRIC_RELIABILITY_DEFAULTS)
     path = config_path
     if path is None:
         path = (
@@ -1558,7 +1558,7 @@ def compute_reliability(
     pass_at_k: int = 1,
     success_threshold: float = 50.0,
     variance_threshold: float = 10.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Aggregate per-run scores into reliability statistics (#50).
 
     ``mean_score`` / ``stddev`` are the arithmetic mean and the population
@@ -1607,7 +1607,7 @@ def _score_with_temperature(
     date: str,
     evolution_dir: Path,
     temperature: Optional[float],
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run one evaluation, passing ``temperature`` when the grader accepts it.
 
     The shipped StrictRubricJudgeGrader is deterministic and takes no
@@ -1632,7 +1632,7 @@ def run_scored_evaluations(
     evolution_dir: Path,
     n_runs: int,
     temperature: Optional[float] = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Evaluate a cycle ``n_runs`` times; returns the per-run scorecards.
 
     Cost bound (#50): total cost = n_runs * single-run cost. n_runs is
@@ -1646,9 +1646,9 @@ def run_scored_evaluations(
 
 
 def aggregate_scorecards(
-    scorecards: List[Dict[str, Any]],
-    config: Dict[str, Any],
-) -> Dict[str, Any]:
+    scorecards: list[dict[str, Any]],
+    config: dict[str, Any],
+) -> dict[str, Any]:
     """Merge per-run scorecards into one reliability-augmented record.
 
     Run 0 is the base (dimensions, claims, flags, rubric_forge, ...);
@@ -1716,7 +1716,7 @@ def cycle_date(now: datetime | None = None) -> str:
     return day.isoformat()
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     evolution_dir = _hot_path(Path(".") if not argv else None)
     args = argv[1:]
 

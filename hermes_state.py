@@ -24,7 +24,7 @@ from collections import deque
 from contextlib import contextmanager, suppress
 from pathlib import Path
 
-from agent.message_metadata import (  # noqa: E402 - canonical, leaf module
+from agent.message_metadata import (
     MESSAGE_ORIGIN_API,
     MESSAGE_ORIGIN_HUMAN,
     MESSAGE_ORIGIN_RUNTIME,

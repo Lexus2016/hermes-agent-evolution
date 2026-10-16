@@ -49,7 +49,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 # condition depends on the agent's constructed environment rather than real
 # behavior.  Each pattern is a compiled regex matched against test file
 # *content* (not just file names).
-_FABRICATED_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
+_FABRICATED_PATTERNS: tuple[tuple[re.Pattern, str], ...] = (
     # Patches out the function/class under test itself — the test never
     # calls the real implementation.
     (
@@ -84,7 +84,7 @@ _FABRICATED_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
 # Tests that exercise real behavior despite containing some mocks (e.g.,
 # integration tests that mock only an external API).  These patterns
 # counter-signal fabrication.
-_REAL_BEHAVIOR_PATTERNS: Tuple[re.Pattern, ...] = (
+_REAL_BEHAVIOR_PATTERNS: tuple[re.Pattern, ...] = (
     re.compile(r"\bsubprocess\.(run|call|Popen)\b"),  # real process exec
     re.compile(
         r"\brequests\.(get|post|put|delete)\b"
@@ -110,7 +110,7 @@ class FabricationFinding:
 class FabricationReport:
     """Result of fabricated-reproduction detection across a set of test files."""
 
-    findings: List[FabricationFinding] = field(default_factory=list)
+    findings: list[FabricationFinding] = field(default_factory=list)
     files_scanned: int = 0
     files_flagged: int = 0
 
@@ -130,7 +130,7 @@ class FabricationReport:
 
 
 def detect_fabricated_reproduction(
-    test_contents: Dict[str, str],
+    test_contents: dict[str, str],
 ) -> FabricationReport:
     """Detect fabricated test reproductions in a set of test files.
 
@@ -187,7 +187,7 @@ def _is_test_file(path: str) -> bool:
 
 # Patterns that indicate a *line* in a test diff adds a mock.  Matched
 # against added lines (``+``-prefixed in unified diff).
-_MOCK_ADD_PATTERNS: Tuple[re.Pattern, ...] = (
+_MOCK_ADD_PATTERNS: tuple[re.Pattern, ...] = (
     re.compile(r"^\+\s*(?:from\s+)?(?:unittest\.)?mock\b", re.IGNORECASE),
     re.compile(r"^\+\s*from\s+unittest\.mock\s+import\b", re.IGNORECASE),
     re.compile(
@@ -213,7 +213,7 @@ class MockRatioResult:
     mock_ratio: float = 0.0  # mock_adding / total, 0..1
     threshold: float = DEFAULT_MOCK_RATIO_THRESHOLD
     flagged: bool = False
-    flagged_files: List[str] = field(default_factory=list)
+    flagged_files: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         status = "FLAGGED" if self.flagged else "OK"
@@ -232,7 +232,7 @@ def _is_test_path(path: str) -> bool:
 
 
 def compute_mock_ratio(
-    files: Sequence[Dict[str, Any]],
+    files: Sequence[dict[str, Any]],
     threshold: float = DEFAULT_MOCK_RATIO_THRESHOLD,
 ) -> MockRatioResult:
     """Compute the mock ratio for a PR's changed files.
@@ -351,10 +351,10 @@ def _path_suggests_mocks(path: str) -> bool:
 
 
 def check_test_quality(
-    files: Sequence[Dict[str, Any]],
-    test_contents: Optional[Dict[str, str]] = None,
+    files: Sequence[dict[str, Any]],
+    test_contents: Optional[dict[str, str]] = None,
     mock_ratio_threshold: float = DEFAULT_MOCK_RATIO_THRESHOLD,
-) -> List[str]:
+) -> list[str]:
     """Return blocking-violation strings from both quality gates (empty == OK).
 
     This is the single entry point for merge-gate integration: call this
@@ -365,7 +365,7 @@ def check_test_quality(
     fabricated-reproduction detection.  When None, only the mock-ratio
     gate runs (fabrication detection requires file content).
     """
-    violations: List[str] = []
+    violations: list[str] = []
 
     # Mock-ratio gate (#1210)
     mr = compute_mock_ratio(files, threshold=mock_ratio_threshold)
@@ -392,10 +392,10 @@ def check_test_quality(
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 
-def _run(cmd: List[str]) -> Tuple[int, str, str]:
+def _run(cmd: list[str]) -> tuple[int, str, str]:
     p = subprocess.run(
         cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
-    )
+    , check=False)
     return p.returncode, p.stdout, p.stderr
 
 
@@ -404,13 +404,13 @@ def _pr_diff(pr: int, repo: Optional[str]) -> Optional[str]:
     cmd = ["gh", "pr", "diff", str(pr)]
     if repo:
         cmd += ["--repo", repo]
-    code, out, err = _run(cmd)
+    code, out, _err = _run(cmd)
     if code != 0:
         return None
     return out
 
 
-def _pr_files(pr: int, repo: Optional[str]) -> Optional[List[Dict[str, Any]]]:
+def _pr_files(pr: int, repo: Optional[str]) -> Optional[list[dict[str, Any]]]:
     cmd = ["gh", "pr", "view", str(pr), "--json", "files"]
     if repo:
         cmd += ["--repo", repo]
@@ -423,9 +423,9 @@ def _pr_files(pr: int, repo: Optional[str]) -> Optional[List[Dict[str, Any]]]:
         return None
 
 
-def _read_test_files(file_paths: List[str], base: str = "HEAD") -> Dict[str, str]:
+def _read_test_files(file_paths: list[str], base: str = "HEAD") -> dict[str, str]:
     """Read file contents at a given git ref for fabrication detection."""
-    contents: Dict[str, str] = {}
+    contents: dict[str, str] = {}
     for path in file_paths:
         if not _is_test_file(path):
             continue
@@ -435,7 +435,7 @@ def _read_test_files(file_paths: List[str], base: str = "HEAD") -> Dict[str, str
     return contents
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     args = argv[1:]
     if "--pr" not in args:
         print(

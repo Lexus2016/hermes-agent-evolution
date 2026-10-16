@@ -233,7 +233,7 @@ def _is_skill_md_target(name: str, target: Path) -> bool:
 
 
 def _background_review_read_before_write_guard(
-    name: str, target: Path, action: str, file_label: str) -> Optional[Dict[str, Any]]:
+    name: str, target: Path, action: str, file_label: str) -> Optional[dict[str, Any]]:
     """Require review forks to load the exact target before mutating it.
 
     SKILL.md auto-preload (#2375): the background skill-curation agent enters
@@ -265,7 +265,7 @@ def _background_review_read_before_write_guard(
         _read_before_write_required=True)
 
 
-def _background_review_preflight(action: str, name: str) -> Optional[Dict[str, Any]]:
+def _background_review_preflight(action: str, name: str) -> Optional[dict[str, Any]]:
     if action not in {"edit", "patch", "delete", "write_file", "remove_file"}:
         return None
     from tools import skill_manager_tool as _smt
@@ -297,7 +297,7 @@ def _curator_consolidation_delete_guard(
 
 
 def _background_review_write_guard(
-    name: str, skill_dir: Path, action: str) -> Optional[Dict[str, Any]]:
+    name: str, skill_dir: Path, action: str) -> Optional[dict[str, Any]]:
     """Refuse autonomous curator writes to anything but curator-owned sediment. The review fork
     has no user in the loop, so it is also blocked on pinned/external/bundled/hub skills."""
     if not _is_background_review():
@@ -387,7 +387,7 @@ def _maybe_auto_propose_org_edit(name: str, skill_path: Path) -> Optional[str]:
 
 
 
-def _org_mirror_write_guard(name: str, skill_path: Path, action: str) -> Optional[Dict[str, Any]]:
+def _org_mirror_write_guard(name: str, skill_path: Path, action: str) -> Optional[dict[str, Any]]:
     """Org-shared skills are EDITABLE IN PLACE — this only blocks deletion. Edits land in the
     mirror, survive the next org pull (baseline sidecar in skills_sync_client) and reach the org
     via `hermes sync propose`. Deletion stays refused: the mirror is a view of org HEAD, so a

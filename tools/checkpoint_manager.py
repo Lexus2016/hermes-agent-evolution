@@ -454,7 +454,7 @@ def _unlink_quiet(path: Path) -> None:
         pass
 
 
-def _unreadable_dirs(working_dir: Path) -> List[str]:
+def _unreadable_dirs(working_dir: Path) -> list[str]:
     """Return top-relative paths of directories under *working_dir* that cannot be read.
 
     ``git add -A`` can fail hard (rc=128) when the working tree contains
@@ -463,9 +463,9 @@ def _unreadable_dirs(working_dir: Path) -> List[str]:
     from staging with ``:(exclude,top)<rel>`` pathspecs so one inaccessible
     subtree does not silently kill every checkpoint of the project (#127).
     """
-    unreadable: List[str] = []
+    unreadable: list[str] = []
     for root, dirs, _files in os.walk(working_dir):
-        kept: List[str] = []
+        kept: list[str] = []
         for name in dirs:
             path = Path(root) / name
             if os.access(path, os.R_OK | os.X_OK):

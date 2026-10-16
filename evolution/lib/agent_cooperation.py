@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Multi-agent cooperation/containment rules + human-escalation path (#2527).
 
 Safety signal: Anthropic's "turf war" experiment (Aug 2026) showed that
@@ -29,18 +28,18 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 __all__ = [
+    "COOPERATION_RULES",
     "ConflictSignal",
     "EscalationMessage",
-    "COOPERATION_RULES",
+    "build_escalation_message",
     "cooperation_directives_for_goal",
     "detect_conflict_signal",
-    "build_escalation_message",
 ]
 
 # Cooperation rules injected into concurrent subagent goals. Each rule is
 # short, enforceable, and maps to a specific "turf war" failure mode from
 # the Anthropic experiment.
-COOPERATION_RULES: List[str] = [
+COOPERATION_RULES: list[str] = [
     "Do not modify, delete, or lock files that belong to another concurrent agent's working directory.",
     "Do not impersonate another agent or spoof its identity to monitoring processes.",
     "Do not halt, interrupt, or kill another agent's processes.",
@@ -83,7 +82,7 @@ class ConflictSignal:
     description: str
     peer_agent_id: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -95,7 +94,7 @@ class EscalationMessage:
     message: str
     action_requested: str = "review and coordinate"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             **self.conflict.to_dict(),
             "message": self.message,
@@ -104,7 +103,7 @@ class EscalationMessage:
 
 
 # Patterns that signal inter-agent conflict in a subagent's output.
-_CONFLICT_PATTERNS: Dict[str, List[str]] = {
+_CONFLICT_PATTERNS: dict[str, list[str]] = {
     "blocked": [
         "another agent blocked",
         "blocked by another",

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from hermes_platform.resolver import LookupContext, locate_command
 import contextlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 import enum
 import json
 import logging
@@ -31,13 +31,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from tools.delegate_tool_toolsets import DEFAULT_TOOLSETS
 from toolsets import TOOLSETS
 from tools.registry import registry, tool_error
-from tools.terminal_tool import set_approval_callback as _set_subagent_approval_cb  # noqa: F401
+from tools.terminal_tool import set_approval_callback as _set_subagent_approval_cb
 from utils import is_truthy_value
 
 logger = logging.getLogger(__name__)
 
 # Subagent context & approval compatibility
-from tools.approval import set_hermes_subagent_context, _is_subagent_context  # noqa: F401
+from tools.approval import set_hermes_subagent_context, _is_subagent_context
 
 # The delegate_tool_* siblings hold the pieces split out of this module; every name callers or patching tests reach as
 # ``tools.delegate_tool.<name>`` is re-imported here. Mutable flag globals live only in their owning module.
@@ -45,15 +45,15 @@ from tools.delegate_tool_child_run import (
     _ChildRun, _attach_child, _build_child_goal_message, _build_result_entry, _dump_subagent_timeout_diagnostic, _fabricated_entry,
     _lease_child_credential, _merge_late_steer, _register_child, _start_heartbeat, _validate_child_output_schema,
 )
-from tools.delegate_tool_config import (  # noqa: F401
+from tools.delegate_tool_config import (
     _DEFAULT_MAX_CONCURRENT_CHILDREN, _MIN_SPAWN_DEPTH, _get_child_timeout, _get_max_async_children,
     _get_max_concurrent_children, _get_max_spawn_depth, _get_oneshot_max_children, _get_orchestrator_enabled,
     _get_subagent_approval_callback, _get_worktree_isolation, _inherit_parent_capabilities, _load_config,
     _merge_request_overrides, _resolve_child_credential_pool, _resolve_child_runtime,
     _resolve_delegation_credentials, _inherit_parent_base_url, _subagent_auto_approve, _subagent_auto_deny,
 )
-from tools.delegate_tool_dispatch import _Batch, _announce_batch, _capture_origin, _run_batch  # noqa: F401
-from tools.delegate_tool_progress import (  # noqa: F401
+from tools.delegate_tool_dispatch import _Batch, _announce_batch, _capture_origin, _run_batch
+from tools.delegate_tool_progress import (
     DelegateEvent, SUBAGENT_FAILURE_STATUSES, _LEGACY_EVENT_MAP, _batch_prefix, _build_child_progress_callback,
     _build_child_system_prompt, _clean_error_text, _emit_parent_console, _quiet, _resolve_workspace_hint,
     _safe_progress, format_batch_tag, format_subagent_failure_line,
@@ -71,7 +71,7 @@ from tools.delegate_tool_tasks import (
 from tools.delegate_tool_toolsets import (
     DELEGATE_BLOCKED_TOOLS, _expand_parent_toolsets, _resolve_child_toolsets, _strip_blocked_tools,
 )
-from tools.delegate_tool_results import (  # noqa: F401
+from tools.delegate_tool_results import (
     _apply_summary_budget, _build_child_preserving_parent_tools, _extract_output_tail, _run_child_lifecycle, _summarize_tool_arguments,
 )
 
@@ -199,7 +199,7 @@ _TIMESTAMP_MARKER_KEYS = frozenset({"now-iso", "generated-timestamp", "current-d
 _DATE_MARKER_KEYS = frozenset({"date", "current-date", "today"})
 _SESSION_MARKER_KEYS = frozenset({"session-id"})
 
-_SUBAGENT_HARNESSES: Dict[str, Any] = {}
+_SUBAGENT_HARNESSES: dict[str, Any] = {}
 
 # ── Helper Functions ────────────────────────────────────────────────────────
 _KNOWN_ACP_BINARIES: tuple[str, ...] = ("copilot", "claude", "codex")
@@ -210,7 +210,7 @@ def _acp_binary_available(cmd: Optional[str] = None) -> bool:
     return any(locate_command(name).found for name in _KNOWN_ACP_BINARIES)
 
 def _now_iso_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def _marker_token(marker: str) -> str:
     inner = (marker or "").strip()
@@ -226,15 +226,15 @@ def expand_template_markers(
     *,
     now_iso: Optional[str] = None,
     session_id: Optional[str] = None,
-) -> Tuple[str, List[str], List[str]]:
+) -> tuple[str, list[str], list[str]]:
     now_iso = now_iso if now_iso is not None else _now_iso_utc()
     today = now_iso[:10]
-    values: Dict[str, str] = {key: now_iso for key in _TIMESTAMP_MARKER_KEYS}
+    values: dict[str, str] = {key: now_iso for key in _TIMESTAMP_MARKER_KEYS}
     values.update({key: today for key in _DATE_MARKER_KEYS})
     if session_id:
         values.update({key: session_id for key in _SESSION_MARKER_KEYS})
-    substituted: List[str] = []
-    residual: List[str] = []
+    substituted: list[str] = []
+    residual: list[str] = []
 
     def _repl(match: re.Match[str]) -> str:
         raw = match.group(0)
@@ -304,7 +304,7 @@ def _goal_needs_web(goal: str, context: Optional[str] = None) -> bool:
     )
     return bool(pattern.search(text))
 
-def _child_blocked_no_terminal(task_index: int, goal: str, child) -> Optional[Dict[str, Any]]:
+def _child_blocked_no_terminal(task_index: int, goal: str, child) -> Optional[dict[str, Any]]:
     if child is None:
         return None
     child_toolsets = getattr(child, "enabled_toolsets", None)
@@ -331,7 +331,7 @@ def _child_blocked_no_terminal(task_index: int, goal: str, child) -> Optional[Di
         "_child_role": getattr(child, "_delegate_role", None),
     }
 
-def _resolve_team_identity(task: Dict[str, Any], index: Any = None) -> Optional[Tuple[str, str]]:
+def _resolve_team_identity(task: dict[str, Any], index: Any = None) -> Optional[tuple[str, str]]:
     team = task.get("team") if isinstance(task, dict) else None
     if not isinstance(team, dict):
         return None
@@ -383,7 +383,7 @@ def _escalate_shallow_goal(goal: str, retry_number: int) -> str:
         f"before answering.\n\nOriginal goal: {goal}"
     )
 
-def _derive_child_outcome(result: Dict[str, Any]) -> Dict[str, Any]:
+def _derive_child_outcome(result: dict[str, Any]) -> dict[str, Any]:
     summary = result.get("final_response") or ""
     completed = bool(result.get("completed", False))
     interrupted = bool(result.get("interrupted", False))
@@ -403,7 +403,7 @@ def _derive_child_outcome(result: Dict[str, Any]) -> Dict[str, Any]:
         "exit_reason": exit_reason,
     }
 
-def _collapsible_parent_turns(parent_agent) -> List[Dict[str, Any]]:
+def _collapsible_parent_turns(parent_agent) -> list[dict[str, Any]]:
     snapshot = getattr(parent_agent, "_delegate_handoff_messages", None)
     if not isinstance(snapshot, list) or not snapshot:
         return []
@@ -451,7 +451,7 @@ def _build_collapsed_handoff_context(parent_agent, existing_context: Optional[st
         return f"{collapsed}\n\n{str(existing_context).strip()}"
     return collapsed
 
-def _apply_handoff_collapse(task_list: List[Dict[str, Any]], handoff_mode: Optional[str], parent_agent) -> None:
+def _apply_handoff_collapse(task_list: list[dict[str, Any]], handoff_mode: Optional[str], parent_agent) -> None:
     if not handoff_mode:
         return
     mode_norm = str(handoff_mode).strip().lower()
@@ -482,8 +482,8 @@ def _apply_handoff_collapse(task_list: List[Dict[str, Any]], handoff_mode: Optio
         else:
             task["context"] = header_block
 
-def _memory_briefing_query(task_list: List[Dict[str, Any]]) -> str:
-    parts: List[str] = []
+def _memory_briefing_query(task_list: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
     for task in task_list:
         goal = task.get("goal")
         if goal and str(goal).strip():
@@ -496,7 +496,7 @@ def _memory_briefing_query(task_list: List[Dict[str, Any]]) -> str:
         query = query[:_MEMORY_BRIEFING_MAX_QUERY_CHARS]
     return query
 
-def _build_memory_briefing(task_list: List[Dict[str, Any]], parent_agent) -> Optional[str]:
+def _build_memory_briefing(task_list: list[dict[str, Any]], parent_agent) -> Optional[str]:
     manager = getattr(parent_agent, "_memory_manager", None)
     if manager is None or not hasattr(manager, "prefetch_all"):
         return None
@@ -517,12 +517,11 @@ def _build_memory_briefing(task_list: List[Dict[str, Any]], parent_agent) -> Opt
     header_block = f"{_MEMORY_BRIEFING_HEADER}\n{body}"
     if truncated:
         header_block += (
-            "\n...[briefing truncated to %d chars — most-relevant-first head kept]"
-            % _MEMORY_BRIEFING_MAX_CHARS
+            f"\n...[briefing truncated to {_MEMORY_BRIEFING_MAX_CHARS:d} chars — most-relevant-first head kept]"
         )
     return header_block
 
-def _apply_memory_briefing(task_list: List[Dict[str, Any]], parent_agent) -> None:
+def _apply_memory_briefing(task_list: list[dict[str, Any]], parent_agent) -> None:
     briefing = _build_memory_briefing(task_list, parent_agent)
     if briefing is None:
         return
@@ -571,7 +570,7 @@ def _run_grader_subagent(
     child_goal: str,
     parent_agent,
     model: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     grader_prompt = (
         "You are an impartial evaluator grading a subagent's completed work against a rubric.\n"
         "Respond ONLY with valid JSON in this exact format:\n"
@@ -619,11 +618,11 @@ def _run_grader_subagent(
     return {"score": 10.0, "feedback": "", "verdict": "pass"}
 
 def _apply_grader_revisions(
-    results: List[Dict[str, Any]],
-    task_list: List[Dict[str, Any]],
-    children: List[tuple[int, Dict[str, Any], Any]],
+    results: list[dict[str, Any]],
+    task_list: list[dict[str, Any]],
+    children: list[tuple[int, dict[str, Any], Any]],
     parent_agent,
-    grader_spec: Optional[Dict[str, Any]],
+    grader_spec: Optional[dict[str, Any]],
 ) -> None:
     if not grader_spec or not grader_spec.get("rubric"):
         return
@@ -789,7 +788,7 @@ def _build_child_agent(
     routing_cfg: Optional[dict[str, Any]] = None,
     # Legacy; accepted for wire compat but ignored (capability is depth-derived).
     role: str = "leaf",
-    team: Optional[Dict[str, Any]] = None,
+    team: Optional[dict[str, Any]] = None,
 ):
     import uuid as _uuid
     from run_agent import AIAgent
@@ -846,7 +845,7 @@ def _build_child_agent(
     routed_model = _route_subagent_model(goal, context, task_index)
     resolved_model = model or routed_model or getattr(parent_agent, "model", None)
 
-    child_session_ref: Dict[str, Any] = {}
+    child_session_ref: dict[str, Any] = {}
     child_progress_cb = _build_child_progress_callback(
         task_index, goal, parent_agent, task_count, subagent_id=subagent_id, parent_id=parent_subagent_id,
         depth=max(0, child_depth - 1),
@@ -928,7 +927,7 @@ def _build_child_agent(
 def _run_single_child(
     task_index: int, goal: str, child=None, parent_agent=None, *, owner_session_id: Optional[str] = None,
     owner_transport: Any = None, owner_session_record: Any = None, **_kwargs,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run a pre-built child agent (called from a worker thread) and return its result entry."""
     # Gate: verify execution prerequisites
     _blocked = _child_blocked_no_terminal(task_index, goal, child)
@@ -1205,9 +1204,9 @@ def delegate_task(
     max_iterations: Optional[int] = None, role: Optional[str] = None, background: Optional[bool] = None,
     output_schema: Optional[dict[str, Any]] = None, images: Optional[list[str]] = None, action: Optional[str] = None,
     subagent_id: Optional[str] = None, message: Optional[str] = None, parent_agent=None,
-    credentials_cfg: Optional[Dict[str, Any]] = None,
-    handoff_mode: Optional[str] = None, memory_briefing: Optional[bool] = None, grader: Optional[Dict[str, Any]] = None,
-    team: Optional[Dict[str, Any]] = None, acp_command: Optional[str] = None, acp_args: Optional[List[str]] = None,
+    credentials_cfg: Optional[dict[str, Any]] = None,
+    handoff_mode: Optional[str] = None, memory_briefing: Optional[bool] = None, grader: Optional[dict[str, Any]] = None,
+    team: Optional[dict[str, Any]] = None, acp_command: Optional[str] = None, acp_args: Optional[list[str]] = None,
 ) -> str:
     if parent_agent is None:
         return tool_error("delegate_task requires a parent agent context.")
@@ -1507,7 +1506,7 @@ def _build_dynamic_schema_overrides() -> dict:
     overrides_params["properties"] = {k: dict(v) for k, v in DELEGATE_TASK_SCHEMA["parameters"]["properties"].items()}
     tasks = overrides_params["properties"]["tasks"] = dict(overrides_params["properties"]["tasks"])
     tasks["items"] = dict(tasks.get("items") or {})
-    tasks["items"]["properties"] = dict((tasks["items"].get("properties") or {}))
+    tasks["items"]["properties"] = dict(tasks["items"].get("properties") or {})
     tasks["description"] = _build_tasks_param_description()
 
     if not independent_completions:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_merge_gate import (  # noqa: E402
+from evolution_merge_gate import (
     check_flip_gate,
     check_merge_method_policy,
     check_merge_policy,

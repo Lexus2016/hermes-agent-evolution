@@ -106,7 +106,7 @@ def test_provenance_ok_reads_live_chain():
     """provenance_ok() with no arg reads the live ContextVar chain."""
     token = init_source_chain()
     try:
-        ok, reason = provenance_ok()
+        ok, _reason = provenance_ok()
         assert ok is True  # empty live chain passes (no evidence to taint)
         wtoken = set_current_write_origin(BACKGROUND_REVIEW)
         try:

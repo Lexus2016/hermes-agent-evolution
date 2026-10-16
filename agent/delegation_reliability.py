@@ -61,8 +61,8 @@ class DelegationIdentity:
 class DelegationEvidence:
     """Moving, attributable, and deterministic evidence for subagent outcomes."""
 
-    tools_executed: List[str] = field(default_factory=list)
-    state_mutations: Set[str] = field(default_factory=set)
+    tools_executed: list[str] = field(default_factory=list)
+    state_mutations: set[str] = field(default_factory=set)
     has_meaningful_output: bool = False
     schema_valid: bool = True
     is_idempotent: bool = True
@@ -87,7 +87,7 @@ class DelegationReliabilityEvaluator:
 
     def __init__(self, max_retries: int = 2):
         self.max_retries = max_retries
-        self._history: Dict[str, List[DelegationEvidence]] = {}
+        self._history: dict[str, list[DelegationEvidence]] = {}
 
     def check_identity_adequacy(self, identity: DelegationIdentity) -> bool:
         """Verify that the identity uniquely identifies the work unit."""

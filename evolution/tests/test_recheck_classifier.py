@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Comprehensive pytest suite for ``recheck_classifier`` (issue #1038).
 
 Covers:

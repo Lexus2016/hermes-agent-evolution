@@ -349,7 +349,7 @@ def _classify_failure_reason(content: Any) -> Optional[str]:
     # deliberately do NOT scan arbitrary content values; this keeps the
     # no-raw-text contract intact while still catching the canonical failure
     # messages tools put in error/output.
-    hints: List[str] = []
+    hints: list[str] = []
     for key in ("error", "status", "output", "stderr", "reason"):
         v = data.get(key)
         if isinstance(v, str) and v:
@@ -416,11 +416,11 @@ def _iter_lines(path: Path):
 _MESSAGE_ROW_ID_KEY = "_db_id"
 
 
-def _message_row_to_dict(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
+def _message_row_to_dict(row: sqlite3.Row) -> Optional[dict[str, Any]]:
     """Convert a SessionDB messages row into the role-tagged dict scan_messages
     consumes (#399). Drops DB-only columns (session_id) but keeps
     the original id for ordering and timestamp for cutoff filtering (#3145)."""
-    obj: Dict[str, Any] = {_MESSAGE_ROW_ID_KEY: row["id"]}
+    obj: dict[str, Any] = {_MESSAGE_ROW_ID_KEY: row["id"]}
     if "role" in row.keys():
         obj["role"] = row["role"]
     if "content" in row.keys():
@@ -444,7 +444,7 @@ def _message_row_to_dict(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
     return obj if obj.get("role") else None
 
 
-def _iter_state_db(db_path: Path) -> Iterable[tuple[str, List[Dict[str, Any]]]]:
+def _iter_state_db(db_path: Path) -> Iterable[tuple[str, list[dict[str, Any]]]]:
     """Yield (session_id, messages) from a SQLite state.db messages table.
 
     Messages are grouped by session_id and ordered by id (insertion order) so
@@ -475,7 +475,7 @@ def _iter_state_db(db_path: Path) -> Iterable[tuple[str, List[Dict[str, Any]]]]:
         except sqlite3.Error:
             return
         current_session: Optional[str] = None
-        current_messages: List[Dict[str, Any]] = []
+        current_messages: list[dict[str, Any]] = []
         for row in cur:
             sid = row["session_id"]
             msg = _message_row_to_dict(row)
@@ -493,7 +493,7 @@ def _iter_state_db(db_path: Path) -> Iterable[tuple[str, List[Dict[str, Any]]]]:
         conn.close()
 
 
-def _state_db_session_signals(msgs: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _state_db_session_signals(msgs: list[dict[str, Any]]) -> dict[str, Any]:
     """Return signals from one SessionDB session, ordered by the original id.
 
     The caller gives us messages already grouped by session_id and ordered by
@@ -507,20 +507,20 @@ def _state_db_session_signals(msgs: List[Dict[str, Any]]) -> Dict[str, Any]:
     return scan_messages(ordered)
 
 
-def scan_messages(messages) -> Dict[str, Any]:
+def scan_messages(messages) -> dict[str, Any]:
     """Return per-session signal counts (no raw text) from an iterable of
     role-tagged message dicts. Shared by the JSONL transcript path, the
     request_dump_*.json path (#238), and the SessionDB state.db path (#399) so
     all formats yield the identical digest.
     """
     tool_failures: Counter = Counter()
-    tool_failures_by_reason: Dict[
-        str, Dict[str, int]
+    tool_failures_by_reason: dict[
+        str, dict[str, int]
     ] = {}  # tool -> reason -> count (#1325)
     timeouts = 0
     refusals = 0
     refusals_recovered = 0  # refusals that proposed an alternative (#1366)
-    id_to_tool: Dict[str, str] = {}
+    id_to_tool: dict[str, str] = {}
     consec_tool = None
     consec_n = 0
     max_runs: Counter = Counter()  # tool -> max consecutive in this session
@@ -585,12 +585,12 @@ def scan_messages(messages) -> Dict[str, Any]:
     }
 
 
-def scan_session(path: Path) -> Dict[str, Any]:
+def scan_session(path: Path) -> dict[str, Any]:
     """Per-session signals from a JSONL transcript (one JSON object per line)."""
     return scan_messages(_iter_lines(path))
 
 
-def _request_dump_messages(obj: Dict[str, Any]) -> List[Any]:
+def _request_dump_messages(obj: dict[str, Any]) -> list[Any]:
     """The conversation messages carried inside a request_dump_*.json snapshot
     live at request.body.messages — the same role-tagged shape as a JSONL
     transcript, so scan_messages handles it directly."""
@@ -600,7 +600,7 @@ def _request_dump_messages(obj: Dict[str, Any]) -> List[Any]:
     return msgs if isinstance(msgs, list) else []
 
 
-def scan_request_dump(obj: Dict[str, Any]) -> Dict[str, Any]:
+def scan_request_dump(obj: dict[str, Any]) -> dict[str, Any]:
     """Per-session signals from a request_dump_*.json snapshot (#238).
 
     Reuses scan_messages over request.body.messages, and adds the provider-layer
@@ -639,22 +639,22 @@ def _fresh(path: Path, cutoff: float) -> bool:
 
 def build_digest(
     sessions_dir: Path, window_days: int = 7, now: float | None = None
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     now = now if now is not None else time.time()
     cutoff = now - window_days * 86400
     failures: Counter = Counter()
-    failures_by_reason: Dict[
-        str, Dict[str, int]
+    failures_by_reason: dict[
+        str, dict[str, int]
     ] = {}  # tool -> reason -> count (#1325)
     timeouts = 0
     refusals = 0
     refusals_recovered = 0  # subset of refusals that offered a path forward (#1366)
     provider_errors: Counter = Counter()
     models: Counter = Counter()
-    repeated: Dict[str, Dict[str, int]] = {}  # tool -> {max_consecutive, sessions}
+    repeated: dict[str, dict[str, int]] = {}  # tool -> {max_consecutive, sessions}
     scanned = 0
 
-    def _aggregate(s: Dict[str, Any]) -> None:
+    def _aggregate(s: dict[str, Any]) -> None:
         nonlocal timeouts, refusals, refusals_recovered
         failures.update(s.get("tool_failures", {}))
         # Sub-classified failures (#1325) — merge per-tool reason counters so
@@ -689,7 +689,7 @@ def build_digest(
         #    blind). Multiple dumps of one session each carry a growing prefix of
         #    the same conversation, so dedup by session_id keeping the most
         #    complete snapshot — one session contributes its signals once.
-        dumps: Dict[str, tuple] = {}  # session_id -> (msg_count, obj)
+        dumps: dict[str, tuple] = {}  # session_id -> (msg_count, obj)
         for path in sorted(sessions_dir.glob("request_dump_*.json")):
             if not _fresh(path, cutoff):
                 continue
@@ -758,7 +758,7 @@ def build_digest(
     # dominated by an UNAFFECTED reason (read_file:timeout) → "no-signal".
     # Exposing the per-(tool,reason) rate gives the verification loop a target
     # that moves only when the targeted reason moves, breaking the treadmill.
-    failure_rate_by_reason: Dict[str, Dict[str, float]] = {}
+    failure_rate_by_reason: dict[str, dict[str, float]] = {}
     for tool, reasons in failures_by_reason.items():
         failure_rate_by_reason[tool] = {
             reason: (n / scanned if scanned else 0.0) for reason, n in reasons.items()
@@ -798,7 +798,7 @@ def _sessions_dir() -> Path:
     return get_hermes_home() / "sessions"
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     days = 7
     for a in argv[1:]:
         if a.startswith("--days="):

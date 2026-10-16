@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Asynchronous early-trigger parallel context compaction.
 
 Issue #2469 (parent #2186) — arXiv:2605.23296.
@@ -41,11 +40,11 @@ class SummaryVolumeConstraint:
     per_section_token_cap: int = 250
     enabled: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "SummaryVolumeConstraint":
+    def from_dict(cls, d: dict[str, Any]) -> SummaryVolumeConstraint:
         return cls(**{k: d[k] for k in d if k in cls.__dataclass_fields__})
 
 
@@ -56,8 +55,8 @@ class SummaryValidationResult:
     ok: bool
     detected_sections: int
     expected_sections: int
-    overlong_sections: List[int]
-    violations: List[str]
+    overlong_sections: list[int]
+    violations: list[str]
 
 
 def estimate_tokens(text: str) -> int:
@@ -70,10 +69,10 @@ def estimate_tokens(text: str) -> int:
 _SECTION_HEADING_RE = re.compile(r"^#{1,6}\s+\S")
 
 
-def split_sections(summary: str) -> List[str]:
+def split_sections(summary: str) -> list[str]:
     """Split a summary into sections on markdown headings (``## ...``)."""
-    sections: List[str] = []
-    current: List[str] = []
+    sections: list[str] = []
+    current: list[str] = []
     for line in summary.splitlines():
         if _SECTION_HEADING_RE.match(line.strip()):
             if current:
@@ -96,8 +95,8 @@ def validate_summary_volume(
 
     sections = split_sections(summary)
     detected = len(sections)
-    violations: List[str] = []
-    overlong: List[int] = []
+    violations: list[str] = []
+    overlong: list[int] = []
     if detected != constraint.section_count:
         violations.append(
             f"expected {constraint.section_count} sections, got {detected}"
@@ -148,11 +147,11 @@ class ParallelCompactionConfig:
     def early_trigger_threshold(self) -> int:
         return max(0, self.hard_token_limit - self.headroom_tokens)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ParallelCompactionConfig":
+    def from_dict(cls, d: dict[str, Any]) -> ParallelCompactionConfig:
         kwargs = {k: d[k] for k in d if k in cls.__dataclass_fields__}
         if isinstance(kwargs.get("summary_constraint"), dict):
             kwargs["summary_constraint"] = SummaryVolumeConstraint.from_dict(
@@ -167,12 +166,12 @@ class CompactionSnapshot:
 
     trigger_index: int
     message_count: int
-    messages: List[Dict[str, Any]]
+    messages: list[dict[str, Any]]
     token_count_at_trigger: int
     snapshot_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     timestamp: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "snapshot_id": self.snapshot_id,
             "timestamp": self.timestamp,
@@ -183,7 +182,7 @@ class CompactionSnapshot:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "CompactionSnapshot":
+    def from_dict(cls, d: dict[str, Any]) -> CompactionSnapshot:
         return cls(
             trigger_index=d.get("trigger_index", len(d.get("messages", []))),
             message_count=d.get("message_count", len(d.get("messages", []))),
@@ -235,7 +234,7 @@ def get_default_snapshot_dir() -> Path:
 
 def write_precompaction_snapshot(
     snapshot: CompactionSnapshot,
-    snapshot_dir: Optional[Union[str, Path]] = None,
+    snapshot_dir: Optional[str | Path] = None,
     session_id: Optional[str] = None,
 ) -> Path:
     """Persist pre-compaction snapshot to disk as a re-readable virtual file."""
@@ -248,14 +247,14 @@ def write_precompaction_snapshot(
     return snapshot_path
 
 
-def read_precompaction_snapshot(snapshot_path: Union[str, Path]) -> CompactionSnapshot:
+def read_precompaction_snapshot(snapshot_path: str | Path) -> CompactionSnapshot:
     """Read a pre-compaction snapshot from disk."""
     p = Path(snapshot_path)
     data = json.loads(p.read_text(encoding="utf-8"))
     return CompactionSnapshot.from_dict(data)
 
 
-def read_precompaction_snapshot_text(snapshot_path: Union[str, Path]) -> str:
+def read_precompaction_snapshot_text(snapshot_path: str | Path) -> str:
     """Read pre-compaction snapshot as human/agent-readable transcript."""
     snap = read_precompaction_snapshot(snapshot_path)
     return snap.to_readable_text()
@@ -274,10 +273,10 @@ class ParallelCompactor:
         self._executor = executor
         self._session_id = session_id
         self._state = CompactionState.IDLE
-        self._future: Optional[concurrent.futures.Future[List[Dict[str, Any]]]] = None
+        self._future: Optional[concurrent.futures.Future[list[dict[str, Any]]]] = None
         self._snapshot: Optional[CompactionSnapshot] = None
         self._snapshot_path: Optional[Path] = None
-        self._compacted_prefix: Optional[List[Dict[str, Any]]] = None
+        self._compacted_prefix: Optional[list[dict[str, Any]]] = None
         self._last_error: Optional[str] = None
         self._swap_count: int = 0
 
@@ -319,9 +318,9 @@ class ParallelCompactor:
 
     def start_async_compaction(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         current_tokens: int,
-        summarize_fn: Callable[[List[Dict[str, Any]]], List[Dict[str, Any]]],
+        summarize_fn: Callable[[list[dict[str, Any]]], list[dict[str, Any]]],
     ) -> bool:
         """Launch background summarization on a snapshot of messages."""
         if not self.config.enabled:
@@ -343,7 +342,7 @@ class ParallelCompactor:
                     snapshot_dir=self.config.snapshot_dir,
                     session_id=self._session_id,
                 )
-            except Exception as exc:
+            except Exception:
                 self._snapshot_path = None
         else:
             self._snapshot_path = None
@@ -355,7 +354,7 @@ class ParallelCompactor:
         if self._executor is not None:
             self._future = self._executor.submit(summarize_fn, snapshot_messages)
         else:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
                 # Synchronous fallback if no executor provided
                 try:
                     res = summarize_fn(snapshot_messages)
@@ -381,7 +380,7 @@ class ParallelCompactor:
                     self._state = CompactionState.FAILED
         return self._state
 
-    def is_safe_swap_boundary(self, current_messages: List[Dict[str, Any]]) -> bool:
+    def is_safe_swap_boundary(self, current_messages: list[dict[str, Any]]) -> bool:
         """Verify context is at a safe turn boundary before swapping.
 
         Safe boundary rules:
@@ -404,8 +403,8 @@ class ParallelCompactor:
         return True
 
     def try_apply_swap(
-        self, current_messages: List[Dict[str, Any]]
-    ) -> Optional[List[Dict[str, Any]]]:
+        self, current_messages: list[dict[str, Any]]
+    ) -> Optional[list[dict[str, Any]]]:
         """Swap in compacted prefix with new messages appended if ready and safe."""
         self.poll_status()
         if self._state != CompactionState.READY_TO_SWAP:
@@ -427,7 +426,7 @@ class ParallelCompactor:
         return new_messages
 
     def read_snapshot(
-        self, snapshot_path: Optional[Union[str, Path]] = None
+        self, snapshot_path: Optional[str | Path] = None
     ) -> Optional[CompactionSnapshot]:
         """Read a pre-compaction snapshot from disk or memory."""
         if snapshot_path is not None:
@@ -439,7 +438,7 @@ class ParallelCompactor:
         return None
 
     def read_snapshot_text(
-        self, snapshot_path: Optional[Union[str, Path]] = None
+        self, snapshot_path: Optional[str | Path] = None
     ) -> Optional[str]:
         """Read snapshot as formatted text transcript."""
         if snapshot_path is not None:

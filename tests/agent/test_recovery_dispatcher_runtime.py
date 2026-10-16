@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Executable-seam runtime tests for the #1027 recovery strategy dispatcher.
 
 These drive the real ``AIAgent`` tool-execution path (``_execute_tool_calls_

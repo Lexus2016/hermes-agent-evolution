@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from evolution_judge_safety_scan import (  # noqa: E402  # fmt: skip
+from evolution_judge_safety_scan import (  # fmt: skip
     Finding,
     ScanResult,
     _DELIM_RE,

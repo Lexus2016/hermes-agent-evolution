@@ -25,11 +25,11 @@ def _s(v: Any) -> str:
 
 def build_qc_review_task(
     summary: str,
-    files: List[str],
+    files: list[str],
     *,
     issue_number: int = 0,
-    toolsets: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    toolsets: Optional[list[str]] = None,
+) -> dict[str, Any]:
     """Build a leaf-subagent QC review task for delegate_task."""
     file_list = "\n".join(f"  - {f}" for f in files) if files else "  (no files listed)"
     goal = (
@@ -65,7 +65,7 @@ def _extract_json(text: str) -> Optional[dict]:
     return None
 
 
-def parse_qc_report(subagent_output: str) -> Dict[str, Any]:
+def parse_qc_report(subagent_output: str) -> dict[str, Any]:
     """Parse QC subagent output. ok=True only when verdict=='pass' and not has_blocking."""
     raw = _extract_json(_s(subagent_output))
     if raw is None:
@@ -77,18 +77,18 @@ def parse_qc_report(subagent_output: str) -> Dict[str, Any]:
     return {"verdict": verdict, "has_blocking": hb, "issues": issues, "recommendations": recs, "ok": verdict == "pass" and not hb}  # fmt: skip
 
 
-def _files_from_args(args: List[str]) -> List[str]:
+def _files_from_args(args: list[str]) -> list[str]:
     files_str = _flag(args, "--files") or ""
     return [f.strip() for f in files_str.split(",") if f.strip()]
 
 
 def build_critic_task(
     summary: str,
-    files: List[str],
+    files: list[str],
     *,
     issue_number: int = 0,
-    toolsets: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    toolsets: Optional[list[str]] = None,
+) -> dict[str, Any]:
     """Build a leaf-subagent adversarial critic task for delegate_task (#92).
 
     Runs AFTER the reviewer has approved a diff: the critic's only job is to
@@ -127,7 +127,7 @@ def build_critic_task(
     }
 
 
-def parse_critic_report(subagent_output: str) -> Dict[str, Any]:
+def parse_critic_report(subagent_output: str) -> dict[str, Any]:
     """Parse the adversarial critic subagent output (#92).
 
     A report is ``ok`` when it is coherent: either a grounded dissent (a
@@ -158,11 +158,11 @@ def parse_critic_report(subagent_output: str) -> Dict[str, Any]:
 
 
 def adjudicate_review(
-    reviewer_report: Dict[str, Any],
-    critic_report: Dict[str, Any],
+    reviewer_report: dict[str, Any],
+    critic_report: dict[str, Any],
     *,
     critic_enabled: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Deterministic reviewer-to-critic gate (#92).
 
     Returns ``{"block", "verdict", "reason"}``:
@@ -202,10 +202,10 @@ def adjudicate_review(
 
 def record_critic_verdict(
     ledger_file: str,
-    verdict: Dict[str, Any],
+    verdict: dict[str, Any],
     *,
-    reviewer_report: Dict[str, Any],
-    critic_report: Dict[str, Any],
+    reviewer_report: dict[str, Any],
+    critic_report: dict[str, Any],
 ) -> None:
     """Record the adversarial-critic verdict into the stage-gate ledger (#92).
 
@@ -224,11 +224,11 @@ def record_critic_verdict(
             failure_mode=_s(critic_report.get("failure_mode")),
             agreement_reason=_s(critic_report.get("agreement_reason")),
         )
-    except Exception:  # noqa: BLE001 - instrumentation must not raise
+    except Exception:
         pass
 
 
-def _load_text(path: Optional[str]) -> Tuple[str, Optional[str]]:
+def _load_text(path: Optional[str]) -> tuple[str, Optional[str]]:
     try:
         raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
         return raw, None
@@ -236,7 +236,7 @@ def _load_text(path: Optional[str]) -> Tuple[str, Optional[str]]:
         return "", str(exc)
 
 
-def _flag(args: List[str], name: str) -> Optional[str]:
+def _flag(args: list[str], name: str) -> Optional[str]:
     if name in args:
         i = args.index(name)
         if i + 1 < len(args):
@@ -244,7 +244,7 @@ def _flag(args: List[str], name: str) -> Optional[str]:
     return None
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(
             "usage: evolution_qc_review.py "

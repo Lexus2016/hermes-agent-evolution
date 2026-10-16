@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Executable-seam integration tests for the #1032 plan feasibility gate.
 
 Drive the real ``AIAgent._maybe_activate_plan_mode`` seam to prove the gate is

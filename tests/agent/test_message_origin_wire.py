@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """``origin`` is persistence-only and must never reach a provider.
 
 Message provenance rides resumed history exactly the way ``display_kind`` and

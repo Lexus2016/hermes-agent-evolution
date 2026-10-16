@@ -216,7 +216,7 @@ class _FakeAgent:
     # a @staticmethod on AIAgent; re-wrap it so the descriptor survives binding
     # onto this stand-in class (a bare function assignment would turn it into an
     # instance method and inject ``self``).
-    from run_agent import AIAgent  # type: ignore  # noqa: E402
+    from run_agent import AIAgent  # type: ignore
     _check_step_divergence_after_tool_calls = AIAgent._check_step_divergence_after_tool_calls
     _latest_tool_observation = staticmethod(AIAgent._latest_tool_observation)
 

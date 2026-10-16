@@ -45,7 +45,7 @@ class TelegramSendPacer:
         self.per_chat_interval = max(0.0, float(per_chat_interval))
         self.global_rate = max(0.1, float(global_rate))
         self.global_burst = max(1.0, float(global_burst))
-        self._next_allowed: Dict[str, float] = {}
+        self._next_allowed: dict[str, float] = {}
         self._tokens = self.global_burst
         self._last_refill = time.monotonic()
         self._lock = asyncio.Lock()

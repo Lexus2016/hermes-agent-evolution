@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import tools.terminal_failure_classifier as classifier
-import tools.terminal_tool as terminal_tool
+from tools import terminal_tool
 
 
 # ---------------------------------------------------------------------------

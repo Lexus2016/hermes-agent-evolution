@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Executable-seam runtime tests for #1041 recheck suppression.
 
 Drive the real ``AIAgent`` tool path so an immediate identical repeat of a

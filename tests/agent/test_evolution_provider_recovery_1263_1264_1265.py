@@ -68,7 +68,7 @@ def test_overload_breaker_emits_status_no_fallback():
     jb, arb = _fb()
     with jb, arb, patch.object(agent, "_buffer_status", side_effect=lambda m: msgs.append(m)), \
          patch.object(agent, "_persist_session"), patch.object(agent, "_save_trajectory"), patch.object(agent, "_cleanup_task_resources"):
-        result = agent.run_conversation("hello")
+        _result = agent.run_conversation("hello")
     assert any("circuit breaker" in s.lower() for s in msgs), f"Got: {msgs}"
 
 
@@ -88,6 +88,5 @@ def test_refusal_session_counter_pattern():
 
 def test_refusal_escalation_threshold():
     """Escalation fires when per-turn >= 2 AND session >= 4."""
-    assert (2 >= 2 and 4 >= 4) is True
-    assert (2 >= 2 and 3 >= 4) is False
-    assert (1 >= 2 and 4 >= 4) is False
+    for turn_count, session_count, expected in ((2, 4, True), (2, 3, False), (1, 4, False)):
+        assert (turn_count >= 2 and session_count >= 4) is expected

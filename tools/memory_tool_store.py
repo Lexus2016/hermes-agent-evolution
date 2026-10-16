@@ -235,7 +235,7 @@ def _make_provenance(source_class: str, trust_tier: str):
     return Provenance(source_class=source_class, trust_tier=trust_tier)
 
 
-def _log_guard_event(action: str, target: str, event: Dict[str, Any]) -> None:
+def _log_guard_event(action: str, target: str, event: dict[str, Any]) -> None:
     """Emit a structured guard event to the logger (warn/strip decisions).
 
     Block decisions surface to the model via the tool error already; warn/strip
@@ -265,7 +265,7 @@ def _validate_provenance(source_class: str, trust_tier: str) -> Optional[str]:
     return None
 
 
-def _drift_error(path: "Path", bak_path: str) -> Dict[str, Any]:
+def _drift_error(path: "Path", bak_path: str) -> dict[str, Any]:
     """Build the error dict returned when external drift is detected.
 
     The on-disk memory file contains content that wouldn't round-trip
@@ -303,7 +303,7 @@ def _drift_error(path: "Path", bak_path: str) -> Dict[str, Any]:
 _READ_FAILED = object()
 
 
-def _read_failed_error(path: "Path") -> Dict[str, Any]:
+def _read_failed_error(path: "Path") -> dict[str, Any]:
     """Build the error dict returned when the on-disk memory file is unreadable.
 
     A file that exists but cannot be read is NOT an empty store. Reading it as
@@ -327,7 +327,7 @@ def _read_failed_error(path: "Path") -> Dict[str, Any]:
 DEFAULT_MEMORY_CHAR_LIMIT = 2200
 DEFAULT_USER_CHAR_LIMIT = 1375
 
-def _find_unique_match(entries: List[str], old_text: str) -> Tuple[Optional[int], bool]:
+def _find_unique_match(entries: list[str], old_text: str) -> tuple[Optional[int], bool]:
     """``(index, ambiguous)`` for entries matching *old_text*.
 
     Comparison is on display text (provenance trailer stripped) so a visible
@@ -405,7 +405,7 @@ def _stale_entry_message(entry: str) -> str:
             f"pending record has been preserved.")
 
 
-def _locate_stored(entries: List[str], old_text: str, matched_entry: Optional[str] = None):
+def _locate_stored(entries: list[str], old_text: str, matched_entry: Optional[str] = None):
     """``(index, error_dict)``. Error is set for a stale pin or an ambiguous match.
     Index is None with no error when nothing matched (the caller phrases the miss)."""
     if matched_entry is not None:
@@ -461,8 +461,8 @@ class MemoryStore:
         memory_enabled: bool = True,
         user_profile_enabled: bool = True,
     ):
-        self.memory_entries: List[str] = []
-        self.user_entries: List[str] = []
+        self.memory_entries: list[str] = []
+        self.user_entries: list[str] = []
         self.memory_char_limit = memory_char_limit
         self.user_char_limit = user_char_limit
         self.memory_enabled = memory_enabled
@@ -477,7 +477,7 @@ class MemoryStore:
         self.auto_evict_on_full = auto_evict_on_full
         self.auto_evict_keep_min = max(0, int(auto_evict_keep_min))
         # Frozen snapshot for system prompt -- set once at load_from_disk()
-        self._system_prompt_snapshot: Dict[str, str] = {"memory": "", "user": ""}
+        self._system_prompt_snapshot: dict[str, str] = {"memory": "", "user": ""}
         # Optional memory-poisoning guard (issue #315). DEFAULT None: when unset,
         # the write path keeps its pre-#315 binary-block behaviour exactly (see
         # _gate_write). A MemoryGuardPolicy here routes a scan hit through
@@ -527,7 +527,7 @@ class MemoryStore:
             ),
         }
 
-    def _failure_with_entries(self, target: str, message: str) -> Dict[str, Any]:
+    def _failure_with_entries(self, target: str, message: str) -> dict[str, Any]:
         """Consolidation failure carrying the live entries so the model can consolidate."""
         current = self._char_count(target)
         limit = self._char_limit(target)
@@ -600,10 +600,10 @@ class MemoryStore:
 
     @staticmethod
     def _sanitize_entries_for_snapshot(
-        entries: List[str],
+        entries: list[str],
         filename: str,
         warned: Optional[set] = None,
-    ) -> List[str]:
+    ) -> list[str]:
         """Return ``entries`` with any threat-matching entry replaced by a placeholder.
 
         Each entry is scanned with the shared threat-pattern library at the
@@ -623,7 +623,7 @@ class MemoryStore:
         from tools.threat_patterns import scan_for_threats
 
         warned = warned if warned is not None else set()
-        sanitized: List[str] = []
+        sanitized: list[str] = []
         for entry in entries:
             if not entry or entry.startswith("[BLOCKED:"):
                 sanitized.append(entry)
@@ -769,7 +769,7 @@ class MemoryStore:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return  # acquired
-            except (OSError, IOError):
+            except OSError:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError(
@@ -856,7 +856,7 @@ class MemoryStore:
         target: str,
         new_entry: str,
         limit: int,
-    ) -> Optional[List[str]]:
+    ) -> Optional[list[str]]:
         """Evict OLDEST entries until ``new_entry`` fits ``limit`` (issue #1283).
 
         Returns the list of evicted DISPLAY texts (oldest-first), or ``None``
@@ -878,7 +878,7 @@ class MemoryStore:
         entries = self._entries_for(target)
         # Working copy we mutate locally; only commit back if it fits.
         working = list(entries)
-        evicted: List[str] = []
+        evicted: list[str] = []
 
         while True:
             candidate = working + [new_entry]
@@ -934,10 +934,10 @@ class MemoryStore:
     def _evict_replacement_to_fit(
         self,
         target: str,
-        entries: List[str],
+        entries: list[str],
         new_text: str,
         limit: int,
-    ) -> Optional[Tuple[List[str], List[str]]]:
+    ) -> Optional[tuple[list[str], list[str]]]:
         """Evict OLDEST entries (never ``new_text``) until the list fits ``limit``.
 
         Issue #129 — the replace-path twin of ``_evict_to_fit`` (#1283): the
@@ -960,7 +960,7 @@ class MemoryStore:
             return None
 
         working = list(entries)
-        evicted: List[str] = []
+        evicted: list[str] = []
 
         while True:
             if len(ENTRY_DELIMITER.join(working)) <= limit:
@@ -1032,7 +1032,7 @@ class MemoryStore:
         content: str,
         source_class: str = DEFAULT_SOURCE_CLASS,
         trust_tier: str = DEFAULT_TRUST_TIER,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Append a new entry. Returns error if it would exceed the char limit.
 
         ``source_class`` / ``trust_tier`` tag the entry's provenance (#316).
@@ -1155,7 +1155,7 @@ class MemoryStore:
         source_class: str = DEFAULT_SOURCE_CLASS,
         trust_tier: str = DEFAULT_TRUST_TIER,
         matched_entry: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Find entry containing old_text substring, replace it with new_content.
 
         ``source_class`` / ``trust_tier`` re-tag the replacement's provenance
@@ -1237,8 +1237,7 @@ class MemoryStore:
                     )
                     return self._success_response(
                         target,
-                        "Entry replaced (evicted %d oldest entr%s to make room)."
-                        % (len(evicted), "y" if len(evicted) == 1 else "ies"),
+                        f"Entry replaced (evicted {len(evicted):d} oldest entr{'y' if len(evicted) == 1 else 'ies'} to make room).",
                         replaced_entry=overwritten,
                     )
                 current = self._char_count(target)
@@ -1477,9 +1476,9 @@ class MemoryStore:
     def compact(
         self,
         target: str,
-        target_size: int = None,
+        target_size: int | None = None,
         prefer: str = "longest",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Shorten entries until the store fits ``target_size`` or no more can be trimmed.
 
         This is the explicit compact/shorten helper requested in #516. It is a
@@ -1633,7 +1632,7 @@ class MemoryStore:
         source_filter: Optional[object] = None,
         min_trust: Optional[str] = None,
         include_superseded: bool = False,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return live entries as provenance-resolved rows, optionally filtered.
 
         Each row is ``{"text": <display>, "source_class": ..., "trust_tier": ...}``.
@@ -1659,7 +1658,7 @@ class MemoryStore:
 
         min_rank = _trust_rank(min_trust) if min_trust is not None else None
 
-        rows: List[Dict[str, Any]] = []
+        rows: list[dict[str, Any]] = []
         for entry in self._entries_for(target):
             # Supersession marker is OUTERMOST, so parse it before provenance
             # (parse_supersession returns the display text with any provenance
@@ -1678,7 +1677,7 @@ class MemoryStore:
             rows.append(row)
         return rows
 
-    def supersede(self, target: str, old_text: str) -> Dict[str, Any]:
+    def supersede(self, target: str, old_text: str) -> dict[str, Any]:
         """Mark the entry containing *old_text* as superseded (#2437).
 
         Temporal governance: bytes stay on disk (audit trail) but recall
@@ -1721,7 +1720,7 @@ class MemoryStore:
 
     def _batch_error(
         self, target: str, message: str, limit: Optional[int] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Batch-abort error without ``current_entries``.
 
         The store did not change. Echoing it made each consolidation retry pay
@@ -1741,7 +1740,7 @@ class MemoryStore:
         })
 
 
-    def resolve_entry(self, target: str, old_text: str, verb: str) -> Dict[str, Any]:
+    def resolve_entry(self, target: str, old_text: str, verb: str) -> dict[str, Any]:
         """Full entry *old_text* selects now, under the lock, or the error a direct edit would return."""
         old_text = (old_text or "").strip()
         with self._file_lock(self._path_for(target)):
@@ -1786,13 +1785,13 @@ class MemoryStore:
     # -- Internal helpers --
 
     @staticmethod
-    def _previews(entries: List[str], width: int = 80) -> List[str]:
+    def _previews(entries: list[str], width: int = 80) -> list[str]:
         """Truncated one-line previews of entries for error feedback."""
         return [e[:width] + ("..." if len(e) > width else "") for e in entries]
 
     def _success_response(
-        self, target: str, message: str = None, limit: Optional[int] = None, **extra
-    ) -> Dict[str, Any]:
+        self, target: str, message: str | None = None, limit: Optional[int] = None, **extra
+    ) -> dict[str, Any]:
         # A successful write means the consolidation loop made progress, so the
         # per-turn failure budget resets (the cap counts consecutive failures,
         # not lifetime ones within a turn) (#42405).
@@ -1864,11 +1863,11 @@ class MemoryStore:
             # save persists over the real bytes — the wipe class documented
             # above. Undecodable bytes must surface as read_ok=False.
             return path.read_text(encoding="utf-8-sig"), True
-        except (OSError, IOError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError):
             return "", False
 
     @staticmethod
-    def _parse_entries(raw: str) -> List[str]:
+    def _parse_entries(raw: str) -> list[str]:
         """Split raw memory-file text into stripped, non-empty entries."""
         if not raw.strip():
             return []
@@ -1878,7 +1877,7 @@ class MemoryStore:
         return [e for e in entries if e]
 
     @staticmethod
-    def _read_entries_checked(path: Path) -> Tuple[List[str], bool]:
+    def _read_entries_checked(path: Path) -> tuple[list[str], bool]:
         """Read + parse a memory file, distinguishing unreadable from empty.
 
         Returns ``(entries, read_ok)`` — see ``_read_raw_checked`` for the
@@ -1890,7 +1889,7 @@ class MemoryStore:
         return MemoryStore._parse_entries(raw), True
 
     @staticmethod
-    def _read_file(path: Path) -> List[str]:
+    def _read_file(path: Path) -> list[str]:
         """Read a memory file and split into entries (empty list on any error).
 
         Retained for read-only callers (``load_from_disk``) that build in-memory
@@ -1919,7 +1918,7 @@ class MemoryStore:
         return str(bak_path)
 
     @staticmethod
-    def _write_file(path: Path, entries: List[str]):
+    def _write_file(path: Path, entries: list[str]):
         """Atomic temp-file + rename so readers never see a truncated file.
 
         open("w") + flock truncates before the lock is acquired, racing
@@ -1929,7 +1928,7 @@ class MemoryStore:
         content = ENTRY_DELIMITER.join(entries) if entries else ""
         try:
             atomic_write_text(path, content, tmp_prefix=".mem_")
-        except (OSError, IOError) as e:
+        except OSError as e:
             raise RuntimeError(f"Failed to write memory file {path}: {e}")
 
 

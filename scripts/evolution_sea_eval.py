@@ -19,6 +19,8 @@ evolution pipeline actually making the agent better, or just accumulating?"
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 import json
 import os
 import sys
@@ -27,17 +29,17 @@ from typing import Any, Dict, List, Optional
 
 # Allow running as a script from anywhere in the repo.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from evolution_funnel import load_records  # noqa: E402
+from evolution_funnel import load_records
 
 
-def _int(rec: Dict[str, Any], key: str) -> int:
+def _int(rec: dict[str, Any], key: str) -> int:
     try:
         return int(rec.get(key, 0) or 0)
     except (TypeError, ValueError):
         return 0
 
 
-def _float(rec: Dict[str, Any], key: str) -> Optional[float]:
+def _float(rec: dict[str, Any], key: str) -> Optional[float]:
     v = rec.get(key)
     if v is None:
         return None
@@ -47,7 +49,7 @@ def _float(rec: Dict[str, Any], key: str) -> Optional[float]:
         return None
 
 
-def _task_type(rec: Dict[str, Any]) -> str:
+def _task_type(rec: dict[str, Any]) -> str:
     """Classify a cycle record into a coarse task type.
 
     Uses the fields the funnel already records. Falls back to 'general' when
@@ -63,7 +65,7 @@ def _task_type(rec: Dict[str, Any]) -> str:
     return "general"
 
 
-def _execution_cost(rec: Dict[str, Any]) -> Optional[float]:
+def _execution_cost(rec: dict[str, Any]) -> Optional[float]:
     """Per-cycle execution cost proxy.
 
     Prefers an explicit ``execution_cost`` field if present (tokens, tool
@@ -85,7 +87,7 @@ def _execution_cost(rec: Dict[str, Any]) -> Optional[float]:
     )
 
 
-def _is_converging(costs: List[float]) -> bool:
+def _is_converging(costs: list[float]) -> bool:
     """Monotonic-convergence check for a task type's cost series.
 
     A task type is converging only if its cost is STRICTLY decreasing over
@@ -97,13 +99,13 @@ def _is_converging(costs: List[float]) -> bool:
     if len(costs) < 2:
         return False
     tol = 1e-6
-    for a, b in zip(costs, costs[1:]):
+    for a, b in pairwise(costs):
         if b >= a - tol:
             return False
     return True
 
 
-def _trend(costs: List[float]) -> str:
+def _trend(costs: list[float]) -> str:
     """Classify a cost series as converging / flat / diverging / n/a."""
     if len(costs) < 2:
         return "n/a"
@@ -116,9 +118,9 @@ def _trend(costs: List[float]) -> str:
 
 
 def compute_convergence(
-    records: List[Dict[str, Any]],
+    records: list[dict[str, Any]],
     min_occurrences: int = 3,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute the SEA-Eval convergence criterion across cycle records.
 
     Args:
@@ -132,7 +134,7 @@ def compute_convergence(
         review.
     """
     # Group cost observations by task type, in chronological order.
-    by_type: Dict[str, List[float]] = {}
+    by_type: dict[str, list[float]] = {}
     for rec in records:
         tt = _task_type(rec)
         cost = _execution_cost(rec)
@@ -140,8 +142,8 @@ def compute_convergence(
             continue
         by_type.setdefault(tt, []).append(cost)
 
-    per_type: Dict[str, Dict[str, Any]] = {}
-    non_converging: List[str] = []
+    per_type: dict[str, dict[str, Any]] = {}
+    non_converging: list[str] = []
     for tt, costs in sorted(by_type.items()):
         # A task type with too few occurrences is not judged at all — its
         # trend is "n/a" (insufficient signal), and it is never flagged.
@@ -165,7 +167,7 @@ def compute_convergence(
     }
 
 
-def _load_records(evolution_dir: Path) -> List[Dict[str, Any]]:
+def _load_records(evolution_dir: Path) -> list[dict[str, Any]]:
     """Load funnel records from the evolution dir's metrics.jsonl."""
     metrics_path = evolution_dir / "metrics.jsonl"
     if not metrics_path.exists():
@@ -173,7 +175,7 @@ def _load_records(evolution_dir: Path) -> List[Dict[str, Any]]:
     return load_records(metrics_path)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(

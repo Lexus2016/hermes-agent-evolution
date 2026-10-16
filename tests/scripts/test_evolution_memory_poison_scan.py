@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
-import evolution_memory_poison_scan as runner  # noqa: E402
+import evolution_memory_poison_scan as runner
 
 
 def _write(path: Path, content: str) -> Path:

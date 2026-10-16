@@ -45,7 +45,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any
 
@@ -162,7 +162,7 @@ def scan_memory_stores(targets: list[Path]) -> dict[str, Any]:
             files_with_findings += 1
             findings.extend(file_findings)
     return {
-        "scanned_at": datetime.now(timezone.utc).isoformat(),
+        "scanned_at": datetime.now(UTC).isoformat(),
         "files_scanned": files_scanned,
         "files_with_findings": files_with_findings,
         "findings": findings,
@@ -206,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     targets = [Path(t).expanduser() for t in args.target] or default_targets()
     try:
         summary = scan_memory_stores(targets)
-    except Exception as exc:  # noqa: BLE001 - a scheduled job must fail loudly
+    except Exception as exc:
         print(f"[memory-poison-scan] FAILED: {exc}", file=sys.stderr)
         return 1
 

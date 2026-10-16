@@ -78,6 +78,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from agent.prompt_builder import STEER_MARKER_CLOSE, STEER_MARKER_OPEN
+from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -114,13 +115,13 @@ class CorrectionRecord:
     session_id: str
     ts: str
     target: Optional[str] = None  # tool/skill name when known
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def _now_iso() -> str:
     from datetime import datetime, timezone
 
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize(text: str) -> str:
@@ -139,13 +140,13 @@ def _signature(kind: str, key_text: str, target: Optional[str]) -> str:
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
 
 
-def _iter_tool_messages(messages: List[Dict]):
+def _iter_tool_messages(messages: list[dict]):
     for m in messages or []:
         if isinstance(m, dict) and m.get("role") == "tool":
             yield m
 
 
-def _tool_text(m: Dict) -> str:
+def _tool_text(m: dict) -> str:
     c = m.get("content")
     if isinstance(c, str):
         return c
@@ -156,7 +157,7 @@ def _tool_text(m: Dict) -> str:
     return ""
 
 
-def _detect_deny(messages: List[Dict]) -> Optional[Dict[str, Any]]:
+def _detect_deny(messages: list[dict]) -> Optional[dict[str, Any]]:
     """Return {target, error} for the LAST genuine USER-denied tool result.
 
     A DENY correction must reflect a real user veto — NOT an automatic safety
@@ -189,7 +190,7 @@ def _detect_deny(messages: List[Dict]) -> Optional[Dict[str, Any]]:
     return found
 
 
-def _detect_steer(messages: List[Dict]) -> Optional[Dict[str, Any]]:
+def _detect_steer(messages: list[dict]) -> Optional[dict[str, Any]]:
     """Return {target, text} for the LAST mid-turn steer, else None."""
     found = None
     for m in _iter_tool_messages(messages):
@@ -206,7 +207,7 @@ def _detect_steer(messages: List[Dict]) -> Optional[Dict[str, Any]]:
 
 
 def detect_correction(
-    messages: List[Dict],
+    messages: list[dict],
     *,
     interrupted: bool,
     interrupt_message: Optional[str],
@@ -332,7 +333,7 @@ class CorrectionLearner:
 
     def record(
         self, rec: CorrectionRecord, *, remember: bool = False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Register a detected correction and apply the generalization guard.
 
         Returns ``{"tier", "durable", "provenance_id", "sightings", "reason"}``.
@@ -359,7 +360,7 @@ class CorrectionLearner:
 
     def _record_inner(
         self, rec: CorrectionRecord, *, remember: bool
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         # 1. Update the recurrence tracker (distinct sessions per signature).
         recurrence = self._read_json(self._recurrence_path, {})
         slot = recurrence.get(rec.signature) or {"sessions": [], "kind": rec.kind}
@@ -519,10 +520,10 @@ class CorrectionLearner:
 
     # -- ledger queries -----------------------------------------------------
 
-    def list_durable(self) -> List[Dict[str, Any]]:
+    def list_durable(self) -> list[dict[str, Any]]:
         return self._read_json(self._learned_path, [])
 
-    def get_durable(self, provenance_id: str) -> Optional[Dict[str, Any]]:
+    def get_durable(self, provenance_id: str) -> Optional[dict[str, Any]]:
         for e in self.list_durable():
             if e.get("provenance_id") == provenance_id:
                 return e
@@ -577,9 +578,9 @@ class CorrectionLearner:
 
 
 __all__ = [
-    "CorrectionRecord",
-    "CorrectionLearner",
-    "detect_correction",
-    "RECURRENCE_THRESHOLD",
     "DURABLE_MEMORY_TARGET",
+    "RECURRENCE_THRESHOLD",
+    "CorrectionLearner",
+    "CorrectionRecord",
+    "detect_correction",
 ]

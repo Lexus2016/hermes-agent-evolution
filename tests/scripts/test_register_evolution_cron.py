@@ -109,7 +109,7 @@ class TestNoAgentJobs:
         import cron.jobs as jobs_mod
 
         monkeypatch.setattr(jobs_mod, "create_job", fake_create_job)
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
 
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
 
@@ -136,7 +136,7 @@ class TestNoAgentJobs:
 
         import cron.jobs as jobs_mod
 
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
 
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
         assert rc == 2  # registration failure reported
@@ -445,7 +445,7 @@ class TestDynamicInferenceRouting:
 
         import cron.jobs as jobs_mod
 
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
         monkeypatch.setattr(
             jobs_mod,
             "create_job",
@@ -804,7 +804,7 @@ class TestSkillToolsetPreflightRegistration:
         import cron.jobs as jobs_mod
 
         monkeypatch.setattr(jobs_mod, "create_job", fake_create_job)
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
 
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
         return rc, created
@@ -876,7 +876,7 @@ class TestCadenceAndWriteGate:
             "create_job",
             lambda **kw: created.append(kw) or {"id": "x", "name": kw["name"]},
         )
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
         assert rc == 0
         assert created == []
@@ -994,7 +994,7 @@ class TestCadenceAndWriteGate:
             "create_job",
             lambda **kw: created.append(kw) or {"id": "wd", "name": kw["name"]},
         )
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
         assert rc == 0
         assert len(created) == 1

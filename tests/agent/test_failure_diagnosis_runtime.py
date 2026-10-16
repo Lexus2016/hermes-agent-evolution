@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Executable-seam runtime tests for #1029/#1030 multi-hypothesis diagnosis.
 
 Drive the real ``AIAgent`` tool path (``_execute_tool_calls_sequential`` ->

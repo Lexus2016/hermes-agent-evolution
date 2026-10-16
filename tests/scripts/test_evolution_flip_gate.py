@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for the example-level flip gate (issue #1446, Child B of #1308)."""
 
 import json
@@ -7,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_flip_gate import (  # noqa: E402
+from evolution_flip_gate import (
     BLOCK,
     FIX,
     HELD,

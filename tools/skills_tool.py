@@ -484,7 +484,7 @@ def _skill_readiness(frontmatter: dict[str, Any], skill_name: str) -> tuple[dict
 
 
 
-def _normalize_schema_examples(value: Any) -> List[Any]:
+def _normalize_schema_examples(value: Any) -> list[Any]:
     """Coerce a raw frontmatter ``examples`` value into a clean list.
 
     Accepts a single example (str/dict) or a list of them. Blank strings and
@@ -494,7 +494,7 @@ def _normalize_schema_examples(value: Any) -> List[Any]:
     if not value:
         return []
     items = value if isinstance(value, list) else [value]
-    examples: List[Any] = []
+    examples: list[Any] = []
     for item in items:
         if isinstance(item, dict):
             examples.append(item)
@@ -503,7 +503,7 @@ def _normalize_schema_examples(value: Any) -> List[Any]:
     return examples
 
 
-def extract_skill_schema(frontmatter: Dict[str, Any]) -> Dict[str, Any]:
+def extract_skill_schema(frontmatter: dict[str, Any]) -> dict[str, Any]:
     """Extract the structured invocation schema declared in skill frontmatter.
 
     This is the middle progressive-disclosure tier (issue #303, child of #229):
@@ -513,7 +513,7 @@ def extract_skill_schema(frontmatter: Dict[str, Any]) -> Dict[str, Any]:
     it needs (``required_environment_variables``, surfaced here read-only), and a
     few usage ``examples`` — without paying for the whole instruction body.
     """
-    schema: Dict[str, Any] = {}
+    schema: dict[str, Any] = {}
 
     inputs = frontmatter.get("inputs")
     if inputs:
@@ -534,7 +534,7 @@ def extract_skill_schema(frontmatter: Dict[str, Any]) -> Dict[str, Any]:
     return schema
 
 
-def _suggest_skill_names(name: str, all_names: List[str], n: int = 3) -> List[str]:
+def _suggest_skill_names(name: str, all_names: list[str], n: int = 3) -> list[str]:
     """Closest skill-name matches for a missing/renamed skill (#232).
 
     A renamed or mistyped skill's requested name is near its real name, so a
@@ -548,7 +548,7 @@ def _suggest_skill_names(name: str, all_names: List[str], n: int = 3) -> List[st
         return []
     q = name.lower()
     q_leaf = q.rsplit("/", 1)[-1]
-    scored: List[Tuple[float, str]] = []
+    scored: list[tuple[float, str]] = []
     for cand in all_names:
         c = cand.lower()
         c_leaf = c.rsplit("/", 1)[-1]
@@ -652,7 +652,7 @@ def _log_security_warnings(name: str, skill_md: Path, content: str, all_dirs, ac
 
 
 def skill_view(
-    name: str, file_path: str = None, task_id: str = None, preprocess: bool = True,
+    name: str, file_path: str | None = None, task_id: str | None = None, preprocess: bool = True,
     schema_only: bool = False) -> str:
     """View a skill (SKILL.md) or a file within its directory, as JSON. ``name`` is a skill name
     or path ("axolotl", "03-fine-tuning/axolotl"); "plugin:skill" resolves plugin-provided
@@ -949,7 +949,7 @@ def _build_skill_graph():
     return SkillGraph.from_skills_dirs(dirs)
 
 
-def skill_relationships(name: str = None) -> str:
+def skill_relationships(name: str | None = None) -> str:
     """Report the dependency/composition/governance graph around skill(s)."""
     try:
         graph = _build_skill_graph()
@@ -1058,10 +1058,10 @@ registry.register(
 # Names external plugins imported from this module before the Sep 2026 decomposition.
 # Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
 # The whole block is removed by reverting the commit that added it.
-from enum import Enum  # noqa: F401,E402
-from typing import Set  # noqa: F401,E402
-import re  # noqa: F401,E402
-import threading  # noqa: F401,E402
+from enum import Enum
+from typing import Set
+import re
+import threading
 
 
 _PLUGIN_COMPAT_LAZY = {

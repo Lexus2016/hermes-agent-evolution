@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_pre_pr_test_runner import (  # noqa: E402
+from evolution_pre_pr_test_runner import (
     DEFAULT_FALLBACK_KWARGS,
     DEFAULT_FALLBACK_TIMEOUT,
     DEFAULT_TIMEOUT,

@@ -93,7 +93,7 @@ def _dumps(payload: dict[str, Any]) -> str:
 
 _MAX_CONSECUTIVE_CRON_FAILURES = 3
 _CRON_RETRY_WINDOW_SECONDS = 300.0  # failures older than this are forgotten
-_cron_failure_tracker: Dict[str, List[float]] = {}
+_cron_failure_tracker: dict[str, list[float]] = {}
 _cron_failure_tracker_lock = threading.Lock()
 
 
@@ -151,7 +151,7 @@ def _format_cron_error(
     return "\n".join(parts)
 
 
-def _validate_cron_action(action: Optional[str]) -> Tuple[str, Optional[str]]:
+def _validate_cron_action(action: Optional[str]) -> tuple[str, Optional[str]]:
     """Normalize and validate the cron action parameter.
 
     Returns ``(normalized_action, error)``; ``error`` is ``None`` when valid.
@@ -1184,9 +1184,9 @@ def cronjob(
     monitor_url: Optional[str] = None,
     pin_inference: Optional[bool] = None,
     reasoning_effort: Optional[str] = None,
-    failure_deliver: Optional[Union[str, List[str]]] = None,
+    failure_deliver: Optional[str | list[str]] = None,
     all: Optional[bool] = None,
-    task_id: str = None,
+    task_id: str | None = None,
     session_id: Optional[str] = None,
     paused: bool = False,
     paused_reason: Optional[str] = None,

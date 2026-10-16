@@ -40,7 +40,7 @@ def _git(args, cwd, timeout: float = 10, **kwargs):
         env = noninteractive_git_env()
     stdin = kwargs.pop("stdin", subprocess.DEVNULL)
     return subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8",
-                          errors="replace", timeout=timeout, cwd=cwd, env=env, stdin=stdin, **kwargs)
+                          errors="replace", timeout=timeout, cwd=cwd, env=env, stdin=stdin, check=kwargs.pop("check", False), **kwargs)
 
 
 def _git_out(args, cwd, timeout: float = 10, **kwargs) -> Optional[str]:

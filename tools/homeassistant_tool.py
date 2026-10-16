@@ -44,7 +44,7 @@ _BLOCKED_DOMAINS = frozenset({
 })
 
 
-def _get_headers(token: str = "") -> Dict[str, str]:
+def _get_headers(token: str = "") -> dict[str, str]:
     """Return authorization headers for HA REST API."""
     if not token:
         _, token = _get_config()
@@ -55,7 +55,7 @@ async def _api_json(method: str, path: str, timeout: float, payload: Any = None)
     """One HA REST call (GET or POST JSON) that raises on HTTP errors and returns the JSON body."""
     import aiohttp
     hass_url, hass_token = _get_config()
-    kwargs: Dict[str, Any] = {"headers": _get_headers(hass_token), "timeout": aiohttp.ClientTimeout(total=timeout)}
+    kwargs: dict[str, Any] = {"headers": _get_headers(hass_token), "timeout": aiohttp.ClientTimeout(total=timeout)}
     if method == "POST":
         kwargs["json"] = payload
     async with aiohttp.ClientSession() as session:
@@ -65,7 +65,7 @@ async def _api_json(method: str, path: str, timeout: float, payload: Any = None)
 
 
 # ── async helpers (called from sync handlers via _run_async) ─────────────────
-def _filter_and_summarize(states: list, domain: Optional[str] = None, area: Optional[str] = None) -> Dict:
+def _filter_and_summarize(states: list, domain: Optional[str] = None, area: Optional[str] = None) -> dict:
     """Filter raw HA states by domain/area (area matches friendly_name or area attr) and compact them."""
     if domain:
         states = [s for s in states if s.get("entity_id", "").startswith(f"{domain}.")]
@@ -83,26 +83,26 @@ def _filter_and_summarize(states: list, domain: Optional[str] = None, area: Opti
     return {"count": len(entities), "entities": entities}
 
 
-async def _async_list_entities(domain: Optional[str] = None, area: Optional[str] = None) -> Dict[str, Any]:
+async def _async_list_entities(domain: Optional[str] = None, area: Optional[str] = None) -> dict[str, Any]:
     return _filter_and_summarize(await _api_json("GET", "/api/states", 15), domain, area)
 
 
-async def _async_get_state(entity_id: str) -> Dict[str, Any]:
+async def _async_get_state(entity_id: str) -> dict[str, Any]:
     data = await _api_json("GET", f"/api/states/{entity_id}", 10)
     return {
         "entity_id": data["entity_id"], "state": data["state"], "attributes": data.get("attributes", {}),
         "last_changed": data.get("last_changed"), "last_updated": data.get("last_updated")}
 
 
-def _build_service_payload(entity_id: Optional[str] = None, data: Optional[Dict[str, Any]] = None) -> Dict:
+def _build_service_payload(entity_id: Optional[str] = None, data: Optional[dict[str, Any]] = None) -> dict:
     """JSON payload for a HA service call; ``entity_id`` overrides data["entity_id"]."""
-    payload: Dict[str, Any] = dict(data or {})
+    payload: dict[str, Any] = dict(data or {})
     if entity_id:
         payload["entity_id"] = entity_id
     return payload
 
 
-def _parse_service_response(domain: str, service: str, result: Any) -> Dict[str, Any]:
+def _parse_service_response(domain: str, service: str, result: Any) -> dict[str, Any]:
     affected = []
     if isinstance(result, list):
         affected = [{"entity_id": s.get("entity_id", ""), "state": s.get("state", "")} for s in result]
@@ -110,14 +110,14 @@ def _parse_service_response(domain: str, service: str, result: Any) -> Dict[str,
 
 
 async def _async_call_service(
-    domain: str, service: str, entity_id: Optional[str] = None, data: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    domain: str, service: str, entity_id: Optional[str] = None, data: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     result = await _api_json(
         "POST", f"/api/services/{domain}/{service}", 15, _build_service_payload(entity_id, data))
     return _parse_service_response(domain, service, result)
 
 
-async def _async_list_services(domain: Optional[str] = None) -> Dict[str, Any]:
+async def _async_list_services(domain: Optional[str] = None) -> dict[str, Any]:
     """Available services, optionally filtered by domain, compacted for context."""
     services = await _api_json("GET", "/api/services", 15)
     if domain:
@@ -126,7 +126,7 @@ async def _async_list_services(domain: Optional[str] = None) -> Dict[str, Any]:
     for svc_domain in services:
         domain_services = {}
         for svc_name, svc_info in svc_domain.get("services", {}).items():
-            svc_entry: Dict[str, Any] = {"description": svc_info.get("description", "")}
+            svc_entry: dict[str, Any] = {"description": svc_info.get("description", "")}
             fields = svc_info.get("fields", {})
             if fields:
                 svc_entry["fields"] = {

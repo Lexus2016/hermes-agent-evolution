@@ -39,7 +39,7 @@ import argparse
 import hashlib
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any
 
@@ -230,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
             baseline_path.write_text(
                 json.dumps(
                     {
-                        "scanned_at": datetime.now(timezone.utc).isoformat(),
+                        "scanned_at": datetime.now(UTC).isoformat(),
                         "roots": [str(r) for r in roots],
                         "files": current,
                     },
@@ -258,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
 
     mutations = detect_mutations(baseline, current)
     summary = {
-        "scanned_at": datetime.now(timezone.utc).isoformat(),
+        "scanned_at": datetime.now(UTC).isoformat(),
         "baseline": str(baseline_path),
         "roots": [str(r) for r in roots],
         "files_baselined": len(baseline),

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for SkillProx Slice 1 — re-execution verify primitive (#2777)."""
 
 from evolution.lib.skill_prox import ReExecutionVerdict, verify_skill_edit
@@ -11,7 +10,7 @@ def _runner(body: str, inp: int) -> bool:
 
 def test_passes_when_edit_reruns_clean_on_all_inputs():
     body = "handle 1"
-    edit = lambda b: b + " and 2"  # noqa: E731
+    edit = lambda b: b + " and 2"
     verdict = verify_skill_edit(body, edit, [1, 2], _runner)
     assert verdict.passed is True
     assert verdict.per_input == {"0": True, "1": True}
@@ -20,7 +19,7 @@ def test_passes_when_edit_reruns_clean_on_all_inputs():
 
 def test_fails_when_any_input_fails_on_rerun():
     body = "handle 1"
-    edit = lambda b: b + " and 2"  # noqa: E731
+    edit = lambda b: b + " and 2"
     verdict = verify_skill_edit(body, edit, [1, 2, 3], _runner)
     assert verdict.passed is False
     assert verdict.per_input["2"] is False  # input 3 not handled
@@ -63,7 +62,7 @@ def test_verdict_is_a_dataclass():
 
 # ── Slice 2: accept/reject memory (#2778) ──────────────────────────────
 
-from evolution.lib.skill_prox import (  # noqa: E402
+from evolution.lib.skill_prox import (
     edit_key,
     is_rejected,
     record_verdict,

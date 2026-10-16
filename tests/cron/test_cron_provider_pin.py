@@ -88,7 +88,7 @@ def _run_with_current_provider(job, current_provider, tmp_path):
 
     Returns (success, output, final_response, error, agent_constructed).
     """
-    fake_db = MagicMock()
+    _fake_db = MagicMock()
     with patch("cron.scheduler._hermes_home", tmp_path), \
          patch("cron.scheduler._resolve_origin", return_value=None), \
          patch("hermes_cli.env_loader.load_hermes_dotenv"), \
@@ -117,7 +117,7 @@ class TestProviderDriftGuard:
     def test_a_unpinned_snapshot_matches_runs_normally(self, tmp_path):
         """(a) Unpinned job whose snapshot == current provider → runs normally."""
         job = _base_job(provider_snapshot="openrouter")
-        success, output, final_response, error, agent_constructed = \
+        success, _output, final_response, error, agent_constructed = \
             _run_with_current_provider(job, "openrouter", tmp_path)
 
         assert success is True
@@ -133,7 +133,7 @@ class TestProviderDriftGuard:
         user to pin.
         """
         job = _base_job(provider_snapshot="openrouter")
-        success, output, final_response, error, agent_constructed = \
+        success, output, _final_response, error, agent_constructed = \
             _run_with_current_provider(job, "nous", tmp_path)
 
         # Fail closed: no agent constructed, no inference call.
@@ -164,7 +164,7 @@ class TestProviderDriftGuard:
         # A job dict that predates the field entirely (key absent, not None).
         job = _base_job()
         job.pop("provider_snapshot", None)
-        success, output, final_response, error, agent_constructed = \
+        success, _output, _final_response, error, agent_constructed = \
             _run_with_current_provider(job, "nous", tmp_path)
 
         assert success is True
@@ -174,7 +174,7 @@ class TestProviderDriftGuard:
     def test_c2_snapshot_none_runs_backcompat(self, tmp_path):
         """(c') Job with provider_snapshot explicitly None → runs (back-compat)."""
         job = _base_job(provider_snapshot=None)
-        success, output, final_response, error, agent_constructed = \
+        success, _output, _final_response, error, agent_constructed = \
             _run_with_current_provider(job, "nous", tmp_path)
 
         assert success is True
@@ -203,7 +203,7 @@ class TestProviderDriftGuard:
         job = _base_job(provider="openrouter", provider_snapshot="anthropic")
         # Current resolution differs from the (stale) snapshot, but the job is
         # pinned, so the guard must not engage.
-        success, output, final_response, error, agent_constructed = \
+        success, _output, _final_response, error, agent_constructed = \
             _run_with_current_provider(job, "nous", tmp_path)
 
         assert success is True
@@ -218,14 +218,14 @@ class TestCreateJobSnapshot:
     def _isolate_storage(monkeypatch):
         """Patch cron.jobs storage so create_job never touches the real store."""
         import contextlib
-        import cron.jobs as jobs
+        from cron import jobs
 
         @contextlib.contextmanager
         def _noop_lock():
             yield
 
         monkeypatch.setattr(jobs, "_jobs_lock", _noop_lock, raising=True)
-        monkeypatch.setattr(jobs, "load_jobs", lambda: [], raising=True)
+        monkeypatch.setattr(jobs, "load_jobs", list, raising=True)
         monkeypatch.setattr(jobs, "save_jobs", lambda j: None, raising=True)
         return jobs
 
@@ -342,7 +342,7 @@ def _run_with_current_provider_and_model(
     if cron_lines:
         config_yaml += "cron:\n" + "\n".join(cron_lines) + "\n"
     (tmp_path / "config.yaml").write_text(config_yaml)
-    fake_db = MagicMock()
+    _fake_db = MagicMock()
     with patch("cron.scheduler._hermes_home", tmp_path), \
          patch("cron.scheduler._get_hermes_home", return_value=tmp_path), \
          patch("cron.scheduler._resolve_origin", return_value=None), \
@@ -378,7 +378,7 @@ class TestModelDriftGuard:
             provider_snapshot="openrouter",
             model_snapshot="llama-3.3-70b-instruct:free",
         )
-        success, output, final_response, error, agent_constructed = \
+        success, output, _final_response, error, agent_constructed = \
             _run_with_current_provider_and_model(
                 job, "openrouter", "claude-fable-5", tmp_path
             )
@@ -416,7 +416,7 @@ class TestModelDriftGuard:
     def test_no_model_snapshot_backcompat(self, tmp_path):
         # Pre-existing job without model_snapshot → no model-drift skip.
         job = _base_job(provider_snapshot="openrouter")  # no model_snapshot key set to a value
-        success, output, final_response, error, agent_constructed = \
+        success, _output, _final_response, _error, agent_constructed = \
             _run_with_current_provider_and_model(
                 job, "openrouter", "claude-fable-5", tmp_path
             )
@@ -429,7 +429,7 @@ class TestModelDriftGuard:
             provider_snapshot="old-provider",
             model_snapshot="old-model",
         )
-        success, output, final_response, error, agent_constructed = \
+        success, _output, final_response, error, agent_constructed = \
             _run_with_current_provider_and_model(
                 job,
                 "new-provider",
@@ -456,7 +456,7 @@ class TestCronFleetDefaultModel:
             provider_snapshot="openrouter",
             model_snapshot="llama-3.3-70b-instruct:free",
         )
-        success, output, final_response, error, agent_constructed = \
+        success, _output, final_response, _error, agent_constructed = \
             _run_with_current_provider_and_model(
                 job,
                 "openrouter",
@@ -475,7 +475,7 @@ class TestCronFleetDefaultModel:
             model_snapshot="old-model",
             model="my-pinned-model",
         )
-        success, output, final_response, error, agent_constructed = \
+        success, _output, _final_response, _error, agent_constructed = \
             _run_with_current_provider_and_model(
                 job,
                 "openrouter",
@@ -506,7 +506,7 @@ class TestRuntimeResolutionTargetModel:
                 "api_mode": "chat_completions",
             }
 
-        fake_db = MagicMock()
+        _fake_db = MagicMock()
         with patch("cron.scheduler._hermes_home", tmp_path), \
              patch("cron.scheduler._resolve_origin", return_value=None), \
              patch("hermes_cli.env_loader.load_hermes_dotenv"), \
@@ -536,7 +536,7 @@ class TestResnapshot:
         """Install an in-memory cron job store backed by a real list so
         resnapshot functions can load/save against it."""
         import contextlib
-        import cron.jobs as jobs
+        from cron import jobs
 
         store = [dict(j) for j in initial_jobs]  # deep-ish copy per job
 
@@ -591,7 +591,7 @@ class TestResnapshot:
     def test_resnapshot_pinned_job_keeps_none_snapshot(self, monkeypatch, tmp_path):
         # A fully-pinned job already carries None snapshots; resnapping must not
         # clobber them into a global default.
-        jobs_mod, store = self._install_store(
+        jobs_mod, _store = self._install_store(
             monkeypatch,
             [
                 self._make_job(

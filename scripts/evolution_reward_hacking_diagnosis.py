@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Reward-hacking trajectory diagnosis for the evolution eval pipeline (issue #1165).
 
 The genuinely-new element of the decoupled Benchmark/Harness/Environment proposal
@@ -31,9 +30,9 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
 __all__ = [
-    "RewardHackSignal",
     "RewardHackFinding",
     "RewardHackReport",
+    "RewardHackSignal",
     "diagnose_trajectory",
     "evaluate",
     "main",
@@ -43,7 +42,7 @@ __all__ = [
 @dataclass(frozen=True)
 class RewardHackSignal:
     key: str
-    pattern: "re.Pattern[str]"
+    pattern: re.Pattern[str]
     weight: float
     description: str
 

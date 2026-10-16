@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """AgentOpt Slice 2 — per-combo aggregation + Pareto frontier (#2742).
 
 Child of #2695. Deterministic aggregation over the Slice-1 telemetry JSONL
@@ -26,12 +25,12 @@ from typing import Any, Dict, Iterable, List, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from agent.agentopt_telemetry import _store_path  # noqa: E402
+from agent.agentopt_telemetry import _store_path
 
 ComboKey = str  # "model-a+model-b" — sorted, deduplicated, "+"-joined
 
 
-def combo_key(record: Dict[str, Any]) -> ComboKey:
+def combo_key(record: dict[str, Any]) -> ComboKey:
     """Identity of the model combination that served one call."""
     raw = record.get("combo")
     models = (
@@ -42,7 +41,7 @@ def combo_key(record: Dict[str, Any]) -> ComboKey:
     return "+".join(sorted(set(models)))
 
 
-def task_class(record: Dict[str, Any]) -> str:
+def task_class(record: dict[str, Any]) -> str:
     """Task class of one call — combo stats are reported per class."""
     for field in ("task_class", "task", "tool"):
         value = record.get(field)
@@ -51,13 +50,13 @@ def task_class(record: Dict[str, Any]) -> str:
     return "default"
 
 
-def load_records(store: Path) -> List[Dict[str, Any]]:
+def load_records(store: Path) -> list[dict[str, Any]]:
     """Parse the Slice-1 JSONL; malformed lines are skipped, never fatal."""
     try:
         lines = store.read_text(encoding="utf-8-sig").splitlines()
     except OSError:
         return []
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for line in lines:
         try:
             rec = json.loads(line)
@@ -68,9 +67,9 @@ def load_records(store: Path) -> List[Dict[str, Any]]:
     return out
 
 
-def aggregate(records: Iterable[Dict[str, Any]]) -> Dict[str, Dict[ComboKey, Dict[str, Any]]]:
+def aggregate(records: Iterable[dict[str, Any]]) -> dict[str, dict[ComboKey, dict[str, Any]]]:
     """Per task class × combo: calls, cost, mean latency, success rate."""
-    acc: Dict[str, Dict[ComboKey, Dict[str, Any]]] = {}
+    acc: dict[str, dict[ComboKey, dict[str, Any]]] = {}
     for rec in records:
         cls, combo = task_class(rec), combo_key(rec)
         bucket = acc.setdefault(cls, {}).setdefault(
@@ -87,8 +86,8 @@ def aggregate(records: Iterable[Dict[str, Any]]) -> Dict[str, Dict[ComboKey, Dic
             pass
         if str(rec.get("outcome") or "").lower() in ("ok", "success", "true"):
             bucket["ok"] += 1
-    for cls in acc:
-        for combo, bucket in acc[cls].items():
+    for cls, combos in acc.items():
+        for combo, bucket in combos.items():
             calls = bucket["calls"]
             acc[cls][combo] = {
                 "calls": calls,
@@ -99,7 +98,7 @@ def aggregate(records: Iterable[Dict[str, Any]]) -> Dict[str, Dict[ComboKey, Dic
     return acc
 
 
-def _dominates(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+def _dominates(a: dict[str, Any], b: dict[str, Any]) -> bool:
     """a dominates b: no worse on cost/latency/success, strictly better somewhere."""
     return (
         a["cost"] <= b["cost"]
@@ -113,7 +112,7 @@ def _dominates(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     )
 
 
-def pareto_frontier(stats: Dict[ComboKey, Dict[str, Any]]) -> List[ComboKey]:
+def pareto_frontier(stats: dict[ComboKey, dict[str, Any]]) -> list[ComboKey]:
     """Combos not dominated by any other — deterministic (sorted) order."""
     frontier = [
         combo
@@ -125,7 +124,7 @@ def pareto_frontier(stats: Dict[ComboKey, Dict[str, Any]]) -> List[ComboKey]:
     return sorted(frontier)
 
 
-def build_report(records: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+def build_report(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate + frontier per task class — the Slice-3 router baseline."""
     agg = aggregate(records)
     return {
@@ -136,7 +135,7 @@ def build_report(records: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     path = Path(argv[1]) if len(argv) > 1 else _store_path()
     report = build_report(load_records(path))
     print(json.dumps(report, indent=2, sort_keys=True))

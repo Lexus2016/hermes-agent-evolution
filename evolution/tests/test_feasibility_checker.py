@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Comprehensive pytest suite for :mod:`feasibility_checker` (issue #1031).
 
 Covers:

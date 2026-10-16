@@ -46,14 +46,14 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 # Reuse the EXACT normalization idiom from the local dedup cache so both stages
 # canonicalize titles identically (tag-strip + lowercase + punctuation-collapse).
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
-from evolution_dedup import normalize_title  # noqa: E402
+from evolution_dedup import normalize_title
 
 # HIGH by design: skip ONLY a near-exact title overlap. Lowering this re-opens
 # the fabricated-rejection failure mode (#83/#101) — keep the bar high.
 DEFAULT_THRESHOLD = 0.85
 
 
-def _tokens(title: str) -> List[str]:
+def _tokens(title: str) -> list[str]:
     """Normalized, de-duplicated word tokens of a title (order-independent)."""
     norm = normalize_title(title)
     # normalize_title already lowercases and reduces non-word runs to single
@@ -95,7 +95,7 @@ class GateDecision:
     reason: str
     matched_issue: Optional[int] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "decision": self.decision,
             "matched_issue": self.matched_issue,
@@ -105,12 +105,12 @@ class GateDecision:
 
 
 def _best_open_match(
-    draft_title: str, open_issues: Sequence[Dict[str, Any]]
-) -> tuple[float, Optional[Dict[str, Any]]]:
+    draft_title: str, open_issues: Sequence[dict[str, Any]]
+) -> tuple[float, Optional[dict[str, Any]]]:
     """Best (score, issue) over OPEN issues only. Closed issues are out of scope
     for this gate (handled in SKILL.md), so they never produce a skip signal."""
     best_score = 0.0
-    best_issue: Optional[Dict[str, Any]] = None
+    best_issue: Optional[dict[str, Any]] = None
     for issue in open_issues:
         state = str(issue.get("state", "open")).lower()
         if state != "open":
@@ -126,8 +126,8 @@ def _best_open_match(
 
 
 def decide(
-    draft: Dict[str, Any],
-    open_issues: Sequence[Dict[str, Any]],
+    draft: dict[str, Any],
+    open_issues: Sequence[dict[str, Any]],
     *,
     threshold: float = DEFAULT_THRESHOLD,
 ) -> GateDecision:
@@ -189,8 +189,8 @@ def _as_int(value: Any) -> Optional[int]:
 
 # ── IO boundary (injectable seam) ───────────────────────────────────────────────
 def fetch_open_issues(
-    repo: str, *, limit: int = 300, runner: Optional[Callable[[List[str]], str]] = None
-) -> List[Dict[str, Any]]:
+    repo: str, *, limit: int = 300, runner: Optional[Callable[[list[str]], str]] = None
+) -> list[dict[str, Any]]:
     """Fetch currently-OPEN issues via ``gh`` (the only networked path).
 
     ``runner`` is injectable so tests can supply canned JSON without a real
@@ -220,7 +220,7 @@ def fetch_open_issues(
         return []
     if not isinstance(data, list):
         return []
-    issues: List[Dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
     for item in data:
         if isinstance(item, dict) and item.get("title"):
             issues.append(
@@ -233,7 +233,7 @@ def fetch_open_issues(
     return issues
 
 
-def _default_runner(cmd: List[str]) -> str:
+def _default_runner(cmd: list[str]) -> str:
     proc = subprocess.run(
         cmd,
         capture_output=True,
@@ -245,7 +245,7 @@ def _default_runner(cmd: List[str]) -> str:
     return proc.stdout
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     """CLI for the SKILL.md hook:
 
         evolution_pre_submit_triage.py decide "<draft title>" [--repo R] [--threshold T]

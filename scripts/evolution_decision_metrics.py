@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-__all__ = ["compute_run_metrics", "scan_trajectories", "main"]
+__all__ = ["compute_run_metrics", "main", "scan_trajectories"]
 
 
 def _default_trajectory_dir() -> Path:
@@ -35,7 +35,7 @@ def _default_trajectory_dir() -> Path:
     )
 
 
-def compute_run_metrics(model_calls: Any) -> Dict[str, Any]:
+def compute_run_metrics(model_calls: Any) -> dict[str, Any]:
     """Per-run tool-call rate and safety-refusal rate from ``model_calls``.
 
     Returns ``{}`` when the run carries no usable ``model_calls`` (missing,
@@ -74,16 +74,16 @@ def compute_run_metrics(model_calls: Any) -> Dict[str, Any]:
     }
 
 
-def _model_calls_from_entry(entry: Dict[str, Any]) -> Any:
+def _model_calls_from_entry(entry: dict[str, Any]) -> Any:
     if isinstance(entry, dict) and "model_calls" in entry:
         return entry["model_calls"]
     return None
 
 
-def scan_trajectories(trajectory_dir: Path) -> List[Dict[str, Any]]:
+def scan_trajectories(trajectory_dir: Path) -> list[dict[str, Any]]:
     """Scan JSONL trajectory files, one entry per line; skip unreadable or
     unmeasured entries. Returns one dict per measured run."""
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     if not trajectory_dir.is_dir():
         return results
     for path in sorted(trajectory_dir.glob("*.jsonl")):
@@ -107,7 +107,7 @@ def scan_trajectories(trajectory_dir: Path) -> List[Dict[str, Any]]:
     return results
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     args = argv[1:]
     trajectory_dir = _default_trajectory_dir()
     if "--dir" in args and args.index("--dir") + 1 < len(args):

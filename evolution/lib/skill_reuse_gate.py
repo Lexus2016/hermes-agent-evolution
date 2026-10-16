@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Skill-distiller reuse gate + quarantine + versioned rollback (#2574).
 
 Misevolution guardrail (parent #2538; arXiv:2608.12851 "Practice Makes
@@ -25,7 +24,7 @@ import json
 import logging
 import re
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -63,15 +62,15 @@ class ReuseGateVerdict:
 
     skill_name: str
     safe: bool
-    reasons: List[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
     quarantined: bool = False
     version: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ReuseGateVerdict":
+    def from_dict(cls, d: dict[str, Any]) -> ReuseGateVerdict:
         return cls(
             skill_name=str(d.get("skill_name", "")),
             safe=bool(d.get("safe", True)),
@@ -82,7 +81,7 @@ class ReuseGateVerdict:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _content_hash(text: str) -> str:
@@ -91,8 +90,8 @@ def _content_hash(text: str) -> str:
 
 def scan_skill_for_misevolution(
     skill_markdown: str,
-    source_chain: Optional[Sequence[Dict[str, Any]]] = None,
-) -> Tuple[bool, List[str]]:
+    source_chain: Optional[Sequence[dict[str, Any]]] = None,
+) -> tuple[bool, list[str]]:
     """Scan *skill_markdown* for misevolution content.
 
     Returns ``(safe, reasons)``. ``safe=False`` means the skill must be
@@ -107,7 +106,7 @@ def scan_skill_for_misevolution(
       (``>`` / ``|`` lines) or a source chain whose entries are all
       untrusted (per the SkillJack taxonomy in ``tools/skill_provenance``).
     """
-    reasons: List[str] = []
+    reasons: list[str] = []
     md = skill_markdown or ""
 
     for m in _SELF_PROPAGATION_RE.finditer(md):
@@ -149,7 +148,7 @@ class SkillReuseGate:
         skill_name: str,
         skill_markdown: str,
         reasons: Sequence[str],
-        source_chain: Optional[Sequence[Dict[str, Any]]] = None,
+        source_chain: Optional[Sequence[dict[str, Any]]] = None,
     ) -> Path:
         """Move an unsafe skill into the quarantine store.
 
@@ -192,7 +191,7 @@ class SkillReuseGate:
         self,
         skill_name: str,
         skill_markdown: str,
-        source_chain: Optional[Sequence[Dict[str, Any]]] = None,
+        source_chain: Optional[Sequence[dict[str, Any]]] = None,
     ) -> str:
         """Write a versioned snapshot of *skill_markdown* and return its version.
 
@@ -244,7 +243,7 @@ class SkillReuseGate:
         self,
         skill_name: str,
         skill_markdown: str,
-        source_chain: Optional[Sequence[Dict[str, Any]]] = None,
+        source_chain: Optional[Sequence[dict[str, Any]]] = None,
     ) -> ReuseGateVerdict:
         """Run the full reuse gate: scan, quarantine if unsafe, version always.
 

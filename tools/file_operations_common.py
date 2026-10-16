@@ -13,9 +13,9 @@ from typing import Any, ClassVar, Dict, List, Optional, Tuple
 def classify_file_error(
     error: Optional[str],
     *,
-    similar_files: Optional[List[str]] = None,
+    similar_files: Optional[list[str]] = None,
     structured_error: Optional[str] = None,
-) -> Optional[Tuple[str, str]]:
+) -> Optional[tuple[str, str]]:
     """Classify file operation errors into structured error_class and recovery guidance (#216)."""
     if not error:
         return None
@@ -197,7 +197,7 @@ def classify_file_error(
 # structured_error field but whose raw error string is generic (#1586).
 # Keys mirror the labels emitted by tools.fuzzy_match.classify_error /
 # format_structured_error ("Error type: <key> — ...").
-_STRUCTURED_SUBCLASS_RECOVERY: Dict[str, Tuple[str, str]] = {
+_STRUCTURED_SUBCLASS_RECOVERY: dict[str, tuple[str, str]] = {
     "indentation_mismatch": (
         "indentation_mismatch",
         "The text matches but the leading whitespace differs (spaces vs tabs, "
@@ -220,7 +220,7 @@ _STRUCTURED_SUBCLASS_RECOVERY: Dict[str, Tuple[str, str]] = {
 
 def _class_from_structured_error(
     structured_error: Optional[str],
-) -> Optional[Tuple[str, str]]:
+) -> Optional[tuple[str, str]]:
     """Extract a ``(error_class, recovery)`` from a fuzzy_match structured_error
     string, if it advertises a known sub-class (#1586)."""
     if not structured_error:
@@ -291,11 +291,11 @@ class PatchResult:
     """Result from patching a file."""
     success: bool = False
     diff: str = ""
-    files_modified: List[str] = field(default_factory=list)
-    files_created: List[str] = field(default_factory=list)
-    files_deleted: List[str] = field(default_factory=list)
-    similar_files: List[str] = field(default_factory=list)
-    lint: Optional[Dict[str, Any]] = None
+    files_modified: list[str] = field(default_factory=list)
+    files_created: list[str] = field(default_factory=list)
+    files_deleted: list[str] = field(default_factory=list)
+    similar_files: list[str] = field(default_factory=list)
+    lint: Optional[dict[str, Any]] = None
     lsp_diagnostics: Optional[str] = None  # see WriteResult.lsp_diagnostics
     error: Optional[str] = None
     # Success-shaped no-op: the edit was already present, nothing written; ``note`` says why.

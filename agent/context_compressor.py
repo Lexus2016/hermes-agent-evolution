@@ -2203,7 +2203,7 @@ _SYNTHETIC_DISPLAY_KINDS = frozenset(
 )
 
 
-def _is_runtime_authored_user_turn(msg: Dict[str, Any]) -> bool:
+def _is_runtime_authored_user_turn(msg: dict[str, Any]) -> bool:
     """True when a role="user" row was written by the runtime, not a human.
 
     Fails CLOSED: an unclassifiable row is treated as runtime-authored and
@@ -2214,7 +2214,7 @@ def _is_runtime_authored_user_turn(msg: Dict[str, Any]) -> bool:
         return True
     try:
         return bool(ContextCompressor._is_synthetic_compression_user_turn(msg))
-    except Exception:  # noqa: BLE001 - classification must never break compaction
+    except Exception:
         logger.debug("Synthetic-turn classification failed; refusing pin", exc_info=True)
         return True
 
@@ -2227,7 +2227,7 @@ _PINNED_CONSTRAINT_RE = re.compile(
 )
 
 
-def _is_pinned_constraint_message(msg: Dict[str, Any]) -> bool:
+def _is_pinned_constraint_message(msg: dict[str, Any]) -> bool:
     """Return True when *msg* carries the pinned-constraint signal."""
     if not isinstance(msg, dict):
         return False
@@ -2242,7 +2242,7 @@ def _is_pinned_constraint_message(msg: Dict[str, Any]) -> bool:
     return role == "system" and isinstance(content, str) and PINNED_CONSTRAINT_MARKER in content
 
 
-def _extract_pinned_constraints(messages: List[Dict[str, Any]]) -> list[str]:
+def _extract_pinned_constraints(messages: list[dict[str, Any]]) -> list[str]:
     """Extract the ordered set of pinned-constraint texts from *messages*."""
     constraints: list[str] = []
     seen: set[str] = set()
@@ -2287,7 +2287,7 @@ _PINNED_CONSTRAINT_REINJECT_HEADER = (
 
 def _pinned_constraint_survives(
     constraint_text: str,
-    compressed_messages: List[Dict[str, Any]],
+    compressed_messages: list[dict[str, Any]],
 ) -> bool:
     """Return True if *constraint_text* is sufficiently preserved in *compressed_messages*."""
     if not constraint_text or not constraint_text.strip():
@@ -2317,7 +2317,7 @@ def _neutralize_pinned_constraint_delimiters(text: str) -> str:
     )
 
 
-def _normalize_pinned_constraint_texts(text: str) -> List[str]:
+def _normalize_pinned_constraint_texts(text: str) -> list[str]:
     """Split OUR OWN re-injection envelope back into its constraints."""
     if not isinstance(text, str) or not text.strip():
         return []
@@ -2344,10 +2344,10 @@ def _pinned_constraint_dedupe_key(text: str) -> str:
     return " ".join((text or "").split()).casefold()
 
 
-def _bound_pinned_constraints(constraints: List[str]) -> List[str]:
+def _bound_pinned_constraints(constraints: list[str]) -> list[str]:
     """De-duplicate and cap *constraints*, oldest-first, deterministically."""
     seen: set[str] = set()
-    out: List[str] = []
+    out: list[str] = []
     used = 0
     for raw in constraints:
         if not isinstance(raw, str):
@@ -2373,7 +2373,7 @@ def _bound_pinned_constraints(constraints: List[str]) -> List[str]:
     return out
 
 
-def _demote_origin_for_spliced_summary(msg: Dict[str, Any]) -> None:
+def _demote_origin_for_spliced_summary(msg: dict[str, Any]) -> None:
     """Drop human provenance from a message the summary is spliced into."""
     if not isinstance(msg, dict):
         return
@@ -2382,9 +2382,9 @@ def _demote_origin_for_spliced_summary(msg: Dict[str, Any]) -> None:
 
 
 def _reinject_dropped_pinned_constraints(
-    pre_compression_messages: List[Dict[str, Any]],
-    compressed_messages: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
+    pre_compression_messages: list[dict[str, Any]],
+    compressed_messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Validate that all pinned constraints from *pre_compression_messages*
     survive in *compressed_messages*. Any dropped constraints are re-injected
     as a tagged system message.
@@ -2404,7 +2404,7 @@ def _reinject_dropped_pinned_constraints(
     )
 
     seen: set = set()
-    bodies: List[str] = []
+    bodies: list[str] = []
     for raw in dropped:
         for text in _normalize_pinned_constraint_texts(raw):
             if text not in seen:
@@ -2417,7 +2417,7 @@ def _reinject_dropped_pinned_constraints(
         f" {_PINNED_CONSTRAINT_CLOSE}"
         for b in bodies
     )
-    reinject_msg: Dict[str, Any] = {
+    reinject_msg: dict[str, Any] = {
         "role": "system",
         "content": f"{_PINNED_CONSTRAINT_REINJECT_HEADER}\n{body_lines}",
         PINNED_CONSTRAINT_METADATA_KEY: True,
@@ -3198,7 +3198,7 @@ class ContextCompressor(
 
     def start_parallel_compaction(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         current_tokens: int,
         focus_topic: Optional[str] = None,
     ) -> bool:
@@ -3218,8 +3218,8 @@ class ContextCompressor(
         )
 
     def try_apply_parallel_swap(
-        self, messages: List[Dict[str, Any]]
-    ) -> Optional[List[Dict[str, Any]]]:
+        self, messages: list[dict[str, Any]]
+    ) -> Optional[list[dict[str, Any]]]:
         """Check if parallel compaction completed and can be safely swapped in."""
         pc = getattr(self, "_parallel_compactor", None)
         if not pc:
@@ -3235,7 +3235,7 @@ class ContextCompressor(
         return None
 
     def read_precompaction_snapshot(
-        self, snapshot_path: Optional[Union[str, Path]] = None
+        self, snapshot_path: Optional[str | Path] = None
     ) -> Optional[Any]:
         """Read pre-compaction snapshot via attached ParallelCompactor."""
         pc = getattr(self, "_parallel_compactor", None)
@@ -3244,7 +3244,7 @@ class ContextCompressor(
         return None
 
     def read_precompaction_snapshot_text(
-        self, snapshot_path: Optional[Union[str, Path]] = None
+        self, snapshot_path: Optional[str | Path] = None
     ) -> Optional[str]:
         """Read pre-compaction snapshot text via attached ParallelCompactor."""
         pc = getattr(self, "_parallel_compactor", None)
@@ -3265,7 +3265,7 @@ class ContextCompressor(
                 self._context_store = None
         return self._context_store
 
-    def update_from_response(self, usage: Dict[str, Any]):
+    def update_from_response(self, usage: dict[str, Any]):
         """Update tracked token usage from API response."""
         self.last_prompt_tokens = usage.get("prompt_tokens", 0)
         self.last_completion_tokens = usage.get("completion_tokens", 0)

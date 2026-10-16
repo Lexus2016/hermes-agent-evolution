@@ -81,8 +81,8 @@ class CacheStats:
     misses: int = 0
     evictions: int = 0
     invalidations: int = 0
-    tool_hit_counts: Dict[str, int] = field(default_factory=dict)
-    tool_miss_counts: Dict[str, int] = field(default_factory=dict)
+    tool_hit_counts: dict[str, int] = field(default_factory=dict)
+    tool_miss_counts: dict[str, int] = field(default_factory=dict)
     
     def record_hit(self, tool_name: str) -> None:
         """Record a cache hit."""
@@ -109,7 +109,7 @@ class CacheStats:
             return 0.0
         return self.hits / total
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert stats to a dictionary for reporting."""
         return {
             "hits": self.hits,
@@ -129,7 +129,7 @@ class ToolCache:
         self,
         max_size: int = 1000,
         default_ttl: int = 300,
-        ttl_config: Optional[Dict[str, int]] = None,
+        ttl_config: Optional[dict[str, int]] = None,
         max_memory_mb: int = 100,
     ):
         """Initialize the tool cache.
@@ -147,8 +147,8 @@ class ToolCache:
         self._max_memory_mb = max_memory_mb
         self._lock = threading.RLock()
         self._stats = CacheStats()
-        self._invalidation_hooks: Dict[str, Set[str]] = {}
-        self._reverse_invalidation: Dict[str, Set[str]] = {}
+        self._invalidation_hooks: dict[str, set[str]] = {}
+        self._reverse_invalidation: dict[str, set[str]] = {}
         self._current_memory_bytes = 0
         
         # Register invalidation rules
@@ -184,7 +184,7 @@ class ToolCache:
     def generate_cache_key(
         self,
         tool_name: str,
-        tool_args: Dict[str, Any],
+        tool_args: dict[str, Any],
         effective_task_id: Optional[str] = None,
     ) -> str:
         """Generate a cache key from tool name and arguments.
@@ -220,7 +220,7 @@ class ToolCache:
         # Hash for shorter keys
         return hashlib.sha256(key_string.encode()).hexdigest()[:32]
     
-    def _normalize_args(self, args: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_args(self, args: dict[str, Any]) -> dict[str, Any]:
         """Normalize arguments for consistent cache key generation.
         
         Handles:
@@ -258,7 +258,7 @@ class ToolCache:
         """
         return self._ttl_config.get(tool_name, self._default_ttl)
     
-    def is_cacheable(self, tool_name: str, tool_args: Dict[str, Any]) -> bool:
+    def is_cacheable(self, tool_name: str, tool_args: dict[str, Any]) -> bool:
         """Determine if a tool call should be cached.
         
         Args:
@@ -284,7 +284,7 @@ class ToolCache:
     def get(
         self,
         tool_name: str,
-        tool_args: Dict[str, Any],
+        tool_args: dict[str, Any],
         effective_task_id: Optional[str] = None,
     ) -> Optional[str]:
         """Attempt to retrieve a cached result.
@@ -326,7 +326,7 @@ class ToolCache:
     def set(
         self,
         tool_name: str,
-        tool_args: Dict[str, Any],
+        tool_args: dict[str, Any],
         result: str,
         effective_task_id: Optional[str] = None,
     ) -> None:
@@ -375,7 +375,7 @@ class ToolCache:
     def invalidate(
         self,
         tool_name: str,
-        tool_args: Optional[Dict[str, Any]] = None,
+        tool_args: Optional[dict[str, Any]] = None,
         effective_task_id: Optional[str] = None,
     ) -> int:
         """Invalidate cache entries based on tool execution.
@@ -421,9 +421,9 @@ class ToolCache:
     def _should_invalidate_entry(
         self,
         source_tool: str,
-        source_args: Dict[str, Any],
+        source_args: dict[str, Any],
         entry: CacheEntry,
-        source_args_full: Dict[str, Any],
+        source_args_full: dict[str, Any],
     ) -> bool:
         """Determine if a cache entry should be invalidated.
         
@@ -468,12 +468,12 @@ class ToolCache:
             self._current_memory_bytes = 0
             logger.debug("Cache cleared")
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get current cache statistics."""
         with self._lock:
             return self._stats.to_dict()
     
-    def get_size_info(self) -> Dict[str, Any]:
+    def get_size_info(self) -> dict[str, Any]:
         """Get information about cache size."""
         with self._lock:
             return {
@@ -510,10 +510,10 @@ def reset_global_cache() -> None:
 
 def cached_tool_call(
     tool_name: str,
-    tool_args: Dict[str, Any],
+    tool_args: dict[str, Any],
     executor: Callable[[], str],
     effective_task_id: Optional[str] = None,
-) -> Tuple[str, bool]:
+) -> tuple[str, bool]:
     """Execute a tool call with caching.
     
     This is the main entry point for the caching layer.

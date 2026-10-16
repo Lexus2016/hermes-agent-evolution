@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
-def _split_path_parts(path: str) -> List[str]:
+def _split_path_parts(path: str) -> list[str]:
     return [p for p in path.replace("\\", "/").split("/") if p]
 
 
@@ -77,7 +77,7 @@ def _mirrored_test(path: str) -> Optional[str]:
     return os.path.join("tests", *parts[:-1], f"test_{stem}.py")
 
 
-def _tests_in_dir(directory: Path, stem: str, repo_root: Path) -> List[str]:
+def _tests_in_dir(directory: Path, stem: str, repo_root: Path) -> list[str]:
     """Find ``test_*<stem>*.py`` files in ``directory``."""
     if not directory.is_dir():
         return []
@@ -85,7 +85,7 @@ def _tests_in_dir(directory: Path, stem: str, repo_root: Path) -> List[str]:
     return sorted(str(p.relative_to(repo_root)) for p in directory.glob(pattern))
 
 
-def _collect_candidates(path: str, repo_root: Path) -> Tuple[List[str], List[str]]:
+def _collect_candidates(path: str, repo_root: Path) -> tuple[list[str], list[str]]:
     """Return (test_files, fallback_dirs) for one source path.
 
     ``fallback_dirs`` are broad test directories to use when no specific test file
@@ -94,7 +94,7 @@ def _collect_candidates(path: str, repo_root: Path) -> Tuple[List[str], List[str
     stem = _stem(path)
     parts = _split_path_parts(path)
 
-    candidates: List[str] = []
+    candidates: list[str] = []
 
     # 1. Mirrored layout.
     mirrored = _mirrored_test(path)
@@ -116,7 +116,7 @@ def _collect_candidates(path: str, repo_root: Path) -> Tuple[List[str], List[str
     candidates.extend(_tests_in_dir(test_dir, stem, repo_root))
 
     # Fallback directories.
-    fallbacks: List[str] = []
+    fallbacks: list[str] = []
     if parts:
         # If the source is in a package, map to tests/<package>/.
         candidate_dir = repo_root / "tests" / parts[0]
@@ -131,10 +131,10 @@ def _collect_candidates(path: str, repo_root: Path) -> Tuple[List[str], List[str
     return candidates, fallbacks
 
 
-def _uniq(seq: Sequence[str]) -> List[str]:
+def _uniq(seq: Sequence[str]) -> list[str]:
     """Deduplicate while preserving order."""
     seen = set()
-    out: List[str] = []
+    out: list[str] = []
     for s in seq:
         if s not in seen:
             seen.add(s)
@@ -145,7 +145,7 @@ def _uniq(seq: Sequence[str]) -> List[str]:
 def build_shard(
     changed_files: Sequence[str],
     repo_root: Optional[Path] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build a test shard from a list of changed file paths.
 
     Returns a dict with keys:
@@ -175,8 +175,8 @@ def build_shard(
                 "changed": changed_files,
             }
 
-    test_files: List[str] = []
-    fallback_dirs: List[str] = []
+    test_files: list[str] = []
+    fallback_dirs: list[str] = []
 
     for path in source_files:
         cands, falls = _collect_candidates(path, repo_root)
@@ -228,7 +228,7 @@ def build_shard(
     }
 
 
-def _find_changed_files(git_root: Path) -> List[str]:
+def _find_changed_files(git_root: Path) -> list[str]:
     """Read ``git diff --name-only HEAD`` to discover changed files."""
     import subprocess
 
@@ -247,7 +247,7 @@ def _find_changed_files(git_root: Path) -> List[str]:
     return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     repo_root = Path(os.environ.get("EVOLUTION_REPO_DIR", str(Path.cwd())))
 
     # If no positional args, infer from git diff.

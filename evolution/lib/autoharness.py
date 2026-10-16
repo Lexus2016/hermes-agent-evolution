@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """AUTOHARNESS: Automatic test harness synthesis for agent self-improvement (Issue #2250, Slice A #2516).
 
 Synthesizes executable evaluation harness specifications from a skill's declared
@@ -37,7 +36,7 @@ __all__ = [
     "synthesize_harness_spec",
 ]
 
-HARNESS_SPEC_JSON_SCHEMA: Dict[str, Any] = {
+HARNESS_SPEC_JSON_SCHEMA: dict[str, Any] = {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "HarnessSpec",
     "type": "object",
@@ -141,11 +140,11 @@ class HarnessAssertion:
     weight: float = 1.0
     description: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> HarnessAssertion:
+    def from_dict(cls, d: dict[str, Any]) -> HarnessAssertion:
         return cls(
             assertion_type=str(d.get("assertion_type", "output_contains")),
             target=str(d.get("target", "stdout")),
@@ -163,12 +162,12 @@ class TestCaseSpec:
 
     test_id: str
     name: str
-    input_data: Dict[str, Any] = field(default_factory=dict)
+    input_data: dict[str, Any] = field(default_factory=dict)
     expected_behavior: str = ""
-    assertions: List[HarnessAssertion] = field(default_factory=list)
+    assertions: list[HarnessAssertion] = field(default_factory=list)
     timeout_sec: float = 30.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "test_id": self.test_id,
             "name": self.name,
@@ -179,7 +178,7 @@ class TestCaseSpec:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> TestCaseSpec:
+    def from_dict(cls, d: dict[str, Any]) -> TestCaseSpec:
         raw_assertions = d.get("assertions", []) or []
         assertions = [
             HarnessAssertion.from_dict(a) if isinstance(a, dict) else a
@@ -201,12 +200,12 @@ class HarnessSpec:
 
     skill_name: str
     skill_category: str
-    claimed_capabilities: List[str] = field(default_factory=list)
-    test_cases: List[TestCaseSpec] = field(default_factory=list)
+    claimed_capabilities: list[str] = field(default_factory=list)
+    test_cases: list[TestCaseSpec] = field(default_factory=list)
     passing_threshold: float = 0.8
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "skill_name": self.skill_name,
             "skill_category": self.skill_category,
@@ -220,7 +219,7 @@ class HarnessSpec:
         return json.dumps(self.to_dict(), indent=indent)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> HarnessSpec:
+    def from_dict(cls, d: dict[str, Any]) -> HarnessSpec:
         raw_cases = d.get("test_cases", []) or []
         cases = [
             TestCaseSpec.from_dict(tc) if isinstance(tc, dict) else tc
@@ -244,8 +243,8 @@ class HarnessSpec:
 
 
 def parse_skill_capabilities(
-    skill_def: Union[Dict[str, Any], str],
-) -> Dict[str, Any]:
+    skill_def: dict[str, Any] | str,
+) -> dict[str, Any]:
     """Extract skill name, category, description, and claimed capabilities from dict or markdown."""
     if isinstance(skill_def, dict):
         name = str(
@@ -276,7 +275,7 @@ def parse_skill_capabilities(
     name = "unnamed_skill"
     category = "general"
     description = ""
-    capabilities: List[str] = []
+    capabilities: list[str] = []
 
     # Check for YAML frontmatter
     fm_match = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", text, re.DOTALL)
@@ -353,7 +352,7 @@ def parse_skill_capabilities(
 
 
 def build_harness_synthesis_prompt(
-    skill_def: Union[Dict[str, Any], str],
+    skill_def: dict[str, Any] | str,
 ) -> str:
     """Build the prompt for synthesizing an evaluation harness spec from a skill definition."""
     parsed = parse_skill_capabilities(skill_def)
@@ -379,10 +378,10 @@ Include test cases for nominal execution, boundary conditions, and error states.
 def _synthesize_category_test_cases(
     skill_name: str,
     category: str,
-    capabilities: List[str],
-) -> List[TestCaseSpec]:
+    capabilities: list[str],
+) -> list[TestCaseSpec]:
     """Generate deterministic test case specifications for standard skill categories."""
-    test_cases: List[TestCaseSpec] = []
+    test_cases: list[TestCaseSpec] = []
     caps = capabilities or ["execute basic operation"]
 
     if category == "coding":
@@ -537,11 +536,11 @@ def _synthesize_category_test_cases(
 
 
 def synthesize_harness_spec(
-    skill_def: Union[Dict[str, Any], str, Path],
+    skill_def: dict[str, Any] | str | Path,
     default_category: Optional[str] = None,
     llm_synthesizer: Optional[Callable[[str], str]] = None,
     passing_threshold: float = 0.8,
-    context: Optional[Dict[str, Any]] = None,
+    context: Optional[dict[str, Any]] = None,
 ) -> HarnessSpec:
     """Synthesize an executable HarnessSpec from a skill's declared capabilities (Issue #2250, Slice A #2516)."""
     parsed = parse_skill_capabilities(skill_def)
@@ -607,7 +606,7 @@ class AssertionResult:
     actual: Any = None
     message: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "assertion": self.assertion.to_dict(),
             "passed": self.passed,
@@ -616,7 +615,7 @@ class AssertionResult:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> AssertionResult:
+    def from_dict(cls, d: dict[str, Any]) -> AssertionResult:
         raw_a = d.get("assertion", {}) or {}
         a = HarnessAssertion.from_dict(raw_a) if isinstance(raw_a, dict) else raw_a
         return cls(
@@ -637,11 +636,11 @@ class TestCaseResult:
     name: str
     passed: bool
     score: float
-    assertion_results: List[AssertionResult] = field(default_factory=list)
+    assertion_results: list[AssertionResult] = field(default_factory=list)
     execution_time_sec: float = 0.0
     error: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "test_id": self.test_id,
             "name": self.name,
@@ -653,7 +652,7 @@ class TestCaseResult:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> TestCaseResult:
+    def from_dict(cls, d: dict[str, Any]) -> TestCaseResult:
         raw_ar = d.get("assertion_results", []) or []
         ar_list = [
             AssertionResult.from_dict(ar) if isinstance(ar, dict) else ar
@@ -681,13 +680,13 @@ class HarnessDiagnosticReport:
     failed_cases: int
     overall_score: float
     passed: bool
-    test_case_results: List[TestCaseResult] = field(default_factory=list)
+    test_case_results: list[TestCaseResult] = field(default_factory=list)
     prior_score: Optional[float] = None
     score_delta: Optional[float] = None
-    per_criterion_diagnostics: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    per_criterion_diagnostics: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "skill_name": self.skill_name,
             "skill_category": self.skill_category,
@@ -711,7 +710,7 @@ class HarnessDiagnosticReport:
         return json.dumps(self.to_dict(), indent=indent)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> HarnessDiagnosticReport:
+    def from_dict(cls, d: dict[str, Any]) -> HarnessDiagnosticReport:
         raw_tcr = d.get("test_case_results", []) or []
         tcr_list = [
             TestCaseResult.from_dict(tcr) if isinstance(tcr, dict) else tcr
@@ -746,7 +745,7 @@ class HarnessDiagnosticReport:
 
 def evaluate_assertion(
     assertion: HarnessAssertion,
-    execution_output: Dict[str, Any],
+    execution_output: dict[str, Any],
 ) -> AssertionResult:
     """Evaluate a single test assertion against execution outputs."""
     target_val = execution_output.get(assertion.target)
@@ -816,7 +815,7 @@ def evaluate_assertion(
                 if isinstance(target_val, (dict, list))
                 else json.loads(actual_str)
             )
-            passed = True if expected is True else False
+            passed = expected is True
             msg = "Valid JSON payload"
             return AssertionResult(
                 assertion=assertion,
@@ -896,17 +895,17 @@ def evaluate_assertion(
 
 def run_harness(
     harness_spec: HarnessSpec,
-    skill_runner: Callable[[Dict[str, Any]], Dict[str, Any]],
+    skill_runner: Callable[[dict[str, Any]], dict[str, Any]],
     prior_report: Optional[HarnessDiagnosticReport] = None,
 ) -> HarnessDiagnosticReport:
     """Execute a skill against a synthesized HarnessSpec and emit structured diagnostics (Slice B #2517)."""
-    test_case_results: List[TestCaseResult] = []
-    criterion_stats: Dict[str, Dict[str, int]] = {}
+    test_case_results: list[TestCaseResult] = []
+    criterion_stats: dict[str, dict[str, int]] = {}
 
     for tc in harness_spec.test_cases:
         t_start = time.time()
         err_msg: Optional[str] = None
-        exec_output: Dict[str, Any] = {}
+        exec_output: dict[str, Any] = {}
         try:
             exec_output = skill_runner(tc.input_data)
         except Exception as e:
@@ -920,7 +919,7 @@ def run_harness(
             }
         t_elapsed = time.time() - t_start
 
-        assertion_results: List[AssertionResult] = []
+        assertion_results: list[AssertionResult] = []
         total_weight = 0.0
         passed_weight = 0.0
 
@@ -976,7 +975,7 @@ def run_harness(
         round(overall_score - prior_score, 4) if prior_score is not None else None
     )
 
-    per_crit_diag: Dict[str, Any] = {}
+    per_crit_diag: dict[str, Any] = {}
     for crit, counts in criterion_stats.items():
         tot = counts["total"]
         pas = counts["passed"]
@@ -1017,9 +1016,9 @@ class CycleEvaluationResult:
     baseline_report: Optional[HarnessDiagnosticReport] = None
     accepted: bool = False
     score_delta: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "cycle_index": self.cycle_index,
             "skill_name": self.skill_name,
@@ -1037,7 +1036,7 @@ class CycleEvaluationResult:
         return json.dumps(self.to_dict(), indent=indent, default=str)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> CycleEvaluationResult:
+    def from_dict(cls, data: dict[str, Any]) -> CycleEvaluationResult:
         base_data = data.get("baseline_report")
         base_report = (
             HarnessDiagnosticReport.from_dict(base_data) if base_data else None
@@ -1065,15 +1064,15 @@ class CycleEvaluationResult:
 
 
 def evaluate_improvement_cycle(
-    skill_dict: Union[Dict[str, Any], str, Path],
-    candidate_runner: Callable[[Dict[str, Any]], Dict[str, Any]],
-    baseline_runner: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    skill_dict: dict[str, Any] | str | Path,
+    candidate_runner: Callable[[dict[str, Any]], dict[str, Any]],
+    baseline_runner: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
     *,
     cycle_index: int = 1,
     llm_synthesizer: Optional[Callable[[str], str]] = None,
     passing_threshold: float = 0.8,
     require_non_negative_delta: bool = True,
-    context: Optional[Dict[str, Any]] = None,
+    context: Optional[dict[str, Any]] = None,
 ) -> CycleEvaluationResult:
     """Run one evaluation cycle by synthesizing a fresh harness and grading the candidate.
 
@@ -1122,22 +1121,22 @@ def evaluate_improvement_cycle(
 
 
 def run_autoharness_loop(
-    skill_dict: Union[Dict[str, Any], str, Path],
+    skill_dict: dict[str, Any] | str | Path,
     candidate_generator: Callable[
         [int, Optional[HarnessDiagnosticReport]],
-        Callable[[Dict[str, Any]], Dict[str, Any]],
+        Callable[[dict[str, Any]], dict[str, Any]],
     ],
-    baseline_runner: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    baseline_runner: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
     *,
     max_cycles: int = 3,
     llm_synthesizer: Optional[Callable[[str], str]] = None,
     passing_threshold: float = 0.8,
-) -> List[CycleEvaluationResult]:
+) -> list[CycleEvaluationResult]:
     """Execute a self-improvement loop across multiple cycles, auto-synthesizing fresh criteria each cycle.
 
     Terminates early once an improvement candidate is accepted.
     """
-    results: List[CycleEvaluationResult] = []
+    results: list[CycleEvaluationResult] = []
     current_baseline = baseline_runner
     last_report: Optional[HarnessDiagnosticReport] = None
 

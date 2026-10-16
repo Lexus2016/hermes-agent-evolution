@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Contradiction detection for episodic memory (issue #37).
 
 The memory-management research behind #37 identifies contradiction handling as
@@ -30,15 +29,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from typing import Iterable, List, Optional
 
 from agent.memory_importance import MemoryEvent, tokenize
 
 __all__ = [
-    "ContradictionFlag",
     "DEFAULT_SCAN_LIMIT",
     "NEGATION_PATTERN",
+    "ContradictionFlag",
     "detect_contradictions",
 ]
 
@@ -235,7 +234,7 @@ def detect_contradictions(
     *,
     limit: int = DEFAULT_SCAN_LIMIT,
     min_importance: float = 0.0,
-) -> List[ContradictionFlag]:
+) -> list[ContradictionFlag]:
     """Return contradiction flags between *observation* and *events*.
 
     Scans the ``limit`` most-recent events (last elements of the iterable),
@@ -250,10 +249,10 @@ def detect_contradictions(
     obs_tokens = _content_tokens(obs)
     if not obs_tokens:
         return []
-    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now_iso = datetime.now(UTC).isoformat(timespec="seconds")
 
     recent = list(events)[-limit:] if limit and limit > 0 else list(events)
-    flags: List[ContradictionFlag] = []
+    flags: list[ContradictionFlag] = []
     for event in recent:
         # Defensive: skip entries that are not MemoryEvent-shaped rather than
         # raising, so a corrupted store entry can never fail the write path.

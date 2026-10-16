@@ -66,7 +66,7 @@ _ENTROPY_REMINDER = (
 )
 
 # (ruleName, human-readable kind, compiled regex). Most-specific first.
-_SECRET_RULES: List[Tuple[str, str, "re.Pattern[str]"]] = [
+_SECRET_RULES: list[tuple[str, str, re.Pattern[str]]] = [
     ("private_key_pem", "PEM private key",
      re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----")),
     ("aws_access_key_id", "AWS access key id",
@@ -109,7 +109,7 @@ def shannon_entropy(s: str) -> float:
     """Shannon entropy in bits/char of *s* (0.0 for empty)."""
     if not s:
         return 0.0
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for ch in s:
         counts[ch] = counts.get(ch, 0) + 1
     n = len(s)
@@ -124,7 +124,7 @@ def _too_big(content: str) -> bool:
     return len(content.encode("utf-8", errors="ignore")) > _MAX_SCAN_BYTES
 
 
-def scan_secrets(path: str, content: str) -> List[Tuple[str, str]]:
+def scan_secrets(path: str, content: str) -> list[tuple[str, str]]:
     """Return ``[(ruleName, reminder), ...]`` for credentials found in *content*.
 
     Each rule fires at most once. Obvious placeholders/example values are
@@ -134,8 +134,8 @@ def scan_secrets(path: str, content: str) -> List[Tuple[str, str]]:
     """
     if not content or _too_big(content):
         return []
-    hits: List[Tuple[str, str]] = []
-    seen: Set[str] = set()
+    hits: list[tuple[str, str]] = []
+    seen: set[str] = set()
     for rule_name, kind, rx in _SECRET_RULES:
         m = rx.search(content)
         if not m or rule_name in seen:

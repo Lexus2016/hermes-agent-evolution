@@ -46,7 +46,7 @@ class TestRefusalNudgeSubagent:
             "agent.loop_guard.maybe_refusal_nudge",
             return_value="[loop-guard] REFUSAL: re-check available tools",
         ) as mock_nudge:
-            outcome = delegate_tool._derive_child_outcome(
+            _outcome = delegate_tool._derive_child_outcome(
                 child.run_conversation.return_value
             )
             # The nudge function itself is called during the dispatch wiring

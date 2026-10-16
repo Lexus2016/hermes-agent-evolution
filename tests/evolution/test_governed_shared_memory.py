@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for governed shared memory with scope, provenance, supersession, and redistribution (Issue #2488, Slice B, MemClaw)."""
 
 from __future__ import annotations

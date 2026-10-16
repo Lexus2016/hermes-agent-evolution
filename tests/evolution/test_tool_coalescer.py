@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for CodeAct-style deterministic tool-call coalescing (Issue #2485, Slice A)."""
 
 from __future__ import annotations

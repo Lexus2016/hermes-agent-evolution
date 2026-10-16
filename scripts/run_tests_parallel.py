@@ -743,8 +743,9 @@ def _run_one_file_once(
                 diag_out = subprocess.run(
                     diag_cmd, cwd=repo_root, capture_output=True,
                     text=True, timeout=10,
+                    check=False,
                 ).stdout.strip()
-            except Exception as exc:  # noqa: BLE001 — diagnostics only
+            except Exception as exc:
                 diag_out = f"<failed: {exc}>"
             shown = diag_out.splitlines()[:10] or ["<empty>"]
             diag_lines.append(f"  $ {' '.join(diag_cmd)}")

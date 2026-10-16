@@ -74,7 +74,7 @@ def _uv_python_flag() -> Optional[str]:
     return None
 
 
-def ensure_transient_venv() -> Tuple[str, bool]:
+def ensure_transient_venv() -> tuple[str, bool]:
     """Create (or reuse) a transient venv and return ``(venv_dir, created_now)``.
 
     The venv is created under ``/tmp`` with a stable name derived from the

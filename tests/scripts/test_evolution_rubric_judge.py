@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_rubric_judge import (  # noqa: E402
+from evolution_rubric_judge import (
     CLAIM_VERDICTS,
     StrictRubricJudgeGrader,
     _markdown_sections,

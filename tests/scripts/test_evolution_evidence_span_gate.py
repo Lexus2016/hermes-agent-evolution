@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
-from evolution_evidence_span_gate import (  # noqa: E402
+from evolution_evidence_span_gate import (
     evaluate_findings,
     format_summary,
     parse_findings,

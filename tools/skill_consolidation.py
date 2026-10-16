@@ -24,7 +24,7 @@ _STOPWORDS = frozenset(
 )
 
 
-def _tokenize(text: Optional[str]) -> Set[str]:
+def _tokenize(text: Optional[str]) -> set[str]:
     """Lowercase token set, dropping short/common words."""
     if not text:
         return set()
@@ -36,17 +36,17 @@ def _tokenize(text: Optional[str]) -> Set[str]:
     return tokens
 
 
-def _jaccard(a: Set[str], b: Set[str]) -> float:
+def _jaccard(a: set[str], b: set[str]) -> float:
     if not a or not b:
         return 0.0
     return len(a & b) / len(a | b)
 
 
-def _build_skill_tokens(rows: List[Dict[str, Any]]) -> Dict[str, Set[str]]:
+def _build_skill_tokens(rows: list[dict[str, Any]]) -> dict[str, set[str]]:
     """Token set per skill from description + tags."""
     from tools.skills_tool import _find_all_skills
 
-    meta_by_name: Dict[str, Dict[str, Any]] = {}
+    meta_by_name: dict[str, dict[str, Any]] = {}
     try:
         for sm in _find_all_skills():
             if isinstance(sm, dict) and sm.get("name"):
@@ -54,7 +54,7 @@ def _build_skill_tokens(rows: List[Dict[str, Any]]) -> Dict[str, Set[str]]:
     except Exception:
         pass
 
-    result: Dict[str, Set[str]] = {}
+    result: dict[str, set[str]] = {}
     for row in rows:
         name = row.get("name", "")
         if not name:
@@ -73,10 +73,10 @@ def _build_skill_tokens(rows: List[Dict[str, Any]]) -> Dict[str, Set[str]]:
     return result
 
 
-def _cluster(names: List[str], tokens: Dict[str, Set[str]], threshold: float) -> List[List[str]]:
+def _cluster(names: list[str], tokens: dict[str, set[str]], threshold: float) -> list[list[str]]:
     """Greedy single-linkage Jaccard clustering."""
-    visited: Set[str] = set()
-    clusters: List[List[str]] = []
+    visited: set[str] = set()
+    clusters: list[list[str]] = []
     for name in names:
         if name in visited:
             continue
@@ -99,7 +99,7 @@ def _cluster(names: List[str], tokens: Dict[str, Set[str]], threshold: float) ->
     return clusters
 
 
-def run_consolidation_pass(threshold: float = _SIMILARITY_THRESHOLD) -> Dict[str, Any]:
+def run_consolidation_pass(threshold: float = _SIMILARITY_THRESHOLD) -> dict[str, Any]:
     """Cluster curator-managed skills by similarity. Returns cluster suggestions
     (members + suggested umbrella). Never mutates skills."""
     try:
@@ -133,7 +133,7 @@ def run_consolidation_pass(threshold: float = _SIMILARITY_THRESHOLD) -> Dict[str
     return {"clusters": clusters, "total_skills": len(rows), "clustered_skills": sum(c["member_count"] for c in clusters)}
 
 
-def render_clusters_for_prompt(result: Dict[str, Any]) -> str:
+def render_clusters_for_prompt(result: dict[str, Any]) -> str:
     """Render clusters as text for the LLM review prompt."""
     clusters = result.get("clusters", [])
     if not clusters:

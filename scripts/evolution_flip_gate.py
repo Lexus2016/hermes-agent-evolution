@@ -62,9 +62,9 @@ BLOCK = "block"
 class FlipTable:
     """Per-probe outcome deltas between two runs of the same probe set."""
 
-    cells: Dict[str, str] = field(default_factory=dict)  # probe id -> cell
+    cells: dict[str, str] = field(default_factory=dict)  # probe id -> cell
 
-    def ids_in(self, cell: str) -> List[str]:
+    def ids_in(self, cell: str) -> list[str]:
         """Probe ids landing in ``cell``, sorted for stable output."""
         return sorted(pid for pid, c in self.cells.items() if c == cell)
 
@@ -72,14 +72,14 @@ class FlipTable:
         return sum(1 for c in self.cells.values() if c == cell)
 
     @property
-    def regressions(self) -> List[str]:
+    def regressions(self) -> list[str]:
         return self.ids_in(REGRESSION)
 
     @property
-    def fixes(self) -> List[str]:
+    def fixes(self) -> list[str]:
         return self.ids_in(FIX)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": SCHEMA_VERSION,
             "cells": dict(sorted(self.cells.items())),
@@ -97,14 +97,14 @@ class FlipVerdict:
 
     verdict: str
     reason: str
-    regressions: List[str] = field(default_factory=list)
-    fixes: List[str] = field(default_factory=list)
+    regressions: list[str] = field(default_factory=list)
+    fixes: list[str] = field(default_factory=list)
 
     @property
     def blocked(self) -> bool:
         return self.verdict == BLOCK
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "verdict": self.verdict,
             "reason": self.reason,
@@ -136,7 +136,7 @@ def _passed(value: Any) -> bool:
     return False
 
 
-def compare_runs(before: Dict[str, Any], after: Dict[str, Any]) -> FlipTable:
+def compare_runs(before: dict[str, Any], after: dict[str, Any]) -> FlipTable:
     """Classify every probe id into one of the four cells (or a missing marker).
 
     ``before`` and ``after`` map probe id -> result, in any of the shapes
@@ -242,7 +242,7 @@ def format_table(table: FlipTable, verdict: FlipVerdict) -> str:
     return "\n".join(lines)
 
 
-def _load(path: Path) -> Dict[str, Any]:
+def _load(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         raise ValueError(f"{path}: expected an object mapping probe id -> result")
@@ -259,7 +259,7 @@ def _usage() -> str:
     )
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     if "--help" in args or "-h" in args:
         print(_usage())

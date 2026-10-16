@@ -45,7 +45,7 @@ class Postcondition:
     """
 
     description: str
-    check: Callable[[Dict[str, Any]], bool]
+    check: Callable[[dict[str, Any]], bool]
     required: bool = True
 
 
@@ -67,12 +67,12 @@ class CaptureRecord:
 
     skill_name: str
     procedure_executed: bool
-    postconditions: List[Postcondition] = field(default_factory=list)
-    post_execution_state: Dict[str, Any] = field(default_factory=dict)
+    postconditions: list[Postcondition] = field(default_factory=list)
+    post_execution_state: dict[str, Any] = field(default_factory=dict)
     trust_level: str = "provisional"
-    validation_results: List[Dict[str, Any]] = field(default_factory=list)
+    validation_results: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_metadata(self) -> Dict[str, Any]:
+    def to_metadata(self) -> dict[str, Any]:
         """Serialize to a metadata dict suitable for skill capture sidecar."""
         return {
             "skill_name": self.skill_name,

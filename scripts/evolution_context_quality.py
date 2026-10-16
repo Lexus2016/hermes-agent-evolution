@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Preflight context-engineering quality check (issue #1163).
 
 A non-circular, model-free scorer that grades a *context artifact* (a stage's
@@ -35,13 +34,13 @@ from enum import Enum
 from typing import Any, Mapping
 
 __all__ = [
+    "ContextQualityReport",
     "Criterion",
     "CriterionScore",
-    "ContextQualityReport",
-    "score_context",
     "compare_context",
     "evaluate",
     "main",
+    "score_context",
 ]
 
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for the plan feasibility gate (#1032)."""
 
 from __future__ import annotations

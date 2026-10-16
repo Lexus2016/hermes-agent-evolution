@@ -3027,7 +3027,7 @@ def _cron_model_drift_axis_for_config_key(key: str) -> Optional[str]:
     return _CRON_DRIFT_AXIS_BY_KEY.get(str(key or "").strip().lower())
 
 
-def _cron_section(config: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def _cron_section(config: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
     """Return the ``cron`` mapping of *config* (loading the merged config when None), else None."""
     if config is None:
         try:
@@ -3039,7 +3039,7 @@ def _cron_section(config: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 
 
 def cron_model_drift_guard_enabled(
-    config: Optional[Dict[str, Any]] = None,
+    config: Optional[dict[str, Any]] = None,
 ) -> bool:
     """Return whether cron must fail closed on unpinned inference drift.
 
@@ -3072,7 +3072,7 @@ def _model_assignment_text(value: Any) -> str:
 
 
 def resolve_cron_model_drift_defaults(
-    config: Any, *, environ: Optional[Dict[str, str]] = None) -> Tuple[str, str]:
+    config: Any, *, environ: Optional[dict[str, str]] = None) -> tuple[str, str]:
     """Resolve the global ``(provider, model)`` cron compares against snapshots.
     Mirrors the scheduler's precedence: a truthy configured model wins over ``HERMES_MODEL``; the
     environment is only a fallback. Per-job and cron fleet defaults are handled by the caller
@@ -3089,7 +3089,7 @@ def resolve_cron_model_drift_defaults(
 
 def cron_model_drift_axes(
     job: Any, *, current_provider: Any = "", current_model: Any = "", config: Any = None
-) -> List[str]:
+) -> list[str]:
     """Return the unpinned axes on which *job* will keep running on its creation snapshot rather
     than the new global assignment (the scheduler treats the snapshot as the effective pin)."""
     if not isinstance(job, dict) or not cron_model_drift_guard_enabled(config):
@@ -3101,7 +3101,7 @@ def cron_model_drift_axes(
     # A cron.model / cron.model_provider fleet default covers its axis: that axis never reads the
     # snapshot at fire time, so reporting it would be false.
     fleet = _cron_section(config) or {}
-    drifted: List[str] = []
+    drifted: list[str] = []
     for axis, fleet_key in (("provider", "model_provider"), ("model", "model")):
         if _model_assignment_text(fleet.get(fleet_key)) or _model_assignment_text(job.get(axis)):
             continue
@@ -3131,13 +3131,13 @@ def _cron_impact_job_name(value: Any, job_id: str) -> str:
     return f"Job {job_id}"[:_CRON_MODEL_IMPACT_NAME_LIMIT].rstrip()
 
 
-def _cron_model_impact_result(available: bool) -> Dict[str, Any]:
+def _cron_model_impact_result(available: bool) -> dict[str, Any]:
     return {"available": available, "affected_count": 0, "truncated": False, "jobs": []}
 
 
 def build_cron_model_impact(
     *, current_provider: Any = "", current_model: Any = "", config: Any = None, jobs: Any = None
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build a bounded, profile-local summary of unpinned jobs that stay on their creation snapshot
     after a global model/provider change. Job-store inspection is best effort: the model assignment
     has already succeeded when Desktop requests this, so an unreadable store is reported as
@@ -3156,7 +3156,7 @@ def build_cron_model_impact(
 
     from cron.jobs import is_job_runnable
 
-    seen_ids: Set[str] = set()
+    seen_ids: set[str] = set()
     for job in jobs:
         if not isinstance(job, dict) or not is_job_runnable(job) or job.get("no_agent"):
             continue
@@ -3180,7 +3180,7 @@ def build_cron_model_impact(
 
 
 def warn_unpinned_cron_jobs_after_model_config_change(
-    key: str, value: Any, config: Optional[Dict[str, Any]] = None) -> None:
+    key: str, value: Any, config: Optional[dict[str, Any]] = None) -> None:
     """Tell the operator which unpinned cron jobs a global model/provider change does NOT move."""
     axis = _cron_model_drift_axis_for_config_key(key)
     if axis is None:

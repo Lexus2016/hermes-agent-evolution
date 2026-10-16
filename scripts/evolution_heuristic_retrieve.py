@@ -45,18 +45,18 @@ _TYPE_MATCH_BONUS = 1.0
 _FREQUENCY_CAP = 8
 
 #: A judge callable takes (task_context, heuristic_dict) and returns 0..1.
-Judge = Callable[[str, Dict[str, Any]], float]
+Judge = Callable[[str, dict[str, Any]], float]
 
 
 @dataclass
 class RankedHeuristic:
     """A heuristic with the score that selected it, and where that came from."""
 
-    heuristic: Dict[str, Any]
+    heuristic: dict[str, Any]
     score: float
     ranked_by: str  # "judge" | "evidence"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "heuristic": dict(self.heuristic),
             "score": self.score,
@@ -76,7 +76,7 @@ def _default_evolution_dir() -> Path:
     return Path(hh) / "evolution" if hh else Path.home() / ".hermes" / "evolution"
 
 
-def load_heuristics(evolution_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
+def load_heuristics(evolution_dir: Optional[Path] = None) -> list[dict[str, Any]]:
     """Load the most recent heuristics file written by slice A.
 
     Most recent by FILENAME, which is the extraction date — the store is
@@ -99,7 +99,7 @@ def load_heuristics(evolution_dir: Optional[Path] = None) -> List[Dict[str, Any]
     return [h for h in heuristics if isinstance(h, dict) and h.get("text")]
 
 
-def _evidence_score(heuristic: Dict[str, Any], task_type: str) -> float:
+def _evidence_score(heuristic: dict[str, Any], task_type: str) -> float:
     """Rank by what slice A measured, gated on relevance to this task type."""
     try:
         outcome = float(heuristic.get("outcome_score", 0.0) or 0.0)
@@ -117,7 +117,7 @@ def _evidence_score(heuristic: Dict[str, Any], task_type: str) -> float:
     return round(score, 4)
 
 
-def _dedupe(heuristics: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _dedupe(heuristics: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
     """Drop repeats of the same claim, keeping the first seen.
 
     Identity is (task_type, pattern) rather than text: the same transition
@@ -125,7 +125,7 @@ def _dedupe(heuristics: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     prose, but injecting both would spend prompt budget saying one thing twice.
     """
     seen = set()
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for h in heuristics:
         key = (
             str(h.get("task_type", "")),
@@ -140,12 +140,12 @@ def _dedupe(heuristics: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def retrieve(
     task_context: str,
-    heuristics: Sequence[Dict[str, Any]],
+    heuristics: Sequence[dict[str, Any]],
     *,
     top_k: int = DEFAULT_TOP_K,
     task_type: str = "",
     judge: Optional[Judge] = None,
-) -> List[RankedHeuristic]:
+) -> list[RankedHeuristic]:
     """Return the top-k heuristics for ``task_context``, best first.
 
     With a ``judge``, each heuristic is scored by it. Without one — or if it
@@ -157,7 +157,7 @@ def retrieve(
     if not candidates or top_k <= 0:
         return []
 
-    ranked: List[RankedHeuristic] = []
+    ranked: list[RankedHeuristic] = []
     for h in candidates:
         score: Optional[float] = None
         source = "evidence"
@@ -211,7 +211,7 @@ def _usage() -> str:
     )
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     if "--help" in args or "-h" in args:
         print(_usage())

@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 # Cost tiers — free tools cost nothing, cheap tools cost 1 unit,
 # expensive tools cost 3 units. Tunable via config in a follow-up increment.
-TOOL_COST_TIERS: Dict[str, str] = {
+TOOL_COST_TIERS: dict[str, str] = {
     "terminal": "free",
     "read_file": "free",
     "write_file": "free",
@@ -37,7 +37,7 @@ TOOL_COST_TIERS: Dict[str, str] = {
     "vision_analyze": "expensive",
 }
 
-TIER_COSTS: Dict[str, int] = {"free": 0, "cheap": 1, "expensive": 3}
+TIER_COSTS: dict[str, int] = {"free": 0, "cheap": 1, "expensive": 3}
 DEFAULT_BUDGET = 100
 
 
@@ -66,8 +66,8 @@ class CycleCostReport:
     date: str = ""
     budget: int = DEFAULT_BUDGET
     total_cost: int = 0
-    calls_by_tier: Dict[str, int] = field(default_factory=dict)
-    calls_by_tool: Dict[str, int] = field(default_factory=dict)
+    calls_by_tier: dict[str, int] = field(default_factory=dict)
+    calls_by_tool: dict[str, int] = field(default_factory=dict)
     budget_exhausted: bool = False
     timestamp: float = 0.0
 
@@ -83,9 +83,9 @@ class ToolCallCostTracker:
         self.budget = budget
         self.date = date
         self._total_cost = 0
-        self._calls: List[ToolCallRecord] = []
-        self._by_tier: Dict[str, int] = {}
-        self._by_tool: Dict[str, int] = {}
+        self._calls: list[ToolCallRecord] = []
+        self._by_tier: dict[str, int] = {}
+        self._by_tool: dict[str, int] = {}
 
     @staticmethod
     def cost_for(tool_name: str) -> int:

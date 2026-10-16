@@ -28,10 +28,10 @@ _AGENT_PARAMS = frozenset(
     "summary subtask angle body content report output text description comment goal".split()
 )
 _DELIM_RE = re.compile(
-    r"<(?:untrusted|data|untrusted-content|agent_output|user_content)>", re.I
+    r"<(?:untrusted|data|untrusted-content|agent_output|user_content)>", re.IGNORECASE
 )
 _PROMPT_KW = frozenset(
-    "review judge evaluat summary sub-task subtask finding quality-control rubric score verdict".split()  # noqa: E501
+    "review judge evaluat summary sub-task subtask finding quality-control rubric score verdict".split()
 )
 
 
@@ -47,19 +47,19 @@ class Finding:
 
 @dataclass
 class ScanResult:
-    findings: List[Finding] = field(default_factory=list)
-    scripts_scanned: List[str] = field(default_factory=list)
+    findings: list[Finding] = field(default_factory=list)
+    scripts_scanned: list[str] = field(default_factory=list)
 
     @property
     def has_failures(self) -> bool:
         return any(f.severity in ("high", "medium") for f in self.findings)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"findings": [asdict(f) for f in self.findings], "scripts_scanned": self.scripts_scanned, "has_failures": self.has_failures}  # fmt: skip
 
 
 def _check(
-    text: str, names: List[str], fp: str, line: int, kind: str
+    text: str, names: list[str], fp: str, line: int, kind: str
 ) -> Optional[Finding]:
     """Emit Finding if agent-content params appear in a prompt-like string without delimiters."""
     if not text or _DELIM_RE.search(text):
@@ -70,7 +70,7 @@ def _check(
     return None
 
 
-def scan_file(filepath: str) -> List[Finding]:
+def scan_file(filepath: str) -> list[Finding]:
     """Scan one script for unsafe agent-content interpolation (#1808)."""
     path = _HERE / filepath
     if not path.exists():
@@ -80,7 +80,7 @@ def scan_file(filepath: str) -> List[Finding]:
         tree = ast.parse(source, filename=str(path))
     except SyntaxError:
         return []
-    out: List[Finding] = []
+    out: list[Finding] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.JoinedStr):  # f-string
             names = [v.value.id for v in node.values if isinstance(v, ast.FormattedValue) and isinstance(v.value, ast.Name)]  # fmt: skip
@@ -117,7 +117,7 @@ def format_report(r: ScanResult) -> str:
     return "\n".join(lines)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     argv = argv or sys.argv
     result = run_scan()
     if "--json" in argv:

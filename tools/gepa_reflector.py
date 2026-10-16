@@ -45,7 +45,7 @@ class VariantResult:
     variant: str
     task: str
     passed: bool
-    task_data: Dict[str, Any] = field(default_factory=dict)
+    task_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -56,9 +56,9 @@ class Critique:
     task: str
     passed: bool
     critique: str
-    signals: List[str] = field(default_factory=list)
+    signals: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "variant": self.variant,
             "task": self.task,
@@ -79,7 +79,7 @@ def _default_critique(result: VariantResult) -> Critique:
     """
     variant = result.variant
     task = result.task
-    signals: List[str] = []
+    signals: list[str] = []
 
     if result.passed:
         signals.append("success")
@@ -112,13 +112,13 @@ def _default_critique(result: VariantResult) -> Critique:
 
 # ── LLM-backed critique generation (optional) ────────────────────────────
 
-LLMCallback = Callable[[List[VariantResult]], List[Critique]]
+LLMCallback = Callable[[list[VariantResult]], list[Critique]]
 
 
 def _llm_critiques(
-    results: List[VariantResult],
+    results: list[VariantResult],
     llm: LLMCallback,
-) -> List[Critique]:
+) -> list[Critique]:
     """Generate critiques via an LLM callback.
 
     The callback receives the full result set and must return a list of
@@ -145,9 +145,9 @@ def _llm_critiques(
 # ── Public API ───────────────────────────────────────────────────────────
 
 def reflect(
-    results: List[VariantResult],
+    results: list[VariantResult],
     llm: Optional[LLMCallback] = None,
-) -> List[Critique]:
+) -> list[Critique]:
     """Produce textual critiques for a set of skill-variant evaluation results.
 
     Args:
@@ -165,7 +165,7 @@ def reflect(
 
 
 def reflect_to_json(
-    results: List[VariantResult],
+    results: list[VariantResult],
     llm: Optional[LLMCallback] = None,
 ) -> str:
     """Reflect and serialize the critiques to JSON (for storage)."""
@@ -174,7 +174,7 @@ def reflect_to_json(
 
 
 def store_critiques(
-    critiques: List[Critique],
+    critiques: list[Critique],
     path: str,
 ) -> None:
     """Store critiques alongside the evaluation results (JSONL append).
@@ -186,5 +186,4 @@ def store_critiques(
 
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "a", encoding="utf-8") as fh:
-        for c in critiques:
-            fh.write(json.dumps(c.to_dict()) + "\n")
+        fh.writelines(json.dumps(c.to_dict()) + "\n" for c in critiques)

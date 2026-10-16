@@ -9,8 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-import pytest  # noqa: E402
-from eval_tasks import TASK_SET_VERSION, EvalTask, latest_version, load_task_set  # noqa: E402
+import pytest
+from eval_tasks import TASK_SET_VERSION, EvalTask, latest_version, load_task_set
 
 REQUIRED_FIELDS = (
     "id",

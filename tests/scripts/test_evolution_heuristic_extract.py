@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for cross-task heuristic extraction (issue #1359, Child A of #1303)."""
 
 import json
@@ -7,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_heuristic_extract import (  # noqa: E402
+from evolution_heuristic_extract import (
     extract_heuristics,
     format_summary,
     load_trajectories,

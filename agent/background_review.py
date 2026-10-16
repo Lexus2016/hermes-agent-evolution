@@ -1121,7 +1121,7 @@ _DURABLE_WRITE_TOOLS = {"memory", "skill_manage"}
 
 def _review_tool_whitelist(
     review_agent: Any = None,
-    task_cfg: Optional[Dict[str, Any]] = None,
+    task_cfg: Optional[dict[str, Any]] = None,
     review_memory: bool = False,
     block_durable_writes: bool = False,
 ) -> Any:
@@ -1355,7 +1355,7 @@ _PROMPT_NAME_BY_SCOPE = {
 
 
 
-def _format_correction_focus(correction_hint: Dict[str, Any]) -> str:
+def _format_correction_focus(correction_hint: dict[str, Any]) -> str:
     """Build the focused-review preamble for a detected structured correction.
 
     Phase 1 (learn-from-corrections): when the turn was an INTERRUPT / DENY /
@@ -1415,9 +1415,9 @@ def _format_correction_focus(correction_hint: Dict[str, Any]) -> str:
 def spawn_background_review_thread(
     agent: Any, messages_snapshot: list[dict], review_memory: bool = False,
     review_skills: bool = False, focus: Optional[str] = None,
-    correction_hint: Optional[Dict[str, Any]] = None,
+    correction_hint: Optional[dict[str, Any]] = None,
     block_durable_writes: bool = False,
-    task_cfg: Optional[Dict[str, Any]] = None, review_run: Optional[_BackgroundReviewRun] = None,
+    task_cfg: Optional[dict[str, Any]] = None, review_run: Optional[_BackgroundReviewRun] = None,
     explicit: bool = False,
 ):
     """Return ``(target, prompt)``; the caller builds the ``threading.Thread`` so test patches of

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for :mod:`agent.memory_contradiction` (issue #37).
 
 Covers the negation-flip heuristic: contradictions are flagged when a new
@@ -124,7 +123,7 @@ class TestMemoryManagerWiring:
         return manager, what
 
     def test_score_memories_surfaces_contradiction(self, caplog):
-        manager, stored = self._manager_with_event("the nas is healthy")
+        manager, _stored = self._manager_with_event("the nas is healthy")
         with caplog.at_level(logging.WARNING, logger="agent.memory_manager"):
             manager.score_memories("the nas is not healthy", "ok", session_id="s1")
         assert any("memory contradiction" in r.message for r in caplog.records)

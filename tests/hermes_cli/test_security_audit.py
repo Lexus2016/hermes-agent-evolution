@@ -235,7 +235,7 @@ class TestMCPSecretAuditWiring:
     ):
         """Plaintext-secret findings from the MCP audit appear in the report."""
         monkeypatch.setattr(sa, "get_hermes_home", lambda: str(tmp_path))
-        monkeypatch.setattr(sa, "_discover_venv", lambda: [])
+        monkeypatch.setattr(sa, "_discover_venv", list)
         monkeypatch.setattr(sa, "_osv_query_batch", lambda comps: {})
         fake = [{
             "server": "graphiti",
@@ -255,7 +255,7 @@ class TestMCPSecretAuditWiring:
         self, tmp_path: Path, monkeypatch, capsys
     ):
         monkeypatch.setattr(sa, "get_hermes_home", lambda: str(tmp_path))
-        monkeypatch.setattr(sa, "_discover_venv", lambda: [])
+        monkeypatch.setattr(sa, "_discover_venv", list)
         monkeypatch.setattr(sa, "_osv_query_batch", lambda comps: {})
         fake = [{
             "server": "remote",
@@ -277,7 +277,7 @@ class TestMCPSecretAuditWiring:
 
     def test_clean_mcp_audit_keeps_exit_zero(self, tmp_path: Path, monkeypatch, capsys):
         monkeypatch.setattr(sa, "get_hermes_home", lambda: str(tmp_path))
-        monkeypatch.setattr(sa, "_discover_venv", lambda: [])
+        monkeypatch.setattr(sa, "_discover_venv", list)
         monkeypatch.setattr(sa, "_osv_query_batch", lambda comps: {})
         monkeypatch.setattr(sa, "_run_mcp_secret_audit", lambda home: ([], 2))
 
@@ -289,7 +289,7 @@ class TestMCPSecretAuditWiring:
     def test_missing_script_degrades_gracefully(self, tmp_path: Path, monkeypatch, capsys):
         """A missing script must not fail the OSV audit."""
         monkeypatch.setattr(sa, "get_hermes_home", lambda: str(tmp_path))
-        monkeypatch.setattr(sa, "_discover_venv", lambda: [])
+        monkeypatch.setattr(sa, "_discover_venv", list)
         monkeypatch.setattr(sa, "_osv_query_batch", lambda comps: {})
         monkeypatch.setattr(sa, "_load_mcp_secret_audit_module", lambda: None)
 

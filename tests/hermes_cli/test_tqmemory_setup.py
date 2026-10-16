@@ -161,7 +161,7 @@ class TestOptOut:
 
     def test_default_not_opted_out(self, monkeypatch):
         monkeypatch.delenv(tqm.OPT_OUT_ENV, raising=False)
-        monkeypatch.setattr("hermes_cli.config.read_raw_config", lambda: {})
+        monkeypatch.setattr("hermes_cli.config.read_raw_config", dict)
         assert tqm.opted_out() is False
 
 

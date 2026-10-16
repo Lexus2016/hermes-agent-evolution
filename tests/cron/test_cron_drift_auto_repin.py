@@ -90,7 +90,7 @@ def _tick(job, tmp_path, current_provider, deliveries):
 
 
 def _stored(tmp_path, job_id="auto-repin-test"):
-    return [j for j in cron_jobs.load_jobs() if j["id"] == job_id][0]
+    return next(j for j in cron_jobs.load_jobs() if j["id"] == job_id)
 
 
 class TestDriftAutoRepin:
@@ -102,7 +102,7 @@ class TestDriftAutoRepin:
         with cron_jobs.use_cron_store(tmp_path):
             cron_jobs.save_jobs([job])
             fresh = _stored(tmp_path)
-            ok, agent_called = _tick(fresh, tmp_path, "nous", deliveries)
+            _ok, agent_called = _tick(fresh, tmp_path, "nous", deliveries)
             assert agent_called is False, "default must not spend on drift"
 
             stored = _stored(tmp_path)
@@ -118,7 +118,7 @@ class TestDriftAutoRepin:
         with cron_jobs.use_cron_store(tmp_path):
             cron_jobs.save_jobs([job])
             fresh = _stored(tmp_path)
-            ok, agent_called = _tick(fresh, tmp_path, "nous", deliveries)
+            _ok, agent_called = _tick(fresh, tmp_path, "nous", deliveries)
             assert agent_called is True, "opted-in drifted job must run"
 
             stored = _stored(tmp_path)
@@ -135,7 +135,7 @@ class TestDriftAutoRepin:
         with cron_jobs.use_cron_store(tmp_path):
             cron_jobs.save_jobs([job])
             fresh = _stored(tmp_path)
-            ok, agent_called = _tick(fresh, tmp_path, "nous", deliveries)
+            _ok, agent_called = _tick(fresh, tmp_path, "nous", deliveries)
             assert agent_called is False, "malformed value must stay fail-closed"
             assert _stored(tmp_path).get("drift_alerted") is True
 
@@ -148,7 +148,7 @@ class TestDriftAutoRepin:
             cron_jobs.save_jobs([job])
             fresh = _stored(tmp_path)
             with patch("cron.jobs.repin_jobs", side_effect=RuntimeError("lock lost")):
-                ok, agent_called = _tick(fresh, tmp_path, "nous", deliveries)
+                _ok, agent_called = _tick(fresh, tmp_path, "nous", deliveries)
             assert agent_called is False, "failed repin must not spend"
 
             stored = _stored(tmp_path)

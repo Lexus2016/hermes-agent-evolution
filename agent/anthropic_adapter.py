@@ -745,7 +745,7 @@ def build_anthropic_kwargs(
         and not _is_third_party_anthropic_endpoint(base_url)
         and _supports_adaptive_thinking(model)
     ):
-        edit: Dict[str, Any] = {"type": "compact_20260112"}
+        edit: dict[str, Any] = {"type": "compact_20260112"}
         if _compaction_instructions:
             edit["instructions"] = _compaction_instructions
         kwargs["context_management"] = {"edits": [edit]}

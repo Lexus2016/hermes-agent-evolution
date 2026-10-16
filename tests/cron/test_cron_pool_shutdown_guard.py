@@ -86,7 +86,7 @@ class TestCronPoolShutdownGuard:
         for p in patches:
             p.start()
         try:
-            success, output, final_response, error = cron_owner(
+            success, _output, _final_response, error = cron_owner(
                 self._make_agent_path_job()
             )
         finally:
@@ -119,7 +119,7 @@ class TestCronPoolShutdownGuard:
         for p in patches:
             p.start()
         try:
-            success, output, final_response, error = cron_owner(
+            success, output, _final_response, error = cron_owner(
                 self._make_agent_path_job()
             )
         finally:

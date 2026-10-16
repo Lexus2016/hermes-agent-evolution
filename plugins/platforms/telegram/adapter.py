@@ -627,13 +627,13 @@ class TelegramAdapter(TelegramHeldInboundMixin, BasePlatformAdapter):
             global_rate=self._coerce_float_extra(
                 "send_global_rate", 25.0, min_value=0.1, max_value=30.0))
         # One in-flight send per chat, so a split message lands contiguously (see _chat_send_lock).
-        self._chat_send_locks: Dict[str, asyncio.Lock] = {}
+        self._chat_send_locks: dict[str, asyncio.Lock] = {}
         # Task holding each chat's gate, so a nested acquire in the same task passes through.
-        self._chat_send_gate_holders: Dict[str, Any] = {}
+        self._chat_send_gate_holders: dict[str, Any] = {}
         # Flood-refused sends: remember the platform's wait per chat so the next send fails closed
         # locally instead of firing another doomed request into an active penalty (see
         # _record_send_cooldown).
-        self._telegram_send_cooldown_until: Dict[str, float] = {}
+        self._telegram_send_cooldown_until: dict[str, float] = {}
         # Transient sendChatAction failures recur on every keep-typing tick; back off per chat.
         self._telegram_typing_cooldown_until: dict[str, float] = {}
         self._telegram_typing_cooldown_seconds: float = self._coerce_float_extra(
@@ -1196,7 +1196,7 @@ class TelegramAdapter(TelegramHeldInboundMixin, BasePlatformAdapter):
         return any(marker in err_lower for marker in topic_markers)
 
     async def _send_with_dm_topic_reply_anchor_retry(
-        self, send_fn: Any, send_kwargs: Dict[str, Any], metadata: Optional[Dict[str, Any]],
+        self, send_fn: Any, send_kwargs: dict[str, Any], metadata: Optional[dict[str, Any]],
         reply_to_message_id: Optional[int], media_label: str, reset_media: Optional[Any] = None,
         chat_id: Any = None) -> Any:
         """Retry stale private-topic media replies once without the topic anchor.
@@ -3520,7 +3520,7 @@ class TelegramAdapter(TelegramHeldInboundMixin, BasePlatformAdapter):
                     timeout=_TEXT_SEND_DEADLINE, label="telegram-send", dump_on_blocked_loop=False)
             raise
 
-    def _chunks_for_send(self, content: str) -> "tuple[List[str], List[str]]":
+    def _chunks_for_send(self, content: str) -> "tuple[list[str], list[str]]":
         """``(raw_chunks, wire_chunks)`` for a ``send()`` payload.
 
         Chunking the RAW text (the split ``_edit_overflow_split`` already uses) keeps every chunk
@@ -3556,7 +3556,7 @@ class TelegramAdapter(TelegramHeldInboundMixin, BasePlatformAdapter):
 
     @staticmethod
     def _split_at_chunk_boundary(
-        content: str, raw_chunks: "List[str]", delivered: int) -> "tuple[str, str]":
+        content: str, raw_chunks: "list[str]", delivered: int) -> "tuple[str, str]":
         """``(delivered_prefix, undelivered_tail)`` as exact slices of ``content``.
 
         Walks the delivered chunk bodies through ``content`` to find the real boundary offset, so
@@ -3575,7 +3575,7 @@ class TelegramAdapter(TelegramHeldInboundMixin, BasePlatformAdapter):
         return content[:offset], content[offset:]
 
     def _partial_send_result(
-        self, failure: SendResult, content: str, raw_chunks: "List[str]", delivered_ids: "List[str]") -> SendResult:
+        self, failure: SendResult, content: str, raw_chunks: "list[str]", delivered_ids: "list[str]") -> SendResult:
         """Re-stamp a mid-loop chunk failure with what already landed.
 
         ``send()`` is not atomic for a split payload: when chunk N is refused (overwhelmingly a

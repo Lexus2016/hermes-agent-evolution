@@ -17,7 +17,7 @@ from typing import Dict, List, Tuple
 class MigrationVerifier:
     """Verify migration integrity."""
     
-    def __init__(self, backup_path: str, current_path: str = None):
+    def __init__(self, backup_path: str, current_path: str | None = None):
         """
         Initialize verifier.
         

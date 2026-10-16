@@ -279,7 +279,7 @@ def test_team_tools_hidden_without_identity(monkeypatch, tmp_path):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     clear_thread_identity()
 
-    import tools.agent_team_tools  # noqa: F401  ensure registered
+    import tools.agent_team_tools
     from tools.registry import invalidate_check_fn_cache, registry
     from toolsets import resolve_toolset
 
@@ -294,7 +294,7 @@ def test_team_tools_visible_with_env(monkeypatch, tmp_path):
     monkeypatch.setenv(TEAM_ID_ENV, "teamA")
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
 
-    import tools.agent_team_tools  # noqa: F401
+    import tools.agent_team_tools
     from tools.registry import invalidate_check_fn_cache, registry
     from toolsets import resolve_toolset
 

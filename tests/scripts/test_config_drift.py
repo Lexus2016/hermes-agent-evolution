@@ -43,7 +43,7 @@ class TestDynamicInferenceRouting:
         monkeypatch.setattr(
             jobs_mod, "create_job", lambda **kw: {"id": "j1", "name": kw["name"]}
         )
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
 
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
 
@@ -84,7 +84,7 @@ class TestDynamicInferenceRouting:
         monkeypatch.setattr(
             jobs_mod, "create_job", lambda **kw: {"id": "j1", "name": kw["name"]}
         )
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
 
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
 
@@ -125,7 +125,7 @@ class TestDynamicInferenceRouting:
         monkeypatch.setattr(
             jobs_mod, "create_job", lambda **kw: {"id": "j1", "name": kw["name"]}
         )
-        monkeypatch.setattr(jobs_mod, "load_jobs", lambda: [])
+        monkeypatch.setattr(jobs_mod, "load_jobs", list)
 
         rc = mod.main(["register_evolution_cron.py", str(src_dir)])
 

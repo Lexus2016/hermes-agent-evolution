@@ -15,7 +15,7 @@ import json
 
 import pytest
 
-import tools.terminal_tool as terminal_tool
+from tools import terminal_tool
 
 
 class TimingOutEnvironment:

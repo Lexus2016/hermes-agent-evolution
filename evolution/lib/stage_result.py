@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Structured result-tuple contract for evolution pipeline stages (issue #1338).
 
 AREX-style ``StageResult`` — every pipeline stage emits this instead of a

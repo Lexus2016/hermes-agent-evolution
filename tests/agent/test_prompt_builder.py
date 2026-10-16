@@ -332,7 +332,7 @@ class TestParseSkillFile:
     def test_missing_description_returns_empty(self, tmp_path):
         skill_file = tmp_path / "SKILL.md"
         skill_file.write_text("No frontmatter here")
-        is_compat, frontmatter, desc = _parse_skill_file(skill_file)
+        _is_compat, _frontmatter, desc = _parse_skill_file(skill_file)
         assert desc == ""
 
     def test_long_description_truncated(self, tmp_path):

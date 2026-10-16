@@ -465,8 +465,8 @@ def _apply_skill_fields(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def check_job_skills_manifest(
-    skills: Optional[Union[str, List[str]]],
-) -> Tuple[List[str], List[str]]:
+    skills: Optional[str | list[str]],
+) -> tuple[list[str], list[str]]:
     """Check a list of skill names against installed skills in the active profile.
 
     Returns:
@@ -480,8 +480,8 @@ def check_job_skills_manifest(
     from agent.skill_utils import normalize_skill_lookup_name
     from tools.skills_tool import skill_view
 
-    installed: List[str] = []
-    missing: List[str] = []
+    installed: list[str] = []
+    missing: list[str] = []
     bundles = None
 
     for skill_name in skill_list:
@@ -523,11 +523,11 @@ def check_job_skills_manifest(
 
 
 def repin_jobs(
-    job_ids: Optional[Union[str, List[str]]] = None,
+    job_ids: Optional[str | list[str]] = None,
     *,
     drifted_only: bool = False,
     pin_explicitly: bool = False,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Re-pin inference configuration or baseline snapshots for cron jobs.
 
     Thread- and process-safe under ``_jobs_lock()``.
@@ -557,7 +557,7 @@ def repin_jobs(
             else:
                 target_id_set = {str(j).strip() for j in job_ids if str(j).strip()}
 
-        updated_jobs: List[Dict[str, Any]] = []
+        updated_jobs: list[dict[str, Any]] = []
 
         for job in jobs:
             if job.get("no_agent"):
@@ -1406,7 +1406,7 @@ def compute_next_run(schedule: dict[str, Any], last_run_at: Optional[str] = None
     return None
 
 
-def _failure_backoff_config() -> Dict[str, Any]:
+def _failure_backoff_config() -> dict[str, Any]:
     """Return the ``cron`` config section for failure-backoff tuning (#70).
 
     Read-only: uses ``load_config_readonly`` so the hot path (every job run)
@@ -1457,7 +1457,7 @@ def _failure_auto_pause_threshold() -> int:
 
 
 def _advance_schedule_by_steps(
-    schedule: Dict[str, Any],
+    schedule: dict[str, Any],
     from_iso: str,
     n_steps: int,
 ) -> Optional[str]:
@@ -2058,7 +2058,7 @@ def _resolve_default_model_snapshot() -> Optional[str]:
 
 def _compute_provider_model_snapshots(
     *, provider: Any, model: Any, base_url: Any, no_agent: Any,
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[Optional[str], Optional[str]]:
     """Snapshot unpinned provider/model resolution: the scheduler runs the job on this snapshot after
     a later global switch instead of silently changing spend. Pinned axes and no-agent jobs carry no
     snapshot."""
@@ -2101,8 +2101,8 @@ def _compute_provider_model_snapshots(
 
 
 def _normalized_inference_axes(
-    job: Dict[str, Any],
-) -> Tuple[Optional[str], Optional[str], Optional[str], bool]:
+    job: dict[str, Any],
+) -> tuple[Optional[str], Optional[str], Optional[str], bool]:
     """Return the stored inference-routing fields in their semantic form."""
     return (
         _normalize_job_optional_text(job.get("provider")),
@@ -2513,7 +2513,7 @@ def update_job(job_id: str, updates: dict[str, Any]) -> Optional[dict[str, Any]]
     return _with_job(job_id, apply)
 
 
-def resnapshot_job(job_id: str) -> Optional[Dict[str, Any]]:
+def resnapshot_job(job_id: str) -> Optional[dict[str, Any]]:
     """Refresh provider/model snapshots for a job's UNPINNED axes to the
     current global resolution.
 
@@ -2549,11 +2549,11 @@ def resnapshot_job(job_id: str) -> Optional[Dict[str, Any]]:
         jobs[i]["provider_snapshot"] = provider_snapshot
         jobs[i]["model_snapshot"] = model_snapshot
         save_jobs(jobs)
-        return _normalize_job_record(jobs[i])
+        return _normalize_job_record(stored)
     return None
 
 
-def resnapshot_all_unpinned() -> List[Dict[str, Any]]:
+def resnapshot_all_unpinned() -> list[dict[str, Any]]:
     """Refresh provider/model snapshots for every job that has any unpinned
     axis, adopting the current global resolution for each.
 
@@ -2561,7 +2561,7 @@ def resnapshot_all_unpinned() -> List[Dict[str, Any]]:
     unpinned to refresh). Equivalent to calling ``resnapshot_job`` for each
     eligible job. Returns the list of updated jobs.
     """
-    updated: List[Dict[str, Any]] = []
+    updated: list[dict[str, Any]] = []
     jobs = load_jobs()
     changed = False
     for job in jobs:
@@ -2814,7 +2814,7 @@ def note_fire_forward_failure(job_id: str, detail: str) -> bool:
 
 
 def _record_run_outcome(
-    job: Dict[str, Any], success: bool, error: Optional[str], delivery_error: Optional[str],
+    job: dict[str, Any], success: bool, error: Optional[str], delivery_error: Optional[str],
     status: Optional[str], now: str, tool_calls: Optional[int] = None,
 ) -> None:
     """Stamp one completed run onto *job*: status fields, failure streak, alert markers, claims."""
@@ -2995,9 +2995,8 @@ def mark_job_run(
                     job["state"] = "paused"
                     job["paused_at"] = now
                     job["paused_reason"] = (
-                        "auto-paused after %d identical consecutive "
-                        "failures (last error: %.200s) — resume to retry"
-                        % (int(job["failure_streak"]), error or "")
+                        f"auto-paused after {int(job['failure_streak'])} identical consecutive "
+                        f"failures (last error: {(error or '')[:200]}) — resume to retry"
                     )
                     job["next_run_at"] = None
         if not success and quota_hold_seconds and not is_terminal_job(job):
@@ -3955,7 +3954,7 @@ def _normalize_delivery_verbosity(value: Any) -> Optional[str]:
 
 
 def save_job_failure(
-    job: Dict[str, Any],
+    job: dict[str, Any],
     *,
     success: bool,
     error: Optional[str] = None,
@@ -4017,11 +4016,11 @@ def save_job_failure(
     return record_file
 
 
-def list_job_failures(job_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+def list_job_failures(job_id: str, limit: Optional[int] = None) -> list[dict[str, Any]]:
     failure_job_dir = _current_cron_store().cron_dir / "failures" / job_id
     if not failure_job_dir.exists():
         return []
-    records: List[Dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
     for path in sorted(
         failure_job_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
     ):
@@ -4034,7 +4033,7 @@ def list_job_failures(job_id: str, limit: Optional[int] = None) -> List[Dict[str
     return records
 
 
-def get_latest_failure(job_id: str) -> Optional[Dict[str, Any]]:
+def get_latest_failure(job_id: str) -> Optional[dict[str, Any]]:
     records = list_job_failures(job_id, limit=1)
     return records[0] if records else None
 
@@ -4148,7 +4147,7 @@ def mark_job_started(job_id: str) -> None:
         logger.warning("mark_job_started: job_id %s not found", job_id)
 
 
-def recover_interrupted_jobs(max_refire_age_hours: float = 6.0) -> List[str]:
+def recover_interrupted_jobs(max_refire_age_hours: float = 6.0) -> list[str]:
     """Turn stale ``running`` markers into visible interrupted records.
 
     Call ONCE at gateway startup, BEFORE the first scheduler tick: this
@@ -4167,7 +4166,7 @@ def recover_interrupted_jobs(max_refire_age_hours: float = 6.0) -> List[str]:
     Do NOT call this from CLI ``cron tick`` paths — a tick alongside a live
     gateway would misread that gateway's in-flight jobs as interrupted.
     """
-    recovered: List[str] = []
+    recovered: list[str] = []
     with _jobs_lock():
         jobs = load_jobs()
         now = _hermes_now()

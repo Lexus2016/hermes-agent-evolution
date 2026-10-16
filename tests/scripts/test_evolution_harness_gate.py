@@ -15,14 +15,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_harness_gate import (  # noqa: E402
+from evolution_harness_gate import (
     GATE_SIDECAR,
     apply_validated,
     main,
     run_cron_pass,
     run_gate,
 )
-from evolution_harness_sandbox import GateResult  # noqa: E402
+from evolution_harness_sandbox import GateResult
 
 SURFACE = {
     "retry_count": 10,

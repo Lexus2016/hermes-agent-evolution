@@ -1124,7 +1124,7 @@ def recover_with_credential_pool(
         )
         try:
             activated = agent._try_activate_fallback(reason=FailoverReason.billing)
-        except Exception as exc:  # noqa: BLE001 — never let fallback errors mask the original 402
+        except Exception as exc:
             _ra().logger.warning("Cross-provider fallback raised: %s", exc)
             activated = False
         if activated:

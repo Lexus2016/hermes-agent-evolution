@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Node-level caching for repeated evolution pipeline stages (issue #2434).
 
 Provides deterministic, TTL-aware caching of stage outputs to eliminate
@@ -26,8 +25,8 @@ from typing import Any, Callable, TypeVar
 __all__ = [
     "CachePolicy",
     "StageCache",
-    "compute_stage_cache_key",
     "cache_stage_call",
+    "compute_stage_cache_key",
 ]
 
 T = TypeVar("T")

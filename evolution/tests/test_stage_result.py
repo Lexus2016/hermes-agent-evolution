@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for :mod:`evolution.lib.stage_result` (issue #1338)."""
 
 from __future__ import annotations

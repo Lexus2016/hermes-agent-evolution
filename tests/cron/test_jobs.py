@@ -994,12 +994,12 @@ class TestFailureBackoff:
 
     def test_advance_schedule_by_steps_interval(self):
         from datetime import datetime, timedelta, timezone
-        base = datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc).isoformat()
+        base = datetime(2026, 8, 18, 12, 0, tzinfo=UTC).isoformat()
         advanced = _advance_schedule_by_steps(
             {"kind": "interval", "minutes": 10}, base, 3
         )
         dt = datetime.fromisoformat(advanced)
-        assert dt == datetime(2026, 8, 18, 12, 30, tzinfo=timezone.utc)
+        assert dt == datetime(2026, 8, 18, 12, 30, tzinfo=UTC)
 
     def test_advance_schedule_by_steps_zero_is_identity(self):
         base = "2026-08-18T12:00:00+00:00"

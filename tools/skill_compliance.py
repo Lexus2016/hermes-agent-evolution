@@ -45,11 +45,11 @@ def record_tool_call_for_active_skill(tool_name: str) -> None:
     _tool_calls.set(calls)
 
 
-def get_active_skill_tool_calls() -> List[str]:
+def get_active_skill_tool_calls() -> list[str]:
     return list(_get_calls())
 
 
-def _read_forbidden_tools(name: str) -> Set[str]:
+def _read_forbidden_tools(name: str) -> set[str]:
     try:
         from tools.skill_manager_tool import _find_skill
         found = _find_skill(name)
@@ -80,7 +80,7 @@ def _read_forbidden_tools(name: str) -> Set[str]:
     return {str(t).lower() for t in forbidden} if isinstance(forbidden, list) else set()
 
 
-def check_boundary_violations(skill_name: str, tool_calls_made: List[str]) -> bool:
+def check_boundary_violations(skill_name: str, tool_calls_made: list[str]) -> bool:
     forbidden = _read_forbidden_tools(skill_name)
     if not forbidden:
         return False

@@ -16,7 +16,7 @@ Shield pre-execution validator (#1798) happens when Slice 1 merges.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from typing import Any
 
 # ── Trust levels ────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ class ProvenanceTag:
     source: str  # e.g. "web_search", "github", "email", "mcp_server"
     url: str = ""
     fetched_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
 
     @property

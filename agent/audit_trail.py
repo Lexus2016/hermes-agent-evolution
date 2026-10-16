@@ -59,10 +59,10 @@ class AuditEvent:
     parent_event_id: Optional[str] = None
     tool_name: Optional[str] = None
     inputs_digest: Optional[str] = None
-    artifact_refs: List[str] = field(default_factory=list)
-    validation_refs: List[str] = field(default_factory=list)
+    artifact_refs: list[str] = field(default_factory=list)
+    validation_refs: list[str] = field(default_factory=list)
     status: str = "success"  # "success", "failure", "denied", "interrupted"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     ts: int = field(default_factory=lambda: int(time.time()))
 
     def to_record(self) -> dict:
@@ -131,11 +131,11 @@ def _hash(prev_hash: str, payload: str) -> str:
     return hashlib.sha256((prev_hash + payload).encode("utf-8")).hexdigest()
 
 
-def sanitize_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def sanitize_metadata(metadata: Optional[dict[str, Any]]) -> dict[str, Any]:
     """Redact sensitive keys/tokens and truncate long output strings."""
     if not metadata:
         return {}
-    cleaned: Dict[str, Any] = {}
+    cleaned: dict[str, Any] = {}
     for k, v in metadata.items():
         if k in ("api_key", "token", "password", "secret", "authorization"):
             cleaned[k] = "[REDACTED]"
@@ -197,10 +197,10 @@ def append(record: dict, *, path: Path | None = None) -> Optional[dict]:
 
 
 def extract_artifact_refs(
-    tool_name: str, args: Optional[Dict[str, Any]] = None, result: Any = None
-) -> List[str]:
+    tool_name: str, args: Optional[dict[str, Any]] = None, result: Any = None
+) -> list[str]:
     """Extract artifact references (file://, git://, http://) from tool invocations."""
-    refs: Set[str] = set()
+    refs: set[str] = set()
     args = args or {}
     name = (tool_name or "").strip().lower()
 
@@ -238,14 +238,14 @@ def extract_artifact_refs(
         if url and isinstance(url, str) and url.startswith(("http://", "https://")):
             refs.add(url.strip())
 
-    return sorted(list(refs))
+    return sorted(refs)
 
 
 def extract_validation_refs(
-    tool_name: str, args: Optional[Dict[str, Any]] = None, result: Any = None
-) -> List[str]:
+    tool_name: str, args: Optional[dict[str, Any]] = None, result: Any = None
+) -> list[str]:
     """Extract validation references (test://, lint://, check://) from executions."""
-    refs: Set[str] = set()
+    refs: set[str] = set()
     args = args or {}
     name = (tool_name or "").strip().lower()
     cmd = str(args.get("command") or args.get("cmd") or "").strip()
@@ -273,7 +273,7 @@ def extract_validation_refs(
             status = "failed" if has_fail else ("passed" if has_pass else "completed")
             refs.add(f"test://{cmd[:60].strip()}:{status}")
 
-    return sorted(list(refs))
+    return sorted(refs)
 
 
 def record_event(
@@ -284,10 +284,10 @@ def record_event(
     parent_event_id: Optional[str] = None,
     tool_name: Optional[str] = None,
     inputs: Any = None,
-    artifact_refs: Optional[List[str]] = None,
-    validation_refs: Optional[List[str]] = None,
+    artifact_refs: Optional[list[str]] = None,
+    validation_refs: Optional[list[str]] = None,
     status: str = "success",
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: Optional[dict[str, Any]] = None,
     path: Optional[Path] = None,
 ) -> Optional[dict]:
     """Construct a structured AuditEvent and append it to the tamper-evident log."""
@@ -322,8 +322,8 @@ def record_event(
         parent_event_id=parent_event_id,
         tool_name=tool_name,
         inputs_digest=AuditEvent.hash_inputs(inputs) if inputs is not None else None,
-        artifact_refs=sorted(list(set(extracted_artifacts))),
-        validation_refs=sorted(list(set(extracted_validations))),
+        artifact_refs=sorted(set(extracted_artifacts)),
+        validation_refs=sorted(set(extracted_validations)),
         status=status,
         metadata=cleaned_metadata,
     )
@@ -338,13 +338,13 @@ def query_trail(
     limit: Optional[int] = 500,
     newest_first: bool = True,
     path: Optional[Path] = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Query audit trail records with filtering and optional limit (newest first)."""
     path = path or _audit_path()
     if not path.exists():
         return []
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     lines = path.read_text(encoding="utf-8-sig").splitlines()
     iterable = reversed(lines) if newest_first else lines
 
@@ -371,17 +371,17 @@ def query_trail(
     return results
 
 
-def reconstruct_run(session_id: str, *, path: Optional[Path] = None) -> Dict[str, Any]:
+def reconstruct_run(session_id: str, *, path: Optional[Path] = None) -> dict[str, Any]:
     """Reconstruct action -> artifact -> validation DAG and summary for a session."""
     # Query all events for this session in chronological order without truncation
     events = query_trail(session_id=session_id, limit=None, newest_first=False, path=path)
     chain_valid, _ = verify(path)
 
-    actions: List[Dict[str, Any]] = []
-    artifacts: Set[str] = set()
-    validations: List[str] = []
-    delegations: List[Dict[str, Any]] = []
-    parent_map: Dict[str, List[str]] = {}
+    actions: list[dict[str, Any]] = []
+    artifacts: set[str] = set()
+    validations: list[str] = []
+    delegations: list[dict[str, Any]] = []
+    parent_map: dict[str, list[str]] = {}
 
     successful_ops = 0
     failed_ops = 0
@@ -426,7 +426,7 @@ def reconstruct_run(session_id: str, *, path: Optional[Path] = None) -> Dict[str
         "event_count": len(events),
         "valid_chain": chain_valid,
         "actions": actions,
-        "artifacts": sorted(list(artifacts)),
+        "artifacts": sorted(artifacts),
         "validations": validations,
         "delegations": delegations,
         "causal_graph": parent_map,

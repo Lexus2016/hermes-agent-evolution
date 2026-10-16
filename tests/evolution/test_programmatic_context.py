@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for persistent programmatic context — context-as-variable store (Issue #2496)."""
 
 from __future__ import annotations
@@ -152,7 +151,7 @@ class TestIntegrationWithCompressorAndAgent:
                 return_value=[{"role": "system", "content": "Summary"}]
             )
             # Compressed conversation replaced
-            messages = [{"role": "system", "content": "Summary"}]
+            _messages = [{"role": "system", "content": "Summary"}]
 
         # Context variable is still intact and accessible without needing old raw messages
         assert agent.get_context_var("critical_decision") == "Use AES-256 for vault"

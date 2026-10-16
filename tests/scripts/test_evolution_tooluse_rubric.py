@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for the tool-use competency rubric (issue #1268)."""
 
 import json
@@ -7,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_tooluse_rubric import (  # noqa: E402
+from evolution_tooluse_rubric import (
     DIMENSIONS,
     format_summary,
     load_turns,
@@ -30,9 +29,8 @@ def _write_turns(d, session, turns):
     d.mkdir(parents=True, exist_ok=True)
     p = d / f"2026-07-28_{session}.jsonl"
     with open(p, "a", encoding="utf-8") as fh:
-        for entries in turns:
-            fh.write(json.dumps({"date": "2026-07-28", "session_id": session,
-                                 "entries": entries}) + "\n")
+        fh.writelines(json.dumps({"date": "2026-07-28", "session_id": session,
+                                 "entries": entries}) + "\n" for entries in turns)
     return p
 
 

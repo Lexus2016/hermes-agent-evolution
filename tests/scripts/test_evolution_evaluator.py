@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_evaluator import (  # noqa: E402
+from evolution_evaluator import (
     ACCEPT,
     DEFAULT_RUBRIC,
     EXIT_ACCEPT,

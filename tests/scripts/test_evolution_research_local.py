@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_research_local import (  # noqa: E402
+from evolution_research_local import (
     _default_evolution_dir,
     _load_records,
     _priority,
@@ -26,6 +26,7 @@ from evolution_research_local import (  # noqa: E402
     run_local_research,
     web_tools_available,
 )
+from datetime import UTC
 
 
 def _write_metrics(evo_dir: Path, records: list[dict]) -> None:
@@ -171,7 +172,7 @@ def test_healthy_pipeline_yields_explicit_note_not_silence(evo_dir: Path):
 
     result = run_local_research(evo_dir)
     assert result["findings"] == []
-    assert "note" in result and result["note"]
+    assert result.get("note")
 
     report = render_report(result)
     assert "Local-state fallback" in report
@@ -241,7 +242,7 @@ def test_main_does_not_clobber_live_report(evo_dir: Path):
     _write_metrics(evo_dir, [{"date": "d0", "merged": 0} for _ in range(4)])
     research_dir = evo_dir / "research"
     research_dir.mkdir()
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     live = research_dir / f"{today}.md"
     live.write_text(
         "# Research Report - live\n\nreal frontier scan\n", encoding="utf-8"

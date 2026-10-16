@@ -10,8 +10,8 @@ from typing import List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tools.gepa_evolution import EvolutionTree, run_gepa_generation  # noqa: E402
-from tools.gepa_reflector import VariantResult  # noqa: E402
+from tools.gepa_evolution import EvolutionTree, run_gepa_generation
+from tools.gepa_reflector import VariantResult
 
 SEED_TEXT = (
     "Read the task prompt carefully. Use the available tools to gather the "
@@ -19,7 +19,7 @@ SEED_TEXT = (
 )
 
 
-def build_seed_results() -> List[VariantResult]:
+def build_seed_results() -> list[VariantResult]:
     """Construct deterministic evaluation results for the seed candidate."""
     return [
         VariantResult(variant="seed", task="t1", passed=True),
@@ -27,7 +27,7 @@ def build_seed_results() -> List[VariantResult]:
     ]
 
 
-def run(argv: List[str]) -> int:
+def run(argv: list[str]) -> int:
     """Run one GEPA generation and print a JSON summary."""
     tree = EvolutionTree()
     seed = tree.add_seed(SEED_TEXT)
@@ -49,7 +49,7 @@ def run(argv: List[str]) -> int:
     return 0
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     return run(argv)
 
 

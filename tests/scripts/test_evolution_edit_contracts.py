@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
-from evolution_edit_contracts import (  # noqa: E402
+from evolution_edit_contracts import (
     contracts_summary,
     load_contracts,
     record_contract,

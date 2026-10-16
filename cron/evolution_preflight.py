@@ -47,7 +47,7 @@ _HALT_GATED_STAGES = frozenset({
 })
 
 
-def evolution_job_stage(job: Dict[str, Any]) -> Optional[str]:
+def evolution_job_stage(job: dict[str, Any]) -> Optional[str]:
     """Return the evolution stage for a cron job, or None if it is not an
     evolution pipeline job.
 
@@ -220,7 +220,7 @@ def load_digest_as_fallback(
     return header + text
 
 
-def _provider_specific_timeout(runtime: Dict[str, Any], cfg: Optional[Any]) -> float:
+def _provider_specific_timeout(runtime: dict[str, Any], cfg: Optional[Any]) -> float:
     """Pick the tightest sensible timeout for the provider ping."""
     provider = runtime.get("provider") or ""
     model = runtime.get("model") or ""
@@ -231,7 +231,7 @@ def _provider_specific_timeout(runtime: Dict[str, Any], cfg: Optional[Any]) -> f
 
 
 def preflight_provider(
-    runtime: Dict[str, Any], *, cfg: Optional[Any] = None
+    runtime: dict[str, Any], *, cfg: Optional[Any] = None
 ) -> Optional[str]:
     """Run a minimal, non-streaming provider ping.
 
@@ -295,7 +295,7 @@ def _balance_cache_path(hermes_home: Optional[Path] = None) -> Path:
     return _evolution_dir(hermes_home) / "balance-low.json"
 
 
-def _balance_state(hermes_home: Optional[Path] = None) -> Dict[str, Any]:
+def _balance_state(hermes_home: Optional[Path] = None) -> dict[str, Any]:
     """Read the balance-verdict marker file; never raises."""
     try:
         path = _balance_cache_path(hermes_home)
@@ -397,7 +397,7 @@ def clear_provider_balance_low(
 
 
 def preflight_provider_balance(
-    runtime: Dict[str, Any], *, cfg: Optional[Any] = None, hermes_home: Optional[Path] = None
+    runtime: dict[str, Any], *, cfg: Optional[Any] = None, hermes_home: Optional[Path] = None
 ) -> Optional[str]:
     """Provider-balance preflight: None when the account has balance (or the
     check cannot run), or a BALANCE_LOW reason when the account is exhausted.
@@ -444,7 +444,7 @@ def _preflight_openai_compatible(
 ) -> Optional[str]:
     from openai import OpenAI
 
-    client_kwargs: Dict[str, Any] = {"api_key": api_key, "timeout": timeout}
+    client_kwargs: dict[str, Any] = {"api_key": api_key, "timeout": timeout}
     if base_url:
         client_kwargs["base_url"] = base_url
     client = OpenAI(**client_kwargs)
@@ -508,7 +508,7 @@ def _preflight_anthropic(
 ) -> Optional[str]:
     from anthropic import Anthropic
 
-    client_kwargs: Dict[str, Any] = {"api_key": api_key, "timeout": timeout}
+    client_kwargs: dict[str, Any] = {"api_key": api_key, "timeout": timeout}
     if base_url:
         client_kwargs["base_url"] = base_url
     client = Anthropic(**client_kwargs)
@@ -529,7 +529,7 @@ def _preflight_anthropic(
             pass
 
 
-def _preflight_bedrock(runtime: Dict[str, Any], timeout: float) -> Optional[str]:
+def _preflight_bedrock(runtime: dict[str, Any], timeout: float) -> Optional[str]:
     # Bedrock uses boto3; resolving the runtime already validates credentials.
     # A full converse ping would require a model id and may incur token cost,
     # so we treat the resolved runtime as reachable. This preserves the fallback

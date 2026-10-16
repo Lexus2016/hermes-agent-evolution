@@ -31,7 +31,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from typing import Callable, Dict, List, Tuple
 
@@ -39,7 +39,7 @@ from typing import Callable, Dict, List, Tuple
 # Slots and extensions mirror cron/evolution/*.yaml (schedule + output.file).
 # Drift is locked down by TestStagesMirrorCronSpecs in
 # tests/scripts/test_evolution_watchdog.py.
-STAGES: Dict[str, Tuple[int, str]] = {
+STAGES: dict[str, tuple[int, str]] = {
     "research": (9, "md"),
     "introspection": (20, "json"),
     # chat-safe default (council 2026-08-31): once-daily pipeline at evening
@@ -123,7 +123,7 @@ def expected_report_date(
     return day.isoformat()
 
 
-def _load_jobs(jobs_file: Path | None) -> List[dict]:
+def _load_jobs(jobs_file: Path | None) -> list[dict]:
     if jobs_file is None:
         return []
     try:
@@ -134,7 +134,7 @@ def _load_jobs(jobs_file: Path | None) -> List[dict]:
 
 
 def _stage_clean_job_for_slot(
-    jobs: List[dict], stage: str, date: str, slot_hour: int
+    jobs: list[dict], stage: str, date: str, slot_hour: int
 ) -> dict | None:
     """The stage's cron job record when it ran with ``last_status == "ok"`` at
     or after its slot on ``date`` — else None. A MISSING report is only a death
@@ -162,14 +162,14 @@ def _stage_clean_job_for_slot(
 
 
 def _stage_ran_clean_for_slot(
-    jobs: List[dict], stage: str, date: str, slot_hour: int
+    jobs: list[dict], stage: str, date: str, slot_hour: int
 ) -> bool:
     """Boolean wrapper kept for existing callers — see
     ``_stage_clean_job_for_slot``."""
     return _stage_clean_job_for_slot(jobs, stage, date, slot_hour) is not None
 
 
-def _stage_cron_weekday(jobs: List[dict], stage: str) -> int | None:
+def _stage_cron_weekday(jobs: list[dict], stage: str) -> int | None:
     """Python weekday (Mon=0 .. Sun=6) of the stage's weekly cron slot, or None.
 
     Weekly stages fire on a fixed cron weekday (research Mon, introspection
@@ -211,12 +211,12 @@ def expected_weekly_report_date(
 
 def check_stage_reports(
     evolution_dir: Path, now: datetime, jobs_file: Path | None = None
-) -> List[str]:
+) -> list[str]:
     """Alert for every stage whose expected report is missing or trivial.
 
     A missing report is suppressed (not a death) when the stage's cron job ran
     clean for the slot — see ``_stage_ran_clean_for_slot``."""
-    alerts: List[str] = []
+    alerts: list[str] = []
     jobs = _load_jobs(jobs_file)
     for stage, (slot_hour, ext) in STAGES.items():
         # A weekly stage's slot is its cron WEEKDAY, not "the most recent daily
@@ -297,9 +297,9 @@ def _parse_iso(value) -> datetime | None:
         return None
 
 
-def check_jobs(jobs_file: Path, now: datetime) -> List[str]:
+def check_jobs(jobs_file: Path, now: datetime) -> list[str]:
     """Alert on unhealthy evolution job records in the cron registry."""
-    alerts: List[str] = []
+    alerts: list[str] = []
     try:
         data = json.loads(jobs_file.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
@@ -345,7 +345,7 @@ def check_jobs(jobs_file: Path, now: datetime) -> List[str]:
     return alerts
 
 
-def _default_runner(cmd: List[str]) -> Tuple[int, str]:
+def _default_runner(cmd: list[str]) -> tuple[int, str]:
     proc = subprocess.run(
         cmd,
         capture_output=True,
@@ -353,20 +353,21 @@ def _default_runner(cmd: List[str]) -> Tuple[int, str]:
         encoding="utf-8",
         errors="replace",
         timeout=30,
+        check=False,
     )
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
 def check_gh(
-    runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
-) -> List[str]:
+    runner: Callable[[list[str]], tuple[int, str]] = _default_runner,
+) -> list[str]:
     """Alert when gh auth is broken or API rate budget is nearly gone."""
-    alerts: List[str] = []
+    alerts: list[str] = []
     try:
         rc, _out = runner(["gh", "auth", "status"])
         if rc != 0:
             alerts.append("gh auth status FAILED — every pipeline stage depends on gh")
-    except Exception as exc:  # noqa: BLE001 — any spawn failure is an alert
+    except Exception as exc:
         return [f"gh unavailable: {exc}"]
 
     try:
@@ -381,7 +382,7 @@ def check_gh(
                 )
         else:
             alerts.append("gh api rate_limit failed — cannot verify API budget")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         alerts.append(f"gh rate-limit check failed: {exc}")
     return alerts
 
@@ -411,14 +412,14 @@ def _utcnow() -> datetime:
     """Injectable clock seam (tz-aware UTC). Overridden in tests for the grace."""
     from datetime import timezone
 
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def check_upstream_lag(
-    runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
+    runner: Callable[[list[str]], tuple[int, str]] = _default_runner,
     repo_dir: Path | None = None,
     clock: Callable[[], datetime] = _utcnow,
-) -> List[str]:
+) -> list[str]:
     """Alert when the fork is missing the latest PUBLISHED upstream release.
 
     RELEASE-tracking model (2026-07-01): the fork mirrors upstream's tagged
@@ -454,15 +455,15 @@ def check_upstream_lag(
             return []
 
         return _release_lag_alerts(runner, repo, clock)
-    except Exception:  # noqa: BLE001 — this check must never crash the watchdog
+    except Exception:
         return []
 
 
 def _release_lag_alerts(
-    runner: Callable[[List[str]], Tuple[int, str]],
+    runner: Callable[[list[str]], tuple[int, str]],
     repo: Path,
     clock: Callable[[], datetime],
-) -> List[str]:
+) -> list[str]:
     """Core release-lag logic (wrapped by check_upstream_lag's fail-open guard)."""
     slug = _upstream_slug(runner, repo)
     if not slug:
@@ -485,7 +486,7 @@ def _release_lag_alerts(
             tag,
             "HEAD",
         ])
-    except Exception:  # noqa: BLE001
+    except Exception:
         return []
     if rc == 0:
         return []  # latest release contained → fully current under release-tracking
@@ -516,18 +517,17 @@ def _release_lag_alerts(
 
 
 def _upstream_slug(
-    runner: Callable[[List[str]], Tuple[int, str]], repo: Path
+    runner: Callable[[list[str]], tuple[int, str]], repo: Path
 ) -> str | None:
     """``owner/name`` of the ``upstream`` remote, or None (fail-open)."""
     try:
         rc, out = runner(["git", "-C", str(repo), "remote", "get-url", "upstream"])
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     if rc != 0:
         return None
     url = out.strip()
-    if url.endswith(".git"):
-        url = url[:-4]
+    url = url.removesuffix(".git")
     # scp-form (git@host:owner/name) vs URL-form (https://host/owner/name)
     path = url.split(":", 1)[1] if ":" in url and "//" not in url else url
     parts = [p for p in path.replace(":", "/").strip("/").split("/") if p]
@@ -537,8 +537,8 @@ def _upstream_slug(
 
 
 def _latest_upstream_release(
-    runner: Callable[[List[str]], Tuple[int, str]], slug: str
-) -> Tuple[str, str] | None:
+    runner: Callable[[list[str]], tuple[int, str]], slug: str
+) -> tuple[str, str] | None:
     """(tagName, publishedAt) of upstream's latest GitHub release, or None."""
     try:
         rc, out = runner([
@@ -550,7 +550,7 @@ def _latest_upstream_release(
             "--json",
             "tagName,publishedAt",
         ])
-    except Exception:  # noqa: BLE001 — gh missing/unauthed: fail-open
+    except Exception:
         return None
     if rc != 0 or not out.strip():
         return None
@@ -580,37 +580,37 @@ def _release_older_than(
     from datetime import timezone
 
     try:
-        pub = datetime.fromisoformat(published_iso.replace("Z", "+00:00"))
+        pub = datetime.fromisoformat(published_iso)
     except ValueError:
         return False
     if pub.tzinfo is None:
-        pub = pub.replace(tzinfo=timezone.utc)
+        pub = pub.replace(tzinfo=UTC)
     now = clock()
     if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+        now = now.replace(tzinfo=UTC)
     return (now - pub) >= timedelta(hours=hours)
 
 
 def _behind_release(
-    runner: Callable[[List[str]], Tuple[int, str]], repo: Path, tag: str
+    runner: Callable[[list[str]], tuple[int, str]], repo: Path, tag: str
 ) -> int:
     """Commits in the release tag not yet in the fork (best-effort, 0 on error)."""
     return _rev_list_count(runner, repo, f"HEAD..{tag}")
 
 
 def _count_ahead_of_release(
-    runner: Callable[[List[str]], Tuple[int, str]], repo: Path, tag: str
+    runner: Callable[[list[str]], tuple[int, str]], repo: Path, tag: str
 ) -> int:
     """Commits the fork has that the release tag does not (best-effort, 0)."""
     return _rev_list_count(runner, repo, f"{tag}..HEAD")
 
 
 def _rev_list_count(
-    runner: Callable[[List[str]], Tuple[int, str]], repo: Path, rng: str
+    runner: Callable[[list[str]], tuple[int, str]], repo: Path, rng: str
 ) -> int:
     try:
         rc, out = runner(["git", "-C", str(repo), "rev-list", "--count", rng])
-    except Exception:  # noqa: BLE001
+    except Exception:
         return 0
     if rc != 0:
         return 0
@@ -624,7 +624,7 @@ def ensure_upstream_issue(
     behind: int,
     ahead: int,
     tag: str = "",
-    runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
+    runner: Callable[[list[str]], tuple[int, str]] = _default_runner,
     gh_enabled: bool = True,
 ) -> str | None:
     """Idempotently ensure a GitHub ``[UPSTREAM]`` tracking issue exists.
@@ -660,7 +660,7 @@ def ensure_upstream_issue(
             "--json",
             "number,title",
         ])
-    except Exception:  # noqa: BLE001 — gh missing/spawn failure: fail-open
+    except Exception:
         return None
     if rc != 0:
         # Search failed: do NOT blind-create (would risk duplicates/spam).
@@ -690,7 +690,7 @@ def ensure_upstream_issue(
     )
     try:
         rc, _out = runner(["gh", "issue", "create", "--title", title, "--body", body])
-    except Exception:  # noqa: BLE001 — fail-open on create spawn failure
+    except Exception:
         return None
     if rc != 0:
         return None
@@ -698,7 +698,7 @@ def ensure_upstream_issue(
 
 
 def _upstream_lag_unmeasurable(
-    runner: Callable[[List[str]], Tuple[int, str]], repo: Path
+    runner: Callable[[list[str]], tuple[int, str]], repo: Path
 ) -> bool:
     """True when ``HEAD..upstream/main`` can't yield a meaningful behind-count.
 
@@ -723,7 +723,7 @@ def _upstream_lag_unmeasurable(
         ])
         if rc == 0 and out.strip() == "true":
             return True
-    except Exception:  # noqa: BLE001 — inconclusive probe: don't block the real check
+    except Exception:
         return False
 
     try:
@@ -735,7 +735,7 @@ def _upstream_lag_unmeasurable(
             "HEAD",
             "upstream/main",
         ])
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
     # No common ancestor: git exits non-zero with NOTHING on stdout. A non-zero
     # exit WITH output (e.g. "fatal: bad revision 'upstream/main'" when the remote
@@ -748,9 +748,9 @@ def _upstream_lag_unmeasurable(
 
 
 def check_runtime_divergence(
-    runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
+    runner: Callable[[list[str]], tuple[int, str]] = _default_runner,
     repo_dir: Path | None = None,
-) -> List[str]:
+) -> list[str]:
     """Alert when the local runtime checkout has diverged from ``origin/main``.
 
     THE SILENT FREEZE (root cause of the stalled nightly self-update): the
@@ -793,7 +793,7 @@ def check_runtime_divergence(
             "HEAD",
             "origin/main",
         ])
-    except Exception:  # noqa: BLE001 — spawn failure: fail-open
+    except Exception:
         return []
     # rc 0 == HEAD IS an ancestor of origin/main → ff-able → not frozen.
     # rc 1 == not an ancestor → potential divergence. Any other rc (e.g. 128 for
@@ -812,7 +812,7 @@ def check_runtime_divergence(
             "--count",
             "origin/main..HEAD",
         ])
-    except Exception:  # noqa: BLE001
+    except Exception:
         return []
     if rc_ahead != 0:
         return []
@@ -835,7 +835,7 @@ def check_runtime_divergence(
         ])
         if rc_behind == 0:
             behind = int(out_behind.strip().split()[0])
-    except (Exception, ValueError, IndexError):  # noqa: BLE001 — count is cosmetic
+    except (Exception, ValueError, IndexError):
         behind = 0
 
     plural = "s" if local_commits != 1 else ""
@@ -846,7 +846,7 @@ def check_runtime_divergence(
     ]
 
 
-def check_health(evolution_dir: Path) -> List[str]:
+def check_health(evolution_dir: Path) -> list[str]:
     """Alert when the longitudinal health sidecar reports degraded calibration.
 
     evolution_metrics writes ``evolution-health.txt`` ending in ``| healthy`` when
@@ -867,7 +867,7 @@ def check_health(evolution_dir: Path) -> List[str]:
     return [f"pipeline health degraded: {line}"]
 
 
-def check_realized_impact(evolution_dir: Path) -> List[str]:
+def check_realized_impact(evolution_dir: Path) -> list[str]:
     """Alert when the post-merge realized-impact sidecar reports blind evolution.
 
     evolution_realized_impact writes ``realized-impact.txt`` ending in
@@ -887,7 +887,7 @@ def check_realized_impact(evolution_dir: Path) -> List[str]:
     return [f"realized-impact degraded: {line}"]
 
 
-def check_analysis_integrity(evolution_dir: Path) -> List[str]:
+def check_analysis_integrity(evolution_dir: Path) -> list[str]:
     """Alert when the latest analysis cycle's self-reported selection budget is
     illegal or overspent (PR #519's effort-budget contract — the agent once wrote
     max_total_effort=2.0, neither 1.5 nor 3.0), OR when an ``already-exists``
@@ -978,7 +978,7 @@ def _resolve_repo_slug() -> str | None:
 
 def recent_merged_evolution_issue_count(
     now: datetime,
-    runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
+    runner: Callable[[list[str]], tuple[int, str]] = _default_runner,
     window_days: int = _REALITY_WINDOW_DAYS,
     branch_prefix: str = "evolution/issue-",
     repo: str | None = None,
@@ -1010,7 +1010,7 @@ def recent_merged_evolution_issue_count(
         if rc != 0:
             return None
         prs = json.loads(out)
-    except Exception:  # noqa: BLE001 — any gh/parse failure → fall open
+    except Exception:
         return None
     if not isinstance(prs, list):
         return None
@@ -1028,11 +1028,11 @@ def recent_merged_evolution_issue_count(
 
 
 def reconcile_health_with_reality(
-    health_alerts: List[str],
+    health_alerts: list[str],
     now: datetime,
-    runner: Callable[[List[str]], Tuple[int, str]] = _default_runner,
+    runner: Callable[[list[str]], tuple[int, str]] = _default_runner,
     window_days: int = _REALITY_WINDOW_DAYS,
-) -> List[str]:
+) -> list[str]:
     """Relabel a MERGED_ZERO health alert that GitHub reality contradicts.
 
     MERGED_ZERO claims the funnel recorded zero merges for a run of cycles. If
@@ -1054,7 +1054,7 @@ def reconcile_health_with_reality(
         "| METRIC_DIVERGENCE: instrumentation suspect (funnel / #667), NOT the "
         "pipeline — verify the metric, auto-clears once the funnel backfills"
     )
-    out: List[str] = []
+    out: list[str] = []
     inserted = False
     for a in health_alerts:
         if any(f in a for f in _DIVERGEABLE_FLAGS):
@@ -1108,7 +1108,7 @@ def reconcile_health_with_reality(
 # ---------------------------------------------------------------------------
 
 
-def health_signature(health_alerts: List[str]) -> str:
+def health_signature(health_alerts: list[str]) -> str:
     """Stable, count-aware condition key for a set of health alerts.
 
     Keys on the FLAG TAIL of each alert (the text after the final ``|``), not
@@ -1121,7 +1121,7 @@ def health_signature(health_alerts: List[str]) -> str:
     Order-independent (alerts are sorted) and returns ``""`` for no condition
     (healthy), which is the recovery sentinel.
     """
-    tails: List[str] = []
+    tails: list[str] = []
     for alert in health_alerts:
         # The flag tail is everything after the last "| " separator that the
         # sidecars use to terminate the metrics body. When there is no such
@@ -1164,11 +1164,11 @@ def save_alert_state(
 
 
 def apply_edge_trigger(
-    health_alerts: List[str],
+    health_alerts: list[str],
     state_path: Path,
     now: datetime,
     cooldown_days: int = EDGE_COOLDOWN_DAYS,
-) -> List[str]:
+) -> list[str]:
     """Decide which HEALTH alerts to actually emit this run, and persist state.
 
     Returns the alerts to print (possibly a single recovery/reminder line in
@@ -1245,7 +1245,7 @@ def main() -> int:
     # and must never be edge-suppressed (a broken gh or a stuck upstream-sync is
     # actionable every single day until fixed). The #561 upstream-lag guard is
     # untouched: its own shallow/no-shared-history checks decide if it speaks.
-    operational: List[str] = []
+    operational: list[str] = []
     operational += check_stage_reports(evolution_dir, now, jobs_file)
     operational += check_jobs(jobs_file, now)
     operational += check_gh()
@@ -1263,7 +1263,7 @@ def main() -> int:
     # signature keys on the alert text (no '|' tail), so it emits on first
     # sighting, on any change (commit count moves), and on the cooldown nudge —
     # but suppresses the verbatim daily repeat. No-mask + fail-open preserved.
-    health: List[str] = []
+    health: list[str] = []
     health += check_runtime_divergence()
     # Reality-reconcile the merge/selection health line before it can page the
     # owner: a metric that claims a stall while GitHub shows evolution PRs
@@ -1275,7 +1275,7 @@ def main() -> int:
     health += check_analysis_integrity(evolution_dir)
     health = apply_edge_trigger(health, evolution_dir / ALERT_STATE_FILENAME, now)
 
-    alerts: List[str] = operational + health
+    alerts: list[str] = operational + health
 
     if alerts:
         print("🐶 Evolution watchdog — pipeline anomalies detected:")

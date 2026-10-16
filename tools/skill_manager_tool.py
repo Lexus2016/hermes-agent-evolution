@@ -908,10 +908,10 @@ def _record_success(action, name, result, *, file_path, absorbed_into, task_id,
 
 
 def skill_manage(
-    action: str, name: str, content: str = None, category: str = None, file_path: str = None,
-    file_content: str = None, old_string: str = None, new_string: str = None,
-    replace_all: bool = False, absorbed_into: str = None, task_id: str = None,
-    session_id: str = None, rationale: str = None, operations=None) -> str:
+    action: str, name: str, content: str | None = None, category: str | None = None, file_path: str | None = None,
+    file_content: str | None = None, old_string: str | None = None, new_string: str | None = None,
+    replace_all: bool = False, absorbed_into: str | None = None, task_id: str | None = None,
+    session_id: str | None = None, rationale: str | None = None, operations=None) -> str:
     """Dispatch to the action handler -> JSON string. ``operations`` (atomic batch shape,
     see _skill_manage_batch) overrides the flat fields."""
     if operations is not None:

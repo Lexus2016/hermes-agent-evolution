@@ -44,7 +44,7 @@ def _load_json(path: Path) -> Any | None:
         return None
 
 
-def _counts_by(items: list, key: str) -> Dict[str, int]:
+def _counts_by(items: list, key: str) -> dict[str, int]:
     """Count list items by a string field, tolerating missing keys."""
     c: Counter = Counter()
     for it in items if isinstance(items, list) else []:
@@ -59,7 +59,7 @@ def compute_funnel(
     *,
     durability_registry: Any = None,
     durability_backend: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build the funnel record for one date from whatever stage reports exist.
 
     Every field defaults to 0 / {} so a missing stage report never crashes the
@@ -78,7 +78,7 @@ def compute_funnel(
     # never crashes the metric — a list-shaped report previously raised
     # AttributeError and killed the whole funnel job (and the realized-impact
     # sidecar refresh that now rides on it).
-    def _as_dict(x: Any) -> Dict[str, Any]:
+    def _as_dict(x: Any) -> dict[str, Any]:
         return x if isinstance(x, dict) else {}
 
     def _stage_load(stage_name: str, path: Path) -> Any:
@@ -185,7 +185,7 @@ def compute_funnel(
     }
 
 
-def append_funnel(metrics_file: Path, record: Dict[str, Any]) -> None:
+def append_funnel(metrics_file: Path, record: dict[str, Any]) -> None:
     """Append one JSON line, idempotently: replace any existing line for the
     same date so re-runs don't duplicate a day."""
     lines = []
@@ -205,12 +205,12 @@ def append_funnel(metrics_file: Path, record: Dict[str, Any]) -> None:
     metrics_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def load_records(metrics_file: Path) -> list[Dict[str, Any]]:
+def load_records(metrics_file: Path) -> list[dict[str, Any]]:
     """Read all funnel records (one JSON object per line), oldest-first,
     skipping blank/malformed lines. Tampered records (#2673) that fail the
     telemetry integrity check are REJECTED, never silently consumed — they
     must not steer selection."""
-    out: list[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     if not metrics_file.exists():
         return out
     for ln in metrics_file.read_text(encoding="utf-8-sig").splitlines():
@@ -398,7 +398,7 @@ def is_evolution_halted(evolution_dir: Path | None = None) -> bool | None:
         return None
 
 
-def summarize(records: list[Dict[str, Any]], last: int = 7) -> Dict[str, Any]:
+def summarize(records: list[dict[str, Any]], last: int = 7) -> dict[str, Any]:
     """Aggregate the last ``last`` funnel records into a signal-quality summary
     that evolution-research reads to self-tune selectivity (#84 feedback loop —
     closes the previously write-only metrics.jsonl).
@@ -448,7 +448,7 @@ def summarize(records: list[Dict[str, Any]], last: int = 7) -> Dict[str, Any]:
     }
 
 
-def format_summary(summary: Dict[str, Any]) -> str:
+def format_summary(summary: dict[str, Any]) -> str:
     """One-line, log/agent-friendly rendering of summarize()."""
     tail = " | ".join(summary["flags"]) if summary["flags"] else "signal OK"
     return (

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for tools.environments.openai_sandbox_adapter (#3242)."""
 
 import json

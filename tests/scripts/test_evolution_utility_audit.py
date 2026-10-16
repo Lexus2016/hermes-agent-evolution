@@ -1,14 +1,13 @@
-# -*- coding: utf-8 -*-
 """Tests for the leave-one-out utility audit (issue #2286, SkillProx)."""
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_utility_audit import (  # noqa: E402
+from evolution_utility_audit import (
     KEEP_FRACTION,
     apply_demotions,
     audit_corpus,
@@ -19,7 +18,7 @@ from evolution_utility_audit import (  # noqa: E402
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _rec(use=0, view=0, patch=0, last=None, description=""):

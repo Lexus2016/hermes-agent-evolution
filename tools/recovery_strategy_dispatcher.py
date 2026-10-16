@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Recovery strategy dispatcher for tool failures (issue #1027, child of #1019).
 
 Third slice of PALADIN-style execution-level tool-failure recovery. The first
@@ -43,14 +42,14 @@ from tools.tool_failure_classifier import (
 )
 
 __all__ = [
-    "RecoveryStrategy",
+    "RECOVERY_GUIDANCE_PREFIX",
     "RecoveryAction",
+    "RecoveryStrategy",
+    "backoff_seconds_for",
     "dispatch_recovery",
+    "maybe_append_recovery_guidance",
     "recover_from_failure",
     "register_strategy",
-    "backoff_seconds_for",
-    "maybe_append_recovery_guidance",
-    "RECOVERY_GUIDANCE_PREFIX",
 ]
 
 

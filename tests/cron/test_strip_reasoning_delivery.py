@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from cron.scheduler import strip_reasoning_for_delivery as strip  # noqa: E402
+from cron.scheduler import strip_reasoning_for_delivery as strip
 
 
 def test_strips_think_block():

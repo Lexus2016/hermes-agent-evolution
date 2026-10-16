@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_metrics import compute_health, format_health  # noqa: E402
+from evolution_metrics import compute_health, format_health
 
 
 def _rec(date, created=0, selected=0, rejected=0, merged=0):
@@ -200,9 +200,7 @@ class TestStageGateIntegration:
 
         evolution_dir.mkdir(parents=True, exist_ok=True)
         with open(evolution_dir / "stage_gate.jsonl", "w", encoding="utf-8") as fh:
-            for b in branches:
-                fh.write(
-                    json.dumps(
+            fh.writelines(json.dumps(
                         {
                             "branch": b,
                             "stage": stage,
@@ -212,8 +210,7 @@ class TestStageGateIntegration:
                             "retained_evidence": [],
                         }
                     )
-                    + "\n"
-                )
+                    + "\n" for b in branches)
 
     def test_healthy_gate_keeps_the_healthy_tail(self, tmp_path):
         d = tmp_path / "evolution"

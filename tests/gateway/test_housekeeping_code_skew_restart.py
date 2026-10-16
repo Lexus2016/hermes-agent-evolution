@@ -8,7 +8,7 @@ See ``gateway.run._start_gateway_housekeeping`` and ``gateway.code_skew``.
 import threading
 from unittest.mock import MagicMock, patch
 
-import gateway.run as run
+from gateway import run
 
 
 def _make_runner(running_agents=None):
@@ -113,7 +113,7 @@ def test_scheduling_failure_does_not_latch_and_retries():
 def test_no_runner_is_a_noop():
     """Back-compat: called without a runner, the skew check never fires — the
     detector is not even reached (the guard short-circuits first)."""
-    stop = threading.Event()
+    _stop = threading.Event()
 
     class OneShotStop:
         """Deterministic stop: reports set() after a couple of iterations so the

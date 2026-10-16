@@ -98,8 +98,8 @@ def _emit_compaction_done(agent: Any) -> None:
 
 
 def maybe_apply_parallel_compaction(
-    agent: Any, messages: List[Dict[str, Any]]
-) -> Optional[List[Dict[str, Any]]]:
+    agent: Any, messages: list[dict[str, Any]]
+) -> Optional[list[dict[str, Any]]]:
     """Check if background parallel compaction completed and apply safe swap at turn boundary (#2186/#2469/#2495)."""
     compressor = getattr(agent, "context_compressor", None)
     if compressor is None:
@@ -4572,8 +4572,8 @@ __all__ = [
     "compress_context",
     "ensure_compression_feasibility_checked",
     "is_compaction_progress_status",
+    "maybe_apply_parallel_compaction",
     "replay_compression_warning",
     "revalidate_compression_feasibility",
     "try_shrink_image_parts_in_messages",
-    "maybe_apply_parallel_compaction",
 ]

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for the tool verification gate (#2577)."""
 
 import json

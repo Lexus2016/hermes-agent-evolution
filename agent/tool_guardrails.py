@@ -269,7 +269,7 @@ class ToolCallGuardrailConfig:
         default_factory=lambda: IDEMPOTENT_TOOL_NAMES
     )
     mutating_tools: frozenset[str] = field(default_factory=lambda: MUTATING_TOOL_NAMES)
-    loop_caps: "LoopCapConfig" = field(default_factory=lambda: LoopCapConfig())
+    loop_caps: LoopCapConfig = field(default_factory=lambda: LoopCapConfig())
 
     @classmethod
     def from_mapping(
@@ -380,7 +380,7 @@ class LoopCapConfig:
     max_subagents: int = _DEFAULT_MAX_SUBAGENTS_PER_TURN
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "LoopCapConfig":
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> LoopCapConfig:
         """Build config from the ``tool_loop_guardrails.loop_caps`` section."""
         if not isinstance(data, Mapping):
             return cls()
@@ -642,8 +642,8 @@ class ToolCallGuardrailController:
     def __init__(
         self,
         config: ToolCallGuardrailConfig | None = None,
-        policy_registry: "PolicyInterceptorRegistry | None" = None,
-        recheck_controller: "RecheckController | None" = None,
+        policy_registry: PolicyInterceptorRegistry | None = None,
+        recheck_controller: RecheckController | None = None,
     ):
         self.config = config or ToolCallGuardrailConfig()
         self.policy_registry = policy_registry
@@ -1233,7 +1233,7 @@ class ToolCallGuardrailController:
         *,
         tool_call_id: str = "",
         failed: bool = False,
-    ) -> "IdenticalCallObservation":
+    ) -> IdenticalCallObservation:
         """Track consecutive identical calls; return notice + dedupe stub info.
 
         Two independent outputs from the same consecutive-streak tracker:

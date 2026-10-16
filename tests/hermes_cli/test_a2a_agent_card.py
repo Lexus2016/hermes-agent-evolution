@@ -134,9 +134,9 @@ def test_collect_capabilities_honours_exclude():
 # --------------------------------------------------------------------------
 
 pytest.importorskip("starlette.testclient")
-from starlette.testclient import TestClient  # noqa: E402
+from starlette.testclient import TestClient
 
-from hermes_cli import web_server  # noqa: E402
+from hermes_cli import web_server
 
 
 @pytest.fixture

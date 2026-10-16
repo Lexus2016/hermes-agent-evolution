@@ -25,7 +25,7 @@ import pytest
 # (used inside evolution_funnel.main) and `import evolution_funnel` both work.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-import evolution_funnel as ef  # noqa: E402
+import evolution_funnel as ef
 
 
 def _write_stage_reports(evolution_dir: Path, date: str) -> None:

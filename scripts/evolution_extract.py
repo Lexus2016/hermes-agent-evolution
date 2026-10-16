@@ -52,7 +52,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # The draft contract. Every field is REQUIRED and must be a non-empty string.
 # Order is the canonical field order used when re-emitting the normalized draft.
-REQUIRED_FIELDS: Tuple[str, ...] = (
+REQUIRED_FIELDS: tuple[str, ...] = (
     "technique",              # the concrete strategy/prompting/reasoning pattern
     "expected_behavior_change",  # how the agent should behave differently
     "testable_hypothesis",    # a falsifiable prediction an A/B test could check
@@ -69,7 +69,7 @@ _MIN_FIELD_LEN = 12
 # field carrying an instruction-shaped payload is rejected rather than passed on.
 # Deliberately narrow + anchored to known attack shapes to avoid false positives
 # on legitimate technical prose.
-_INJECTION_PATTERNS: Tuple[re.Pattern, ...] = (
+_INJECTION_PATTERNS: tuple[re.Pattern, ...] = (
     re.compile(r"ignore\s+(?:all\s+)?previous\s+instructions", re.IGNORECASE),
     re.compile(r"disregard\s+(?:all\s+)?(?:previous|prior|above)", re.IGNORECASE),
     re.compile(r"^\s*(?:system|assistant|developer)\s*:", re.IGNORECASE | re.MULTILINE),
@@ -77,7 +77,7 @@ _INJECTION_PATTERNS: Tuple[re.Pattern, ...] = (
 )
 
 # Zero-width / bidi-control characters used to hide text from a human reviewer.
-_HIDDEN_CHARS_RE = re.compile(r"[​‌‍⁠﻿‪-‮]")
+_HIDDEN_CHARS_RE = re.compile(r"[\u200b\u200c\u200d\u2060\ufeff\u202a-\u202e]")
 
 # A `source` is "traceable" if it carries a URL, an arXiv id, or a DOI. A bare
 # "a recent paper" with no locator can't be A/B tested or audited — reject it.
@@ -114,7 +114,7 @@ def source_is_traceable(value: str) -> bool:
     return bool(_SOURCE_TRACEABLE_RE.search(value or ""))
 
 
-def validate_draft(draft: Any) -> Tuple[bool, List[str], Optional[Dict[str, str]]]:
+def validate_draft(draft: Any) -> tuple[bool, list[str], Optional[dict[str, str]]]:
     """Validate ONE technique draft against the contract.
 
     Returns ``(valid, errors, normalized)``: ``errors`` is a list of
@@ -122,7 +122,7 @@ def validate_draft(draft: Any) -> Tuple[bool, List[str], Optional[Dict[str, str]
     with every field trimmed/whitespace-collapsed and keys in canonical order
     (only when valid, else ``None``). Pure — no IO, safe to unit test.
     """
-    errors: List[str] = []
+    errors: list[str] = []
 
     if not isinstance(draft, dict):
         return False, ["draft must be a JSON object"], None
@@ -133,7 +133,7 @@ def validate_draft(draft: Any) -> Tuple[bool, List[str], Optional[Dict[str, str]
     if extra:
         errors.append(f"unexpected field(s): {sorted(extra)}")
 
-    normalized: Dict[str, str] = {}
+    normalized: dict[str, str] = {}
     for field in REQUIRED_FIELDS:
         if field not in draft:
             errors.append(f"missing required field: '{field}'")
@@ -176,7 +176,7 @@ EXIT_INVALID = 1
 EXIT_BAD_INPUT = 2
 
 
-def _load_draft(path: Optional[str]) -> Tuple[Optional[Any], Optional[str]]:
+def _load_draft(path: Optional[str]) -> tuple[Optional[Any], Optional[str]]:
     """Read the draft JSON from a positional path or stdin."""
     try:
         raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
@@ -188,7 +188,7 @@ def _load_draft(path: Optional[str]) -> Tuple[Optional[Any], Optional[str]]:
         return None, f"input is not valid JSON: {exc}"
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] != "validate":
         print("usage: evolution_extract.py validate [draft.json]", file=sys.stderr)
         return EXIT_BAD_INPUT

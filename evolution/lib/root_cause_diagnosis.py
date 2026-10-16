@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Structured root-cause diagnosis for tool failures.
 
 Implements GitHub issue #1026 — a child of #1019 (PALADIN-style
@@ -48,11 +47,11 @@ from typing import Any, Dict, List, Optional
 __version__ = "1.0.0"
 
 __all__ = [
-    "FailureCategory",
     "Diagnosis",
-    "ErrorClassifier",
-    "RootCauseAnalyzer",
     "DiagnosisHistory",
+    "ErrorClassifier",
+    "FailureCategory",
+    "RootCauseAnalyzer",
 ]
 
 
@@ -83,7 +82,7 @@ class FailureCategory(enum.Enum):
     UNKNOWN = "unknown"
 
     @classmethod
-    def from_string(cls, s: str) -> "FailureCategory":
+    def from_string(cls, s: str) -> FailureCategory:
         """Parse a :class:`FailureCategory` from a string (case-insensitive)."""
         s_lower = s.lower().strip()
         for fc in cls:
@@ -111,12 +110,12 @@ class Diagnosis:
 
     category: FailureCategory = FailureCategory.UNKNOWN
     root_cause: str = ""
-    contributing_factors: List[str] = field(default_factory=list)
-    suggested_fixes: List[str] = field(default_factory=list)
+    contributing_factors: list[str] = field(default_factory=list)
+    suggested_fixes: list[str] = field(default_factory=list)
     confidence: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-compatible dictionary."""
         return {
             "category": self.category.value,
@@ -128,7 +127,7 @@ class Diagnosis:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "Diagnosis":
+    def from_dict(cls, d: dict[str, Any]) -> Diagnosis:
         """Deserialize from a dictionary produced by :meth:`to_dict`."""
         return cls(
             category=FailureCategory.from_string(d["category"])
@@ -186,7 +185,7 @@ class ErrorClassifier:
         return pattern in text
 
     # Default patterns per category, lower-cased substrings.
-    _DEFAULT_PATTERNS: Dict[FailureCategory, List[str]] = {
+    _DEFAULT_PATTERNS: dict[FailureCategory, list[str]] = {
         FailureCategory.TIMEOUT: [
             "timeout",
             "timed out",
@@ -247,11 +246,11 @@ class ErrorClassifier:
 
     def __init__(
         self,
-        patterns: Optional[Dict[FailureCategory, List[str]]] = None,
+        patterns: Optional[dict[FailureCategory, list[str]]] = None,
     ) -> None:
         """Initialize with optional custom patterns; defaults are used otherwise."""
         if patterns is not None:
-            self._patterns: Dict[FailureCategory, List[str]] = {
+            self._patterns: dict[FailureCategory, list[str]] = {
                 cat: [p.lower() for p in pats]
                 for cat, pats in patterns.items()
             }
@@ -292,7 +291,7 @@ class ErrorClassifier:
         combined = f"{error_message} {error_type}".lower()
 
         # Priority order: most specific → most generic.
-        priority: List[FailureCategory] = [
+        priority: list[FailureCategory] = [
             FailureCategory.TIMEOUT,
             FailureCategory.PERMISSION,
             FailureCategory.NOT_FOUND,
@@ -313,7 +312,7 @@ class ErrorClassifier:
     # Pattern management
     # ------------------------------------------------------------------
 
-    def get_category_patterns(self) -> Dict[FailureCategory, List[str]]:
+    def get_category_patterns(self) -> dict[FailureCategory, list[str]]:
         """Return a copy of the current pattern map."""
         with self._lock:
             return {cat: list(pats) for cat, pats in self._patterns.items()}
@@ -329,13 +328,13 @@ class ErrorClassifier:
         self,
         error_message: str,
         error_type: str = "",
-    ) -> Dict[FailureCategory, int]:
+    ) -> dict[FailureCategory, int]:
         """Count how many patterns match for each category.
 
         Used internally for confidence scoring; exposed for testing.
         """
         combined = f"{error_message} {error_type}".lower()
-        counts: Dict[FailureCategory, int] = {}
+        counts: dict[FailureCategory, int] = {}
         with self._lock:
             for cat, patterns in self._patterns.items():
                 c = sum(1 for p in patterns if self._pattern_matches(p, combined))
@@ -376,7 +375,7 @@ class RootCauseAnalyzer:
         tool_name: str,
         error_message: str,
         error_type: str = "",
-        context: Optional[Dict[str, Any]] = None,
+        context: Optional[dict[str, Any]] = None,
     ) -> Diagnosis:
         """Produce a full :class:`Diagnosis` for a tool failure.
 
@@ -422,7 +421,7 @@ class RootCauseAnalyzer:
         category: FailureCategory,
         tool_name: str,
         error_message: str,
-        context: Dict[str, Any],
+        context: dict[str, Any],
     ) -> str:
         """Determine a human-readable root cause string."""
         causes = {
@@ -475,10 +474,10 @@ class RootCauseAnalyzer:
         category: FailureCategory,
         tool_name: str,
         error_message: str,
-        context: Dict[str, Any],
-    ) -> List[str]:
+        context: dict[str, Any],
+    ) -> list[str]:
         """Generate a list of contributing factors based on category and context."""
-        factors: List[str] = []
+        factors: list[str] = []
         retry_count = context.get("retry_count", 0)
         if retry_count:
             factors.append(
@@ -522,7 +521,7 @@ class RootCauseAnalyzer:
         category: FailureCategory,
         tool_name: str,
         error_message: str,
-    ) -> List[str]:
+    ) -> list[str]:
         """Generate per-category suggested fixes."""
         fixes = {
             FailureCategory.NETWORK: [
@@ -617,7 +616,7 @@ class DiagnosisHistory:
     """
 
     def __init__(self) -> None:
-        self._history: Dict[str, List[Diagnosis]] = defaultdict(list)
+        self._history: dict[str, list[Diagnosis]] = defaultdict(list)
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -645,7 +644,7 @@ class DiagnosisHistory:
         self,
         tool_name: str,
         n: int = 5,
-    ) -> List[Diagnosis]:
+    ) -> list[Diagnosis]:
         """Return the *n* most recent diagnoses for *tool_name*."""
         with self._lock:
             diagnoses = list(self._history.get(tool_name, []))
@@ -682,7 +681,7 @@ class DiagnosisHistory:
                 return d.category
         return tied[0]
 
-    def stats(self) -> Dict[str, Any]:
+    def stats(self) -> dict[str, Any]:
         """Return aggregate statistics across all tracked diagnoses.
 
         Returns:
@@ -692,8 +691,8 @@ class DiagnosisHistory:
                 * ``per_tool`` — ``{tool_name: count}``
         """
         with self._lock:
-            all_diags: List[Diagnosis] = []
-            tool_counts: Dict[str, int] = {}
+            all_diags: list[Diagnosis] = []
+            tool_counts: dict[str, int] = {}
             for tool, diags in self._history.items():
                 all_diags.extend(diags)
                 tool_counts[tool] = len(diags)
@@ -710,7 +709,7 @@ class DiagnosisHistory:
     # Serialization
     # ------------------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize all history to a JSON-compatible dict."""
         with self._lock:
             return {
@@ -719,7 +718,7 @@ class DiagnosisHistory:
             }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "DiagnosisHistory":
+    def from_dict(cls, d: dict[str, Any]) -> DiagnosisHistory:
         """Reconstruct a :class:`DiagnosisHistory` from :meth:`to_dict` output."""
         hist = cls()
         for tool, diag_dicts in d.items():

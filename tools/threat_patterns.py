@@ -145,7 +145,7 @@ def scan_for_threats(content: str, scope: str = "context") -> list[str]:
     return findings
 
 
-def scan_for_threat_spans(content: str, scope: str = "strict") -> List[Tuple[int, int, str]]:
+def scan_for_threat_spans(content: str, scope: str = "strict") -> list[tuple[int, int, str]]:
     """Return ``(start, end, pattern_id)`` spans of every threat match in ``content``.
 
     Reuses the SAME compiled pattern sets as :func:`scan_for_threats` (no new
@@ -160,7 +160,7 @@ def scan_for_threat_spans(content: str, scope: str = "strict") -> List[Tuple[int
     if not content:
         return []
 
-    spans: List[Tuple[int, int, str]] = []
+    spans: list[tuple[int, int, str]] = []
 
     # Invisible unicode — per-occurrence spans (scan_for_threats reports these
     # once per distinct codepoint; for stripping we need every position).
@@ -196,7 +196,7 @@ def first_threat_message(content: str, scope: str = "strict") -> Optional[str]:
 __all__ = [
     "INVISIBLE_CHARS",
     "MAX_SCAN_CHARS",
-    "scan_for_threats",
-    "scan_for_threat_spans",
     "first_threat_message",
+    "scan_for_threat_spans",
+    "scan_for_threats",
 ]

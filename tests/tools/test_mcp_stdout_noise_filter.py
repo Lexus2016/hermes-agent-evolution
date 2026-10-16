@@ -14,7 +14,7 @@ import logging
 
 import pytest
 
-import tools.mcp_tool as mcp_tool  # noqa: F401  — import installs the filter
+from tools import mcp_tool
 
 _MCP_STDIO_LOGGER = "mcp.client.stdio"
 _MCP_JSONRPC_PARSE_MSG = "Failed to parse JSONRPC message from server"

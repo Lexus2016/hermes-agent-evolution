@@ -39,8 +39,8 @@ _MAX_QUERIES_PER_CALL = 7
 _MAX_DESCRIBE_NAMES_PER_CALL = 10
 
 # ── Consecutive-search streak tracking (#1144 / #1373) ───────────────────
-_SEARCH_STREAK: Dict[str, int] = {}
-_SEARCH_QUERIES: Dict[str, List[str]] = {}
+_SEARCH_STREAK: dict[str, int] = {}
+_SEARCH_QUERIES: dict[str, list[str]] = {}
 
 #: Cap on how many previous queries we surface / retain per session.
 _PREVIOUS_QUERIES_MAX = 8
@@ -86,7 +86,7 @@ def reset_search_streak(session_id: Optional[str]) -> None:
         _SEARCH_QUERIES.pop(key, None)
 
 
-def get_previous_queries(session_id: Optional[str]) -> List[str]:
+def get_previous_queries(session_id: Optional[str]) -> list[str]:
     """Return the rolling recent-query history for ``session_id`` (copy)."""
     key = _streak_key(session_id)
     if key is None:
@@ -332,19 +332,19 @@ def is_deferrable_tool_name(
     )
 
 
-def _tool_def_names(tool_defs: Iterable[Dict[str, Any]]) -> Iterable[str]:
+def _tool_def_names(tool_defs: Iterable[dict[str, Any]]) -> Iterable[str]:
     for td in tool_defs:
         yield _fn(td).get("name", "")
 
 
 def classify_tools(
-    tool_defs: List[Dict[str, Any]],
+    tool_defs: list[dict[str, Any]],
     defer_tools: Optional[Any] = None,
     config: Optional[Any] = None,
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Split a tool-defs list into (visible, deferrable)."""
-    visible: List[Dict[str, Any]] = []
-    deferrable: List[Dict[str, Any]] = []
+    visible: list[dict[str, Any]] = []
+    deferrable: list[dict[str, Any]] = []
     for td in tool_defs:
         fn = _fn(td)
         name = fn.get("name", "")
@@ -357,13 +357,13 @@ def classify_tools(
     return visible, deferrable
 
 
-def _deferrable_in(tool_defs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _deferrable_in(tool_defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return classify_tools(tool_defs, load_config_readonly().effective_defer_tools)[1]
 
 
-def estimate_tokens_from_schemas(tool_defs: Iterable[Dict[str, Any]]) -> int:
+def estimate_tokens_from_schemas(tool_defs: Iterable[dict[str, Any]]) -> int:
     """Estimate token cost via chars/4."""
-    def _chars(td: Dict[str, Any]) -> int:
+    def _chars(td: dict[str, Any]) -> int:
         try:
             return len(json.dumps(td, ensure_ascii=False, separators=(",", ":")))
         except (TypeError, ValueError):
@@ -398,9 +398,9 @@ def listing_token_budget(config: ToolSearchConfig, context_length: Optional[int]
 def _bridge_schema(
     name: str,
     description: str,
-    properties: Dict[str, Any],
-    required: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    properties: dict[str, Any],
+    required: Optional[list[str]] = None,
+) -> dict[str, Any]:
     return {
         "type": "function",
         "function": {
@@ -643,11 +643,11 @@ def _string_list_arg(args: dict[str, Any], key: str, *, dedupe: bool, max_items:
 
 
 # ── Search catalog cache (#140) ──────────────────────────────────────────
-_search_catalog_cache: dict[tuple[str, str], tuple[List[Dict[str, Any]], List[CatalogEntry]]] = {}
+_search_catalog_cache: dict[tuple[str, str], tuple[list[dict[str, Any]], list[CatalogEntry]]] = {}
 _SEARCH_CATALOG_CACHE_MAX = 16
 
 
-def _toolset_signature(tool_defs: List[Dict[str, Any]]) -> str:
+def _toolset_signature(tool_defs: list[dict[str, Any]]) -> str:
     # Definitions can share names across profiles or change schemas during discovery.
     # Cache only byte-identical catalogs in the same profile.
     import hashlib
@@ -658,7 +658,7 @@ def _toolset_signature(tool_defs: List[Dict[str, Any]]) -> str:
 
 
 def _search_catalog_key(
-    tool_defs: List[Dict[str, Any]], config: ToolSearchConfig
+    tool_defs: list[dict[str, Any]], config: ToolSearchConfig
 ) -> tuple[str, str]:
     sig = _toolset_signature(tool_defs)
     cfg = "|".join(
@@ -669,8 +669,8 @@ def _search_catalog_key(
 
 
 def _build_search_catalog(
-    tool_defs: List[Dict[str, Any]], config: ToolSearchConfig
-) -> tuple[List[Dict[str, Any]], List[CatalogEntry]]:
+    tool_defs: list[dict[str, Any]], config: ToolSearchConfig
+) -> tuple[list[dict[str, Any]], list[CatalogEntry]]:
     key = _search_catalog_key(tool_defs, config)
     cached = _search_catalog_cache.get(key)
     if cached is not None:
@@ -690,8 +690,8 @@ def clear_search_catalog_cache() -> None:
 
 
 def _degraded_search_response(
-    queries: List[str],
-    tool_defs: List[Dict[str, Any]],
+    queries: list[str],
+    tool_defs: list[dict[str, Any]],
     limit: int,
     exc: BaseException,
 ) -> str:
@@ -720,9 +720,9 @@ def _degraded_search_response(
 
 
 def dispatch_tool_search(
-    args: Dict[str, Any],
+    args: dict[str, Any],
     *,
-    current_tool_defs: List[Dict[str, Any]],
+    current_tool_defs: list[dict[str, Any]],
     config: Optional[ToolSearchConfig] = None,
     connector_search: Optional[Any] = None,
     session_id: Optional[str] = None,
@@ -759,18 +759,18 @@ def dispatch_tool_search(
     except Exception as exc:
         return _degraded_search_response(queries, current_tool_defs, limit, exc)
 
-    remote_entries: List[List[CatalogEntry]] = [[] for _ in queries]
+    remote_entries: list[list[CatalogEntry]] = [[] for _ in queries]
     hosted_failure: Optional[str] = None
     if connections_in_scope(current_tool_defs):
         remote_entries, hosted_failure = connector_entries_by_group(
             queries, connector_search=connector_search, call=call)
-    results: List[Dict[str, Any]] = []
-    tools_map: Dict[str, Dict[str, Any]] = {}
+    results: list[dict[str, Any]] = []
+    tools_map: dict[str, dict[str, Any]] = {}
     # An empty lexical catalog still has declared-but-hidden MCP sources.
     # Gating the summary on ``catalog`` dropped those rows and the empty-match
     # hint never named the server the user had declared.
     available_sources = _available_source_summary(catalog)
-    all_hits: List[CatalogEntry] = []
+    all_hits: list[CatalogEntry] = []
     for position, query in enumerate(queries):
         corpus = catalog + remote_entries[position]
         hits = search_catalog(corpus, query, limit=limit)
@@ -796,7 +796,7 @@ def dispatch_tool_search(
             )
         results.append(group)
     remote_count = sum(1 for name in tools_map if is_connector_name(name))
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "queries": queries,
         "total_available": len(catalog) + remote_count,
         "results": results,
@@ -863,7 +863,7 @@ def _record_search_metric(current_tool_defs: list[dict[str, Any]], *, hits: int,
 
 
 # ── tool_describe caching & fuzzy matching (#978, #107, #1015, #2309) ────
-_describe_cache: Dict[Tuple[str, str], str] = {}
+_describe_cache: dict[tuple[str, str], str] = {}
 _DESCRIBE_CACHE_MAX = 64
 
 
@@ -872,7 +872,7 @@ def clear_describe_cache() -> None:
     _describe_cache.clear()
 
 
-def _fuzzy_tool_names(query: str, available: List[str], limit: int = 3) -> List[str]:
+def _fuzzy_tool_names(query: str, available: list[str], limit: int = 3) -> list[str]:
     """Return up to ``limit`` tool names closest to ``query`` by substring / edit-distance (#978)."""
     q = query.lower()
     if not q or not available:
@@ -900,8 +900,8 @@ def _fuzzy_tool_names(query: str, available: List[str], limit: int = 3) -> List[
 
 
 def _tool_schema_payload(
-    tool_defs: List[Dict[str, Any]], name: str
-) -> Optional[Dict[str, Any]]:
+    tool_defs: list[dict[str, Any]], name: str
+) -> Optional[dict[str, Any]]:
     """Return describe payload if name is in tool_defs (#107)."""
     for td in tool_defs:
         fn = _fn(td)
@@ -915,10 +915,10 @@ def _tool_schema_payload(
 
 
 def _dispatch_tool_describe_inner(
-    args: Dict[str, Any],
+    args: dict[str, Any],
     name: str,
-    current_tool_defs: List[Dict[str, Any]],
-    config: "ToolSearchConfig",
+    current_tool_defs: list[dict[str, Any]],
+    config: ToolSearchConfig,
 ) -> str:
     """Inner logic for dispatch_tool_describe, separated for caching."""
     if not is_deferrable_tool_name(name, config=config):
@@ -1012,9 +1012,9 @@ def _dispatch_tool_describe_inner(
 
 
 def _dispatch_tool_describe_batched(
-    args: Dict[str, Any],
+    args: dict[str, Any],
     *,
-    current_tool_defs: List[Dict[str, Any]],
+    current_tool_defs: list[dict[str, Any]],
     config: Optional[ToolSearchConfig] = None,
     connector_describe: Optional[Any] = None,
     call: Optional[Any] = None,
@@ -1071,9 +1071,9 @@ def _dispatch_tool_describe_batched(
 
 
 def dispatch_tool_describe(
-    args: Dict[str, Any],
+    args: dict[str, Any],
     *,
-    current_tool_defs: List[Dict[str, Any]],
+    current_tool_defs: list[dict[str, Any]],
     config: Optional[ToolSearchConfig] = None,
     connector_describe: Optional[Any] = None,
     call: Optional[Any] = None,
@@ -1108,7 +1108,7 @@ def dispatch_tool_describe(
     return result
 
 
-def scoped_deferrable_names(tool_defs: List[Dict[str, Any]]) -> frozenset[str]:
+def scoped_deferrable_names(tool_defs: list[dict[str, Any]]) -> frozenset[str]:
     defer_tools = load_config_readonly().effective_defer_tools
     return frozenset(
         name for td, name in zip(tool_defs, _tool_def_names(tool_defs))
@@ -1121,7 +1121,7 @@ def scoped_deferrable_names(tool_defs: List[Dict[str, Any]]) -> frozenset[str]:
 # unavailable per #1307) tries to invoke a core tool via tool_call, the
 # generic "is not a deferrable tool" message gave no recovery guidance and
 # the agent retried the same pattern in a loop.
-_CORE_TOOL_ALTERNATIVES: Dict[str, str] = {
+_CORE_TOOL_ALTERNATIVES: dict[str, str] = {
     "terminal": (
         "terminal is not available in this environment. "
         "Use search_files for finding files, read_file for reading file contents, "
@@ -1187,8 +1187,8 @@ def _non_deferrable_error(name: str, config: Optional[ToolSearchConfig] = None) 
 
 
 def resolve_underlying_call(
-    args: Dict[str, Any], config: Optional[ToolSearchConfig] = None
-) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:
+    args: dict[str, Any], config: Optional[ToolSearchConfig] = None
+) -> tuple[Optional[str], dict[str, Any], Optional[str]]:
     """Parse a ``tool_call`` invocation into (underlying_name, args, error_msg)."""
     entries, err = normalize_tool_call_entries(args)
     if err:
@@ -1237,9 +1237,9 @@ def _check_type(value: Any, type_str: str) -> bool:
 
 def validate_tool_args(
     name: str,
-    args: Dict[str, Any],
+    args: dict[str, Any],
     schema: Optional[dict] = None,
-) -> Tuple[bool, Optional[str]]:
+) -> tuple[bool, Optional[str]]:
     """Validate *args* against a tool's OpenAI-format parameter *schema*."""
     if not schema:
         return True, None
@@ -1286,44 +1286,44 @@ def validate_tool_args(
 
 
 __all__ = [
-    "out_of_scope_reason",
-    "TOOL_SEARCH_NAME",
-    "TOOL_DESCRIBE_NAME",
-    "TOOL_CALL_NAME",
     "BRIDGE_TOOL_NAMES",
-    "ToolSearchConfig",
-    "CatalogEntry",
+    "CONNECTOR_BATCH_SENTINEL",
+    "TOOL_CALL_NAME",
+    "TOOL_DESCRIBE_NAME",
+    "TOOL_SEARCH_NAME",
+    "_CORE_TOOL_ALTERNATIVES",
     "AssemblyResult",
-    "load_config",
-    "load_config_readonly",
-    "is_deferrable_tool_name",
-    "classify_tools",
-    "estimate_tokens_from_schemas",
-    "should_activate",
+    "CatalogEntry",
+    "ToolSearchConfig",
+    "_non_deferrable_error",
+    "assemble_tool_defs",
+    "bridge_tool_schemas",
     "build_catalog",
     "build_catalog_listing",
     "build_catalog_listing_with_form",
-    "listing_token_budget",
-    "search_catalog",
-    "bridge_tool_schemas",
-    "assemble_tool_defs",
-    "is_bridge_tool",
-    "dispatch_tool_search",
-    "dispatch_tool_describe",
-    "resolve_underlying_call",
-    "scoped_deferrable_names",
-    "validate_deferred_call_args",
-    "normalize_tool_call_entries",
-    "CONNECTOR_BATCH_SENTINEL",
-    "is_connector_name",
-    "effective_core_tool_names",
-    "get_previous_queries",
-    "note_tool_search",
-    "reset_search_streak",
-    "_non_deferrable_error",
-    "_CORE_TOOL_ALTERNATIVES",
+    "classify_tools",
     "clear_describe_cache",
     "clear_search_catalog_cache",
+    "dispatch_tool_describe",
+    "dispatch_tool_search",
+    "effective_core_tool_names",
+    "estimate_tokens_from_schemas",
+    "get_previous_queries",
+    "is_bridge_tool",
+    "is_connector_name",
+    "is_deferrable_tool_name",
+    "listing_token_budget",
+    "load_config",
+    "load_config_readonly",
+    "normalize_tool_call_entries",
+    "note_tool_search",
+    "out_of_scope_reason",
+    "reset_search_streak",
+    "resolve_underlying_call",
+    "scoped_deferrable_names",
+    "search_catalog",
+    "should_activate",
+    "validate_deferred_call_args",
     "validate_tool_args",
 ]
 
@@ -1332,18 +1332,18 @@ __all__ = [
 # Names external plugins imported from this module before the Sep 2026 decomposition.
 # Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
 # The whole block is removed by reverting the commit that added it.
-from typing import Literal  # noqa: F401,E402
-import copy  # noqa: F401,E402
-from dataclasses import field  # noqa: F401,E402
-import re  # noqa: F401,E402
-import snowballstemmer  # noqa: F401,E402
-import threading  # noqa: F401,E402
+from typing import Literal
+import copy
+from dataclasses import field
+import re
+import snowballstemmer
+import threading
 
 
 def build_catalog_listing(
-    deferrable: List[Dict[str, Any]],
+    deferrable: list[dict[str, Any]],
     *,
     max_tokens: int = 4000,
-) -> Tuple[Optional[str], str]:
+) -> tuple[Optional[str], str]:
     return build_catalog_listing_with_form(deferrable, max_tokens=max_tokens)
 # ---- END PLUGIN-COMPAT ----

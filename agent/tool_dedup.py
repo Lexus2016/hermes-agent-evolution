@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 #: Default config. Overridable via ``tool_dedup.enabled`` in config.yaml or
 #: the ``HERMES_TOOL_DEDUP`` env var.
-DEFAULT_CONFIG: Dict[str, Any] = {
+DEFAULT_CONFIG: dict[str, Any] = {
     # Master switch. Default ON (advisory + fail-open, so it is low-risk).
     "enabled": True,
     # How many distinct tool+args entries to remember per session.
@@ -95,10 +95,10 @@ class _SessionTracker:
     calls since that entry was last seen (used for the recency window).
     """
 
-    __slots__ = ("_history", "_lock", "_call_count")
+    __slots__ = ("_call_count", "_history", "_lock")
 
     def __init__(self) -> None:
-        self._history: "OrderedDict[str, int]" = OrderedDict()
+        self._history: OrderedDict[str, int] = OrderedDict()
         self._lock = threading.Lock()
         self._call_count = 0
 
@@ -145,7 +145,7 @@ class _SessionTracker:
 
 #: Process-global registry of per-session trackers. Keyed by session_id
 #: (``"default"`` when none is provided). Guarded by ``_REGISTRY_LOCK``.
-_REGISTRY: Dict[str, _SessionTracker] = {}
+_REGISTRY: dict[str, _SessionTracker] = {}
 _REGISTRY_LOCK = threading.Lock()
 
 
@@ -211,7 +211,7 @@ def _config_value(key: str, default: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _normalize_args(args: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _normalize_args(args: Optional[dict[str, Any]]) -> dict[str, Any]:
     """Return a stable, sortable copy of *args* for dedup keying.
 
     Strips volatile transport keys and normalizes values (recursively
@@ -221,7 +221,7 @@ def _normalize_args(args: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """
     if not isinstance(args, dict):
         return {}
-    cleaned: Dict[str, Any] = {}
+    cleaned: dict[str, Any] = {}
     for k, v in args.items():
         if k in _VOLATILE_ARG_KEYS:
             continue
@@ -243,7 +243,7 @@ def _normalize_value(value: Any) -> Any:
         return "<unserializable>"
 
 
-def _dedup_key(function_name: str, args: Optional[Dict[str, Any]]) -> str:
+def _dedup_key(function_name: str, args: Optional[dict[str, Any]]) -> str:
     """Stable hash of (tool, normalized-args) for dedup tracking."""
     payload = json.dumps(
         {"tool": function_name, "args": _normalize_args(args)},
@@ -261,7 +261,7 @@ def _dedup_key(function_name: str, args: Optional[Dict[str, Any]]) -> str:
 
 def check_tool_dedup(
     function_name: str,
-    function_args: Optional[Dict[str, Any]] = None,
+    function_args: Optional[dict[str, Any]] = None,
     session_id: Optional[str] = None,
 ) -> Optional[str]:
     """Return a hint string if *function_name*+args was recently successful.
@@ -302,7 +302,7 @@ def check_tool_dedup(
 
 def record_tool_call(
     function_name: str,
-    function_args: Optional[Dict[str, Any]] = None,
+    function_args: Optional[dict[str, Any]] = None,
     session_id: Optional[str] = None,
     success: bool = True,
 ) -> None:

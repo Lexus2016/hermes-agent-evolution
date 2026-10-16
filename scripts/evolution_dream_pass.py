@@ -33,7 +33,7 @@ Entry point for the scheduled pass: ``evolution_dream_contradiction_scan.py``.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any
 
@@ -192,12 +192,12 @@ def _created_at_utc(note: dict[str, Any]) -> datetime | None:
         return None
     s = raw.strip()
     try:
-        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(s)
     except ValueError:
         return None
     if dt.tzinfo is None:  # naive timestamps are treated as UTC
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def _is_active(note: dict[str, Any]) -> bool:
@@ -233,7 +233,7 @@ def scan_tqmemory_contradictions(
           "action": "deprecate-older",
         }
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     by_topic: dict[str, list[dict[str, Any]]] = {}
     for n in notes:
         topic = _topic_key(n)
@@ -273,8 +273,8 @@ def scan_tqmemory_contradictions(
 
 def _utc_now_iso(now: datetime | None) -> str:
     return (
-        (now or datetime.now(timezone.utc))
-        .astimezone(timezone.utc)
+        (now or datetime.now(UTC))
+        .astimezone(UTC)
         .isoformat()
         .replace("+00:00", "Z")
     )

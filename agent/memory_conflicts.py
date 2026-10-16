@@ -48,14 +48,14 @@ from typing import Any, Iterable, Optional, Tuple
 from agent.memory_staleness import Note, jaccard_similarity
 
 __all__ = [
-    "Note",
-    "MemoryConflict",
-    "ConflictReport",
     "DEFAULT_CONFIG",
-    "split_claim",
-    "detect_conflicts",
+    "ConflictReport",
+    "MemoryConflict",
+    "Note",
     "analyze_conflicts",
+    "detect_conflicts",
     "render_conflict_report",
+    "split_claim",
 ]
 
 
@@ -84,7 +84,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 # non-empty parts wins. Colon-delimited claims ("Deploy target: staging")
 # are the most common and least ambiguous form in real memory entries, so
 # they take priority over the looser natural-language separators.
-_SEPARATOR_PATTERNS: Tuple[re.Pattern, ...] = (
+_SEPARATOR_PATTERNS: tuple[re.Pattern, ...] = (
     re.compile(r"\s*:\s*"),
     re.compile(r"\s+is\s+", re.IGNORECASE),
     re.compile(r"\s+are\s+", re.IGNORECASE),
@@ -100,7 +100,7 @@ def _word_set(text: str) -> set[str]:
     return {w for w in _WORD_RE.split(text.lower()) if w}
 
 
-def split_claim(text: str) -> Optional[Tuple[str, str]]:
+def split_claim(text: str) -> Optional[tuple[str, str]]:
     """Split ``text`` into a ``(topic, value)`` pair on the first matching separator.
 
     Tries each separator in :data:`_SEPARATOR_PATTERNS` in priority order and

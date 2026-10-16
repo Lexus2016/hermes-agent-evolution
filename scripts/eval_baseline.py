@@ -33,12 +33,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from eval_runner import (  # noqa: E402
+from eval_runner import (
     EvalTrajectory,
     run_task_set,
     write_trajectories,
 )
-from eval_tasks import (  # noqa: E402
+from eval_tasks import (
     latest_version,
     load_long_horizon_tasks,
     load_task_set,
@@ -57,17 +57,17 @@ class _NullAgent:
     same code path a real run uses.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.model = "null-agent"
         self.provider = "null"
         self.config = config
 
 
-def _null_agent_factory(pinned: Dict[str, Any], _on_start, _on_complete) -> _NullAgent:
+def _null_agent_factory(pinned: dict[str, Any], _on_start, _on_complete) -> _NullAgent:
     return _NullAgent(pinned)
 
 
-def _null_run_conversation(_agent, _user_message, **_kwargs) -> Dict[str, Any]:
+def _null_run_conversation(_agent, _user_message, **_kwargs) -> dict[str, Any]:
     return {
         "response": NULL_AGENT_REFUSAL,
         "conversation_history": [{"role": "assistant", "content": NULL_AGENT_REFUSAL}],
@@ -75,7 +75,7 @@ def _null_run_conversation(_agent, _user_message, **_kwargs) -> Dict[str, Any]:
     }
 
 
-def score_trajectory(traj: EvalTrajectory, task: Any) -> Dict[str, Any]:
+def score_trajectory(traj: EvalTrajectory, task: Any) -> dict[str, Any]:
     """Score one trajectory against its task.
 
     * ``tool_score``   — fraction of ``expected_tools`` the agent actually called.
@@ -103,13 +103,13 @@ def score_trajectory(traj: EvalTrajectory, task: Any) -> Dict[str, Any]:
         tool_score = 0.0
 
     if pattern:
-        result_score = 1.0 if re.search(re.escape(pattern), answer, re.I) else 0.0
+        result_score = 1.0 if re.search(re.escape(pattern), answer, re.IGNORECASE) else 0.0
     else:
         result_score = 0.0
 
     completed = 1.0 if not traj.error else 0.0
 
-    achievement: List[float] = []
+    achievement: list[float] = []
     if expected_tools:
         achievement.append(tool_score)
     if pattern:
@@ -134,23 +134,22 @@ def score_trajectory(traj: EvalTrajectory, task: Any) -> Dict[str, Any]:
 
 
 def score_all(
-    trajectories: List[EvalTrajectory], tasks: List[Any]
-) -> List[Dict[str, Any]]:
+    trajectories: list[EvalTrajectory], tasks: list[Any]
+) -> list[dict[str, Any]]:
     by_id = {getattr(t, "id", str(t)): t for t in tasks}
     return [score_trajectory(tr, by_id.get(tr.task_id, tr)) for tr in trajectories]
 
 
-def write_scores(scores: List[Dict[str, Any]], path: str) -> str:
+def write_scores(scores: list[dict[str, Any]], path: str) -> str:
     parent = os.path.dirname(os.path.abspath(path))
     if parent:
         os.makedirs(parent, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
-        for row in scores:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        fh.writelines(json.dumps(row, ensure_ascii=False) + "\n" for row in scores)
     return path
 
 
-def summarize(scores: List[Dict[str, Any]]) -> Dict[str, Any]:
+def summarize(scores: list[dict[str, Any]]) -> dict[str, Any]:
     if not scores:
         return {"tasks": 0, "mean_total": 0.0, "solved": 0}
     return {
@@ -165,13 +164,13 @@ def summarize(scores: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _run_bucket(
-    tasks: List[Any],
+    tasks: list[Any],
     *,
     agent: str,
     scores_path: Optional[str] = None,
     trajectories_path: Optional[str] = None,
-    agent_config: Optional[Dict[str, Any]] = None,
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    agent_config: Optional[dict[str, Any]] = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Run + score one bucket through the real code path (shared wiring)."""
     if agent == "null":
         trajectories = run_task_set(
@@ -193,7 +192,7 @@ def run_null_agent_baseline(
     version: Optional[str] = None,
     scores_path: str = ".evolution/eval/scores-null.jsonl",
     trajectories_path: Optional[str] = None,
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Run the null agent over the task set and write its floor scores."""
     tasks = load_task_set(version or latest_version())
     return _run_bucket(
@@ -208,8 +207,8 @@ def run_real_agent_baseline(
     version: Optional[str] = None,
     scores_path: str = ".evolution/eval/scores.jsonl",
     trajectories_path: Optional[str] = ".evolution/eval/trajectories.jsonl",
-    agent_config: Optional[Dict[str, Any]] = None,
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    agent_config: Optional[dict[str, Any]] = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Run the real agent over the task set and write its scores."""
     tasks = load_task_set(version or latest_version())
     return _run_bucket(
@@ -225,8 +224,8 @@ def run_long_horizon_stress(
     agent: str = "null",
     scores_path: Optional[str] = None,
     trajectories_path: Optional[str] = None,
-    agent_config: Optional[Dict[str, Any]] = None,
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    agent_config: Optional[dict[str, Any]] = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Run the opt-in long-horizon stress bucket — 50+ turn tasks (#2530).
     Too expensive to block CI on; a too-fast finish is marked ``shortcut``."""
     if scores_path is None:
@@ -240,7 +239,7 @@ def run_long_horizon_stress(
     )
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument(
         "--agent",
@@ -261,13 +260,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     if args.agent == "null":
-        scores, summary = run_null_agent_baseline(
+        _scores, summary = run_null_agent_baseline(
             args.version,
             args.output or ".evolution/eval/scores-null.jsonl",
             args.trajectories,
         )
     else:
-        scores, summary = run_real_agent_baseline(
+        _scores, summary = run_real_agent_baseline(
             args.version,
             args.output or ".evolution/eval/scores.jsonl",
             args.trajectories or ".evolution/eval/trajectories.jsonl",

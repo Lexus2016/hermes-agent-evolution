@@ -513,7 +513,7 @@ class TestDelegateTask(unittest.TestCase):
             "summary": "Done", "api_calls": 1, "duration_seconds": 1.0
         }
         parent = _make_mock_parent()
-        result = json.loads(delegate_task(
+        _result = json.loads(delegate_task(
             goal="This should be ignored",
             tasks=[{"goal": "Actual task 1"}, {"goal": "Actual task 2"}],
             parent_agent=parent,
@@ -1024,7 +1024,6 @@ class TestToolNamePreservation(unittest.TestCase):
 
         def fake_which(name, **kwargs):
             calls.append(name)
-            return None
 
         with patch("shutil.which", side_effect=fake_which):
             self.assertFalse(_acp_binary_available())

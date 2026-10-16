@@ -231,5 +231,5 @@ class TestLogPersistence:
         assert len(log["retrievals"]) == _MAX_LOG_ENTRIES
         # Oldest entries should be pruned (kept = most recent).
         ids = [r["record_id"] for r in log["retrievals"]]
-        assert f"memory:0" not in ids
+        assert "memory:0" not in ids
         assert f"memory:{_MAX_LOG_ENTRIES + 99}" in ids

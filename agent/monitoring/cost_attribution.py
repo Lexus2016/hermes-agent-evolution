@@ -19,9 +19,9 @@ _COST_FIELDS = {
 _WINDOW_S, _REDUNDANT, _RETRY = 300.0, 4, 4
 
 
-def cost_attributes(event: Dict[str, Any]) -> Dict[str, Any]:
+def cost_attributes(event: dict[str, Any]) -> dict[str, Any]:
     """Map numeric usage fields onto ``hermes.*`` span attributes."""
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     for key, name in _COST_FIELDS.items():
         v = event.get(key)
         if isinstance(v, (int, float)) and not isinstance(v, bool):
@@ -29,11 +29,11 @@ def cost_attributes(event: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def anomaly_attributes(signal: Dict[str, Any]) -> Dict[str, Any]:
+def anomaly_attributes(signal: dict[str, Any]) -> dict[str, Any]:
     """Map a cost-anomaly signal onto ``hermes.*`` span attributes."""
     if not signal or not signal.get("anomaly"):
         return {}
-    attrs: Dict[str, Any] = {"hermes.cost_anomaly": signal["anomaly"]}
+    attrs: dict[str, Any] = {"hermes.cost_anomaly": signal["anomaly"]}
     if signal.get("tool"):
         attrs["hermes.anomaly_tool"] = signal["tool"]
     if signal.get("count"):
@@ -54,7 +54,7 @@ class CostAnomalyDetector:
         self._redundant = redundant_threshold
         self._retry = retry_threshold
         self._window_s = window_s
-        self._recent: Dict[tuple, list] = {}
+        self._recent: dict[tuple, list] = {}
         self._lock = threading.Lock()
 
     def detect(
@@ -62,7 +62,7 @@ class CostAnomalyDetector:
         tool: str,
         session_id: str = "",
         status: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Record a tool call and return a cost-anomaly signal (or {})."""
         try:
             now = time.monotonic()
@@ -90,9 +90,9 @@ _DETECTOR = CostAnomalyDetector()
 
 
 def detect_cost_anomaly(
-    event: Dict[str, Any],
+    event: dict[str, Any],
     detector: Optional[CostAnomalyDetector] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Feed a tool-call event to a detector and return its anomaly signal."""
     try:
         det = detector if detector is not None else _DETECTOR

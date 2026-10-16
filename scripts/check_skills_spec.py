@@ -84,8 +84,8 @@ class SkillReport:
     fields — but the spec does not forbid extra fields, so they never fail CI.
     """
 
-    violations: List[SkillViolation] = field(default_factory=list)
-    warnings: List[SkillViolation] = field(default_factory=list)
+    violations: list[SkillViolation] = field(default_factory=list)
+    warnings: list[SkillViolation] = field(default_factory=list)
 
     def add_violation(self, skill: str, path: str, message: str) -> None:
         self.violations.append(SkillViolation(skill, path, message))
@@ -98,7 +98,7 @@ class SkillReport:
         return not self.violations
 
 
-def extract_frontmatter(text: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+def extract_frontmatter(text: str) -> tuple[Optional[str], Optional[dict[str, Any]]]:
     """Return (raw_frontmatter, parsed_dict) from SKILL.md text.
 
     ``(None, None)`` when the file has no ``---`` frontmatter block at all.
@@ -120,7 +120,7 @@ def extract_frontmatter(text: str) -> Tuple[Optional[str], Optional[Dict[str, An
 
 def check_skill_file(
     skill_path: Path, repo_root: Path
-) -> Tuple[List[SkillViolation], List[SkillViolation]]:
+) -> tuple[list[SkillViolation], list[SkillViolation]]:
     """Validate one ``skills/<name>/SKILL.md`` file.
 
     Returns ``(violations, warnings)``: hard spec violations (required
@@ -129,8 +129,8 @@ def check_skill_file(
     documented ``metadata`` extension namespace for portability).
     """
     skill_name = skill_path.parent.name
-    out: List[SkillViolation] = []
-    warnings: List[SkillViolation] = []
+    out: list[SkillViolation] = []
+    warnings: list[SkillViolation] = []
     rel = str(skill_path.relative_to(repo_root))
 
     text = skill_path.read_text(encoding="utf-8-sig")
@@ -224,7 +224,7 @@ def scan_skills_tree(skills_dir: Path) -> SkillReport:
     return report
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             __doc__ or "Validate skills against the Agent Skills spec"

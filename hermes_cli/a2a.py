@@ -32,7 +32,7 @@ _SKILLS_ROOT = _REPO_ROOT / "skills"
 
 # Defaults used when ``skills/a2a/config.yaml`` is absent or partial. The
 # config file overlays these keys (see that file for the documented schema).
-_DEFAULT_CONFIG: Dict[str, Any] = {
+_DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
     "name": "Hermes",
     "description": "Hermes agent advertising its tools and skills over A2A.",
@@ -64,9 +64,9 @@ class AgentSkill:
     id: str
     name: str
     description: str = ""
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -83,15 +83,15 @@ class AgentCard:
     description: str
     url: str
     version: str
-    skills: List[AgentSkill] = field(default_factory=list)
-    capabilities: Dict[str, bool] = field(default_factory=dict)
-    authentication: Dict[str, Any] = field(default_factory=dict)
-    provider: Optional[Dict[str, str]] = None
-    default_input_modes: List[str] = field(default_factory=lambda: ["text"])
-    default_output_modes: List[str] = field(default_factory=lambda: ["text"])
+    skills: list[AgentSkill] = field(default_factory=list)
+    capabilities: dict[str, bool] = field(default_factory=dict)
+    authentication: dict[str, Any] = field(default_factory=dict)
+    provider: Optional[dict[str, str]] = None
+    default_input_modes: list[str] = field(default_factory=lambda: ["text"])
+    default_output_modes: list[str] = field(default_factory=lambda: ["text"])
 
-    def to_dict(self) -> Dict[str, Any]:
-        card: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        card: dict[str, Any] = {
             "name": self.name,
             "description": self.description,
             "url": self.url,
@@ -107,9 +107,9 @@ class AgentCard:
         return card
 
 
-def load_config(path: Optional[Path] = None) -> Dict[str, Any]:
+def load_config(path: Optional[Path] = None) -> dict[str, Any]:
     """Return the A2A config, overlaying ``skills/a2a/config.yaml`` on defaults."""
-    cfg: Dict[str, Any] = {**_DEFAULT_CONFIG}
+    cfg: dict[str, Any] = {**_DEFAULT_CONFIG}
     cfg_path = path or _CONFIG_PATH
     try:
         import hermes_yaml as yaml
@@ -123,7 +123,7 @@ def load_config(path: Optional[Path] = None) -> Dict[str, Any]:
     return cfg
 
 
-def collect_capabilities(config: Dict[str, Any]) -> List[AgentSkill]:
+def collect_capabilities(config: dict[str, Any]) -> list[AgentSkill]:
     """Gather Hermes tools + ``SKILL.md`` skills as A2A skills.
 
     Side-effect free: reads the live tool registry (populated once tool
@@ -133,7 +133,7 @@ def collect_capabilities(config: Dict[str, Any]) -> List[AgentSkill]:
     """
     expose = config.get("expose") or {}
     exclude = {str(x) for x in (expose.get("exclude") or [])}
-    skills: List[AgentSkill] = []
+    skills: list[AgentSkill] = []
     seen: set[str] = set()
 
     if expose.get("tools", True):
@@ -177,12 +177,12 @@ def collect_capabilities(config: Dict[str, Any]) -> List[AgentSkill]:
 # rarely, so cache the (config, capabilities) snapshot for a short TTL.
 _SNAPSHOT_TTL = 30.0
 _snapshot_lock = threading.Lock()
-_snapshot: Optional[Tuple[float, Dict[str, Any], List[AgentSkill]]] = None
+_snapshot: Optional[tuple[float, dict[str, Any], list[AgentSkill]]] = None
 
 
 def get_discovery_snapshot(
     ttl: float = _SNAPSHOT_TTL,
-) -> Tuple[Dict[str, Any], List[AgentSkill]]:
+) -> tuple[dict[str, Any], list[AgentSkill]]:
     """Return the cached ``(config, capabilities)`` snapshot, rebuilding it at
     most once per *ttl* seconds. Thread-safe (double-checked locking)."""
     global _snapshot
@@ -207,8 +207,8 @@ def reset_discovery_cache() -> None:
 
 
 def build_agent_card(
-    config: Optional[Dict[str, Any]] = None,
-    capabilities: Optional[List[AgentSkill]] = None,
+    config: Optional[dict[str, Any]] = None,
+    capabilities: Optional[list[AgentSkill]] = None,
     *,
     version: Optional[str] = None,
     base_url: Optional[str] = None,
@@ -241,7 +241,7 @@ def build_agent_card(
     )
 
 
-def _iter_registered_tools() -> Iterator[Tuple[str, str, str]]:
+def _iter_registered_tools() -> Iterator[tuple[str, str, str]]:
     """Yield ``(name, description, toolset)`` for each Hermes tool.
 
     Prefers the live tool registry (populated in a full agent process, so
@@ -273,7 +273,7 @@ def _iter_registered_tools() -> Iterator[Tuple[str, str, str]]:
     try:
         import toolsets
 
-        static_map: Dict[str, str] = {}
+        static_map: dict[str, str] = {}
         for toolset in toolsets.TOOLSETS:
             try:
                 names = toolsets.resolve_toolset(toolset, include_registry=False)
@@ -287,7 +287,7 @@ def _iter_registered_tools() -> Iterator[Tuple[str, str, str]]:
         logger.debug("A2A: static toolsets unavailable", exc_info=True)
 
 
-def _iter_skill_docs() -> Iterator[Tuple[str, str, str]]:
+def _iter_skill_docs() -> Iterator[tuple[str, str, str]]:
     """Yield ``(name, description, category)`` from ``skills/**/SKILL.md``."""
     if not _SKILLS_ROOT.is_dir():
         return
@@ -306,7 +306,7 @@ def _iter_skill_docs() -> Iterator[Tuple[str, str, str]]:
         yield name, desc, category
 
 
-def _read_frontmatter(path: Path, yaml_mod: Any) -> Dict[str, Any]:
+def _read_frontmatter(path: Path, yaml_mod: Any) -> dict[str, Any]:
     """Parse a ``SKILL.md`` YAML frontmatter block into a dict (or ``{}``)."""
     try:
         text = path.read_text(encoding="utf-8-sig")

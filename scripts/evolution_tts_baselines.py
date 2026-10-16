@@ -42,11 +42,11 @@ import sys
 from typing import Any, Dict, List, Optional
 
 __all__ = [
-    "best_of_n",
-    "pass_at_k",
     "baseline_curve",
+    "best_of_n",
     "compare_against_baseline",
     "main",
+    "pass_at_k",
 ]
 
 #: A harness that merely *ties* the naive baseline is not an improvement —
@@ -69,7 +69,7 @@ def _clamp01(x: Any) -> float:
     return v
 
 
-def _sample_list(samples: Any) -> List[float]:
+def _sample_list(samples: Any) -> list[float]:
     """Coerce the samples argument to a list of [0,1] floats.
 
     Accepts a JSON list, a whitespace/comma-separated string, or a list of
@@ -82,7 +82,7 @@ def _sample_list(samples: Any) -> List[float]:
         samples = samples.replace(",", " ").split()
     if not isinstance(samples, (list, tuple)):
         return []
-    out: List[float] = []
+    out: list[float] = []
     for s in samples:
         if isinstance(s, (dict, list)):
             continue
@@ -93,7 +93,7 @@ def _sample_list(samples: Any) -> List[float]:
     return out
 
 
-def best_of_n(scores: List[float]) -> float:
+def best_of_n(scores: list[float]) -> float:
     """Best-of-N test-time-scaling arm: the maximum of N attempt scores.
 
     The naive ceiling: an orchestrator that simply re-runs the task N times
@@ -103,7 +103,7 @@ def best_of_n(scores: List[float]) -> float:
     return max(scores) if scores else 0.0
 
 
-def pass_at_k(scores: List[float], *, threshold: float = 0.75) -> float:
+def pass_at_k(scores: list[float], *, threshold: float = 0.75) -> float:
     """Probability that at least one of k attempts clears ``threshold``.
 
     Each attempt is treated as an independent Bernoulli trial with observed
@@ -120,7 +120,7 @@ def pass_at_k(scores: List[float], *, threshold: float = 0.75) -> float:
     return 1.0 - (1.0 - p) ** n
 
 
-def baseline_curve(scores: List[float], *, max_n: int = 8) -> List[Dict[str, float]]:
+def baseline_curve(scores: list[float], *, max_n: int = 8) -> list[dict[str, float]]:
     """Best-of-N curve: the baseline score achievable at each attempt budget.
 
     ``curve[i] = best_of_n(scores[:i+1])`` — the prefix-max of sorted-descending
@@ -130,7 +130,7 @@ def baseline_curve(scores: List[float], *, max_n: int = 8) -> List[Dict[str, flo
     pragmatic sampling budget for an evaluation run).
     """
     ordered = sorted(scores, reverse=True)
-    curve: List[Dict[str, float]] = []
+    curve: list[dict[str, float]] = []
     for i in range(min(max(0, max_n), len(ordered))):
         curve.append({"n": i + 1, "best": round(best_of_n(ordered[: i + 1]), 6)})
     return curve
@@ -142,7 +142,7 @@ def compare_against_baseline(
     *,
     threshold: float = 0.75,
     margin: float = DEFAULT_MARGIN,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compare an evolved harness score against the naive best-of-N baseline.
 
     Verdict semantics:
@@ -208,13 +208,13 @@ def compare_against_baseline(
     }
 
 
-def _parse_args(argv: List[str]) -> tuple[Dict[str, Any], Optional[str]]:
+def _parse_args(argv: list[str]) -> tuple[dict[str, Any], Optional[str]]:
     """Tiny hand-rolled arg parse (matches the other evolution_* CLIs' style).
 
     Flags: ``--evolved``, ``--threshold``, ``--margin``, ``--max-n``.
     Samples come from either repeated ``--sample`` flags, a positional path
     to a JSON file, or stdin (a JSON list)."""
-    opts: Dict[str, Any] = {
+    opts: dict[str, Any] = {
         "evolved": None,
         "threshold": 0.75,
         "margin": DEFAULT_MARGIN,
@@ -253,7 +253,7 @@ def _parse_args(argv: List[str]) -> tuple[Dict[str, Any], Optional[str]]:
     return opts, None
 
 
-def _load_samples(opts: Dict[str, Any]) -> tuple[List[float], Optional[str]]:
+def _load_samples(opts: dict[str, Any]) -> tuple[list[float], Optional[str]]:
     """Read attempt scores from ``--sample`` flags, a path, or stdin.
 
     A positional path may hold either a bare JSON list of numbers or an object
@@ -279,7 +279,7 @@ def _load_samples(opts: Dict[str, Any]) -> tuple[List[float], Optional[str]]:
     return _sample_list(data), None
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     opts, err = _parse_args(argv)
     if err:
         print(f"[evolution-tts-baselines] {err}", file=sys.stderr)

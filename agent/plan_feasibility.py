@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Plan feasibility validation for the plan-execution loop (#1032, child of #1021).
 
 Second slice of PIVOT-style plan-feasibility validation. The first slice
@@ -34,12 +33,12 @@ from typing import Any, Callable, Iterable
 from agent.plan_schema import Plan, Step
 
 __all__ = [
+    "PLAN_FEASIBILITY_METADATA_KEY",
     "FeasibilityStatus",
-    "StepFeasibility",
     "PlanFeasibilityReport",
+    "StepFeasibility",
     "check_plan_feasibility",
     "maybe_validate_plan",
-    "PLAN_FEASIBILITY_METADATA_KEY",
 ]
 
 PLAN_FEASIBILITY_METADATA_KEY = "feasibility"

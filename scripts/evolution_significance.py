@@ -15,8 +15,8 @@ from typing import Dict, List, Optional, Tuple
 
 
 def calculate_paired_z_score(
-    baseline_scores: List[float], candidate_scores: List[float]
-) -> Tuple[float, bool]:
+    baseline_scores: list[float], candidate_scores: list[float]
+) -> tuple[float, bool]:
     """Calculate the paired z-score for per-task differences.
 
     Returns (z_score, is_significant) where is_significant is True if z >= 1.96.
@@ -47,7 +47,7 @@ def check_activation_gate(trigger_condition: str, execution_log: str) -> bool:
 
 def calculate_retention_rate(
     training_lift: float, sealed_lift: float
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Calculate sealed-test retention rate (sealed_lift / training_lift)."""
     if abs(training_lift) < 1e-9:
         retention = 1.0 if abs(sealed_lift) < 1e-9 else 0.0

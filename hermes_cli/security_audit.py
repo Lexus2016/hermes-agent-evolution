@@ -307,7 +307,7 @@ def _load_mcp_secret_audit_module():
     if spec is None or spec.loader is None:
         return None
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # noqa: S102 - loading a first-party repo script
+    spec.loader.exec_module(mod)
     return mod
 
 
@@ -321,7 +321,7 @@ def _run_mcp_secret_audit(hermes_home: Path) -> tuple[list[dict], int]:
     mod = _load_mcp_secret_audit_module()
     if mod is None:
         return [], 0
-    servers, _source = mod._load_mcp_servers(str(hermes_home / "config.yaml"))  # noqa: SLF001
+    servers, _source = mod._load_mcp_servers(str(hermes_home / "config.yaml"))
     return mod.audit_mcp_servers(servers), len(servers)
 
 

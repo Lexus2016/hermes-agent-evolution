@@ -20,8 +20,8 @@ class ExecutionNode:
     action: str
     status: str  # "success" | "failure" | "timeout"
     error: Optional[str] = None
-    dependencies: Set[str] = field(default_factory=set)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    dependencies: set[str] = field(default_factory=set)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -32,7 +32,7 @@ class AttributionReport:
     culprit_stage: str
     culprit_action: str
     root_cause: str
-    influence_path: List[str]
+    influence_path: list[str]
     confidence: float = 0.9
 
     def render_markdown(self) -> str:
@@ -50,9 +50,9 @@ class InfluenceGraph:
     """Directed Acyclic Graph over trace execution nodes."""
 
     def __init__(self):
-        self.nodes: Dict[str, ExecutionNode] = {}
-        self.edges: Dict[str, Set[str]] = {}  # source -> targets
-        self.reverse_edges: Dict[str, Set[str]] = {}  # target -> sources
+        self.nodes: dict[str, ExecutionNode] = {}
+        self.edges: dict[str, set[str]] = {}  # source -> targets
+        self.reverse_edges: dict[str, set[str]] = {}  # target -> sources
 
     def add_node(self, node: ExecutionNode) -> None:
         self.nodes[node.node_id] = node
@@ -74,7 +74,7 @@ class InfluenceGraph:
         self.reverse_edges[target_id].add(source_id)
 
     @classmethod
-    def build_from_trace(cls, trace_steps: List[Dict[str, Any]]) -> InfluenceGraph:
+    def build_from_trace(cls, trace_steps: list[dict[str, Any]]) -> InfluenceGraph:
         """Construct an influence graph from a sequential list of trace steps."""
         graph = cls()
         prev_node_id: Optional[str] = None

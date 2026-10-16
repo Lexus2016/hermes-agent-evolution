@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_dedup import (  # noqa: E402
+from evolution_dedup import (
     idea_key,
     is_seen,
     load_cache,

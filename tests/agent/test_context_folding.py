@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for Multi-Scale Context Folding (AgentFold, issue #2361)."""
 
 import pytest

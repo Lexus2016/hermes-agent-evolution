@@ -23,7 +23,7 @@ GUARD_TOKENS = (
 MIN_MERGE_RATE = 0.4
 
 
-def guard_weakening_flags(diff_text: str) -> List[str]:
+def guard_weakening_flags(diff_text: str) -> list[str]:
     """Return guard tokens whose definition lines were modified in a diff."""
     flags = []
     for token in GUARD_TOKENS:
@@ -57,7 +57,7 @@ def volume_drift_flag(
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=60
-    )
+    , check=False)
     if result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
     return result.stdout
@@ -72,13 +72,13 @@ def _resolve_log_ref(repo: Path) -> str:
         return "HEAD"
 
 
-def audit_merged_commits(repo: Path, count: int = 30) -> List[str]:
+def audit_merged_commits(repo: Path, count: int = 30) -> list[str]:
     """Scan recent merge commits for guard-weakening edits."""
     ref = _resolve_log_ref(repo)
     log = _git(
         repo, "log", f"-{count}", "--first-parent", "--format=%H %s", ref
     )
-    flags: List[str] = []
+    flags: list[str] = []
     for line in log.splitlines():
         sha, _, subject = line.partition(" ")
         # Conservative scope: only commits plausibly touching the pipeline's
@@ -97,9 +97,9 @@ def audit_merged_commits(repo: Path, count: int = 30) -> List[str]:
     return flags
 
 
-def run_audit(repo: Path, metrics_path: Optional[Path] = None) -> Dict[str, Any]:
+def run_audit(repo: Path, metrics_path: Optional[Path] = None) -> dict[str, Any]:
     """Run both checks; returns a JSON-serializable verdict dict."""
-    verdict: Dict[str, Any] = {"flags": [], "ok": True}
+    verdict: dict[str, Any] = {"flags": [], "ok": True}
     try:
         verdict["flags"].extend(audit_merged_commits(repo))
     except (RuntimeError, OSError) as exc:
@@ -125,7 +125,7 @@ def run_audit(repo: Path, metrics_path: Optional[Path] = None) -> Dict[str, Any]
     return verdict
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     repo = Path(argv[1]) if len(argv) > 1 else Path.cwd()
     metrics = Path(argv[2]) if len(argv) > 2 else None
     print(json.dumps(run_audit(repo, metrics), indent=2))

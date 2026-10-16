@@ -28,7 +28,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -64,7 +64,7 @@ _TRIVIAL_ERROR_CLASSES = {
 }
 
 # Regex -> error_class heuristic.
-_TRIVIAL_PATTERNS: List[Tuple[str, str]] = [
+_TRIVIAL_PATTERNS: list[tuple[str, str]] = [
     (r"ruff.*\b(F401|F811|F841|E501|W291|W292|E302|E303|W391)\b", "lint"),
     (r"ruff format --check", "format"),
     (r"black --check", "format"),
@@ -85,7 +85,7 @@ _TRIVIAL_PATTERNS: List[Tuple[str, str]] = [
     (r"\berror:\s*\[[a-z][a-z0-9-]*\]", "lint"),
 ]
 
-_COMPLEX_PATTERNS: List[Tuple[str, str]] = [
+_COMPLEX_PATTERNS: list[tuple[str, str]] = [
     (r"FAILED\s+(tests/\S+)::\S+\s+-\s+(\w+Error):", "pytest-error"),
     (r"FAILED\s+(tests/\S+)::\S+", "test-failure"),
     (r"ERROR\s+(tests/\S+)::\S+", "test-error"),
@@ -123,13 +123,13 @@ _COMPLEX_PATTERNS: List[Tuple[str, str]] = [
 # mode (in addition to its free-form narrative) so recurrence is measurable by
 # mode ("incorrect-verification dropped N%") instead of by narrative.
 
-MAST_CATEGORIES: Dict[str, str] = {
+MAST_CATEGORIES: dict[str, str] = {
     "1": "system-design",
     "2": "inter-agent-misalignment",
     "3": "task-verification",
 }
 
-MAST_FAILURE_MODES: Dict[str, str] = {
+MAST_FAILURE_MODES: dict[str, str] = {
     "1.1": "Disobey Task Specification",
     "1.2": "Disobey Role Specification",
     "1.3": "Step Repetition",
@@ -149,7 +149,7 @@ MAST_FAILURE_MODES: Dict[str, str] = {
 # Deterministic error_class -> MAST mode. The error_class names a failure
 # family the existing patterns already classify; this maps each to its most
 # likely mode.
-_ERROR_CLASS_TO_MAST: Dict[str, str] = {
+_ERROR_CLASS_TO_MAST: dict[str, str] = {
     "assertion-error": "3.3",
     "test-failure": "3.3",
     "test-error": "3.3",
@@ -172,7 +172,7 @@ _ERROR_CLASS_TO_MAST: Dict[str, str] = {
 }
 
 # High-signal message keywords that override the coarse error_class map.
-_MAST_MESSAGE_HINTS: Tuple[Tuple[str, str], ...] = (
+_MAST_MESSAGE_HINTS: tuple[tuple[str, str], ...] = (
     ("timeout", "3.1"),
     ("terminat", "3.1"),
     ("premature", "3.1"),
@@ -225,7 +225,7 @@ class FailedCheck:
     conclusion: str
     details_url: str
     head_sha: str
-    annotations: List[Dict[str, Any]]
+    annotations: list[dict[str, Any]]
 
 
 @dataclass
@@ -239,7 +239,7 @@ class FailureDetails:
 
 
 Client = Callable[
-    [str, str, Optional[str]], Tuple[int, str]
+    [str, str, Optional[str]], tuple[int, str]
 ]  # method, url, body -> (status, body)
 
 
@@ -250,7 +250,7 @@ Client = Callable[
 
 def _make_request(
     url: str, token: str, method: str = "GET", body: Optional[str] = None
-) -> Tuple[int, str]:
+) -> tuple[int, str]:
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
@@ -304,7 +304,7 @@ def _resolve_github_token() -> str:
 
 def default_client(
     method: str, url: str, body: Optional[str] = None
-) -> Tuple[int, str]:
+) -> tuple[int, str]:
     token = _resolve_github_token()
     if not token:
         print(
@@ -340,7 +340,7 @@ def _recorded_issues_path() -> Path:
     return path
 
 
-def _load_recorded() -> Dict[str, str]:
+def _load_recorded() -> dict[str, str]:
     path = _recorded_issues_path()
     if not path.is_file():
         return {}
@@ -382,12 +382,12 @@ def fetch_open_prs(
     client: Client,
     repo: str = _REPO,
     limit: int = _DEFAULT_LIMIT,
-) -> List[PRInfo]:
+) -> list[PRInfo]:
     url = f"{_GITHUB_API}/repos/{repo}/pulls?state=open&per_page={limit}"
     data = _get(client, url)
     if not isinstance(data, list):
         return []
-    prs: List[PRInfo] = []
+    prs: list[PRInfo] = []
     for item in data:
         head = item.get("head") or {}
         sha = (head.get("sha") or "").strip()
@@ -410,13 +410,13 @@ def fetch_failed_check_runs(
     client: Client,
     head_sha: str,
     repo: str = _REPO,
-) -> List[FailedCheck]:
+) -> list[FailedCheck]:
     url = f"{_GITHUB_API}/repos/{repo}/commits/{head_sha}/check-runs?per_page={_ANNOTATION_LIMIT}"
     data = _get(client, url)
     if not isinstance(data, dict):
         return []
     checks = data.get("check_runs", [])
-    failed: List[FailedCheck] = []
+    failed: list[FailedCheck] = []
     for cr in checks:
         conclusion = cr.get("conclusion")
         if conclusion != "failure":
@@ -440,7 +440,7 @@ def fetch_check_run_annotations(
     client: Client,
     check_run_id: int,
     repo: str = _REPO,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     url = f"{_GITHUB_API}/repos/{repo}/check-runs/{check_run_id}/annotations?per_page={_ANNOTATION_LIMIT}"
     data = _get(client, url)
     if not isinstance(data, list):
@@ -516,8 +516,8 @@ def _raw_tail(text: str, max_lines: int = _SNIPPET_LINES) -> str:
     return "\n".join(lines[-max_lines:])
 
 
-def _format_annotations(annotations: List[Dict[str, Any]]) -> str:
-    parts: List[str] = []
+def _format_annotations(annotations: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
     for ann in annotations:
         path = ann.get("path", "")
         line = ann.get("start_line", ann.get("line"))
@@ -543,7 +543,7 @@ def classify_failure(error_class: str) -> str:
 
 def extract_failure(
     check: FailedCheck,
-    runner: Optional[Callable[..., Tuple[int, str, str]]] = None,
+    runner: Optional[Callable[..., tuple[int, str, str]]] = None,
 ) -> FailureDetails:
     # 1. Try annotations first (no zip, no gh CLI dependency).
     if check.annotations:
@@ -602,7 +602,7 @@ def extract_failure(
     )
 
 
-def _extract_from_text(text: str) -> Tuple[str, str]:
+def _extract_from_text(text: str) -> tuple[str, str]:
     for pattern, error_class in _TRIVIAL_PATTERNS:
         match = re.search(pattern, text, re.MULTILINE | re.IGNORECASE)
         if match:
@@ -655,7 +655,7 @@ def _comment_on_existing(
     client: Client,
     existing_url: str,
     pr: PRInfo,
-    failures: List[Tuple[FailedCheck, FailureDetails]],
+    failures: list[tuple[FailedCheck, FailureDetails]],
     error_class: str,
 ) -> None:
     """Attach additional failing check runs to an existing issue if not already recorded."""
@@ -713,7 +713,7 @@ def _comment_on_existing(
 def create_child_issue(
     client: Client,
     pr: PRInfo,
-    failures: List[Tuple[FailedCheck, FailureDetails]],
+    failures: list[tuple[FailedCheck, FailureDetails]],
     error_class: str,
     dry_run: bool = False,
     recorded_state_path: Optional[Path] = None,
@@ -781,10 +781,10 @@ def create_child_issue(
             f"- **Source**: `{failure.source}`",
             f"- **Check run URL**: {check.details_url}",
             "",
-            f"**Error message:**",
+            "**Error message:**",
             f"```\\n{failure.message}\\n```",
             "",
-            f"**Log/annotation excerpt:**",
+            "**Log/annotation excerpt:**",
             f"```\\n{failure.snippet[:1000]}\\n```",
             "",
         ])
@@ -855,7 +855,7 @@ def _cleanup_old_reports(max_days: int = 7) -> int:
     report_dir = _report_dir()
     if not report_dir.is_dir():
         return 0
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max_days)
+    cutoff = datetime.now(UTC) - timedelta(days=max_days)
     deleted = 0
     for entry in report_dir.glob("diagnosis-*.json"):
         try:
@@ -863,7 +863,7 @@ def _cleanup_old_reports(max_days: int = 7) -> int:
             stem = entry.stem  # diagnosis-2026-08-09T181258Z
             date_str = stem.replace("diagnosis-", "").replace("Z", "")
             file_date = datetime.strptime(date_str, "%Y-%m-%dT%H%M%S")
-            file_date = file_date.replace(tzinfo=timezone.utc)
+            file_date = file_date.replace(tzinfo=UTC)
             if file_date < cutoff:
                 entry.unlink(missing_ok=True)
                 deleted += 1
@@ -875,12 +875,12 @@ def _cleanup_old_reports(max_days: int = 7) -> int:
 
 
 def save_diagnosis_report(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     report_dir: Optional[Path] = None,
 ) -> Path:
     target = report_dir or _report_dir()
     target.mkdir(parents=True, exist_ok=True)
-    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+    date_str = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
     report_path = target / f"diagnosis-{date_str}.json"
     summary = {
         "total_prs": len(results),
@@ -894,7 +894,7 @@ def save_diagnosis_report(
         "child_issues_created": sum(1 for r in results if r.get("child_issue_url")),
     }
     data = {
-        "run_time": datetime.now(timezone.utc).isoformat(),
+        "run_time": datetime.now(UTC).isoformat(),
         "summary": summary,
         "results": results,
     }
@@ -913,7 +913,7 @@ def diagnose_prs(
     client: Optional[Client] = None,
     recorded_state_path: Optional[Path] = None,
     report_dir: Optional[Path] = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     if _resolve_github_token() == "":
         print(
             "[ci-diagnosis] no GitHub token available "
@@ -927,7 +927,7 @@ def diagnose_prs(
     prs = fetch_open_prs(api)
     print(f"[ci-diagnosis] found {len(prs)} open PR(s)")
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for pr in prs:
         failed_checks = fetch_failed_check_runs(api, pr.head_sha)
         if not failed_checks:
@@ -946,7 +946,7 @@ def diagnose_prs(
             continue
 
         # Collect all failures for this PR, then create ONE issue per root cause.
-        all_failures: List[Tuple[FailedCheck, FailureDetails]] = []
+        all_failures: list[tuple[FailedCheck, FailureDetails]] = []
         for check in failed_checks:
             failure = extract_failure(check)
             all_failures.append((check, failure))
@@ -956,11 +956,11 @@ def diagnose_prs(
 
         # Group complex failures by root-cause signature; each group becomes
         # one focused issue, deduped by (PR, error_class).
-        groups: Dict[str, List[Tuple[FailedCheck, FailureDetails]]] = {}
+        groups: dict[str, list[tuple[FailedCheck, FailureDetails]]] = {}
         for check, failure in all_failures:
             if failure.classification == "complex":
                 groups.setdefault(failure.error_class, []).append((check, failure))
-        issue_by_error: Dict[str, Optional[str]] = {}
+        issue_by_error: dict[str, Optional[str]] = {}
         for error_class, group in sorted(groups.items()):
             issue_by_error[error_class] = create_child_issue(
                 api,
@@ -992,7 +992,7 @@ def diagnose_prs(
     return results
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="CI failure auto-diagnosis for evolution PRs (#577)"
     )

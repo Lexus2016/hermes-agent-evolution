@@ -108,7 +108,7 @@ class TestCmdPeers:
         assert "hermes.work" not in out
         assert "(not set)" not in out
         # work row shows the populated block's values
-        work_line = [l for l in out.splitlines() if l.strip().startswith("work")][0]
+        work_line = next(l for l in out.splitlines() if l.strip().startswith("work"))
         assert "alice" in work_line and "hermes" in work_line
 
     def test_peers_falls_back_cleanly_when_block_missing(
@@ -121,5 +121,5 @@ class TestCmdPeers:
         )
         out = _peers_output(SimpleNamespace())
         assert "hermes.new" not in out  # well-formed key, no dot-form leak
-        new_line = [l for l in out.splitlines() if l.strip().startswith("new")][0]
+        new_line = next(l for l in out.splitlines() if l.strip().startswith("new"))
         assert "alice" in new_line  # top-level peerName fallback

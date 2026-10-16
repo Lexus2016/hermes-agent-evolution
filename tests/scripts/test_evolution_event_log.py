@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
-from evolution_event_log import (  # noqa: E402
+from evolution_event_log import (
     classify_evolution_type,
     event_summary,
     load_events,

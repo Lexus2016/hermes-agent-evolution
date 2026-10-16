@@ -68,7 +68,7 @@ _EXCEPTION_RE = re.compile(
     re.MULTILINE,
 )
 
-_EXCEPTION_SUGGESTIONS: Dict[str, str] = {
+_EXCEPTION_SUGGESTIONS: dict[str, str] = {
     "NameError": (
         "A variable, function, or module is not defined. Ensure it is imported "
         "or assigned before use."
@@ -124,10 +124,10 @@ def _classify_execution_failure(
     stderr_text: str,
     status: str,
     timeout_value: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return structured diagnostic for a failed execute_code run."""
     stderr_text = (stderr_text or "").strip()
-    diag: Dict[str, Any] = {
+    diag: dict[str, Any] = {
         "exit_code": exit_code,
         "stderr": stderr_text,
     }

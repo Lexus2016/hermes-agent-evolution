@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """SkillProx Slice 3 — retroactive proximal shrinkage (#2779).
 
 Child of #2744. Verification can also run BACKWARD over already-published
@@ -31,7 +30,7 @@ class ShrinkResult:
 
     shrunk: bool
     new_body: str = ""
-    removed_sections: List[str] = field(default_factory=list)
+    removed_sections: list[str] = field(default_factory=list)
     history_path: Optional[Path] = None
 
 
@@ -51,7 +50,7 @@ def _iter_sections(body: str):
 
 def _negative_section_keys(
     skill_name: str, body: str, store_path: Optional[Path]
-) -> List[str]:
+) -> list[str]:
     """Sections whose EXACT current text is recorded as rejected."""
     verdicts = _load_verdicts(store_path or _default_store_path())
     return [
@@ -66,7 +65,7 @@ def _section_key(skill_name: str, header: str, text: str) -> str:
     import hashlib
 
     return hashlib.sha256(
-        f"{(skill_name or '').strip()}\n{header}\n{text}".encode("utf-8")
+        f"{(skill_name or '').strip()}\n{header}\n{text}".encode()
     ).hexdigest()
 
 
@@ -89,8 +88,8 @@ def shrink_negative_sections(
     if not negative:
         return ShrinkResult(shrunk=False, new_body=body)
 
-    removed_texts: Dict[str, str] = {}
-    kept: List[str] = []
+    removed_texts: dict[str, str] = {}
+    kept: list[str] = []
     for header, text in _iter_sections(body):
         if header in negative:
             removed_texts[header] = text

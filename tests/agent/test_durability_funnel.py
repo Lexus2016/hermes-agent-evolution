@@ -14,7 +14,7 @@ _scripts_dir = Path(__file__).resolve().parent.parent.parent / "scripts"
 if str(_scripts_dir) not in sys.path:
     sys.path.insert(0, str(_scripts_dir))
 
-from evolution_funnel import compute_funnel  # noqa: E402
+from evolution_funnel import compute_funnel
 
 
 def _ws(evolution_dir: Path, stage: str, date: str, data: object) -> None:

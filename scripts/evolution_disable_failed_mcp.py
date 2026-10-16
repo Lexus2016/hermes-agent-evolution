@@ -43,7 +43,7 @@ def _import_tqmemory():
     return None
 
 
-def check_tqmemory_health() -> Tuple[bool, str]:
+def check_tqmemory_health() -> tuple[bool, str]:
     """Check if tqmemory binary exists and launches. Returns (healthy, message)."""
     mod = _import_tqmemory()
     if mod is None:
@@ -56,14 +56,14 @@ def check_tqmemory_health() -> Tuple[bool, str]:
     return True, f"turbo-memory-mcp healthy at {binary}"
 
 
-def disable_in_profiles(dry_run: bool = False) -> List[str]:
+def disable_in_profiles(dry_run: bool = False) -> list[str]:
     """Set ``mcp_servers.tqmemory.enabled: false`` in all profile configs."""
     import hermes_yaml as yaml
 
     mod = _import_tqmemory()
     if mod is None:
         return []
-    changed: List[str] = []
+    changed: list[str] = []
     for cfg_path in mod._all_profile_config_paths():
         if not cfg_path.exists():
             continue
@@ -94,7 +94,7 @@ def disable_in_profiles(dry_run: bool = False) -> List[str]:
     return changed
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Disable tqmemory MCP when binary broken (#1541)"
     )

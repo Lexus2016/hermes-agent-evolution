@@ -695,7 +695,7 @@ def _tool_result_observer_fields(tool_name: str, result: Any) -> tuple[str, Opti
 
 def _derive_provenance_source_id(
     function_name: str,
-    function_args: Dict[str, Any],
+    function_args: dict[str, Any],
 ) -> str:
     """Derive a bounded provenance source id for a completed tool call.
 

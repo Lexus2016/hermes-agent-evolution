@@ -233,7 +233,7 @@ def _build_cooperation_containment_block() -> str:
 
 def _build_child_system_prompt(
     goal: str, context: Optional[str] = None, *, workspace_path: Optional[str] = None, role: str = "leaf",
-    max_spawn_depth: int = 2, child_depth: int = 1, denied_toolsets: Optional[List[str]] = None,
+    max_spawn_depth: int = 2, child_depth: int = 1, denied_toolsets: Optional[list[str]] = None,
     attribution: Optional[str] = None,
 ) -> str:
     """Focused system prompt for a child agent. role='orchestrator' appends a delegation-capability block (modeled on

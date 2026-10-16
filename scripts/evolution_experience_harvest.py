@@ -76,7 +76,7 @@ except OSError:
     pass
 
 try:
-    from agent.display import _detect_tool_failure  # noqa: E402
+    from agent.display import _detect_tool_failure
 except ImportError:
     def _detect_tool_failure(tool_name: str, result):  # type: ignore[no-redef]
         """Fallback when agent.display is unavailable (outside the repo)."""
@@ -106,7 +106,7 @@ except ImportError:
     )
 
 try:
-    from agent.experience_bank import (  # noqa: E402
+    from agent.experience_bank import (
         CATEGORY_TO_DIMENSION,
         ExperienceEntry,
         append_entry,
@@ -126,9 +126,9 @@ except ImportError:
     _sys.exit(0)
 
 try:
-    from evolution.lib.root_cause_diagnosis import ErrorClassifier  # noqa: E402
+    from evolution.lib.root_cause_diagnosis import ErrorClassifier
 except ImportError:
-    import enum  # noqa: E402
+    import enum
 
     class _FallbackFailureCategory(enum.Enum):
         """Minimal stand-in for FailureCategory when `evolution` is absent."""
@@ -144,7 +144,7 @@ except ImportError:
         ``ModuleNotFoundError``.  See GitHub issue #1304.
         """
 
-        def classify(self, content: str):  # noqa: D401, ARG002
+        def classify(self, content: str):
             return _FallbackFailureCategory.UNKNOWN
 
     print(
@@ -153,7 +153,7 @@ except ImportError:
         "evolution package for full failure classification).",
         file=sys.stderr,
     )
-from hermes_constants import get_hermes_home  # noqa: E402
+from hermes_constants import get_hermes_home
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -191,7 +191,7 @@ _UNAMBIGUOUS_CATEGORIES = frozenset(
 )
 
 #: Candidate dimension lists for the ambiguous categories; primary stays None.
-_AMBIGUOUS_SECONDARY: Dict[str, List[str]] = {
+_AMBIGUOUS_SECONDARY: dict[str, list[str]] = {
     "validation": ["tool", "output"],
     "timeout": ["tool", "generation", "orchestration"],
     "resource_limit": ["context", "generation", "tool"],
@@ -217,7 +217,7 @@ def _iter_session_rows(
     last_message_id: int = 0,
     *,
     full_scan: bool = False,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Return completed session rows in monotonic completion order.
 
     Uses a single aggregate query instead of list_sessions_rich so child
@@ -301,7 +301,7 @@ def _scrub_tool_name(name: Any) -> str:
     return cleaned.strip("_") or "unknown"
 
 
-def _message_text(msg: Dict[str, Any]) -> str:
+def _message_text(msg: dict[str, Any]) -> str:
     """Return deterministic text for string or structured message content.
 
     Повертає детермінований текст для рядкового або структурованого вмісту.
@@ -317,7 +317,7 @@ def _message_text(msg: Dict[str, Any]) -> str:
     return ""
 
 
-def analyze_session(messages: List[Dict[str, Any]], ended: bool) -> Dict[str, Any]:
+def analyze_session(messages: list[dict[str, Any]], ended: bool) -> dict[str, Any]:
     """Deterministically analyze one session's messages.
 
     Args:
@@ -334,11 +334,11 @@ def analyze_session(messages: List[Dict[str, Any]], ended: bool) -> Dict[str, An
     # ── Tool-error tallies, using Hermes' own failure predicate ──
     # An error is UNRECOVERED only when the same tool never succeeds later
     # in the session; recovered errors are normal agent behavior.
-    tool_msgs: List[Dict[str, Any]] = [
+    tool_msgs: list[dict[str, Any]] = [
         m for m in messages if m.get("role") == "tool"
     ]
-    last_success_idx: Dict[str, int] = {}
-    failures: List[tuple] = []  # (index, tool, category)
+    last_success_idx: dict[str, int] = {}
+    failures: list[tuple] = []  # (index, tool, category)
     for idx, msg in enumerate(tool_msgs):
         tool = _scrub_tool_name(msg.get("tool_name"))
         content = _message_text(msg)
@@ -353,7 +353,7 @@ def analyze_session(messages: List[Dict[str, Any]], ended: bool) -> Dict[str, An
 
     unrecovered: Counter = Counter()   # (tool, category) -> count
     recovered_per_tool: Counter = Counter()
-    first_seen_order: List[tuple] = []
+    first_seen_order: list[tuple] = []
     for idx, tool, category in failures:
         if idx > last_success_idx.get(tool, -1):
             key = (tool, category)
@@ -427,7 +427,7 @@ def analyze_session(messages: List[Dict[str, Any]], ended: bool) -> Dict[str, An
 
     # ── Honest-null dimension attribution (dominant unrecovered error) ──
     primary_dimension: Optional[str] = None
-    secondary_dimensions: List[str] = []
+    secondary_dimensions: list[str] = []
     if dominant_category in _UNAMBIGUOUS_CATEGORIES:
         primary_dimension = CATEGORY_TO_DIMENSION.get(dominant_category)
     elif dominant_category == "timeout" and dominant_tool != "unknown":
@@ -477,7 +477,7 @@ def analyze_session(messages: List[Dict[str, Any]], ended: bool) -> Dict[str, An
 # Harvest
 # ---------------------------------------------------------------------------
 
-def _maybe_distill() -> Optional[Dict[str, Any]]:
+def _maybe_distill() -> Optional[dict[str, Any]]:
     """Invoke distillation inline (sibling script).  Never raises."""
     try:
         from evolution_experience_distill import run_distillation
@@ -495,7 +495,7 @@ def _maybe_distill() -> Optional[Dict[str, Any]]:
 def run_harvest(
     db_path: Optional[Path] = None,
     now: Optional[float] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run one harvest pass.  Returns the summary dict main() prints.
 
     Import-safe and unit-testable: *db_path* / *now* inject the seams;
@@ -506,7 +506,7 @@ def run_harvest(
     now = time.time() if now is None else float(now)
     db_path = db_path or _default_db_path()
 
-    summary: Dict[str, Any] = {
+    summary: dict[str, Any] = {
         "sessions_scanned": 0,
         "sessions_harvested": 0,
         "entries_appended": 0,
@@ -526,11 +526,11 @@ def run_harvest(
         last_message_id = int(state.get("last_message_id", 0) or 0)
     except (TypeError, ValueError):
         last_message_id = 0
-    seen_ids: List[str] = [
+    seen_ids: list[str] = [
         str(s) for s in (state.get("seen_ids") or []) if isinstance(s, str)
     ]
     seen_set = set(seen_ids)
-    seen_revisions: List[str] = [
+    seen_revisions: list[str] = [
         str(value)
         for value in (state.get("seen_revisions") or [])
         if isinstance(value, str)
@@ -571,8 +571,8 @@ def run_harvest(
 
         processed_max_ts = cursor_ts
         processed_max_message_id = last_message_id
-        new_seen_revisions: List[str] = []
-        new_seen_ids: List[str] = []
+        new_seen_revisions: list[str] = []
+        new_seen_ids: list[str] = []
         migration_pass_complete = True
         for row in rows:
             summary["sessions_scanned"] += 1
@@ -699,7 +699,7 @@ def run_harvest(
 # Lock + main
 # ---------------------------------------------------------------------------
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     with experience_lock() as acquired:
         if not acquired:
             print(

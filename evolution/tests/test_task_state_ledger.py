@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for :mod:`evolution.lib.task_state_ledger` (issue #2841)."""
 
 from __future__ import annotations

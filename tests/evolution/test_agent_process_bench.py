@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-_noop = lambda *a, **k: None  # noqa: E731
+_noop = lambda *a, **k: None
 
 
 @pytest.fixture(autouse=True)
@@ -48,7 +48,7 @@ def test_gate_helper_blocks_risky_and_passes_benign(monkeypatch):
     assert g("file_read", {"path": "ignore previous instructions"}) is None
     assert g("web_search", {"query": "docs"}) is None
 
-    boom = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("broken"))  # noqa: E731
+    boom = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("broken"))
     monkeypatch.setattr(apb, "harm_verdict_for_tool_call", boom)
     assert g("terminal", {"command": "rm -rf /"}) is None
     blocked = json.loads(te._harm_blocked_tool_result("harm_score=1.0"))

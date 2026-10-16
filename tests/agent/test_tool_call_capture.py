@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for real tool-call capture (issue #1363)."""
 
 from __future__ import annotations
@@ -9,9 +8,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-import pytest  # noqa: E402
+import pytest
 
-from agent.tool_call_capture import (  # noqa: E402
+from agent.tool_call_capture import (
     _CAPTURE_ENV,
     build_trajectory_log,
     capture_enabled,
@@ -410,7 +409,7 @@ class TestMultiTurnSessionsAppend:
         for cid in ("a", "b"):
             capture_turn([_call("terminal", {}, cid), _ok(cid)], session_id="s1",
                          trajectory_dir=tmp_path)
-        path = list(tmp_path.glob("*.jsonl"))[0]
+        path = next(iter(tmp_path.glob("*.jsonl")))
         for line in path.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 assert json.loads(line)["entries"]

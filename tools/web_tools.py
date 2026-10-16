@@ -303,7 +303,7 @@ def _finish_debug(call_name: str, debug_call_data: dict, error_msg: Optional[str
 
 DEFAULT_WEB_SEARCH_STREAK_THRESHOLD = 5
 _web_search_default_key = "_default_"
-_web_search_streak: Dict[str, int] = {}
+_web_search_streak: dict[str, int] = {}
 _web_search_lock = threading.Lock()
 
 

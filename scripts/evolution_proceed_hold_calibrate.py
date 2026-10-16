@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Sequence
 
@@ -95,7 +95,7 @@ def persist_report(
     out = Path(evolution_dir) / REPORT_FILENAME
     out.parent.mkdir(parents=True, exist_ok=True)
     record = {
-        "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
+        "timestamp": timestamp or datetime.now(UTC).isoformat(),
         "decider": decider,
         "report": report.to_dict(),
     }

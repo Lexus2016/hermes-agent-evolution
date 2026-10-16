@@ -33,10 +33,10 @@ logger = logging.getLogger(__name__)
 class ToolPinDiff:
     """Diff between pinned and current MCP tool definitions."""
 
-    added: List[str] = field(default_factory=list)
-    removed: List[str] = field(default_factory=list)
-    modified: List[str] = field(default_factory=list)
-    unchanged: List[str] = field(default_factory=list)
+    added: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+    modified: list[str] = field(default_factory=list)
+    unchanged: list[str] = field(default_factory=list)
 
     @property
     def has_changes(self) -> bool:
@@ -44,7 +44,7 @@ class ToolPinDiff:
 
     def summary(self) -> str:
         """Human-readable summary of changes."""
-        parts: List[str] = []
+        parts: list[str] = []
         if self.added:
             parts.append(f"added: {', '.join(sorted(self.added))}")
         if self.removed:
@@ -92,7 +92,7 @@ def compute_tool_fingerprint(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def compute_server_fingerprint(tools: List[Any]) -> Dict[str, str]:
+def compute_server_fingerprint(tools: list[Any]) -> dict[str, str]:
     """Compute fingerprints for all tools from an MCP server.
 
     Args:
@@ -102,7 +102,7 @@ def compute_server_fingerprint(tools: List[Any]) -> Dict[str, str]:
     Returns:
         Dict mapping tool name → SHA-256 fingerprint.
     """
-    fingerprints: Dict[str, str] = {}
+    fingerprints: dict[str, str] = {}
     for tool in tools:
         name = getattr(tool, "name", None) or (tool.get("name") if isinstance(tool, dict) else None)
         if not name:
@@ -136,7 +136,7 @@ def _pins_path(server_name: str) -> Path:
     return _pins_dir() / f"{safe_name}.json"
 
 
-def load_pins(server_name: str) -> Optional[Dict[str, str]]:
+def load_pins(server_name: str) -> Optional[dict[str, str]]:
     """Load pinned tool fingerprints for a server.
 
     Returns None if no pins exist (first connection).
@@ -154,7 +154,7 @@ def load_pins(server_name: str) -> Optional[Dict[str, str]]:
         return None
 
 
-def save_pins(server_name: str, fingerprints: Dict[str, str]) -> None:
+def save_pins(server_name: str, fingerprints: dict[str, str]) -> None:
     """Persist tool fingerprints as the pinned state for a server."""
     path = _pins_path(server_name)
     try:
@@ -168,16 +168,16 @@ def save_pins(server_name: str, fingerprints: Dict[str, str]) -> None:
 
 
 def diff_pins(
-    pinned: Dict[str, str],
-    current: Dict[str, str],
+    pinned: dict[str, str],
+    current: dict[str, str],
 ) -> ToolPinDiff:
     """Compare pinned fingerprints against current ones.
 
     Returns a ToolPinDiff describing added, removed, modified, and
     unchanged tools.
     """
-    pinned_names: Set[str] = set(pinned.keys())
-    current_names: Set[str] = set(current.keys())
+    pinned_names: set[str] = set(pinned.keys())
+    current_names: set[str] = set(current.keys())
 
     added = sorted(current_names - pinned_names)
     removed = sorted(pinned_names - current_names)
@@ -193,7 +193,7 @@ def diff_pins(
 
 def verify_tools(
     server_name: str,
-    current_tools: List[Any],
+    current_tools: list[Any],
 ) -> ToolPinDiff:
     """Verify MCP tool definitions against pinned fingerprints.
 
@@ -243,7 +243,7 @@ def verify_tools(
     return diff
 
 
-def accept_new_pins(server_name: str, current_tools: List[Any]) -> None:
+def accept_new_pins(server_name: str, current_tools: list[Any]) -> None:
     """Accept current tool definitions as the new pinned state.
 
     Called when the user (or the caller) decides the changes are safe

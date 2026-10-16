@@ -6,8 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_pre_pr_test_runner import run_gate  # noqa: E402
-from evolution_validation_subset import select_subset, track_validation_cost  # noqa: E402
+from evolution_pre_pr_test_runner import run_gate
+from evolution_validation_subset import select_subset, track_validation_cost
 
 TASKS = [
     {"id": i, "difficulty": b}

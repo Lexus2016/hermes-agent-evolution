@@ -1262,7 +1262,7 @@ def wait_for_session_delegations(
     deadline_seconds: float = 1200.0,
     poll_interval: float = 5.0,
     on_interrupt: Optional[Callable[[int], None]] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Wait for async delegations owned by *parent_session_id* to finish.
 
     Called by the cron scheduler after the agent's ``run_conversation`` returns
@@ -1286,7 +1286,7 @@ def wait_for_session_delegations(
     """
     import time as _time
 
-    def _running_for_session() -> List[Dict[str, Any]]:
+    def _running_for_session() -> list[dict[str, Any]]:
         with _records_lock:
             return [
                 r for r in _records.values()

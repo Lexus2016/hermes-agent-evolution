@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_realized_impact import (  # noqa: E402
+from evolution_realized_impact import (
     append_ledger_record,
     classify_verdict_by_rate,
     compute_realized,
@@ -114,7 +114,7 @@ class TestComputeRealized:
 
     def test_healthy_when_mostly_confirmed(self):
         recs = [
-            _merge(i, "2026-06-0%d" % i) | _verdict(i, "confirmed") for i in range(1, 4)
+            _merge(i, f"2026-06-0{i:d}") | _verdict(i, "confirmed") for i in range(1, 4)
         ]
         h = compute_realized(recs, today="2026-06-30")
         assert h["realized_impact_rate"] == 1.0
@@ -446,7 +446,7 @@ class TestRateNormalizedCloseGate:
     def test_no_baseline_falls_back_to_verdict(self):
         # Legacy record without baseline_failure_rate: regressed still blocks.
         recs = [{"issue": 1, "merged_at": "2026-06-01"} | _verdict(1, "regressed")]
-        should, reason = should_close_issue(
+        should, _reason = should_close_issue(
             recs, 1, "2026-06-17", current_failure_rate=7.0
         )
         assert should is False

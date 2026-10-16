@@ -357,7 +357,7 @@ class TestGatewayNotRunningWarning:
     """
 
     def test_create_warns_when_gateway_absent(self, tmp_cron_dir, capsys, monkeypatch):
-        monkeypatch.setattr("hermes_cli.gateway.find_gateway_pids", lambda: [])
+        monkeypatch.setattr("hermes_cli.gateway.find_gateway_pids", list)
         cron_command(
             Namespace(
                 cron_command="create",
@@ -499,7 +499,7 @@ def test_cron_list_warns_when_gateway_not_running(monkeypatch, capsys):
             }
         ],
     )
-    monkeypatch.setattr("hermes_cli.gateway.find_gateway_pids", lambda: [])
+    monkeypatch.setattr("hermes_cli.gateway.find_gateway_pids", list)
     monkeypatch.setattr(cron_cli, "_active_cron_provider_name", lambda: "builtin")
 
     cron_cli.cron_list()

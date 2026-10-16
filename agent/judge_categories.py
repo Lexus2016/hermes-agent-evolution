@@ -47,7 +47,7 @@ from agent.agent_judge import JudgeVerdict
 DEFAULT_THRESHOLD = 0.7
 
 # A labelled verdict: the benchmark-task category and the verdict scored for it.
-VerdictWithCategory = Tuple[str, JudgeVerdict]
+VerdictWithCategory = tuple[str, JudgeVerdict]
 
 
 @dataclass(frozen=True)
@@ -69,7 +69,7 @@ class CategoryStats:
         """Fraction of verdicts that passed; 0.0 for an empty category."""
         return self.passed / self.n if self.n else 0.0
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         """JSON-serialisable form for the evolution report."""
         return {
             "pass_rate": round(self.pass_rate, 4),
@@ -81,7 +81,7 @@ class CategoryStats:
 def aggregate_by_category(
     verdicts_with_category: Sequence[VerdictWithCategory],
     threshold: float = DEFAULT_THRESHOLD,
-) -> Dict[str, CategoryStats]:
+) -> dict[str, CategoryStats]:
     """Group labelled verdicts into per-category pass rates.
 
     Pure and deterministic — no LLM, no I/O.  Each ``(category, verdict)`` pair
@@ -101,7 +101,7 @@ def aggregate_by_category(
     Raises:
         ValueError: if a category label is empty after whitespace stripping.
     """
-    counts: Dict[str, List[int]] = {}  # category -> [n, passed]
+    counts: dict[str, list[int]] = {}  # category -> [n, passed]
     for category, verdict in verdicts_with_category:
         label = category.strip()
         if not label:
@@ -117,11 +117,11 @@ def aggregate_by_category(
 
 
 def weakest_categories(
-    aggregated: Dict[str, CategoryStats],
+    aggregated: dict[str, CategoryStats],
     *,
     max_pass_rate: float = 1.0,
     limit: int = 0,
-) -> List[CategoryStats]:
+) -> list[CategoryStats]:
     """Rank categories worst-pass-rate-first as evolution targets.
 
     Pure and deterministic.  Ties on pass rate break by category name so the
@@ -154,7 +154,7 @@ def build_category_report(
     *,
     max_pass_rate: float = 0.5,
     limit: int = 0,
-) -> Dict[str, object]:
+) -> dict[str, object]:
     """Build the JSON-serialisable category breakdown for the evolution report.
 
     Combines :func:`aggregate_by_category` and :func:`weakest_categories` into

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 _CROSS_FAMILY_PENALTY = 0.5
 
 VALID_OUTCOMES = frozenset({"helped", "neutral", "misled"})
-OUTCOME_UTILITY_WEIGHTS: Dict[str, float] = {
+OUTCOME_UTILITY_WEIGHTS: dict[str, float] = {
     "helped": 1.25,
     "neutral": 1.0,
     "misled": 0.2,
@@ -156,13 +156,13 @@ def filter_by_model_family(
 
 
 def record_outcome_feedback(
-    note_id: str, outcome: str, extra_meta: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+    note_id: str, outcome: str, extra_meta: Optional[dict[str, Any]] = None
+) -> dict[str, Any]:
     """Generate structured outcome update payload for a memory note (#3201)."""
     norm_outcome = outcome.strip().lower() if isinstance(outcome, str) else "neutral"
     if norm_outcome not in VALID_OUTCOMES:
         norm_outcome = "neutral"
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "id": note_id,
         "outcome": norm_outcome,
         "metadata": {

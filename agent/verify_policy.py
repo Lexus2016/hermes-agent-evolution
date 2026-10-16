@@ -95,19 +95,19 @@ class VerifyOutcome:
         return self.status in {"ok", "mismatch", "error"}
 
     @classmethod
-    def ok(cls, tool_name: str, verifier: str, detail: str = "") -> "VerifyOutcome":
+    def ok(cls, tool_name: str, verifier: str, detail: str = "") -> VerifyOutcome:
         return cls(status="ok", tool_name=tool_name, verifier=verifier, detail=detail)
 
     @classmethod
-    def mismatch(cls, tool_name: str, verifier: str, detail: str = "") -> "VerifyOutcome":
+    def mismatch(cls, tool_name: str, verifier: str, detail: str = "") -> VerifyOutcome:
         return cls(status="mismatch", tool_name=tool_name, verifier=verifier, detail=detail)
 
     @classmethod
-    def error(cls, tool_name: str, verifier: str, detail: str = "") -> "VerifyOutcome":
+    def error(cls, tool_name: str, verifier: str, detail: str = "") -> VerifyOutcome:
         return cls(status="error", tool_name=tool_name, verifier=verifier, detail=detail)
 
     @classmethod
-    def skipped(cls, tool_name: str, detail: str = "") -> "VerifyOutcome":
+    def skipped(cls, tool_name: str, detail: str = "") -> VerifyOutcome:
         return cls(status="skipped", tool_name=tool_name, detail=detail)
 
 
@@ -593,21 +593,21 @@ def call_signature(tool_name: str, args: Mapping[str, Any]) -> str:
 
 
 __all__ = [
+    "MAX_VERIFY_RETRIES",
     "MUTATING_TOOL_NAMES",
+    "RegisteredVerifier",
+    "RetryDecision",
+    "Verifier",
     "VerifyCall",
     "VerifyOutcome",
-    "Verifier",
-    "RegisteredVerifier",
     "VerifyPolicy",
-    "make_file_exists_verifier",
+    "call_signature",
+    "decide_retry",
     "make_command_verifier",
+    "make_file_exists_verifier",
     "make_predicate_verifier",
     "make_terminal_verifier",
     "register_default_verifiers",
     "split_command",
     "verify_policy_enabled",
-    "MAX_VERIFY_RETRIES",
-    "RetryDecision",
-    "decide_retry",
-    "call_signature",
 ]

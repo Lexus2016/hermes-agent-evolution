@@ -531,7 +531,6 @@ def _record_tool_circuit_breaker(agent, tool_name: str, result: Any, is_error: b
 
 def _run_tool(*args, **kwargs):
     """Compatibility alias for tool runner."""
-    pass
 
 def _append_skipped_tool_results(
     agent,

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """GRASP-style balanced-probe regression gate for the skill-evolution loop (#2840).
 
 GRASP (Gated Regression-Aware Skill Proposer, arXiv:2605.29668 v2) treats
@@ -34,10 +33,10 @@ from typing import Any, List, Sequence, Tuple
 from evolution.lib.rubric_forge import RubricJudge
 
 __all__ = [
-    "GraspVerdict",
     "DECISION_ACCEPT",
-    "DECISION_REVISE",
     "DECISION_REJECT",
+    "DECISION_REVISE",
+    "GraspVerdict",
     "balanced_probe_split",
     "grasp_regression_gate",
 ]
@@ -66,7 +65,7 @@ class GraspVerdict:
     regressed: int
     regression_budget: int
     probe_size: int
-    regressed_examples: List[Any] = field(default_factory=list)
+    regressed_examples: list[Any] = field(default_factory=list)
     reason: str = ""
 
 
@@ -75,7 +74,7 @@ def balanced_probe_split(
     labels: Sequence[bool],
     *,
     probe_size: int = 4,
-) -> Tuple[List[Any], List[bool], List[Any], List[bool]]:
+) -> tuple[list[Any], list[bool], list[Any], list[bool]]:
     """Stratified split: keep a balanced mix of failing and passing in the probe.
 
     Returns ``(train_ex, train_lb, probe_ex, probe_lb)`` where the probe holds
@@ -90,7 +89,7 @@ def balanced_probe_split(
     failing = [i for i, lb in enumerate(labels) if not lb]
     passing = [i for i, lb in enumerate(labels) if lb]
 
-    probe_idx: List[int] = []
+    probe_idx: list[int] = []
     # Round-robin over failing/passing so both classes appear (balanced probe).
     # Both branches respect the probe_size cap (the earlier failing branch
     # could overflow past probe_size).
@@ -113,7 +112,7 @@ def _verdict_breakdown(
     probe_ex: Sequence[Any],
     probe_lb: Sequence[bool],
     judge: RubricJudge,
-) -> Tuple[int, int, List[Any]]:
+) -> tuple[int, int, list[Any]]:
     """Count (fixed, regressed, regressed_examples) for ``candidate``.
 
     - FIXED: a previously-FAILING example (label False) the candidate now
@@ -124,11 +123,11 @@ def _verdict_breakdown(
     """
     fixed = 0
     regressed = 0
-    regressed_examples: List[Any] = []
+    regressed_examples: list[Any] = []
     for ex, lb in zip(probe_ex, probe_lb):
         try:
             accepted = bool(judge(candidate, ex))
-        except Exception:  # noqa: BLE001 - a throwing judge proves nothing
+        except Exception:
             continue  # unknown outcome: count as neither fixed nor regressed
         if not lb and not accepted:
             fixed += 1  # previously-failing, now correctly rejected
@@ -189,7 +188,7 @@ def grasp_regression_gate(
         _, baseline_regressed, _ = _verdict_breakdown(
             baseline, probe_ex, probe_lb, judge
         )
-    except Exception:  # noqa: BLE001 - a throwing baseline just means budget 0
+    except Exception:
         baseline_regressed = 0
     hard_budget = max(regression_budget, baseline_regressed)
 

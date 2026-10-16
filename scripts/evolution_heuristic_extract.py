@@ -36,7 +36,7 @@ import os
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -58,15 +58,15 @@ class Heuristic:
     """One extracted, falsifiable claim about what works for a task type."""
 
     task_type: str
-    pattern: List[str] = field(default_factory=list)
+    pattern: list[str] = field(default_factory=list)
     text: str = ""
     frequency: int = 0
     success_count: int = 0
     failure_count: int = 0
     outcome_score: float = 0.0
-    source_trajectories: List[str] = field(default_factory=list)
+    source_trajectories: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_type": self.task_type,
             "pattern": list(self.pattern),
@@ -87,7 +87,7 @@ def _default_evolution_dir() -> Path:
     return Path(hh) / "evolution" if hh else Path.home() / ".hermes" / "evolution"
 
 
-def load_trajectories(trajectory_dir: Path) -> List[Dict[str, Any]]:
+def load_trajectories(trajectory_dir: Path) -> list[dict[str, Any]]:
     """Read captured turns that carry a RECORDED outcome.
 
     ``completed`` is tri-state in the capture: True and False are recorded,
@@ -95,7 +95,7 @@ def load_trajectories(trajectory_dir: Path) -> List[Dict[str, Any]]:
     claim about what leads to success, so a trajectory whose outcome nobody
     wrote down cannot contribute to either side of the contrast and is skipped.
     """
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     if not trajectory_dir.is_dir():
         return out
     for path in sorted(trajectory_dir.glob("*.jsonl")):
@@ -120,7 +120,7 @@ def load_trajectories(trajectory_dir: Path) -> List[Dict[str, Any]]:
     return out
 
 
-def _tools(record: Dict[str, Any]) -> List[str]:
+def _tools(record: dict[str, Any]) -> list[str]:
     return [
         str(e.get("tool"))
         for e in record.get("entries", [])
@@ -128,7 +128,7 @@ def _tools(record: Dict[str, Any]) -> List[str]:
     ]
 
 
-def _classify(tools: List[str]) -> str:
+def _classify(tools: list[str]) -> str:
     """Group trajectories by what they did, reusing the store's taxonomy.
 
     Imported lazily so this module stays usable if that script moves; falling
@@ -144,16 +144,16 @@ def _classify(tools: List[str]) -> str:
         return "general"
 
 
-def _bigrams(tools: List[str]) -> List[Tuple[str, str]]:
+def _bigrams(tools: list[str]) -> list[tuple[str, str]]:
     return [(tools[i], tools[i + 1]) for i in range(len(tools) - 1)]
 
 
 def extract_heuristics(
-    records: List[Dict[str, Any]],
+    records: list[dict[str, Any]],
     *,
     min_frequency: int = DEFAULT_MIN_FREQUENCY,
     min_score: float = DEFAULT_MIN_SCORE,
-) -> List[Heuristic]:
+) -> list[Heuristic]:
     """Rank tool-transition patterns by how much they predict success.
 
     ``outcome_score`` is ``(successes - failures) / total`` for the pattern
@@ -163,7 +163,7 @@ def extract_heuristics(
     are returned — a heuristic is advice to follow, and slice C injects these
     into a prompt.
     """
-    by_type: Dict[str, Dict[Tuple[str, str], Dict[str, Any]]] = {}
+    by_type: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
 
     for rec in records:
         tools = _tools(rec)
@@ -181,7 +181,7 @@ def extract_heuristics(
             stat["success" if completed else "failure"] += 1
             stat["sources"].append(str(rec.get("_id", "")))
 
-    heuristics: List[Heuristic] = []
+    heuristics: list[Heuristic] = []
     for task_type, patterns in by_type.items():
         for pair, stat in patterns.items():
             total = stat["success"] + stat["failure"]
@@ -215,13 +215,13 @@ def extract_heuristics(
 
 
 def write_heuristics(
-    heuristics: List[Heuristic],
+    heuristics: list[Heuristic],
     evolution_dir: Optional[Path] = None,
     date: Optional[str] = None,
 ) -> Path:
     """Persist to ``<evolution_dir>/heuristics/<date>.json``."""
     base = evolution_dir or _default_evolution_dir()
-    day = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    day = date or datetime.now(UTC).strftime("%Y-%m-%d")
     out_dir = base / "heuristics"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{day}.json"
@@ -237,7 +237,7 @@ def write_heuristics(
     return path
 
 
-def format_summary(heuristics: List[Heuristic]) -> str:
+def format_summary(heuristics: list[Heuristic]) -> str:
     if not heuristics:
         return "[heuristics] none extracted (no recurring outcome-linked patterns)"
     by_type = Counter(h.task_type for h in heuristics)
@@ -250,7 +250,7 @@ def format_summary(heuristics: List[Heuristic]) -> str:
     )
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     args = list(argv if argv is not None else sys.argv[1:])
     if "--help" in args or "-h" in args:
         print(

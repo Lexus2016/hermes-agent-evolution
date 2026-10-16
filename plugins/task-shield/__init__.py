@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 _local = threading.local()
 _TRUTHY = {"1", "true", "yes", "on"}
 
-_ACTION_KEYWORDS: Dict[str, str] = {
+_ACTION_KEYWORDS: dict[str, str] = {
     "write": "write create save update edit modify patch change set insert add replace",
     "send": "send email message post publish share forward reply notify tweet",
     "search": "search find look query locate google",
@@ -42,15 +42,15 @@ def _is_high_risk(tool_name: str) -> bool:
     return any(tool_name.endswith(s) for s in _HIGH_RISK_SUFFIXES)
 
 
-_SUSPICIOUS_PATTERNS: List[re.Pattern] = [
-    re.compile(r"<\s*system\s*>", re.I),
-    re.compile(r"ignore.*(?:previous|above).*instructions", re.I),
-    re.compile(r"you\s+must\s+(?:now\s+)?(?:send|post|publish|forward|create)", re.I),
-    re.compile(r"system\s+prompt.*(?:says|instructs)", re.I),
+_SUSPICIOUS_PATTERNS: list[re.Pattern] = [
+    re.compile(r"<\s*system\s*>", re.IGNORECASE),
+    re.compile(r"ignore.*(?:previous|above).*instructions", re.IGNORECASE),
+    re.compile(r"you\s+must\s+(?:now\s+)?(?:send|post|publish|forward|create)", re.IGNORECASE),
+    re.compile(r"system\s+prompt.*(?:says|instructs)", re.IGNORECASE),
 ]
 
 
-def _extract_goal_keywords(text: str) -> Set[str]:
+def _extract_goal_keywords(text: str) -> set[str]:
     tl = text.lower()
     return {
         a for a, kws in _ACTION_KEYWORDS.items() if any(k in tl for k in kws.split())
@@ -71,14 +71,14 @@ def _extract_goal_text(msg: Any) -> str:
     return ""
 
 
-def _detect_injection(args_text: str) -> List[str]:
+def _detect_injection(args_text: str) -> list[str]:
     return [
         f"pattern: {p.pattern}" for p in _SUSPICIOUS_PATTERNS if p.search(args_text)
     ]
 
 
 def _check_goal_consistency(
-    tool_name: str, args: Any, goal_kws: Set[str]
+    tool_name: str, args: Any, goal_kws: set[str]
 ) -> Optional[str]:
     """Return reason string if suspicious, None if fine."""
     if not goal_kws:
@@ -112,7 +112,7 @@ def _on_pre_api_request(
 
 def _on_pre_tool_call(
     tool_name: str = "", args: Any = None, session_id: str = "", **_: Any
-) -> Optional[Dict[str, str]]:
+) -> Optional[dict[str, str]]:
     if os.getenv("TASK_SHIELD_DISABLE", "").strip().lower() in _TRUTHY:
         return None
     goal_kws = _extract_goal_keywords(

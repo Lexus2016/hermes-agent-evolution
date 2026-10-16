@@ -41,12 +41,12 @@ GATE_SIDECAR = "harness-gate-latest.json"
 
 
 def run_gate(
-    proposal: Dict[str, Any],
+    proposal: dict[str, Any],
     *,
     gate_runner=None,
-    holdout_batch: Optional[List[Dict[str, Any]]] = None,
+    holdout_batch: Optional[list[dict[str, Any]]] = None,
     min_sessions: int = DEFAULT_MIN_SESSIONS,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Sandboxed apply + regression gate for a proposal; never auto-applies.
 
     1. Screen against immutable invariant rules first (#68).
@@ -86,7 +86,7 @@ def run_gate(
     return validate_code_diff(proposal, gate_runner=gate_runner)
 
 
-def apply_validated(verdict: Dict[str, Any], out_path: Path) -> bool:
+def apply_validated(verdict: dict[str, Any], out_path: Path) -> bool:
     """Write the validated surface to *out_path* — ONLY when the gate is green."""
     if verdict.get("status") != VALIDATED or not verdict.get("applied"):
         return False
@@ -102,13 +102,13 @@ def run_cron_pass(
     weaknesses_payload: Any,
     *,
     gate_runner=None,
-    surface: Optional[Dict[str, Any]] = None,
-    holdout_batch: Optional[List[Dict[str, Any]]] = None,
+    surface: Optional[dict[str, Any]] = None,
+    holdout_batch: Optional[list[dict[str, Any]]] = None,
     min_sessions: int = DEFAULT_MIN_SESSIONS,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Cron pass: weaknesses -> proposals -> gated verdicts (report-only)."""
     proposals = generate_proposals(load_weaknesses(weaknesses_payload), surface=surface)
-    verdicts: List[Dict[str, Any]] = []
+    verdicts: list[dict[str, Any]] = []
     skipped = 0
     invariant_rejected = 0
     validator_rejected = 0
@@ -206,7 +206,7 @@ def _cron_main() -> int:
     return EXIT_VALIDATED
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     positional = [a for a in argv[1:] if not a.startswith("-")]
     if not positional:
         return _cron_main()  # scheduled (zero-arg) invocation

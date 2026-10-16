@@ -66,7 +66,7 @@ from evolution_harness_code_diff import build_retry_policy_diff
 # on — anything outside it is dropped rather than passed through as free-form.
 PROPOSAL_TYPES = ("system_prompt_delta", "retry_policy_change", "tool_guard")
 
-KIND_TO_TYPE: Dict[str, str] = {
+KIND_TO_TYPE: dict[str, str] = {
     # A tool whose results keep looking like failures wants a wrapper guard
     # (validate preconditions / sanity-check the result shape).
     "tool_failure": "tool_guard",
@@ -82,10 +82,10 @@ KIND_TO_TYPE: Dict[str, str] = {
 # (e.g. ``title``, ``delta``, ``rationale``). It is the ONLY place a network
 # call may happen, and it is injected so tests pass a stub. The default is
 # ``None`` (offline): no seam -> no LLM-authored delta, never a hidden call.
-LLMFn = Callable[[Dict[str, Any], str], Dict[str, Any]]
+LLMFn = Callable[[dict[str, Any], str], dict[str, Any]]
 
 
-def proposal_type_for(weakness: Dict[str, Any]) -> Optional[str]:
+def proposal_type_for(weakness: dict[str, Any]) -> Optional[str]:
     """Map a weakness record's ``kind`` to its constrained proposal ``type``.
 
     Returns ``None`` for an unknown / malformed kind so the caller DROPS it
@@ -98,7 +98,7 @@ def proposal_type_for(weakness: Dict[str, Any]) -> Optional[str]:
     return KIND_TO_TYPE.get(kind)
 
 
-def _evidence_of(weakness: Dict[str, Any]) -> Dict[str, Any]:
+def _evidence_of(weakness: dict[str, Any]) -> dict[str, Any]:
     """Carry the trace evidence forward VERBATIM from the weakness record.
 
     Only the anonymized fields the miner already emits (counts / classes /
@@ -112,7 +112,7 @@ def _evidence_of(weakness: Dict[str, Any]) -> Dict[str, Any]:
     return {k: weakness[k] for k in allowed if k in weakness}
 
 
-def _default_title(weakness: Dict[str, Any], ptype: str) -> str:
+def _default_title(weakness: dict[str, Any], ptype: str) -> str:
     """Deterministic fallback title used when no LLM seam authors one.
 
     Concrete and de-dup-friendly (names the subject + the proposal type +
@@ -129,7 +129,7 @@ def _default_title(weakness: Dict[str, Any], ptype: str) -> str:
     return f"[HARNESS] {label} ({scope}) for `{subject}`"
 
 
-def _default_rationale(weakness: Dict[str, Any], ptype: str) -> str:
+def _default_rationale(weakness: dict[str, Any], ptype: str) -> str:
     """Offline rationale that cites the diagnosis skeleton when available.
 
     Falls back to the miner's free-form label when no deterministic diagnosis
@@ -158,11 +158,11 @@ def _coerce_str(value: Any) -> str:
 
 
 def build_proposal(
-    weakness: Dict[str, Any],
+    weakness: dict[str, Any],
     *,
     llm: Optional[LLMFn] = None,
-    surface: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
+    surface: Optional[dict[str, Any]] = None,
+) -> Optional[dict[str, Any]]:
     """Turn ONE weakness record into ONE structured harness proposal.
 
     Returns ``None`` if the weakness's kind has no constrained proposal type
@@ -185,7 +185,7 @@ def build_proposal(
 
     evidence = _evidence_of(weakness)
     diag = weakness.get("diagnosis") or {}
-    proposal: Dict[str, Any] = {
+    proposal: dict[str, Any] = {
         "type": ptype,
         "source": "self-harness",  # distinguishes from research-generated proposals
         "evidence": evidence,
@@ -230,18 +230,18 @@ def build_proposal(
 
 
 def generate_proposals(
-    weaknesses: List[Dict[str, Any]],
+    weaknesses: list[dict[str, Any]],
     *,
     llm: Optional[LLMFn] = None,
-    surface: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
+    surface: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
     """Map a list of weakness records to harness proposals (best-first).
 
     Malformed records and records whose kind has no constrained proposal type
     are dropped silently. Order follows the input (the miner already sorts
     weaknesses by severity desc), so the worst cluster yields the first
     proposal. Pure aside from the injected ``llm`` seam."""
-    proposals: List[Dict[str, Any]] = []
+    proposals: list[dict[str, Any]] = []
     for w in weaknesses:
         p = build_proposal(w, llm=llm, surface=surface)
         if p is not None:
@@ -249,7 +249,7 @@ def generate_proposals(
     return proposals
 
 
-def load_weaknesses(payload: Any) -> List[Dict[str, Any]]:
+def load_weaknesses(payload: Any) -> list[dict[str, Any]]:
     """Extract the weakness records list from a trace-miner payload.
 
     Accepts either the miner's full sidecar object
@@ -265,7 +265,7 @@ def load_weaknesses(payload: Any) -> List[Dict[str, Any]]:
     return [r for r in records if isinstance(r, dict)]
 
 
-def _parse_args(argv: List[str]) -> Tuple[Optional[str], Optional[str]]:
+def _parse_args(argv: list[str]) -> tuple[Optional[str], Optional[str]]:
     """Tiny hand-rolled arg parse (matches the other evolution_* CLIs).
 
     Returns ``(path, error)``. ``path`` is the positional weakness-records file
@@ -280,7 +280,7 @@ def _parse_args(argv: List[str]) -> Tuple[Optional[str], Optional[str]]:
     return path, None
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     path, err = _parse_args(argv)
     if err:
         print(f"[evolution-harness-proposer] {err}", file=sys.stderr)

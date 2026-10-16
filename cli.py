@@ -78,7 +78,7 @@ from rich.console import Console
 from hermes_cli.fallback_config import get_fallback_chain
 from hermes_state_ids import new_session_id
 from utils import base_url_host_matches, base_url_hostname, is_truthy_value
-from hermes_cli.cli_render import (  # noqa: F401,E402
+from hermes_cli.cli_render import (
     ChatConsole,
     _ACCENT,
     _ACCENT_ANSI_DEFAULT,

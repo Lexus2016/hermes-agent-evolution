@@ -93,7 +93,7 @@ def build_messages(
     original_request: str,
     final_response: str,
     tool_trace_json: Any = None,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Build the chat messages for the audit call."""
     trace = _normalize_trace(tool_trace_json)
     user_parts = [
@@ -112,7 +112,7 @@ def build_messages(
     ]
 
 
-def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
+def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
     """Pull the first JSON object out of a model response (tolerates fences)."""
     if not text:
         return None
@@ -164,7 +164,7 @@ def _coerce_verdict_word(raw: Any) -> Optional[str]:
     return None
 
 
-def coerce_result(obj: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def coerce_result(obj: Optional[dict[str, Any]]) -> dict[str, Any]:
     """Normalize a parsed audit object into the strict output shape.
 
     Applies a consistency guard: a ``satisfied`` verdict with non-empty
@@ -179,7 +179,7 @@ def coerce_result(obj: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         return _unknown("auditor returned an unrecognized verdict")
 
     raw_items = obj.get("missing_items", [])
-    missing_items: List[str] = []
+    missing_items: list[str] = []
     if isinstance(raw_items, list):
         missing_items = [str(it).strip() for it in raw_items if str(it).strip()]
     elif isinstance(raw_items, str) and raw_items.strip():
@@ -199,7 +199,7 @@ def coerce_result(obj: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _unknown(reason: str) -> Dict[str, Any]:
+def _unknown(reason: str) -> dict[str, Any]:
     return {
         "verdict": "unknown",
         "missing_items": [],
@@ -208,11 +208,11 @@ def _unknown(reason: str) -> Dict[str, Any]:
 
 
 def _default_critique_fn(
-    messages: List[Dict[str, str]],
+    messages: list[dict[str, str]],
     *,
     timeout: float = 30.0,
     max_tokens: int = 500,
-    main_runtime: Optional[Dict[str, Any]] = None,
+    main_runtime: Optional[dict[str, Any]] = None,
 ) -> str:
     """Call Hermes' shared auxiliary client and return the raw text content.
 
@@ -239,8 +239,8 @@ def critique(
     *,
     critique_fn: Optional[Callable[..., str]] = None,
     timeout: float = 30.0,
-    main_runtime: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    main_runtime: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     """Audit a completed task against the original request.
 
     Parameters
@@ -271,17 +271,17 @@ def critique(
         # retry before degrading — acceptable for this test/embed seam.
         try:
             raw = fn(messages)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning("self_critique: auditor call failed: %s", e)
             return _unknown(f"auditor unavailable: {e}")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.warning("self_critique: auditor call failed: %s", e)
         return _unknown(f"auditor unavailable: {e}")
 
     return coerce_result(_extract_json_object(raw or ""))
 
 
-def _read_payload(args: argparse.Namespace) -> Dict[str, Any]:
+def _read_payload(args: argparse.Namespace) -> dict[str, Any]:
     if args.input:
         with open(args.input, "r", encoding="utf-8") as fh:
             return json.load(fh)
@@ -289,7 +289,7 @@ def _read_payload(args: argparse.Namespace) -> Dict[str, Any]:
     return json.loads(data) if data.strip() else {}
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Audit a completed task against the original request."
     )

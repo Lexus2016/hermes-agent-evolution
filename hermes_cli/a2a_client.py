@@ -82,7 +82,7 @@ class TaskState(str, enum.Enum):
     UNKNOWN = "unknown"
 
     @classmethod
-    def from_wire(cls, value: Any) -> "TaskState":
+    def from_wire(cls, value: Any) -> TaskState:
         """Coerce a wire value to a member.
 
         Accepts both the A2A spelling ``canceled`` and the British
@@ -114,11 +114,11 @@ class TaskStatus:
     """The ``status`` block of an A2A task (state + optional agent message)."""
 
     state: TaskState
-    message: Optional[Dict[str, Any]] = None
+    message: Optional[dict[str, Any]] = None
     timestamp: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "TaskStatus":
+    def from_dict(cls, data: Optional[dict[str, Any]]) -> TaskStatus:
         data = data or {}
         return cls(
             state=TaskState.from_wire(data.get("state")),
@@ -134,16 +134,16 @@ class Task:
     id: str
     status: TaskStatus
     session_id: Optional[str] = None
-    artifacts: List[Dict[str, Any]] = field(default_factory=list)
-    history: List[Dict[str, Any]] = field(default_factory=list)
-    raw: Dict[str, Any] = field(default_factory=dict)
+    artifacts: list[dict[str, Any]] = field(default_factory=list)
+    history: list[dict[str, Any]] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
 
     @property
     def state(self) -> TaskState:
         return self.status.state
 
     @classmethod
-    def from_result(cls, result: Dict[str, Any]) -> "Task":
+    def from_result(cls, result: dict[str, Any]) -> Task:
         return cls(
             id=str(result.get("id", "")),
             status=TaskStatus.from_dict(result.get("status")),
@@ -173,8 +173,8 @@ class DiscoveredAgent:
 
     name: str
     endpoint: str
-    card: Dict[str, Any]
-    skills: List[AgentSkill] = field(default_factory=list)
+    card: dict[str, Any]
+    skills: list[AgentSkill] = field(default_factory=list)
 
     @property
     def supports_streaming(self) -> bool:
@@ -182,7 +182,7 @@ class DiscoveredAgent:
         return bool(caps.get("streaming"))
 
 
-def text_message(text: str, role: str = "user") -> Dict[str, Any]:
+def text_message(text: str, role: str = "user") -> dict[str, Any]:
     """Build an A2A ``Message`` with a single text part."""
     return {"role": role, "parts": [{"type": "text", "text": text}]}
 
@@ -268,20 +268,20 @@ class A2AClient:
 
     def send_task(
         self,
-        message: Dict[str, Any],
+        message: dict[str, Any],
         *,
         task_id: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> Task:
         """Send one task turn (``tasks/send``) and return the resulting Task."""
-        params: Dict[str, Any] = {"id": task_id or _new_task_id(), "message": message}
+        params: dict[str, Any] = {"id": task_id or _new_task_id(), "message": message}
         if session_id:
             params["sessionId"] = session_id
         return Task.from_result(self._rpc("tasks/send", params))
 
     def get_task(self, task_id: str, *, history_length: Optional[int] = None) -> Task:
         """Poll a task's current state (``tasks/get``)."""
-        params: Dict[str, Any] = {"id": task_id}
+        params: dict[str, Any] = {"id": task_id}
         if history_length is not None:
             params["historyLength"] = history_length
         return Task.from_result(self._rpc("tasks/get", params))
@@ -292,7 +292,7 @@ class A2AClient:
 
     def subscribe(
         self,
-        message: Dict[str, Any],
+        message: dict[str, Any],
         *,
         task_id: Optional[str] = None,
         session_id: Optional[str] = None,
@@ -307,7 +307,7 @@ class A2AClient:
         frames, so a misbehaving server cannot hang the caller indefinitely.
         """
         endpoint = self.endpoint  # lazy-discover before opening the stream
-        params: Dict[str, Any] = {"id": task_id or _new_task_id(), "message": message}
+        params: dict[str, Any] = {"id": task_id or _new_task_id(), "message": message}
         if session_id:
             params["sessionId"] = session_id
         payload = self._jsonrpc("tasks/sendSubscribe", params)
@@ -338,7 +338,7 @@ class A2AClient:
 
     # -- internals --------------------------------------------------------
 
-    def _jsonrpc(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _jsonrpc(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         return {
             "jsonrpc": "2.0",
             "id": next(self._ids),
@@ -346,13 +346,13 @@ class A2AClient:
             "params": params,
         }
 
-    def _rpc(self, method: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _rpc(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         payload = self._jsonrpc(method, params)
         with self._client() as client:
             response = self._send(client, "POST", self.endpoint, json_body=payload)
         return self._extract_result(self._decode_json(response))
 
-    def _extract_result(self, body: Any) -> Dict[str, Any]:
+    def _extract_result(self, body: Any) -> dict[str, Any]:
         if not isinstance(body, dict):
             raise A2AClientError("A2A response was not a JSON-RPC object")
         error = body.get("error")
@@ -400,7 +400,7 @@ class A2AClient:
             headers=self._headers(),
         )
 
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         headers = {"User-Agent": "Hermes-Agent/a2a-client"}
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
@@ -435,7 +435,7 @@ class A2AClient:
 
 def _iter_sse(
     lines: Iterator[str], max_events: int
-) -> Iterator[Tuple[Optional[str], str]]:
+) -> Iterator[tuple[Optional[str], str]]:
     """Parse an SSE line stream into ``(event, data)`` tuples.
 
     ``lines`` is an iterator of newline-stripped lines (httpx
@@ -444,7 +444,7 @@ def _iter_sse(
     a value's single leading space after the colon is stripped. Emits at most
     ``max_events`` frames, then stops.
     """
-    data: List[str] = []
+    data: list[str] = []
     event: Optional[str] = None
     emitted = 0
     for raw in lines:

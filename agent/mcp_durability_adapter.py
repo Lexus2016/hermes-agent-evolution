@@ -147,7 +147,7 @@ class McpDurabilityAdapter:
         the pending (``cp_id``) and done (``cp_id-done``) states so both
         are persisted independently.
         """
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "tool_name": self.tool_name,
             "args": args,
             "call_id": call_id,

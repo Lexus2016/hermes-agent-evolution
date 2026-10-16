@@ -345,13 +345,13 @@ class TestSearchResultDensify:
         r = SearchResult(matches=matches, total_count=6)
         text = r.to_dict(densify=True)["matches_text"]
         recovered = []
-        cur = None
+        _cur = None
         for ln in text.split("\n"):
             row = re.match(r"^  (\d+): (.*)$", ln)
             if row:
                 recovered.append(row.group(2))
             else:
-                cur = ln
+                _cur = ln
         assert len(recovered) == 6
         for got in recovered:
             assert got == content.rstrip()
@@ -1053,7 +1053,6 @@ class _DeletedTestGitBaselineCheck:
     instruction to keep CI green; reinstate them when the underlying
     helper is restored or replaced.
     """
-    pass
 
 
 # =========================================================================

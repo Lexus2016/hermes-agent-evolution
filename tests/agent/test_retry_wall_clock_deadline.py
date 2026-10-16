@@ -10,7 +10,8 @@ import time
 
 def test_cron_wall_clock_default_is_larger():
     """Sanity: cron cap default (600) is larger than interactive default (300)."""
-    assert 600 > 300
+    cron_default, interactive_default = 600, 300
+    assert cron_default > interactive_default
 
 
 def test_deadline_math_for_short_limit():

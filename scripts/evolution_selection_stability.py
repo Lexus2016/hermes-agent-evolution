@@ -29,10 +29,10 @@ from typing import Any, Callable, Dict, List, Sequence
 
 __all__ = [
     "StabilityReport",
-    "selection_stability",
     "jaccard",
-    "make_command_select_fn",
     "main",
+    "make_command_select_fn",
+    "selection_stability",
 ]
 
 DEFAULT_RUNS = 5
@@ -61,15 +61,15 @@ class StabilityReport:
         flipped_ids: Ids selected in some orders but dropped in others.
     """
 
-    orders: List[List[Any]] = field(default_factory=list)
-    selections: List[List[Any]] = field(default_factory=list)
+    orders: list[list[Any]] = field(default_factory=list)
+    selections: list[list[Any]] = field(default_factory=list)
     stability_score: float = 1.0
     min_pairwise: float = 1.0
     stable: bool = True
     threshold: float = DEFAULT_STABILITY_THRESHOLD
-    flipped_ids: List[Any] = field(default_factory=list)
+    flipped_ids: list[Any] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "n_orders": len(self.orders),
             "orders": self.orders,
@@ -84,7 +84,7 @@ class StabilityReport:
 
 def selection_stability(
     backlog: Sequence[Any],
-    select_fn: Callable[[List[Any]], List[Any]],
+    select_fn: Callable[[list[Any]], list[Any]],
     *,
     runs: int = DEFAULT_RUNS,
     seed: int = 0,
@@ -111,7 +111,7 @@ def selection_stability(
     items_by_id = {_key(item): item for item in backlog}
 
     report = StabilityReport(threshold=threshold)
-    selections: List[set] = []
+    selections: list[set] = []
     for i in range(runs):
         rng = random.Random(seed + i)
         order = ids[:]
@@ -135,7 +135,7 @@ def selection_stability(
 
 def make_command_select_fn(
     command: str,
-) -> Callable[[List[Any]], List[Any]]:
+) -> Callable[[list[Any]], list[Any]]:
     """Wrap an external selector command into a ``select_fn``.
 
     The command receives the shuffled backlog as a JSON array on stdin and
@@ -144,14 +144,14 @@ def make_command_select_fn(
     selector is never mistaken for an empty (stable) selection.
     """
 
-    def _select(items: List[Any]) -> List[Any]:
+    def _select(items: list[Any]) -> list[Any]:
         proc = subprocess.run(
             command,
             shell=True,
             input=json.dumps(items).encode(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=600,
+            check=False,
         )
         if proc.returncode != 0:
             raise RuntimeError(
@@ -192,11 +192,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     if args.select_cmd:
-        select_fn: Callable[[List[Any]], List[Any]] = make_command_select_fn(
+        select_fn: Callable[[list[Any]], list[Any]] = make_command_select_fn(
             args.select_cmd
         )
     else:
-        select_fn = lambda items: [  # noqa: E731 — identity passthrough selector
+        select_fn = lambda items: [
             (i.get("number", i.get("id")) if isinstance(i, dict) else i) for i in items
         ]
 

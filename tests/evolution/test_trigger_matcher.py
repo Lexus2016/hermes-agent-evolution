@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for evolution.lib.trigger_matcher (#3229)."""
 
 import pytest

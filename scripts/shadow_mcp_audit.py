@@ -27,7 +27,7 @@ from typing import Any
 
 def _default_log() -> Path:
     try:
-        from hermes_constants import get_hermes_home  # noqa: PLC0415
+        from hermes_constants import get_hermes_home
 
         return get_hermes_home() / "logs" / "shadow_mcp.jsonl"
     except Exception:

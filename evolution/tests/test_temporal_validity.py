@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for :mod:`evolution.lib.temporal_validity` (issue #2842)."""
 
 from __future__ import annotations

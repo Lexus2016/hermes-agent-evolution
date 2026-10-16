@@ -58,7 +58,7 @@ def cmd_evolution(args) -> None:
                 print(json.dumps(out, indent=2, ensure_ascii=False))
                 return
 
-            print(f"═══ AI4AI-Bench Recursive Self-Improvement Benchmark ═══")
+            print("═══ AI4AI-Bench Recursive Self-Improvement Benchmark ═══")
             print(f"Run ID: {result.run_id} | Commit: {result.commit_sha or 'unknown'}")
             print(
                 f"Composite RSI Score: {result.composite_rsi_score * 100:.1f}% "

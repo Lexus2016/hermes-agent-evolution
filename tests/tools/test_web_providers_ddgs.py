@@ -237,7 +237,7 @@ class TestDDGSProviderSearch:
         import time
 
         try:
-            import ddgs  # noqa: F401
+            import ddgs
         except ImportError:
             pytest.skip("ddgs package not installed — subprocess timeout test requires it")
 
@@ -364,7 +364,7 @@ class TestDDGSBackendWiring:
         """Exa (priority) should win over ddgs in auto-detect."""
         from tools import web_tools
 
-        monkeypatch.setattr(web_tools, "_load_web_config", lambda: {})
+        monkeypatch.setattr(web_tools, "_load_web_config", dict)
         for key in (
             "FIRECRAWL_API_KEY",
             "FIRECRAWL_API_URL",
@@ -382,7 +382,7 @@ class TestDDGSBackendWiring:
     def test_auto_detect_picks_ddgs_as_last_resort(self, monkeypatch):
         from tools import web_tools
 
-        monkeypatch.setattr(web_tools, "_load_web_config", lambda: {})
+        monkeypatch.setattr(web_tools, "_load_web_config", dict)
         for key in (
             "FIRECRAWL_API_KEY",
             "FIRECRAWL_API_URL",

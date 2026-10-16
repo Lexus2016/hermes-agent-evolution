@@ -96,7 +96,7 @@ def _patch_update_deps(monkeypatch, tmp_path, run_side_effect):
     monkeypatch.setattr(
         hermes_gateway, "find_profile_gateway_processes", lambda *a, **k: []
     )
-    import hermes_cli.update_cmd_fleet as update_cmd_fleet
+    from hermes_cli import update_cmd_fleet
     monkeypatch.setattr(
         update_cmd, "_restart_macos_launchd_gateways", lambda *a, **k: None
     )

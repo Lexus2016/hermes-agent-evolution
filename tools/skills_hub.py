@@ -420,7 +420,7 @@ def ensure_hub_dirs() -> None:
 
 
 
-def _record_retrieval(query: str, results: List[SkillMeta]) -> None:
+def _record_retrieval(query: str, results: list[SkillMeta]) -> None:
     """Append one retrieval event to the sidecar for future precision math.
 
     Issue #2918 (slice 1 of #2897): actual-use gating exists (#2286), but
@@ -437,7 +437,7 @@ def _record_retrieval(query: str, results: List[SkillMeta]) -> None:
         path = _retrieval_events_file()
         path.parent.mkdir(parents=True, exist_ok=True)
         event = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "query": query,
             "retrieved": [r.identifier for r in results if r.identifier],
         }
@@ -451,24 +451,24 @@ def _record_retrieval(query: str, results: List[SkillMeta]) -> None:
 # Names external plugins imported from this module before the Sep 2026 decomposition.
 # Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
 # The whole block is removed by reverting the commit that added it.
-from abc import ABC  # noqa: F401,E402
-from pathlib import PurePosixPath  # noqa: F401,E402
-from typing import Tuple  # noqa: F401,E402
-from typing import Union  # noqa: F401,E402
-from abc import abstractmethod  # noqa: F401,E402
-from dataclasses import dataclass  # noqa: F401,E402
-from dataclasses import field  # noqa: F401,E402
-import hashlib  # noqa: F401,E402
-import os  # noqa: F401,E402
-from urllib.parse import quote  # noqa: F401,E402
-import re  # noqa: F401,E402
-import shutil  # noqa: F401,E402
-import subprocess  # noqa: F401,E402
-from urllib.parse import unquote  # noqa: F401,E402
-from urllib.parse import urlparse  # noqa: F401,E402
-from urllib.parse import urlsplit  # noqa: F401,E402
-from urllib.parse import urlunparse  # noqa: F401,E402
-import hermes_yaml as yaml  # noqa: F401,E402
+from abc import ABC
+from pathlib import PurePosixPath
+from typing import Tuple
+from typing import Union
+from abc import abstractmethod
+from dataclasses import dataclass
+from dataclasses import field
+import hashlib
+import os
+from urllib.parse import quote
+import re
+import shutil
+import subprocess
+from urllib.parse import unquote
+from urllib.parse import urlparse
+from urllib.parse import urlsplit
+from urllib.parse import urlunparse
+import hermes_yaml as yaml
 
 
 _PLUGIN_COMPAT_LAZY = {

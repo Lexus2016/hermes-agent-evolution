@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for compositional skill routing (#1137)."""
 
 from __future__ import annotations

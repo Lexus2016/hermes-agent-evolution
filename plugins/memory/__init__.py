@@ -502,7 +502,7 @@ class _ProviderCollector:
         return self._context
 
 
-def _memory_plugin_source_and_path(source_file: Optional[str]) -> Tuple[str, Optional[str]]:
+def _memory_plugin_source_and_path(source_file: Optional[str]) -> tuple[str, Optional[str]]:
     """Classify a memory-provider ``__file__`` the way ``scan_directory`` labels plugins."""
     if not source_file:
         return "", None

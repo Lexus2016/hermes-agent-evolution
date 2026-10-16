@@ -74,7 +74,7 @@ DEFAULT_MIN_SUPPORT = 3
 # Keyword → task type. First matching bucket wins (checked in this order). Kept
 # deliberately small and obvious; the evolution loop can extend the vocabulary
 # without touching the store/extract logic.
-_TASK_KEYWORDS: List[Tuple[str, Tuple[str, ...]]] = [
+_TASK_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("coding", ("code", "function", "bug", "implement", "refactor", "test",
                 "compile", "python", "javascript", "class", "method", "patch",
                 "write", "fix", "edit")),
@@ -104,7 +104,7 @@ def classify_task_type(prompt: Optional[str]) -> str:
     return "general"
 
 
-def _first_human_prompt(conversations: List[Dict[str, Any]]) -> str:
+def _first_human_prompt(conversations: list[dict[str, Any]]) -> str:
     """The first human/user turn's text from a ShareGPT conversation list.
 
     Tolerates both the on-disk ``from``/``value`` shape and a defensive
@@ -124,13 +124,13 @@ def _first_human_prompt(conversations: List[Dict[str, Any]]) -> str:
     return ""
 
 
-def _tool_names_in_value(value: Any) -> List[str]:
+def _tool_names_in_value(value: Any) -> list[str]:
     """Extract tool names from the ``<tool_call>{...}</tool_call>`` blocks in a
     ``gpt`` turn's ``value``. Tolerates malformed JSON inside a block (skipped).
     """
     if not isinstance(value, str) or "<tool_call>" not in value:
         return []
-    names: List[str] = []
+    names: list[str] = []
     for raw in _TOOL_CALL_RE.findall(value):
         try:
             obj = json.loads(raw)
@@ -142,14 +142,14 @@ def _tool_names_in_value(value: Any) -> List[str]:
     return names
 
 
-def trajectory_tools(conversations: List[Dict[str, Any]]) -> List[str]:
+def trajectory_tools(conversations: list[dict[str, Any]]) -> list[str]:
     """All tool names invoked across a trajectory's assistant turns, in order.
 
     This is the on-disk ShareGPT analogue of iterating ``replay_trace_steps`` and
     reading each step's ``tool_calls`` — same decision-step view, different stored
     shape (``from``/``value`` with embedded ``<tool_call>`` XML).
     """
-    tools: List[str] = []
+    tools: list[str] = []
     if not isinstance(conversations, list):
         return tools
     for msg in conversations:
@@ -158,7 +158,7 @@ def trajectory_tools(conversations: List[Dict[str, Any]]) -> List[str]:
     return tools
 
 
-def classify_by_tools(tools: List[str]) -> str:
+def classify_by_tools(tools: list[str]) -> str:
     """Classify a trajectory by WHAT IT DID, not by how the task was worded.
 
     The #1363 capture stores no prompt text — deliberately, since the task
@@ -207,10 +207,10 @@ class TrajectoryStore:
 
     def __init__(self) -> None:
         # task_type -> list of {"tools": List[str], "tool_set": frozenset}
-        self._by_type: Dict[str, List[Dict[str, Any]]] = {}
+        self._by_type: dict[str, list[dict[str, Any]]] = {}
 
     @classmethod
-    def from_jsonl(cls, path: Any) -> "TrajectoryStore":
+    def from_jsonl(cls, path: Any) -> TrajectoryStore:
         """Build a store from a ``trajectory_samples.jsonl`` path.
 
         Missing file → empty store. Malformed lines (not JSON, missing
@@ -245,7 +245,7 @@ class TrajectoryStore:
         return store
 
     @classmethod
-    def from_capture_dir(cls, directory: Any) -> "TrajectoryStore":
+    def from_capture_dir(cls, directory: Any) -> TrajectoryStore:
         """Build a store from the #1363 capture directory.
 
         Reads ``*.jsonl`` — one JSON object per turn — and indexes only turns
@@ -286,11 +286,11 @@ class TrajectoryStore:
                     store._add_tools(tools, classify_by_tools(tools))
         return store
 
-    def _add(self, conversations: List[Dict[str, Any]]) -> None:
+    def _add(self, conversations: list[dict[str, Any]]) -> None:
         task_type = classify_task_type(_first_human_prompt(conversations))
         self._add_tools(trajectory_tools(conversations), task_type)
 
-    def _add_tools(self, tools: List[str], task_type: str) -> None:
+    def _add_tools(self, tools: list[str], task_type: str) -> None:
         self._by_type.setdefault(task_type, []).append(
             {"tools": tools, "tool_set": frozenset(tools)}
         )
@@ -299,18 +299,18 @@ class TrajectoryStore:
         """Total successful trajectories indexed."""
         return sum(len(v) for v in self._by_type.values())
 
-    def task_types(self) -> List[str]:
+    def task_types(self) -> list[str]:
         """Sorted list of task types present in the store."""
         return sorted(self._by_type)
 
-    def by_type(self, task_type: str) -> List[Dict[str, Any]]:
+    def by_type(self, task_type: str) -> list[dict[str, Any]]:
         """All indexed records for ``task_type`` (empty list if none)."""
         return list(self._by_type.get(task_type, []))
 
 
 def extract_success_patterns(
     store: TrajectoryStore, min_support: int = DEFAULT_MIN_SUPPORT
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Emit improvement proposals from recurring successful tool patterns.
 
     For each task type, a tool that appears in at least ``min_support`` distinct
@@ -324,7 +324,7 @@ def extract_success_patterns(
     ``source``) and are sorted by support descending so the issues stage triages
     the strongest patterns first.
     """
-    proposals: List[Dict[str, Any]] = []
+    proposals: list[dict[str, Any]] = []
     for task_type in store.task_types():
         records = store.by_type(task_type)
         total = len(records)
@@ -332,7 +332,7 @@ def extract_success_patterns(
             continue
         # Count distinct trajectories each tool appears in (per-trajectory
         # support, not raw call frequency — a retry loop must not inflate it).
-        support: Dict[str, int] = {}
+        support: dict[str, int] = {}
         for rec in records:
             for tool in rec["tool_set"]:
                 support[tool] = support.get(tool, 0) + 1
@@ -362,7 +362,7 @@ def extract_success_patterns(
     return proposals
 
 
-def format_proposals(proposals: List[Dict[str, Any]]) -> str:
+def format_proposals(proposals: list[dict[str, Any]]) -> str:
     """One-line-per-proposal human summary for the issues-stage prompt / watchdog."""
     if not proposals:
         return "[evolution-trajectory-store] no recurring success patterns"
@@ -375,7 +375,7 @@ def format_proposals(proposals: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _iter_records(store: TrajectoryStore) -> Iterator[Dict[str, Any]]:  # pragma: no cover - convenience
+def _iter_records(store: TrajectoryStore) -> Iterator[dict[str, Any]]:  # pragma: no cover - convenience
     for task_type in store.task_types():
         for rec in store.by_type(task_type):
             yield {"task_type": task_type, **rec}
@@ -396,7 +396,7 @@ def _default_capture_dir() -> Path:
     )
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     path = ""
     min_support = DEFAULT_MIN_SUPPORT
     for a in argv[1:]:

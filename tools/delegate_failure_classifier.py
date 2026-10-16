@@ -67,7 +67,7 @@ _TIMEOUT_MARKERS = [
 ]
 
 
-def _extract_error_text(data: Dict[str, Any]) -> str:
+def _extract_error_text(data: dict[str, Any]) -> str:
     """Best-effort extraction of an error string from a delegate result payload."""
     if isinstance(data, dict):
         return str(data.get("error") or data.get("message") or "")
@@ -75,7 +75,7 @@ def _extract_error_text(data: Dict[str, Any]) -> str:
 
 
 def classify_delegate_failure(
-    result: Optional[str | Dict[str, Any]] = None,
+    result: Optional[str | dict[str, Any]] = None,
     *,
     error_text: Optional[str] = None,
 ) -> Optional[DelegateFailureClass]:
@@ -108,7 +108,7 @@ def classify_delegate_failure(
     return None
 
 
-def inject_delegate_failure_class(payload: Dict[str, Any]) -> bool:
+def inject_delegate_failure_class(payload: dict[str, Any]) -> bool:
     """Mutate a parsed delegate_task result payload in place.
 
     Adds ``failure_class`` to the top-level result for tool_error-style

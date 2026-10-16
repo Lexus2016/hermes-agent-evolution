@@ -65,7 +65,7 @@ class TestAutoAddWebLogic:
         from tools.delegate_tool import _expand_parent_toolsets
 
         parent_toolsets = {"terminal", "file"}
-        child_toolsets = _strip_blocked_tools(["terminal", "file"])
+        _child_toolsets = _strip_blocked_tools(["terminal", "file"])
         assert _goal_needs_web("Research the topic and report back")
         expanded = _expand_parent_toolsets(parent_toolsets)
         assert "web" not in expanded  # guard prevents add

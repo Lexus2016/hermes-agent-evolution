@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for the C-A-F loop (Issue #2258, Slice B, parent #2247).
 
 Behavior contracts: verifier pass/fail → experience records; regret math on

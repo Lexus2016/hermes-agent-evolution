@@ -70,7 +70,7 @@ class SkillRequiresCycleError(Exception):
     the flat loader so skill loading never silently breaks.
     """
 
-    def __init__(self, cycles: List[List[str]]):
+    def __init__(self, cycles: list[list[str]]):
         self.cycles = cycles
         rendered = "; ".join(" -> ".join(c + [c[0]]) for c in cycles if c)
         super().__init__(
@@ -105,14 +105,14 @@ def v2_enabled() -> bool:
 
         cfg = load_skills_config()
         return bool(cfg.get(CONFIG_KEY, False))
-    except Exception:  # noqa: BLE001 - config read must never break startup
+    except Exception:
         logger.debug("skills_loader_v2: could not read config flag", exc_info=True)
         return False
 
 
 def _warn_capability_conflicts(
     validation, skills_dir: Path
-) -> List[Tuple[str, List[str]]]:
+) -> list[tuple[str, list[str]]]:
     """Log a load-time warning for each ambiguously-provided capability (#299).
 
     A *capability conflict* is a capability (an abstract ability declared via
@@ -153,11 +153,11 @@ def _name_for_skill_file(skill_file: Path, skills_dir: Path) -> str:
         frontmatter, _ = parse_frontmatter(skill_file.read_text(encoding="utf-8-sig"))
         name = str(frontmatter.get("name") or skill_file.parent.name).strip()
         return name or skill_file.parent.name
-    except Exception:  # noqa: BLE001 - one bad file is non-fatal
+    except Exception:
         return skill_file.parent.name
 
 
-def ordered_skill_files(skills_dir: Path) -> List[Path]:
+def ordered_skill_files(skills_dir: Path) -> list[Path]:
     """Return *skills_dir*'s ``SKILL.md`` paths in topological load order.
 
     Builds a :class:`~agent.skill_graph.SkillGraph` over *skills_dir*, validates
@@ -180,7 +180,7 @@ def ordered_skill_files(skills_dir: Path) -> List[Path]:
     """
     # The authoritative file list — flat, directory order. This is the set the
     # legacy loader walks; we only ever reorder it, never add/remove.
-    flat_files: List[Path] = list(iter_skill_index_files(skills_dir, "SKILL.md"))
+    flat_files: list[Path] = list(iter_skill_index_files(skills_dir, "SKILL.md"))
     if not flat_files:
         return flat_files
 
@@ -201,8 +201,8 @@ def ordered_skill_files(skills_dir: Path) -> List[Path]:
     # files if two skill dirs share a frontmatter name; the graph keeps only the
     # first (local-dir precedence), so later duplicates are treated as un-graphed
     # and preserved in flat order — never dropped.
-    name_to_files: Dict[str, List[Path]] = {}
-    file_names: Dict[Path, str] = {}
+    name_to_files: dict[str, list[Path]] = {}
+    file_names: dict[Path, str] = {}
     for f in flat_files:
         name = _name_for_skill_file(f, skills_dir)
         file_names[f] = name
@@ -210,7 +210,7 @@ def ordered_skill_files(skills_dir: Path) -> List[Path]:
 
     topo_names = graph.topological_order()
 
-    ordered: List[Path] = []
+    ordered: list[Path] = []
     placed: set = set()
 
     # 1) Emit files in topological (dependency-first) order. For a name that the
@@ -236,7 +236,7 @@ def ordered_skill_files(skills_dir: Path) -> List[Path]:
     return ordered
 
 
-def ordered_skill_files_or_flat(skills_dir: Path) -> List[Path]:
+def ordered_skill_files_or_flat(skills_dir: Path) -> list[Path]:
     """Topological order when the graph allows it, else the flat order.
 
     Convenience wrapper used at the call site: returns
@@ -254,7 +254,7 @@ def ordered_skill_files_or_flat(skills_dir: Path) -> List[Path]:
             exc,
             skills_dir,
         )
-    except Exception:  # noqa: BLE001 - defensive: never break loading
+    except Exception:
         logger.warning(
             "skills_loader_v2: unexpected error ordering skills in %s; "
             "falling back to flat loading",
@@ -264,7 +264,7 @@ def ordered_skill_files_or_flat(skills_dir: Path) -> List[Path]:
     return list(iter_skill_index_files(skills_dir, "SKILL.md"))
 
 
-def iter_skill_files_for_load(skills_dir: Path) -> List[Path]:
+def iter_skill_files_for_load(skills_dir: Path) -> list[Path]:
     """The single entry point the flat loader calls to get skill files.
 
     * Flag OFF (default): identical to ``list(iter_skill_index_files(skills_dir,

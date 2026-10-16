@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Executable-seam integration tests for #1137 listwise reranking in tool_search.
 
 Drive the real ``dispatch_tool_search`` handler to prove the listwise reranker

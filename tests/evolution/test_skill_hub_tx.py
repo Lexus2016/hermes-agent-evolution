@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Agentic Transaction Slice 2 — transactional skill hub tests (#2763)."""
 
 import sys
@@ -6,8 +5,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from evolution.lib.agentic_tx import begin  # noqa: E402
-from evolution.lib.skill_hub_tx import staged_skill_publish  # noqa: E402
+from evolution.lib.agentic_tx import begin
+from evolution.lib.skill_hub_tx import staged_skill_publish
 
 
 def _card(tmp_path: Path) -> Path:

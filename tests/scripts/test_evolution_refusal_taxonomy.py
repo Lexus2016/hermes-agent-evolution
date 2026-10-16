@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from evolution_refusal_taxonomy import (  # noqa: E402  # fmt: skip
+from evolution_refusal_taxonomy import (  # fmt: skip
     detect_refusals,
     classify_refusal,
     recovery_suggestion,

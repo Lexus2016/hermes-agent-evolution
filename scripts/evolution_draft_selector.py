@@ -33,7 +33,7 @@ ANTICONFORMITY_SIMILARITY = 0.8
 # The hint is a *suggestion*: the orchestrator passes it to delegate_task's
 # model override or writes it to ``delegation.model`` in config.yaml.  The
 # actual model name is resolved by the runtime's provider layer.
-_TIERS: Dict[str, Tuple[str, str]] = {
+_TIERS: dict[str, tuple[str, str]] = {
     "trivial": ("cheap", "fast-cheap"),
     "simple": ("cheap", "fast-cheap"),
     "moderate": ("standard", "standard"),
@@ -43,7 +43,7 @@ _TIERS: Dict[str, Tuple[str, str]] = {
 
 # Keyword → complexity bucket.  Scanned in order; first match wins so that
 # more-specific keywords (``refactor``) are checked before generic ones.
-_CMAP: List[Tuple[str, str]] = [
+_CMAP: list[tuple[str, str]] = [
     ("trivial", "trivial"),
     ("fix typo", "trivial"),
     ("lint", "trivial"),
@@ -70,7 +70,7 @@ _CMAP: List[Tuple[str, str]] = [
 ]
 
 
-def route_cost_tier(complexity: str) -> Dict[str, str]:
+def route_cost_tier(complexity: str) -> dict[str, str]:
     """Map a task complexity description to a cost-tier model hint.
 
     ``complexity`` is free-text (the task goal or a complexity label).  The
@@ -99,9 +99,9 @@ def build_draft_tasks(
     n_drafters: int = DEFAULT_MAX_DRAFTERS,
     *,
     context: str = "",
-    toolsets: Optional[List[str]] = None,
+    toolsets: Optional[list[str]] = None,
     memo_path: Optional[str] = None,
-) -> Tuple[List[Dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int]:
     """Build N identical leaf-worker tasks for parallel draft mode via delegate_task.
 
     With ``memo_path`` (shared failure memo, issue #65), the memo is consulted
@@ -161,7 +161,7 @@ def _summary_similarity(a: str, b: str) -> float:
     return len(wa & wb) / len(wa | wb)
 
 
-def _distinct_variants(drafts: List[Dict[str, Any]]) -> Tuple[int, float]:
+def _distinct_variants(drafts: list[dict[str, Any]]) -> tuple[int, float]:
     """Pick the winner with anti-conformity pressure applied (#2761).
 
     Baseline is the best-scoring OK draft. When the population has converged
@@ -189,14 +189,14 @@ def _distinct_variants(drafts: List[Dict[str, Any]]) -> Tuple[int, float]:
     return alt["index"], alt["score"]
 
 
-def select_best_draft(delegate_output: Any) -> Tuple[int, float, List[Dict[str, Any]]]:
+def select_best_draft(delegate_output: Any) -> tuple[int, float, list[dict[str, Any]]]:
     """Score drafts, pick winner: (best_index, best_score, drafts)."""
     results = (
         delegate_output.get("results", [])
         if isinstance(delegate_output, dict)
         else (delegate_output if isinstance(delegate_output, list) else [])
     )
-    drafts: List[Dict[str, Any]] = []
+    drafts: list[dict[str, Any]] = []
     for pos, entry in enumerate(results if isinstance(results, list) else []):
         if not isinstance(entry, dict):
             entry = {}
@@ -220,7 +220,7 @@ def select_best_draft(delegate_output: Any) -> Tuple[int, float, List[Dict[str, 
 
 def check_shuffle_order_stability(
     delegate_output: Any, n_shuffles: int = 5
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Test candidate selection stability across random shuffle orderings (#3337).
 
     Evaluates whether the winning candidate selection is invariant to the presentation
@@ -263,7 +263,7 @@ def check_shuffle_order_stability(
     }
 
 
-def _load_json(path: Optional[str]) -> Tuple[Any, Optional[str]]:
+def _load_json(path: Optional[str]) -> tuple[Any, Optional[str]]:
     try:
         raw = Path(path).read_text(encoding="utf-8-sig") if path else sys.stdin.read()
         return json.loads(raw), None
@@ -271,7 +271,7 @@ def _load_json(path: Optional[str]) -> Tuple[Any, Optional[str]]:
         return None, str(exc)
 
 
-def _flag(args: List[str], name: str) -> Optional[str]:
+def _flag(args: list[str], name: str) -> Optional[str]:
     if name in args:
         i = args.index(name)
         if i + 1 < len(args):
@@ -279,7 +279,7 @@ def _flag(args: List[str], name: str) -> Optional[str]:
     return None
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(
             "usage: evolution_draft_selector.py {build,select,route,stability} ...",

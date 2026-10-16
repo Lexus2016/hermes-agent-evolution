@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Temporal-validity evaluation axis (issue #2842).
 
 A positive evaluation criterion for any pipeline stage that reasons over dated
@@ -76,13 +75,13 @@ class EvidenceItem:
     valid_from: Optional[str] = None
     valid_until: Optional[str] = None
     timestamp: Optional[str] = None
-    evidence: List[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "EvidenceItem":
+    def from_dict(cls, data: dict[str, Any]) -> EvidenceItem:
         return cls(
             id=str(data.get("id", "")),
             valid_from=data.get("valid_from"),
@@ -103,17 +102,17 @@ class TemporalValidityReport:
     as_of: str = ""
     total: int = 0
     passed: int = 0
-    violations: List[Dict[str, str]] = field(default_factory=list)
+    violations: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def pass_rate(self) -> float:
         return self.passed / self.total if self.total else 1.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TemporalValidityReport":
+    def from_dict(cls, data: dict[str, Any]) -> TemporalValidityReport:
         return cls(
             as_of=str(data.get("as_of", "")),
             total=int(data.get("total", 0)),
@@ -123,7 +122,7 @@ class TemporalValidityReport:
 
 
 def evaluate_temporal_validity(
-    items: List[EvidenceItem],
+    items: list[EvidenceItem],
     as_of: str,
 ) -> TemporalValidityReport:
     """Verify each item was valid *as of* ``as_of`` (ISO-8601).

@@ -1732,7 +1732,7 @@ def _run_conversation_turn(
     persist_user_display_metadata: Optional[dict[str, Any]] = None,
     persist_user_platform_id: Optional[str] = None,
     persist_user_origin: Optional[str] = None,
-    turn_author: Optional[Dict[str, Any]] = None,
+    turn_author: Optional[dict[str, Any]] = None,
     moa_config: Optional[dict[str, Any]] = None,
     title_user_message: Optional[str] = None,
     prelude: Optional[Prelude] = None,
@@ -1943,13 +1943,13 @@ def run_conversation(
     persist_user_timestamp: Optional[float] = None,
     persist_user_display_kind: Optional[str] = None,
     persist_user_origin: Optional[str] = None,
-    persist_user_display_metadata: Optional[Dict[str, Any]] = None,
+    persist_user_display_metadata: Optional[dict[str, Any]] = None,
     persist_user_platform_id: Optional[str] = None,
     moa_config: Optional[dict[str, Any]] = None,
-    turn_author: Optional[Dict[str, Any]] = None,
+    turn_author: Optional[dict[str, Any]] = None,
     title_user_message: Optional[str] = None,
     prelude: Optional[Prelude] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Thin wrapper that traces one agent run (#167), then delegates.
 
     The opt-in OpenTelemetry span is a zero-overhead no-op unless
@@ -1994,15 +1994,15 @@ def run_conversation(
 def _run_conversation_impl(
     agent,
     user_message: Any,
-    system_message: str = None,
-    conversation_history: List[Dict[str, Any]] = None,
-    task_id: str = None,
+    system_message: str | None = None,
+    conversation_history: list[dict[str, Any]] | None = None,
+    task_id: str | None = None,
     stream_callback: Optional[callable] = None,
     persist_user_message: Optional[Any] = None,
     persist_user_timestamp: Optional[float] = None,
     persist_user_display_kind: Optional[str] = None,
     persist_user_origin: Optional[str] = None,
-    persist_user_display_metadata: Optional[Dict[str, Any]] = None,
+    persist_user_display_metadata: Optional[dict[str, Any]] = None,
     persist_user_platform_id: Optional[str] = None,
     moa_config: Optional[dict[str, Any]] = None,
     turn_author: Optional[dict[str, Any]] = None,
@@ -2143,4 +2143,4 @@ def _close_durable_failed_turn(agent, result: Any) -> None:
     except Exception:
         logger.debug("failed-turn boundary not written", exc_info=True)
 
-__all__ = ["run_conversation", "_run_conversation_impl"]
+__all__ = ["_run_conversation_impl", "run_conversation"]

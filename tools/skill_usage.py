@@ -345,7 +345,7 @@ def adopt_skill(skill_name: str) -> tuple[bool, str]:
 
 
 # --- Sidecar I/O ---
-def _empty_record() -> Dict[str, Any]:
+def _empty_record() -> dict[str, Any]:
     return {
         "created_by": None,
         "use_count": 0,
@@ -809,14 +809,14 @@ def set_rationale(
         "why": narrative,
     }
 
-    def _apply(rec: Dict[str, Any]) -> None:
+    def _apply(rec: dict[str, Any]) -> None:
         rec["rationale"] = block
         rec["rationale_generation"] = _non_negative_int(rec.get("patch_generation"))
 
     _mutate(skill_name, _apply)
 
 
-def rationale_decayed(record: Dict[str, Any], *, generations_gap: int = 1) -> bool:
+def rationale_decayed(record: dict[str, Any], *, generations_gap: int = 1) -> bool:
     """Whether a skill's rationale is missing or has decayed (#2629).
 
     Decay model (arXiv:2608.11095 "catastrophic remembering"): a rationale
@@ -844,7 +844,7 @@ def set_source_run_id(skill_name: str, run_id: str) -> None:
     """
     if not run_id:
         return
-    def _apply(rec: Dict[str, Any]) -> None:
+    def _apply(rec: dict[str, Any]) -> None:
         rec["source_run_id"] = run_id[:200]
     _mutate(skill_name, _apply)
 
@@ -866,7 +866,7 @@ def record_skill_outcome(skill_name: str, success: bool) -> None:
     ``consecutive_successes`` and promote at the configured threshold; a
     failure resets the counter and may demote.
     """
-    def _apply(rec: Dict[str, Any]) -> None:
+    def _apply(rec: dict[str, Any]) -> None:
         rec["use_count"] = int(rec.get("use_count") or 0) + 1
         rec["last_used_at"] = _now_iso()
         outcomes = rec.get("_recent_outcomes") or []
@@ -881,7 +881,7 @@ def record_skill_outcome(skill_name: str, success: bool) -> None:
     _mutate(skill_name, _apply)
 
 
-def _apply_trust_transition(rec: Dict[str, Any], success: bool) -> None:
+def _apply_trust_transition(rec: dict[str, Any], success: bool) -> None:
     """Mutate *rec* for provisional→trusted lifecycle (#2256)."""
     state = rec.get("trust_state", "trusted")
     if success:
@@ -944,7 +944,7 @@ def _default_invalidation_reason(state: str) -> str:
     }.get(state, f"transition:{state}")
 
 
-def _apply_validity_transition(rec: Dict[str, Any], new_state: str, reason: str) -> None:
+def _apply_validity_transition(rec: dict[str, Any], new_state: str, reason: str) -> None:
     """Close/reopen the record's validity window (#2700).
 
     Entering stale/archived closes the current window (invalidate, not
@@ -982,7 +982,7 @@ def _apply_validity_transition(rec: Dict[str, Any], new_state: str, reason: str)
         rec["invalidation_reason"] = None
 
 
-def _stored_record(skill_name: str) -> Optional[Dict[str, Any]]:
+def _stored_record(skill_name: str) -> Optional[dict[str, Any]]:
     """The persisted sidecar record, or None when the skill has none.
 
     Unlike ``get_record`` this does NOT fabricate a fresh record for
@@ -993,7 +993,7 @@ def _stored_record(skill_name: str) -> Optional[Dict[str, Any]]:
     return rec if isinstance(rec, dict) else None
 
 
-def skill_validity(skill_name: str) -> Dict[str, Any]:
+def skill_validity(skill_name: str) -> dict[str, Any]:
     """Current validity window for a skill (#2700).
 
     Legacy records created before validity tracking backfill
@@ -1012,7 +1012,7 @@ def skill_validity(skill_name: str) -> Dict[str, Any]:
     }
 
 
-def skill_validity_history(skill_name: str) -> List[Dict[str, Any]]:
+def skill_validity_history(skill_name: str) -> list[dict[str, Any]]:
     """Prior (closed) validity windows for a skill, oldest first (#2700).
 
     Answers "what did this skill look like before it was demoted or
@@ -1041,7 +1041,7 @@ def skill_state_at(skill_name: str, at_iso: str) -> str:
     at = _parse_iso_timestamp(at_iso)
     if at is None:
         return "unknown"
-    windows: List[Dict[str, Any]] = []
+    windows: list[dict[str, Any]] = []
     history = rec.get("validity_history")
     if isinstance(history, list):
         windows.extend(w for w in history if isinstance(w, dict))
@@ -1063,15 +1063,15 @@ def skill_state_at(skill_name: str, at_iso: str) -> str:
 # Names external plugins imported from this module before the Sep 2026 decomposition.
 # Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
 # The whole block is removed by reverting the commit that added it.
-import tempfile  # noqa: F401,E402
-import os  # noqa: F401,E402
-import os  # noqa: F401,E402
-import tempfile  # noqa: F401,E402
+import tempfile
+import os
+import os
+import tempfile
 
 def _suppressed_file() -> Path:
     return _skills_dir() / ".curator_suppressed"
 
-def _write_suppressed_names(names: Set[str]) -> None:
+def _write_suppressed_names(names: set[str]) -> None:
     path = _suppressed_file()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1102,7 +1102,7 @@ def add_suppressed_name(skill_name: str) -> None:
         _write_suppressed_names(names)
 
 
-def agent_created_report() -> List[Dict[str, Any]]:
+def agent_created_report() -> list[dict[str, Any]]:
     """DEPRECATED — use :func:`curated_report` instead.
 
     Used to return everything :func:`curated_report` returns (including bundled

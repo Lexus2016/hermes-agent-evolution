@@ -464,7 +464,7 @@ def model_id_suffix_variants(model: str) -> list[str]:
 
 
 def next_untried_model_variant(
-    base_model: str, tried: "set[str] | frozenset[str]"
+    base_model: str, tried: set[str] | frozenset[str]
 ) -> str | None:
     """Next ``model:suffix`` variant of ``base_model`` not present in ``tried``.
 
@@ -1373,7 +1373,7 @@ def _classify_image_tool_422(c: _Ctx) -> Verdict:
 # read window). 504 Gateway Timeout routes to timeout so progressive backoff (#1100)
 # and consecutive-timeout circuit breaker engage (#1142).
 # Unlisted 4xx → format_error, 5xx → server_error.
-_STATUS_HANDLERS: Dict[int, Callable[[_Ctx], Verdict]] = {
+_STATUS_HANDLERS: dict[int, Callable[[_Ctx], Verdict]] = {
     400: _classify_400, 401: lambda c: _V_AUTH_ROTATE, 402: lambda c: _classify_402(c.msg, dict),
     403: _status_403, 404: _status_404, 408: lambda c: _V_TIMEOUT, 413: lambda c: _V_PAYLOAD_TOO_LARGE,
     422: lambda c: _classify_image_tool_422(c), 504: lambda c: _V_TIMEOUT,

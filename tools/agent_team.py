@@ -153,7 +153,7 @@ class TeamStore:
 
     # -- members --------------------------------------------------------
 
-    def add_member(self, name: str, role: str = "", model: str = "") -> Dict[str, Any]:
+    def add_member(self, name: str, role: str = "", model: str = "") -> dict[str, Any]:
         """Register (or update) a teammate. Returns the member row as a dict."""
         if not is_valid_slug(name):
             raise ValueError(f"invalid member name slug: {name!r}")
@@ -170,7 +170,7 @@ class TeamStore:
             )
         return {"name": name, "role": role or "", "model": model or ""}
 
-    def list_members(self) -> List[Dict[str, Any]]:
+    def list_members(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT name, role, model FROM members ORDER BY created_at"
@@ -179,7 +179,7 @@ class TeamStore:
 
     # -- shared task list ----------------------------------------------
 
-    def add_task(self, title: str, assignee: str = "") -> Dict[str, Any]:
+    def add_task(self, title: str, assignee: str = "") -> dict[str, Any]:
         """Append a task to the shared list. Returns the task row."""
         title = (title or "").strip()
         if not title:
@@ -199,14 +199,14 @@ class TeamStore:
             )
         return self.get_task(task_id)  # type: ignore[return-value]
 
-    def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+    def get_task(self, task_id: str) -> Optional[dict[str, Any]]:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM tasks WHERE id = ?", (task_id,)
             ).fetchone()
         return dict(row) if row else None
 
-    def list_tasks(self, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_tasks(self, status: Optional[str] = None) -> list[dict[str, Any]]:
         query = "SELECT * FROM tasks"
         params: tuple = ()
         if status:
@@ -217,7 +217,7 @@ class TeamStore:
             rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
 
-    def claim_task(self, task_id: str, member: str) -> Dict[str, Any]:
+    def claim_task(self, task_id: str, member: str) -> dict[str, Any]:
         """Atomically claim an open task for *member*.
 
         Returns ``{"claimed": True, "task": {...}}`` on success, or
@@ -254,7 +254,7 @@ class TeamStore:
 
     def complete_task(
         self, task_id: str, result: str = "", member: str = ""
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Mark a task done with an optional result summary.
 
         ``member`` is accepted for call-site symmetry with :meth:`claim_task`
@@ -277,7 +277,7 @@ class TeamStore:
 
     def send_message(
         self, sender: str, body: str, recipient: str = ""
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Send a direct message to *recipient*, or broadcast when empty.
 
         ``recipient=""`` is a broadcast: every member (other than the sender)
@@ -293,7 +293,7 @@ class TeamStore:
             raise ValueError(f"invalid recipient slug: {recipient!r}")
         now = time.time()
 
-        recipients: List[str]
+        recipients: list[str]
         if recipient:
             recipients = [recipient]
         else:
@@ -305,7 +305,7 @@ class TeamStore:
                 # message so it is not silently dropped.
                 recipients = [""]
 
-        created: List[str] = []
+        created: list[str] = []
         with self._connect() as conn:
             for rcpt in recipients:
                 msg_id = f"tm_{uuid.uuid4().hex[:12]}"
@@ -326,7 +326,7 @@ class TeamStore:
 
     def inbox(
         self, member: str, unread_only: bool = True, mark_read: bool = True
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return messages addressed to *member* (and broadcasts).
 
         Broadcasts are persisted as per-recipient rows by :meth:`send_message`,
@@ -356,7 +356,7 @@ class TeamStore:
 
     # -- lead-side merge ------------------------------------------------
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         """Full team state for the lead to merge teammate outputs.
 
         Lets the lead collect every teammate's completed-task results and the

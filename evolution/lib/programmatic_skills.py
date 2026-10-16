@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Programmatic Skills: compile recurring reasoning patterns into deterministic code (issue #2384).
 
 Adopts the SpeedRunner paradigm (arXiv:2608.11338, 'SpeedRunner: Programmatic Skills That
@@ -21,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ProgrammaticSkill",
-    "ProgrammaticSkillSynthesizer",
     "ProgrammaticSkillLibrary",
+    "ProgrammaticSkillSynthesizer",
 ]
 
 
@@ -34,17 +33,17 @@ class ProgrammaticSkill:
     description: str
     code: str
     entry_point: str
-    input_schema: Dict[str, Any] = field(default_factory=dict)
-    output_schema: Dict[str, Any] = field(default_factory=dict)
+    input_schema: dict[str, Any] = field(default_factory=dict)
+    output_schema: dict[str, Any] = field(default_factory=dict)
     call_count: int = 0
     token_savings_estimate: int = 0
     provenance_trace_id: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> ProgrammaticSkill:
+    def from_dict(cls, d: dict[str, Any]) -> ProgrammaticSkill:
         return cls(
             name=str(d.get("name", "")),
             description=str(d.get("description", "")),
@@ -83,12 +82,12 @@ class ProgrammaticSkillSynthesizer:
     @classmethod
     def synthesize_from_trace(
         cls,
-        trace_data: Dict[str, Any] | Sequence[Dict[str, Any]],
+        trace_data: dict[str, Any] | Sequence[dict[str, Any]],
         skill_name: str = "extracted_utility",
         description: str = "Synthesized programmatic utility",
     ) -> Optional[ProgrammaticSkill]:
         """Synthesize a programmatic skill from structured trace observations."""
-        events = (
+        _events = (
             trace_data if isinstance(trace_data, list) else trace_data.get("events", [])
         )
         trace_id = (
@@ -124,13 +123,13 @@ class ProgrammaticSkillSynthesizer:
     def execute_skill(
         cls,
         skill: ProgrammaticSkill,
-        inputs: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        inputs: dict[str, Any],
+    ) -> dict[str, Any]:
         """Safely execute the programmatic skill in an isolated local dictionary."""
         if not cls.validate_code_safety(skill.code):
             return {"status": "error", "error": "Skill failed AST safety validation"}
 
-        local_vars: Dict[str, Any] = {}
+        local_vars: dict[str, Any] = {}
         # Restricted builtins
         safe_builtins = {
             "len": len,
@@ -177,7 +176,7 @@ class ProgrammaticSkillLibrary:
     """Registry and storage for programmatic skills."""
 
     def __init__(self) -> None:
-        self.skills: Dict[str, ProgrammaticSkill] = {}
+        self.skills: dict[str, ProgrammaticSkill] = {}
 
     def register(self, skill: ProgrammaticSkill) -> None:
         self.skills[skill.name] = skill
@@ -185,7 +184,7 @@ class ProgrammaticSkillLibrary:
     def get(self, name: str) -> Optional[ProgrammaticSkill]:
         return self.skills.get(name)
 
-    def execute(self, name: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, name: str, inputs: dict[str, Any]) -> dict[str, Any]:
         skill = self.get(name)
         if skill is None:
             return {"status": "error", "error": f"Skill '{name}' not found"}
@@ -194,11 +193,11 @@ class ProgrammaticSkillLibrary:
     def estimate_total_token_savings(self) -> int:
         return sum(s.token_savings_estimate for s in self.skills.values())
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"skills": [s.to_dict() for s in self.skills.values()]}
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> ProgrammaticSkillLibrary:
+    def from_dict(cls, d: dict[str, Any]) -> ProgrammaticSkillLibrary:
         lib = cls()
         for s_data in d.get("skills", []) or []:
             lib.register(ProgrammaticSkill.from_dict(s_data))

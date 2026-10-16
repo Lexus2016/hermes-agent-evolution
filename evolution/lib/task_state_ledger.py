@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Verified external task-state ledger (issue #2841).
 
 Manage-execute-audit primitive: an append-only durable record of
@@ -43,14 +42,14 @@ class LedgerEntry:
     step: str
     verified: bool = True
     outcome: str = ""
-    evidence: List[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
     timestamp: float = field(default_factory=time.time)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "LedgerEntry":
+    def from_dict(cls, data: dict[str, Any]) -> LedgerEntry:
         return cls(
             step=str(data.get("step", "")),
             verified=bool(data.get("verified", True)),
@@ -66,7 +65,7 @@ class TaskStateLedger:
     def __init__(
         self,
         task_id: str,
-        storage_dir: Optional[Union[str, Path]] = None,
+        storage_dir: Optional[str | Path] = None,
         auto_save: bool = True,
     ) -> None:
         self.task_id = task_id
@@ -74,7 +73,7 @@ class TaskStateLedger:
             Path(storage_dir) if storage_dir else get_default_ledger_dir()
         )
         self.auto_save = auto_save
-        self._entries: List[LedgerEntry] = []
+        self._entries: list[LedgerEntry] = []
         if self.storage_file.exists():
             self.load()
 
@@ -86,7 +85,7 @@ class TaskStateLedger:
         return self.storage_dir / f"ledger_{safe_id}.json"
 
     @property
-    def entries(self) -> List[LedgerEntry]:
+    def entries(self) -> list[LedgerEntry]:
         return list(self._entries)
 
     @property
@@ -114,14 +113,14 @@ class TaskStateLedger:
             for e in self._entries
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "entries": [e.to_dict() for e in self._entries],
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TaskStateLedger":
+    def from_dict(cls, data: dict[str, Any]) -> TaskStateLedger:
         ledger = cls(task_id=str(data.get("task_id", "default")), auto_save=False)
         entries = data.get("entries", [])
         if isinstance(entries, list):
@@ -130,7 +129,7 @@ class TaskStateLedger:
             ]
         return ledger
 
-    def save(self, path: Optional[Union[str, Path]] = None) -> Path:
+    def save(self, path: Optional[str | Path] = None) -> Path:
         """Atomically persist to disk (tmp + replace)."""
         target = Path(path) if path else self.storage_file
         try:
@@ -145,7 +144,7 @@ class TaskStateLedger:
             pass
         return target
 
-    def load(self, path: Optional[Union[str, Path]] = None) -> bool:
+    def load(self, path: Optional[str | Path] = None) -> bool:
         """Load entries from disk; True on success."""
         target = Path(path) if path else self.storage_file
         if not target.exists():

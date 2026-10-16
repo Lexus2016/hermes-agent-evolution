@@ -51,7 +51,7 @@ def distill_terminal_output(
         return text
 
     raw_lines = text.splitlines()
-    clean_lines: List[str] = []
+    clean_lines: list[str] = []
 
     last_poll_pattern: Optional[str] = None
     poll_repeat_count = 0
@@ -123,13 +123,13 @@ class ObservationalContextEngine(ContextEngine):
 
     def update_from_response(
         self,
-        response_usage: Dict[str, Any],
+        response_usage: dict[str, Any],
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
     ) -> None:
         pass
 
-    def should_compress(self, messages: List[Dict[str, Any]], model: str = "") -> bool:
+    def should_compress(self, messages: list[dict[str, Any]], model: str = "") -> bool:
         if not self.config.enabled:
             return False
         total_tokens = estimate_messages_tokens_rough(messages)
@@ -137,15 +137,15 @@ class ObservationalContextEngine(ContextEngine):
 
     def compress(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         model: str = "",
         max_tokens: int = 4000,
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         if not messages:
             return messages, {"compressed": False, "tokens_saved": 0}
 
         initial_tokens = estimate_messages_tokens_rough(messages)
-        compressed_msgs: List[Dict[str, Any]] = []
+        compressed_msgs: list[dict[str, Any]] = []
 
         total_msgs = len(messages)
         cutoff_idx = max(0, total_msgs - self.config.tail_turns_to_preserve)

@@ -12,12 +12,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_skill_lint import (  # noqa: E402
+from evolution_skill_lint import (
     extract_declared_inputs,
     find_cap_violations,
     lint_repo,
 )
-from evolution_tool_cap_check import (  # noqa: E402
+from evolution_tool_cap_check import (
     check_input_caps,
     declared_input_size,
     load_caps,

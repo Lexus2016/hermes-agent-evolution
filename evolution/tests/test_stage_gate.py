@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for the confidence gate at stage boundaries (issue #1339)."""
 
 from __future__ import annotations

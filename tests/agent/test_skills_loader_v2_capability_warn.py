@@ -151,7 +151,7 @@ def test_flag_off_is_silent_even_with_conflict(tmp_path, caplog, monkeypatch):
     """With v2 off, the loader never runs the graph -> no capability warning."""
     monkeypatch.delenv(ENV_FLAG, raising=False)
     monkeypatch.setattr(
-        "agent.skill_preprocessing.load_skills_config", lambda: {}, raising=True
+        "agent.skill_preprocessing.load_skills_config", dict, raising=True
     )
     skills = tmp_path / "skills"
     _write_skill(skills, "cat", "alpha", provides="search")

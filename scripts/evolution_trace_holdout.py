@@ -20,7 +20,7 @@ DEFAULT_TOLERANCE = 0.20
 DEFAULT_MIN_COUNT = 5  # must match evolution_trace_miner.DEFAULT_MIN_COUNT
 
 
-def _cluster_key(record: Dict[str, Any]) -> str:
+def _cluster_key(record: dict[str, Any]) -> str:
     """Stable identifier for a weakness cluster."""
     kind = str(record.get("kind", ""))
     tool = str(record.get("tool") or record.get("signature") or "")
@@ -28,13 +28,13 @@ def _cluster_key(record: Dict[str, Any]) -> str:
 
 
 def evaluate_holdout(
-    weaknesses: List[Dict[str, Any]],
+    weaknesses: list[dict[str, Any]],
     total_sessions: int,
     *,
     holdout_ratio: float = DEFAULT_HOLDOUT_RATIO,
     tolerance: float = DEFAULT_TOLERANCE,
     min_count: int = DEFAULT_MIN_COUNT,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return a deterministic generalization report for the mined weaknesses.
 
     A cluster is generalized when the evidence that would remain after holding
@@ -43,7 +43,7 @@ def evaluate_holdout(
     of the verdict. Clusters flagged ``generalized == False`` need more evidence
     across time before the agent proposes a code change for them.
     """
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     generalized_count = 0
     threshold = min_count * (1.0 - tolerance)
     for record in weaknesses:
@@ -72,7 +72,7 @@ def evaluate_holdout(
     }
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     """CLI: read weakness JSON from stdin, write holdout report to stdout."""
     try:
         payload = json.load(sys.stdin)

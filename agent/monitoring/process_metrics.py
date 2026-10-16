@@ -24,13 +24,13 @@ _PHASE_FIELDS = {
 }
 
 
-def process_attributes(event: Dict[str, Any]) -> Dict[str, Any]:
+def process_attributes(event: dict[str, Any]) -> dict[str, Any]:
     """Map normalized phase-quality scores onto ``hermes.*`` span attributes.
 
     Only numeric 0..1 values are surfaced; anything else (missing, string,
     out-of-range) is dropped. Content-free by construction.
     """
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     for key, name in _PHASE_FIELDS.items():
         v = event.get(key)
         if isinstance(v, (int, float)) and not isinstance(v, bool) and 0.0 <= v <= 1.0:
@@ -38,11 +38,11 @@ def process_attributes(event: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-def reuse_attributes(signal: Dict[str, Any]) -> Dict[str, Any]:
+def reuse_attributes(signal: dict[str, Any]) -> dict[str, Any]:
     """Map an experience-reuse audit signal onto ``hermes.*`` span attributes."""
     if not signal or not signal.get("reuse"):
         return {}
-    attrs: Dict[str, Any] = {"hermes.process.reuse": signal["reuse"]}
+    attrs: dict[str, Any] = {"hermes.process.reuse": signal["reuse"]}
     if signal.get("count"):
         attrs["hermes.process.reuse_count"] = signal["count"]
     if signal.get("source"):
@@ -60,10 +60,10 @@ class ExperienceReuseAudit:
 
     def __init__(self, *, window_s: float = 300.0) -> None:
         self._window_s = window_s
-        self._counts: Dict[str, int] = {}
+        self._counts: dict[str, int] = {}
         self._lock = threading.Lock()
 
-    def record(self, source: str = "") -> Dict[str, Any]:
+    def record(self, source: str = "") -> dict[str, Any]:
         """Record one reuse decision for ``source``; return a signal (or {})."""
         try:
             key = source or "unknown"
@@ -83,9 +83,9 @@ _AUDIT = ExperienceReuseAudit()
 
 
 def audit_experience_reuse(
-    event: Dict[str, Any],
+    event: dict[str, Any],
     audit: Optional[ExperienceReuseAudit] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Feed a reuse decision to the audit counter and return its signal.
 
     Only records when the event explicitly carries a ``reuse_source`` (i.e. a

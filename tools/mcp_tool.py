@@ -318,8 +318,6 @@ class MCPServerTask(MCPServerRunMixin, MCPServerTransportMixin, MCPServerHealthM
 
     __slots__ = (
         "_auth_park",
-        "_last_park_error",
-        "_stateless_enabled",
         "_auth_type",
         "_config",
         "_elicitation",
@@ -327,6 +325,7 @@ class MCPServerTask(MCPServerRunMixin, MCPServerTransportMixin, MCPServerHealthM
         "_ever_connected",
         "_idle_timeout_seconds",
         "_inflight_tasks",
+        "_last_park_error",
         "_last_park_line",
         "_last_tool_call_at",
         "_lifecycle_started_at",
@@ -350,6 +349,7 @@ class MCPServerTask(MCPServerRunMixin, MCPServerTransportMixin, MCPServerHealthM
         "_session_proven",
         "_shutdown_event",
         "_sse_fallback",
+        "_stateless_enabled",
         "_stdio_child_pids",
         "_suspect_reason",
         "_task",
@@ -938,11 +938,11 @@ def _ensure_stdio_command_resolvable(command: str, env: dict) -> None:
         )
 
 
-_server_risk_flags: Dict[str, bool] = {}
+_server_risk_flags: dict[str, bool] = {}
 
 _MCP_INJECTION_PATTERNS = [
-    (re.compile(r"ignore\s+(?:all\s+|previous\s+|above\s+)*instructions", re.I), "prompt_injection"),
-    (re.compile(r"system\s+prompt", re.I), "system_prompt_mention"),
+    (re.compile(r"ignore\s+(?:all\s+|previous\s+|above\s+)*instructions", re.IGNORECASE), "prompt_injection"),
+    (re.compile(r"system\s+prompt", re.IGNORECASE), "system_prompt_mention"),
 ]
 
 
@@ -953,12 +953,12 @@ def _is_high_risk_mcp_server(name: str) -> bool:
 
 def _scan_mcp_tool(
     server_name: str, tool_name: str, description: str
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Scan an MCP tool name and description and return a structured risk report."""
     severity_order = {"clean": 0, "low": 1, "medium": 2, "high": 3}
 
-    def _scan_text(text: str, field: str) -> Dict[str, Any]:
-        findings: List[Dict[str, str]] = []
+    def _scan_text(text: str, field: str) -> dict[str, Any]:
+        findings: list[dict[str, str]] = []
         if not text:
             return {
                 "server": server_name,
@@ -1017,15 +1017,15 @@ def _scan_mcp_tool(
 
 
 # Re-exports for test compatibility and facade surface
-from tools.mcp_tool_errors import _classify_mcp_failure  # noqa: F401,E402
-from tools.mcp_tool_transport import _govern_outbound_endpoint  # noqa: F401,E402
-from tools.mcp_tool_registration import (  # noqa: F401,E402
+from tools.mcp_tool_errors import _classify_mcp_failure
+from tools.mcp_tool_transport import _govern_outbound_endpoint
+from tools.mcp_tool_registration import (
     _register_server_tools,
     _resolve_durability_backend,
     _wrap_with_durability,
     _normalize_server_trust,
 )
-from tools.mcp_tool_handlers import (  # noqa: F401,E402
+from tools.mcp_tool_handlers import (
     _make_tool_handler,
     _make_get_prompt_handler,
     _clear_quota_exhausted,
@@ -1034,7 +1034,7 @@ from tools.mcp_tool_handlers import (  # noqa: F401,E402
     _quota_cooldown_active,
     _server_quota_exhausted_until,
 )
-from tools.mcp_tool_loop import _run_on_mcp_loop  # noqa: F401,E402
+from tools.mcp_tool_loop import _run_on_mcp_loop
 
 
 def _mark_server_call_started(server: Any) -> None:
@@ -1082,20 +1082,20 @@ def _enrich_missing_prompt_error(
 # Names external plugins imported from this module before the Sep 2026 decomposition.
 # Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
 # The whole block is removed by reverting the commit that added it.
-from typing import Coroutine  # noqa: F401,E402
-from types import SimpleNamespace  # noqa: F401,E402
-from typing import Tuple  # noqa: F401,E402
-from contextlib import asynccontextmanager  # noqa: F401,E402
-import concurrent.futures  # noqa: F401,E402
-from datetime import datetime  # noqa: F401,E402
-import errno  # noqa: F401,E402
-import fnmatch  # noqa: F401,E402
-import json  # noqa: F401,E402
-import math  # noqa: F401,E402
-import random  # noqa: F401,E402
-import re  # noqa: F401,E402
-import shutil  # noqa: F401,E402
-from urllib.parse import urlparse  # noqa: F401,E402
+from typing import Coroutine
+from types import SimpleNamespace
+from typing import Tuple
+from contextlib import asynccontextmanager
+import concurrent.futures
+from datetime import datetime
+import errno
+import fnmatch
+import json
+import math
+import random
+import re
+import shutil
+from urllib.parse import urlparse
 
 
 _PLUGIN_COMPAT_LAZY = {

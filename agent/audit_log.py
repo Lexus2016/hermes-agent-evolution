@@ -72,7 +72,7 @@ def log_audit_event(
     import datetime as _dt
 
     entry = {
-        "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "ts": _dt.datetime.now(_dt.UTC).isoformat(),
         "event": event,
         "session_id": session_id,
         "turn_id": turn_id,

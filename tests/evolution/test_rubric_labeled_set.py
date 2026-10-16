@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """RubricForge Slice 2 — labeled-set collection tests (#2781)."""
 
 import json
@@ -8,12 +7,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution.lib.rubric_labeled_set import (  # noqa: E402
+from evolution.lib.rubric_labeled_set import (
     append_labeled_examples,
     default_store_path,
     load_labeled_set,
 )
-from evolution_rubric_judge import resolve_active_rubric  # noqa: E402
+from evolution_rubric_judge import resolve_active_rubric
 
 
 def test_append_validates_and_persists(tmp_path):

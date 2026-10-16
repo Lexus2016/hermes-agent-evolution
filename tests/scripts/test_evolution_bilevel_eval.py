@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for scripts/evolution_bilevel_eval.py (#1166)."""
 
 import sys
@@ -6,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-import evolution_bilevel_eval as bl  # noqa: E402
+import evolution_bilevel_eval as bl
 
 
 def _cases():

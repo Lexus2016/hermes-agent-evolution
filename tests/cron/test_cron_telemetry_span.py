@@ -7,10 +7,10 @@ identity + success/error — without running the heavy _run_job_impl (stubbed).
 import pytest
 
 pytest.importorskip("opentelemetry")
-from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult  # noqa: E402
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-import cron.scheduler as scheduler  # noqa: E402
-import hermes_telemetry as tel  # noqa: E402
+from cron import scheduler
+import hermes_telemetry as tel
 
 
 class _Collect(SpanExporter):
@@ -62,7 +62,7 @@ def test_run_job_span_records_failure(monkeypatch):
 
 def test_run_job_disabled_is_noop(monkeypatch):
     # Default (disabled) telemetry: run_job works and emits nothing.
-    monkeypatch.setattr(tel, "_otel_config", lambda: {})
+    monkeypatch.setattr(tel, "_otel_config", dict)
     monkeypatch.setattr(scheduler, "_run_job_impl", lambda job: (True, "", "", None))
     ok, *_ = scheduler.run_job({"id": "x"})
     assert ok is True

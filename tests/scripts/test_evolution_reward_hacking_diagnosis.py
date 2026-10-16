@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for scripts/evolution_reward_hacking_diagnosis.py (#1165)."""
 
 import sys
@@ -6,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-import evolution_reward_hacking_diagnosis as rh  # noqa: E402
+import evolution_reward_hacking_diagnosis as rh
 
 
 def test_clean_trajectory_no_findings():
@@ -81,4 +80,4 @@ def test_empty_trajectory():
 def test_evaluate_shape():
     out = rh.evaluate([{"tool": "read_file", "path": "reference_solution.py"}], verification_passed=True)
     assert out["suspected_reward_hacking"] is True
-    assert "findings" in out and out["findings"]
+    assert out.get("findings")

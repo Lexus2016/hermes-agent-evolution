@@ -355,7 +355,7 @@ class TestSkillReadiness:
         job = _job(skills=["ghost-skill"])
         with cron_jobs.use_cron_store(tmp_path):
             cron_jobs.save_jobs([job])
-            success, output, final_response, error, agent_constructed = \
+            success, output, _final_response, error, agent_constructed = \
                 _run_job_patched(job, tmp_path, skill_view=fake_skill_view)
 
         assert agent_constructed is False
@@ -395,7 +395,7 @@ class TestSkillReadiness:
             cron_jobs.save_jobs([job])
             with patch("agent.skill_bundles.resolve_bundle_command_key", return_value="my-bundle"), \
                  patch("agent.skill_bundles.get_skill_bundles", return_value=fake_bundles):
-                success, output, final_response, error, agent_constructed = \
+                success, output, _final_response, error, agent_constructed = \
                     _run_job_patched(job, tmp_path, skill_view=fake_skill_view)
 
         assert agent_constructed is False
@@ -454,7 +454,7 @@ class TestBalanceLowBlock:
                 "cron.scheduler._preflight_check_provider_balance",
                 return_value=self._balance_reason(),
             ):
-                success, output, final_response, error, agent_constructed = \
+                success, output, _final_response, error, agent_constructed = \
                     _run_job_patched(job, tmp_path)
 
         assert agent_constructed is False
@@ -496,7 +496,7 @@ class TestBalanceLowBlock:
             cron_jobs.save_jobs([job])
             fake_db = MagicMock()
             for _tick in range(2):
-                fresh = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
+                fresh = next(j for j in cron_jobs.load_jobs() if j["id"] == job["id"])
                 with patch("cron.scheduler._hermes_home", tmp_path), \
                      patch("cron.scheduler._resolve_origin", return_value=None), \
                      patch("cron.scheduler._preflight_check_provider_key",
@@ -517,7 +517,7 @@ class TestBalanceLowBlock:
                     assert ok is True
                     assert mock_agent_cls.called is False
 
-            stored = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
+            stored = next(j for j in cron_jobs.load_jobs() if j["id"] == job["id"])
 
         assert stored["last_status"] == "balance_low"
         assert len(deliveries) == 1, (
@@ -537,12 +537,12 @@ class TestBalanceLowBlock:
                 return_value=self._balance_reason(),
             ):
                 _run_job_patched(job, tmp_path)
-            stored = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
+            stored = next(j for j in cron_jobs.load_jobs() if j["id"] == job["id"])
             assert stored.get("preflight_alerted")
             # Balance restored → healthy run clears the marker.
-            fresh = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
+            fresh = next(j for j in cron_jobs.load_jobs() if j["id"] == job["id"])
             success, *_rest, agent_constructed = _run_job_patched(fresh, tmp_path)
             assert success is True
             assert agent_constructed is True
-            stored = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
+            stored = next(j for j in cron_jobs.load_jobs() if j["id"] == job["id"])
             assert not stored.get("preflight_alerted")

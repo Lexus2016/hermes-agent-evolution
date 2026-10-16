@@ -89,6 +89,7 @@ def _run_gate(tmp_path: Path, bin_dir: Path, gate: Path = GATE) -> tuple[str, Pa
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr
     return proc.stdout.strip().splitlines()[-1], evolution_dir

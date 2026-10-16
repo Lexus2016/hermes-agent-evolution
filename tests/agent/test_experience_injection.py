@@ -7,7 +7,7 @@ Patterns are seeded via the real bank module against the hermetic
 the explicit raising-bank test.
 """
 
-import agent.experience_bank as experience_bank
+from agent import experience_bank
 from types import SimpleNamespace
 from unittest.mock import patch
 

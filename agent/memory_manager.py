@@ -478,7 +478,7 @@ class MemoryManager:
         # Retrieval-utility tracking (#1480): per-turn list of (record_id,
         # session_id) pairs logged during prefetch_all. Cleared after
         # outcomes are recorded in sync_all.
-        self._pending_retrievals: List[tuple[str, str]] = []
+        self._pending_retrievals: list[tuple[str, str]] = []
         # #137: per-process dedup set of (event_id, hash(observation)) pairs
         # whose contradiction flag has already been surfaced. Bounded; an
         # overflow clears toward MORE detection (fail-safe, never suppresses).
@@ -768,7 +768,7 @@ class MemoryManager:
     def _friction_signals_from_turn(
         user_content: str,
         assistant_content: str,
-        messages: Optional[List[Dict[str, Any]]] = None,
+        messages: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, int]:
         """Derive friction signals for a completed turn.
 
@@ -859,7 +859,7 @@ class MemoryManager:
         assistant_content: str,
         *,
         session_id: str = "",
-        messages: Optional[List[Dict[str, Any]]] = None,
+        messages: Optional[list[dict[str, Any]]] = None,
     ) -> MemoryEvent:
         """Score a completed turn and record it as an episodic memory event.
 
@@ -913,7 +913,7 @@ class MemoryManager:
         *,
         limit: int = 200,
         min_importance: float = 0.0,
-    ) -> List[ContradictionFlag]:
+    ) -> list[ContradictionFlag]:
         """Surface contradictions between *observation* and episodic memory.
 
         Runs :func:`agent.memory_contradiction.detect_contradictions` over the
@@ -964,7 +964,7 @@ class MemoryManager:
 
     def _revoke_contradicted(
         self,
-        flags: List[ContradictionFlag],
+        flags: list[ContradictionFlag],
         *,
         by_event_id: str = "",
     ) -> int:
@@ -1374,7 +1374,7 @@ class MemoryManager:
     # -- Staleness detection (#797) ------------------------------------------
 
     @staticmethod
-    def _entries_to_notes(entries: List[str], *, target: str) -> List["Note"]:
+    def _entries_to_notes(entries: list[str], *, target: str) -> list[Note]:
         """Convert built-in memory-store entries to staleness :class:`Note` objects.
 
         The built-in store keeps entries as plain strings (delimited by ``§``)
@@ -1386,7 +1386,7 @@ class MemoryManager:
         """
         from agent.memory_staleness import Note
 
-        notes: List[Note] = []
+        notes: list[Note] = []
         for idx, entry in enumerate(entries):
             text = (entry or "").strip()
             if not text:
@@ -1404,7 +1404,7 @@ class MemoryManager:
             )
         return notes
 
-    def collect_notes(self) -> List["Note"]:
+    def collect_notes(self) -> list[Note]:
         """Gather :class:`~agent.memory_staleness.Note` objects from all stores.
 
         Reads the on-disk built-in memory store (MEMORY.md + USER.md) via
@@ -1423,14 +1423,14 @@ class MemoryManager:
             logger.warning("check_staleness: could not load memory store: %s", e)
             return []
 
-        notes: List["Note"] = []
+        notes: list[Note] = []
         notes.extend(self._entries_to_notes(store.memory_entries, target="memory"))
         notes.extend(self._entries_to_notes(store.user_entries, target="user"))
         return notes
 
     def check_staleness(
-        self, *, config: Optional[Dict[str, Any]] = None
-    ) -> "StalenessReport":
+        self, *, config: Optional[dict[str, Any]] = None
+    ) -> StalenessReport:
         """Run staleness detection over the current memory corpus (#797).
 
         This is the real consumer of :func:`agent.memory_staleness.analyze`:
@@ -1449,7 +1449,7 @@ class MemoryManager:
         return analyze(notes, config=config)
 
     def render_staleness_report(
-        self, *, config: Optional[Dict[str, Any]] = None
+        self, *, config: Optional[dict[str, Any]] = None
     ) -> str:
         """Run :meth:`check_staleness` and render the result as markdown.
 
@@ -1464,8 +1464,8 @@ class MemoryManager:
     # -- Conflict detection (#908) -------------------------------------------
 
     def detect_memory_conflicts(
-        self, *, config: Optional[Dict[str, Any]] = None
-    ) -> "ConflictReport":
+        self, *, config: Optional[dict[str, Any]] = None
+    ) -> ConflictReport:
         """Run conflict detection over the current memory corpus (#908).
 
         This is the real consumer of :func:`agent.memory_conflicts.analyze_conflicts`:
@@ -1485,7 +1485,7 @@ class MemoryManager:
         return analyze_conflicts(notes, config=config)
 
     def render_memory_conflicts(
-        self, *, config: Optional[Dict[str, Any]] = None
+        self, *, config: Optional[dict[str, Any]] = None
     ) -> str:
         """Run :meth:`detect_memory_conflicts` and render the result as markdown.
 

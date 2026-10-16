@@ -2105,7 +2105,7 @@ def _buffer_fallback_notice(agent, notice: str) -> None:
 
 def try_activate_fallback(
     agent,
-    reason: "FailoverReason | None" = None,
+    reason: FailoverReason | None = None,
     reset_at=None,
     *,
     api_error: Optional[Exception] = None,

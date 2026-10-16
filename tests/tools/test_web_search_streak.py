@@ -53,7 +53,7 @@ def test_threshold_resolution(monkeypatch):
         _get_web_search_streak_threshold,
     )
 
-    monkeypatch.setattr("tools.web_tools._load_web_config", lambda: {})
+    monkeypatch.setattr("tools.web_tools._load_web_config", dict)
     assert _get_web_search_streak_threshold() == DEFAULT_WEB_SEARCH_STREAK_THRESHOLD
     cases = [
         ({"search_streak_threshold": 0}, 0),  # 0 disables

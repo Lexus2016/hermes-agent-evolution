@@ -91,7 +91,7 @@ class TestSearchFilesArgumentPreflight:
     def test_no_blind_retry_path(self):
         """Malformed args result is returned to the model, not retried."""
         agent = _make_agent()
-        args, err = _parse_tool_arguments(
+        _args, err = _parse_tool_arguments(
             '{"target": "content"}',
             function_name="search_files",
             agent=agent,

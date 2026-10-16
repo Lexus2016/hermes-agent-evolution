@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """References-not-rules memory framing + dual-memory consensus (#2576).
 
 Misevolution guardrail (parent #2538; arXiv:2509.26354 "Your Agent May
@@ -26,8 +25,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 __all__ = [
-    "ConsensusVerdict",
     "REFERENCES_NOT_RULES_PROMPT",
+    "ConsensusVerdict",
     "consensus_validate",
     "frame_memory_block",
 ]
@@ -50,15 +49,15 @@ class ConsensusVerdict:
 
     entry_text: str
     confidence: str  # "high", "medium", "low"
-    corroborated_by: List[str] = field(default_factory=list)
-    contradicted_by: List[str] = field(default_factory=list)
+    corroborated_by: list[str] = field(default_factory=list)
+    contradicted_by: list[str] = field(default_factory=list)
     notes: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ConsensusVerdict":
+    def from_dict(cls, d: dict[str, Any]) -> ConsensusVerdict:
         return cls(
             entry_text=str(d.get("entry_text", "")),
             confidence=str(d.get("confidence", "low")),
@@ -80,7 +79,7 @@ def _text_overlap(a: str, b: str) -> bool:
 
 def consensus_validate(
     entry_text: str,
-    evidence_sources: Sequence[Dict[str, Any]],
+    evidence_sources: Sequence[dict[str, Any]],
 ) -> ConsensusVerdict:
     """Corroborate a recalled memory against independent evidence.
 
@@ -94,8 +93,8 @@ def consensus_validate(
     - **medium** — no corroboration and no contradiction (neutral).
     - **low** — contradicted by >= 1 source.
     """
-    corroborated_by: List[str] = []
-    contradicted_by: List[str] = []
+    corroborated_by: list[str] = []
+    contradicted_by: list[str] = []
 
     entry_lower = entry_text.lower()
     entry_tokens = {w for w in entry_lower.split() if len(w) >= 4}
@@ -171,7 +170,7 @@ def frame_memory_block(
     entry as a reference, not a rule. When False, the block is rendered
     without the framing (backward-compatible for callers that don't want it).
     """
-    lines: List[str] = []
+    lines: list[str] = []
     if include_framing:
         lines.append(f"[{REFERENCES_NOT_RULES_PROMPT}]")
         lines.append("")

@@ -78,7 +78,7 @@ _SECONDS_PER_DAY = 86400.0
 # Entries compaction (bounds entries.jsonl growth)
 # ---------------------------------------------------------------------------
 
-def _compact_entries(entries: List[ExperienceEntry], cutoff_ts: float) -> bool:
+def _compact_entries(entries: list[ExperienceEntry], cutoff_ts: float) -> bool:
     """Atomically rewrite ``entries.jsonl`` keeping entries at/after *cutoff_ts*.
 
     Reads come from the already-parsed *entries* list (via ``iter_entries``),
@@ -132,7 +132,7 @@ def _compact_entries(entries: List[ExperienceEntry], cutoff_ts: float) -> bool:
 # Core distillation
 # ---------------------------------------------------------------------------
 
-def _empty_stats() -> Dict[str, Any]:
+def _empty_stats() -> dict[str, Any]:
     return {
         "entries_seen": 0,
         "evidence_entries": 0,
@@ -156,8 +156,8 @@ def _fill(template: str, tool: Optional[str]) -> Optional[str]:
 
 
 def _latest_session_revisions(
-    entries: List[ExperienceEntry],
-) -> List[ExperienceEntry]:
+    entries: list[ExperienceEntry],
+) -> list[ExperienceEntry]:
     """Return only the newest completed revision for each session.
 
     ``ts`` is the source ``ended_at``; the message id resolves equal-time
@@ -166,7 +166,7 @@ def _latest_session_revisions(
     Повертає лише найновішу завершену редакцію кожної сесії. Час завершення є
     головним ключем, номер повідомлення та порядок запису розв'язують нічию.
     """
-    latest: Dict[str, Tuple[Tuple[float, int, int], ExperienceEntry]] = {}
+    latest: dict[str, tuple[tuple[float, int, int], ExperienceEntry]] = {}
     for index, entry in enumerate(entries):
         try:
             message_id = int(entry.stats.get("source_last_message_id", 0) or 0)
@@ -179,7 +179,7 @@ def _latest_session_revisions(
     return [latest[session_id][1] for session_id in sorted(latest)]
 
 
-def _distill(now: float, stats: Dict[str, Any]) -> Dict[str, Any]:
+def _distill(now: float, stats: dict[str, Any]) -> dict[str, Any]:
     evidence_cutoff = now - EVIDENCE_WINDOW_DAYS * _SECONDS_PER_DAY
     stale_cutoff = now - STALE_PATTERN_DAYS * _SECONDS_PER_DAY
 
@@ -197,7 +197,7 @@ def _distill(now: float, stats: Dict[str, Any]) -> Dict[str, Any]:
     stats["evidence_entries"] = len(evidence)
 
     # 2. Honest null: unattributed evidence never clusters.
-    attributable: List[ExperienceEntry] = []
+    attributable: list[ExperienceEntry] = []
     for e in evidence:
         if e.primary_dimension is None or e.failure_category is None:
             stats["unattributed"] += 1
@@ -205,14 +205,14 @@ def _distill(now: float, stats: Dict[str, Any]) -> Dict[str, Any]:
             attributable.append(e)
 
     # 3. Cluster by (dimension, category, tool); tool may be None.
-    groups: Dict[Tuple[str, str, Optional[str]], List[ExperienceEntry]] = {}
+    groups: dict[tuple[str, str, Optional[str]], list[ExperienceEntry]] = {}
     for e in attributable:
         key = (e.primary_dimension or "", e.failure_category or "", e.tool)
         groups.setdefault(key, []).append(e)
     stats["clusters"] = len(groups)
 
     existing = {p.id: p for p in load_patterns()}
-    merged: Dict[str, ExperiencePattern] = {}
+    merged: dict[str, ExperiencePattern] = {}
 
     # 4. Threshold + template gate; deterministic iteration order.
     for (dimension, category, tool) in sorted(groups, key=lambda k: (k[0], k[1], k[2] or "")):
@@ -305,7 +305,7 @@ def run_distillation(
         return _distill(now, stats)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     """Cron entry point: run once, print the stats as one JSON line."""
     stats = run_distillation()
     print(json.dumps(stats, sort_keys=True))

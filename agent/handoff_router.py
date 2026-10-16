@@ -44,10 +44,10 @@ _CODE_KEYWORDS = frozenset({
 class DependencyGraphContext:
     """Typed summary of files, tool executions, and key context constraints."""
 
-    files_referenced: Set[str] = field(default_factory=set)
-    tools_executed: List[str] = field(default_factory=list)
-    recent_errors: List[str] = field(default_factory=list)
-    key_facts: List[str] = field(default_factory=list)
+    files_referenced: set[str] = field(default_factory=set)
+    tools_executed: list[str] = field(default_factory=list)
+    recent_errors: list[str] = field(default_factory=list)
+    key_facts: list[str] = field(default_factory=list)
 
     def render_markdown(self) -> str:
         """Render compact dependency graph markdown."""
@@ -57,7 +57,7 @@ class DependencyGraphContext:
             lines.append(f"• Referenced Files: {', '.join(sorted_files)}")
         if self.tools_executed:
             # Deduplicate sequential identical actions
-            deduped_actions: List[str] = []
+            deduped_actions: list[str] = []
             for act in self.tools_executed:
                 if not deduped_actions or deduped_actions[-1] != act:
                     deduped_actions.append(act)
@@ -72,7 +72,7 @@ class DependencyGraphContext:
 
 
 def extract_dependency_graph(
-    turns: List[Dict[str, Any]],
+    turns: list[dict[str, Any]],
 ) -> DependencyGraphContext:
     """Extract files, actions, errors, and key facts from turn history without LLM calls."""
     graph = DependencyGraphContext()
@@ -117,7 +117,7 @@ def extract_dependency_graph(
 
 
 def select_handoff_format(
-    turns: List[Dict[str, Any]],
+    turns: list[dict[str, Any]],
     goal: Optional[str] = None,
     requested_mode: Optional[str] = "auto",
 ) -> str:

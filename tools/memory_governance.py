@@ -36,7 +36,7 @@ at the single call site.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from typing import Any, Dict, List, Optional, Tuple
 
 # OUTERMOST supersession trailer. The ``sup:`` prefix is namespaced so it
@@ -56,7 +56,7 @@ _VERIFIER_RE = re.compile(r"⟦verifier:confidence=([0-9.]+)(?:\|verified_by=([a
 
 def _now_iso() -> str:
     """Current UTC timestamp in the canonical supersession format."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def encode_supersession(text: str, timestamp: Optional[str] = None) -> str:
@@ -72,7 +72,7 @@ def encode_supersession(text: str, timestamp: Optional[str] = None) -> str:
     return f"{text} {_SUP_OPEN}{ts}{_SUP_CLOSE}"
 
 
-def parse_supersession(stored: str) -> Tuple[str, Optional[str]]:
+def parse_supersession(stored: str) -> tuple[str, Optional[str]]:
     """Split ``stored`` into ``(display_text, superseded_at)``.
 
     Returns ``(stored, None)`` when the outermost trailer is absent or
@@ -87,8 +87,8 @@ def parse_supersession(stored: str) -> Tuple[str, Optional[str]]:
 
 
 def supersede_entry(
-    entries: List[str], old_text: str, timestamp: Optional[str] = None
-) -> Dict[str, Any]:
+    entries: list[str], old_text: str, timestamp: Optional[str] = None
+) -> dict[str, Any]:
     """Mark the entry containing *old_text* as superseded, in place.
 
     Operates on the raw on-disk entry list. First supersession wins: if the
@@ -126,7 +126,7 @@ def governed_search(
     source_filter: Optional[object] = None,
     min_trust: Optional[str] = None,
     include_superseded: bool = False,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Supersession-aware wrapper around ``store.search``.
 
     Default (``include_superseded=False``) hides superseded entries entirely.
@@ -164,7 +164,7 @@ def encode_lifecycle_and_verifier(
 
 def parse_lifecycle_and_verifier(
     stored: str,
-) -> Tuple[str, str, float, Optional[str]]:
+) -> tuple[str, str, float, Optional[str]]:
     """Parse MemGuard lifecycle and verifier metadata from a stored memory entry.
 
     Returns:
@@ -192,11 +192,11 @@ def parse_lifecycle_and_verifier(
 
 
 def promote_provisional_entry(
-    entries: List[str],
+    entries: list[str],
     match_text: str,
     confidence: float = 1.0,
     verified_by: str = "verifier",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Promote a provisional memory entry to active status after verification (#3385)."""
     match_text = (match_text or "").strip()
     if not match_text:

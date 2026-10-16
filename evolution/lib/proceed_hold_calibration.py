@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Proceed-vs-hold calibration suite for irreversible action boundaries (#66).
 
 SteerBench-Work (arXiv 2608.12654) freezes the "commit moments" where a
@@ -45,18 +44,18 @@ from enum import Enum
 from typing import Callable, Dict, Optional, Sequence, Tuple
 
 __all__ = [
+    "DEFAULT_SUITE",
+    "CalibrationReport",
     "Decision",
-    "Outcome",
     "EvidenceItem",
+    "Outcome",
     "Scenario",
     "ScenarioResult",
-    "CalibrationReport",
     "classify_outcome",
-    "run_calibration",
     "evaluate",
-    "reference_decider",
     "mirror_pairs",
-    "DEFAULT_SUITE",
+    "reference_decider",
+    "run_calibration",
 ]
 
 
@@ -103,7 +102,7 @@ class Scenario:
     category: str
     action: str
     required_confidence: float
-    evidence: Tuple[EvidenceItem, ...]
+    evidence: tuple[EvidenceItem, ...]
     ground_truth: Decision
     mirror_of: str = ""
 
@@ -163,7 +162,7 @@ class CalibrationReport:
             f"({self.over_refusal_rate:.1%})"
         )
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         """JSON-serialisable view of the report."""
         return {
             "total": self.total,
@@ -197,13 +196,13 @@ def classify_outcome(decision: Decision, ground_truth: Decision) -> Outcome:
 def evaluate(
     decider: Decider,
     scenarios: Sequence[Scenario] = (),
-) -> Tuple[CalibrationReport, Tuple[ScenarioResult, ...]]:
+) -> tuple[CalibrationReport, tuple[ScenarioResult, ...]]:
     """Run a decider over the scenarios and return report + per-scenario detail.
 
     ``scenarios`` defaults to :data:`DEFAULT_SUITE` when omitted.
     """
     suite = DEFAULT_SUITE if scenarios == () else scenarios
-    results: Tuple[ScenarioResult, ...] = tuple(
+    results: tuple[ScenarioResult, ...] = tuple(
         ScenarioResult(
             scenario_id=s.id,
             decision=(decision := decider(s)),
@@ -246,7 +245,7 @@ def reference_decider(scenario: Scenario) -> Decision:
     return Decision.HOLD
 
 
-def mirror_pairs(scenarios: Sequence[Scenario] = ()) -> Dict[str, str]:
+def mirror_pairs(scenarios: Sequence[Scenario] = ()) -> dict[str, str]:
     """Map each evidence-reversed mirror id to its origin id (or {} if none)."""
     suite = DEFAULT_SUITE if scenarios == () else scenarios
     return {s.id: s.mirror_of for s in suite if s.mirror_of}
@@ -260,7 +259,7 @@ def _ev(text: str, supports_action: bool, strength: float) -> EvidenceItem:
 # The default suite: 12 scenarios across 6 categories, organised as six
 # evidence-reversed mirror pairs.  Within each pair the action surface is
 # identical and only the evidence flips, so the ground truth must flip too.
-DEFAULT_SUITE: Tuple[Scenario, ...] = (
+DEFAULT_SUITE: tuple[Scenario, ...] = (
     # -- merge -----------------------------------------------------------
     Scenario(
         id="merge-green",

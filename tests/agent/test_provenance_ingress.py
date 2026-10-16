@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Provenance is classified at ingress and stamped in exactly one place.
 
 The role label is not a trust boundary: the runtime writes ``role="user"`` rows

@@ -54,10 +54,10 @@ class StageResult:
 class ProbeOutcome:
     """All stage outcomes plus the overall verdict."""
 
-    results: List[StageResult] = field(default_factory=list)
+    results: list[StageResult] = field(default_factory=list)
     ok: bool = True
 
-    def failing_stages(self) -> List[str]:
+    def failing_stages(self) -> list[str]:
         return [r.stage for r in self.results if not r.ok]
 
 
@@ -73,7 +73,7 @@ def _run_one(
     start = time.monotonic()
     try:
         fn()
-    except Exception as exc:  # noqa: BLE001 — any failure must be attributed
+    except Exception as exc:
         elapsed = time.monotonic() - start
         res = StageResult(
             stage=stage,
@@ -131,7 +131,7 @@ def run_probe(
     return outcome
 
 
-def _load_oss_config(path: str) -> Dict[str, Any]:
+def _load_oss_config(path: str) -> dict[str, Any]:
     """Load the OSS block of a mem0.json config file."""
     import json as _json
 
@@ -145,7 +145,7 @@ def _load_oss_config(path: str) -> Dict[str, Any]:
     return oss
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=(__doc__ or "Staged Mem0 health probe").splitlines()[0]
     )
@@ -165,7 +165,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         oss = _load_oss_config(args.config)
-    except Exception as exc:  # noqa: BLE001 — config errors exit 2
+    except Exception as exc:
         emit({"stage": "config", "status": "failed", "detail": str(exc)})
         return 2
 
@@ -179,7 +179,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "reranker": oss.get("reranker"),
             "version": "v1.1",
         })
-    except Exception as exc:  # noqa: BLE001 — init failure must be attributed
+    except Exception as exc:
         emit({
             "stage": "init",
             "status": "failed",

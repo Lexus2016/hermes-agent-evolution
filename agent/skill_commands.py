@@ -472,7 +472,7 @@ def skill_command_collision_note(name: str) -> Optional[str]:
     return f"slash command /{cmd_name} unavailable — name taken by built-in; use /skill {name}"
 
 
-def _scan_skill_md(skill_md: Path, disabled: set, seen_names: set, commands: Dict[str, Dict[str, Any]], resolve_command, pending_colliding: list) -> None:
+def _scan_skill_md(skill_md: Path, disabled: set, seen_names: set, commands: dict[str, dict[str, Any]], resolve_command, pending_colliding: list) -> None:
     """Register one SKILL.md in *commands* (no-op when filtered or colliding)."""
     from tools.skills_tool import _parse_frontmatter, skill_matches_apps, skill_matches_platform, skill_matches_environment
     if any(part in _SCAN_SKIP_PARTS for part in skill_md.parts):
@@ -551,7 +551,7 @@ def scan_skill_commands() -> dict[str, dict[str, Any]]:
                 except Exception:
                     continue
         # Pass 2: Register namespaced commands for colliding skills
-        colliding: Dict[str, Dict[str, Any]] = {}
+        colliding: dict[str, dict[str, Any]] = {}
         for name, cmd_name, description, skill_md in pending_colliding:
             namespaced_key = f"/skill-{cmd_name}"
             if namespaced_key in commands:

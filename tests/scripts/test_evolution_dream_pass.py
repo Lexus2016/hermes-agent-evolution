@@ -5,14 +5,14 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
-from evolution_dream_pass import (  # noqa: E402
+from evolution_dream_pass import (
     MAX_OLDER_AGE_DAYS,
     SUPERSEDED_NOTE_STATUS,
     apply_tqmemory_deprecations,
@@ -218,7 +218,7 @@ def test_scan_untitled_notes_skipped() -> None:
 
 
 def test_scan_age_window_respects_max_older_age() -> None:
-    now = datetime(2026, 8, 23, tzinfo=timezone.utc)
+    now = datetime(2026, 8, 23, tzinfo=UTC)
     old = (now - timedelta(days=MAX_OLDER_AGE_DAYS + 1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     fresh = (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     notes = [
@@ -271,7 +271,7 @@ def test_apply_dry_run_writes_nothing(tmp_path: Path) -> None:
 
 
 def test_loader_reads_store_layout_and_skips_malformed(tmp_path: Path) -> None:
-    notes = _write_store(
+    _notes = _write_store(
         tmp_path,
         [
             _tq("n1", "One", TS0, project_id="proj-a"),

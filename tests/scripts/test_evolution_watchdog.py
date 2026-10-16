@@ -3,14 +3,14 @@
 import json
 import re
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_watchdog import (  # noqa: E402
+from evolution_watchdog import (
     STAGES,
     _load_jobs,
     _stage_cron_weekday,
@@ -426,7 +426,7 @@ class TestUpstreamLag:
     def _clock(self, hours_after_release):
         from datetime import datetime, timedelta, timezone
 
-        base = datetime(2026, 6, 19, 12, 0, 0, tzinfo=timezone.utc)
+        base = datetime(2026, 6, 19, 12, 0, 0, tzinfo=UTC)
         return lambda: base + timedelta(hours=hours_after_release)
 
     def _release_runner(
@@ -601,7 +601,7 @@ class TestStagesMirrorCronSpecs:
     def test_extension_matches_output_file(self):
         for stage, (_slot, ext) in STAGES.items():
             spec = (self.CRON_DIR / f"{stage}.yaml").read_text()
-            m = re.search(r"^\s*file:.*\{current_date\}\.(\w+)\s*$", spec, re.M)
+            m = re.search(r"^\s*file:.*\{current_date\}\.(\w+)\s*$", spec, re.MULTILINE)
             assert m, f"{stage}.yaml has no output.file with {{current_date}}"
             assert m.group(1) == ext, (
                 f"watchdog STAGES says '{stage}' reports are .{ext}, "
@@ -613,7 +613,7 @@ class TestStagesMirrorCronSpecs:
             spec = (self.CRON_DIR / f"{stage}.yaml").read_text()
             # Hour field may be a single hour ("21") or a multi-slot list
             # ("1,5,9,13,17,21"); STAGES mirrors the FIRST slot.
-            m = re.search(r'^schedule:\s*"(\d+)\s+([\d,]+)\s', spec, re.M)
+            m = re.search(r'^schedule:\s*"(\d+)\s+([\d,]+)\s', spec, re.MULTILINE)
             assert m, f"{stage}.yaml has no parsable schedule"
             first_hour = int(m.group(2).split(",")[0])
             assert first_hour == slot, (
@@ -1125,7 +1125,7 @@ class TestUpstreamLagFilesIssue:
     def _clock(self, hours_after_release):
         from datetime import datetime, timedelta, timezone
 
-        base = datetime(2026, 6, 19, 12, 0, 0, tzinfo=timezone.utc)
+        base = datetime(2026, 6, 19, 12, 0, 0, tzinfo=UTC)
         return lambda: base + timedelta(hours=hours_after_release)
 
     def _release_runner(self, *, tag="v2026.6.19", is_ancestor_rc=1, behind=391):
@@ -1157,7 +1157,6 @@ class TestUpstreamLagFilesIssue:
         def fake_ensure(behind, ahead, tag="", **kw):
             calls["behind"] = behind
             calls["tag"] = tag
-            return None
 
         monkeypatch.setattr(w, "ensure_upstream_issue", fake_ensure)
         alerts = check_upstream_lag(
@@ -1285,7 +1284,7 @@ class TestRealityReconciliation:
         # ratio 0.01 is a real degradation). LOW_SELECTION_EFFICIENCY must survive.
         from evolution_watchdog import reconcile_health_with_reality
 
-        prs = [
+        _prs = [
             {"headRefName": "evolution/issue-752-x", "mergedAt": "2026-07-09T19:16:20Z"}
         ]
 

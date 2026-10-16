@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Agentic Transaction Slice 2 — transactional skill hub (#2763).
 
 Child of #2759 (Agentic Transaction, arXiv 2608.13900). Semantic atomicity
@@ -66,7 +65,7 @@ def staged_skill_publish(
     try:
         try:
             gate_passed = bool(validator(new_body))
-        except Exception as exc:  # noqa: BLE001 - a throwing gate fails closed
+        except Exception as exc:
             logger.debug("skill validator raised: %s", exc)
             gate_passed = False
         if not gate_passed:

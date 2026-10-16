@@ -483,7 +483,7 @@ class TestAgentCannotSetModelPin:
 # Cron preflight, action validation, and retry rate limiter (issue #214)
 # =========================================================================
 
-from tools.cronjob_tools import (  # noqa: E402
+from tools.cronjob_tools import (
     _cron_preflight_check,
     _format_cron_error,
     _validate_cron_action,

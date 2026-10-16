@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Safety-review gate for self-modification merges + static analysis (#2575).
 
 Misevolution guardrail (parent #2538; arXiv:2509.26354 "Your Agent May
@@ -26,13 +25,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 __all__ = [
     "SafetyGateVerdict",
-    "scan_code_for_safety_violations",
     "check_safety_gate",
+    "scan_code_for_safety_violations",
 ]
 
 # Dangerous-code patterns (static analysis on generated Python).
 # Each entry: (compiled_regex, description, severity).
-_DANGEROUS_PATTERNS: List[Tuple[re.Pattern, str, str]] = [
+_DANGEROUS_PATTERNS: list[tuple[re.Pattern, str, str]] = [
     (
         re.compile(r"\bos\.system\s*\("),
         "os.system() — shell injection risk; use subprocess with shell=False",
@@ -99,14 +98,14 @@ class SafetyGateVerdict:
     """Result of the safety-review gate on a set of changed files."""
 
     safe: bool
-    violations: List[str] = field(default_factory=list)
+    violations: list[str] = field(default_factory=list)
     files_scanned: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "SafetyGateVerdict":
+    def from_dict(cls, d: dict[str, Any]) -> SafetyGateVerdict:
         return cls(
             safe=bool(d.get("safe", True)),
             violations=list(d.get("violations", []) or []),
@@ -115,8 +114,8 @@ class SafetyGateVerdict:
 
 
 def scan_code_for_safety_violations(
-    file_contents: Dict[str, str],
-) -> List[str]:
+    file_contents: dict[str, str],
+) -> list[str]:
     """Scan *file_contents* (path → content) for dangerous code patterns.
 
     Returns a list of violation strings, each formatted as:
@@ -126,7 +125,7 @@ def scan_code_for_safety_violations(
     target Python syntax). The scan is line-by-line for accurate line
     numbers and to avoid multi-line false positives.
     """
-    violations: List[str] = []
+    violations: list[str] = []
     for path, content in file_contents.items():
         if not path.endswith(".py"):
             continue
@@ -142,9 +141,9 @@ def scan_code_for_safety_violations(
 
 
 def check_safety_gate(
-    files: Sequence[Dict[str, Any]],
-    source_contents: Optional[Dict[str, str]] = None,
-) -> List[str]:
+    files: Sequence[dict[str, Any]],
+    source_contents: Optional[dict[str, str]] = None,
+) -> list[str]:
     """Run the safety-review gate and return blocking-violation strings.
 
     ``files`` is the ``gh pr view --json files`` shape. ``source_contents``

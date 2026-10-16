@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for ERL heuristic injection into the system prompt (issue #1361)."""
 
 from __future__ import annotations
@@ -10,7 +9,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_heuristic_retrieve import (  # noqa: E402
+from evolution_heuristic_retrieve import (
     format_for_injection,
     load_heuristics,
     retrieve,

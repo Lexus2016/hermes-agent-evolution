@@ -29,7 +29,7 @@ from evolution_trace_holdout import (
 DEFAULT_MIN_SESSIONS = 3  # distinct sessions required to call a candidate general
 
 
-def _cluster_key(record: Dict[str, Any]) -> str:
+def _cluster_key(record: dict[str, Any]) -> str:
     """Stable identifier for a weakness cluster (mirrors trace_holdout)."""
     kind = str(record.get("kind", ""))
     tool = str(record.get("tool") or record.get("signature") or "")
@@ -37,14 +37,14 @@ def _cluster_key(record: Dict[str, Any]) -> str:
 
 
 def score_candidate(
-    candidate: Dict[str, Any],
-    holdout_batch: List[Dict[str, Any]],
+    candidate: dict[str, Any],
+    holdout_batch: list[dict[str, Any]],
     *,
     min_sessions: int = DEFAULT_MIN_SESSIONS,
     holdout_ratio: float = DEFAULT_HOLDOUT_RATIO,
     tolerance: float = DEFAULT_TOLERANCE,
     min_count: int = DEFAULT_MIN_COUNT,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return a select/reject verdict for one candidate harness update.
 
     A candidate is SELECTED when BOTH hold:
@@ -93,7 +93,7 @@ def score_candidate(
     }
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     """CLI: read {candidate, holdout_batch} JSON from stdin, print verdicts."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(

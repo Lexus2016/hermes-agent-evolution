@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Governed shared memory with scope, provenance, supersession, and redistribution (Issue #2488, Slice B, MemClaw).
 
 Mitigates multi-agent shared memory failure modes:
@@ -35,11 +34,11 @@ class MemoryProvenance:
 
     author_subagent_id: str
     source_tool: str = ""
-    sources: List[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
     timestamp_ms: float = field(default_factory=lambda: time.time() * 1000.0)
     confidence: float = 1.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -78,7 +77,7 @@ class GovernedMemoryRecord:
     created_at_ms: float = field(default_factory=lambda: time.time() * 1000.0)
     updated_at_ms: float = field(default_factory=lambda: time.time() * 1000.0)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -86,7 +85,7 @@ class GovernedSharedMemory:
     """Central store managing governed memory records with provenance and redistribution."""
 
     def __init__(self) -> None:
-        self._records: Dict[str, GovernedMemoryRecord] = {}
+        self._records: dict[str, GovernedMemoryRecord] = {}
 
     def write(
         self,
@@ -95,7 +94,7 @@ class GovernedSharedMemory:
         author_id: str,
         scope: str = MemoryScope.TASK.value,
         source_tool: str = "",
-        sources: Optional[List[str]] = None,
+        sources: Optional[list[str]] = None,
         supersedes_key: Optional[str] = None,
         confidence: float = 1.0,
         reader_class: Optional[str] = None,
@@ -198,7 +197,7 @@ class GovernedSharedMemory:
 
     def list_by_scope(
         self, scope: str, active_only: bool = True, reader_class: Optional[str] = None
-    ) -> List[GovernedMemoryRecord]:
+    ) -> list[GovernedMemoryRecord]:
         """List all memory records belonging to a particular scope.
 
         Records the caller is not authorized for are excluded — listing must not
@@ -219,7 +218,7 @@ class GovernedSharedMemory:
         author_id: str,
         active_only: bool = True,
         reader_class: Optional[str] = None,
-    ) -> List[GovernedMemoryRecord]:
+    ) -> list[GovernedMemoryRecord]:
         """List memory records authored by a specific subagent (authorization enforced)."""
         results = [
             rec
@@ -265,9 +264,9 @@ class GovernedSharedMemory:
         )
         return rehomed_count
 
-    def get_provenance_chain(self, key: str) -> List[GovernedMemoryRecord]:
+    def get_provenance_chain(self, key: str) -> list[GovernedMemoryRecord]:
         """Trace lineage backward through supersedes_key links."""
-        chain: List[GovernedMemoryRecord] = []
+        chain: list[GovernedMemoryRecord] = []
         curr_key: Optional[str] = key
 
         visited = set()

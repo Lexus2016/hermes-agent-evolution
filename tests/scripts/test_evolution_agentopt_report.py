@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """AgentOpt Slice 2 — aggregation + Pareto frontier tests (#2742)."""
 
 import json
@@ -8,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from evolution_agentopt_report import (  # noqa: E402
+from evolution_agentopt_report import (
     aggregate,
     build_report,
     combo_key,

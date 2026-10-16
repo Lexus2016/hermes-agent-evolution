@@ -29,7 +29,7 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -59,10 +59,10 @@ def _today() -> str:
     # Derive the gate date from UTC, not the naive local clock (#2664): in
     # UTC+ timezones a local date drift near midnight fired spurious wakes /
     # mislabeled the gate day.
-    return datetime.now(timezone.utc).date().isoformat()
+    return datetime.now(UTC).date().isoformat()
 
 
-def _today_paths(evo_dir: Path, stage: str, ext: str = ".json") -> Tuple[Path, ...]:
+def _today_paths(evo_dir: Path, stage: str, ext: str = ".json") -> tuple[Path, ...]:
     """Return paths for today's output in json and markdown format (including suffixed variants)."""
     today_str = _today()
     stage_dir = evo_dir / stage
@@ -117,7 +117,7 @@ def _ledger_path(evo_dir: Path) -> Path:
     return evo_dir / ".hydra-dispatch-ledger.json"
 
 
-def _read_ledger(evo_dir: Path) -> Dict[str, dict]:
+def _read_ledger(evo_dir: Path) -> dict[str, dict]:
     """Load the dispatch ledger, or ``{}`` if absent / corrupt.
 
     Schema: ``{"<edge>": {"date": "YYYY-MM-DD", "upstream_mtime": <float>,
@@ -136,7 +136,7 @@ def _read_ledger(evo_dir: Path) -> Dict[str, dict]:
         return {}
 
 
-def _write_ledger(evo_dir: Path, ledger: Dict[str, dict]) -> None:
+def _write_ledger(evo_dir: Path, ledger: dict[str, dict]) -> None:
     """Persist the ledger atomically. Best-effort: a write failure is logged to
     stderr but never raised — the ledger is an optimization, not a correctness
     requirement, so a failed write degrades to "may re-wake once" rather than
@@ -242,7 +242,7 @@ def _has_upstream_freshness(
     return up_mtime > down_mtime
 
 
-def _check_github_write_access() -> Tuple[bool, str]:
+def _check_github_write_access() -> tuple[bool, str]:
     """Check if the authenticated GitHub account has WORKING access to the
     evolution repo.  The `.permissions` API endpoint is unreliable for repo
     owners — it often returns ``push: false`` even when the token has full
@@ -264,6 +264,7 @@ def _check_github_write_access() -> Tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         if r.returncode != 0:
             return False, "gh CLI not authenticated"
@@ -277,6 +278,7 @@ def _check_github_write_access() -> Tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         if r.returncode != 0:
             return False, f"cannot read repo {repo}: {r.stderr.strip()}"
@@ -290,6 +292,7 @@ def _check_github_write_access() -> Tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         user = r.stdout.strip() if r.returncode == 0 else "?"
     except (OSError, subprocess.TimeoutExpired):
@@ -298,7 +301,7 @@ def _check_github_write_access() -> Tuple[bool, str]:
     return True, f"gh CLI {user}: auth OK, repo {repo} readable, write assumed"
 
 
-def _check_env_capability() -> Tuple[bool, str]:
+def _check_env_capability() -> tuple[bool, str]:
     """Probe whether the current environment can actually EXECUTE work (P-001).
 
     Implementation/integration subagent environments sometimes expose no
@@ -324,6 +327,7 @@ def _check_env_capability() -> Tuple[bool, str]:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
         if r.returncode == 0:
             if r.stdout.strip() == "True":
@@ -336,7 +340,7 @@ def _check_env_capability() -> Tuple[bool, str]:
     return True, "capability probe inconclusive — assuming capable (fail-open)"
 
 
-def _check_halt(evo_dir: Path) -> Tuple[bool, Path]:
+def _check_halt(evo_dir: Path) -> tuple[bool, Path]:
     """Return (halted, halt_file_path) for the evolution pipeline.
 
     If ``halt-state.txt`` exists, the pipeline has produced zero automated
@@ -351,7 +355,7 @@ def _check_halt(evo_dir: Path) -> Tuple[bool, Path]:
         return False, halt_file
 
 
-def _check_pool(evo_dir: Path) -> Dict[str, bool]:
+def _check_pool(evo_dir: Path) -> dict[str, bool]:
     """Check all upstream→downstream pairs for staleness. Returns per-pair
     freshness map."""
     # Upstream → downstream pairs in the evolution pipeline
@@ -363,14 +367,14 @@ def _check_pool(evo_dir: Path) -> Dict[str, bool]:
         ("implementation", "integration"),  # new PRs → need merge
     ]
 
-    results: Dict[str, bool] = {}
+    results: dict[str, bool] = {}
     for up, down in pairs:
         fresh = _has_upstream_freshness(evo_dir, up, down)
         results[f"{up}→{down}"] = fresh
     return results
 
 
-def _has_work(evo_dir: Path) -> Tuple[bool, str]:
+def _has_work(evo_dir: Path) -> tuple[bool, str]:
     """Core gate logic. Returns (has_work, reason).
 
     Freshness edges that were already dispatched today (with no upstream

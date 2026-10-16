@@ -3507,7 +3507,7 @@ def _build_cli_parser():
 
     _corrections_cli.register_cli(corrections_parser)
 
-    def _dispatch_corrections(args):  # noqa: ANN001
+    def _dispatch_corrections(args):
         if getattr(args, "corrections_command", None):
             return args.func(args)
         corrections_parser.print_help()

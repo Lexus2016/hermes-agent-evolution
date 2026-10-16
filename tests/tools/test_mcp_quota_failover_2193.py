@@ -9,7 +9,7 @@ import json
 import time
 import pytest
 
-import tools.mcp_tool as mcp_tool
+from tools import mcp_tool
 from tools.mcp_tool import (
     _clear_quota_exhausted,
     _is_quota_error,

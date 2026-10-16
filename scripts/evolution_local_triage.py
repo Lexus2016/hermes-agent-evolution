@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 
 try:
@@ -180,7 +180,7 @@ def _resolve_repo_root(repo_dir: Optional[Path] = None) -> Optional[Path]:
 
 def run_local_triage(evolution_dir: Path, repo_root: Optional[Path] = None) -> dict:
     """Run the local triage pass and return the analysis JSON dict."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     resolved_repo = _resolve_repo_root(repo_root)
 
     # Read latest sidecars
@@ -260,7 +260,7 @@ def run_local_triage(evolution_dir: Path, repo_root: Optional[Path] = None) -> d
             evidence_pointers=[p for p in evidence if p],
             confidence=50,
             stage="local_triage",
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
         envelope = stage_result.to_dict()
         envelope.pop("result", None)

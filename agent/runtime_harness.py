@@ -43,7 +43,7 @@ class HarnessPolicy:
 class HarnessEvent:
     event_type: str
     timestamp: float
-    details: Dict[str, Any] = field(default_factory=dict)
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -68,12 +68,12 @@ class AgentRuntimeHarness:
         self.started_at = time.time()
         self.tool_call_streak = 0
         self.unproductive_turns = 0
-        self.events: List[HarnessEvent] = []
-        self.checkpoints: List[Dict[str, Any]] = []
+        self.events: list[HarnessEvent] = []
+        self.checkpoints: list[dict[str, Any]] = []
         self.on_event = on_event
         self._kill_requested = False
 
-    def _emit(self, event_type: str, details: Dict[str, Any]) -> None:
+    def _emit(self, event_type: str, details: dict[str, Any]) -> None:
         event = HarnessEvent(
             event_type=event_type, timestamp=time.time(), details=details
         )
@@ -156,7 +156,7 @@ class AgentRuntimeHarness:
             action=HarnessAction.KILL, reason=reason, can_resume=False
         )
 
-    def check_pre_execution(self, tool_name: str, args: Dict[str, Any]) -> HarnessDecision:
+    def check_pre_execution(self, tool_name: str, args: dict[str, Any]) -> HarnessDecision:
         """Consult harness before executing a tool."""
         if self._kill_requested or self.status == HarnessStatus.KILLED:
             return HarnessDecision(
@@ -214,7 +214,7 @@ class AgentRuntimeHarness:
 
         return HarnessDecision(action=HarnessAction.PROCEED, reason="OK", can_resume=True)
 
-    def create_checkpoint(self, state_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    def create_checkpoint(self, state_snapshot: dict[str, Any]) -> dict[str, Any]:
         """Save a serializable state checkpoint."""
         checkpoint = {
             "session_id": self.session_id,
@@ -228,7 +228,7 @@ class AgentRuntimeHarness:
         self._emit("harness.checkpoint", {"index": len(self.checkpoints) - 1})
         return checkpoint
 
-    def restore_checkpoint(self, checkpoint: Dict[str, Any]) -> Dict[str, Any]:
+    def restore_checkpoint(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
         """Restore harness state from checkpoint."""
         self.tool_call_streak = checkpoint.get("tool_call_streak", 0)
         self.unproductive_turns = checkpoint.get("unproductive_turns", 0)

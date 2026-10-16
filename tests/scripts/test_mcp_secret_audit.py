@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from mcp_secret_audit import (  # noqa: E402
+from mcp_secret_audit import (
     _looks_plaintext_secret,
     audit_mcp_servers,
     main,

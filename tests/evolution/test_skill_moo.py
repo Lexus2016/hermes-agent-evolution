@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for SkillMOO Pareto Optimization and Pruning Discipline (#2290)."""
 
 import pytest

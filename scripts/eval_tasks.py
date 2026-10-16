@@ -26,7 +26,7 @@ class EvalTask:
 
     id: str
     prompt: str
-    expected_tools: List[str] = field(default_factory=list)
+    expected_tools: list[str] = field(default_factory=list)
     expected_result_pattern: Optional[str] = None
     category: str = "reasoning"
     difficulty: str = "easy"
@@ -35,7 +35,7 @@ class EvalTask:
 
 # Canonical v1.0 task set — small, real pieces of evolution work, covering
 # >=3 tool categories (search, file-ops, code, reasoning).
-_TASKS_V1: List[EvalTask] = [
+_TASKS_V1: list[EvalTask] = [
     EvalTask(
         id="v1-list-python-files",
         prompt="List the Python files under scripts/ whose names start with 'evolution_'.",
@@ -79,7 +79,7 @@ _TASKS_V1: List[EvalTask] = [
 ]
 
 
-def _by_version(version: str) -> Dict[str, List[EvalTask]]:
+def _by_version(version: str) -> dict[str, list[EvalTask]]:
     return {"1.0": _TASKS_V1, "1": _TASKS_V1}  # "1" = major-version alias
 
 
@@ -91,7 +91,7 @@ def _by_version(version: str) -> Dict[str, List[EvalTask]]:
 # ``_TASKS_V1``/``load_task_set``: 50+ turn runs are too expensive for CI.
 LONG_HORIZON_MIN_TURNS = 50
 
-_TASKS_LONG_HORIZON: List[EvalTask] = [
+_TASKS_LONG_HORIZON: list[EvalTask] = [
     EvalTask(
         id="lh-extract-helpers-loop",
         prompt=(
@@ -139,7 +139,7 @@ _TASKS_LONG_HORIZON: List[EvalTask] = [
 ]
 
 
-def load_long_horizon_tasks() -> List[EvalTask]:
+def load_long_horizon_tasks() -> list[EvalTask]:
     """Load the opt-in long-horizon stress bucket (#2530) — deliberately kept
     out of ``load_task_set`` so the default split is unchanged; enter via
     ``eval_baseline --with-long-horizon`` (manual/cron only)."""
@@ -151,7 +151,7 @@ def latest_version() -> str:
     return TASK_SET_VERSION
 
 
-def load_task_set(version: str = TASK_SET_VERSION) -> List[EvalTask]:
+def load_task_set(version: str = TASK_SET_VERSION) -> list[EvalTask]:
     """Load the task list for ``version``. Raises KeyError for an unknown
     version (fail loud — a silent empty list would let an eval score zero tasks)."""
     sets = _by_version(version)

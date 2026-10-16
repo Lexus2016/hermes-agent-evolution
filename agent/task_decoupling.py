@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Task-decoupled planning: sub-goal DAG with scoped contexts (#1138).
 
 Implements Task-Decoupled Planning (TDP, arXiv:2601.07577): decompose a
@@ -29,11 +28,11 @@ __all__ = [
     "SubGoal",
     "SubGoalDAG",
     "TaskDecouplingConfig",
-    "decompose_task",
-    "scoped_context",
     "confined_replan",
-    "should_decouple",
+    "decompose_task",
     "load_task_decoupling_config",
+    "scoped_context",
+    "should_decouple",
 ]
 
 
@@ -129,7 +128,7 @@ class TaskDecouplingConfig:
     min_task_chars: int = 280  # trigger heuristic: only long tasks decouple
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "TaskDecouplingConfig":
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> TaskDecouplingConfig:
         if not isinstance(data, Mapping):
             return cls()
         defaults = cls()

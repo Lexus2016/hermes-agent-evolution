@@ -49,7 +49,7 @@ class LoadEvent:
     skipped: bool = False  # True when a higher-priority source won
     section: str = ""  # the rendered ``## label`` header, if any
 
-    def to_dict(self) -> Dict[str, object]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "path": self.path,
             "kind": self.kind,
@@ -67,7 +67,7 @@ class ContextLoadRecorder:
     _MAX_EVENTS = 4096
 
     def __init__(self) -> None:
-        self._events: List[LoadEvent] = []
+        self._events: list[LoadEvent] = []
         self._lock = threading.Lock()
 
     def record(self, event: LoadEvent) -> None:
@@ -80,14 +80,14 @@ class ContextLoadRecorder:
         except Exception:  # pragma: no cover — never fail the loader
             return
 
-    def drain(self) -> List[LoadEvent]:
+    def drain(self) -> list[LoadEvent]:
         """Return a copy of all recorded events and clear the buffer."""
         with self._lock:
             events = list(self._events)
             self._events = []
         return events
 
-    def snapshot(self) -> List[LoadEvent]:
+    def snapshot(self) -> list[LoadEvent]:
         """Return a copy of all recorded events without clearing."""
         with self._lock:
             return list(self._events)
@@ -150,22 +150,22 @@ def record_context_load(
     )
 
 
-def drain_events() -> List[LoadEvent]:
+def drain_events() -> list[LoadEvent]:
     """Drain and return recorded events (the eval harness's read path)."""
     return _recorder.drain()
 
 
-def snapshot_events() -> List[LoadEvent]:
+def snapshot_events() -> list[LoadEvent]:
     """Peek at recorded events without clearing them."""
     return _recorder.snapshot()
 
 
-def loaded_paths(kind: Optional[str] = None) -> List[str]:
+def loaded_paths(kind: Optional[str] = None) -> list[str]:
     """Distinct paths of successfully-loaded context files.
 
     Useful for a one-line eval assertion ("the harness loaded AGENTS.md").
     """
-    seen: List[str] = []
+    seen: list[str] = []
     for e in snapshot_events():
         if not e.loaded or e.skipped:
             continue
@@ -177,18 +177,18 @@ def loaded_paths(kind: Optional[str] = None) -> List[str]:
 
 
 __all__ = [
-    "LoadEvent",
-    "ContextLoadRecorder",
-    "record_context_load",
-    "enable_recording",
-    "disable_recording",
-    "is_recording",
-    "drain_events",
-    "snapshot_events",
-    "loaded_paths",
-    "KIND_HERMES",
     "KIND_AGENTS",
     "KIND_CLAUDE",
     "KIND_CURSORRULES",
+    "KIND_HERMES",
     "KIND_SOUL",
+    "ContextLoadRecorder",
+    "LoadEvent",
+    "disable_recording",
+    "drain_events",
+    "enable_recording",
+    "is_recording",
+    "loaded_paths",
+    "record_context_load",
+    "snapshot_events",
 ]

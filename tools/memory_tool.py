@@ -165,7 +165,7 @@ def _batch_op_line(op: dict[str, Any]) -> str:
 
 
 def _apply_write_gate(store: "MemoryStore", action: str, target: str, content: Optional[str],
-                      old_text: Optional[str], operations: Optional[List[Dict[str, Any]]] = None,
+                      old_text: Optional[str], operations: Optional[list[dict[str, Any]]] = None,
                       source_class: str = DEFAULT_SOURCE_CLASS,
                       trust_tier: str = DEFAULT_TRUST_TIER) -> Optional[str]:
     """Gate one mutating op, or (``operations`` set) a whole batch as a single unit.
@@ -370,17 +370,17 @@ def _record_memory_call(fn):
 
 @_record_memory_call
 def memory_tool(
-    action: str = None,
+    action: str | None = None,
     target: str = "memory",
-    content: str = None,
-    old_text: str = None,
-    new_text: str = None,
+    content: str | None = None,
+    old_text: str | None = None,
+    new_text: str | None = None,
     source_class: str = DEFAULT_SOURCE_CLASS,
     trust_tier: str = DEFAULT_TRUST_TIER,
     source_filter: Optional[object] = None,
     min_trust: Optional[str] = None,
     include_superseded: bool = False,
-    operations: Optional[List[Dict[str, Any]]] = None,
+    operations: Optional[list[dict[str, Any]]] = None,
     target_size: Optional[int] = None,
     prefer: str = "longest",
     memory_char_limit: Optional[int] = None,
@@ -527,7 +527,7 @@ def memory_tool(
     )
 
 
-def get_builtin_memory_config(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def get_builtin_memory_config(config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """Return a normalized built-in memory config mapping.
 
     Missing, unreadable, or malformed sections become an empty mapping, whose
@@ -834,8 +834,8 @@ registry.register(
 )
 
 # ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
-from contextlib import contextmanager  # noqa: F401,E402
-import time  # noqa: F401,E402
+from contextlib import contextmanager
+import time
 
 _PLUGIN_COMPAT_LAZY = {
     'atomic_write_text': ('utils', 'atomic_write_text'),

@@ -38,7 +38,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -58,7 +58,7 @@ _SKIP_PRS: set[int] = set()
 # Close-reason classification
 # ---------------------------------------------------------------------------
 
-_CLOSE_REASON_MAP: Dict[str, str] = {
+_CLOSE_REASON_MAP: dict[str, str] = {
     "merged": "merged",
     "implemented-on-main": "implemented-on-main",
     "rejected": "rejected",
@@ -71,7 +71,7 @@ _CLOSE_REASON_MAP: Dict[str, str] = {
 _MERGED_LABELS = {"merged"}
 
 
-def _classify_close_reason(labels: List[str], state: str) -> str:
+def _classify_close_reason(labels: list[str], state: str) -> str:
     """Classify a closed PR's reason from its labels and state.
 
     Priority order: merged > implemented-on-main > needs-work > duplicate > rejected.
@@ -98,7 +98,7 @@ def _classify_close_reason(labels: List[str], state: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _run_gh(args: List[str], timeout: int = 60) -> subprocess.CompletedProcess:
+def _run_gh(args: list[str], timeout: int = 60) -> subprocess.CompletedProcess:
     """Run a ``gh`` command and return the completed process."""
     return subprocess.run(
         ["gh"] + args,
@@ -111,7 +111,7 @@ def _run_gh(args: List[str], timeout: int = 60) -> subprocess.CompletedProcess:
 
 def fetch_closed_prs(
     repo: str = _DEFAULT_REPO, limit: int = _DEFAULT_LIMIT
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Fetch recently closed PRs via ``gh pr list``.
 
     Returns a list of dicts with fields: number, title, state, labels, mergedAt.
@@ -152,7 +152,7 @@ def fetch_closed_prs(
 
 def fetch_pr_details(
     pr_number: int, repo: str = _DEFAULT_REPO
-) -> Optional[Dict[str, Any]]:
+) -> Optional[dict[str, Any]]:
     """Fetch a single PR's closing comment and metadata.
 
     Returns None if the PR cannot be fetched.
@@ -189,8 +189,8 @@ def fetch_pr_details(
 # and instruction-injection-shaped payloads. Deliberately narrow + anchored to
 # known attack shapes to avoid false positives on legitimate technical titles.
 _WHITESPACE_RE = re.compile(r"\s+")
-_HIDDEN_CHARS_RE = re.compile(r"[​‌‍⁠﻿‪-‮]")
-_INJECTION_PATTERNS: Tuple[re.Pattern, ...] = (
+_HIDDEN_CHARS_RE = re.compile(r"[\u200b\u200c\u200d\u2060\ufeff\u202a-\u202e]")
+_INJECTION_PATTERNS: tuple[re.Pattern, ...] = (
     re.compile(r"ignore\s+(?:all\s+)?previous\s+instructions", re.IGNORECASE),
     re.compile(r"disregard\s+(?:all\s+)?(?:previous|prior|above)", re.IGNORECASE),
     re.compile(r"^\s*(?:system|assistant|developer)\s*:", re.IGNORECASE | re.MULTILINE),
@@ -212,7 +212,7 @@ def _title_is_unsafe(title: str) -> bool:
     return any(p.search(t) for p in _INJECTION_PATTERNS)
 
 
-def _extract_pattern(pr: Dict[str, Any]) -> str:
+def _extract_pattern(pr: dict[str, Any]) -> str:
     """Extract a human-readable pattern description from a PR's title + labels.
 
     This is a deterministic heuristic — we use the PR title as the base and
@@ -249,13 +249,13 @@ def _extract_pattern(pr: Dict[str, Any]) -> str:
 
 def _make_rule_id(pr_number: int, seq: int) -> str:
     """Generate a unique rule ID from a PR number and a per-PR sequence."""
-    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    today = datetime.now(UTC).strftime("%Y%m%d")
     return f"rule-{today}-{pr_number:04d}-{seq:03d}"
 
 
 def extract_rules_from_pr(
-    pr: Dict[str, Any], existing_ids: set[str]
-) -> List[Dict[str, Any]]:
+    pr: dict[str, Any], existing_ids: set[str]
+) -> list[dict[str, Any]]:
     """Extract durable rules from a single closed PR.
 
     Only generates rules for non-merged, non-duplicate PRs.  Deduplicates
@@ -289,7 +289,7 @@ def extract_rules_from_pr(
         "pattern": f"check: {pattern}",
         "source_pr": pr_number,
         "close_reason": close_reason,
-        "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "created": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "hit_count": 0,
     }
     return [rule]
@@ -308,7 +308,7 @@ def _output_dir() -> Path:
     return _DEFAULT_OUTPUT_DIR
 
 
-def load_existing_rules(filepath: Path) -> Dict[str, Any]:
+def load_existing_rules(filepath: Path) -> dict[str, Any]:
     """Load existing postmortem rules file, or return a fresh skeleton."""
     if not filepath.is_file():
         return {"rules": [], "last_scanned_pr": 0, "stats": {}}
@@ -320,12 +320,12 @@ def load_existing_rules(filepath: Path) -> Dict[str, Any]:
 
 
 def merge_rules(
-    existing: Dict[str, Any],
-    new_rules: List[Dict[str, Any]],
+    existing: dict[str, Any],
+    new_rules: list[dict[str, Any]],
     last_scanned_pr: int,
     total_scanned: int,
     skipped_merged: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Merge new rules into the existing rule set, deduplicating by ID.
 
     Returns the full output structure.
@@ -355,7 +355,7 @@ def merge_rules(
     }
 
 
-def write_rules(filepath: Path, data: Dict[str, Any]) -> None:
+def write_rules(filepath: Path, data: dict[str, Any]) -> None:
     """Write the rules JSON file atomically."""
     filepath.parent.mkdir(parents=True, exist_ok=True)
     # Write to temp file then rename for atomicity
@@ -369,7 +369,7 @@ def write_rules(filepath: Path, data: Dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     dry_run = "--dry-run" in argv
     limit = _DEFAULT_LIMIT
     for a in argv[1:]:
@@ -393,7 +393,7 @@ def main(argv: List[str]) -> int:
         return 0
 
     # 3. Classify and extract rules
-    all_new_rules: List[Dict[str, Any]] = []
+    all_new_rules: list[dict[str, Any]] = []
     skipped_merged = 0
     last_scanned_pr = existing.get("last_scanned_pr", 0)
 
@@ -403,8 +403,7 @@ def main(argv: List[str]) -> int:
         state = pr.get("state", "closed")
 
         # Update last_scanned_pr for tracking
-        if pr_number > last_scanned_pr:
-            last_scanned_pr = pr_number
+        last_scanned_pr = max(last_scanned_pr, pr_number)
 
         reason = _classify_close_reason(labels_raw, state)
         if reason == "merged":

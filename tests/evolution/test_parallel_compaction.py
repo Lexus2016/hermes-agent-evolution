@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for early-trigger parallel compaction (Issue #2469)."""
 
 from __future__ import annotations
@@ -55,7 +54,7 @@ def test_async_compaction_and_safe_swap():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
     compactor = ParallelCompactor(executor=executor)
 
-    def slow_summarizer(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def slow_summarizer(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         time.sleep(0.05)
         return [{"role": "system", "content": "Summary of prior turns"}]
 
@@ -101,7 +100,7 @@ def test_async_compaction_and_safe_swap():
 def test_unsafe_swap_boundary_rejected():
     compactor = ParallelCompactor()
 
-    def dummy_summarizer(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def dummy_summarizer(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [{"role": "system", "content": "summary"}]
 
     msgs = [{"role": "user", "content": "hi"}]
@@ -128,7 +127,7 @@ def test_failed_compaction_handling():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     compactor = ParallelCompactor(executor=executor)
 
-    def failing_summarizer(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def failing_summarizer(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         raise RuntimeError("Summarization LLM quota exceeded")
 
     msgs = [{"role": "user", "content": "test"}]

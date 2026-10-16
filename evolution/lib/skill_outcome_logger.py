@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Triggered-skill outcome logging and auto-demotion (#3218, child of #3210).
 
 Closes the feedback loop for triggered skills:
@@ -25,8 +24,8 @@ class _SkillOutcomeStore:
     def __init__(self, storage_file: Optional[Path] = None) -> None:
         self._lock = threading.Lock()
         self._storage_file = storage_file
-        self._stats: Dict[str, Dict[str, Any]] = {}
-        self._events: List[Dict[str, Any]] = []
+        self._stats: dict[str, dict[str, Any]] = {}
+        self._events: list[dict[str, Any]] = []
         if storage_file and storage_file.is_file():
             self._load()
 
@@ -57,7 +56,7 @@ class _SkillOutcomeStore:
         trigger_confidence: float,
         success: bool,
         revision: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         with self._lock:
             sid = str(skill_id).strip()
             if not sid:
@@ -116,14 +115,14 @@ class _SkillOutcomeStore:
             rate = succ / uses if uses > 0 else 0.0
             return rate < min_success_rate or bool(rec.get("demoted", False))
 
-    def get_stats(self, skill_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_stats(self, skill_id: Optional[str] = None) -> dict[str, Any]:
         with self._lock:
             if skill_id:
                 sid = str(skill_id).strip()
                 return dict(self._stats.get(sid, {}))
             return {k: dict(v) for k, v in self._stats.items()}
 
-    def promote_skill(self, skill_id: str) -> Dict[str, Any]:
+    def promote_skill(self, skill_id: str) -> dict[str, Any]:
         """Re-promote a skill, clearing its demotion state."""
         with self._lock:
             sid = str(skill_id).strip()
@@ -152,7 +151,7 @@ def record_skill_outcome(
     trigger_confidence: float,
     success: bool,
     revision: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Record execution outcome for a triggered skill."""
     return _GLOBAL_STORE.record_outcome(
         skill_id=skill_id,
@@ -167,11 +166,11 @@ def is_skill_demoted(skill_id: str) -> bool:
     return _GLOBAL_STORE.is_demoted(skill_id=skill_id)
 
 
-def get_skill_stats(skill_id: Optional[str] = None) -> Dict[str, Any]:
+def get_skill_stats(skill_id: Optional[str] = None) -> dict[str, Any]:
     """Get outcome stats for a specific skill or all skills."""
     return _GLOBAL_STORE.get_stats(skill_id=skill_id)
 
 
-def promote_skill(skill_id: str) -> Dict[str, Any]:
+def promote_skill(skill_id: str) -> dict[str, Any]:
     """Manually re-promote a demoted skill."""
     return _GLOBAL_STORE.promote_skill(skill_id=skill_id)

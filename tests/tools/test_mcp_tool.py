@@ -1950,7 +1950,7 @@ class TestUtilityHandlers:
 
         async def _raise_unknown(name, arguments=None):
             # mcp.shared.exceptions.McpError carries .error (ErrorData).
-            err = SimpleNamespace(message=f"Unknown prompt: {name}")
+            _err = SimpleNamespace(message=f"Unknown prompt: {name}")
             raise type(
                 "McpError",
                 (Exception,),

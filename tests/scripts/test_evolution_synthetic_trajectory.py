@@ -14,7 +14,7 @@ from pathlib import Path
 # but the script under test lives in scripts/ — add it explicitly.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_synthetic_trajectory import (  # noqa: E402
+from evolution_synthetic_trajectory import (
     SCENARIOS,
     generate_batch,
     generate_episode,

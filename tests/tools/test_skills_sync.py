@@ -767,7 +767,7 @@ class TestSyncSkills:
         (user_skill / "SKILL.md").write_text("# User modified")
 
         with self._patches(bundled, skills_dir, manifest_file):
-            result = sync_skills(quiet=True)
+            _result = sync_skills(quiet=True)
 
         assert (user_skill / "SKILL.md").read_text() == "# User modified"
 

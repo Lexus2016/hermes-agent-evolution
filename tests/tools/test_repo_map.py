@@ -185,7 +185,7 @@ class TestRepoMapTool:
     def test_tool_is_registered_like_other_file_tools(self):
         # Importing tools.repo_map runs the module-level registry.register(),
         # exactly as tools.file_tools does for read_file/search_files.
-        import tools.repo_map  # noqa: F401
+        import tools.repo_map
         from tools.registry import registry
 
         entry = registry.get_entry("repo_map")

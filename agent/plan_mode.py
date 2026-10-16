@@ -57,10 +57,10 @@ PLAN_MODE_CONFIG_KEY = "plan_mode"
 
 # A config loader: returns the parsed config dict (``hermes_cli.config.load_config``
 # shape). Injectable so the flag reader and its tests never have to touch disk.
-ConfigLoader = Callable[[], Dict[str, Any]]
+ConfigLoader = Callable[[], dict[str, Any]]
 
 
-def _default_config_loader() -> Dict[str, Any]:
+def _default_config_loader() -> dict[str, Any]:
     """Load persisted config, swallowing any error to an empty dict.
 
     Imported lazily (like the other flag readers in ``run_agent.py``) so a config
@@ -302,7 +302,7 @@ def build_llm_plan(
     if not isinstance(raw_steps, list) or not raw_steps:
         return None
 
-    steps: List[Step] = []
+    steps: list[Step] = []
     for item in raw_steps:
         if not isinstance(item, dict):
             return None

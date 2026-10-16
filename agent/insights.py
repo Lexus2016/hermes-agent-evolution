@@ -231,8 +231,8 @@ class InsightsEngine:
 
 
     def cost_breakdown(
-        self, days: int = 30, source: str = None, limit: int = 20
-    ) -> Dict[str, Any]:
+        self, days: int = 30, source: str | None = None, limit: int = 20
+    ) -> dict[str, Any]:
         """Per-session spend plus per-tool and per-subagent cost attribution."""
         cutoff = time.time() - (days * 86400)
         sessions = self._get_sessions(cutoff, source)
@@ -260,7 +260,7 @@ class InsightsEngine:
 
         per_session_tool_usage = self._get_per_session_tool_usage(cutoff, source)
 
-        session_rows: List[Dict[str, Any]] = []
+        session_rows: list[dict[str, Any]] = []
         total_estimated = 0.0
         total_actual = 0.0
         for s in sessions:
@@ -317,16 +317,16 @@ class InsightsEngine:
         }
 
     def _get_per_session_tool_usage(
-        self, cutoff: float, source: str = None
-    ) -> Dict[str, Dict[str, Dict[str, int]]]:
-        named: Dict[str, Dict[str, Dict[str, int]]] = defaultdict(dict)
+        self, cutoff: float, source: str | None = None
+    ) -> dict[str, dict[str, dict[str, int]]]:
+        named: dict[str, dict[str, dict[str, int]]] = defaultdict(dict)
         for row in self._query("_GET_PER_SESSION_TOOL_NAMES", cutoff, source):
             named[row["session_id"]][row["tool_name"]] = {
                 "calls": row["calls"],
                 "chars": row["chars"] or 0,
             }
 
-        from_json: Dict[str, Counter] = defaultdict(Counter)
+        from_json: dict[str, Counter] = defaultdict(Counter)
         for row in self._query("_GET_PER_SESSION_TOOL_CALLS", cutoff, source):
             try:
                 for fn in _iter_functions(row["tool_calls"]):
@@ -336,11 +336,11 @@ class InsightsEngine:
             except (TypeError, AttributeError):
                 continue
 
-        per_session: Dict[str, Dict[str, Dict[str, int]]] = {}
+        per_session: dict[str, dict[str, dict[str, int]]] = {}
         for sid in set(named) | set(from_json):
             named_tools = named.get(sid, {})
             json_counts = from_json.get(sid, Counter())
-            merged: Dict[str, Dict[str, int]] = {}
+            merged: dict[str, dict[str, int]] = {}
             for tool in set(named_tools) | set(json_counts):
                 named_calls = named_tools.get(tool, {}).get("calls", 0)
                 chars = named_tools.get(tool, {}).get("chars", 0)
@@ -351,12 +351,12 @@ class InsightsEngine:
 
     def _compute_tool_cost_attribution(
         self,
-        sessions: List[Dict],
-        per_session_tool_usage: Dict[str, Dict[str, Dict[str, int]]],
-    ) -> List[Dict[str, Any]]:
-        tool_cost: Dict[str, float] = defaultdict(float)
-        tool_calls: Dict[str, int] = defaultdict(int)
-        tool_chars: Dict[str, int] = defaultdict(int)
+        sessions: list[dict],
+        per_session_tool_usage: dict[str, dict[str, dict[str, int]]],
+    ) -> list[dict[str, Any]]:
+        tool_cost: dict[str, float] = defaultdict(float)
+        tool_calls: dict[str, int] = defaultdict(int)
+        tool_chars: dict[str, int] = defaultdict(int)
 
         session_by_id = {s["id"]: s for s in sessions}
 
@@ -397,9 +397,9 @@ class InsightsEngine:
         result.sort(key=lambda x: (x["cost"], x["calls"]), reverse=True)
         return result
 
-    def _compute_subagent_cost_attribution(self, sessions: List[Dict]) -> Dict[str, Any]:
+    def _compute_subagent_cost_attribution(self, sessions: list[dict]) -> dict[str, Any]:
         subagents = [s for s in sessions if (s.get("source") or "") == "subagent"]
-        by_model: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+        by_model: dict[str, dict[str, Any]] = defaultdict(lambda: {
             "sessions": 0, "input_tokens": 0, "output_tokens": 0,
             "total_tokens": 0, "tool_calls": 0, "cost": 0.0,
         })
@@ -433,7 +433,7 @@ class InsightsEngine:
             "by_model": models,
         }
 
-    def format_cost_terminal(self, report: Dict) -> str:
+    def format_cost_terminal(self, report: dict) -> str:
         """Format a :meth:`cost_breakdown` report for terminal display."""
         days = report.get("days", 30)
         src = report.get("source_filter")
@@ -441,7 +441,7 @@ class InsightsEngine:
             src_note = f" (source: {src})" if src else ""
             return f"  No sessions found in the last {days} days{src_note}."
 
-        lines: List[str] = []
+        lines: list[str] = []
         period = f"Last {days} days" + (f" ({src})" if src else "")
         lines.append("")
         lines.append(f"  💰 Hermes Cost Attribution — {period}")
@@ -532,7 +532,7 @@ class InsightsEngine:
 
         return "\n".join(lines)
 
-    def get_usage_breakdown(self, days: int = 30, source: str = None) -> Dict[str, Any]:
+    def get_usage_breakdown(self, days: int = 30, source: str | None = None) -> dict[str, Any]:
         """Analytics-usage payload (tools + skills) without a full generate(); the
         instr()-prefiltered skill query loads only skill_view/skill_manage messages."""
         cutoff = time.time() - (days * 86400)

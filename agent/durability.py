@@ -151,7 +151,7 @@ class MemoryDurabilityRegistry:
     """
 
     def __init__(self) -> None:
-        self._backends: Dict[str, DurabilityBackend] = {}
+        self._backends: dict[str, DurabilityBackend] = {}
 
     def register(self, name: str, backend: DurabilityBackend) -> None:
         self._backends[name] = backend
@@ -166,7 +166,7 @@ class MemoryDurabilityRegistry:
         backend = self._backends.get(name)
         return backend if backend is not None else NoOpDurability()
 
-    def available(self) -> Dict[str, str]:
+    def available(self) -> dict[str, str]:
         return {name: backend.name for name, backend in self._backends.items()}
 
 

@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GATE = REPO_ROOT / "scripts" / "evolution_hydra_gate.py"
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-import evolution_hydra_gate as hydra  # noqa: E402
+import evolution_hydra_gate as hydra
 
 
 class TestCheckHalt:
@@ -40,7 +40,7 @@ class TestCheckHalt:
                 raise OSError("permission denied")
 
         bad_path = BadPath(tmp_path)
-        halted, returned_path = hydra._check_halt(bad_path)
+        halted, _returned_path = hydra._check_halt(bad_path)
         assert halted is False
 
 
@@ -82,7 +82,7 @@ class TestDispatchLedger:
             "analysis→implementation": ("analysis", "implementation"),
             "implementation→integration": ("implementation", "integration"),
         }
-        up, down = up_for[edge]
+        up, _down = up_for[edge]
         up_dir = tmp_path / up
         up_dir.mkdir(parents=True, exist_ok=True)
         (up_dir / f"{hydra._today()}.json").write_text("{}", encoding="utf-8")
@@ -114,7 +114,7 @@ class TestDispatchLedger:
         # The on-disk key must be the REAL unicode arrow (ensure_ascii=False),
         # not the literal \\u2192 escape sequence.
         assert b"\\u2192" not in first
-        assert "→".encode("utf-8") in first
+        assert "→".encode() in first
 
     def test_ledger_migrates_legacy_escaped_key(self, tmp_path):
         """P-002: a legacy ledger written with the \\u2192-escaped key must be
@@ -392,9 +392,9 @@ class TestTodayUtc:
         class _FakeDatetime(_dt.datetime):
             @classmethod
             def now(cls, tz=None):
-                if tz is _dt.timezone.utc:
+                if tz is _dt.UTC:
                     # 2026-08-17 22:30 UTC — the fixed code asks for UTC.
-                    return cls(2026, 8, 17, 22, 30, tzinfo=_dt.timezone.utc)
+                    return cls(2026, 8, 17, 22, 30, tzinfo=_dt.UTC)
                 # Naive local clock in UTC+2: already 2026-08-18 00:30 — the
                 # buggy code (datetime.now().date()) would mislabel the day.
                 return cls(
@@ -410,9 +410,9 @@ class TestTodayUtc:
         class _FakeDatetime(_dt.datetime):
             @classmethod
             def now(cls, tz=None):
-                if tz is _dt.timezone.utc:
+                if tz is _dt.UTC:
                     # 2026-08-17 01:30 UTC — still the 17th.
-                    return cls(2026, 8, 17, 1, 30, tzinfo=_dt.timezone.utc)
+                    return cls(2026, 8, 17, 1, 30, tzinfo=_dt.UTC)
                 # Local clock in UTC-10: still 2026-08-16 15:30.
                 return cls(
                     2026, 8, 16, 15, 30, tzinfo=_dt.timezone(_dt.timedelta(hours=-10))

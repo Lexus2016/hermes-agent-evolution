@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
-from evolution_volatility_gate import (  # noqa: E402
+from evolution_volatility_gate import (
     ab_release_test,
     anti_recitation_check,
     classify_volatility,

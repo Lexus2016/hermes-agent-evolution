@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """External-source skill capture via Search2Skill distillation (issue #2291).
 
 Implements Search2Skill architecture:
@@ -29,10 +28,10 @@ class CapabilityGap:
 
     domain: str
     gap_description: str
-    unsupported_operations: List[str] = field(default_factory=list)
+    unsupported_operations: list[str] = field(default_factory=list)
     confidence_score: float = 0.8
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -46,7 +45,7 @@ class ExternalSkillSpec:
     distilled_markdown: str
     gap_addressed: CapabilityGap
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "skill_name": self.skill_name,
             "target_domain": self.target_domain,
@@ -72,9 +71,9 @@ class Search2SkillEngine:
         cls,
         error_logs: Sequence[str],
         available_skills: Sequence[str] = (),
-    ) -> List[CapabilityGap]:
+    ) -> list[CapabilityGap]:
         """Analyze failure logs to extract missing external domain capabilities."""
-        gaps: List[CapabilityGap] = []
+        gaps: list[CapabilityGap] = []
         available_set = {s.lower() for s in available_skills}
 
         for log_entry in error_logs:
@@ -105,9 +104,9 @@ class Search2SkillEngine:
         return gaps
 
     @classmethod
-    def generate_search_queries(cls, gap: CapabilityGap) -> List[str]:
+    def generate_search_queries(cls, gap: CapabilityGap) -> list[str]:
         """Construct high-relevance search queries for external knowledge retrieval."""
-        queries: List[str] = []
+        queries: list[str] = []
         queries.append(f"{gap.domain} CLI best practices documentation cheat sheet")
         for op in gap.unsupported_operations:
             queries.append(f"how to {op} command line reference guide")

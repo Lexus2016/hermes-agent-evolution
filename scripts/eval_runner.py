@@ -49,7 +49,7 @@ def horizon_bucket(task: Any) -> Optional[str]:
     return LONG_HORIZON_BUCKET if int(getattr(task, "min_turns", 0) or 0) > 0 else None
 
 
-def split_by_horizon(tasks: List[Any]) -> Tuple[List[Any], List[Any]]:
+def split_by_horizon(tasks: list[Any]) -> tuple[list[Any], list[Any]]:
     """Partition tasks into ``(default, long_horizon_stress)`` buckets."""
     stress = [t for t in tasks if horizon_bucket(t) is not None]
     default = [t for t in tasks if horizon_bucket(t) is None]
@@ -61,14 +61,14 @@ class EvalTrajectory:
     """Full execution record of running the agent against one EvalTask."""
 
     task_id: str
-    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
     model_turns: int = 0
     final_answer: str = ""
     duration_seconds: float = 0.0
     error: Optional[str] = None
-    agent_config: Dict[str, Any] = field(default_factory=dict)
+    agent_config: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "task_id": self.task_id,
             "tool_calls": list(self.tool_calls),
@@ -83,9 +83,9 @@ class EvalTrajectory:
         return json.dumps(self.to_dict(), ensure_ascii=False) + "\n"
 
     @property
-    def tools_used(self) -> List[str]:
+    def tools_used(self) -> list[str]:
         """Distinct tool names in call order — the shape scoring compares."""
-        seen: List[str] = []
+        seen: list[str] = []
         for call in self.tool_calls:
             name = call.get("tool", "")
             if name and name not in seen:
@@ -93,14 +93,14 @@ class EvalTrajectory:
         return seen
 
 
-def _make_recorder() -> Tuple[List[Dict[str, Any]], Callable, Callable]:
+def _make_recorder() -> tuple[list[dict[str, Any]], Callable, Callable]:
     """Build the tool-call capture callbacks and their backing list.
 
     Returns ``(calls, on_start, on_complete)``. ``on_start`` appends the call;
     ``on_complete`` attaches the result to the most recent matching entry, so a
     tool that never returns still leaves a record that it was attempted.
     """
-    calls: List[Dict[str, Any]] = []
+    calls: list[dict[str, Any]] = []
 
     def on_start(tool_name: str, args: Any = None, **_kw: Any) -> None:
         calls.append(
@@ -131,7 +131,7 @@ def _make_recorder() -> Tuple[List[Dict[str, Any]], Callable, Callable]:
     return calls, on_start, on_complete
 
 
-def build_pinned_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def build_pinned_config(overrides: Optional[dict[str, Any]] = None) -> dict[str, Any]:
     """Resolve the pinned agent config for an eval run."""
     cfg = overrides or {}
     return {
@@ -142,14 +142,14 @@ def build_pinned_config(overrides: Optional[Dict[str, Any]] = None) -> Dict[str,
     }
 
 
-def _build_agent(pinned: Dict[str, Any], on_start: Callable, on_complete: Callable):
+def _build_agent(pinned: dict[str, Any], on_start: Callable, on_complete: Callable):
     """Construct a real AIAgent wired to the trajectory recorder."""
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
-    from run_agent import AIAgent  # noqa: PLC0415 — heavy import, keep it lazy
+    from run_agent import AIAgent
 
-    kwargs: Dict[str, Any] = {
+    kwargs: dict[str, Any] = {
         "model": pinned["model"],
         "max_iterations": pinned["max_iterations"],
         "enabled_toolsets": pinned["toolsets"],
@@ -164,7 +164,7 @@ def _build_agent(pinned: Dict[str, Any], on_start: Callable, on_complete: Callab
 
 def run_eval_task(
     task: Any,
-    agent_config: Optional[Dict[str, Any]] = None,
+    agent_config: Optional[dict[str, Any]] = None,
     agent_factory: Optional[Callable] = None,
     conversation_fn: Optional[Callable] = None,
 ) -> EvalTrajectory:
@@ -196,7 +196,7 @@ def run_eval_task(
 
         drive = conversation_fn
         if drive is None:
-            from agent.conversation_loop import run_conversation  # noqa: PLC0415
+            from agent.conversation_loop import run_conversation
 
             drive = run_conversation
 
@@ -219,7 +219,7 @@ def run_eval_task(
                 traj.error = str(result.get("error") or "agent reported failure")
         else:
             traj.final_answer = str(result or "")
-    except Exception as exc:  # noqa: BLE001 — a failed task is a result, not a crash
+    except Exception as exc:
         traj.error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
         logger.warning("eval task %s failed: %s", task_id, exc)
 
@@ -241,13 +241,13 @@ def run_eval_task(
 
 
 def run_task_set(
-    tasks: List[Any],
-    agent_config: Optional[Dict[str, Any]] = None,
+    tasks: list[Any],
+    agent_config: Optional[dict[str, Any]] = None,
     agent_factory: Optional[Callable] = None,
     conversation_fn: Optional[Callable] = None,
-) -> List[EvalTrajectory]:
+) -> list[EvalTrajectory]:
     """Run every task in order, returning one trajectory each."""
-    trajectories: List[EvalTrajectory] = []
+    trajectories: list[EvalTrajectory] = []
     for task in tasks:
         logger.info("running eval task %s", getattr(task, "id", task))
         trajectories.append(
@@ -256,12 +256,11 @@ def run_task_set(
     return trajectories
 
 
-def write_trajectories(trajectories: List[EvalTrajectory], path: str) -> str:
+def write_trajectories(trajectories: list[EvalTrajectory], path: str) -> str:
     """Write trajectories as JSONL, returning the path written."""
     parent = os.path.dirname(os.path.abspath(path))
     if parent:
         os.makedirs(parent, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
-        for traj in trajectories:
-            fh.write(traj.to_jsonl())
+        fh.writelines(traj.to_jsonl() for traj in trajectories)
     return path

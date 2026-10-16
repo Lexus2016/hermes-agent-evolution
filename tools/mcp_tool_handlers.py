@@ -599,7 +599,7 @@ def _render_call_tool_result(result, server_name: str, image_paths: Optional[lis
         return json.dumps({"result": text_result}, ensure_ascii=False)
 
 
-_server_quota_exhausted_until: Dict[str, float] = {}
+_server_quota_exhausted_until: dict[str, float] = {}
 _QUOTA_COOLDOWN_SEC = 1800.0  # 30 minutes
 
 

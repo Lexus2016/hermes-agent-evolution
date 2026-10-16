@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """RubricForge — agreement-maximization primitive for rubric evolution (#2780).
 
 Child of #2760. A rubric is only as good as its agreement with a labeled set
@@ -29,7 +28,7 @@ def score_rubric(
     labeled: Sequence[Any],
     labels: Sequence[bool],
     judge: RubricJudge,
-) -> Tuple[float, List[bool]]:
+) -> tuple[float, list[bool]]:
     """Agreement of one candidate rubric against a labeled set.
 
     Returns ``(agreement, per_example)`` where ``per_example[i]`` is whether
@@ -38,11 +37,11 @@ def score_rubric(
     """
     if len(labeled) != len(labels):
         raise ValueError("labeled and labels must be parallel sequences")
-    per_example: List[bool] = []
+    per_example: list[bool] = []
     for example, label in zip(labeled, labels):
         try:
             verdict = bool(judge(rubric, example))
-        except Exception as exc:  # noqa: BLE001 - a throwing judge is a mismatch
+        except Exception as exc:
             verdict = False
             logger.debug("rubric judge failed on %r: %s", example, exc)
         per_example.append(verdict == bool(label))
@@ -55,7 +54,7 @@ def select_best_rubric(
     labeled: Sequence[Any],
     labels: Sequence[bool],
     judge: RubricJudge,
-) -> Tuple[str, float]:
+) -> tuple[str, float]:
     """Return ``(best_rubric_text, agreement)`` — highest agreement wins.
 
     Ties break toward the FIRST candidate (stable), so candidate ordering is

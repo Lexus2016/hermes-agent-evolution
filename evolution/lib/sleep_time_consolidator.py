@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Sleep-Time Compute for autonomous memory consolidation (issue #2358).
 
 Adopts Letta/MemGPT Sleep-time Compute (arXiv:2504.13171):
@@ -31,9 +30,9 @@ class ConsolidationAction:
     action_type: str  # "promote", "deprecate", "merge", "link"
     target_id: str
     reason: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -45,9 +44,9 @@ class ConsolidationReport:
     deprecated_count: int = 0
     merged_count: int = 0
     linked_count: int = 0
-    actions: List[ConsolidationAction] = field(default_factory=list)
+    actions: list[ConsolidationAction] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "promoted_count": self.promoted_count,
             "deprecated_count": self.deprecated_count,
@@ -69,15 +68,15 @@ class SleepTimeMemoryConsolidator:
     @classmethod
     def consolidate_notes(
         cls,
-        notes: Sequence[Dict[str, Any]],
+        notes: Sequence[dict[str, Any]],
         access_frequency_threshold: int = 3,
-    ) -> Tuple[List[Dict[str, Any]], ConsolidationReport]:
+    ) -> tuple[list[dict[str, Any]], ConsolidationReport]:
         """Perform full sleep-time consolidation pass over memory notes."""
         report = ConsolidationReport()
-        consolidated: List[Dict[str, Any]] = []
+        consolidated: list[dict[str, Any]] = []
 
-        seen_hashes: Dict[str, Dict[str, Any]] = {}
-        stale_notes: Set[str] = set()
+        seen_hashes: dict[str, dict[str, Any]] = {}
+        _stale_notes: set[str] = set()
 
         for note in notes:
             note_id = str(note.get("id") or note.get("note_id") or "")

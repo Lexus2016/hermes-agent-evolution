@@ -44,7 +44,7 @@ def _get_delegate_max_loop_failures() -> int:
     return _delegate_max_loop_failures_cached
 
 
-def _compute_goal_signature(tasks: List[Dict[str, Any]]) -> str:
+def _compute_goal_signature(tasks: list[dict[str, Any]]) -> str:
     """Compute a compact, normalized hash for a batch of delegation tasks."""
     normalized_parts = []
     for t in tasks:
@@ -63,7 +63,7 @@ def _compute_goal_signature(tasks: List[Dict[str, Any]]) -> str:
     return h.hexdigest()
 
 
-def _is_task_failure(result: Dict[str, Any]) -> bool:
+def _is_task_failure(result: dict[str, Any]) -> bool:
     """Check if an individual child task result represents a failure."""
     if not isinstance(result, dict):
         return True
@@ -82,15 +82,15 @@ class _DelegateLoopGuardTracker:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._sessions: Dict[str, Tuple[str, int]] = {}
+        self._sessions: dict[str, tuple[str, int]] = {}
 
     def record_and_evaluate(
         self,
         session_id: Optional[str],
-        tasks: List[Dict[str, Any]],
-        results: List[Dict[str, Any]],
+        tasks: list[dict[str, Any]],
+        results: list[dict[str, Any]],
         budget: Optional[int] = None,
-    ) -> Tuple[bool, int, Optional[str]]:
+    ) -> tuple[bool, int, Optional[str]]:
         """Record batch outcomes and evaluate if loop guard is tripped.
 
         Returns (tripped: bool, consecutive_failures: int, diagnostic: Optional[str]).

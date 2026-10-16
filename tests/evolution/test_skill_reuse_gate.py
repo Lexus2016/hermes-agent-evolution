@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for the skill-distiller reuse gate (#2574)."""
 
 from pathlib import Path

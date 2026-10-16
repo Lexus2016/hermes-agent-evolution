@@ -22,14 +22,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_draft_selector import build_draft_tasks  # noqa: E402
-from evolution_orchestrator import (  # noqa: E402
+from evolution_draft_selector import build_draft_tasks
+from evolution_orchestrator import (
     _memo_context_block,
     _memo_hits_for,
     build_worker_tasks,
     main as orchestrator_main,
 )
-from evolution_shared_memo import (  # noqa: E402
+from evolution_shared_memo import (
     SharedMemo,
     consult_before_fetch,
     default_memo_path,

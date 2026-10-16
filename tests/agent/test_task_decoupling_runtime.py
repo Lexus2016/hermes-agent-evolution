@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Executable-seam runtime tests for #1138 task-decoupled planning.
 
 Drive the real ``run_conversation`` turn loop to prove the task-decoupling

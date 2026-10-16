@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for :mod:`evolution.lib.mutation_guard` (issue #3014, counter slice)."""
 
 from __future__ import annotations

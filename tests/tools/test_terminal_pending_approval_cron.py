@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-import tools.terminal_tool as terminal_tool
+from tools import terminal_tool
 
 
 def _pending_approval_result():

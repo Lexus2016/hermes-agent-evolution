@@ -42,7 +42,7 @@ class ToolCallContext:
     tool_name: str
     args: Mapping[str, Any]
     signature: ToolCallSignature
-    observations: tuple["ToolCallObservation", ...] = ()
+    observations: tuple[ToolCallObservation, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -68,15 +68,15 @@ class PolicyOutcome:
     rewritten_args: Mapping[str, Any] | None = None
 
     @classmethod
-    def allow(cls) -> "PolicyOutcome":
+    def allow(cls) -> PolicyOutcome:
         return cls()
 
     @classmethod
-    def deny(cls, message: str) -> "PolicyOutcome":
+    def deny(cls, message: str) -> PolicyOutcome:
         return cls(action="deny", message=message)
 
     @classmethod
-    def rewrite(cls, args: Mapping[str, Any], message: str = "") -> "PolicyOutcome":
+    def rewrite(cls, args: Mapping[str, Any], message: str = "") -> PolicyOutcome:
         return cls(action="rewrite", rewritten_args=dict(args), message=message)
 
 

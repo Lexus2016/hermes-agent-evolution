@@ -193,7 +193,7 @@ class TestToolCache:
         cache.set("read_file", {"path": "/tmp/test"}, "content")
         
         # Invalidate via write_file
-        count = cache.invalidate("write_file", {"path": "/tmp/test"})
+        _count = cache.invalidate("write_file", {"path": "/tmp/test"})
         
         # read_file should be invalidated
         result = cache.get("read_file", {"path": "/tmp/test"})
@@ -241,10 +241,10 @@ class TestCachedToolCall:
         executor = Mock(return_value="tool result")
         
         # First call - cache miss
-        result1, hit1 = cached_tool_call("read_file", {"path": "/tmp/test"}, executor)
+        _result1, hit1 = cached_tool_call("read_file", {"path": "/tmp/test"}, executor)
         
         # Second call - should be cache hit
-        result2, hit2 = cached_tool_call("read_file", {"path": "/tmp/test"}, executor)
+        _result2, hit2 = cached_tool_call("read_file", {"path": "/tmp/test"}, executor)
         
         assert hit1 is False
         assert hit2 is True

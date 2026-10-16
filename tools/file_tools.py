@@ -1813,7 +1813,7 @@ def search_tool(pattern: str, target: str = "content", path: str = ".",
         # Structured like ``_warning`` above: text appended after the JSON
         # breaks every json.loads consumer (execute_code RPC, strict tool-message
         # providers) — #90322.
-        result_json = json.dumps(result_dict, ensure_ascii=False)
+        _result_json = json.dumps(result_dict, ensure_ascii=False)
         if result_dict.get("truncated"):
             result_dict["_hint"] = (
                 f"Results truncated. Use offset={offset + limit} to see more, "

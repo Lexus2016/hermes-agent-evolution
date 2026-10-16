@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Pytest path setup for the ``evolution`` workspace test suite.
 
 The modules under test live in ``evolution/lib/``.  The test files use two

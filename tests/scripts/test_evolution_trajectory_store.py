@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_trajectory_store import (  # noqa: E402
+from evolution_trajectory_store import (
     TrajectoryStore,
     classify_by_tools,
     classify_task_type,
@@ -50,8 +50,7 @@ def _entry(prompt, *gpt_turns, completed=True, model="m"):
 
 def _write_jsonl(path, entries):
     with open(path, "w", encoding="utf-8") as f:
-        for e in entries:
-            f.write(json.dumps(e, ensure_ascii=False) + "\n")
+        f.writelines(json.dumps(e, ensure_ascii=False) + "\n" for e in entries)
 
 
 # --------------------------------------------------------------------------- #

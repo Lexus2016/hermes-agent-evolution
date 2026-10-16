@@ -15,7 +15,7 @@ from tools.computer_use import cua_backend_driver
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "hermes_cli.main", "computer-use", *args],
+        [sys.executable, "-m", "hermes_cli.main", "computer-use", *args], check=False,
         capture_output=True,
         text=True,
         timeout=30,
@@ -58,7 +58,7 @@ def test_computer_use_status_returns_zero_for_compatible_driver(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from hermes_cli import tools_config
-    import hermes_cli.tools_config_cua as tools_config_cua
+    from hermes_cli import tools_config_cua
 
 
 

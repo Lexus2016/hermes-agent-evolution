@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Self-refining harness state with versioned rollback (Issue #2497, Slice B).
 
 Enables the agent to refine its operating instructions mid-task while keeping
@@ -42,13 +41,13 @@ class HarnessVersion:
     reason: str = ""
     author: str = "agent"
     timestamp: float = field(default_factory=time.time)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> HarnessVersion:
+    def from_dict(cls, data: dict[str, Any]) -> HarnessVersion:
         return cls(
             version=int(data.get("version", 1)),
             instructions=str(data.get("instructions", "")),
@@ -66,7 +65,7 @@ class VersionedHarnessState:
         self,
         initial_instructions: str = "",
         session_id: Optional[str] = None,
-        storage_dir: Optional[Union[str, Path]] = None,
+        storage_dir: Optional[str | Path] = None,
         auto_save: bool = True,
     ) -> None:
         self.session_id = session_id or "default"
@@ -74,7 +73,7 @@ class VersionedHarnessState:
             Path(storage_dir) if storage_dir else get_default_harness_state_dir()
         )
         self.auto_save = auto_save
-        self._history: List[HarnessVersion] = []
+        self._history: list[HarnessVersion] = []
         if self.storage_file.exists():
             if not self.load():
                 self._init_first_version(initial_instructions)
@@ -112,7 +111,7 @@ class VersionedHarnessState:
         return self._history[-1].instructions if self._history else ""
 
     @property
-    def history(self) -> List[HarnessVersion]:
+    def history(self) -> list[HarnessVersion]:
         """Full list of version snapshots."""
         return list(self._history)
 
@@ -121,7 +120,7 @@ class VersionedHarnessState:
         instructions: str,
         reason: str = "",
         author: str = "agent",
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> HarnessVersion:
         """Update instructions and commit a new version to history."""
         next_v = self.current_version + 1
@@ -194,7 +193,7 @@ class VersionedHarnessState:
         )
         return "".join(diff_lines) or "No changes between versions."
 
-    def list_versions(self) -> List[Dict[str, Any]]:
+    def list_versions(self) -> list[dict[str, Any]]:
         """List metadata summary for all versions."""
         return [
             {
@@ -207,7 +206,7 @@ class VersionedHarnessState:
             for v in self._history
         ]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize state and history to dictionary."""
         return {
             "session_id": self.session_id,
@@ -215,7 +214,7 @@ class VersionedHarnessState:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> VersionedHarnessState:
+    def from_dict(cls, data: dict[str, Any]) -> VersionedHarnessState:
         """Construct state from dictionary."""
         state = cls(session_id=data.get("session_id", "default"), auto_save=False)
         hist_data = data.get("history", [])
@@ -225,7 +224,7 @@ class VersionedHarnessState:
             ]
         return state
 
-    def save(self, path: Optional[Union[str, Path]] = None) -> Path:
+    def save(self, path: Optional[str | Path] = None) -> Path:
         """Save history to disk."""
         target = Path(path) if path else self.storage_file
         try:
@@ -235,7 +234,7 @@ class VersionedHarnessState:
             logger.warning("Failed to save harness state history: %s", e)
         return target
 
-    def load(self, path: Optional[Union[str, Path]] = None) -> bool:
+    def load(self, path: Optional[str | Path] = None) -> bool:
         """Load history from disk."""
         target = Path(path) if path else self.storage_file
         if not target.exists():

@@ -663,8 +663,8 @@ class SessionPortabilityMixin:
     def _import_session_row(
         self,
         conn,
-        raw: Dict[str, Any],
-        messages: List[Dict[str, Any]],
+        raw: dict[str, Any],
+        messages: list[dict[str, Any]],
         session_id: str,
         *,
         trust_origin: bool = False,
@@ -754,10 +754,10 @@ class SessionPortabilityMixin:
 
     def import_sessions(
         self,
-        sessions: List[Dict[str, Any]],
+        sessions: list[dict[str, Any]],
         *,
         trust_origin: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Import sessions exported by :meth:`export_session` or ``export_all``. Existing ids
         are skipped. A child keeps its parent only when the parent exists or is in the
         same payload; otherwise it is detached so partial imports pass FK validation.

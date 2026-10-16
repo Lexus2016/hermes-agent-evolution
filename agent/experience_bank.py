@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Experience bank — single source of truth for harvested execution experience.
 
 MemoHarness-inspired (arXiv:2607.14159): the agent harness is optimized
@@ -58,29 +57,29 @@ from hermes_constants import get_hermes_home
 __version__ = "1.1.0"
 
 __all__ = [
-    "HARNESS_DIMENSIONS",
     "CATEGORY_TO_DIMENSION",
     "CONFIDENCE_LEVELS",
     "GUIDANCE_TEMPLATES",
+    "HARNESS_DIMENSIONS",
+    "DelegationPattern",
     "ExperienceEntry",
     "ExperiencePattern",
-    "DelegationPattern",
-    "pattern_id",
-    "entries_path",
-    "patterns_path",
-    "delegation_patterns_path",
-    "harvest_state_path",
-    "experience_lock",
     "append_entry",
-    "iter_entries",
-    "load_patterns",
-    "save_patterns",
-    "load_delegation_patterns",
-    "save_delegation_patterns",
-    "record_delegation_outcome",
+    "delegation_patterns_path",
+    "entries_path",
+    "experience_lock",
     "find_matching_delegation_patterns",
     "format_patterns_prompt",
     "get_harvest_state",
+    "harvest_state_path",
+    "iter_entries",
+    "load_delegation_patterns",
+    "load_patterns",
+    "pattern_id",
+    "patterns_path",
+    "record_delegation_outcome",
+    "save_delegation_patterns",
+    "save_patterns",
     "set_harvest_state",
 ]
 
@@ -105,7 +104,7 @@ HARNESS_DIMENSIONS: tuple = (
 #: Keyed by value strings — NOT by the enum — so this module stays free of
 #: any ``evolution/`` import.  The exact assignments are a judgment call and
 #: may be refined; keep this a plain dict at module top.
-CATEGORY_TO_DIMENSION: Dict[str, Optional[str]] = {
+CATEGORY_TO_DIMENSION: dict[str, Optional[str]] = {
     "network": "tool",
     "permission": "tool",
     "not_found": "context",
@@ -127,7 +126,7 @@ CONFIDENCE_LEVELS: tuple = ("high", "low")
 #: are omitted from the prompt.
 #: ``patterns.json`` є даними, а не довіреними інструкціями. Шлях системного
 #: промпта завжди відтворює пораду з цієї мапи й відкидає небезпечні значення.
-GUIDANCE_TEMPLATES: Dict[tuple[str, str], tuple[str, str]] = {
+GUIDANCE_TEMPLATES: dict[tuple[str, str], tuple[str, str]] = {
     ("tool", "network"): (
         "`{tool}` fails with network errors (DNS, connection refused, unreachable host)",
         "When `{tool}` fails with a network error, probe connectivity once with a "
@@ -370,11 +369,11 @@ class ExperienceEntry:
     confidence: str = "low"
     terminal_reason: str = ""
     primary_dimension: Optional[str] = None
-    secondary_dimensions: List[str] = field(default_factory=list)
+    secondary_dimensions: list[str] = field(default_factory=list)
     failure_category: Optional[str] = None
     tool: Optional[str] = None
     analysis: str = ""
-    stats: Dict[str, Any] = field(default_factory=dict)
+    stats: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _validate_dimension(self.primary_dimension, "primary_dimension")
@@ -390,7 +389,7 @@ class ExperienceEntry:
                 f"got {self.confidence!r}"
             )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-compatible dictionary."""
         return {
             "v": self.v,
@@ -411,7 +410,7 @@ class ExperienceEntry:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ExperienceEntry":
+    def from_dict(cls, d: dict[str, Any]) -> ExperienceEntry:
         """Deserialize from a dictionary produced by :meth:`to_dict`.
 
         Tolerant: unknown dimension strings are coerced to ``None``, unknown
@@ -508,7 +507,7 @@ class ExperiencePattern:
     first_seen: float = 0.0
     last_seen: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-compatible dictionary."""
         return {
             "v": self.v,
@@ -524,7 +523,7 @@ class ExperiencePattern:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ExperiencePattern":
+    def from_dict(cls, d: dict[str, Any]) -> ExperiencePattern:
         """Deserialize from a dictionary produced by :meth:`to_dict`.
 
         Tolerant of malformed field types (coerces to safe defaults) and of
@@ -724,7 +723,7 @@ def iter_entries(since_ts: Optional[float] = None) -> Iterator[ExperienceEntry]:
 
 def load_patterns(
     max_age_days: Optional[float] = None,
-) -> List[ExperiencePattern]:
+) -> list[ExperiencePattern]:
     """Load distilled patterns from ``patterns.json``.
 
     Tolerant: returns ``[]`` when the file is missing or corrupt.  Corrupt
@@ -748,7 +747,7 @@ def load_patterns(
     if not isinstance(raw, list):
         return []
 
-    patterns: List[ExperiencePattern] = []
+    patterns: list[ExperiencePattern] = []
     for item in raw:
         if not isinstance(item, dict):
             continue
@@ -855,7 +854,7 @@ def format_patterns_prompt(
 
     block = "\n".join(lines)
     if len(block) > max_chars:
-        kept: List[str] = []
+        kept: list[str] = []
         total = 0
         for line in block.split("\n"):
             # +1 accounts for the newline joining each kept line.
@@ -876,7 +875,7 @@ def format_patterns_prompt(
 # ---------------------------------------------------------------------------
 
 
-def get_harvest_state() -> Dict[str, Any]:
+def get_harvest_state() -> dict[str, Any]:
     """Read the harvest dedup cursor.  Returns ``{}`` on missing/corrupt."""
     path = harvest_state_path()
     try:
@@ -887,7 +886,7 @@ def get_harvest_state() -> Dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def set_harvest_state(state: Dict[str, Any]) -> bool:
+def set_harvest_state(state: dict[str, Any]) -> bool:
     """Persist the harvest dedup cursor atomically and return success.
 
     Атомарно зберігає курсор усунення дублів і повертає результат.
@@ -908,7 +907,7 @@ class DelegationPattern:
     role: str
     model: str = ""
     goal_template: str = ""
-    context_keys: List[str] = field(default_factory=list)
+    context_keys: list[str] = field(default_factory=list)
     success_count: int = 1
     total_count: int = 1
     last_used: float = field(default_factory=time.time)
@@ -917,7 +916,7 @@ class DelegationPattern:
     def success_rate(self) -> float:
         return self.success_count / self.total_count if self.total_count > 0 else 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-compatible dictionary."""
         return {
             "task_type": self.task_type,
@@ -931,7 +930,7 @@ class DelegationPattern:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "DelegationPattern":
+    def from_dict(cls, d: dict[str, Any]) -> DelegationPattern:
         """Deserialize from dictionary."""
         return cls(
             task_type=str(d.get("task_type", "")),
@@ -950,7 +949,7 @@ def delegation_patterns_path() -> Path:
     return _experience_dir() / "delegation_patterns.json"
 
 
-def load_delegation_patterns() -> List[DelegationPattern]:
+def load_delegation_patterns() -> list[DelegationPattern]:
     """Load all tracked delegation patterns from disk."""
     path = delegation_patterns_path()
     try:
@@ -1020,7 +1019,7 @@ def find_matching_delegation_patterns(
     task_type: str,
     min_success_rate: float = 0.5,
     min_evidence: int = 1,
-) -> List[DelegationPattern]:
+) -> list[DelegationPattern]:
     """Retrieve proven delegation patterns matching task_type."""
     patterns = load_delegation_patterns()
     query = task_type.lower().strip()

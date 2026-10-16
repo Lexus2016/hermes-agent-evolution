@@ -61,17 +61,17 @@ class QcrNote:
     """A target-bound note distilled from a successful trajectory."""
 
     workflow_invariant: str = ""
-    bindings_to_obtain: List[str] = field(default_factory=list)
-    applicability_conditions: List[str] = field(default_factory=list)
+    bindings_to_obtain: list[str] = field(default_factory=list)
+    applicability_conditions: list[str] = field(default_factory=list)
     verification_guardrail: str = ""
     source_task_type: str = ""
-    source_tools: List[str] = field(default_factory=list)
+    source_tools: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "QcrNote":
+    def from_dict(cls, d: dict[str, Any]) -> QcrNote:
         return cls(
             workflow_invariant=str(d.get("workflow_invariant", "")),
             bindings_to_obtain=list(d.get("bindings_to_obtain", []) or []),
@@ -82,7 +82,7 @@ class QcrNote:
         )
 
 
-def _tool_names(record: Dict[str, Any]) -> List[str]:
+def _tool_names(record: dict[str, Any]) -> list[str]:
     tools = record.get("tools") or []
     if isinstance(tools, (list, tuple, set, frozenset)):
         return [str(t) for t in tools]
@@ -90,7 +90,7 @@ def _tool_names(record: Dict[str, Any]) -> List[str]:
 
 
 def build_qcr_note(
-    record: Dict[str, Any],
+    record: dict[str, Any],
     task_type: str = "",
 ) -> QcrNote:
     """Derive a target-bound note from a successful trajectory record.
@@ -114,7 +114,7 @@ def build_qcr_note(
     if not bindings:
         bindings = ["re-resolve any file/URL/entity targets against the current task"]
 
-    conditions: List[str] = []
+    conditions: list[str] = []
     if tool_set & _ENV_TOOLS:
         conditions.append(
             "Requires the same environment (terminal/browser) as the source run."
@@ -142,7 +142,7 @@ def build_qcr_note(
     )
 
 
-def _note_from(obj: Union[QcrNote, Dict[str, Any]]) -> QcrNote:
+def _note_from(obj: QcrNote | dict[str, Any]) -> QcrNote:
     """Coerce a :class:`QcrNote` or its dict projection to a :class:`QcrNote`."""
     if isinstance(obj, QcrNote):
         return obj
@@ -150,7 +150,7 @@ def _note_from(obj: Union[QcrNote, Dict[str, Any]]) -> QcrNote:
 
 
 def score_note_for_target(
-    note: Union[QcrNote, Dict[str, Any]],
+    note: QcrNote | dict[str, Any],
     target_task_type: str = "",
     target_tools: Optional[Sequence[str]] = None,
 ) -> float:
@@ -188,10 +188,10 @@ def score_note_for_target(
 
 
 def rank_notes_for_target(
-    notes: Sequence[Union[QcrNote, Dict[str, Any]]],
+    notes: Sequence[QcrNote | dict[str, Any]],
     target_task_type: str = "",
     target_tools: Optional[Sequence[str]] = None,
-) -> List[Tuple[float, QcrNote]]:
+) -> list[tuple[float, QcrNote]]:
     """Rank candidate notes for a new target, best first.
 
     Stable sort — ties keep input order, so the result is deterministic for
@@ -205,7 +205,7 @@ def rank_notes_for_target(
 
 
 def select_reusable_memory(
-    notes: Sequence[Union[QcrNote, Dict[str, Any]]],
+    notes: Sequence[QcrNote | dict[str, Any]],
     target_task_type: str = "",
     target_tools: Optional[Sequence[str]] = None,
     min_score: float = 0.5,
@@ -225,7 +225,7 @@ def select_reusable_memory(
 # ── Replay path: note store + guardrail + composed reuse (#2694) ────────────
 
 #: Env tool -> the capability a target toolset must have to replay with it.
-_ENV_TOOL_ALIASES: Dict[str, str] = {
+_ENV_TOOL_ALIASES: dict[str, str] = {
     "terminal": "terminal",
     "browser_navigate": "browser_navigate",
     "docker": "terminal",
@@ -233,12 +233,12 @@ _ENV_TOOL_ALIASES: Dict[str, str] = {
 }
 
 
-def load_notes(store_path: Any) -> List[QcrNote]:
+def load_notes(store_path: Any) -> list[QcrNote]:
     """Read the QCR note store (JSONL; missing/unreadable/malformed → skip)."""
     path = Path(store_path)
     if not path.is_file():
         return []
-    notes: List[QcrNote] = []
+    notes: list[QcrNote] = []
     for line in path.read_text(encoding="utf-8-sig").splitlines():
         try:
             notes.append(QcrNote.from_dict(json.loads(line)))
@@ -257,11 +257,11 @@ def write_notes(store_path: Any, notes: Sequence[QcrNote]) -> int:
 
 
 def check_reuse_guardrail(
-    note: Union[QcrNote, Dict[str, Any]],
+    note: QcrNote | dict[str, Any],
     *,
     target_task_type: str = "",
     target_tools: Optional[Sequence[str]] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Replay gate (#2694): verify applicability + bindings BEFORE reuse.
 
     ``ok=False`` → fall back to fresh execution; missing binding tools are
@@ -270,7 +270,7 @@ def check_reuse_guardrail(
     env_aliases = _ENV_TOOL_ALIASES
     n = _note_from(note)
     target = {t.lower() for t in (target_tools or [])}
-    reasons: List[str] = []
+    reasons: list[str] = []
 
     if target_task_type and n.source_task_type:
         if target_task_type.lower() != n.source_task_type.lower():
@@ -307,7 +307,7 @@ def reuse_for_target(
     target_task_type: str = "",
     target_tools: Optional[Sequence[str]] = None,
     min_score: float = 0.5,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Replay-path entry: select (incr 2) then guardrail-check (incr 3)."""
     ranked = rank_notes_for_target(
         load_notes(store_path), target_task_type, target_tools
@@ -330,14 +330,14 @@ def reuse_for_target(
     return verdict
 
 
-def notes_from_capture_dir(capture_dir: Any) -> List[QcrNote]:
+def notes_from_capture_dir(capture_dir: Any) -> list[QcrNote]:
     """Producer (#2694): distill notes from captured successful trajectories."""
     try:
         from evolution_trajectory_store import TrajectoryStore
     except Exception:
         return []
     store = TrajectoryStore.from_capture_dir(capture_dir)
-    notes: List[QcrNote] = []
+    notes: list[QcrNote] = []
     for task_type in store.task_types():
         for rec in store.by_type(task_type):
             tools = sorted(rec["tool_set"])
@@ -354,12 +354,12 @@ _DISTILL_TRACE_GOAL = (
 
 
 def distill_skill(
-    notes: Sequence[Union[QcrNote, Dict[str, Any]]],
+    notes: Sequence[QcrNote | dict[str, Any]],
     *,
     target_task_type: str = "funnel",
     target_tools: Optional[Sequence[str]] = None,
     min_score: float = 0.5,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Reuse distilled QCR notes when building a NEW skill (#2694).
 
     The QCR replay path already feeds ``reuse_for_target`` (reuse-or-fallback
@@ -431,7 +431,7 @@ def distill_skill(
     }
 
 
-def build_qcr_skill_section(note: Union[QcrNote, Dict[str, Any]]) -> str:
+def build_qcr_skill_section(note: QcrNote | dict[str, Any]) -> str:
     """Render a note's four fields as the markdown section embedded in a skill."""
     n = _note_from(note)
     return (

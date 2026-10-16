@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for the non-stationary audit bar (issue #63).
 
 Covers the four required behaviors: calibration-trap recognition (known
@@ -8,12 +7,12 @@ rotation, and state persistence round-trip (fail-open).
 """
 
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from evolution.lib.audit_bar import (  # noqa: E402
+from evolution.lib.audit_bar import (
     AUDIT_RUBRIC_VARIANTS,
     AuditBarState,
     CHANGED,
@@ -49,7 +48,7 @@ def _obs(name, verdict="keep", utility=5.0, share=0.3):
 
 
 def _now():
-    return datetime(2026, 8, 19, 6, 40, tzinfo=timezone.utc)
+    return datetime(2026, 8, 19, 6, 40, tzinfo=UTC)
 
 
 class TestTrapRecognition:

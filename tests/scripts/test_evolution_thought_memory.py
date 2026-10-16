@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for the versioned thought-memory store (issue #2900, Thought-Retriever)."""
 
 import json
@@ -7,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_thought_memory import (  # noqa: E402
+from evolution_thought_memory import (
     MAX_STORE_ENTRIES,
     MIN_THOUGHT_CHARS,
     Thought,

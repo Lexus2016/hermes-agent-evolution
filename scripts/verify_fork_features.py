@@ -92,6 +92,7 @@ def _markers_in(ref: str) -> set[str]:
         ["git", "grep", "-ohE", "#[0-9]{3,5}", ref, "--", *CODE_PATHS],
         capture_output=True,
         timeout=600,
+        check=False,
     ).stdout
     return _fork_range(m.decode() for m in _MARKER_RE.findall(raw))
 
@@ -105,6 +106,7 @@ def _worktree_markers() -> set[str]:
         ["git", "grep", "-ohE", "#[0-9]{3,5}", "--", *CODE_PATHS],
         capture_output=True,
         timeout=600,
+        check=False,
     ).stdout
     return _fork_range(m.decode() for m in _MARKER_RE.findall(raw))
 
@@ -131,7 +133,7 @@ def _symbols_in(ref: str | None) -> dict[str, str]:
         if ref:
             blob = subprocess.run(
                 ["git", "show", f"{ref}:{path}"], capture_output=True, timeout=60
-            )
+            , check=False)
             if blob.returncode != 0:
                 continue
             source = blob.stdout.decode("utf-8", "replace")

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """AgentOpt Slice 3 — measured-combo router feed (#2743).
 
 Child of #2695. Consumes the Slice-2 Pareto report
@@ -23,11 +22,11 @@ from typing import Any, Dict, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from evolution_agentopt_report import build_report, load_records  # noqa: E402
+from evolution_agentopt_report import build_report, load_records
 
 
 def feed_routing_table(
-    report: Dict[str, Any],
+    report: dict[str, Any],
     table: Any,
     *,
     min_calls: int = 5,

@@ -6,7 +6,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-# noqa: E402
 from evolution_postmortem_miner import (  # type: ignore[import-not-found]
     _classify_close_reason,
     _extract_pattern,
@@ -70,7 +69,7 @@ class TestExtractPattern:
         assert _extract_pattern(pr) == "(title omitted — failed content screen)"
 
     def test_hidden_char_title_is_redacted(self):
-        pr = {"title": "totally normal​title", "labels": []}  # ZWSP hidden char
+        pr = {"title": "totally normal\u200btitle", "labels": []}  # ZWSP hidden char
         assert _extract_pattern(pr) == "(title omitted — failed content screen)"
 
     def test_role_marker_title_is_redacted(self):

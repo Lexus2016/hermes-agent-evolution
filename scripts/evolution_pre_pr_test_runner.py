@@ -107,6 +107,7 @@ def check_branch_pushed(
         try:
             proc = _sp.run(
                 args, capture_output=True, text=True, cwd=str(repo_root),
+                check=False,
             )
             return proc.returncode, proc.stdout, proc.stderr
         except Exception as exc:  # pragma: no cover — never crash the pipeline
@@ -196,10 +197,10 @@ class TestShard:
 
     __test__ = False  # not a pytest test class
 
-    pytest_args: List[str]  # e.g. ["tests/agent/test_foo.py", "-x", "-q", "--timeout=60"]
+    pytest_args: list[str]  # e.g. ["tests/agent/test_foo.py", "-x", "-q", "--timeout=60"]
     description: str  # human label for logging / reporting
 
-    def as_cmd(self) -> List[str]:
+    def as_cmd(self) -> list[str]:
         """Full shell command for subprocess (pytest binary + args)."""
         return ["pytest"] + self.pytest_args
 
@@ -221,12 +222,12 @@ class TestResult:
 class GateReport:
     """Full outcome of the pre-PR test gate."""
 
-    changed_files: List[str]
-    shards: List[TestShard] = field(default_factory=list)
-    results: List[TestResult] = field(default_factory=list)
+    changed_files: list[str]
+    shards: list[TestShard] = field(default_factory=list)
+    results: list[TestResult] = field(default_factory=list)
     passed: bool = False
     note: str = ""
-    validation_cost: Dict[str, Any] = field(default_factory=dict)
+    validation_cost: dict[str, Any] = field(default_factory=dict)
 
 
 # ── File → test mapping (pure, injectable) ─────────────────────────────────────
@@ -248,7 +249,7 @@ def _resolve_test_path(
     changed_file: str,
     repo_root: Path,
     *,
-    existing_paths: Optional[Set[str]] = None,
+    existing_paths: Optional[set[str]] = None,
 ) -> Optional[str]:
     """Map ONE changed source file to its best test path.
 
@@ -314,7 +315,7 @@ def _resolve_test_path(
 def _path_exists(
     rel_path: str,
     repo_root: Path,
-    existing_paths: Optional[Set[str]] = None,
+    existing_paths: Optional[set[str]] = None,
 ) -> bool:
     """Check whether a relative path (file or directory) exists.
 
@@ -339,16 +340,16 @@ def map_changed_files_to_shards(
     changed_files: Sequence[str],
     repo_root: Path,
     *,
-    existing_paths: Optional[Set[str]] = None,
-) -> List[TestShard]:
+    existing_paths: Optional[set[str]] = None,
+) -> list[TestShard]:
     """Map a list of changed source files to deduplicated test shards.
 
     Each changed file may resolve to a test path (exact match) or a test
     directory.  Shards are deduplicated by their pytest argument string.
     If no source files map to any test, returns an empty list.
     """
-    seen: Set[str] = set()
-    shards: List[TestShard] = []
+    seen: set[str] = set()
+    shards: list[TestShard] = []
 
     for f in changed_files:
         test_path = _resolve_test_path(f, repo_root, existing_paths=existing_paths)
@@ -374,7 +375,7 @@ def map_changed_files_to_shards(
 def _is_file(
     rel_path: str,
     repo_root: Path,
-    existing_paths: Optional[Set[str]] = None,
+    existing_paths: Optional[set[str]] = None,
 ) -> bool:
     if existing_paths is not None:
         return rel_path in existing_paths
@@ -387,7 +388,7 @@ def run_shard(
     shard: TestShard,
     repo_root: Path,
     *,
-    extra_env: Optional[Dict[str, str]] = None,
+    extra_env: Optional[dict[str, str]] = None,
     runner: Optional[Callable] = None,
 ) -> TestResult:
     """Run a single test shard and return the result.
@@ -418,6 +419,7 @@ def run_shard(
         text=True,
         cwd=str(repo_root),
         env=env,
+        check=False,
     )
     elapsed = time.monotonic() - t0
     return TestResult(
@@ -429,7 +431,7 @@ def run_shard(
     )
 
 
-def _append_cost_record(cost_file: Path, record: Dict[str, Any]) -> None:
+def _append_cost_record(cost_file: Path, record: dict[str, Any]) -> None:
     cost_file.parent.mkdir(parents=True, exist_ok=True)
     with cost_file.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, sort_keys=True) + "\n")
@@ -463,8 +465,8 @@ def write_log(report: GateReport, log_path: Optional[Path] = None) -> Path:
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    lines: List[str] = []
-    lines.append(f"=== Pre-PR Test Runner — Gate Report ===")
+    lines: list[str] = []
+    lines.append("=== Pre-PR Test Runner — Gate Report ===")
     lines.append(f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append(f"Changed files ({len(report.changed_files)}):")
     for cf in report.changed_files:
@@ -510,7 +512,7 @@ def run_gate(
     changed_files: Sequence[str],
     repo_root: Path,
     *,
-    existing_paths: Optional[Set[str]] = None,
+    existing_paths: Optional[set[str]] = None,
     runner: Optional[Callable] = None,
     log_path: Optional[Path] = None,
     validation_subset_ratio: Optional[float] = 0.5,
@@ -592,7 +594,7 @@ def run_gate(
         record = {
             "cycle": time.strftime("%Y-%m-%d"),
             "stage": "pre_pr_validation",
-            "validation_cost": int(round(sum(r.elapsed_sec for r in report.results))),
+            "validation_cost": round(sum(r.elapsed_sec for r in report.results)),
             "shards_run": len(report.results),
             "shards_total": total_shards,
         }
@@ -621,14 +623,14 @@ def run_gate(
 
 # ── CLI ─────────────────────────────────────────────────────────────────────────
 
-def _parse_changed_files_arg(value: Optional[str]) -> List[str]:
+def _parse_changed_files_arg(value: Optional[str]) -> list[str]:
     """Parse the --changed-files comma-separated argument."""
     if not value:
         return []
     return [f.strip() for f in value.split(",") if f.strip()]
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Pre-PR local test runner: run targeted tests for changed files."
     )
@@ -699,6 +701,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             proc = subprocess.run(
                 ["git", "diff", "--name-only", "HEAD"],
                 capture_output=True, text=True, cwd=args.repo_root or ".",
+                check=False,
             )
             if proc.returncode == 0:
                 for line in proc.stdout.splitlines():
@@ -721,6 +724,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             proc = subprocess.run(
                 ["git", "rev-parse", "--show-toplevel"],
                 capture_output=True, text=True,
+                check=False,
             )
             repo_root = Path(proc.stdout.strip()).resolve()
         except Exception:

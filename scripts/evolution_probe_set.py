@@ -50,11 +50,11 @@ class Probe:
     input: str
     expected_behavior: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Probe":
+    def from_dict(cls, data: dict[str, Any]) -> Probe:
         return cls(
             id=str(data.get("id", "")),
             input=str(data.get("input", "")),
@@ -73,13 +73,13 @@ class ProbeSet:
     """
 
     skill_name: str
-    probes: List[Probe] = field(default_factory=list)
+    probes: list[Probe] = field(default_factory=list)
     schema_version: str = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
         # Normalize any raw dicts in ``probes`` into ``Probe`` objects so callers
         # can pass ``[{"id": ..., "input": ...}]`` directly.
-        normalized: List[Probe] = []
+        normalized: list[Probe] = []
         for p in self.probes:
             if isinstance(p, Probe):
                 normalized.append(p)
@@ -88,10 +88,10 @@ class ProbeSet:
         self.probes = normalized
 
     @property
-    def probe_ids(self) -> List[str]:
+    def probe_ids(self) -> list[str]:
         return [p.id for p in self.probes]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "skill_name": self.skill_name,
             "schema_version": self.schema_version,
@@ -100,7 +100,7 @@ class ProbeSet:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ProbeSet":
+    def from_dict(cls, data: dict[str, Any]) -> ProbeSet:
         if not isinstance(data, dict):
             raise ValueError("ProbeSet.from_dict requires a dict")
         skill_name = str(data.get("skill_name", ""))
@@ -177,7 +177,7 @@ def _usage() -> str:
     )
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] in ("-h", "--help"):
         print(_usage())
         return 0 if len(argv) >= 2 else 2

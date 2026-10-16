@@ -434,9 +434,7 @@ def _ensure_evolution_labels(repo_root: Path, dry_run: bool = False) -> list[str
                 check=False,
                 timeout=30,
             )
-            if result.returncode == 0:
-                created.append(name)
-            elif "already exists" in (result.stderr or "").lower():
+            if result.returncode == 0 or "already exists" in (result.stderr or "").lower():
                 created.append(name)
             else:
                 print(

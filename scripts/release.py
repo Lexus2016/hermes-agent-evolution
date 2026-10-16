@@ -742,6 +742,7 @@ def build_release_artifacts(semver: str) -> list[Path]:
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode != 0:
         print("  ⚠ Could not build Python release artifacts.")

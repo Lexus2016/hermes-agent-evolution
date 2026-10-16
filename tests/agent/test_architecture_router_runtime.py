@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Executable-seam runtime tests for #1139 architecture router.
 
 Drive the real ``run_conversation`` turn loop to prove the architecture-router

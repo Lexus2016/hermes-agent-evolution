@@ -284,8 +284,8 @@ class AIAgent(
         fallback_model: dict[str, Any] | None = None, credential_pool=None,
         checkpoints_enabled: bool = False, checkpoint_max_snapshots: int = 20,
         checkpoint_max_total_size_mb: int = 500, checkpoint_max_file_size_mb: int = 10,
-        pass_session_id: bool = False, requested_provider: str = None,
-        capabilities: Dict[str, bool] | None = None, cwd: str | None = None,
+        pass_session_id: bool = False, requested_provider: str | None = None,
+        capabilities: dict[str, bool] | None = None, cwd: str | None = None,
         write_guard_policy: Any = None,
         side_agent: bool = False, memory_manager=None,
         tool_result_metadata_callback: Optional[Callable[..., dict]] = None,
@@ -338,9 +338,7 @@ class AIAgent(
         db = self._session_db
         if db is None:
             pass
-        elif not hasattr(db, "_conn"):
-            return True
-        elif db._conn is not None:
+        elif not hasattr(db, "_conn") or db._conn is not None:
             return True
         else:
             try:
@@ -363,7 +361,7 @@ class AIAgent(
             return False
 
     def _spool_unpersisted_messages_to_jsonl(
-        self, messages: List[Dict]
+        self, messages: list[dict]
     ) -> None:
         """Best-effort JSONL spool of un-persisted messages after DB failure.
 
@@ -391,10 +389,7 @@ class AIAgent(
             import json as _json
 
             with open(spool_path, "a", encoding="utf-8") as fh:
-                for m in pending:
-                    fh.write(
-                        _json.dumps(m, ensure_ascii=False, default=str) + "\n"
-                    )
+                fh.writelines(_json.dumps(m, ensure_ascii=False, default=str) + "\n" for m in pending)
             logger.warning(
                 "Session DB flush failed; spooled %d un-persisted message(s) "
                 "to %s",
@@ -1215,7 +1210,7 @@ class AIAgent(
     def _consult_verify_policy(
         self,
         tool_name: str,
-        args: Dict[str, Any],
+        args: dict[str, Any],
         result: Any,
         is_error: bool,
     ) -> Optional[str]:
@@ -1369,7 +1364,7 @@ class AIAgent(
             return store.slice(name, start=start, end=end)
         return None
 
-    def list_context_vars(self) -> List[Dict[str, Any]]:
+    def list_context_vars(self) -> list[dict[str, Any]]:
         """List all stored programmatic context variables."""
         store = self.context_store
         if store:
@@ -1416,7 +1411,7 @@ class AIAgent(
             return hs.current_instructions
         return getattr(self, "system_prompt", "") or ""
 
-    def _build_system_prompt_parts(self, system_message: str = None) -> Dict[str, str]:
+    def _build_system_prompt_parts(self, system_message: str | None = None) -> dict[str, str]:
         """Forwarder — see ``agent.system_prompt.build_system_prompt_parts``."""
         from agent.system_prompt import build_system_prompt_parts
 
@@ -1931,7 +1926,7 @@ class AIAgent(
         """Extract the most recent tool-result text from messages."""
         if not messages:
             return None
-        texts: List[str] = []
+        texts: list[str] = []
         for msg in reversed(messages):
             if not isinstance(msg, dict) or msg.get("role") != "tool":
                 break
@@ -2043,8 +2038,7 @@ class AIAgent(
         coalesced_res = ToolCallCoalescer.coalesce_and_execute(
             assistant_message.tool_calls, _handler
         )
-        for msg in coalesced_res.to_tool_messages():
-            messages.append(msg)
+        messages.extend(coalesced_res.to_tool_messages())
         return coalesced_res
 
     def coalesce_and_execute_tool_calls(

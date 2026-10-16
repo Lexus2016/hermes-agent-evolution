@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Message provenance: the ``origin`` column on ``messages``.
 
 Phase 1a of the pinned-constraint plan. A security gate in

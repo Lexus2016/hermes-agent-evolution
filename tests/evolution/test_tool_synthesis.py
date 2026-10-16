@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for the tool synthesis harness (#2259)."""
 
 from pathlib import Path

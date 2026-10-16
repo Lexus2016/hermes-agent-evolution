@@ -47,7 +47,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # Default ranking weights (sum to 1.0). Recency dominates; provenance is the
 # smallest lever so that a low-trust entry only loses ties, it does not get
 # evicted purely for its origin while a same-age entry survives.
-DEFAULT_WEIGHTS: Dict[str, float] = {
+DEFAULT_WEIGHTS: dict[str, float] = {
     "recency": 0.5,
     "access": 0.3,
     "provenance": 0.2,
@@ -55,7 +55,7 @@ DEFAULT_WEIGHTS: Dict[str, float] = {
 
 # Trust-tier weights for the provenance factor (#316 tags). Unknown tiers
 # land at 0.5 — treated as "no evidence", not "hostile".
-TRUST_TIER_WEIGHTS: Dict[str, float] = {
+TRUST_TIER_WEIGHTS: dict[str, float] = {
     "high": 1.0,
     "medium": 0.6,
     "low": 0.3,
@@ -64,7 +64,7 @@ UNKNOWN_TRUST_TIER_WEIGHT: float = 0.5
 
 # Optional per-source multipliers on top of the trust tier. Unknown sources
 # are neutral (1.0) — the module never guesses a source's trustworthiness.
-SOURCE_BOOSTS: Dict[str, float] = {
+SOURCE_BOOSTS: dict[str, float] = {
     "human": 1.1,
     "user": 1.1,
     "agent": 0.9,
@@ -101,8 +101,8 @@ class MemoryEntry:
             return max(0, self.size_bytes)
         return len(self.content.encode("utf-8"))
 
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
             "id": self.id,
             "content": self.content,
             "created_at": self.created_at,
@@ -116,7 +116,7 @@ class MemoryEntry:
         return d
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "MemoryEntry":
+    def from_dict(cls, d: dict[str, Any]) -> MemoryEntry:
         return cls(
             id=str(d["id"]),
             content=str(d.get("content", "")),
@@ -169,7 +169,7 @@ def score_entry(
     entry: MemoryEntry,
     now: float,
     max_access: int = 0,
-    weights: Optional[Dict[str, float]] = None,
+    weights: Optional[dict[str, float]] = None,
     half_life_days: float = DEFAULT_HALF_LIFE_DAYS,
 ) -> float:
     """Multiplicative blend of recency × access × provenance, in [0, 1].
@@ -189,17 +189,17 @@ def score_entry(
     return (rec**r) * (acc**a) * (prov**p)
 
 
-def max_access_count(entries: List[MemoryEntry]) -> int:
+def max_access_count(entries: list[MemoryEntry]) -> int:
     """Largest access count in the candidate set (0 when empty)."""
     return max((e.access_count for e in entries), default=0)
 
 
 def rank_entries(
-    entries: List[MemoryEntry],
+    entries: list[MemoryEntry],
     now: float,
-    weights: Optional[Dict[str, float]] = None,
+    weights: Optional[dict[str, float]] = None,
     half_life_days: float = DEFAULT_HALF_LIFE_DAYS,
-) -> List[Tuple[MemoryEntry, float]]:
+) -> list[tuple[MemoryEntry, float]]:
     """Rank entries by score, highest (most valuable) first.
 
     Ties break on ``id`` ascending so the ranking is a pure function of its
@@ -233,8 +233,8 @@ class EvictionPlan:
     module discards data.
     """
 
-    entries_to_archive: List[MemoryEntry] = field(default_factory=list)
-    entries_to_keep: List[MemoryEntry] = field(default_factory=list)
+    entries_to_archive: list[MemoryEntry] = field(default_factory=list)
+    entries_to_keep: list[MemoryEntry] = field(default_factory=list)
     freed_bytes: int = 0
     target_bytes: int = 0
     usage_bytes: int = 0
@@ -264,11 +264,11 @@ class EvictionPlan:
 
 
 def build_eviction_plan(
-    entries: List[MemoryEntry],
+    entries: list[MemoryEntry],
     cap_bytes: int,
     usage_bytes: int,
     now: Optional[float] = None,
-    weights: Optional[Dict[str, float]] = None,
+    weights: Optional[dict[str, float]] = None,
     half_life_days: float = DEFAULT_HALF_LIFE_DAYS,
     archive_namespace: str = DEFAULT_ARCHIVE_NAMESPACE,
 ) -> EvictionPlan:
@@ -306,14 +306,13 @@ def build_eviction_plan(
     # Ascending value: evict the least valuable first.
     ranked_asc = list(reversed(ranked))
     projected = usage_bytes
-    archive: List[MemoryEntry] = []
+    archive: list[MemoryEntry] = []
     for entry, _score in ranked_asc:
         if projected <= cap_bytes:
             break
         archive.append(entry)
         projected -= entry.size()
-        if projected < 0:
-            projected = 0
+        projected = max(projected, 0)
 
     archived_ids = {e.id for e in archive}
     keep = [e for e in entries if e.id not in archived_ids]
@@ -343,13 +342,13 @@ class MemoryEvictionPolicy:
 
     enabled: bool = False
     cap_bytes: int = 0
-    weights: Optional[Dict[str, float]] = None
+    weights: Optional[dict[str, float]] = None
     half_life_days: float = DEFAULT_HALF_LIFE_DAYS
     archive_namespace: str = DEFAULT_ARCHIVE_NAMESPACE
 
     def maybe_plan(
         self,
-        entries: List[MemoryEntry],
+        entries: list[MemoryEntry],
         usage_bytes: int,
         now: Optional[float] = None,
     ) -> Optional[EvictionPlan]:

@@ -42,7 +42,7 @@ def _seed_state_db(home: Path) -> None:
         "db._conn.commit(); db.close()\n"
     )
     res = subprocess.run(
-        [sys.executable, "-c", seed],
+        [sys.executable, "-c", seed], check=False,
         env=env, capture_output=True, text=True, cwd=str(_WORKTREE), timeout=60,
     )
     assert res.returncode == 0, res.stderr
@@ -53,7 +53,7 @@ def _run_sessions_cost(home: Path, args: list[str]) -> subprocess.CompletedProce
     env["PYTHONPATH"] = str(_WORKTREE)
     env["HERMES_HOME"] = str(home)
     return subprocess.run(
-        [sys.executable, "-m", "hermes_cli.main", "sessions", "cost"] + args,
+        [sys.executable, "-m", "hermes_cli.main", "sessions", "cost"] + args, check=False,
         env=env, capture_output=True, text=True, cwd=str(_WORKTREE), timeout=60,
     )
 

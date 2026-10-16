@@ -10,10 +10,10 @@ result verbatim — so a future refactor can't silently drop the span.
 import pytest
 
 pytest.importorskip("opentelemetry")
-from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult  # noqa: E402
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
-import agent.conversation_loop as cl  # noqa: E402
-import hermes_telemetry as tel  # noqa: E402
+import agent.conversation_loop as cl
+import hermes_telemetry as tel
 
 
 class _Collect(SpanExporter):
@@ -75,7 +75,7 @@ def test_run_conversation_span_marks_failed_result(monkeypatch):
 
 
 def test_run_conversation_disabled_is_noop(monkeypatch):
-    monkeypatch.setattr(tel, "_otel_config", lambda: {})
+    monkeypatch.setattr(tel, "_otel_config", dict)
     monkeypatch.setattr(cl, "_run_conversation_impl", lambda *a, **k: {"final_response": "x"})
     res = cl.run_conversation(_FakeAgent(), "hi")
     assert res["final_response"] == "x"

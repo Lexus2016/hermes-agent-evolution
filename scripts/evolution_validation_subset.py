@@ -14,14 +14,14 @@ __all__ = ["DIFFICULTY_BANDS", "select_subset", "track_validation_cost"]
 DIFFICULTY_BANDS = ("easy", "medium", "hard")
 
 
-def _band(task: Dict[str, Any]) -> str:
+def _band(task: dict[str, Any]) -> str:
     difficulty = str(task.get("difficulty", "medium")).lower()
     return difficulty if difficulty in DIFFICULTY_BANDS else "medium"
 
 
 def select_subset(
-    tasks: Sequence[Dict[str, Any]], budget_ratio: float = 0.5, seed: int = 7
-) -> Dict[str, Any]:
+    tasks: Sequence[dict[str, Any]], budget_ratio: float = 0.5, seed: int = 7
+) -> dict[str, Any]:
     """Deterministic stratified subset that preserves the difficulty mix."""
     rng = random.Random(seed)
     tasks = list(tasks)
@@ -48,9 +48,9 @@ def select_subset(
     }
 
 
-def track_validation_cost(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+def track_validation_cost(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate per-cycle validation cost from validation cost records."""
-    cycles: Dict[str, int] = {}
+    cycles: dict[str, int] = {}
     total = 0
     for record in records:
         cycle = str(record.get("cycle", "unknown"))

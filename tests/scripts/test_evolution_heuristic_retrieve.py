@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tests for judge-reranked heuristic retrieval (issue #1360, Child B of #1303)."""
 
 import json
@@ -7,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_heuristic_retrieve import (  # noqa: E402
+from evolution_heuristic_retrieve import (
     format_for_injection,
     load_heuristics,
     main,

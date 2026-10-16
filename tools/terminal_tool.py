@@ -190,7 +190,7 @@ _cleanup_running = False
 # Per-session streak counters for terminal invocations without observable state
 # change.  Used by the failure classifier to detect retry spirals and force a
 # tool switch or plan-check.  The agent may also read/write this directly.
-_terminal_streak_counts: Dict[str, int] = {}
+_terminal_streak_counts: dict[str, int] = {}
 
 
 def _increment_terminal_streak(task_id: Optional[str]) -> int:
@@ -212,7 +212,7 @@ def get_terminal_streak(task_id: Optional[str] = None) -> int:
 
 
 # Per-session tracker of consecutive IDENTICAL terminal failures (issue #1022).
-_terminal_failure_repeats: Dict[str, Tuple[str, int]] = {}
+_terminal_failure_repeats: dict[str, tuple[str, int]] = {}
 
 _DEFAULT_MAX_COMMAND_REPEATS = 3
 _MAX_COMMAND_REPEATS_CEILING = 20
@@ -738,7 +738,7 @@ def _apply_classified_enrichments(
         result_dict["error"] = str(result_dict.get("error") or "") + "\n\n" + hint
 
 
-def _resolve_task_host_cwd(config: Dict[str, Any], task_id: Optional[str]) -> Optional[str]:
+def _resolve_task_host_cwd(config: dict[str, Any], task_id: Optional[str]) -> Optional[str]:
     """Host directory to bind-mount at ``/workspace`` for *task_id*'s container.
 
     Single owner of the cwd-mount policy for every creation site. Shared-

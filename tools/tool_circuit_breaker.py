@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Retry-spiral circuit breaker and diagnostic fallback for core tool invocations (#3241).
 
 Prevents infinite retry spirals on core tools (read_file, patch, terminal, search_files)
@@ -67,7 +66,7 @@ class _ToolCircuitBreakerTracker:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._state: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        self._state: dict[str, dict[str, dict[str, Any]]] = {}
 
     def record_result(
         self,
@@ -76,7 +75,7 @@ class _ToolCircuitBreakerTracker:
         status: str,
         error_message: Optional[str] = None,
         budget: Optional[int] = None,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[dict[str, Any]]:
         """Record a tool result and return a diagnostic event if the circuit breaker trips."""
         with self._lock:
             sid = str(session_id or "default").strip()
@@ -124,7 +123,7 @@ class _ToolCircuitBreakerTracker:
                 tool_rec["consecutive_failures"] = 0
                 return None
 
-    def get_session_stats(self, session_id: str) -> Dict[str, Any]:
+    def get_session_stats(self, session_id: str) -> dict[str, Any]:
         with self._lock:
             sid = str(session_id or "default").strip()
             return {k: dict(v) for k, v in self._state.get(sid, {}).items()}

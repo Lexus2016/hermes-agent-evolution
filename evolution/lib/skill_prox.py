@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """SkillProx Slice 1 — re-execution verify primitive for proposed skill edits (#2777).
 
 Child of #2744 (SkillProx validation gate).  A proposed skill edit is
@@ -30,11 +29,11 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ReExecutionVerdict",
+    "edit_key",
+    "is_rejected",
+    "record_verdict",
     "verify_skill_edit",
     "verify_skill_edit_with_memory",
-    "record_verdict",
-    "is_rejected",
-    "edit_key",
 ]
 
 # A skill edit is a callable that transforms a skill body (str) into a new
@@ -49,7 +48,7 @@ class ReExecutionVerdict:
     """Outcome of re-running a proposed skill edit on the same batch."""
 
     passed: bool
-    per_input: Dict[str, bool] = field(default_factory=dict)
+    per_input: dict[str, bool] = field(default_factory=dict)
     edited_body: str = ""
     error: Optional[str] = None
 
@@ -74,19 +73,19 @@ def verify_skill_edit(
     """
     try:
         edited_body = edit(original_body)
-    except Exception as exc:  # noqa: BLE001 - an edit that throws is a failure
+    except Exception as exc:
         return ReExecutionVerdict(
             passed=False,
             edited_body=original_body,
             error=f"edit raised: {exc}",
         )
 
-    per_input: Dict[str, bool] = {}
+    per_input: dict[str, bool] = {}
     for pos, inp in enumerate(batch):
         key = input_keys[pos] if input_keys and pos < len(input_keys) else str(pos)
         try:
             per_input[key] = bool(runner(edited_body, inp))
-        except Exception as exc:  # noqa: BLE001 - a runner that throws is a failure
+        except Exception as exc:
             per_input[key] = False
             logger.debug("skill_edit re-execution failed on %r: %s", key, exc)
 
@@ -121,12 +120,12 @@ def edit_key(skill_name: str, edited_body: str) -> str:
     import hashlib
 
     return hashlib.sha256(
-        f"{(skill_name or '').strip()}\n{edited_body or ''}".encode("utf-8")
+        f"{(skill_name or '').strip()}\n{edited_body or ''}".encode()
     ).hexdigest()
 
 
-def _load_verdicts(store_path: Path) -> Dict[str, bool]:
-    verdicts: Dict[str, bool] = {}
+def _load_verdicts(store_path: Path) -> dict[str, bool]:
+    verdicts: dict[str, bool] = {}
     try:
         for line in store_path.read_text(encoding="utf-8").splitlines():
             try:
@@ -196,7 +195,7 @@ def verify_skill_edit_with_memory(
     # is a failed verdict, identical to verify_skill_edit).
     try:
         candidate_body = edit(original_body)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         verdict = ReExecutionVerdict(
             passed=False, edited_body=original_body, error=f"edit raised: {exc}"
         )

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from evolution_qc_review import (  # noqa: E402  # fmt: skip
+from evolution_qc_review import (  # fmt: skip
     adjudicate_review,
     build_critic_task,
     main,

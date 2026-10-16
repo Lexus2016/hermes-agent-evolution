@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Multi-scale context folding for long autonomous sessions (issue #2361).
 
 Adopts AgentFold (arXiv:2510.24699, 'AgentFold: Multi-Scale Context Folding for
@@ -44,7 +43,7 @@ class FoldedContextSummary:
     total_original_messages: int = 0
     estimated_tokens_saved: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -68,11 +67,11 @@ class MultiScaleContextFolder:
         )
 
     def _extract_turn_blocks(
-        self, messages: Sequence[Dict[str, Any]]
-    ) -> List[List[Dict[str, Any]]]:
+        self, messages: Sequence[dict[str, Any]]
+    ) -> list[list[dict[str, Any]]]:
         """Group linear messages into logical user-assistant-tool turn blocks."""
-        turns: List[List[Dict[str, Any]]] = []
-        current_turn: List[Dict[str, Any]] = []
+        turns: list[list[dict[str, Any]]] = []
+        current_turn: list[dict[str, Any]] = []
 
         for msg in messages:
             role = msg.get("role")
@@ -87,9 +86,9 @@ class MultiScaleContextFolder:
             turns.append(current_turn)
         return turns
 
-    def _condense_granular(self, turn_block: Sequence[Dict[str, Any]]) -> str:
+    def _condense_granular(self, turn_block: Sequence[dict[str, Any]]) -> str:
         """Perform granular condensation on a turn: preserve tool calls, params, and outcomes."""
-        lines: List[str] = []
+        lines: list[str] = []
         for msg in turn_block:
             role = msg.get("role")
             content = msg.get("content") or ""
@@ -110,7 +109,7 @@ class MultiScaleContextFolder:
                 lines.append(f"<- Tool result [{status}]: {content[:150].strip()}")
         return "\n".join(lines)
 
-    def _consolidate_deep(self, turn_block: Sequence[Dict[str, Any]]) -> str:
+    def _consolidate_deep(self, turn_block: Sequence[dict[str, Any]]) -> str:
         """Perform deep consolidation: preserve high-level goals and milestone outcomes."""
         user_intent = ""
         assistant_outcome = ""
@@ -130,15 +129,15 @@ class MultiScaleContextFolder:
 
     def fold_context(
         self,
-        messages: Sequence[Dict[str, Any]],
+        messages: Sequence[dict[str, Any]],
         system_prompt: Optional[str] = None,
-    ) -> Tuple[List[Dict[str, Any]], FoldedContextSummary]:
+    ) -> tuple[list[dict[str, Any]], FoldedContextSummary]:
         """Fold messages into layered multi-scale representations.
 
         Returns (folded_messages, summary_metadata).
         """
         if not messages:
-            folded: List[Dict[str, Any]] = []
+            folded: list[dict[str, Any]] = []
             if system_prompt:
                 folded.append({"role": "system", "content": system_prompt})
             return folded, FoldedContextSummary()
@@ -187,7 +186,7 @@ class MultiScaleContextFolder:
             folded_msgs.append({"role": "system", "content": system_prompt})
 
         # Inject multi-scale state summary as structured context
-        summary_sections: List[str] = []
+        summary_sections: list[str] = []
         if deep_text:
             summary_sections.append(
                 f"### Historical Milestone Summary (Deep Consolidation):\n{deep_text}"

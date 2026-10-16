@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_rubric_judge import (  # noqa: E402
+from evolution_rubric_judge import (
     RUBRIC_RELIABILITY_DEFAULTS,
     RUBRIC_RELIABILITY_MAX_RUNS,
     RUBRIC_RELIABILITY_MIN_RUNS,

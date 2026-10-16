@@ -27,7 +27,7 @@ class TestClassifyFileError:
         assert klass == "fuzzy_match" and "util.py" in rec
 
     def test_patch_parse(self):
-        klass, rec = classify_file_error("Failed to parse patch: bad context")
+        klass, _rec = classify_file_error("Failed to parse patch: bad context")
         assert klass == "patch_parse"
 
     def test_block_no_match_is_fuzzy(self):

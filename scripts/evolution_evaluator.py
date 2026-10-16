@@ -59,14 +59,14 @@ try:  # pragma: no cover - exercised by test_eval_tasks
     from eval_tasks import load_task_set as _eval_load_task_set
 
     _EVAL_TASK_SET_OK = bool(_eval_load_task_set()) and bool(_eval_latest_version())
-except Exception:  # noqa: BLE001 - never break the evaluator over the task set
+except Exception:
     _EVAL_TASK_SET_OK = False
 
 # Default rubric for a research sub-task. Weights are relative (renormalized over
 # whichever criteria a candidate actually scores), so an orchestrator can ship a
 # partial rubric without skewing the scale. Kept deliberately small and generic —
 # the skill MAY override per task, but these are sensible research defaults.
-DEFAULT_RUBRIC: Dict[str, float] = {
+DEFAULT_RUBRIC: dict[str, float] = {
     "relevance": 1.0,  # answers the actual sub-task, not an adjacent one
     "evidence": 1.0,  # claims are backed by cited sources, not asserted
     "specificity": 0.8,  # concrete + actionable vs. vague generality
@@ -101,7 +101,7 @@ def _clamp01(x: Any) -> float:
     return v
 
 
-def score_candidate(scores: Dict[str, Any], rubric: Dict[str, float]) -> float:
+def score_candidate(scores: dict[str, Any], rubric: dict[str, float]) -> float:
     """Fuse a candidate's per-criterion scores into one [0, 1] number.
 
     Weighted mean over the rubric criteria the candidate actually scored. A
@@ -138,9 +138,9 @@ def _evaluation_count(candidate: Any) -> int:
 
 
 def evaluate_candidates(
-    candidates: List[Dict[str, Any]],
-    rubric: Optional[Dict[str, float]] = None,
-) -> List[Tuple[int, float]]:
+    candidates: list[dict[str, Any]],
+    rubric: Optional[dict[str, float]] = None,
+) -> list[tuple[int, float]]:
     """Score every candidate, returning ``(original_index, fused_score)`` pairs
     sorted best-first.
 
@@ -157,7 +157,7 @@ def evaluate_candidates(
     rubric = rubric or DEFAULT_RUBRIC
     declared = [isinstance(c, dict) and "evaluation_count" in c for c in candidates]
     use_history = any(declared)
-    scored: List[Tuple[int, float]] = []
+    scored: list[tuple[int, float]] = []
     for i, cand in enumerate(candidates):
         cand_scores = cand.get("scores", {}) if isinstance(cand, dict) else {}
         if not isinstance(cand_scores, dict):
@@ -180,13 +180,13 @@ def evaluate_candidates(
 
 
 def decide(
-    candidates: List[Dict[str, Any]],
+    candidates: list[dict[str, Any]],
     *,
     threshold: float = 0.75,
     current_pass: int = 1,
     max_passes: int = 3,
-    rubric: Optional[Dict[str, float]] = None,
-) -> Dict[str, Any]:
+    rubric: Optional[dict[str, float]] = None,
+) -> dict[str, Any]:
     """Run one evaluator-optimizer decision over the current pass's candidates.
 
     Returns a verdict record an orchestrator follows verbatim:
@@ -276,15 +276,15 @@ def _exit_code(verdict: str) -> int:
 
 
 def update_rubric_weights_from_outcome(
-    dimension_scores: Dict[str, float],
+    dimension_scores: dict[str, float],
     outcome_success: bool,
     *,
-    current_weights: Optional[Dict[str, float]] = None,
+    current_weights: Optional[dict[str, float]] = None,
     learning_rate: float = 0.05,
     skip_gap_advantage: Optional[float] = None,
     min_weight: float = 0.2,
     max_weight: float = 3.0,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Co-evolve rubric weights based on post-merge outcome feedback (#3244, CAFE pattern).
 
     Dimensions where high scores aligned with success (or low scores with failure)
@@ -310,12 +310,12 @@ def update_rubric_weights_from_outcome(
     return weights
 
 
-def _parse_args(argv: List[str]) -> Tuple[Dict[str, Any], Optional[str]]:
+def _parse_args(argv: list[str]) -> tuple[dict[str, Any], Optional[str]]:
     """Tiny hand-rolled arg parse (matches the other evolution_* CLIs' style).
 
     Returns (opts, error). ``opts`` carries threshold/current_pass/max_passes and
     an optional ``path`` (positional; absent -> read stdin)."""
-    opts: Dict[str, Any] = {
+    opts: dict[str, Any] = {
         "threshold": 0.75,
         "current_pass": 1,
         "max_passes": 3,
@@ -348,8 +348,8 @@ def _parse_args(argv: List[str]) -> Tuple[Dict[str, Any], Optional[str]]:
 
 
 def _load_candidates(
-    opts: Dict[str, Any],
-) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    opts: dict[str, Any],
+) -> tuple[Optional[list[dict[str, Any]]], Optional[str]]:
     """Read the candidates payload from the positional path or stdin.
 
     Accepts either a bare JSON list of candidate objects, or an object with a
@@ -370,7 +370,7 @@ def _load_candidates(
     return [c if isinstance(c, dict) else {} for c in data], None
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     opts, err = _parse_args(argv)
     if err:
         print(f"[evolution-evaluator] {err}", file=sys.stderr)

@@ -24,14 +24,14 @@ _FIELD_TO_ATTR = {
 }
 
 
-def mcp_span_attrs(ev: Dict[str, Any]) -> Dict[str, Any]:
+def mcp_span_attrs(ev: dict[str, Any]) -> dict[str, Any]:
     """Return MCP span attributes for a tool-execution event.
 
     Only present fields are returned; an event with no MCP metadata yields an
     empty dict (so ordinary tool events are unaffected). Values are coerced to
     strings and never contain user/session content.
     """
-    attrs: Dict[str, Any] = {}
+    attrs: dict[str, Any] = {}
     for attr_key, field in _FIELD_TO_ATTR.items():
         val = ev.get(field)
         if val:
@@ -41,7 +41,7 @@ def mcp_span_attrs(ev: Dict[str, Any]) -> Dict[str, Any]:
 
 __all__ = [
     "MCP_METHOD_NAME",
-    "MCP_SESSION_ID",
     "MCP_PROTOCOL_VERSION",
+    "MCP_SESSION_ID",
     "mcp_span_attrs",
 ]

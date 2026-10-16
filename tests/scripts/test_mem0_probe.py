@@ -49,7 +49,7 @@ class _StubMemory:
         if self.fail_write:
             raise TimeoutError("write timed out")
 
-    def search(self, query: str, **kwargs: Any) -> List[Dict[str, Any]]:
+    def search(self, query: str, **kwargs: Any) -> list[dict[str, Any]]:
         self.search_calls += 1
         if self.fail_read:
             raise ConnectionError("vector store unreachable")
@@ -58,7 +58,7 @@ class _StubMemory:
 
 def test_healthy_probe_all_stages_ok() -> None:
     mem = _StubMemory()
-    emitted: List[dict] = []
+    emitted: list[dict] = []
 
     outcome = run_probe(mem, emit=emitted.append)
 
@@ -76,7 +76,7 @@ def test_healthy_probe_all_stages_ok() -> None:
 
 def test_failing_write_stage_is_attributed() -> None:
     mem = _StubMemory(fail_write=True)
-    emitted: List[dict] = []
+    emitted: list[dict] = []
 
     outcome = run_probe(mem, emit=emitted.append)
 
@@ -106,7 +106,7 @@ def test_embed_stage_skipped_when_no_embedder() -> None:
         def add(self, text: str, **kwargs: Any) -> None:
             pass
 
-        def search(self, query: str, **kwargs: Any) -> List[Dict[str, Any]]:
+        def search(self, query: str, **kwargs: Any) -> list[dict[str, Any]]:
             return []
 
     outcome = run_probe(NoEmbedder())
@@ -117,7 +117,7 @@ def test_embed_stage_skipped_when_no_embedder() -> None:
 def test_stdout_lines_are_json_parseable() -> None:
     """Every emitted line must be a JSON object (the shell consumer parses them)."""
     mem = _StubMemory(fail_read=True)
-    emitted: List[dict] = []
+    emitted: list[dict] = []
 
     run_probe(mem, emit=emitted.append)
 

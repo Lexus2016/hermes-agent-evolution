@@ -132,7 +132,7 @@ class TestEnsureFreshToken:
             oauth, "_http_post_form_status",
             lambda *a, **k: pytest.fail("must not refresh; disk token is fresh"),
         )
-        token, refreshed = oauth.ensure_fresh_token(path, "hermes", stale_raw, now=1000)
+        token, _refreshed = oauth.ensure_fresh_token(path, "hermes", stale_raw, now=1000)
         assert token == "hch-at-old"  # the on-disk fresh credential's access token
 
 

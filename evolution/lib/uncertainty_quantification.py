@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Trajectory-adapted uncertainty quantification for evolution decisions (#2386).
 
 Inspired by arXiv:2608.11552 ("Trajectory-Adapted Uncertainty Quantification:
@@ -173,10 +172,10 @@ def assess_finding_confidence(
         ter = compute_trajectory_equivalence_rate(trajectories)
         method = "hybrid"
         # Combine reflexive P(True) and empirical TER
-        combined_score = int(round((0.4 * p_true + 0.6 * ter) * 100))
+        combined_score = round((0.4 * p_true + 0.6 * ter) * 100)
     else:
         method = "reflexive_p_true"
-        combined_score = int(round(p_true * 100))
+        combined_score = round(p_true * 100)
 
     score = max(0, min(100, combined_score))
 

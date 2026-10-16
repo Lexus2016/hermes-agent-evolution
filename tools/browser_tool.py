@@ -250,7 +250,7 @@ def _get_open_command_timeout(*, first_open: bool = False) -> int:
 from tools import browser_tool_session as _session
 
 # Seams for tests that monkeypatch browser_tool internals
-def _run_browser_command(session_id: str, command: str, args: Optional[list] = None) -> Dict[str, Any]:
+def _run_browser_command(session_id: str, command: str, args: Optional[list] = None) -> dict[str, Any]:
     return _session._run_browser_command(session_id, command, args)
 
 def _last_session_key(task_id: str) -> str:
@@ -873,7 +873,7 @@ def _json_with_fallback(response: dict[str, Any], result: dict[str, Any]) -> str
 
 
 
-def _annotate_browser_failure(response: Dict[str, Any]) -> Dict[str, Any]:
+def _annotate_browser_failure(response: dict[str, Any]) -> dict[str, Any]:
     """Tag a failed browser tool response with the shared failure taxonomy.
 
     Adds a failure_class drawn from agent/tool_diagnostics (via

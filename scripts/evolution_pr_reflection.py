@@ -50,7 +50,7 @@ def _evolution_dir() -> Path:
 def query_closed_prs(
     repo: str = "Lexus2016/hermes-agent-evolution",
     days: int = DEFAULT_WINDOW_DAYS,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Query recently closed PRs via ``gh`` CLI.
 
     Returns a list of dicts with keys: number, title, state, mergedAt,
@@ -75,6 +75,7 @@ def query_closed_prs(
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
         if result.returncode != 0:
             logger.warning("[pr-reflection] gh query failed: %s", result.stderr[:200])
@@ -90,7 +91,7 @@ def query_closed_prs(
             if not dt_str:
                 return 0.0
             try:
-                return datetime.fromisoformat(dt_str.replace("Z", "+00:00")).timestamp()
+                return datetime.fromisoformat(dt_str).timestamp()
             except (ValueError, AttributeError):
                 return 0.0
 
@@ -105,7 +106,7 @@ def query_closed_prs(
         return []
 
 
-def _classify_pr(pr: Dict[str, Any]) -> str:
+def _classify_pr(pr: dict[str, Any]) -> str:
     """Classify a closed PR as 'merged', 'rejected', or 'closed-other'.
 
     A PR with ``mergedAt`` set was merged (success signal).
@@ -119,7 +120,7 @@ def _classify_pr(pr: Dict[str, Any]) -> str:
     return "closed-other"
 
 
-def extract_reject_reason(pr: Dict[str, Any]) -> Optional[str]:
+def extract_reject_reason(pr: dict[str, Any]) -> Optional[str]:
     """Extract the rejection reason from a PR body or title.
 
     Evolution PRs that were skipped/rejected typically contain keywords like
@@ -142,7 +143,7 @@ def extract_reject_reason(pr: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def reflect(prs: List[Dict[str, Any]]) -> Dict[str, Any]:
+def reflect(prs: list[dict[str, Any]]) -> dict[str, Any]:
     """Build a reflection summary from a list of closed PRs.
 
     Returns a dict with:
@@ -175,7 +176,7 @@ def reflect(prs: List[Dict[str, Any]]) -> Dict[str, Any]:
     #: Merge rate below this fraction signals low selection viability.
     LOW_MERGE_RATE_THRESHOLD = 0.4
 
-    patterns: List[str] = []
+    patterns: list[str] = []
     if (
         merge_rate is not None
         and merge_rate < LOW_MERGE_RATE_THRESHOLD
@@ -205,7 +206,7 @@ def reflect(prs: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def format_sidecar(h: Dict[str, Any]) -> str:
+def format_sidecar(h: dict[str, Any]) -> str:
     """Format the reflection as a one-line sidecar string.
 
     Same pattern as ``evolution_realized_impact.format_realized`` — a single
@@ -226,8 +227,8 @@ def format_sidecar(h: Dict[str, Any]) -> str:
 def run_reflection(
     evolution_dir: Optional[Path] = None,
     days: int = DEFAULT_WINDOW_DAYS,
-    prs: Optional[List[Dict[str, Any]]] = None,
-) -> Dict[str, Any]:
+    prs: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
     """Query closed PRs, reflect, and write the sidecar. Returns the summary.
 
     When ``prs`` is provided (testing), skip the ``gh`` query and use the
@@ -254,7 +255,7 @@ def run_reflection(
     return summary
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     """Cron entry point: run reflection, print summary as JSON."""
     days = DEFAULT_WINDOW_DAYS
     if argv:

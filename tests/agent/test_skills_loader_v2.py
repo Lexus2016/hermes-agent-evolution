@@ -69,7 +69,7 @@ def _flag_off(monkeypatch):
     """
     monkeypatch.delenv(ENV_FLAG, raising=False)
     monkeypatch.setattr(
-        "agent.skill_preprocessing.load_skills_config", lambda: {}, raising=True
+        "agent.skill_preprocessing.load_skills_config", dict, raising=True
     )
 
 

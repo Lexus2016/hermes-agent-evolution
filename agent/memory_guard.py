@@ -86,7 +86,7 @@ class GuardOutcome:
     action: str = "allow"
     content: str = ""
     allowed: bool = True
-    findings: Tuple[str, ...] = ()
+    findings: tuple[str, ...] = ()
     message: str = ""
     policy: str = ""
 
@@ -150,7 +150,7 @@ class MemoryGuardPolicy:
         self._scan_scope = scan_scope
 
     @property
-    def rules(self) -> Tuple[MemoryGuardRule, ...]:
+    def rules(self) -> tuple[MemoryGuardRule, ...]:
         return tuple(self._rules)
 
     @property
@@ -178,14 +178,14 @@ class MemoryGuardPolicy:
 
     # -- internals --
 
-    def _select_action(self, source_class: str) -> Tuple[str, str]:
+    def _select_action(self, source_class: str) -> tuple[str, str]:
         for rule in self._rules:
             if rule.applies_to(source_class):
                 return rule.action, rule.name
         return self._default_action, "default"
 
     def _build_outcome(
-        self, action: str, policy_name: str, content: str, findings: Tuple[str, ...]
+        self, action: str, policy_name: str, content: str, findings: tuple[str, ...]
     ) -> GuardOutcome:
         ids = ", ".join(findings)
         if action == "warn":
@@ -257,7 +257,7 @@ def strip_threat_spans(content: str, scope: str = _SCAN_SCOPE) -> str:
     return out
 
 
-def _apply_strip(content: str, spans: list[Tuple[int, int, str]]) -> str:
+def _apply_strip(content: str, spans: list[tuple[int, int, str]]) -> str:
     merged = _merge_spans([(s, e) for s, e, _ in spans])
     pieces: list[str] = []
     cursor = 0
@@ -273,12 +273,12 @@ def _apply_strip(content: str, spans: list[Tuple[int, int, str]]) -> str:
     return result.strip()
 
 
-def _merge_spans(spans: list[Tuple[int, int]]) -> list[Tuple[int, int]]:
+def _merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
     """Merge overlapping / adjacent (start, end) spans into disjoint ones."""
     if not spans:
         return []
     ordered = sorted(spans)
-    merged: list[Tuple[int, int]] = [ordered[0]]
+    merged: list[tuple[int, int]] = [ordered[0]]
     for start, end in ordered[1:]:
         last_start, last_end = merged[-1]
         if start <= last_end:
@@ -374,10 +374,10 @@ def _as_bool(value: Any, default: bool) -> bool:
 __all__ = [
     "GUARD_ACTIONS",
     "STRIP_REPLACEMENT",
-    "Provenance",
     "GuardOutcome",
-    "MemoryGuardRule",
     "MemoryGuardPolicy",
-    "strip_threat_spans",
+    "MemoryGuardRule",
+    "Provenance",
     "build_memory_guard_from_config",
+    "strip_threat_spans",
 ]

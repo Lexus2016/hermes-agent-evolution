@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -29,7 +29,7 @@ def _path(d: Path | None = None) -> Path:
     return Path(home) / "evolution" / "edit_contracts.jsonl"
 
 
-def validate_contract(c: Dict[str, Any]) -> List[str]:
+def validate_contract(c: dict[str, Any]) -> list[str]:
     """Validate required fields; returns error list."""
     errs = [f"missing required field: {f}" for f in _REQUIRED if not c.get(f)]
     pi = c.get("predicted_impact", {})
@@ -38,14 +38,14 @@ def validate_contract(c: Dict[str, Any]) -> List[str]:
     return errs
 
 
-def record_contract(c: Dict[str, Any], d: Path | None = None) -> Dict[str, Any]:
+def record_contract(c: dict[str, Any], d: Path | None = None) -> dict[str, Any]:
     """Record a falsifiable edit contract to the append-only JSONL log."""
     errs = validate_contract(c)
     if errs:
         raise ValueError("; ".join(errs))
     et = c.get("edit_type", "skill")
     entry = {
-        "timestamp": c.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+        "timestamp": c.get("timestamp") or datetime.now(UTC).isoformat(),
         "edit_type": et,
         "file_path": c.get("file_path", ""),
         "issue_number": c.get("issue_number"),
@@ -65,12 +65,12 @@ def record_contract(c: Dict[str, Any], d: Path | None = None) -> Dict[str, Any]:
     return entry
 
 
-def load_contracts(d: Path | None = None) -> List[Dict[str, Any]]:
+def load_contracts(d: Path | None = None) -> list[dict[str, Any]]:
     """Load all contracts from the JSONL log."""
     p = _path(d)
     if not p.exists():
         return []
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for ln in p.read_text(encoding="utf-8-sig").splitlines():
         ln = ln.strip()
         if not ln:
@@ -85,8 +85,8 @@ def load_contracts(d: Path | None = None) -> List[Dict[str, Any]]:
 
 
 def verify_contracts(
-    observed: Dict[str, bool], d: Path | None = None
-) -> List[Dict[str, Any]]:
+    observed: dict[str, bool], d: Path | None = None
+) -> list[dict[str, Any]]:
     """Verify unverified contracts against observed task deltas."""
     contracts = load_contracts(d)
     for c in contracts:
@@ -113,9 +113,9 @@ def verify_contracts(
     return contracts
 
 
-def contracts_summary(contracts: List[Dict[str, Any]]) -> Dict[str, Any]:
-    bt: Dict[str, int] = {}
-    br: Dict[str, int] = {}
+def contracts_summary(contracts: list[dict[str, Any]]) -> dict[str, Any]:
+    bt: dict[str, int] = {}
+    br: dict[str, int] = {}
     for c in contracts:
         k = c.get("edit_type", "?")
         bt[k] = bt.get(k, 0) + 1
@@ -124,7 +124,7 @@ def contracts_summary(contracts: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"total": len(contracts), "by_type": bt, "by_result": br}
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     d: Path | None = None
     args = argv[1:]
     if "--evolution-dir" in args:

@@ -1,9 +1,9 @@
 """Regression tests for sudo detection and sudo password handling."""
 
 import json
-import tools.terminal_tool as terminal_tool
-import tools.terminal_tool_sudo as terminal_tool_sudo
-import tools.terminal_tool_guards as terminal_tool_guards
+from tools import terminal_tool
+from tools import terminal_tool_sudo
+from tools import terminal_tool_guards
 
 
 def setup_function():

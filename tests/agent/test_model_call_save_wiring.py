@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Live-seam wiring tests for decision-level model-call capture (#2877).
 
 First attempt (PR #2906) was bounced: the capture had no production call
@@ -14,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from agent.tool_call_capture import extract_model_calls  # noqa: E402
+from agent.tool_call_capture import extract_model_calls
 
 
 def _raw_turn():

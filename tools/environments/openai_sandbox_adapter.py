@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """OpenAI Agents SDK sandbox runtime adapter (#3242).
 
 Translates OpenAI Agents SDK Manifest and SandboxRunConfig structures
@@ -23,7 +22,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def parse_openai_manifest(manifest_input: Union[str, Dict[str, Any], Path]) -> Dict[str, Any]:
+def parse_openai_manifest(manifest_input: str | dict[str, Any] | Path) -> dict[str, Any]:
     """Parse an OpenAI Agents SDK manifest YAML/JSON string, dict, or file path."""
     if isinstance(manifest_input, Path):
         p = manifest_input
@@ -81,7 +80,7 @@ def parse_openai_manifest(manifest_input: Union[str, Dict[str, Any], Path]) -> D
     return inner
 
 
-def openai_manifest_to_hermes_config(manifest_input: Union[str, Dict[str, Any], Path]) -> Dict[str, Any]:
+def openai_manifest_to_hermes_config(manifest_input: str | dict[str, Any] | Path) -> dict[str, Any]:
     """Convert OpenAI Agents SDK sandbox manifest to Hermes terminal/docker config."""
     parsed = parse_openai_manifest(manifest_input)
     if not parsed:
@@ -93,7 +92,7 @@ def openai_manifest_to_hermes_config(manifest_input: Union[str, Dict[str, Any], 
     timeout = int(parsed.get("timeout", 300))
 
     # Parse and normalize mounts: list of strings 'host:container[:mode]' or dicts
-    mounts: List[str] = []
+    mounts: list[str] = []
     raw_mounts = parsed.get("mounts") or parsed.get("bind_mounts") or []
     if isinstance(raw_mounts, list):
         for m in raw_mounts:
@@ -124,9 +123,9 @@ class SandboxStateRegistry:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._registry: Dict[str, Dict[str, Any]] = {}
+        self._registry: dict[str, dict[str, Any]] = {}
 
-    def record_state(self, sandbox_id: str, container_id: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+    def record_state(self, sandbox_id: str, container_id: str, metadata: Optional[dict[str, Any]] = None) -> None:
         with self._lock:
             sid = str(sandbox_id or "default").strip()
             self._registry[sid] = {
@@ -135,7 +134,7 @@ class SandboxStateRegistry:
                 "metadata": dict(metadata or {}),
             }
 
-    def get_state(self, sandbox_id: str) -> Optional[Dict[str, Any]]:
+    def get_state(self, sandbox_id: str) -> Optional[dict[str, Any]]:
         with self._lock:
             sid = str(sandbox_id or "default").strip()
             entry = self._registry.get(sid)

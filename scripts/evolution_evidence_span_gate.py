@@ -34,10 +34,10 @@ def _evolution_dir() -> Path:
     return Path(home) / "evolution"
 
 
-def parse_findings(md: str) -> List[Dict[str, Any]]:
+def parse_findings(md: str) -> list[dict[str, Any]]:
     """Extract findings from research report markdown."""
     hdrs = list(_HDR_RE.finditer(md))
-    out: List[Dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
     for i, h in enumerate(hdrs):
         body = md[
             h.end() : hdrs[i + 1].start() if i + 1 < len(hdrs) else len(md)
@@ -56,9 +56,9 @@ def parse_findings(md: str) -> List[Dict[str, Any]]:
     return out
 
 
-def evaluate_findings(findings: List[Dict[str, Any]]) -> Dict[str, Any]:
+def evaluate_findings(findings: list[dict[str, Any]]) -> dict[str, Any]:
     """Evaluate findings against evidence-span requirements."""
-    detail: List[Dict[str, Any]] = []
+    detail: list[dict[str, Any]] = []
     wq = wu = nl = 0
     for f in findings:
         has_q, has_u, is_long = (
@@ -94,7 +94,7 @@ def evaluate_findings(findings: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def run_gate(evolution_dir: Path | None = None) -> Dict[str, Any]:
+def run_gate(evolution_dir: Path | None = None) -> dict[str, Any]:
     """Run the evidence-span gate on the latest research report."""
     if evolution_dir is None:
         evolution_dir = _evolution_dir()
@@ -115,7 +115,7 @@ def run_gate(evolution_dir: Path | None = None) -> Dict[str, Any]:
     return result
 
 
-def format_summary(result: Dict[str, Any]) -> str:
+def format_summary(result: dict[str, Any]) -> str:
     """One-line summary for the pipeline log."""
     if result.get("skipped"):
         return f"[evidence-span-gate] skipped: {result['skipped']}"
@@ -128,7 +128,7 @@ def format_summary(result: Dict[str, Any]) -> str:
     )
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     evolution_dir: Path | None = None
     args = argv[1:]
     if "--evolution-dir" in args:

@@ -114,7 +114,7 @@ class TestAutoAddTerminalLogic:
         from tools.delegate_tool import _expand_parent_toolsets
 
         parent_toolsets = {"file", "web"}
-        child_toolsets = _strip_blocked_tools(["file", "web"])
+        _child_toolsets = _strip_blocked_tools(["file", "web"])
         assert _goal_needs_terminal("Run git log")
         expanded = _expand_parent_toolsets(parent_toolsets)
         assert "terminal" not in expanded  # guard prevents add

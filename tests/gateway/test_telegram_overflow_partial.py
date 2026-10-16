@@ -126,7 +126,7 @@ async def test_send_without_a_refusal_reports_no_partial(telegram_adapter):
 @pytest.mark.asyncio
 async def test_send_retry_resends_only_the_undelivered_tail(telegram_adapter, monkeypatch):
     """_send_with_retry must not re-send a head the platform already accepted."""
-    import gateway.platforms.base as base
+    from gateway.platforms import base
     import plugins.platforms.telegram.adapter as tg
 
     # Faking the retry sleep means faking the clock with it: the refusal arms a per-chat flood
@@ -140,7 +140,7 @@ async def test_send_retry_resends_only_the_undelivered_tail(telegram_adapter, mo
         clock.advance(seconds)
 
     monkeypatch.setattr(base.asyncio, "sleep", _sleep)
-    side_effect, state = _flood_on_call(2)
+    side_effect, _state = _flood_on_call(2)
     sent: list[str] = []
 
     def _record(*_args, **kwargs):

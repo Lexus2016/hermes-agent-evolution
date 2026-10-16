@@ -555,7 +555,7 @@ class TestMemoryCompact:
 
         store.add("memory", "Alpha entry with extra words that can be removed.")
         store.add("memory", "Beta entry with extra words that can be removed.")
-        order_before = [parse_provenance(e)[0] for e in store.memory_entries]
+        _order_before = [parse_provenance(e)[0] for e in store.memory_entries]
         store.compact("memory", target_size=60, prefer="longest")
         order_after = [parse_provenance(e)[0] for e in store.memory_entries]
         # Entries are still in the same order, even if shortened.
@@ -1800,7 +1800,7 @@ class TestAutoEvictionOnReplaceOverflow:
     @staticmethod
     def _store(tmp_path, monkeypatch, **kw):
         monkeypatch.setattr("tools.memory_tool.get_memory_dir", lambda: tmp_path)
-        defaults: Dict[str, Any] = dict(memory_char_limit=80, user_char_limit=80)
+        defaults: dict[str, Any] = dict(memory_char_limit=80, user_char_limit=80)
         defaults.update(kw)
         s = MemoryStore(**defaults)
         s.load_from_disk()

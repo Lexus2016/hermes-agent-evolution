@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Shadow-MCP governance — outbound endpoint visibility + approval (#90).
 
 The local counterpart to Cloudflare's 2026-08-14 Gateway ``shadow-MCP``
@@ -57,7 +56,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse, urlunparse
@@ -65,18 +64,18 @@ from urllib.parse import urlparse, urlunparse
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "ALLOW",
     "ALERT",
+    "ALLOW",
     "DENY",
     "EndpointContact",
     "ShadowMcpDeniedError",
-    "ShadowMcpPolicy",
     "ShadowMcpGovernor",
+    "ShadowMcpPolicy",
+    "default_log_path",
     "endpoint_host",
     "endpoint_matches",
-    "redact_url",
-    "default_log_path",
     "get_governor",
+    "redact_url",
 ]
 
 ALLOW = "allow"
@@ -85,7 +84,7 @@ DENY = "deny"
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _normalize_host(value: str) -> str:
@@ -206,7 +205,7 @@ class ShadowMcpDeniedError(ConnectionError):
 def default_log_path() -> Optional[Path]:
     """Best-effort default on-disk contact-log path, or ``None`` if unavailable."""
     try:
-        from hermes_constants import get_hermes_home  # noqa: PLC0415
+        from hermes_constants import get_hermes_home
 
         return get_hermes_home() / "logs" / "shadow_mcp.jsonl"
     except Exception:
@@ -232,11 +231,11 @@ class EndpointContact:
     def __post_init__(self) -> None:
         self.host = self.host or endpoint_host(self.endpoint)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "EndpointContact":
+    def from_dict(cls, d: dict[str, Any]) -> EndpointContact:
         return cls(
             server=str(d.get("server", "")),
             endpoint=str(d.get("endpoint", "")),
@@ -257,12 +256,12 @@ class ShadowMcpPolicy:
     Entries are matched via :func:`endpoint_matches`.
     """
 
-    allow: List[str] = field(default_factory=list)
-    deny: List[str] = field(default_factory=list)
+    allow: list[str] = field(default_factory=list)
+    deny: list[str] = field(default_factory=list)
     enabled: bool = True
 
     @classmethod
-    def from_config(cls, config: Optional[Dict[str, Any]]) -> "ShadowMcpPolicy":
+    def from_config(cls, config: Optional[dict[str, Any]]) -> ShadowMcpPolicy:
         """Build a policy from a ``shadow_mcp`` config mapping (or ``None``)."""
         if not isinstance(config, dict):
             return cls()
@@ -306,7 +305,7 @@ class ShadowMcpGovernor:
         self.policy = policy or ShadowMcpPolicy()
         self.log_path = Path(log_path) if log_path else None
         self._alerter = alerter
-        self._contacts: Dict[str, EndpointContact] = {}
+        self._contacts: dict[str, EndpointContact] = {}
 
     def record_contact(self, server: str, endpoint: str) -> str:
         """Record a contact, return its verdict (``allow``/``alert``/``deny``).
@@ -368,13 +367,13 @@ class ShadowMcpGovernor:
         except OSError as exc:
             logger.debug("shadow-mcp disk append failed: %s", exc)
 
-    def audit_digest(self) -> List[Dict[str, Any]]:
+    def audit_digest(self) -> list[dict[str, Any]]:
         """All recorded contacts, most-recently-seen first."""
         contacts = list(self._contacts.values())
         contacts.sort(key=lambda c: c.last_seen, reverse=True)
         return [c.to_dict() for c in contacts]
 
-    def unapproved(self) -> List[Dict[str, Any]]:
+    def unapproved(self) -> list[dict[str, Any]]:
         """Contacts whose last verdict was ``alert`` or ``deny``."""
         return [
             c.to_dict()
@@ -396,7 +395,7 @@ def get_governor() -> ShadowMcpGovernor:
     if _governor is None:
         policy = ShadowMcpPolicy()
         try:
-            from hermes_cli.config import load_config  # noqa: PLC0415
+            from hermes_cli.config import load_config
 
             policy = ShadowMcpPolicy.from_config(load_config().get("shadow_mcp"))
         except Exception:

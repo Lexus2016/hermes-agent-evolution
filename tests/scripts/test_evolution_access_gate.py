@@ -68,6 +68,7 @@ def _run_gate(tmp_path: Path, bin_dir: Path) -> str:
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr
     return proc.stdout.strip().splitlines()[-1]
@@ -158,7 +159,7 @@ def test_curl_fallback_keeps_token_off_argv(tmp_path: Path) -> None:
         "GITHUB_EVOLUTION_REPO": "Owner/repo",
         "GITHUB_PRIVATE_TOKEN": token,
     }
-    proc = subprocess.run([BASH, str(GATE)], capture_output=True, text=True, env=env)
+    proc = subprocess.run([BASH, str(GATE)], capture_output=True, text=True, env=env, check=False)
     assert proc.returncode == 0, proc.stderr
 
     # The gate still works (push:true → wake).

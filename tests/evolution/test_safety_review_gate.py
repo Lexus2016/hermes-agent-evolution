@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Unit tests for the safety-review gate (#2575)."""
 
 from evolution.lib.safety_review_gate import (

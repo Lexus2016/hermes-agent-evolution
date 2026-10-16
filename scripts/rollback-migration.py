@@ -11,7 +11,7 @@ import shutil
 from pathlib import Path
 
 
-def rollback(backup_path: str, target_path: str = None) -> bool:
+def rollback(backup_path: str, target_path: str | None = None) -> bool:
     """
     Rollback to backup.
     

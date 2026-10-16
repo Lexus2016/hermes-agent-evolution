@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Pass-rate x cost Pareto optimization and pruning discipline (SkillMOO, issue #2290).
 
 Adopts SkillMOO (arXiv:2604.09297, ASE '26):
@@ -17,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "ParetoRankingResult",
-    "SkillMetricProfile",
     "SkillMOOOptimizer",
+    "SkillMetricProfile",
 ]
 
 
@@ -55,7 +54,7 @@ class SkillMetricProfile:
         )
         return better_or_equal and strictly_better
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -63,12 +62,12 @@ class SkillMetricProfile:
 class ParetoRankingResult:
     """Multi-objective ranking output."""
 
-    fronts: List[List[SkillMetricProfile]] = field(default_factory=list)
-    keep_skills: List[str] = field(default_factory=list)
-    prune_skills: List[str] = field(default_factory=list)
+    fronts: list[list[SkillMetricProfile]] = field(default_factory=list)
+    keep_skills: list[str] = field(default_factory=list)
+    prune_skills: list[str] = field(default_factory=list)
     total_cost_saved_tokens: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "fronts": [[p.to_dict() for p in front] for front in self.fronts],
             "keep_skills": self.keep_skills,
@@ -84,16 +83,16 @@ class SkillMOOOptimizer:
     def calculate_non_dominated_fronts(
         cls,
         profiles: Sequence[SkillMetricProfile],
-    ) -> List[List[SkillMetricProfile]]:
+    ) -> list[list[SkillMetricProfile]]:
         """Compute non-dominated Pareto fronts using fast non-dominated sorting."""
         if not profiles:
             return []
 
-        domination_counts: Dict[str, int] = {p.skill_name: 0 for p in profiles}
-        dominated_sets: Dict[str, List[SkillMetricProfile]] = {
+        domination_counts: dict[str, int] = {p.skill_name: 0 for p in profiles}
+        dominated_sets: dict[str, list[SkillMetricProfile]] = {
             p.skill_name: [] for p in profiles
         }
-        profile_map = {p.skill_name: p for p in profiles}
+        _profile_map = {p.skill_name: p for p in profiles}
 
         for p in profiles:
             for q in profiles:
@@ -102,14 +101,14 @@ class SkillMOOOptimizer:
                 elif q.dominates(p):
                     domination_counts[p.skill_name] += 1
 
-        fronts: List[List[SkillMetricProfile]] = []
-        current_front: List[SkillMetricProfile] = [
+        fronts: list[list[SkillMetricProfile]] = []
+        current_front: list[SkillMetricProfile] = [
             p for p in profiles if domination_counts[p.skill_name] == 0
         ]
 
         while current_front:
             fronts.append(current_front)
-            next_front: List[SkillMetricProfile] = []
+            next_front: list[SkillMetricProfile] = []
             for p in current_front:
                 for q in dominated_sets[p.skill_name]:
                     domination_counts[q.skill_name] -= 1
@@ -131,8 +130,8 @@ class SkillMOOOptimizer:
             return ParetoRankingResult()
 
         fronts = cls.calculate_non_dominated_fronts(profiles)
-        keep_skills: List[str] = []
-        prune_skills: List[str] = []
+        keep_skills: list[str] = []
+        prune_skills: list[str] = []
         tokens_saved = 0
 
         # Retain top fronts satisfying quality criteria

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Architecture router: single-agent vs centralized multi-agent selector (#1139).
 
 Classifies each task on two axes — decomposability and tool density (plus
@@ -29,14 +28,14 @@ from typing import Any, Deque, Mapping
 
 __all__ = [
     "Architecture",
-    "TaskClassification",
-    "RoutingDecision",
     "ArchitectureRouterConfig",
     "RouterTelemetry",
+    "RoutingDecision",
+    "TaskClassification",
     "classify_task",
-    "route",
-    "maybe_route",
     "load_router_config",
+    "maybe_route",
+    "route",
 ]
 
 
@@ -88,7 +87,7 @@ class ArchitectureRouterConfig:
     high_tool_density: int = 16  # Google: coordination tax rises past ~16 tools
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "ArchitectureRouterConfig":
+    def from_mapping(cls, data: Mapping[str, Any] | None) -> ArchitectureRouterConfig:
         if not isinstance(data, Mapping):
             return cls()
         d = cls()
@@ -243,7 +242,7 @@ class RouterTelemetry:
     """Bounded in-memory log of routing decisions + outcomes for calibration."""
 
     capacity: int = 500
-    _entries: Deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=500))
+    _entries: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=500))
 
     def __post_init__(self) -> None:
         self._entries = deque(self._entries, maxlen=max(1, self.capacity))

@@ -7,7 +7,7 @@ import time
 
 from types import SimpleNamespace
 
-import agent.retry_utils as retry_utils
+from agent import retry_utils
 from agent.retry_utils import adaptive_rate_limit_backoff, extract_retry_after_seconds, jittered_backoff
 
 

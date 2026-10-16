@@ -38,7 +38,7 @@ _ISOLATION_RES = [
 # Negative: implement and verify coupled in the same scope.
 _COUPLING_RES = [
     (
-        re.compile(r"def\s+implement.*?def\s+(?:verif|merge_check|qc)", re.S),
+        re.compile(r"def\s+implement.*?def\s+(?:verif|merge_check|qc)", re.DOTALL),
         "implement+verify in same module",
     ),
 ]
@@ -54,24 +54,24 @@ class Finding:
 
 @dataclass
 class ScanResult:
-    findings: List[Finding] = field(default_factory=list)
-    scripts_scanned: List[str] = field(default_factory=list)
+    findings: list[Finding] = field(default_factory=list)
+    scripts_scanned: list[str] = field(default_factory=list)
 
     @property
     def has_failures(self) -> bool:
         return any(f.severity == "high" for f in self.findings)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"findings": [asdict(f) for f in self.findings], "scripts_scanned": self.scripts_scanned, "has_failures": self.has_failures}  # fmt: skip
 
 
-def scan_file(filepath: str) -> List[Finding]:
+def scan_file(filepath: str) -> list[Finding]:
     """Check one script for evaluator/implementer coupling (#1807)."""
     path = _HERE / filepath
     if not path.exists():
         return []
     source = path.read_text(encoding="utf-8-sig")
-    out: List[Finding] = []
+    out: list[Finding] = []
     for pat, desc in _COUPLING_RES:
         if pat.search(source):
             out.append(Finding("evaluator-isolation", "high", filepath, f"COUPLING: {desc}"))  # fmt: skip
@@ -101,7 +101,7 @@ def format_report(r: ScanResult) -> str:
     return "\n".join(lines)
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     argv = argv or sys.argv
     result = run_scan()
     if "--json" in argv:

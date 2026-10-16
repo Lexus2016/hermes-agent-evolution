@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from evolution_orchestrator import (  # noqa: E402
+from evolution_orchestrator import (
     DEFAULT_MAX_WORKERS,
     DEFAULT_WORKER_TOOLSETS,
     build_worker_task,
@@ -101,7 +101,7 @@ class TestCollectCandidates:
 
     def test_accepts_bare_results_list(self):
         out = self._delegate_output()["results"]
-        cands, ok, failed = collect_candidates(out)
+        cands, ok, _failed = collect_candidates(out)
         assert ok == 2
         assert [c["angle"] for c in cands] == [None, None]
 
@@ -159,7 +159,7 @@ class TestCollectCandidates:
     def test_output_feeds_evaluator_shape(self):
         # The collected payload must be consumable by evolution_evaluator.
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-        from evolution_evaluator import decide  # noqa: E402
+        from evolution_evaluator import decide
 
         cands, _, _ = collect_candidates(self._delegate_output())
         # Empty scores -> evaluator can't judge -> nobody passes (correct: the
@@ -387,7 +387,7 @@ class TestSkillFrontmatter:
         # Validate the SKILL.md frontmatter parses via the same util the runtime uses.
         repo = Path(__file__).resolve().parents[2]
         sys.path.insert(0, str(repo))
-        from agent.skill_utils import parse_frontmatter  # noqa: E402
+        from agent.skill_utils import parse_frontmatter
 
         skill = repo / "skills" / "evolution" / "evolution-orchestrator" / "SKILL.md"
         fm, body = parse_frontmatter(skill.read_text(encoding="utf-8"))

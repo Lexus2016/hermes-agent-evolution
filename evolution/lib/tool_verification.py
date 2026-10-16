@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Tool verification gate — verify external tools before ingestion (#2577).
 
 Misevolution guardrail (parent #2538; arXiv:2509.26354 "Your Agent May
@@ -27,7 +26,7 @@ import hashlib
 import json
 import logging
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
@@ -36,7 +35,7 @@ from evolution.lib.tool_synthesis import SandboxValidator, SynthesizedTool, Tool
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["VerificationResult", "verify_external_tool", "ingest_tool", "revalidate_on_reuse"]
+__all__ = ["VerificationResult", "ingest_tool", "revalidate_on_reuse", "verify_external_tool"]
 
 VERDICT_ACCEPTED = "accepted"
 VERDICT_REJECTED = "rejected"
@@ -47,7 +46,7 @@ Judge = Callable[[SynthesizedTool, bool], bool]
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _content_hash(text: str) -> str:
@@ -65,7 +64,7 @@ def _default_store_dir() -> Path:
     return base / "verified_tools"
 
 
-def _normalize_test_inputs(spec: Dict[str, Any]) -> List[str]:
+def _normalize_test_inputs(spec: dict[str, Any]) -> list[str]:
     raw = spec.get("test_inputs", "test")
     if isinstance(raw, str):
         return [raw]
@@ -80,7 +79,7 @@ class VerificationResult:
 
     tool_name: str
     verdict: str
-    reasons: List[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
     version: str = ""
     verified_at: str = ""
 
@@ -88,11 +87,11 @@ class VerificationResult:
     def accepted(self) -> bool:
         return self.verdict == VERDICT_ACCEPTED
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "VerificationResult":
+    def from_dict(cls, d: dict[str, Any]) -> VerificationResult:
         return cls(tool_name=str(d.get("tool_name", "")), verdict=str(d.get("verdict", VERDICT_REJECTED)),
                    reasons=list(d.get("reasons", []) or []), version=str(d.get("version", "")),
                    verified_at=str(d.get("verified_at", "")))
@@ -103,7 +102,7 @@ def _result(name: str, verdict: str, reason: str, code: str) -> VerificationResu
                               version=_content_hash(code), verified_at=_now_iso())
 
 
-def verify_external_tool(code: str, spec: Optional[Dict[str, Any]] = None) -> VerificationResult:
+def verify_external_tool(code: str, spec: Optional[dict[str, Any]] = None) -> VerificationResult:
     """Verify external tool *code* against *spec* — three stages, fail-closed.
 
     Stage 1 ``ast.parse``; stage 2 the #2575 safety scanner (rejects
@@ -140,7 +139,7 @@ def verify_external_tool(code: str, spec: Optional[Dict[str, Any]] = None) -> Ve
 
 
 def ingest_tool(registry: ToolRegistry, name: str, code: str,
-               spec: Optional[Dict[str, Any]] = None,
+               spec: Optional[dict[str, Any]] = None,
                store_dir: Optional[Path | str] = None) -> VerificationResult:
     """Verify an external tool, then record it; register only when accepted.
 

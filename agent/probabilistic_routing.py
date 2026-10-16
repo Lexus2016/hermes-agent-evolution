@@ -17,7 +17,7 @@ class AgentBelief:
 
     alpha: float = 1.0  # prior successes
     beta: float = 1.0   # prior failures
-    task_priors: Dict[str, Tuple[float, float]] = field(default_factory=dict)
+    task_priors: dict[str, tuple[float, float]] = field(default_factory=dict)
 
     def sample(self, task_type: str = "general", rng: Optional[random.Random] = None) -> float:
         """Sample expected marginal contribution via Thompson sampling (Beta distribution)."""
@@ -58,7 +58,7 @@ class ProbabilisticRouter:
     """Probabilistic controller for selecting and re-routing delegation targets."""
 
     def __init__(self, rng: Optional[random.Random] = None):
-        self.beliefs: Dict[str, AgentBelief] = {}
+        self.beliefs: dict[str, AgentBelief] = {}
         self.rng = rng or random.Random()
 
     def get_or_create_belief(self, target_id: str) -> AgentBelief:
@@ -68,9 +68,9 @@ class ProbabilisticRouter:
 
     def select_target(
         self,
-        candidates: List[str],
+        candidates: list[str],
         task_type: str = "general",
-        exclude: Optional[List[str]] = None,
+        exclude: Optional[list[str]] = None,
     ) -> str:
         """Select target candidate using Thompson sampling with belief-guided priors."""
         if not candidates:
@@ -99,7 +99,7 @@ class ProbabilisticRouter:
         belief = self.get_or_create_belief(target_id)
         belief.update(success=success, weight=weight, task_type=task_type)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize beliefs to dict for persistence."""
         return {
             target: {
@@ -111,7 +111,7 @@ class ProbabilisticRouter:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ProbabilisticRouter:
+    def from_dict(cls, data: dict[str, Any]) -> ProbabilisticRouter:
         """Restore beliefs from dict."""
         router = cls()
         for target, d in data.items():
@@ -138,9 +138,9 @@ def get_global_probabilistic_router() -> ProbabilisticRouter:
 
 
 def route_delegation_target(
-    candidates: List[str],
+    candidates: list[str],
     task_type: str = "general",
-    exclude: Optional[List[str]] = None,
+    exclude: Optional[list[str]] = None,
     router: Optional[ProbabilisticRouter] = None,
 ) -> str:
     """Convenience helper to select a delegation target using Thompson sampling."""

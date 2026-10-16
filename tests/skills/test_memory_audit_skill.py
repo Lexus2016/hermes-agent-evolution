@@ -24,7 +24,7 @@ _SKILL_SCRIPT = (
 )
 sys.path.insert(0, str(_SKILL_SCRIPT))
 
-import memory_audit  # noqa: E402
+import memory_audit
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────

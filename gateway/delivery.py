@@ -303,7 +303,7 @@ class DeliveryRouter:
             getattr(adapter, "send_choice_picker", None))
 
     async def _deliver_as_document(self, adapter: Any, chat_id: str, content: str,
-                                   metadata: Optional[Dict[str, Any]], job_id: str) -> Dict[str, Any]:
+                                   metadata: Optional[dict[str, Any]], job_id: str) -> dict[str, Any]:
         """Send an over-cap reply as one Markdown file instead of several messages."""
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         tmp_dir = tempfile.mkdtemp(prefix="hermes-report-")
@@ -331,7 +331,7 @@ class DeliveryRouter:
                 os.rmdir(tmp_dir)
 
     async def _offer_long_reply_choice(self, adapter: Any, platform: str, chat_id: str,
-                                       metadata: Optional[Dict[str, Any]]) -> None:
+                                       metadata: Optional[dict[str, Any]]) -> None:
         """Offer the one-time split-or-file choice, after the report itself has been delivered.
 
         Order matters: the report goes out first, unchanged. Holding a scheduled report until a human

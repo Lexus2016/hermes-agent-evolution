@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Adaptive validation agent for the evolution verification stage (issue #1164).
 
 Senior SWE-Bench (Snorkel AI + Princeton + UW–Madison, 2026) moved verification
@@ -32,14 +31,14 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Sequence
 
 __all__ = [
-    "ValidationSpec",
     "GeneratedTest",
     "TestResult",
+    "ValidationSpec",
     "ValidationVerdict",
-    "generate_tests",
     "apply_safeguards",
-    "validate",
+    "generate_tests",
     "main",
+    "validate",
 ]
 
 # runner: (test_source, solution_state) -> passed?  solution_state is one of
@@ -58,7 +57,7 @@ class ValidationSpec:
     change_class: str = "default"
 
     @classmethod
-    def from_dict(cls, d: Mapping[str, Any]) -> "ValidationSpec":
+    def from_dict(cls, d: Mapping[str, Any]) -> ValidationSpec:
         return cls(
             behavior=str(d.get("behavior", "")),
             recipes=tuple(str(r) for r in d.get("recipes", [])),

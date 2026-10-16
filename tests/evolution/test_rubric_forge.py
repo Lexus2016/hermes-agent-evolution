@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """RubricForge Slice 1 — primitive + real-consumer wiring tests (#2780)."""
 
 import json
@@ -8,8 +7,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from evolution.lib.rubric_forge import score_rubric, select_best_rubric  # noqa: E402
-from evolution_rubric_judge import (  # noqa: E402
+from evolution.lib.rubric_forge import score_rubric, select_best_rubric
+from evolution_rubric_judge import (
     RUBRIC_DIMENSIONS,
     StrictRubricJudgeGrader,
     _keyword_requirements_judge,

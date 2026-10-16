@@ -68,7 +68,7 @@ _STALE_PATTERNS = [
 ]
 
 
-def _read_entries(path: Path) -> Tuple[str, List[str]]:
+def _read_entries(path: Path) -> tuple[str, list[str]]:
     """Return (raw_text, entries) from a §-delimited memory file."""
     if not path.exists():
         return "", []
@@ -83,9 +83,9 @@ def _read_entries(path: Path) -> Tuple[str, List[str]]:
     return raw, parts
 
 
-def _scan_secrets(entries: List[str]) -> List[str]:
+def _scan_secrets(entries: list[str]) -> list[str]:
     """Return list of secret matches found in entries."""
-    hits: List[str] = []
+    hits: list[str] = []
     for entry in entries:
         for pat in _SECRET_PATTERNS:
             m = pat.search(entry)
@@ -96,9 +96,9 @@ def _scan_secrets(entries: List[str]) -> List[str]:
     return hits
 
 
-def _scan_stale(entries: List[str]) -> List[str]:
+def _scan_stale(entries: list[str]) -> list[str]:
     """Return list of stale-entry snippets found."""
-    hits: List[str] = []
+    hits: list[str] = []
     for entry in entries:
         for pat in _STALE_PATTERNS:
             m = pat.search(entry)
@@ -124,9 +124,9 @@ def audit_hermes_memory(
     memory_dir: Path,
     mem_limit: int = DEFAULT_MEMORY_CHAR_LIMIT,
     user_limit: int = DEFAULT_USER_CHAR_LIMIT,
-) -> List[str]:
+) -> list[str]:
     """Audit MEMORY.md and USER.md. Return list of problem strings (empty = healthy)."""
-    findings: List[str] = []
+    findings: list[str] = []
 
     for filename, limit in (("MEMORY.md", mem_limit), ("USER.md", user_limit)):
         path = memory_dir / filename
@@ -151,15 +151,15 @@ def audit_hermes_memory(
     return findings
 
 
-def _find_wikilinks(text: str) -> List[str]:
+def _find_wikilinks(text: str) -> list[str]:
     """Extract [[Note Name]] targets from markdown text."""
     # [[Note]] or [[Note|Alias]] or [[folder/Note#heading]]
     return re.findall(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]", text)
 
 
-def audit_obsidian_vault(vault_path: Path) -> List[str]:
+def audit_obsidian_vault(vault_path: Path) -> list[str]:
     """Audit an Obsidian vault for broken wikilinks and missing daily note."""
-    findings: List[str] = []
+    findings: list[str] = []
     if not vault_path or not vault_path.exists():
         return findings  # no vault configured — not an error
 
@@ -170,7 +170,7 @@ def audit_obsidian_vault(vault_path: Path) -> List[str]:
         note_names[md.name.lower()] = md
 
     # Broken wikilinks
-    broken: List[str] = []
+    broken: list[str] = []
     for md in vault_path.rglob("*.md"):
         try:
             text = md.read_text(encoding="utf-8", errors="replace")
@@ -203,9 +203,9 @@ def run_audit(
     vault_path: Optional[Path] = None,
     mem_limit: int = DEFAULT_MEMORY_CHAR_LIMIT,
     user_limit: int = DEFAULT_USER_CHAR_LIMIT,
-) -> List[str]:
+) -> list[str]:
     """Run all configured checks. Return combined findings list."""
-    findings: List[str] = []
+    findings: list[str] = []
 
     if memory_dir:
         findings.extend(audit_hermes_memory(memory_dir, mem_limit, user_limit))
@@ -216,7 +216,7 @@ def run_audit(
     return findings
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Hermes memory quality audit")
     parser.add_argument(
         "--memory-dir",
