@@ -345,24 +345,38 @@ def test_lifecycle_event_does_not_restart_first_progress_deadline():
 def test_large_codex_lifecycle_only_stream_hits_attempt_progress_budget(tmp_path, monkeypatch):
     """Lifecycle events may change phase diagnostics, but cannot buy another full grace period."""
     from agent import chat_completion_helpers as h
+    from agent import codex_runtime
+    from tests.waiting import wait_until
 
     agent = _make_codex_agent(tmp_path, monkeypatch)
     _shorten_implicit_idle_watchdog(monkeypatch, h, ttfb_timeout=0.9, progress_timeout=0.9)
     closes = []
+    now = [1000.0]
+    clock = SimpleNamespace(time=lambda: now[0], monotonic=lambda: now[0])
+    # Keep real worker/stream handling, but advance only at observed stream boundaries.
+    # Patch module bindings, not the process-wide clock used by bounded test waits.
+    monkeypatch.setattr(h, "time", clock)
+    monkeypatch.setattr(codex_runtime, "time", clock)
 
     def stream_attempt():
-        time.sleep(0.7)
+        now[0] += 0.7
         yield SimpleNamespace(type="response.created")
-        while getattr(agent, "_active_codex_stream_request_token", None) is not None:
-            time.sleep(0.02)
+        # The lifecycle event has been consumed. Cross the attempt's 0.9s budget
+        # while remaining below a wrongly restarted budget (0.7s + 0.9s).
+        now[0] += 0.3
+        # Retirement still has wait_until's bounded 10s real completion deadline.
+        wait_until(
+            lambda: getattr(agent, "_active_codex_stream_request_token", None) is None,
+            what="lifecycle-only request retirement",
+        )
         raise ConnectionError("retired lifecycle-only stream")
 
     _install_codex_event_stream(agent, monkeypatch, stream_attempt, closes)
-    started = time.monotonic()
+    started = clock.monotonic()
     with pytest.raises(TimeoutError, match="no substantive model progress"):
         h.interruptible_api_call(agent, {"model": "gpt-5.6-sol", "input": "x" * 40_004})
 
-    assert time.monotonic() - started < 1.5
+    assert clock.monotonic() - started < 1.5  # logical budget, independent of runner load
     assert "codex_progress_kill" in closes
 
 

@@ -393,13 +393,20 @@ class TestAggregateChatStream:
             return
         # Hold the stalled attempt's timer at the moment it shuts a socket down; meanwhile let
         # attempt A end at EOF (its connection may return to the pool) and start B on the client.
-        paused, resume, outcome = threading.Event(), threading.Event(), {}
+        paused, resume, shutdown_finished = threading.Event(), threading.Event(), threading.Event()
+        outcome = {}
+
+        def trace_shutdown_return(_frame, event, _arg):
+            if event == "return":
+                shutdown_finished.set()
+            return trace_shutdown_return
 
         def tracer(frame, event, _arg):
             if (event == "call" and frame.f_code.co_name == "_shutdown_socket"
                     and not paused.is_set()):
                 paused.set()
                 resume.wait(3)
+                return trace_shutdown_return
 
         def run(name, model, task):
             try:
@@ -418,7 +425,7 @@ class TestAggregateChatStream:
             attempt_b.start()
             assert gates["b_started"].wait(3)
             resume.set()
-            time.sleep(0.2)
+            assert shutdown_finished.wait(3)
             gates["b"].set()
             attempt_b.join(5)
             attempt_a.join(5)

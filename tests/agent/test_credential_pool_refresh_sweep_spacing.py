@@ -23,12 +23,11 @@ def test_pending_refresh_sweep_leaves_waiter_windows_between_holds(tmp_path):
     hold_events = []
 
     def fake_refresh(entry, *, force):
-        # Same shape as a real single-use refresh: the cross-process lock is held
-        # across the "POST" (the sleep), released only when the entry is done.
+        # Keep the real single-use refresh lock boundary; POST duration does not
+        # contribute to the lock-free interval between consecutive entries.
         with auth._auth_store_lock(timeout_seconds=30.0, target_path=auth_path):
             hold_events.append(("acquired", time.monotonic()))
-            time.sleep(0.05)
-            hold_events.append(("released", time.monotonic()))
+        hold_events.append(("released", time.monotonic()))
 
     pool._refresh_entry = fake_refresh
     CredentialPool._refresh_pending_entries(pool, [object(), object(), object()])
@@ -39,6 +38,6 @@ def test_pending_refresh_sweep_leaves_waiter_windows_between_holds(tmp_path):
     inter_hold_windows = [a - r for r, a in zip(releases, acquires[1:])]
     # A waiter polling every 50ms (the _file_lock retry cadence) must get a real
     # window between two consecutive holds of the sweep, not a scheduling artifact.
-    assert max(inter_hold_windows) >= 0.4, (
-        f"deferred refresh sweep left no waiter window between holds: {inter_hold_windows}"
+    assert all(window >= 0.4 for window in inter_hold_windows), (
+        f"deferred refresh sweep omitted a waiter window between holds: {inter_hold_windows}"
     )
