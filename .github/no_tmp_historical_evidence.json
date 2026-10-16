@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "purpose": "Reviewed inert sync evidence at the pinned source checkpoint; historical paths are data, not executable code, prompts, or runnable documentation.",
-  "source_commit": "a25410312f4582d1b8cc5f71d635e11c118bc097",
+  "source_commit": "189a83df0813e28f3bfc250b67a869e7771e4419",
   "files": [
     {
       "path": "analysis/sync-health/v0221-9ad6-main365-health-report.json.parts/0001.txt",
@@ -117,7 +117,7 @@
     },
     {
       "path": "analysis/sync-health/v0221-manifest.json.parts/0003.txt",
-      "sha256": "72a5476692d65aa10a96ed9deec2f0da390847f8df112ec9c045de6e95e08b65"
+      "sha256": "8177f9efe3355cfdf33a6cdb7ca540d8279475433489b7f9f90f34c4cb968d20"
     },
     {
       "path": "analysis/sync-health/v0221-manifest.json.parts/0004.txt",
