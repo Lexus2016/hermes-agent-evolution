@@ -10,6 +10,7 @@ import contextlib
 from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -418,12 +419,55 @@ class TestDoctorMemoryProviderSection:
         assert "Mem0" not in out
 
 
-    def test_catalog_provider_not_installed_names_install_command(self, monkeypatch, tmp_path):
-        # mem0 left core for the plugin catalog: a home still configured for it gets the exact command.
-        out = self._run_doctor_and_capture(monkeypatch, tmp_path, provider="mem0")
-        section = out.split("Memory Provider", 1)[1][:600]
+    def _check_synthetic_provider(self, monkeypatch, tmp_path, capsys, *, present, loaded):
+        home = self._make_hermes_home(tmp_path, provider="mem0")
+        monkeypatch.setattr(doctor_mod, "HERMES_HOME", home)
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        provider_dir = tmp_path / "bundled" / "mem0"
+        if present:
+            provider_dir.mkdir(parents=True)
+
+        # Metadata-only module: doctor cannot import or initialize a real provider.
+        memory = types.ModuleType("plugins.memory")
+        memory.load_memory_provider = Mock(return_value=loaded)
+        memory.find_provider_dir = Mock(return_value=provider_dir if present else None)
+        monkeypatch.setitem(sys.modules, "plugins.memory", memory)
+        catalog_entry = Mock(return_value=SimpleNamespace(name="mem0", category="memory"))
+        monkeypatch.setattr("hermes_cli.plugin_catalog.get_catalog_entry", catalog_entry)
+
+        doctor_state._check_memory_provider(False)
+
+        memory.load_memory_provider.assert_called_once_with("mem0")
+        if loaded is None:
+            memory.find_provider_dir.assert_called_once_with("mem0")
+        else:
+            memory.find_provider_dir.assert_not_called()
+            loaded.is_available.assert_called_once_with()
+        if present:
+            catalog_entry.assert_not_called()
+        else:
+            catalog_entry.assert_called_once_with("mem0")
+        return capsys.readouterr().out
+
+    def test_catalog_provider_not_installed_names_install_command(self, monkeypatch, tmp_path, capsys):
+        # Absence is explicit: this contract also applies when the fork bundles Mem0.
+        out = self._check_synthetic_provider(monkeypatch, tmp_path, capsys, present=False, loaded=None)
         assert "Built-in memory active" not in out
-        assert "mem0 plugin not found" in section and "plugins install mem0" in section
+        assert "mem0 plugin not found" in out
+        assert "run: hermes plugins install mem0" in out
+
+    @pytest.mark.parametrize("loadable", [False, True], ids=["unloadable", "unavailable"])
+    def test_retained_provider_recovery_guidance(self, monkeypatch, tmp_path, capsys, loadable):
+        loaded = SimpleNamespace(is_available=Mock(return_value=False)) if loadable else None
+        out = self._check_synthetic_provider(monkeypatch, tmp_path, capsys, present=True, loaded=loaded)
+        if loadable:
+            assert "mem0 configured but not available" in out
+            assert "run: hermes memory status" in out
+        else:
+            assert "mem0 plugin not loadable" in out
+            assert "run: hermes memory setup" in out
+        assert "plugin not found" not in out
+        assert "plugins install" not in out
 
     @pytest.mark.parametrize("memory_enabled", [False, True])
     def test_stale_builtin_files_reported_only_when_store_enabled(
