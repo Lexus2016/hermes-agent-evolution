@@ -192,3 +192,17 @@ def _reset_mcp_circuit_breaker():
     yield
     mcp_tool._server_error_counts.clear()
     mcp_tool._server_breaker_opened_at.clear()
+
+
+@pytest.fixture
+def tirith_binary_unavailable():
+    """Generic approval tests keep policy enabled but never install or run a scanner.
+
+    Opt in explicitly; dedicated scanner/resolver/install contracts must retain
+    their own mocks. Missing-binary behavior still exercises the real scan gate.
+    """
+    with (patch("tools.tirith_security._resolve_tirith_path", return_value=None),
+          patch("tools.tirith_security._install_tirith",
+                side_effect=AssertionError("generic approval tests must not install Tirith")) as install):
+        yield
+        install.assert_not_called()

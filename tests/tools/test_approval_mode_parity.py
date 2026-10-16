@@ -30,6 +30,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("tirith_binary_unavailable")
+
 @pytest.fixture()
 def hermes_home(tmp_path, monkeypatch):
     home = tmp_path / ".hermes"

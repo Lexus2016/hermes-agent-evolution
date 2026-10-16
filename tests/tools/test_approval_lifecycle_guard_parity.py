@@ -1,6 +1,10 @@
 """Parity between the approval layer and the in-gateway lifecycle hard block (launchctl verbs)."""
 
+import pytest
+
 from tools.approval import detect_dangerous_command
+
+pytestmark = pytest.mark.usefixtures("tirith_binary_unavailable")
 
 
 # launchd verbs that stop, unload or deregister a running gateway. `disable`

@@ -9,6 +9,8 @@ import pytest
 import tools.approval as approval_mod
 from tools import approval_context
 
+pytestmark = pytest.mark.usefixtures("tirith_binary_unavailable")
+
 SESSION = "test-unattended-presence"
 
 

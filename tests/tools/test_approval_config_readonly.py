@@ -19,6 +19,8 @@ from tools.approval import check_all_command_guards, load_permanent_allowlist
 from tools.approval_context import _get_approval_config
 from tools.approval_context import _get_cron_approval_mode
 
+pytestmark = pytest.mark.usefixtures("tirith_binary_unavailable")
+
 
 @pytest.fixture
 def config_home(tmp_path, monkeypatch):
